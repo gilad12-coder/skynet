@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { preload } from "react-dom";
 import { cache } from "react";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import Script from "next/script";
 import { AppShell } from "@/shared/layout/app-shell";
 import { TooltipProvider } from "@/shared/ui/primitives/tooltip";
@@ -28,7 +28,6 @@ import {
   LOCALE_COOKIE,
   dirForLocale,
   isLocale,
-  localeFromAcceptLanguage,
   type Locale,
 } from "@/shared/lib/locale";
 import { serializeLocale, setServerLocale } from "@/shared/lib/runtime-locale";
@@ -53,16 +52,16 @@ const siteName = "Skynet";
 const OG_LOCALE: Record<Locale, string> = { he: "he_IL", en: "en_US" };
 
 /**
- * Resolve the request's locale: an explicit cookie wins, else the best match
- * from the browser's `Accept-Language`, else the Hebrew default. Wrapped in
- * React `cache()` so the layout and `generateMetadata` share a single
- * cookie/header read per request.
+ * Resolve the request's locale: an explicit switcher cookie wins, else the
+ * English default. New visitors land in English regardless of their browser's
+ * `Accept-Language`; Hebrew is reached via the language switcher (which sets
+ * the cookie). Wrapped in React `cache()` so the layout and `generateMetadata`
+ * share a single cookie read per request.
  */
 const resolveRequestLocale = cache(async (): Promise<Locale> => {
   const cookieLocale = (await cookies()).get(LOCALE_COOKIE)?.value;
   if (isLocale(cookieLocale)) return cookieLocale;
-  const accept = (await headers()).get("accept-language");
-  return localeFromAcceptLanguage(accept) ?? DEFAULT_LOCALE;
+  return DEFAULT_LOCALE;
 });
 
 export const viewport: Viewport = {

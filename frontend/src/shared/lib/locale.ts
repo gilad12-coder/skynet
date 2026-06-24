@@ -1,7 +1,7 @@
 /**
  * Locale model shared by the server and client halves of the i18n layer.
  *
- * Skynet ships Hebrew-first; English is the opt-in second locale. Everything
+ * Skynet ships English-first; Hebrew is the opt-in second locale. Everything
  * here is framework-agnostic so it can be imported from React Server
  * Components, client components, and plain `.ts` libs alike (no `next/*` or
  * `react` imports). Request-time resolution and the sync `msg()` plumbing live
@@ -11,8 +11,8 @@
 export const LOCALES = ["he", "en"] as const;
 export type Locale = (typeof LOCALES)[number];
 
-/** Hebrew is the product default — English is opt-in via cookie or browser. */
-export const DEFAULT_LOCALE: Locale = "he";
+/** English is the product default — Hebrew is opt-in via the language switcher. */
+export const DEFAULT_LOCALE: Locale = "en";
 
 /**
  * Cookie that persists the user's chosen locale. Read server-side in the

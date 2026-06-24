@@ -17,4 +17,11 @@ export const authMessagesEn: Partial<Record<keyof typeof authMessages, string>> 
   "auth.login.with_github": "Continue with GitHub",
   "auth.login.divider": "or",
   "auth.login.invalid_credentials": "Incorrect email or password",
+  "auth.login.tab_signin": "Sign in",
+  "auth.login.tab_signup": "Sign up",
+  "auth.login.name": "Display name",
+  "auth.login.name_placeholder": "What should we call you? (optional)",
+  "auth.login.password_hint": "At least 8 characters",
+  "auth.login.signup_submit": "Create account",
+  "auth.login.register_failed": "Account creation failed. Please try again",
 };
