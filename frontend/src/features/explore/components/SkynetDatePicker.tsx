@@ -255,6 +255,10 @@ export function SkynetDatePicker({
     maxDate && addMonths(viewDate, 1) > startOfMonth(maxDate),
   );
 
+  const rtl = getActiveDir() === "rtl";
+  const PrevMonthIcon = rtl ? ChevronRight : ChevronLeft;
+  const NextMonthIcon = rtl ? ChevronLeft : ChevronRight;
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -290,7 +294,7 @@ export function SkynetDatePicker({
               disabled={prevMonthDisabled}
               className="inline-flex size-7 items-center justify-center rounded-md text-foreground/60 transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/25 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
             >
-              <ChevronRight className="size-4" aria-hidden="true" />
+              <PrevMonthIcon className="size-4" aria-hidden="true" />
             </button>
             <div
               className="text-[13px] font-medium text-foreground"
@@ -305,7 +309,7 @@ export function SkynetDatePicker({
               disabled={nextMonthDisabled}
               className="inline-flex size-7 items-center justify-center rounded-md text-foreground/60 transition-colors cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/25 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
             >
-              <ChevronLeft className="size-4" aria-hidden="true" />
+              <NextMonthIcon className="size-4" aria-hidden="true" />
             </button>
           </div>
 
