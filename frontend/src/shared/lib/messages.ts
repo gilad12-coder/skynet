@@ -15,6 +15,7 @@
  */
 
 import { formatTemplate } from "@/shared/lib/i18n";
+import { fallbackChain, type Locale } from "@/shared/lib/locale";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import { submitMessages } from "@/features/submit/messages";
 import { dashboardMessages } from "@/features/dashboard/messages";
@@ -68,8 +69,9 @@ export const MESSAGES = {
 export type MessageKey = keyof typeof MESSAGES;
 type MessageParams = Record<string, string | number>;
 
-// English overlay. Each slice is Partial, so any key absent here resolves to
-// its Hebrew template in msg() — partial translations render without holes.
+// English overlay. Each slice is Partial, so any key absent here resolves down
+// the fallback chain to its Hebrew template — partial translations render
+// without holes.
 const MESSAGES_EN: Partial<Record<MessageKey, string>> = {
   ...submitMessagesEn,
   ...dashboardMessagesEn,
@@ -88,19 +90,35 @@ const MESSAGES_EN: Partial<Record<MessageKey, string>> = {
   ...sharedMessagesEn,
 };
 
+// Per-locale UI catalogs, keyed by locale tag. Hebrew is the complete authored
+// base; English is a partial overlay; locales without their own catalog inherit
+// through the registry's fallback chain. Adding a translated locale = drop its
+// catalog in here plus a registry row.
+const CATALOGS: Partial<Record<Locale, Partial<Record<MessageKey, string>>>> = {
+  en: MESSAGES_EN,
+  he: MESSAGES,
+};
+
 /**
  * Look up a user-facing string by key and optionally interpolate placeholders.
  *
- * Resolves against the active locale (`runtime-locale`): English uses the
- * overlay when the key is translated and falls back to Hebrew otherwise, so a
- * missing English string degrades to Hebrew rather than to the raw key.
+ * Walks the active locale's fallback chain (`runtime-locale` → registry) and
+ * returns the first catalog that defines the key, so a missing translation
+ * degrades to its fallback locale rather than to the raw key.
  */
 export function msg(key: MessageKey, params?: MessageParams): string {
   const locale = getActiveLocale();
-  const template = (locale === "en" ? MESSAGES_EN[key] : undefined) ?? MESSAGES[key];
+  let template: string | undefined;
+  for (const loc of fallbackChain(locale)) {
+    const value = CATALOGS[loc]?.[key];
+    if (value !== undefined) {
+      template = value;
+      break;
+    }
+  }
   // Always run formatTemplate: even param-less strings may carry `{term.x}`
   // vocabulary placeholders that must resolve rather than leak to the UI.
-  return formatTemplate(template, params, locale);
+  return formatTemplate(template ?? key, params, locale);
 }
 
 export function formatMsg(key: MessageKey, params: MessageParams): string {

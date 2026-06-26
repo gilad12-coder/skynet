@@ -49,7 +49,10 @@ export const dynamic = "force-dynamic";
 const siteUrl = getSiteUrl();
 const siteName = "Skynet";
 
-const OG_LOCALE: Record<Locale, string> = { he: "he_IL", en: "en_US" };
+/** OpenGraph wants `language_TERRITORY`; the locale tag's hyphen maps to it. */
+function ogLocale(locale: Locale): string {
+  return locale.replace("-", "_");
+}
 
 /**
  * Resolve the request's locale: an explicit switcher cookie wins, else the
@@ -94,7 +97,7 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     openGraph: {
       type: "website",
-      locale: OG_LOCALE[locale],
+      locale: ogLocale(locale),
       siteName,
       title: siteName,
       description: siteDescription,

@@ -83,6 +83,8 @@ export const sharedMessagesEn: Partial<Record<keyof typeof sharedMessages, strin
   "app.shell.advanced.exit_aria": "Exit advanced mode",
   "app.shell.menu_close": "Close menu",
   "shared.language.switch_aria": "Choose interface language",
+  "shared.language.search_placeholder": "Search language…",
+  "shared.language.no_results": "No languages found",
   "not_found.title": "Page not found",
   "not_found.description": "The address you requested doesn't exist or has moved",
   "not_found.back_dashboard": "Back to dashboard",

@@ -82,6 +82,8 @@ export const sharedMessages = {
   "app.shell.advanced.exit_aria": "יציאה ממצב מתקדם",
   "app.shell.menu_close": "סגור/סגרי את התפריט",
   "shared.language.switch_aria": "בחירת שפת הממשק",
+  "shared.language.search_placeholder": "חיפוש שפה…",
+  "shared.language.no_results": "לא נמצאו שפות",
   "not_found.title": "הדף לא נמצא",
   "not_found.description": "הכתובת שחיפשת לא קיימת או שהועברה למיקום אחר",
   "not_found.back_dashboard": "חזור/חזרי ללוח הבקרה",
