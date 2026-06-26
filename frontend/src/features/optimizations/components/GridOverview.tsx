@@ -1057,7 +1057,11 @@ function GridOverviewImpl({
                       }}
                     >
                       {pairResumable ? (
-                        <Play className={`size-3.5 -scale-x-100${rerunBusy ? " animate-spin" : ""}`} />
+                        <Play
+                          className={`size-3.5${getActiveDir() === "rtl" ? " -scale-x-100" : ""}${
+                            rerunBusy ? " animate-spin" : ""
+                          }`}
+                        />
                       ) : (
                         <RotateCcw className={`size-3.5${rerunBusy ? " animate-spin" : ""}`} />
                       )}
