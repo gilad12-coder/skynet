@@ -31,6 +31,12 @@ import {
   type Locale,
 } from "@/shared/lib/locale";
 import { serializeLocale, setServerLocale } from "@/shared/lib/runtime-locale";
+import {
+  serializeMessages,
+  setServerMessages,
+  type UiCatalog,
+} from "@/shared/lib/runtime-messages";
+import { buildActiveCatalog } from "@/shared/lib/messages.server";
 import { getSiteUrl } from "@/shared/lib/site-config";
 import "@fontsource-variable/heebo/index.css";
 import "@fontsource-variable/inter/index.css";
@@ -67,6 +73,16 @@ const resolveRequestLocale = cache(async (): Promise<Locale> => {
   return DEFAULT_LOCALE;
 });
 
+/**
+ * Build the request's merged UI catalog once and share it across `generateMetadata`
+ * and the layout via React `cache()`. This is the single payload the client ever
+ * sees — the active locale's fallback chain, injected into the page rather than
+ * bundled with every locale.
+ */
+const resolveActiveCatalog = cache(async (): Promise<UiCatalog> => {
+  return buildActiveCatalog(await resolveRequestLocale());
+});
+
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
@@ -80,6 +96,7 @@ export const viewport: Viewport = {
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await resolveRequestLocale();
   setServerLocale(locale);
+  setServerMessages(await resolveActiveCatalog());
   const siteDescription = msg("app.meta.description");
   return {
     title: {
@@ -125,6 +142,8 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await resolveRequestLocale();
   setServerLocale(locale);
+  const messages = await resolveActiveCatalog();
+  setServerMessages(messages);
   // Preload the above-the-fold variable subsets so the fallback→webfont swap
   // window (and its RTL line-box shift) is bounded. react-dom's preload()
   // dedupes to a single hoisted <link> per resource — a raw <link rel=preload> in
@@ -166,6 +185,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Script id="skynet-locale" strategy="beforeInteractive">
           {serializeLocale(locale)}
         </Script>
+        <Script id="skynet-messages" strategy="beforeInteractive">
+          {serializeMessages(messages)}
+        </Script>
         <Script id="skynet-runtime-env" strategy="beforeInteractive">
           {serializeRuntimeEnv(runtimeEnv)}
         </Script>
@@ -173,7 +195,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdSafe }} />
       </head>
       <body suppressHydrationWarning>
-        <LocaleProvider initialLocale={locale}>
+        <LocaleProvider initialLocale={locale} initialMessages={messages}>
           <SessionProvider>
             <UserPrefsProvider>
               <LiteModeProvider>
