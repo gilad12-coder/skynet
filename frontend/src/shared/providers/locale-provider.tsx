@@ -8,7 +8,6 @@ import {
   type Locale,
 } from "@/shared/lib/locale";
 import { setClientLocale } from "@/shared/lib/runtime-locale";
-import { setClientMessages, type UiCatalog } from "@/shared/lib/runtime-messages";
 
 interface LocaleContextValue {
   locale: Locale;
@@ -38,27 +37,24 @@ export function useLocale(): LocaleContextValue {
  *
  * Args:
  *   initialLocale: Locale resolved server-side for this request.
- *   initialMessages: The request's merged UI catalog (active fallback chain),
- *     seeded into the sync `msg()` slot. This is what covers the SSR pass of
- *     client components, where `window.__SKYNET_MESSAGES__` is undefined.
  *   children: App subtree.
  */
 export function LocaleProvider({
   initialLocale,
-  initialMessages,
   children,
 }: {
   initialLocale: Locale;
-  initialMessages: UiCatalog;
   children: React.ReactNode;
 }) {
-  // Align the sync msg() module-globals with the server-resolved locale and
-  // catalog before any descendant renders, so the first client render matches
-  // SSR. A lazy useState initializer runs exactly once per mount (server +
-  // client), ahead of children, without the re-render churn of an effect.
+  // Align the sync msg() locale module-global with the server-resolved locale
+  // before any descendant renders, so the first client render matches SSR. A
+  // lazy useState initializer runs exactly once per mount (server + client),
+  // ahead of children, without the re-render churn of an effect. The catalog
+  // itself is not seeded here: the browser reads it lazily from the
+  // `window.__SKYNET_MESSAGES__` shim, and SSR of client components from the
+  // request global the layout publishes (see runtime-messages.ts).
   React.useState(() => {
     setClientLocale(initialLocale);
-    setClientMessages(initialMessages);
     return null;
   });
 

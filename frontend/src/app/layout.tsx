@@ -195,7 +195,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdSafe }} />
       </head>
       <body suppressHydrationWarning>
-        <LocaleProvider initialLocale={locale} initialMessages={messages}>
+        <LocaleProvider initialLocale={locale}>
           <SessionProvider>
             <UserPrefsProvider>
               <LiteModeProvider>
