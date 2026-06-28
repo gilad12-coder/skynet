@@ -31,6 +31,8 @@ from ..config import settings
 from ..constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
+    PAYLOAD_OVERVIEW_MODEL_NAME,
+    PAYLOAD_OVERVIEW_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
     PAYLOAD_OVERVIEW_USERNAME,
 )
@@ -620,10 +622,17 @@ class BackgroundWorker:
                             baseline_score=_baseline,
                             optimized_score=_optimized,
                         )
-                        # Metered usage shares the once-only completion claim so a
-                        # redelivered/re-run job is never double-billed. Success
-                        # only — a failed (e.g. all-pairs-failed) run is not billed.
+                        # Both the local credit debit and the Stripe metering share
+                        # the once-only completion claim so a redelivered/re-run job
+                        # is never double-billed. Success only — a failed (e.g.
+                        # all-pairs-failed) run is not billed.
                         if final_status == "success":
+                            self._debit_run_credits(
+                                _username,
+                                result_dict,
+                                run_name=overview.get(PAYLOAD_OVERVIEW_NAME) or "",
+                                model=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
+                            )
                             self._report_run_usage_best_effort(_username, result_dict)
                     if final_status == "success":
                         self._schedule_embedding_indexing(optimization_id)
@@ -862,6 +871,39 @@ class BackgroundWorker:
             embed_finished_job(optimization_id, job_store=self._job_store)
         except Exception as exc:  # isolation boundary: best-effort indexing must never impact job status
             logger.debug("Embedding indexing for %s failed: %s", optimization_id, exc)
+
+    def _debit_run_credits(
+        self, username: str, result_dict: dict[str, Any] | None, *, run_name: str, model: str | None
+    ) -> None:
+        """Debit a finished run's credit cost from the account's local ledger.
+
+        Writes a signed ``run`` row and decrements the account's grant/balance via
+        :meth:`StripeBillingService.debit_run`. Runs inline (not on a daemon
+        thread) so the wallet visibly reflects the spend the moment the run lands,
+        but wrapped so a billing-DB hiccup can never flip job status — the local
+        ledger is the credit source of truth, independent of whether Stripe is
+        configured. A no-op when the store exposes no SQL engine (legacy/in-memory),
+        the caller is anonymous, or the run reported no token usage.
+
+        Args:
+            username: Account the run is billed to.
+            result_dict: The serialized run/grid result; its ``total_tokens`` is
+                the figure charged.
+            run_name: Run name for the ledger row's human label.
+            model: Model id stamped on the ledger row, or ``None``.
+        """
+        engine = getattr(self._job_store, "engine", None)
+        if engine is None or not username:
+            return
+        total_tokens = result_dict.get("total_tokens") if isinstance(result_dict, dict) else None
+        if not isinstance(total_tokens, int) or total_tokens <= 0:
+            return
+        try:
+            StripeBillingService(engine=engine).debit_run(
+                username, total_tokens, model=model, description=run_name or "Run"
+            )
+        except Exception as exc:  # isolation boundary: a debit failure must never impact job status
+            logger.debug("Credit debit for %s failed: %s", username, exc)
 
     def _report_run_usage_best_effort(self, username: str, result_dict: dict[str, Any] | None) -> None:
         """Meter a finished run's token usage to Stripe, off the worker hot path.

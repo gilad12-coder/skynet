@@ -17,6 +17,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, Header
 from sqlalchemy.orm import Session
 
+from ...billing import StripeBillingService
 from ...constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
@@ -315,6 +316,31 @@ def _expand_catalog_grid_payload(payload: GridSearchRequest) -> None:
         payload.reflection_models = expanded
 
 
+def _enforce_credit_balance(job_store, username: str) -> None:
+    """Block a depleted account from starting a managed run at submit time.
+
+    Reads the account's spendable credits (free grant + purchased balance, with
+    the rolling grant reset applied) and refuses the submission when nothing is
+    left. The free grant means a brand-new account always passes; this only fires
+    once both the grant and any purchased balance are exhausted. Managed compute
+    is the default token source today, so the gate is unconditional — BYOK mode
+    propagation (which would exempt own-key runs) lands in a later phase.
+
+    Args:
+        job_store: Job-store instance whose ORM engine backs the billing tables.
+        username: Account attempting the submission.
+
+    Raises:
+        DomainError: 402 when the account has no spendable credits.
+    """
+    engine = getattr(job_store, "engine", None)
+    if engine is None or not username:
+        return
+    service = StripeBillingService(engine=engine)
+    if service.spendable_credits(username) <= 0:
+        raise DomainError("billing.insufficient_credits", status=402)
+
+
 def create_submissions_router(*, service, job_store) -> APIRouter:
     """Build the submissions router.
 
@@ -398,6 +424,8 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             payload.username,
             incoming_bytes=json_byte_size(payload.model_dump(mode="json", by_alias=True)),
         )
+
+        _enforce_credit_balance(job_store, payload.username)
 
         optimization_id = str(uuid4())
         task_fingerprint = compute_task_fingerprint(payload.signature_code, payload.metric_code, payload.dataset)
@@ -546,6 +574,8 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             payload.username,
             incoming_bytes=json_byte_size(payload.model_dump(mode="json", by_alias=True)),
         )
+
+        _enforce_credit_balance(job_store, payload.username)
 
         optimization_id = str(uuid4())
         if payload.seed is None:

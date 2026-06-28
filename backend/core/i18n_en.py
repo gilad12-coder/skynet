@@ -29,6 +29,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "auth.invalid_token": "Authentication token is invalid or expired.",
     "auth.missing_token": "Authentication token is required.",
     "auth.not_configured": "Backend authentication is not configured.",
+    "billing.insufficient_credits": "Your balance is empty. Add credits or wait for the free grant to renew to run on managed compute.",
     "billing.not_configured": "Billing is not configured on this deployment.",
     "billing.unknown_pack": "Unknown credit pack '{pack_id}'.",
     "billing.webhook_invalid": "Stripe webhook signature verification failed.",

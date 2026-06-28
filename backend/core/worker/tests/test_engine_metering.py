@@ -1,8 +1,11 @@
-"""Tests for the worker's metered-usage hook (``_report_run_usage_best_effort``).
+"""Tests for the worker's billing hooks at run completion.
 
-The hook must never affect job status: it is a no-op unless the store exposes a
-SQL engine, Stripe is configured, the caller is known, and the run reported
-token usage. When all hold it dispatches ``report_run_usage`` on a daemon thread.
+Covers ``_report_run_usage_best_effort`` (Stripe metering) and
+``_debit_run_credits`` (the local credit-ledger debit). Both must never affect
+job status. Metering is a no-op unless the store exposes a SQL engine, Stripe is
+configured, the caller is known, and the run reported token usage; the local
+debit drops the Stripe-configured requirement (the ledger is the credit source of
+truth even on a key-less deploy) but otherwise gates the same way.
 """
 
 from __future__ import annotations
@@ -115,3 +118,53 @@ def test_meter_run_usage_swallows_failures(configured: None) -> None:
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
         billing_cls.return_value.report_run_usage.side_effect = RuntimeError("stripe down")
         worker._meter_run_usage(object(), "u@x.com", 5000)  # must not raise
+
+
+def test_debit_hook_charges_credits_for_successful_run() -> None:
+    """With an engine, a known caller, and tokens present, the run is debited."""
+    engine = object()
+    worker = _worker(_Store(engine=engine))
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        worker._debit_run_credits(
+            "u@x.com", {"total_tokens": 5000}, run_name="sentiment v3", model="m1"
+        )
+    billing_cls.assert_called_once_with(engine=engine)
+    billing_cls.return_value.debit_run.assert_called_once_with(
+        "u@x.com", 5000, model="m1", description="sentiment v3"
+    )
+
+
+def test_debit_hook_runs_without_stripe_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The local debit fires even when Stripe is unconfigured (ledger is local truth)."""
+    monkeypatch.setattr(settings, "stripe_secret_key", None)
+    engine = object()
+    worker = _worker(_Store(engine=engine))
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        worker._debit_run_credits("u@x.com", {"total_tokens": 5000}, run_name="r", model=None)
+    billing_cls.return_value.debit_run.assert_called_once()
+
+
+def test_debit_hook_noop_without_engine() -> None:
+    """A store without a SQL engine (legacy/in-memory) debits nothing."""
+    worker = _worker(_Store(engine=None))
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        worker._debit_run_credits("u@x.com", {"total_tokens": 5000}, run_name="r", model=None)
+    billing_cls.assert_not_called()
+
+
+def test_debit_hook_noop_without_token_usage() -> None:
+    """A run that reported no token total debits nothing."""
+    worker = _worker(_Store(engine=object()))
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        worker._debit_run_credits("u@x.com", {"total_tokens": None}, run_name="r", model=None)
+        worker._debit_run_credits("u@x.com", {}, run_name="r", model=None)
+        worker._debit_run_credits("u@x.com", None, run_name="r", model=None)
+    billing_cls.assert_not_called()
+
+
+def test_debit_hook_swallows_failures() -> None:
+    """A debit failure never propagates to the worker (job status is untouched)."""
+    worker = _worker(_Store(engine=object()))
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        billing_cls.return_value.debit_run.side_effect = RuntimeError("db down")
+        worker._debit_run_credits("u@x.com", {"total_tokens": 5000}, run_name="r", model=None)

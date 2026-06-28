@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
+from ...billing.service import GRANT_WINDOW_DAYS
 from ...constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
@@ -25,6 +30,7 @@ from ...constants import (
 from ...i18n_keys import I18nKey
 from ...registry import RegistryError
 from ...service_gateway import ServiceError
+from ...storage.models import Base, BillingCustomerModel
 from ...storage.usage import StorageUsage
 from ..model_catalog import CatalogModel, ModelCatalogResponse
 from ..routers import submissions as _sub_mod
@@ -966,6 +972,62 @@ def test_submit_grid_search_accepts_image_signature_when_all_models_support_visi
     payload["reflection_models"] = [{"name": "gpt-4o"}]
 
     resp = client.post("/grid-search", json=payload)
+
+    assert resp.status_code == 201
+
+
+def test_submit_run_returns_402_when_credits_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A managed run is blocked at submit when the account has no spendable credits."""
+    # StaticPool keeps one shared connection so the in-memory schema is visible
+    # from the request threadpool, not just the thread that ran create_all.
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            BillingCustomerModel(
+                username="alice",
+                stripe_customer_id="cus_alice",
+                credit_balance=0,
+                grant_remaining=0,
+                grant_reset_at=datetime.now(UTC) + timedelta(days=GRANT_WINDOW_DAYS),
+            )
+        )
+        session.commit()
+
+    store = _FakeJobStore()
+    store.engine = engine
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    resp = client.post("/run", json=_run_payload())
+
+    assert resp.status_code == 402
+    assert resp.json()["code"] == "billing.insufficient_credits"
+    assert store.created_ids() == []
+
+
+def test_submit_run_allowed_with_remaining_credits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A managed run with grant left passes the credit gate and is enqueued."""
+    # StaticPool keeps one shared connection so the in-memory schema is visible
+    # from the request threadpool, not just the thread that ran create_all.
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            BillingCustomerModel(
+                username="alice",
+                stripe_customer_id="cus_alice",
+                credit_balance=0,
+                grant_remaining=50,
+                grant_reset_at=datetime.now(UTC) + timedelta(days=GRANT_WINDOW_DAYS),
+            )
+        )
+        session.commit()
+
+    store = _FakeJobStore()
+    store.engine = engine
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    resp = client.post("/run", json=_run_payload())
 
     assert resp.status_code == 201
 
