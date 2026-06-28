@@ -14,19 +14,23 @@ portal) require ``settings.is_stripe_configured`` and raise
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import stripe
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..api.errors import DomainError
 from ..config import settings
+from ..constants import GUARANTEE_BASIS_TEST, GUARANTEE_BASIS_VAL, TOKEN_SOURCE_BYOK
 from ..storage.models import (
     BillingCustomerModel,
     BillingWebhookEventModel,
     CreditLedgerModel,
+    GuaranteeRunModel,
 )
 
 # Credits granted per one-time pack. Mirrors the frontend CREDIT_PACKS catalog;
@@ -57,8 +61,21 @@ TOKENS_PER_CREDIT = 1000
 # Stripe without code changes; this only fixes the token-to-unit granularity.
 METER_UNIT_TOKENS = 1000
 
+# Share of a run's credit cost that is Skynet's platform fee (vs. pass-through
+# compute). On a no-lift BYOK run the provider tokens are already spent on the
+# user's own key, so only this fee is refundable; a managed no-lift run refunds
+# the whole cost. Lives here so the fee is re-priceable without touching the
+# guarantee logic.
+PLATFORM_FEE_FRACTION = 0.20
+
 # Stripe subscription statuses that entitle an account to the frontier catalog.
 _ACTIVE_SUBSCRIPTION_STATUSES = frozenset({"active", "trialing", "past_due"})
+
+# How long a Founder's Rate subscriber's price is held. The offer promises the
+# rate is locked for 12 months; the lock instant is stamped into the
+# subscription metadata at checkout so the held-through date is auditable and
+# surfaced back to the subscriber.
+FOUNDERS_LOCK_DAYS = 365
 
 
 @dataclass(frozen=True)
@@ -75,6 +92,20 @@ class LedgerRow:
     model: str | None
     credits: int
     kind: str
+
+
+@dataclass(frozen=True)
+class FoundersRateStatus:
+    """The Founder's Rate availability as the upgrade page reads it.
+
+    ``open`` is whether new subscriptions are still accepted (the deadline gate),
+    ``closes_at`` is the ISO-8601 close instant, and ``price_locked_until`` is the
+    ISO-8601 instant through which a subscriber locking in *now* keeps the rate.
+    """
+
+    open: bool
+    closes_at: str
+    price_locked_until: str
 
 
 @dataclass(frozen=True)
@@ -107,6 +138,47 @@ def credits_for_tokens(total_tokens: int) -> int:
     if total_tokens <= 0:
         return 0
     return -(-total_tokens // TOKENS_PER_CREDIT)
+
+
+def tokens_for_credits(credits: int) -> int:
+    """Convert a credit ceiling to the run-token budget it represents.
+
+    The inverse of :func:`credits_for_tokens`, used by the per-job cost ceiling:
+    a user-set cap in credits becomes the token budget the run is hard-stopped
+    against. Because :func:`credits_for_tokens` rounds a partial credit up, a cap
+    of ``n`` credits buys up to ``n * TOKENS_PER_CREDIT`` tokens — the run is
+    stopped once accumulated usage exceeds that budget.
+
+    Args:
+        credits: The credit ceiling; non-positive yields ``0`` (no budget).
+
+    Returns:
+        The non-negative token budget the ceiling allows.
+    """
+    if credits <= 0:
+        return 0
+    return credits * TOKENS_PER_CREDIT
+
+
+def platform_fee_credits(total_tokens: int) -> int:
+    """Return the platform-fee portion of a run's credit cost, rounding up.
+
+    The refundable amount on a no-lift **BYOK** run: the provider tokens were
+    spent on the user's own key, so only Skynet's fee
+    (:data:`PLATFORM_FEE_FRACTION` of the full cost) can be returned. Always at
+    least one credit when the run cost anything, so a covered run is never
+    refunded zero.
+
+    Args:
+        total_tokens: Tokens the run consumed.
+
+    Returns:
+        The non-negative platform-fee credits (``0`` when the run cost nothing).
+    """
+    cost = credits_for_tokens(total_tokens)
+    if cost <= 0:
+        return 0
+    return max(1, math.ceil(cost * PLATFORM_FEE_FRACTION))
 
 
 def _grant_window_end(now: datetime) -> datetime:
@@ -308,6 +380,83 @@ class StripeBillingService:
         )
         return str(checkout.url)
 
+    def founders_rate_status(self, now: datetime | None = None) -> FoundersRateStatus:
+        """Return whether the Founder's Rate is still open and its lock window.
+
+        The deadline gate is config-driven (:attr:`settings.founders_rate_closes_at`)
+        — a placeholder far-future default until the real close date is set — so no
+        date is hardcoded. ``open`` is ``now <= closes_at``; once the deadline
+        passes the offer is unavailable to new subscribers. ``price_locked_until``
+        is a subscriber-locking-in-now date (``now + FOUNDERS_LOCK_DAYS``), the
+        12-month price hold the offer promises.
+
+        Args:
+            now: Reference instant; defaults to the current UTC time.
+
+        Returns:
+            A :class:`FoundersRateStatus` for the upgrade-page deadline line and gate.
+        """
+        now = now or datetime.now(UTC)
+        closes_at = settings.founders_rate_closes_at_dt
+        return FoundersRateStatus(
+            open=now <= closes_at,
+            closes_at=closes_at.isoformat(),
+            price_locked_until=(now + timedelta(days=FOUNDERS_LOCK_DAYS)).isoformat(),
+        )
+
+    def create_founders_checkout(self, username: str) -> str:
+        """Create a Checkout Session for the Founder's Rate subscription.
+
+        Gated by the config-driven deadline: once the close date has passed, the
+        offer is unavailable and this raises rather than minting a checkout. The
+        12-month price-lock is recorded as subscription metadata (``founders_rate``
+        and ``price_locked_until``) so the held-through date travels with the
+        subscription in Stripe and is auditable. The Founder's Rate has its own
+        Stripe price; when unconfigured it falls back to the Premium price so the
+        offer still works on a partly-provisioned deploy.
+
+        Args:
+            username: Subscriber identity, stamped into session metadata.
+
+        Returns:
+            The hosted Stripe Checkout URL for the recurring Founder's Rate.
+
+        Raises:
+            DomainError: 410 when the offer's deadline has passed; 503 when Stripe
+                (and no fallback Premium price) is unconfigured.
+        """
+        now = datetime.now(UTC)
+        if now > settings.founders_rate_closes_at_dt:
+            raise DomainError("billing.founders_closed", status=410)
+        price_id = settings.stripe_price_founders or settings.stripe_price_premium
+        if not price_id:
+            raise DomainError("billing.not_configured", status=503)
+        stripe_mod = self._stripe()
+        customer_id = self.get_or_create_customer(username)
+        locked_until = (now + timedelta(days=FOUNDERS_LOCK_DAYS)).isoformat()
+        metadata = {
+            "username": username,
+            "founders_rate": "true",
+            "price_locked_until": locked_until,
+        }
+        line_items: list[dict[str, Any]] = [{"price": price_id, "quantity": 1}]
+        # The metered overage price rides on the same subscription so per-run token
+        # usage bills the subscriber. A metered price is quantity-less.
+        metered_price = settings.stripe_price_metered
+        if metered_price:
+            line_items.append({"price": metered_price})
+        checkout = stripe_mod.checkout.Session.create(
+            customer=customer_id,
+            mode="subscription",
+            line_items=line_items,
+            success_url=self._return_url("success"),
+            cancel_url=self._return_url("cancel"),
+            client_reference_id=username,
+            metadata=metadata,
+            subscription_data={"metadata": metadata},
+        )
+        return str(checkout.url)
+
     def create_billing_portal(self, username: str) -> str:
         """Create a Stripe Billing Portal session and return its URL.
 
@@ -428,6 +577,30 @@ class StripeBillingService:
                 session.commit()
         return max(grant_remaining + paid, 0)
 
+    def frontier_unlocked(self, username: str) -> bool:
+        """Return whether the account may run frontier models in managed mode.
+
+        Frontier access is entitled by a purchased credit balance or an active
+        Premium subscription — the same line the wizard draws client-side. Read
+        directly off the billing row (no Stripe call), so it serves on a
+        key-less deploy. A brand-new account with no row is locked (free grant
+        runs mini models only).
+
+        Args:
+            username: Account to check.
+
+        Returns:
+            ``True`` when the account holds purchased credits or active Premium.
+        """
+        with Session(self._engine) as session:
+            customer = session.get(BillingCustomerModel, username)
+            if customer is None:
+                return False
+            if int(customer.credit_balance) > 0:
+                return True
+            status = customer.subscription_status
+            return status in _ACTIVE_SUBSCRIPTION_STATUSES if status else False
+
     def debit_run(
         self, username: str, total_tokens: int, *, model: str | None, description: str
     ) -> int:
@@ -488,6 +661,170 @@ class StripeBillingService:
             )
             session.commit()
         return cost
+
+    def _refund_run(
+        self, session: Session, username: str, credits: int, *, model: str | None, description: str
+    ) -> None:
+        """Write an offsetting positive ``run`` row and restore the balance.
+
+        The credit side of an auto-refund: returns ``credits`` to the account by
+        replenishing the free grant first (mirroring how :meth:`debit_run` drew
+        it down — grant before paid balance) and any remainder to the purchased
+        balance, then appends a positive ``run`` ledger row so the wallet shows
+        the refund as a legible line. Caller commits.
+
+        Args:
+            session: Open session the refund is written into (caller commits).
+            username: Account being refunded.
+            credits: Positive credit amount to restore.
+            model: Model id stamped on the refund row, or ``None``.
+            description: Human label for the ledger row.
+        """
+        now = datetime.now(UTC)
+        customer = session.get(BillingCustomerModel, username)
+        if customer is None:
+            customer = BillingCustomerModel(
+                username=username,
+                stripe_customer_id=f"{LOCAL_CUSTOMER_PREFIX}{username}",
+                credit_balance=0,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(customer)
+        self._resolve_grant(customer, now)
+        # Restore the grant up to its full allowance first (it was drawn first on
+        # debit), then send any overflow to the purchased balance.
+        grant = int(customer.grant_remaining or 0)
+        to_grant = min(FREE_GRANT_CREDITS - grant, credits) if grant < FREE_GRANT_CREDITS else 0
+        to_grant = max(to_grant, 0)
+        customer.grant_remaining = grant + to_grant
+        customer.credit_balance = int(customer.credit_balance) + (credits - to_grant)
+        customer.updated_at = now
+        session.add(
+            CreditLedgerModel(
+                username=username,
+                delta_credits=credits,
+                kind="run",
+                description=description,
+                model=model,
+            )
+        )
+
+    def adjudicate_guarantee(
+        self,
+        username: str,
+        task_fingerprint: str,
+        optimization_id: str,
+        guarantee: dict[str, Any] | None,
+        *,
+        token_source: str,
+        total_tokens: int,
+        model: str | None,
+        description: str,
+    ) -> int:
+        """Apply the "No lift, no charge" guarantee to a finished run.
+
+        Only the **first** run per ``(username, task_fingerprint)`` is covered:
+        an atomic insert claims that one-time slot, so a redelivered or re-run
+        job — and every later run on the same task — bills normally and returns
+        ``0`` here. On the covered run, lift is read from ``guarantee`` (the
+        baseline-vs-optimized scores on the test split, or the valset fallback
+        when the dataset was too small): any improvement counts as lift and the
+        run stays billed. No lift triggers an auto-refund — a managed run gets
+        the **whole** run cost back, a BYOK run only Skynet's platform fee (the
+        provider tokens were spent on the user's own key) — written as an
+        offsetting ``run`` row that restores the balance, and the slot is flagged
+        ``refunded``. A missing ``guarantee`` (no comparable baseline/optimized
+        pair) leaves the run billed but still consumes the slot, so the account's
+        one covered run is spent honestly rather than retried for free.
+
+        Args:
+            username: Account the run was billed to.
+            task_fingerprint: Content hash identifying the task (same value the
+                submit path computes from signature + metric + dataset).
+            optimization_id: The run claiming or skipping the guarantee slot.
+            guarantee: ``{"basis", "baseline", "optimized"}`` from the result, or
+                ``None`` when the run produced no comparable pair.
+            token_source: ``"managed"`` or ``"byok"`` — sets the refund scope.
+            total_tokens: Tokens the run consumed (sizes the refund).
+            model: Model id stamped on the refund row, or ``None``.
+            description: Human label for the refund ledger row.
+
+        Returns:
+            The credits refunded (``0`` when the run was billed: it had lift,
+            wasn't the first run on the task, or had no comparable scores).
+        """
+        if not username or not task_fingerprint:
+            return 0
+        with Session(self._engine) as session:
+            session.add(
+                GuaranteeRunModel(
+                    username=username,
+                    task_fingerprint=task_fingerprint,
+                    optimization_id=optimization_id,
+                )
+            )
+            try:
+                # Flush the claim alone so a re-run's PK collision surfaces here
+                # (this account already spent its covered run on this task) and we
+                # bail before touching the ledger.
+                session.flush()
+            except IntegrityError:
+                session.rollback()
+                return 0
+
+            # Refund only on a definitive no-lift signal. A run with lift — or one
+            # with no comparable baseline/optimized pair to judge — bills, but
+            # still consumes the account's one covered slot for this task.
+            if not self._is_no_lift(guarantee):
+                session.commit()
+                return 0
+
+            refund = (
+                platform_fee_credits(total_tokens)
+                if token_source == TOKEN_SOURCE_BYOK
+                else credits_for_tokens(total_tokens)
+            )
+            if refund <= 0:
+                session.commit()
+                return 0
+
+            self._refund_run(session, username, refund, model=model, description=description)
+            claim = session.get(GuaranteeRunModel, (username, task_fingerprint))
+            if claim is not None:
+                claim.refunded = True
+            session.commit()
+        return refund
+
+    @staticmethod
+    def _is_no_lift(guarantee: dict[str, Any] | None) -> bool:
+        """Return whether the guarantee scores definitively show no lift.
+
+        Lift is ``optimized > baseline`` on the run's adjudication basis (test
+        split, or valset fallback); any real improvement counts — the test-split
+        basis is what keeps "any improvement" honest rather than a noise gotcha.
+        Returns ``True`` only when a valid basis carries both scores and the
+        optimized score did not exceed the baseline. A missing or malformed
+        guarantee block (no comparable pair) is *not* treated as no-lift — the
+        run can't be proven a failure, so it bills.
+
+        Args:
+            guarantee: ``{"basis", "baseline", "optimized"}`` from the result, or
+                ``None``.
+
+        Returns:
+            ``True`` only when both scores are present and optimized did not beat
+            baseline.
+        """
+        if not isinstance(guarantee, dict):
+            return False
+        if guarantee.get("basis") not in (GUARANTEE_BASIS_TEST, GUARANTEE_BASIS_VAL):
+            return False
+        baseline = guarantee.get("baseline")
+        optimized = guarantee.get("optimized")
+        if not isinstance(baseline, (int, float)) or not isinstance(optimized, (int, float)):
+            return False
+        return optimized <= baseline
 
     def handle_webhook(self, payload: bytes, sig_header: str | None) -> None:
         """Verify and apply a Stripe webhook event, exactly once.

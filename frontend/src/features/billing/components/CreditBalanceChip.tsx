@@ -22,7 +22,7 @@ import { creditsToUsd, formatCredits, formatResetDate, formatUsd } from "../lib/
  * switches to a key glyph instead of a number, since managed credits aren't spent.
  */
 export function CreditBalanceChip({ className }: { className?: string }) {
-  const { wallet, status, totalCredits, loading } = useCredits();
+  const { wallet, status, totalCredits, loading, syncing } = useCredits();
   const { locale } = useLocale();
   const { openTo } = useSettingsModal();
   const [open, setOpen] = React.useState(false);
@@ -60,6 +60,7 @@ export function CreditBalanceChip({ className }: { className?: string }) {
           aria-label={formatMsg("billing.chip.aria", {
             p1: isByok ? msg("billing.chip.byok") : formatCredits(totalCredits, locale),
           })}
+          aria-busy={syncing || undefined}
           className={cn(
             "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs font-semibold transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45",
             triggerTone,
@@ -85,7 +86,12 @@ export function CreditBalanceChip({ className }: { className?: string }) {
                 )}
                 aria-hidden="true"
               />
-              <span dir="ltr" className="tabular-nums">
+              {/* Post-checkout sync [FG-3]: a quiet shimmer over the *prior* balance
+                  until the webhook lands, so the chip never flashes a false zero. */}
+              <span
+                dir="ltr"
+                className={cn("tabular-nums", syncing && "animate-pulse text-muted-foreground")}
+              >
                 {formatCredits(totalCredits, locale)}
               </span>
             </>
@@ -147,6 +153,11 @@ export function CreditBalanceChip({ className }: { className?: string }) {
                     p1: formatResetDate(wallet.freeGrant.resetsAt, locale),
                   })}
                 </p>
+                {/* Low balance reads as an operational metric, not an alarm: one
+                    calm factual line in the warm neutrals, no red, no urgency. */}
+                {status === "low" && (
+                  <p className="text-muted-foreground/80">{msg("billing.chip.low_note")}</p>
+                )}
               </dl>
             </>
           )}

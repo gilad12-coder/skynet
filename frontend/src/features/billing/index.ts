@@ -16,6 +16,7 @@ export { modelTier, isModelLocked, type ModelTier } from "./lib/model-access";
 export {
   CREDIT_PACKS,
   CREDIT_USD_VALUE,
+  TOKENS_PER_CREDIT,
   creditsToUsd,
   formatCredits,
   formatResetDate,

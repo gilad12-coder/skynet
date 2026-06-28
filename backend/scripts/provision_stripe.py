@@ -29,6 +29,7 @@ _PACKS: list[tuple[str, str, int]] = [
     ("skynet_pack_pro", "Skynet Credits — Pro", 5000),
 ]
 _PREMIUM = ("skynet_premium", "Skynet Premium", 2000)
+_FOUNDERS = ("skynet_founders", "Skynet Founder's Rate", 2000)
 _METERED = ("skynet_metered", "Skynet Token Overage", 1)
 
 
@@ -126,6 +127,11 @@ def main() -> int:
         _PREMIUM[0], _PREMIUM[1], _PREMIUM[2], recurring={"interval": "month"}
     )
 
+    print("Provisioning Founder's Rate subscription ...")
+    founders_id = _ensure_price(
+        _FOUNDERS[0], _FOUNDERS[1], _FOUNDERS[2], recurring={"interval": "month"}
+    )
+
     print("Provisioning metered overage (optional) ...")
     meter_id = _ensure_meter(settings.stripe_meter_event_name)
     metered_id = None
@@ -142,6 +148,7 @@ def main() -> int:
     print(f"STRIPE_PRICE_PACK_PLUS={pack_ids['skynet_pack_plus']}")
     print(f"STRIPE_PRICE_PACK_PRO={pack_ids['skynet_pack_pro']}")
     print(f"STRIPE_PRICE_PREMIUM={premium_id}")
+    print(f"STRIPE_PRICE_FOUNDERS={founders_id}")
     if metered_id:
         print(f"STRIPE_PRICE_METERED={metered_id}")
         print(f"STRIPE_METER_EVENT_NAME={settings.stripe_meter_event_name}")

@@ -33,6 +33,11 @@ class _Store:
         """
         if engine is not None:
             self.engine = engine
+        self.updates: list[dict[str, Any]] = []
+
+    def update_job(self, optimization_id: str, **fields: Any) -> None:
+        """Capture a re-persist so the billing-outcome stamp can be asserted."""
+        self.updates.append({"id": optimization_id, **fields})
 
 
 class _SyncThread:
@@ -168,3 +173,120 @@ def test_debit_hook_swallows_failures() -> None:
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
         billing_cls.return_value.debit_run.side_effect = RuntimeError("db down")
         worker._debit_run_credits("u@x.com", {"total_tokens": 5000}, run_name="r", model=None)
+
+
+def _overview(**extra: Any) -> dict[str, Any]:
+    """Build a payload overview carrying the guarantee inputs."""
+    base = {"task_fingerprint": "task-1", "token_source": "managed", "name": "sentiment v3"}
+    base.update(extra)
+    return base
+
+
+def test_guarantee_hook_adjudicates_for_successful_run() -> None:
+    """With an engine, a fingerprint, and tokens, the guarantee is adjudicated."""
+    engine = object()
+    worker = _worker(_Store(engine=engine))
+    result = {"total_tokens": 5000, "guarantee": {"basis": "test", "baseline": 0.7, "optimized": 0.7}}
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        billing_cls.return_value.adjudicate_guarantee.return_value = 5
+        worker._apply_guarantee_best_effort("u@x.com", result, _overview(), "opt-1")
+    billing_cls.assert_called_once_with(engine=engine)
+    call = billing_cls.return_value.adjudicate_guarantee.call_args
+    assert call.args[:3] == ("u@x.com", "task-1", "opt-1")
+    assert call.args[3] == result["guarantee"]
+    assert call.kwargs["token_source"] == "managed"
+    assert call.kwargs["total_tokens"] == 5000
+
+
+def test_guarantee_hook_noop_without_task_fingerprint() -> None:
+    """A run with no task fingerprint can't claim the per-task slot — no-op."""
+    worker = _worker(_Store(engine=object()))
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        worker._apply_guarantee_best_effort(
+            "u@x.com", {"total_tokens": 5000}, _overview(task_fingerprint=None), "opt-1"
+        )
+    billing_cls.assert_not_called()
+
+
+def test_guarantee_hook_noop_without_engine() -> None:
+    """A store without a SQL engine adjudicates nothing."""
+    worker = _worker(_Store(engine=None))
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        worker._apply_guarantee_best_effort("u@x.com", {"total_tokens": 5000}, _overview(), "opt-1")
+    billing_cls.assert_not_called()
+
+
+def test_guarantee_hook_noop_without_token_usage() -> None:
+    """A run that reported no token total adjudicates nothing."""
+    worker = _worker(_Store(engine=object()))
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        worker._apply_guarantee_best_effort("u@x.com", {"total_tokens": None}, _overview(), "opt-1")
+        worker._apply_guarantee_best_effort("u@x.com", {}, _overview(), "opt-1")
+    billing_cls.assert_not_called()
+
+
+def test_guarantee_hook_defaults_token_source_to_managed() -> None:
+    """An overview missing token_source falls back to managed for the guarantee."""
+    worker = _worker(_Store(engine=object()))
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        billing_cls.return_value.adjudicate_guarantee.return_value = 0
+        worker._apply_guarantee_best_effort(
+            "u@x.com", {"total_tokens": 5000}, _overview(token_source=None), "opt-1"
+        )
+    assert billing_cls.return_value.adjudicate_guarantee.call_args.kwargs["token_source"] == "managed"
+
+
+def test_guarantee_hook_swallows_failures() -> None:
+    """A guarantee failure never propagates to the worker (job status untouched)."""
+    worker = _worker(_Store(engine=object()))
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        billing_cls.return_value.adjudicate_guarantee.side_effect = RuntimeError("db down")
+        worker._apply_guarantee_best_effort("u@x.com", {"total_tokens": 5000}, _overview(), "opt-1")
+
+
+def test_stamp_billing_records_billed_outcome() -> None:
+    """A billed run stamps the charged credits as the proof receipt."""
+    store = _Store(engine=object())
+    worker = _worker(store)
+    result: dict[str, Any] = {"total_tokens": 5000}
+    worker._stamp_billing_outcome("opt-1", result, billed=5, refunded=0)
+    assert result["details"]["billing"] == {"outcome": "billed", "credits": 5}
+    assert store.updates == [{"id": "opt-1", "result": result}]
+
+
+def test_stamp_billing_refund_wins_over_bill() -> None:
+    """A refund (guarantee held) frames the outcome as a free run, not a charge."""
+    store = _Store(engine=object())
+    worker = _worker(store)
+    result: dict[str, Any] = {"total_tokens": 5000, "details": {"existing": True}}
+    worker._stamp_billing_outcome("opt-1", result, billed=5, refunded=5)
+    assert result["details"]["billing"] == {"outcome": "refunded", "credits": 5}
+    assert result["details"]["existing"] is True
+
+
+def test_stamp_billing_noop_when_nothing_charged() -> None:
+    """A free-grant run that cost zero credits stamps nothing."""
+    store = _Store(engine=object())
+    worker = _worker(store)
+    result: dict[str, Any] = {"total_tokens": 0}
+    worker._stamp_billing_outcome("opt-1", result, billed=0, refunded=0)
+    assert "details" not in result
+    assert store.updates == []
+
+
+def test_stamp_billing_skips_grid_results() -> None:
+    """A grid envelope has no per-run billing receipt — skip it."""
+    store = _Store(engine=object())
+    worker = _worker(store)
+    result: dict[str, Any] = {"pair_results": [], "total_tokens": 5000}
+    worker._stamp_billing_outcome("opt-1", result, billed=5, refunded=0)
+    assert "details" not in result
+    assert store.updates == []
+
+
+def test_stamp_billing_swallows_persist_failures() -> None:
+    """A re-persist failure never propagates to the worker (job status untouched)."""
+    store = _Store(engine=object())
+    worker = _worker(store)
+    with patch.object(store, "update_job", side_effect=RuntimeError("db down")):
+        worker._stamp_billing_outcome("opt-1", {"total_tokens": 5000}, billed=5, refunded=0)

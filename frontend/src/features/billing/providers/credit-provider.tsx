@@ -19,6 +19,12 @@ interface CreditContextValue {
   wallet: CreditWallet;
   /** True while the wallet is being fetched — drives the chip's loading shimmer. */
   loading: boolean;
+  /**
+   * True while waiting for a post-checkout Stripe webhook to land [FG-3]. The
+   * chip shows a quiet shimmer over the *prior* balance rather than flashing a
+   * stale/empty number while the FastAPI→Postgres seam catches up.
+   */
+  syncing: boolean;
   status: WalletStatus;
   totalCredits: number;
   hasPaidBalance: boolean;
@@ -30,6 +36,12 @@ interface CreditContextValue {
   setMode: (mode: TokenSourceMode) => void;
   /** Re-fetch the wallet from the backend — call after a checkout/portal return. */
   refresh: () => void;
+  /**
+   * Enter the post-checkout `syncing` state and poll the wallet until the webhook
+   * lands (the balance/subscription changes) or a short budget elapses. Call on a
+   * Stripe `?status=success` return so the chip never shows a false zero.
+   */
+  beginSync: () => void;
 }
 
 /**
@@ -94,6 +106,7 @@ export function CreditProvider({
 }) {
   const [wallet, setWallet] = React.useState<CreditWallet>(initialWallet);
   const [loading, setLoading] = React.useState(true);
+  const [syncing, setSyncing] = React.useState(false);
 
   const refresh = React.useCallback(() => {
     setLoading(true);
@@ -109,6 +122,35 @@ export function CreditProvider({
     refresh();
   }, [refresh]);
 
+  // Post-checkout sync [FG-3]: Stripe webhooks aren't instant, so on a success
+  // return we poll the wallet (without toggling `loading`, to avoid wiping the
+  // prior balance) until it changes or a short budget elapses. The chip reads
+  // `syncing` and shimmers over the prior balance instead of flashing a zero.
+  const beginSync = React.useCallback(() => {
+    setSyncing(true);
+    let attempt = 0;
+    const baseline = JSON.stringify({ p: wallet.paidBalanceCredits, s: wallet.premiumActive });
+    const poll = () => {
+      attempt += 1;
+      void getWallet()
+        .then((r) => {
+          setWallet((prev) => applyWalletResponse(prev, r));
+          return JSON.stringify({ p: r.paid_balance_credits, s: r.premium_active }) !== baseline;
+        })
+        .catch(() => false)
+        .then((landed) => {
+          // Stop once the webhook's effect is visible, or after ~12s of polling
+          // so the shimmer is never permanent if nothing changes (e.g. cancel).
+          if (landed || attempt >= 8) {
+            setSyncing(false);
+            return;
+          }
+          window.setTimeout(poll, 1500);
+        });
+    };
+    poll();
+  }, [wallet.paidBalanceCredits, wallet.premiumActive]);
+
   const setAutoReload = React.useCallback((patch: Partial<AutoReload>) => {
     setWallet((w) => ({ ...w, autoReload: { ...w.autoReload, ...patch } }));
   }, []);
@@ -121,6 +163,7 @@ export function CreditProvider({
     () => ({
       wallet,
       loading,
+      syncing,
       status: walletStatus(wallet),
       totalCredits: totalCredits(wallet),
       hasPaidBalance: hasPaidBalance(wallet),
@@ -128,8 +171,9 @@ export function CreditProvider({
       setAutoReload,
       setMode,
       refresh,
+      beginSync,
     }),
-    [wallet, loading, setAutoReload, setMode, refresh],
+    [wallet, loading, syncing, setAutoReload, setMode, refresh, beginSync],
   );
 
   return <CreditContext.Provider value={value}>{children}</CreditContext.Provider>;

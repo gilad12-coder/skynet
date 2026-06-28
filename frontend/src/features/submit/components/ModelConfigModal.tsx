@@ -242,6 +242,12 @@ export function ModelConfigModal({
                 >
                   {msg("billing.mode.manage_keys")}
                 </button>
+                {/* BYOK concurrency note [FG-2]: your-key runs share self-hosted
+                    compute and may queue at peak — stated so it reads as a limit,
+                    not a penalty for not buying credits. */}
+                <span className="w-full text-muted-foreground/80">
+                  {msg("billing.mode.byok_queue_note")}
+                </span>
               </>
             )}
           </div>

@@ -85,7 +85,7 @@ function LedgerRow({ entry }: { entry: UsageEntry }) {
  * credit count with its USD equivalent, per the "show real cost" decision.
  */
 export function WalletTab() {
-  const { wallet, totalCredits, setAutoReload } = useCredits();
+  const { wallet, totalCredits, setAutoReload, status, syncing } = useCredits();
   const { locale } = useLocale();
   const usd = creditsToUsd(totalCredits);
 
@@ -108,8 +108,16 @@ export function WalletTab() {
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {msg("billing.popover.title")}
           </span>
-          <div className="flex items-baseline gap-2">
-            <span dir="ltr" className="text-3xl font-semibold text-foreground tabular-nums">
+          <div className="flex items-baseline gap-2" aria-busy={syncing || undefined}>
+            {/* Post-checkout sync [FG-3]: shimmer over the prior balance until the
+                webhook lands, mirroring the header chip so the two never disagree. */}
+            <span
+              dir="ltr"
+              className={cn(
+                "text-3xl font-semibold text-foreground tabular-nums",
+                syncing && "animate-pulse text-muted-foreground",
+              )}
+            >
               {formatCredits(totalCredits, locale)}
             </span>
             <span dir="ltr" className="text-sm text-muted-foreground tabular-nums">
@@ -128,6 +136,11 @@ export function WalletTab() {
               p1: formatResetDate(wallet.freeGrant.resetsAt, locale),
             })}
           </span>
+          {/* Low balance stays an operational metric here too — same calm line as
+              the header chip, no red, no urgency. */}
+          {status === "low" && (
+            <span className="text-xs text-muted-foreground/80">{msg("billing.chip.low_note")}</span>
+          )}
         </div>
         <Link
           href="/upgrade"

@@ -44,6 +44,7 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
 
   const [editing, setEditing] = React.useState(false);
   const [secret, setSecret] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
   const [verifying, setVerifying] = React.useState(false);
 
   const startEditing = () => {
@@ -51,28 +52,53 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
     setEditing(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const trimmed = secret.trim();
     if (!trimmed) return;
-    saveKey(provider.slug, trimmed);
-    setSecret("");
-    setEditing(false);
-    toast.success(msg("settings.keys.saved_toast"));
+    setSaving(true);
+    try {
+      const status = await saveKey(provider.slug, trimmed);
+      setSecret("");
+      setEditing(false);
+      // The vault verifies on entry, so a saved key can already come back
+      // rejected; surface that honestly rather than a blanket "saved".
+      if (status === "invalid") {
+        toast.error(msg("settings.keys.invalid_toast"));
+      } else {
+        toast.success(msg("settings.keys.saved_toast"));
+      }
+    } catch {
+      toast.error(msg("settings.keys.save_failed_toast"));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleVerify = async () => {
     setVerifying(true);
     try {
-      await verifyKey(provider.slug);
-      toast.success(msg("settings.keys.verified_toast"));
+      const status = await verifyKey(provider.slug);
+      if (status === "verified") {
+        toast.success(msg("settings.keys.verified_toast"));
+      } else if (status === "invalid") {
+        toast.error(msg("settings.keys.invalid_toast"));
+      } else {
+        toast.info(msg("settings.keys.unverified_toast"));
+      }
+    } catch {
+      toast.error(msg("settings.keys.verify_failed_toast"));
     } finally {
       setVerifying(false);
     }
   };
 
-  const handleRemove = () => {
-    removeKey(provider.slug);
-    toast.success(msg("settings.keys.removed_toast"));
+  const handleRemove = async () => {
+    try {
+      await removeKey(provider.slug);
+      toast.success(msg("settings.keys.removed_toast"));
+    } catch {
+      toast.error(msg("settings.keys.remove_failed_toast"));
+    }
   };
 
   return (
@@ -158,13 +184,17 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
             value={secret}
             onChange={(e) => setSecret(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") handleSave();
+              if (e.key === "Enter") void handleSave();
               if (e.key === "Escape") setEditing(false);
             }}
             className="h-8 flex-1"
           />
-          <Button size="xs" onClick={handleSave} disabled={!secret.trim()}>
-            {msg("settings.keys.save")}
+          <Button size="xs" onClick={handleSave} disabled={!secret.trim() || saving}>
+            {saving ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              msg("settings.keys.save")
+            )}
           </Button>
           <Button
             variant="ghost"

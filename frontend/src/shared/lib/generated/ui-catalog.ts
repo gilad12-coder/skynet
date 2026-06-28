@@ -1704,12 +1704,34 @@ export type MessageKey =
   | "billing.chip.aria"
   | "billing.chip.byok"
   | "billing.chip.empty"
+  | "billing.chip.low_note"
+  | "billing.founders.active"
+  | "billing.founders.closed"
+  | "billing.founders.cta"
+  | "billing.founders.deadline"
+  | "billing.founders.eyebrow"
+  | "billing.founders.lead"
+  | "billing.founders.manage"
+  | "billing.founders.packs_lead"
+  | "billing.founders.packs_title"
+  | "billing.founders.price"
+  | "billing.founders.price_note"
+  | "billing.founders.stack_credits"
+  | "billing.founders.stack_guarantee"
+  | "billing.founders.stack_history"
+  | "billing.founders.stack_lock"
+  | "billing.founders.stack_managed"
+  | "billing.founders.stack_proof"
+  | "billing.founders.stack_serving"
+  | "billing.founders.stack_title"
+  | "billing.founders.title"
   | "billing.history.byok_tag"
   | "billing.lock.frontier"
   | "billing.lock.frontier_note"
   | "billing.mode.aria"
   | "billing.mode.byok"
   | "billing.mode.byok_hint"
+  | "billing.mode.byok_queue_note"
   | "billing.mode.label"
   | "billing.mode.manage_keys"
   | "billing.mode.managed"
@@ -1921,6 +1943,30 @@ export type MessageKey =
   | "not_found.back_dashboard"
   | "not_found.description"
   | "not_found.title"
+  | "onboarding.cta.free_note"
+  | "onboarding.cta.run"
+  | "onboarding.demo.after_label"
+  | "onboarding.demo.before_label"
+  | "onboarding.demo.caption"
+  | "onboarding.demo.desc"
+  | "onboarding.demo.task_label"
+  | "onboarding.demo.task_value"
+  | "onboarding.demo.title"
+  | "onboarding.eyebrow"
+  | "onboarding.lead"
+  | "onboarding.mode.desc"
+  | "onboarding.mode.title"
+  | "onboarding.skip"
+  | "onboarding.title"
+  | "onboarding.upload.baseline_desc"
+  | "onboarding.upload.baseline_title"
+  | "onboarding.upload.desc"
+  | "onboarding.upload.dropzone_hint"
+  | "onboarding.upload.dropzone_label"
+  | "onboarding.upload.error"
+  | "onboarding.upload.parsing"
+  | "onboarding.upload.rows_columns"
+  | "onboarding.upload.title"
   | "optimization.access_banner.editor"
   | "optimization.access_banner.viewer"
   | "optimization.cancel.failed"
@@ -1940,6 +1986,14 @@ export type MessageKey =
   | "optimization.pause.success"
   | "optimization.pause_tooltip"
   | "optimization.progress.gepa"
+  | "optimization.proof.basis.test"
+  | "optimization.proof.basis.val"
+  | "optimization.proof.billed.line"
+  | "optimization.proof.billed.neutral"
+  | "optimization.proof.billed.neutral.title"
+  | "optimization.proof.billed.title"
+  | "optimization.proof.refunded.line"
+  | "optimization.proof.refunded.title"
   | "optimization.readonly_by"
   | "optimization.rerun"
   | "optimization.rerun.failed"
@@ -2046,17 +2100,22 @@ export type MessageKey =
   | "settings.keys.cancel"
   | "settings.keys.description"
   | "settings.keys.invalid"
+  | "settings.keys.invalid_toast"
   | "settings.keys.privacy"
   | "settings.keys.remove"
+  | "settings.keys.remove_failed_toast"
   | "settings.keys.removed_toast"
   | "settings.keys.replace"
   | "settings.keys.save"
+  | "settings.keys.save_failed_toast"
   | "settings.keys.saved_toast"
   | "settings.keys.title"
   | "settings.keys.unverified"
+  | "settings.keys.unverified_toast"
   | "settings.keys.verified"
   | "settings.keys.verified_toast"
   | "settings.keys.verify"
+  | "settings.keys.verify_failed_toast"
   | "settings.keys.verifying"
   | "settings.open"
   | "settings.saved"
@@ -2260,6 +2319,14 @@ export type MessageKey =
   | "submit.code.agent.tool.metric.title"
   | "submit.code.agent.tool.signature.title"
   | "submit.code_validation_failed"
+  | "submit.cost_ceiling.bracket"
+  | "submit.cost_ceiling.cap_hint"
+  | "submit.cost_ceiling.cap_label"
+  | "submit.cost_ceiling.cap_unit"
+  | "submit.cost_ceiling.enable"
+  | "submit.cost_ceiling.label"
+  | "submit.cost_ceiling.no_cap"
+  | "submit.cost_ceiling.note"
   | "submit.dataset.column_kind.image"
   | "submit.dataset.column_kind.image_auto_hint"
   | "submit.dataset.column_kind.text"
@@ -2274,6 +2341,7 @@ export type MessageKey =
   | "submit.dataset.library_picker_title"
   | "submit.dataset.library_search"
   | "submit.dataset.library_search_empty"
+  | "submit.nav.run_cap"
   | "submit.nav.validating"
   | "submit.probe.asymptote_label"
   | "submit.probe.details.logs"
@@ -4103,12 +4171,34 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "billing.chip.aria": "יתרת קרדיטים: {p1}",
   "billing.chip.byok": "המפתח שלך",
   "billing.chip.empty": "הוספת קרדיטים",
+  "billing.chip.low_note": "היתרה נמוכה. אפשר להוסיף קרדיטים מתי שנוח — מודלים קטנים ממשיכים לרוץ על המענק החינמי.",
+  "billing.founders.active": "אתה חבר מייסד — המחיר שלך נעול.",
+  "billing.founders.closed": "מסלול המייסדים נסגר לחברים חדשים.",
+  "billing.founders.cta": "נעילת מסלול המייסדים",
+  "billing.founders.deadline": "פתוח עד {p1} · נעול ל-12 חודשים",
+  "billing.founders.eyebrow": "מסלול המייסדים",
+  "billing.founders.lead": "Skynet מבצעת אופטימיזציה לתוכנית ה-DSPy שלך ומוכיחה את השיפור על נתונים שהאופטימייזר מעולם לא ראה. אין שיפור? ההרצה חינם.",
+  "billing.founders.manage": "ניהול המנוי",
+  "billing.founders.packs_lead": "אפשר להוסיף קרדיטים בכל עת בחבילה מראש — בנפרד מהחברות שלך.",
+  "billing.founders.packs_title": "צריך עוד קרדיטים?",
+  "billing.founders.price": "{p1}/חודש",
+  "billing.founders.price_note": "נעול ל-12 חודשים.",
+  "billing.founders.stack_credits": "פי 2 קרדיטים בחודש הראשון",
+  "billing.founders.stack_guarantee": "אין שיפור, אין חיוב — מובטח",
+  "billing.founders.stack_history": "היסטוריית גרסאות מלאה",
+  "billing.founders.stack_lock": "מחיר נעול ל-12 חודשים · קו ישיר לצוות",
+  "billing.founders.stack_managed": "אופטימיזציה מנוהלת ללא התקנה",
+  "billing.founders.stack_proof": "הוכחת לפני/אחרי על מערך המבחן",
+  "billing.founders.stack_serving": "אירוח של כל תוכנית מותאמת",
+  "billing.founders.stack_title": "חברות מייסדים כוללת",
+  "billing.founders.title": "פרומפטים טובים יותר, או שלא משלמים.",
   "billing.history.byok_tag": "מפתח שלך",
   "billing.lock.frontier": "הוספת קרדיטים לפתיחה",
   "billing.lock.frontier_note": "מודלים מתקדמים דורשים קרדיטים.",
   "billing.mode.aria": "בחירת אופן החיוב על ההרצות",
   "billing.mode.byok": "המפתח שלך",
   "billing.mode.byok_hint": "ההרצות מחויבות למפתח הספק שלך, לא ל-Skynet.",
+  "billing.mode.byok_queue_note": "הרצות עם המפתח שלך חולקות את משאבי המחשוב המתארחים של Skynet, ולכן ייתכן שימתינו בתור בשעות עומס. זו מגבלת מקביליות, לא קנס על קרדיטים.",
   "billing.mode.label": "מקור הטוקנים",
   "billing.mode.manage_keys": "ניהול מפתחות",
   "billing.mode.managed": "קרדיטים של Skynet",
@@ -4320,6 +4410,30 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "not_found.back_dashboard": "חזור/חזרי ללוח הבקרה",
   "not_found.description": "הכתובת שחיפשת לא קיימת או שהועברה למיקום אחר",
   "not_found.title": "הדף לא נמצא",
+  "onboarding.cta.free_note": "האופטימיזציה הראשונה שלך על משימה מכוסה בערבות — אם היא לא תנצח את קו הבסיס שלך, ההרצה חינם.",
+  "onboarding.cta.run": "אופטימיזציה — ההרצה הראשונה שלך חינם",
+  "onboarding.demo.after_label": "אחרי Skynet",
+  "onboarding.demo.before_label": "קו הבסיס שלך",
+  "onboarding.demo.caption": "נמדד על פיצול בדיקה שמור שהאופטימייזר מעולם לא ראה.",
+  "onboarding.demo.desc": "הנה משימה לדוגמה שכבר ביצענו עליה אופטימיזציה, כדי שתראו את צורת התוצאה עוד לפני שהרמתם אצבע.",
+  "onboarding.demo.task_label": "משימה לדוגמה",
+  "onboarding.demo.task_value": "סיווג כוונת פניות תמיכה",
+  "onboarding.demo.title": "קודם תראו שזה עובד",
+  "onboarding.eyebrow": "הרצה ראשונה",
+  "onboarding.lead": "שתי דקות מכאן ועד תוצאה מדודה של לפני־ואחרי על הנתונים שלכם — בלי כרטיס, בלי הגדרות.",
+  "onboarding.mode.desc": "הרצות מנוהלות רצות על הקרדיטים של Skynet בלי שום דבר להגדיר. אפשר לעבור למפתח הספק שלכם בכל רגע.",
+  "onboarding.mode.title": "איך ההרצה שלכם מחויבת",
+  "onboarding.skip": "דלגו — קחו אותי להגדרה המלאה",
+  "onboarding.title": "בואו נוכיח את זה על הנתונים שלכם",
+  "onboarding.upload.baseline_desc": "העלו, ואנחנו נשמור בצד {p1} דוגמאות שמורות שעליהן ננקד את התוכנית שלכם — הפער שהאופטימייזר צריך לסגור.",
+  "onboarding.upload.baseline_title": "קו הבסיס שלכם, נמדד על {p1} דוגמאות שמורות",
+  "onboarding.upload.desc": "גררו קובץ CSV, JSON או JSONL. נקרא אותו כאן בדפדפן שלכם — שום דבר לא נשלח עד שתתחילו את ההרצה.",
+  "onboarding.upload.dropzone_hint": "CSV, JSON או JSONL",
+  "onboarding.upload.dropzone_label": "בחרו קובץ או גררו אותו לכאן",
+  "onboarding.upload.error": "לא הצלחנו לקרוא את הקובץ. ודאו שזה CSV, JSON או JSONL תקין ונסו שוב.",
+  "onboarding.upload.parsing": "קוראים את הנתונים שלכם…",
+  "onboarding.upload.rows_columns": "{p1} שורות · {p2} עמודות",
+  "onboarding.upload.title": "עכשיו, הנתונים שלכם",
   "optimization.access_banner.editor": "שיתפו איתך · הרשאת עריכה",
   "optimization.access_banner.viewer": "שיתפו איתך · הרשאת צפייה",
   "optimization.cancel.failed": "ביטול נכשל",
@@ -4339,6 +4453,14 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "optimization.pause.success": "ההרצה הושהתה",
   "optimization.pause_tooltip": "השהה/השהי את ההרצה — אפשר להמשיך אותה מאותה נקודה",
   "optimization.progress.gepa": "אופטימיזציית GEPA",
+  "optimization.proof.basis.test": "נתונים שהאופטימייזר מעולם לא ראה",
+  "optimization.proof.basis.val": "סט האימות שלך",
+  "optimization.proof.billed.line": "ניצחנו את קו הבסיס שלך ב-{p1} על {p2} — ולכן הרצה זו חויבה: {p3} קרדיטים.",
+  "optimization.proof.billed.neutral": "הרצה זו חויבה: {p1} קרדיטים.",
+  "optimization.proof.billed.neutral.title": "הרצה זו חויבה",
+  "optimization.proof.billed.title": "הוכח על נתונים שמורים",
+  "optimization.proof.refunded.line": "לא הצלחנו לנצח את קו הבסיס שלך על {p1}, ולכן הרצה זו הייתה חינם. {p2} קרדיטים זוכו לארנק שלך.",
+  "optimization.proof.refunded.title": "אין שיפור — הרצה זו הייתה חינם",
   "optimization.readonly_by": "מאת {name}",
   "optimization.rerun": "הרץ/הריצי שוב",
   "optimization.rerun.failed": "לא ניתן להריץ מחדש",
@@ -4445,17 +4567,22 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "settings.keys.cancel": "ביטול",
   "settings.keys.description": "שמירת מפתחות הספק שלך כדי להריץ על חשבונך במקום קרדיטים של Skynet.",
   "settings.keys.invalid": "לא תקין",
+  "settings.keys.invalid_toast": "המפתח נדחה על ידי הספק. בדוק/י אותו ונסה/י שוב.",
   "settings.keys.privacy": "המפתחות מוצפנים באחסון ולא מוצגים שוב לאחר השמירה.",
   "settings.keys.remove": "הסרה",
+  "settings.keys.remove_failed_toast": "לא ניתן היה להסיר את המפתח. נסה/י שוב.",
   "settings.keys.removed_toast": "המפתח הוסר.",
   "settings.keys.replace": "החלפה",
   "settings.keys.save": "שמירת מפתח",
+  "settings.keys.save_failed_toast": "לא ניתן היה לשמור את המפתח. נסה/י שוב.",
   "settings.keys.saved_toast": "המפתח נשמר.",
   "settings.keys.title": "מפתחות API של ספקים",
   "settings.keys.unverified": "לא מאומת",
+  "settings.keys.unverified_toast": "לא ניתן היה ליצור קשר עם הספק לאימות. המפתח נשמר — נסה/י לאמת שוב.",
   "settings.keys.verified": "מאומת",
   "settings.keys.verified_toast": "המפתח אומת.",
   "settings.keys.verify": "אימות",
+  "settings.keys.verify_failed_toast": "לא ניתן היה לאמת את המפתח. נסה/י שוב.",
   "settings.keys.verifying": "באימות…",
   "settings.open": "פתח/י הגדרות",
   "settings.saved": "ההגדרה נשמרה",
@@ -4659,6 +4786,14 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.code.agent.tool.metric.title": "עריכת {term.metric}",
   "submit.code.agent.tool.signature.title": "עריכת {term.signature}",
   "submit.code_validation_failed": "שגיאה באימות הקוד",
+  "submit.cost_ceiling.bracket": "טווח צפוי: {low}–{high} קרדיטים",
+  "submit.cost_ceiling.cap_hint": "הריצה תיעצר אוטומטית כשהצריכה תגיע לתקרה. ריצה שנעצרה אינה מחויבת.",
+  "submit.cost_ceiling.cap_label": "תקרה",
+  "submit.cost_ceiling.cap_unit": "קרדיטים",
+  "submit.cost_ceiling.enable": "הגבלת עלות הריצה",
+  "submit.cost_ceiling.label": "תקרת עלות",
+  "submit.cost_ceiling.no_cap": "ללא תקרה",
+  "submit.cost_ceiling.note": "צריכת הטוקנים של {term.optimization} אינה לינארית, לכן זהו טווח ולא מספר מדויק.",
   "submit.dataset.column_kind.image": "תמונה",
   "submit.dataset.column_kind.image_auto_hint": "זוהתה אוטומטית כעמודת תמונה",
   "submit.dataset.column_kind.text": "טקסט",
@@ -4673,6 +4808,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.dataset.library_picker_title": "בחירת {term.dataset} מהספרייה",
   "submit.dataset.library_search": "חיפוש {term.dataset}…",
   "submit.dataset.library_search_empty": "לא נמצאו דאטאסטים תואמים",
+  "submit.nav.run_cap": "תקרה: {credits} קרדיטים",
   "submit.nav.validating": "מאמת…",
   "submit.probe.asymptote_label": "{term.expectedScore}",
   "submit.probe.details.logs": "יומן ריצה",
@@ -11292,12 +11428,34 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "billing.chip.aria": "Credit balance: {p1}",
   "billing.chip.byok": "Your key",
   "billing.chip.empty": "Add credits",
+  "billing.chip.low_note": "Running low. Add credits when it suits you — mini models keep running on your free grant.",
+  "billing.founders.active": "You're a founding member — your rate is locked.",
+  "billing.founders.closed": "The Founder's Rate has closed for new members.",
+  "billing.founders.cta": "Lock in the Founder's Rate",
+  "billing.founders.deadline": "Open until {p1} · locked for 12 months",
+  "billing.founders.eyebrow": "The Founder's Rate",
+  "billing.founders.lead": "Skynet optimizes your DSPy program and proves the lift on data the optimizer never saw. No improvement? The run's free.",
+  "billing.founders.manage": "Manage subscription",
+  "billing.founders.packs_lead": "Top up anytime with a prepaid pack — separate from your membership.",
+  "billing.founders.packs_title": "Need more credits?",
+  "billing.founders.price": "{p1}/mo",
+  "billing.founders.price_note": "Locked for 12 months.",
+  "billing.founders.stack_credits": "2× first-month credits",
+  "billing.founders.stack_guarantee": "No lift, no charge — guaranteed",
+  "billing.founders.stack_history": "Full version history",
+  "billing.founders.stack_lock": "Price locked 12 months · a direct line to the team",
+  "billing.founders.stack_managed": "Setup-free managed optimization",
+  "billing.founders.stack_proof": "Test-split before/after proof",
+  "billing.founders.stack_serving": "Hosted serving of every optimized program",
+  "billing.founders.stack_title": "Founding membership includes",
+  "billing.founders.title": "Better prompts, or you don't pay.",
   "billing.history.byok_tag": "BYOK",
   "billing.lock.frontier": "Add credits to unlock",
   "billing.lock.frontier_note": "Frontier models need credits.",
   "billing.mode.aria": "Choose how runs are billed",
   "billing.mode.byok": "Your own key",
   "billing.mode.byok_hint": "Runs are billed to your own provider key, not Skynet.",
+  "billing.mode.byok_queue_note": "Your-key runs share Skynet's self-hosted compute, so they may wait in line at busy times. It's a concurrency limit, not a credits penalty.",
   "billing.mode.label": "Token source",
   "billing.mode.manage_keys": "Manage keys",
   "billing.mode.managed": "Skynet credits",
@@ -11509,6 +11667,30 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "not_found.back_dashboard": "Back to dashboard",
   "not_found.description": "The address you requested doesn't exist or has moved",
   "not_found.title": "Page not found",
+  "onboarding.cta.free_note": "Your first optimization on a task is covered by the guarantee — if it doesn't beat your baseline, the run is free.",
+  "onboarding.cta.run": "Optimize — your first run is free",
+  "onboarding.demo.after_label": "After Skynet",
+  "onboarding.demo.before_label": "Your baseline",
+  "onboarding.demo.caption": "Measured on a held-out test split the optimizer never saw.",
+  "onboarding.demo.desc": "Here's a sample task we already optimized, so you can see the shape of the result before lifting a finger.",
+  "onboarding.demo.task_label": "Sample task",
+  "onboarding.demo.task_value": "Support-ticket intent classification",
+  "onboarding.demo.title": "See it work first",
+  "onboarding.eyebrow": "First run",
+  "onboarding.lead": "Two minutes from here to a measured before-and-after on your own data — no card, no setup.",
+  "onboarding.mode.desc": "Managed runs on Skynet's credits with nothing to configure. You can switch to your own provider key any time.",
+  "onboarding.mode.title": "How your run is billed",
+  "onboarding.skip": "Skip — take me to the full setup",
+  "onboarding.title": "Let's prove it on your data",
+  "onboarding.upload.baseline_desc": "Upload, and we'll set aside {p1} held-out examples to score your program against — the gap the optimizer has to close.",
+  "onboarding.upload.baseline_title": "Your baseline, measured on {p1} held-out examples",
+  "onboarding.upload.desc": "Drop in a CSV, JSON, or JSONL file. We'll read it here in your browser — nothing is sent until you start the run.",
+  "onboarding.upload.dropzone_hint": "CSV, JSON, or JSONL",
+  "onboarding.upload.dropzone_label": "Choose a file or drop it here",
+  "onboarding.upload.error": "We couldn't read that file. Check it's a valid CSV, JSON, or JSONL and try again.",
+  "onboarding.upload.parsing": "Reading your data…",
+  "onboarding.upload.rows_columns": "{p1} rows · {p2} columns",
+  "onboarding.upload.title": "Now, your data",
   "optimization.access_banner.editor": "Shared with you · Editor access",
   "optimization.access_banner.viewer": "Shared with you · Viewer access",
   "optimization.cancel.failed": "Cancellation failed",
@@ -11528,6 +11710,14 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "optimization.pause.success": "Run paused",
   "optimization.pause_tooltip": "Pause the run — you can resume it from the same point",
   "optimization.progress.gepa": "GEPA optimization",
+  "optimization.proof.basis.test": "data the optimizer never saw",
+  "optimization.proof.basis.val": "your validation set",
+  "optimization.proof.billed.line": "We beat your baseline by {p1} on {p2} — that's why this run was billed: {p3} credits.",
+  "optimization.proof.billed.neutral": "This run was billed: {p1} credits.",
+  "optimization.proof.billed.neutral.title": "This run was billed",
+  "optimization.proof.billed.title": "Proven on held-out data",
+  "optimization.proof.refunded.line": "We couldn't beat your baseline on {p1}, so this run was free. {p2} credits refunded to your wallet.",
+  "optimization.proof.refunded.title": "No lift — this run was free",
   "optimization.readonly_by": "by {name}",
   "optimization.rerun": "Run again",
   "optimization.rerun.failed": "Couldn't create a new optimization",
@@ -11634,17 +11824,22 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "Cancel",
   "settings.keys.description": "Save your own provider keys to run on your account instead of Skynet credits.",
   "settings.keys.invalid": "Invalid",
+  "settings.keys.invalid_toast": "That key was rejected by the provider. Check it and try again.",
   "settings.keys.privacy": "Keys are encrypted at rest and never shown again after saving.",
   "settings.keys.remove": "Remove",
+  "settings.keys.remove_failed_toast": "Couldn't remove the key. Try again.",
   "settings.keys.removed_toast": "Key removed.",
   "settings.keys.replace": "Replace",
   "settings.keys.save": "Save key",
+  "settings.keys.save_failed_toast": "Couldn't save the key. Try again.",
   "settings.keys.saved_toast": "Key saved.",
   "settings.keys.title": "Provider API keys",
   "settings.keys.unverified": "Not verified",
+  "settings.keys.unverified_toast": "Couldn't reach the provider to verify. The key is saved — try verifying again.",
   "settings.keys.verified": "Verified",
   "settings.keys.verified_toast": "Key verified.",
   "settings.keys.verify": "Verify",
+  "settings.keys.verify_failed_toast": "Couldn't verify the key. Try again.",
   "settings.keys.verifying": "Verifying…",
   "settings.open": "Open settings",
   "settings.saved": "Setting saved",
@@ -11848,6 +12043,14 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.code.agent.tool.metric.title": "Edit metric",
   "submit.code.agent.tool.signature.title": "Edit Signature",
   "submit.code_validation_failed": "Code validation failed",
+  "submit.cost_ceiling.bracket": "Projected range: {low}–{high} credits",
+  "submit.cost_ceiling.cap_hint": "The run stops automatically once usage reaches the ceiling. A stopped run isn't billed.",
+  "submit.cost_ceiling.cap_label": "Ceiling",
+  "submit.cost_ceiling.cap_unit": "credits",
+  "submit.cost_ceiling.enable": "Cap this run's cost",
+  "submit.cost_ceiling.label": "Max cost ceiling",
+  "submit.cost_ceiling.no_cap": "No ceiling",
+  "submit.cost_ceiling.note": "An {term.optimization}'s token use isn't linear, so this is a range, not an exact figure.",
   "submit.dataset.column_kind.image": "Image",
   "submit.dataset.column_kind.image_auto_hint": "Auto-detected as an image column",
   "submit.dataset.column_kind.text": "Text",
@@ -11862,6 +12065,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.dataset.library_picker_title": "Pick a dataset from the library",
   "submit.dataset.library_search": "Search datasets…",
   "submit.dataset.library_search_empty": "No matching datasets found",
+  "submit.nav.run_cap": "Cap: {credits} credits",
   "submit.nav.validating": "Validating…",
   "submit.probe.asymptote_label": "Expected score",
   "submit.probe.details.logs": "Run log",

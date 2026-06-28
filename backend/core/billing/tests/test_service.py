@@ -21,16 +21,20 @@ from pydantic import SecretStr
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from core.api.errors import DomainError
 from core.billing.service import (
+    FOUNDERS_LOCK_DAYS,
     FREE_GRANT_CREDITS,
     GRANT_WINDOW_DAYS,
     METER_UNIT_TOKENS,
     TOKENS_PER_CREDIT,
     StripeBillingService,
     credits_for_tokens,
+    platform_fee_credits,
 )
 from core.config import settings
-from core.storage.models import Base, BillingCustomerModel, CreditLedgerModel
+from core.constants import GUARANTEE_BASIS_TEST, GUARANTEE_BASIS_VAL, TOKEN_SOURCE_BYOK, TOKEN_SOURCE_MANAGED
+from core.storage.models import Base, BillingCustomerModel, CreditLedgerModel, GuaranteeRunModel
 
 
 @pytest.fixture
@@ -138,6 +142,80 @@ def test_subscription_checkout_omits_metered_when_unconfigured(
         create.return_value = SimpleNamespace(url="https://checkout.test/abc")
         service.create_subscription_checkout("u@x.com")
     assert create.call_args.kwargs["line_items"] == [{"price": "price_premium", "quantity": 1}]
+
+
+def test_founders_rate_open_before_close_date(
+    engine: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Before the close date the offer is open and reports a 12-month lock window."""
+    monkeypatch.setattr(settings, "founders_rate_closes_at", "2099-12-31T23:59:59Z")
+    service = StripeBillingService(engine=engine)
+    now = datetime(2026, 6, 28, tzinfo=UTC)
+    status = service.founders_rate_status(now=now)
+    assert status.open is True
+    assert status.price_locked_until == (now + timedelta(days=FOUNDERS_LOCK_DAYS)).isoformat()
+
+
+def test_founders_rate_closed_after_close_date(
+    engine: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past the configured deadline the offer reports closed."""
+    monkeypatch.setattr(settings, "founders_rate_closes_at", "2026-07-31T23:59:59Z")
+    service = StripeBillingService(engine=engine)
+    status = service.founders_rate_status(now=datetime(2026, 8, 1, tzinfo=UTC))
+    assert status.open is False
+
+
+def test_founders_checkout_stamps_price_lock_metadata(
+    engine: object, configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Founder's Rate checkout carries the lock metadata onto the subscription."""
+    monkeypatch.setattr(settings, "founders_rate_closes_at", "2099-12-31T23:59:59Z")
+    monkeypatch.setattr(settings, "stripe_price_founders", "price_founders")
+    monkeypatch.setattr(settings, "stripe_price_metered", "")
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    with patch("stripe.checkout.Session.create") as create:
+        create.return_value = SimpleNamespace(url="https://checkout.test/f")
+        url = service.create_founders_checkout("u@x.com")
+    assert url == "https://checkout.test/f"
+    kwargs = create.call_args.kwargs
+    assert kwargs["mode"] == "subscription"
+    assert kwargs["line_items"] == [{"price": "price_founders", "quantity": 1}]
+    assert kwargs["metadata"]["founders_rate"] == "true"
+    assert "price_locked_until" in kwargs["metadata"]
+    assert kwargs["subscription_data"]["metadata"]["founders_rate"] == "true"
+    # No explicit payment_method_types — Stripe picks from the Dashboard config.
+    assert "payment_method_types" not in kwargs
+
+
+def test_founders_checkout_falls_back_to_premium_price(
+    engine: object, configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no dedicated Founder's price, the Premium price backs the subscription."""
+    monkeypatch.setattr(settings, "founders_rate_closes_at", "2099-12-31T23:59:59Z")
+    monkeypatch.setattr(settings, "stripe_price_founders", "")
+    monkeypatch.setattr(settings, "stripe_price_premium", "price_premium")
+    monkeypatch.setattr(settings, "stripe_price_metered", "")
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    with patch("stripe.checkout.Session.create") as create:
+        create.return_value = SimpleNamespace(url="https://checkout.test/f")
+        service.create_founders_checkout("u@x.com")
+    assert create.call_args.kwargs["line_items"] == [{"price": "price_premium", "quantity": 1}]
+
+
+def test_founders_checkout_rejected_after_deadline(
+    engine: object, configured: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past the deadline a checkout attempt is gated with a 410, no Stripe call."""
+    monkeypatch.setattr(settings, "founders_rate_closes_at", "2020-01-01T00:00:00Z")
+    monkeypatch.setattr(settings, "stripe_price_founders", "price_founders")
+    service = StripeBillingService(engine=engine)
+    with patch("stripe.checkout.Session.create") as create, pytest.raises(DomainError) as exc:
+        service.create_founders_checkout("u@x.com")
+    assert exc.value.status_code == 410
+    create.assert_not_called()
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -338,3 +416,178 @@ def test_spendable_credits_zero_when_grant_and_balance_exhausted(engine: object)
 def test_spendable_credits_full_for_new_account(engine: object) -> None:
     """A brand-new account has a full grant of spendable credits (gate passes)."""
     assert StripeBillingService(engine=engine).spendable_credits("new@x.com") == FREE_GRANT_CREDITS
+
+
+def _lift(baseline: float, optimized: float, *, basis: str = GUARANTEE_BASIS_TEST) -> dict:
+    """Build a guarantee block with the given basis and scores."""
+    return {"basis": basis, "baseline": baseline, "optimized": optimized}
+
+
+def _balance(engine: object, username: str) -> tuple[int, int]:
+    """Read (grant_remaining, paid_balance) for an account."""
+    with Session(engine) as session:
+        c = session.get(BillingCustomerModel, username)
+        return (0, 0) if c is None else (int(c.grant_remaining or 0), int(c.credit_balance))
+
+
+def test_platform_fee_is_a_floor_and_fraction_of_cost() -> None:
+    """The platform fee is at least one credit and a fraction of the full cost."""
+    assert platform_fee_credits(0) == 0
+    assert platform_fee_credits(TOKENS_PER_CREDIT) == 1  # 20% of 1 credit, floored up to 1
+    assert platform_fee_credits(100 * TOKENS_PER_CREDIT) == 20  # 20% of 100
+
+
+def test_guarantee_refunds_full_run_on_no_lift_managed(engine: object) -> None:
+    """A managed first run with no lift is fully refunded and the slot is flagged."""
+    service = StripeBillingService(engine=engine)
+    # Debit 50 credits worth first (mirrors the worker's debit before adjudication).
+    service.debit_run("u@x.com", 50 * TOKENS_PER_CREDIT, model="m1", description="r")
+    assert _balance(engine, "u@x.com")[0] == FREE_GRANT_CREDITS - 50
+    refunded = service.adjudicate_guarantee(
+        "u@x.com",
+        "task-abc",
+        "opt-1",
+        _lift(0.7, 0.7),
+        token_source=TOKEN_SOURCE_MANAGED,
+        total_tokens=50 * TOKENS_PER_CREDIT,
+        model="m1",
+        description="No lift — refunded",
+    )
+    assert refunded == 50
+    assert _balance(engine, "u@x.com")[0] == FREE_GRANT_CREDITS  # restored
+    with Session(engine) as session:
+        claim = session.get(GuaranteeRunModel, ("u@x.com", "task-abc"))
+        assert claim is not None
+        assert claim.refunded is True
+        rows = session.query(CreditLedgerModel).filter_by(username="u@x.com").all()
+    assert sorted(r.delta_credits for r in rows) == [-50, 50]
+
+
+def test_guarantee_refunds_only_platform_fee_on_byok_no_lift(engine: object) -> None:
+    """A BYOK no-lift run refunds only Skynet's platform fee, not provider tokens."""
+    service = StripeBillingService(engine=engine)
+    refunded = service.adjudicate_guarantee(
+        "u@x.com",
+        "task-byok",
+        "opt-1",
+        _lift(0.5, 0.5),
+        token_source=TOKEN_SOURCE_BYOK,
+        total_tokens=100 * TOKENS_PER_CREDIT,
+        model=None,
+        description="No lift — refunded",
+    )
+    assert refunded == platform_fee_credits(100 * TOKENS_PER_CREDIT)
+    assert refunded == 20
+
+
+def test_guarantee_no_refund_when_run_has_lift(engine: object) -> None:
+    """Any improvement on the basis counts as lift — the run stays billed."""
+    service = StripeBillingService(engine=engine)
+    refunded = service.adjudicate_guarantee(
+        "u@x.com",
+        "task-lift",
+        "opt-1",
+        _lift(0.6, 0.61),
+        token_source=TOKEN_SOURCE_MANAGED,
+        total_tokens=10 * TOKENS_PER_CREDIT,
+        model=None,
+        description="No lift — refunded",
+    )
+    assert refunded == 0
+    with Session(engine) as session:
+        claim = session.get(GuaranteeRunModel, ("u@x.com", "task-lift"))
+        assert claim is not None
+        assert claim.refunded is False
+        assert session.query(CreditLedgerModel).filter_by(username="u@x.com").count() == 0
+
+
+def test_guarantee_only_covers_first_run_per_task(engine: object) -> None:
+    """A re-run on the same task bills regardless — only the first run is covered."""
+    service = StripeBillingService(engine=engine)
+    first = service.adjudicate_guarantee(
+        "u@x.com",
+        "task-dup",
+        "opt-1",
+        _lift(0.7, 0.7),
+        token_source=TOKEN_SOURCE_MANAGED,
+        total_tokens=20 * TOKENS_PER_CREDIT,
+        model=None,
+        description="No lift — refunded",
+    )
+    assert first == 20
+    second = service.adjudicate_guarantee(
+        "u@x.com",
+        "task-dup",
+        "opt-2",
+        _lift(0.7, 0.7),
+        token_source=TOKEN_SOURCE_MANAGED,
+        total_tokens=20 * TOKENS_PER_CREDIT,
+        model=None,
+        description="No lift — refunded",
+    )
+    assert second == 0
+    with Session(engine) as session:
+        # Only the first run's slot exists, still pointing at opt-1.
+        claim = session.get(GuaranteeRunModel, ("u@x.com", "task-dup"))
+        assert claim.optimization_id == "opt-1"
+
+
+def test_guarantee_valset_basis_judges_lift(engine: object) -> None:
+    """The valset fallback basis is honored when no test split was reserved."""
+    service = StripeBillingService(engine=engine)
+    refunded = service.adjudicate_guarantee(
+        "u@x.com",
+        "task-val",
+        "opt-1",
+        _lift(0.8, 0.8, basis=GUARANTEE_BASIS_VAL),
+        token_source=TOKEN_SOURCE_MANAGED,
+        total_tokens=5 * TOKENS_PER_CREDIT,
+        model=None,
+        description="No lift — refunded",
+    )
+    assert refunded == 5
+
+
+def test_guarantee_billed_when_no_comparable_scores(engine: object) -> None:
+    """A run with no guarantee block still spends its slot but is not refunded."""
+    service = StripeBillingService(engine=engine)
+    refunded = service.adjudicate_guarantee(
+        "u@x.com",
+        "task-none",
+        "opt-1",
+        None,
+        token_source=TOKEN_SOURCE_MANAGED,
+        total_tokens=5 * TOKENS_PER_CREDIT,
+        model=None,
+        description="No lift — refunded",
+    )
+    assert refunded == 0
+    with Session(engine) as session:
+        assert session.get(GuaranteeRunModel, ("u@x.com", "task-none")) is not None
+
+
+def test_frontier_unlocked_requires_balance_or_premium(engine: object) -> None:
+    """Frontier access needs purchased credits or active Premium; a new account is locked."""
+    service = StripeBillingService(engine=engine)
+    assert service.frontier_unlocked("new@x.com") is False
+    with Session(engine) as session:
+        session.add(
+            BillingCustomerModel(username="paid@x.com", stripe_customer_id="cus_p", credit_balance=100)
+        )
+        session.add(
+            BillingCustomerModel(
+                username="sub@x.com",
+                stripe_customer_id="cus_s",
+                credit_balance=0,
+                subscription_status="active",
+            )
+        )
+        session.add(
+            BillingCustomerModel(
+                username="free@x.com", stripe_customer_id="cus_f", credit_balance=0
+            )
+        )
+        session.commit()
+    assert service.frontier_unlocked("paid@x.com") is True
+    assert service.frontier_unlocked("sub@x.com") is True
+    assert service.frontier_unlocked("free@x.com") is False

@@ -6,9 +6,10 @@
  * shown only masked afterwards, and carries a verification state so the UI can
  * tell a typo'd key from a working one before a job ever runs.
  *
- * Like the wallet, this is currently STUB-backed (`STUB_PROVIDER_KEYS`) — the
- * shapes are the contract the backend (encrypted key vault + a verify probe)
- * will fill. No React / `next/*` imports so it's safe from server and client.
+ * The store is backed by the real encrypt-at-rest vault (`/billing/byok/keys`):
+ * the secret is encrypted before it touches the database and verified on entry,
+ * so the UI only ever holds the masked tail + verification state — never the
+ * plaintext. No React / `next/*` imports so it's safe from server and client.
  */
 
 /** Whether a saved key has been checked against its provider. */
@@ -48,12 +49,3 @@ export const BYOK_PROVIDERS: ByokProviderInfo[] = [
 export function keyLast4(secret: string): string {
   return secret.slice(-4) || "····";
 }
-
-/**
- * Placeholder saved keys until the key vault exists: one verified provider so
- * the populated row (masked tail + verified badge) renders against real-shaped
- * data. Fixed date string — Date.now() is intentionally avoided in shared modules.
- */
-export const STUB_PROVIDER_KEYS: ProviderKey[] = [
-  { provider: "openai", last4: "a1b2", status: "verified", addedAt: "2026-06-20T10:15:00Z" },
-];

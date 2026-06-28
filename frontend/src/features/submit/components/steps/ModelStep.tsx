@@ -15,9 +15,10 @@ import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip, AddModelButton } from "@/shared/ui/model-chip";
-import { TokenSourceToggle } from "@/features/billing";
+import { TokenSourceToggle, useCredits } from "@/features/billing";
 import { ModelConfigModal } from "../ModelConfigModal";
 import { ModelProbeDialog } from "../ModelProbeDialog";
+import { CostCeilingCard } from "../CostCeilingCard";
 
 import { emptyModelConfig } from "../../constants";
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
@@ -94,6 +95,7 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
     catalog,
   } = w;
 
+  const { wallet } = useCredits();
   const availableCount = catalog?.models.length ?? 0;
   const catalogEmpty = catalog != null && availableCount === 0;
   const [probeOpen, setProbeOpen] = React.useState(false);
@@ -329,6 +331,10 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
             </div>
           </div>
         )}
+        {/* Pre-run cost bracket + Max Cost Ceiling [FG-1] — a managed-credit
+            guardrail, so it's hidden in BYOK mode (the user's own key isn't
+            metered against Skynet credits). */}
+        {wallet.mode === "managed" && <CostCeilingCard w={w} />}
         {/* Model config modal — shared across all model chips */}
         <ModelConfigModal
           open={!!editingModel}

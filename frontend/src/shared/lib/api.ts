@@ -465,9 +465,66 @@ export function createSubscriptionCheckout() {
   return request<{ url: string }>("/billing/subscribe", { method: "POST" });
 }
 
+/** The Founder's Rate availability: the deadline gate and the 12-month price-lock window. */
+export interface FoundersRateResponse {
+  open: boolean;
+  closes_at: string;
+  price_locked_until: string;
+}
+
+/** Read the Founder's Rate availability (open/closed + lock window). Works without Stripe. */
+export function getFoundersRate() {
+  return request<FoundersRateResponse>("/billing/founders");
+}
+
+/** Start a Stripe Checkout session for the Founder's Rate subscription; redirect to `.url`. */
+export function createFoundersCheckout() {
+  return request<{ url: string }>("/billing/founders/subscribe", { method: "POST" });
+}
+
 /** Open the Stripe Billing Portal (manage card / invoices / cancel); redirect to `.url`. */
 export function openBillingPortal() {
   return request<{ url: string }>("/billing/portal", { method: "POST" });
+}
+
+/** One stored BYOK provider key as the backend reports it — masked, never the secret. */
+export interface ProviderKeyResponse {
+  provider: string;
+  last4: string;
+  status: "verified" | "unverified" | "invalid";
+  added_at: string;
+}
+
+/** The caller's stored BYOK provider keys, masked. */
+export interface ProviderKeysResponse {
+  keys: ProviderKeyResponse[];
+}
+
+/** List the caller's stored BYOK provider keys (masked). Reads work without the vault key. */
+export function getProviderKeys() {
+  return request<ProviderKeysResponse>("/billing/byok/keys");
+}
+
+/**
+ * Save (or rotate) a BYOK provider key. The secret is encrypted at rest on the
+ * backend and verified on entry; the response carries only the masked tail and
+ * the entry-time verify verdict — the plaintext is never echoed back.
+ */
+export function saveProviderKey(provider: string, secret: string) {
+  return request<ProviderKeyResponse>("/billing/byok/keys", {
+    method: "PUT",
+    body: JSON.stringify({ provider, secret }),
+  });
+}
+
+/** Re-run the verify probe against a stored BYOK key and return the fresh verdict. */
+export function verifyProviderKey(provider: string) {
+  return request<ProviderKeyResponse>(`/billing/byok/keys/${provider}/verify`, { method: "POST" });
+}
+
+/** Forget a stored BYOK provider key; returns the remaining masked keys. */
+export function removeProviderKey(provider: string) {
+  return request<ProviderKeysResponse>(`/billing/byok/keys/${provider}`, { method: "DELETE" });
 }
 
 export interface DirectoryUserMatch {

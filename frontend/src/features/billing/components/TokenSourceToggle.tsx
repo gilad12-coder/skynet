@@ -58,6 +58,12 @@ export function TokenSourceToggle() {
       <p className="text-xs text-muted-foreground">
         {mode === "managed" ? msg("billing.mode.managed_hint") : msg("billing.mode.byok_hint")}
       </p>
+      {/* BYOK concurrency note [FG-2]: a your-key run shares Skynet's self-hosted
+          LiteLLM compute and may queue at peak. Stating the reason keeps it from
+          reading as a pay-to-skip penalty for not buying credits. */}
+      {mode === "byok" && (
+        <p className="text-xs text-muted-foreground/80">{msg("billing.mode.byok_queue_note")}</p>
+      )}
     </div>
   );
 }

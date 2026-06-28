@@ -1032,6 +1032,94 @@ def test_submit_run_allowed_with_remaining_credits(monkeypatch: pytest.MonkeyPat
     assert resp.status_code == 201
 
 
+def _billing_engine() -> Any:
+    """Build a StaticPool in-memory engine with the billing schema."""
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Base.metadata.create_all(engine)
+    return engine
+
+
+def test_submit_run_managed_frontier_model_blocked_without_balance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A managed run on a frontier model is refused when the account can't unlock it."""
+    engine = _billing_engine()
+    with Session(engine) as session:
+        session.add(
+            BillingCustomerModel(
+                username="alice",
+                stripe_customer_id="cus_alice",
+                credit_balance=0,
+                grant_remaining=200,
+                grant_reset_at=datetime.now(UTC) + timedelta(days=GRANT_WINDOW_DAYS),
+            )
+        )
+        session.commit()
+    store = _FakeJobStore()
+    store.engine = engine
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    payload = {**_run_payload(), "model_settings": {"name": "openai/gpt-4o"}, "token_source": "managed"}
+    resp = client.post("/run", json=payload)
+
+    assert resp.status_code == 402
+    assert resp.json()["code"] == "billing.frontier_locked"
+    assert store.created_ids() == []
+
+
+def test_submit_run_byok_frontier_model_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A BYOK run on a frontier model is never locked (own key), and persists the mode."""
+    engine = _billing_engine()
+    store = _FakeJobStore()
+    store.engine = engine
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    payload = {**_run_payload(), "model_settings": {"name": "openai/gpt-4o"}, "token_source": "byok"}
+    resp = client.post("/run", json=payload)
+
+    assert resp.status_code == 201
+    overview = store._jobs[store.created_ids()[0]]["overview"]
+    assert overview["token_source"] == "byok"
+
+
+def test_submit_run_managed_frontier_allowed_with_paid_balance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A purchased balance unlocks the frontier catalog for a managed run."""
+    engine = _billing_engine()
+    with Session(engine) as session:
+        session.add(
+            BillingCustomerModel(
+                username="alice", stripe_customer_id="cus_alice", credit_balance=500
+            )
+        )
+        session.commit()
+    store = _FakeJobStore()
+    store.engine = engine
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    payload = {**_run_payload(), "model_settings": {"name": "openai/gpt-4o"}, "token_source": "managed"}
+    resp = client.post("/run", json=payload)
+
+    assert resp.status_code == 201
+
+
+def test_submit_run_defaults_token_source_to_managed_in_overview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An omitted token_source defaults to managed and is persisted on the overview."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    resp = client.post("/run", json=_run_payload())
+
+    assert resp.status_code == 201
+    overview = store._jobs[store.created_ids()[0]]["overview"]
+    assert overview["token_source"] == "managed"
+
+
 def test_submit_run_idempotent_retry_returns_same_optimization_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
