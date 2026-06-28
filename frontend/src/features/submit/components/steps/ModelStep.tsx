@@ -15,6 +15,7 @@ import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip, AddModelButton } from "@/shared/ui/model-chip";
+import { TokenSourceToggle } from "@/features/billing";
 import { ModelConfigModal } from "../ModelConfigModal";
 import { ModelProbeDialog } from "../ModelProbeDialog";
 
@@ -114,6 +115,7 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
+        <TokenSourceToggle />
         {jobType === "run" ? (
           <div className="space-y-3" data-tutorial="model-catalog">
             <Label className="text-sm font-semibold">

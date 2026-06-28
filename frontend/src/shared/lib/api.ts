@@ -405,6 +405,54 @@ export async function revokeApiToken(): Promise<void> {
   }
 }
 
+export interface BillingFreeGrant {
+  credits_remaining: number;
+  credits_total: number;
+  resets_at: string;
+}
+
+export interface BillingUsageEntry {
+  id: string;
+  at: string;
+  label: string;
+  model: string | null;
+  credits: number;
+  kind: string;
+}
+
+/** The caller's wallet as the backend reports it (snake_case mirrors the API). */
+export interface BillingWalletResponse {
+  paid_balance_credits: number;
+  free_grant: BillingFreeGrant;
+  premium_active: boolean;
+  subscription_status: string | null;
+  subscription_current_period_end: string | null;
+  usage: BillingUsageEntry[];
+}
+
+/** Fetch the caller's credit wallet + subscription state. Reads work even without Stripe. */
+export function getWallet() {
+  return request<BillingWalletResponse>("/billing/wallet");
+}
+
+/** Start a Stripe Checkout session for a credit pack; redirect the browser to `.url`. */
+export function createCheckoutSession(packId: string) {
+  return request<{ url: string }>("/billing/checkout", {
+    method: "POST",
+    body: JSON.stringify({ pack_id: packId }),
+  });
+}
+
+/** Start a Stripe Checkout session for the Premium subscription; redirect to `.url`. */
+export function createSubscriptionCheckout() {
+  return request<{ url: string }>("/billing/subscribe", { method: "POST" });
+}
+
+/** Open the Stripe Billing Portal (manage card / invoices / cancel); redirect to `.url`. */
+export function openBillingPortal() {
+  return request<{ url: string }>("/billing/portal", { method: "POST" });
+}
+
 export interface DirectoryUserMatch {
   username: string;
   display_name?: string | null;

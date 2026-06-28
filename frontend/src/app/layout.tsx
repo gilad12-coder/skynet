@@ -5,12 +5,7 @@ import { cookies, headers } from "next/headers";
 import Script from "next/script";
 import { AppShell } from "@/shared/layout/app-shell";
 import { TooltipProvider } from "@/shared/ui/primitives/tooltip";
-import {
-  LocaleProvider,
-  SessionProvider,
-  ThemeProvider,
-  ToastContainer,
-} from "@/shared/providers";
+import { LocaleProvider, SessionProvider, ThemeProvider, ToastContainer } from "@/shared/providers";
 import { SplashScreen } from "@/shared/layout/splash-screen";
 import { TutorialOverlay, TutorialMenu, TutorialProvider } from "@/features/tutorial";
 import {
@@ -20,6 +15,7 @@ import {
   SettingsModal,
 } from "@/features/settings";
 import { StorageQuotaModalHost } from "@/features/storage";
+import { CreditProvider, ByokKeysProvider } from "@/features/billing";
 import { AppSkeletonTheme } from "@/shared/ui/skeleton";
 import { msg } from "@/shared/lib/messages";
 import { getServerRuntimeEnv, serializeRuntimeEnv } from "@/shared/lib/runtime-env";
@@ -201,25 +197,29 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body suppressHydrationWarning>
         <LocaleProvider initialLocale={locale}>
           <SessionProvider>
-            <UserPrefsProvider>
-              <LiteModeProvider>
-                <ThemeProvider>
-                  <TooltipProvider>
-                    <AppSkeletonTheme>
-                      <SplashScreen />
-                      <TutorialProvider>
-                        <SettingsModalProvider>
-                          <AppShell>{children}</AppShell>
-                          <SettingsModal />
-                        </SettingsModalProvider>
-                        <TutorialOverlay />
-                        <TutorialMenu />
-                      </TutorialProvider>
-                    </AppSkeletonTheme>
-                  </TooltipProvider>
-                </ThemeProvider>
-              </LiteModeProvider>
-            </UserPrefsProvider>
+            <CreditProvider>
+              <ByokKeysProvider>
+                <UserPrefsProvider>
+                  <LiteModeProvider>
+                    <ThemeProvider>
+                      <TooltipProvider>
+                        <AppSkeletonTheme>
+                          <SplashScreen />
+                          <TutorialProvider>
+                            <SettingsModalProvider>
+                              <AppShell>{children}</AppShell>
+                              <SettingsModal />
+                            </SettingsModalProvider>
+                            <TutorialOverlay />
+                            <TutorialMenu />
+                          </TutorialProvider>
+                        </AppSkeletonTheme>
+                      </TooltipProvider>
+                    </ThemeProvider>
+                  </LiteModeProvider>
+                </UserPrefsProvider>
+              </ByokKeysProvider>
+            </CreditProvider>
           </SessionProvider>
           <StorageQuotaModalHost />
           <ToastContainer />
