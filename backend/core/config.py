@@ -58,6 +58,44 @@ class Settings(BaseSettings):
         ),
     )
 
+    stripe_secret_key: SecretStr | None = Field(
+        default=None,
+        alias="STRIPE_SECRET_KEY",
+        description="Stripe secret API key (sk_test_… in test mode). Unset disables every billing mutation; reads still work.",
+    )
+    stripe_webhook_secret: SecretStr | None = Field(
+        default=None,
+        alias="STRIPE_WEBHOOK_SECRET",
+        description="Stripe webhook signing secret (whsec_…) used to verify event payload authenticity.",
+    )
+    stripe_price_pack_starter: str = Field(
+        default="", alias="STRIPE_PRICE_PACK_STARTER", description="Stripe price id for the 'starter' one-time credit pack."
+    )
+    stripe_price_pack_plus: str = Field(
+        default="", alias="STRIPE_PRICE_PACK_PLUS", description="Stripe price id for the 'plus' one-time credit pack."
+    )
+    stripe_price_pack_pro: str = Field(
+        default="", alias="STRIPE_PRICE_PACK_PRO", description="Stripe price id for the 'pro' one-time credit pack."
+    )
+    stripe_price_premium: str = Field(
+        default="", alias="STRIPE_PRICE_PREMIUM", description="Stripe price id for the recurring Premium subscription."
+    )
+    stripe_price_metered: str = Field(
+        default="",
+        alias="STRIPE_PRICE_METERED",
+        description="Stripe price id for usage-based overage (metered). Optional until per-run token metering lands.",
+    )
+    stripe_meter_event_name: str = Field(
+        default="skynet_tokens",
+        alias="STRIPE_METER_EVENT_NAME",
+        description="Stripe Billing Meter event_name the metered overage price aggregates.",
+    )
+    app_public_url: str = Field(
+        default="http://localhost:3000",
+        alias="APP_PUBLIC_URL",
+        description="Public origin of the web app, used to build Stripe Checkout success/cancel return URLs.",
+    )
+
     worker_threads: int = Field(
         default=4, ge=1, le=32, description="Number of concurrent worker threads", alias="WORKER_CONCURRENCY"
     )
@@ -526,6 +564,20 @@ class Settings(BaseSettings):
     def admin_groups_set(self) -> frozenset[str]:
         """Return admin IdP groups as a lowercase frozenset."""
         return frozenset(s.strip().lower() for s in self.admin_groups.split(",") if s.strip())
+
+    @property
+    def is_stripe_configured(self) -> bool:
+        """Return whether a Stripe secret key is present (billing mutations enabled)."""
+        return self.stripe_secret_key is not None
+
+    @property
+    def stripe_pack_price_ids(self) -> dict[str, str]:
+        """Return the one-time credit-pack Stripe price ids keyed by pack id."""
+        return {
+            "starter": self.stripe_price_pack_starter,
+            "plus": self.stripe_price_pack_plus,
+            "pro": self.stripe_price_pack_pro,
+        }
 
     @cached_property
     def quota_overrides(self) -> dict[str, int | None]:

@@ -26,6 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ..billing import StripeBillingService
 from ..config import settings
 from ..constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
@@ -619,6 +620,11 @@ class BackgroundWorker:
                             baseline_score=_baseline,
                             optimized_score=_optimized,
                         )
+                        # Metered usage shares the once-only completion claim so a
+                        # redelivered/re-run job is never double-billed. Success
+                        # only — a failed (e.g. all-pairs-failed) run is not billed.
+                        if final_status == "success":
+                            self._report_run_usage_best_effort(_username, result_dict)
                     if final_status == "success":
                         self._schedule_embedding_indexing(optimization_id)
                 except KeyError:
@@ -856,6 +862,50 @@ class BackgroundWorker:
             embed_finished_job(optimization_id, job_store=self._job_store)
         except Exception as exc:  # isolation boundary: best-effort indexing must never impact job status
             logger.debug("Embedding indexing for %s failed: %s", optimization_id, exc)
+
+    def _report_run_usage_best_effort(self, username: str, result_dict: dict[str, Any] | None) -> None:
+        """Meter a finished run's token usage to Stripe, off the worker hot path.
+
+        Reads the run's ``total_tokens`` (captured from LM history into the
+        result payload) and reports it on a daemon thread so a slow or hung
+        Stripe call cannot stall the worker. A no-op when the store exposes no
+        SQL engine (legacy/in-memory), Stripe is unconfigured, the caller is
+        anonymous, or the run reported no token usage — billing must never
+        affect job status.
+
+        Args:
+            username: Account the run is billed to.
+            result_dict: The serialized run/grid result; its ``total_tokens`` is
+                the figure metered.
+        """
+        engine = getattr(self._job_store, "engine", None)
+        if engine is None or not username or settings.stripe_secret_key is None:
+            return
+        total_tokens = result_dict.get("total_tokens") if isinstance(result_dict, dict) else None
+        if not isinstance(total_tokens, int) or total_tokens <= 0:
+            return
+        threading.Thread(
+            target=self._meter_run_usage,
+            args=(engine, username, total_tokens),
+            name=f"meter-{username[:8]}",
+            daemon=True,
+        ).start()
+
+    def _meter_run_usage(self, engine: Any, username: str, total_tokens: int) -> None:
+        """Report run usage to Stripe, swallowing failures so they never reach the worker.
+
+        A Stripe outage or an unconfigured meter only surfaces on this daemon
+        thread; the job is already marked success by the time this runs.
+
+        Args:
+            engine: SQLAlchemy engine backing the billing tables.
+            username: Account the run is billed to.
+            total_tokens: Tokens the run consumed.
+        """
+        try:
+            StripeBillingService(engine=engine).report_run_usage(username, total_tokens)
+        except Exception as exc:  # isolation boundary: metering must never impact job status
+            logger.debug("Metered usage report for %s failed: %s", username, exc)
 
     def _terminate_run_process(self, run_process: mp.process.BaseProcess, optimization_id: str) -> None:
         """Terminate a still-running job subprocess, escalating to SIGKILL after a 3-second grace period.
