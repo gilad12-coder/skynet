@@ -15,7 +15,11 @@ import {
   SettingsModal,
 } from "@/features/settings";
 import { StorageQuotaModalHost } from "@/features/storage";
-import { CreditProvider, ByokKeysProvider } from "@/features/billing";
+import {
+  CreditProvider,
+  ByokKeysProvider,
+  InsufficientCreditsModalHost,
+} from "@/features/billing";
 import { AppSkeletonTheme } from "@/shared/ui/skeleton";
 import { msg } from "@/shared/lib/messages";
 import { getServerRuntimeEnv, serializeRuntimeEnv } from "@/shared/lib/runtime-env";
@@ -222,6 +226,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </CreditProvider>
           </SessionProvider>
           <StorageQuotaModalHost />
+          <InsufficientCreditsModalHost />
           <ToastContainer />
         </LocaleProvider>
       </body>

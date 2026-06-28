@@ -172,6 +172,12 @@ export const STORAGE_QUOTA_CODE = I18N_KEY.USER_STORAGE_QUOTA_EXCEEDED;
 /** Browser event the central error path fires when a write hits the storage budget. */
 export const STORAGE_QUOTA_EVENT = "storage-quota-exceeded";
 
+/** Backend error code for a managed run blocked by an empty credit balance (HTTP 402). */
+export const INSUFFICIENT_CREDITS_CODE = I18N_KEY.BILLING_INSUFFICIENT_CREDITS;
+
+/** Browser event the central error path fires when a submit hits the credit gate. */
+export const INSUFFICIENT_CREDITS_EVENT = "billing-insufficient-credits";
+
 /** Browser event fired after a storage-freeing delete so the meter re-reads usage. */
 export const STORAGE_CHANGED_EVENT = "storage-changed";
 
@@ -200,6 +206,11 @@ export class ApiError extends Error {
 /** Narrow a caught value to the storage-budget 409 so its toast can be suppressed. */
 export function isStorageQuotaError(err: unknown): err is ApiError {
   return err instanceof ApiError && err.code === STORAGE_QUOTA_CODE;
+}
+
+/** Narrow a caught value to the credit-gate 402 so its toast can be suppressed. */
+export function isInsufficientCreditsError(err: unknown): err is ApiError {
+  return err instanceof ApiError && err.code === INSUFFICIENT_CREDITS_CODE;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -231,6 +242,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // isStorageQuotaError so the modal is the single surface.
     if (parsed.code === STORAGE_QUOTA_CODE && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(STORAGE_QUOTA_EVENT, { detail: parsed.params }));
+    }
+    // The credit gate is account-wide like the storage budget: any blocked submit
+    // opens the one paywall modal, and producers suppress their own toast via
+    // isInsufficientCreditsError so the modal is the single surface.
+    if (parsed.code === INSUFFICIENT_CREDITS_CODE && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent(INSUFFICIENT_CREDITS_EVENT));
     }
     throw new ApiError(
       parsed.message ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status }),

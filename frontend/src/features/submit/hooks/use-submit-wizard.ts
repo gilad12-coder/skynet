@@ -18,6 +18,7 @@ import {
   getStagedDataset,
   getDatasetRows,
   isStorageQuotaError,
+  isInsufficientCreditsError,
   type DatasetSummary,
 } from "@/shared/lib/api";
 import type {
@@ -1588,9 +1589,10 @@ export function useSubmitWizard() {
         router.push(jobUrl);
       }, 1500);
     } catch (err) {
-      // The storage-budget 409 opens the shared quota modal centrally; suppress
-      // the redundant toast so the modal is the single surface.
-      if (!isStorageQuotaError(err)) {
+      // The storage-budget 409 and the credit-gate 402 each open their own shared
+      // modal centrally; suppress the redundant toast so the modal is the single
+      // surface for both.
+      if (!isStorageQuotaError(err) && !isInsufficientCreditsError(err)) {
         toast.error(err instanceof Error ? err.message : msg("submit.submit_failed"));
       }
       setSubmitPhase("idle");

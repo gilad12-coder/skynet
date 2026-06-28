@@ -5,6 +5,7 @@ export { WalletTab } from "./components/WalletTab";
 export { ByokKeysSection } from "./components/ByokKeysSection";
 export { UpgradeView } from "./components/UpgradeView";
 export { TokenSourceToggle } from "./components/TokenSourceToggle";
+export { InsufficientCreditsModalHost } from "./components/InsufficientCreditsModalHost";
 export {
   BYOK_PROVIDERS,
   type ByokProviderInfo,
