@@ -36,6 +36,7 @@ import {
   DialogTitle,
 } from "@/shared/ui/primitives/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/primitives/tabs";
+import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import {
   Select,
   SelectContent,
@@ -1206,6 +1207,13 @@ export function SettingsModal() {
     }
     clearTarget();
   }, [targetTab, tabs, clearTarget]);
+  // Fire settings_opened on the closed→open transition only; the ref stops a
+  // re-render with open still true from re-emitting it.
+  const wasOpen = React.useRef(false);
+  React.useEffect(() => {
+    if (open && !wasOpen.current) track(TelemetryEvent.SettingsOpened);
+    wasOpen.current = open;
+  }, [open]);
   const tabCount = tabs.length;
   const listElRef = React.useRef<HTMLElement | null>(null);
   const observerRef = React.useRef<ResizeObserver | null>(null);
@@ -1261,7 +1269,10 @@ export function SettingsModal() {
 
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as SettingsTab)}
+          onValueChange={(v) => {
+            setActiveTab(v as SettingsTab);
+            track(TelemetryEvent.SettingsTabChanged, { tab: v });
+          }}
           className="px-6 pb-6 pt-2"
         >
           <TabsList

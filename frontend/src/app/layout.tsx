@@ -5,7 +5,13 @@ import { cookies, headers } from "next/headers";
 import Script from "next/script";
 import { AppShell } from "@/shared/layout/app-shell";
 import { TooltipProvider } from "@/shared/ui/primitives/tooltip";
-import { LocaleProvider, SessionProvider, ThemeProvider, ToastContainer } from "@/shared/providers";
+import {
+  LocaleProvider,
+  SessionProvider,
+  TelemetryProvider,
+  ThemeProvider,
+  ToastContainer,
+} from "@/shared/providers";
 import { SplashScreen } from "@/shared/layout/splash-screen";
 import { TutorialOverlay, TutorialMenu, TutorialProvider } from "@/features/tutorial";
 import {
@@ -225,6 +231,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               </ByokKeysProvider>
             </CreditProvider>
           </SessionProvider>
+          <TelemetryProvider />
           <StorageQuotaModalHost />
           <InsufficientCreditsModalHost />
           <ToastContainer />
