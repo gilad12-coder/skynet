@@ -12,10 +12,8 @@ import { Switch } from "@/shared/ui/primitives/switch";
 import { createSubscriptionCheckout, openBillingPortal } from "@/shared/lib/api";
 import { useCredits } from "../providers/credit-provider";
 import {
-  creditsToUsd,
   formatCredits,
   formatResetDate,
-  formatUsd,
   type LedgerKind,
   type UsageEntry,
 } from "../lib/credit";
@@ -81,13 +79,12 @@ function LedgerRow({ entry }: { entry: UsageEntry }) {
  * Wallet — the `billing` settings tab.
  *
  * A calm, left-aligned balance block (not a centered hero metric), the opt-in
- * auto-reload control, and the usage ledger. All credit/dollar values pair the
- * credit count with its USD equivalent, per the "show real cost" decision.
+ * auto-reload control, and the usage ledger. Balances read in credits only — no
+ * dollar equivalent is shown.
  */
 export function WalletTab() {
   const { wallet, totalCredits, setAutoReload, status, syncing } = useCredits();
   const { locale } = useLocale();
-  const usd = creditsToUsd(totalCredits);
 
   // Premium subscribe / manage both redirect to Stripe-hosted pages; the backend
   // creates the session and returns its URL. A failure (e.g. billing unconfigured)
@@ -120,20 +117,12 @@ export function WalletTab() {
             >
               {formatCredits(totalCredits, locale)}
             </span>
-            <span dir="ltr" className="text-sm text-muted-foreground tabular-nums">
-              {formatUsd(usd, locale)}
-            </span>
           </div>
           <span className="text-xs text-muted-foreground">
             {formatMsg("billing.wallet.breakdown", {
               p1: formatCredits(wallet.paidBalanceCredits, locale),
               p2: formatCredits(wallet.freeGrant.creditsRemaining, locale),
               p3: formatCredits(wallet.freeGrant.creditsTotal, locale),
-            })}
-          </span>
-          <span className="text-xs text-muted-foreground/80">
-            {formatMsg("billing.popover.grant_resets", {
-              p1: formatResetDate(wallet.freeGrant.resetsAt, locale),
             })}
           </span>
           {/* Low balance stays an operational metric here too — same calm line as

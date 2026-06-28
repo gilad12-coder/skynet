@@ -9,14 +9,13 @@ import { useLocale } from "@/shared/providers";
 import { useSettingsModal } from "@/features/settings";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import { useCredits } from "../providers/credit-provider";
-import { creditsToUsd, formatCredits, formatResetDate, formatUsd } from "../lib/credit";
+import { formatCredits } from "../lib/credit";
 
 /**
  * Header credit-balance chip — the spine of the billing UI.
  *
  * Sits inline-end beside the language switcher. Shows total spendable credits
- * (free grant + purchased) with the dollar value one tap away in the popover.
- * Theming is calm by design: gold `#C8A882` marks a healthy balance and the
+ * (free grant + purchased). Theming is calm by design: gold `#C8A882` marks a healthy balance and the
  * primary "Add credits" affordance only; a low balance reads as quiet taupe, not
  * an alarm. When the account is running on its own provider key (BYOK), the chip
  * switches to a key glyph instead of a number, since managed credits aren't spent.
@@ -40,7 +39,6 @@ export function CreditBalanceChip({ className }: { className?: string }) {
   }
 
   const isByok = wallet.mode === "byok";
-  const usd = creditsToUsd(totalCredits);
 
   // One trigger, three visual registers. Healthy spends the gold accent; low and
   // empty stay in the warm neutrals so the chip never shouts. Empty reframes the
@@ -105,11 +103,6 @@ export function CreditBalanceChip({ className }: { className?: string }) {
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {msg("billing.popover.title")}
             </span>
-            {!isByok && (
-              <span dir="ltr" className="text-xs text-muted-foreground tabular-nums">
-                {formatUsd(usd, locale)}
-              </span>
-            )}
           </div>
 
           {isByok ? (
@@ -126,7 +119,7 @@ export function CreditBalanceChip({ className }: { className?: string }) {
               <div className="px-4 pb-3">
                 <span
                   dir="ltr"
-                  className="block text-2xl font-semibold text-foreground tabular-nums"
+                  className="block text-right text-2xl font-semibold text-foreground tabular-nums"
                 >
                   {formatCredits(totalCredits, locale)}
                 </span>
@@ -148,11 +141,6 @@ export function CreditBalanceChip({ className }: { className?: string }) {
                     </span>
                   </dd>
                 </div>
-                <p className="text-muted-foreground/80">
-                  {formatMsg("billing.popover.grant_resets", {
-                    p1: formatResetDate(wallet.freeGrant.resetsAt, locale),
-                  })}
-                </p>
                 {/* Low balance reads as an operational metric, not an alarm: one
                     calm factual line in the warm neutrals, no red, no urgency. */}
                 {status === "low" && (

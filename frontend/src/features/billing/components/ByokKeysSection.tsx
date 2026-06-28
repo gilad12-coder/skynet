@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, KeyRound, Loader2, Pencil, Shield, Trash2, X } from "lucide-react";
+import { Check, KeyRound, Loader2, Pencil, Trash2, X } from "lucide-react";
 import { toast } from "react-toastify";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
@@ -229,10 +229,6 @@ export function ByokKeysSection() {
           </span>
         </div>
         <p className="text-xs text-muted-foreground">{msg("settings.keys.description")}</p>
-        <p className="flex items-start gap-1.5 text-[0.6875rem] text-muted-foreground/80">
-          <Shield className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
-          {msg("settings.keys.privacy")}
-        </p>
       </div>
 
       <div className="flex flex-col gap-2">
