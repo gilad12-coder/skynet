@@ -47,13 +47,14 @@ export function CostCeilingCard({ w }: { w: SubmitWizardContext }) {
         </div>
 
         <p className="mt-2 text-[12px] leading-relaxed text-[#3D2E22]" dir="auto">
+          {/* Wrap the range in an LTR isolate (U+2066…U+2069): in an RTL line the
+              en-dash between two Latin number groups is a neutral that resolves to
+              the paragraph's RTL direction and visually swaps the numbers to
+              "high–low". Isolating "low–high" as one LTR run keeps the order. */}
           {formatMsg("submit.cost_ceiling.bracket", {
-            low: formatCredits(costBracket.lowCredits, locale),
-            high: formatCredits(costBracket.highCredits, locale),
+            low: `\u2066${formatCredits(costBracket.lowCredits, locale)}`,
+            high: `${formatCredits(costBracket.highCredits, locale)}\u2069`,
           })}
-        </p>
-        <p className="mt-0.5 text-[11px] leading-relaxed text-[#8C7A6B]" dir="auto">
-          {msg("submit.cost_ceiling.note")}
         </p>
       </div>
 
@@ -84,9 +85,6 @@ export function CostCeilingCard({ w }: { w: SubmitWizardContext }) {
                 </span>
               </div>
             </div>
-            <p className="text-[11px] leading-relaxed text-[#8C7A6B]" dir="auto">
-              {msg("submit.cost_ceiling.cap_hint")}
-            </p>
           </div>
         </div>
       </div>

@@ -1739,7 +1739,6 @@ export type MessageKey =
   | "billing.popover.byok_active"
   | "billing.popover.byok_hint"
   | "billing.popover.free_grant"
-  | "billing.popover.grant_resets"
   | "billing.popover.paid"
   | "billing.popover.title"
   | "billing.premium.active"
@@ -2101,7 +2100,6 @@ export type MessageKey =
   | "settings.keys.description"
   | "settings.keys.invalid"
   | "settings.keys.invalid_toast"
-  | "settings.keys.privacy"
   | "settings.keys.remove"
   | "settings.keys.remove_failed_toast"
   | "settings.keys.removed_toast"
@@ -2320,13 +2318,11 @@ export type MessageKey =
   | "submit.code.agent.tool.signature.title"
   | "submit.code_validation_failed"
   | "submit.cost_ceiling.bracket"
-  | "submit.cost_ceiling.cap_hint"
   | "submit.cost_ceiling.cap_label"
   | "submit.cost_ceiling.cap_unit"
   | "submit.cost_ceiling.enable"
   | "submit.cost_ceiling.label"
   | "submit.cost_ceiling.no_cap"
-  | "submit.cost_ceiling.note"
   | "submit.dataset.column_kind.image"
   | "submit.dataset.column_kind.image_auto_hint"
   | "submit.dataset.column_kind.text"
@@ -4206,7 +4202,6 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "billing.popover.byok_active": "פועל עם מפתח ה-API שלך",
   "billing.popover.byok_hint": "קרדיטים מנוהלים אינם בשימוש כאשר משתמשים במפתח שלך.",
   "billing.popover.free_grant": "מענק חודשי",
-  "billing.popover.grant_resets": "הקרדיטים החינמיים מתחדשים ב-{p1}",
   "billing.popover.paid": "בתשלום",
   "billing.popover.title": "קרדיטים",
   "billing.premium.active": "מנוי Premium פעיל",
@@ -4568,7 +4563,6 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "settings.keys.description": "שמירת מפתחות הספק שלך כדי להריץ על חשבונך במקום קרדיטים של Skynet.",
   "settings.keys.invalid": "לא תקין",
   "settings.keys.invalid_toast": "המפתח נדחה על ידי הספק. בדוק/י אותו ונסה/י שוב.",
-  "settings.keys.privacy": "המפתחות מוצפנים באחסון ולא מוצגים שוב לאחר השמירה.",
   "settings.keys.remove": "הסרה",
   "settings.keys.remove_failed_toast": "לא ניתן היה להסיר את המפתח. נסה/י שוב.",
   "settings.keys.removed_toast": "המפתח הוסר.",
@@ -4787,13 +4781,11 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.code.agent.tool.signature.title": "עריכת {term.signature}",
   "submit.code_validation_failed": "שגיאה באימות הקוד",
   "submit.cost_ceiling.bracket": "טווח צפוי: {low}–{high} קרדיטים",
-  "submit.cost_ceiling.cap_hint": "הריצה תיעצר אוטומטית כשהצריכה תגיע לתקרה. ריצה שנעצרה אינה מחויבת.",
   "submit.cost_ceiling.cap_label": "תקרה",
   "submit.cost_ceiling.cap_unit": "קרדיטים",
   "submit.cost_ceiling.enable": "הגבלת עלות הריצה",
   "submit.cost_ceiling.label": "תקרת עלות",
   "submit.cost_ceiling.no_cap": "ללא תקרה",
-  "submit.cost_ceiling.note": "צריכת הטוקנים של {term.optimization} אינה לינארית, לכן זהו טווח ולא מספר מדויק.",
   "submit.dataset.column_kind.image": "תמונה",
   "submit.dataset.column_kind.image_auto_hint": "זוהתה אוטומטית כעמודת תמונה",
   "submit.dataset.column_kind.text": "טקסט",
@@ -6651,7 +6643,6 @@ const ui_ar: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "يعمل باستخدام مفتاح API الخاص بك",
   "billing.popover.byok_hint": "لا تُستخدَم الأرصدة المُدارة أثناء استعمال مفتاحك الخاص.",
   "billing.popover.free_grant": "منحة شهرية مجانية",
-  "billing.popover.grant_resets": "تتجدّد الأرصدة المجانية في {p1}",
   "billing.popover.paid": "مدفوعة",
   "billing.popover.title": "الأرصدة",
   "billing.unit.credits": "أرصدة",
@@ -6974,7 +6965,6 @@ const ui_ar: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "إلغاء",
   "settings.keys.description": "احفظ مفاتيح المزوّد الخاصة بك للتشغيل على حسابك بدلًا من أرصدة Skynet.",
   "settings.keys.invalid": "غير صالح",
-  "settings.keys.privacy": "تُخزَّن المفاتيح مُشفّرة، ولا تُعرض مرة أخرى بعد الحفظ.",
   "settings.keys.remove": "إزالة",
   "settings.keys.removed_toast": "أُزيل المفتاح.",
   "settings.keys.replace": "استبدال",
@@ -9044,7 +9034,6 @@ const ui_de: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "Läuft über deinen eigenen API-Schlüssel",
   "billing.popover.byok_hint": "Verwaltete Credits werden nicht genutzt, solange du deinen eigenen Schlüssel verwendest.",
   "billing.popover.free_grant": "Kostenlos monatlich",
-  "billing.popover.grant_resets": "Kostenlose Credits werden am {p1} zurückgesetzt",
   "billing.popover.paid": "Gekauft",
   "billing.popover.title": "Credits",
   "billing.unit.credits": "Credits",
@@ -9367,7 +9356,6 @@ const ui_de: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "Abbrechen",
   "settings.keys.description": "Speichere deine eigenen Anbieter-Schlüssel, um über dein Konto statt mit Skynet-Credits auszuführen.",
   "settings.keys.invalid": "Ungültig",
-  "settings.keys.privacy": "Schlüssel werden verschlüsselt gespeichert und nach dem Speichern nie wieder angezeigt.",
   "settings.keys.remove": "Entfernen",
   "settings.keys.removed_toast": "Schlüssel entfernt.",
   "settings.keys.replace": "Ersetzen",
@@ -11463,7 +11451,6 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "Running on your own API key",
   "billing.popover.byok_hint": "Managed credits aren't used while you bring your own key.",
   "billing.popover.free_grant": "Free monthly",
-  "billing.popover.grant_resets": "Free credits reset {p1}",
   "billing.popover.paid": "Purchased",
   "billing.popover.title": "Credits",
   "billing.premium.active": "Premium active",
@@ -11825,7 +11812,6 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "settings.keys.description": "Save your own provider keys to run on your account instead of Skynet credits.",
   "settings.keys.invalid": "Invalid",
   "settings.keys.invalid_toast": "That key was rejected by the provider. Check it and try again.",
-  "settings.keys.privacy": "Keys are encrypted at rest and never shown again after saving.",
   "settings.keys.remove": "Remove",
   "settings.keys.remove_failed_toast": "Couldn't remove the key. Try again.",
   "settings.keys.removed_toast": "Key removed.",
@@ -12044,13 +12030,11 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.code.agent.tool.signature.title": "Edit Signature",
   "submit.code_validation_failed": "Code validation failed",
   "submit.cost_ceiling.bracket": "Projected range: {low}–{high} credits",
-  "submit.cost_ceiling.cap_hint": "The run stops automatically once usage reaches the ceiling. A stopped run isn't billed.",
   "submit.cost_ceiling.cap_label": "Ceiling",
   "submit.cost_ceiling.cap_unit": "credits",
   "submit.cost_ceiling.enable": "Cap this run's cost",
   "submit.cost_ceiling.label": "Max cost ceiling",
   "submit.cost_ceiling.no_cap": "No ceiling",
-  "submit.cost_ceiling.note": "An {term.optimization}'s token use isn't linear, so this is a range, not an exact figure.",
   "submit.dataset.column_kind.image": "Image",
   "submit.dataset.column_kind.image_auto_hint": "Auto-detected as an image column",
   "submit.dataset.column_kind.text": "Text",
@@ -14081,7 +14065,6 @@ const ui_es: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "Funcionando con tu propia clave de API",
   "billing.popover.byok_hint": "Los créditos gestionados no se usan mientras utilizas tu propia clave.",
   "billing.popover.free_grant": "Gratis cada mes",
-  "billing.popover.grant_resets": "Los créditos gratuitos se renuevan el {p1}",
   "billing.popover.paid": "Comprados",
   "billing.popover.title": "Créditos",
   "billing.unit.credits": "créditos",
@@ -14404,7 +14387,6 @@ const ui_es: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "Cancelar",
   "settings.keys.description": "Guarda tus propias claves de proveedor para ejecutar en tu cuenta en lugar de con créditos de Skynet.",
   "settings.keys.invalid": "No válida",
-  "settings.keys.privacy": "Las claves se cifran en reposo y no se vuelven a mostrar tras guardarlas.",
   "settings.keys.remove": "Eliminar",
   "settings.keys.removed_toast": "Clave eliminada.",
   "settings.keys.replace": "Reemplazar",
@@ -16481,7 +16463,6 @@ const ui_fa: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "در حال اجرا با کلید API شخصی شما",
   "billing.popover.byok_hint": "تا زمانی که از کلید شخصی خود استفاده می‌کنید، اعتبار مدیریت‌شده مصرف نمی‌شود.",
   "billing.popover.free_grant": "رایگان ماهانه",
-  "billing.popover.grant_resets": "اعتبار رایگان در {p1} بازنشانی می‌شود",
   "billing.popover.paid": "خریداری‌شده",
   "billing.popover.title": "اعتبار",
   "billing.unit.credits": "اعتبار",
@@ -16804,7 +16785,6 @@ const ui_fa: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "لغو",
   "settings.keys.description": "کلیدهای ارائه‌دهنده‌ی خود را ذخیره کنید تا به‌جای اعتبار Skynet روی حساب خودتان اجرا کنید.",
   "settings.keys.invalid": "نامعتبر",
-  "settings.keys.privacy": "کلیدها در حالت ذخیره رمزگذاری می‌شوند و پس از ذخیره دیگر هرگز نمایش داده نمی‌شوند.",
   "settings.keys.remove": "حذف",
   "settings.keys.removed_toast": "کلید حذف شد.",
   "settings.keys.replace": "جایگزینی",
@@ -18874,7 +18854,6 @@ const ui_fr: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "Fonctionne avec votre propre clé API",
   "billing.popover.byok_hint": "Les crédits gérés ne sont pas utilisés lorsque vous utilisez votre propre clé.",
   "billing.popover.free_grant": "Gratuit chaque mois",
-  "billing.popover.grant_resets": "Réinitialisation des crédits gratuits le {p1}",
   "billing.popover.paid": "Acheté",
   "billing.popover.title": "Crédits",
   "billing.unit.credits": "crédits",
@@ -19197,7 +19176,6 @@ const ui_fr: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "Annuler",
   "settings.keys.description": "Enregistrez vos propres clés de fournisseur pour exécuter sur votre compte au lieu des crédits Skynet.",
   "settings.keys.invalid": "Invalide",
-  "settings.keys.privacy": "Les clés sont chiffrées au repos et ne sont plus affichées après l'enregistrement.",
   "settings.keys.remove": "Supprimer",
   "settings.keys.removed_toast": "Clé supprimée.",
   "settings.keys.replace": "Remplacer",
@@ -21286,7 +21264,6 @@ const ui_hi: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "आपकी अपनी API कुंजी पर चल रहा है",
   "billing.popover.byok_hint": "जब आप अपनी कुंजी का उपयोग करते हैं तो प्रबंधित क्रेडिट उपयोग नहीं होते।",
   "billing.popover.free_grant": "मासिक मुफ़्त",
-  "billing.popover.grant_resets": "मुफ़्त क्रेडिट {p1} को रीसेट होते हैं",
   "billing.popover.paid": "खरीदे गए",
   "billing.popover.title": "क्रेडिट",
   "billing.unit.credits": "क्रेडिट",
@@ -21609,7 +21586,6 @@ const ui_hi: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "रद्द करें",
   "settings.keys.description": "Skynet क्रेडिट के बजाय अपने खाते पर चलाने के लिए अपनी प्रदाता कुंजियाँ सहेजें।",
   "settings.keys.invalid": "अमान्य",
-  "settings.keys.privacy": "कुंजियाँ संग्रहण में एन्क्रिप्टेड होती हैं और सहेजने के बाद फिर कभी नहीं दिखाई जातीं।",
   "settings.keys.remove": "हटाएँ",
   "settings.keys.removed_toast": "कुंजी हटा दी गई।",
   "settings.keys.replace": "बदलें",
@@ -23678,7 +23654,6 @@ const ui_it: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "In esecuzione con la tua chiave API",
   "billing.popover.byok_hint": "I crediti gestiti non vengono usati mentre utilizzi la tua chiave.",
   "billing.popover.free_grant": "Gratis ogni mese",
-  "billing.popover.grant_resets": "I crediti gratuiti si rinnovano il {p1}",
   "billing.popover.paid": "Acquistati",
   "billing.popover.title": "Crediti",
   "billing.unit.credits": "crediti",
@@ -24001,7 +23976,6 @@ const ui_it: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "Annulla",
   "settings.keys.description": "Salva le tue chiavi del provider per eseguire sul tuo account invece che con i crediti Skynet.",
   "settings.keys.invalid": "Non valida",
-  "settings.keys.privacy": "Le chiavi sono crittografate a riposo e non vengono più mostrate dopo il salvataggio.",
   "settings.keys.remove": "Rimuovi",
   "settings.keys.removed_toast": "Chiave rimossa.",
   "settings.keys.replace": "Sostituisci",
@@ -26070,7 +26044,6 @@ const ui_ja: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "自分のAPIキーで実行中",
   "billing.popover.byok_hint": "自分のキーを使用している間は、管理クレジットは消費されません。",
   "billing.popover.free_grant": "毎月無料",
-  "billing.popover.grant_resets": "無料クレジットは{p1}にリセットされます",
   "billing.popover.paid": "購入済み",
   "billing.popover.title": "クレジット",
   "billing.unit.credits": "クレジット",
@@ -26393,7 +26366,6 @@ const ui_ja: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "キャンセル",
   "settings.keys.description": "自分のプロバイダーキーを保存すると、Skynetクレジットの代わりに自分のアカウントで実行できます。",
   "settings.keys.invalid": "無効",
-  "settings.keys.privacy": "キーは保存時に暗号化され、保存後は二度と表示されません。",
   "settings.keys.remove": "削除",
   "settings.keys.removed_toast": "キーを削除しました。",
   "settings.keys.replace": "置き換える",
@@ -28462,7 +28434,6 @@ const ui_ko: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "내 API 키로 실행 중",
   "billing.popover.byok_hint": "내 키를 사용하는 동안에는 관리형 크레딧이 사용되지 않습니다.",
   "billing.popover.free_grant": "매월 무료",
-  "billing.popover.grant_resets": "무료 크레딧 초기화 {p1}",
   "billing.popover.paid": "구매함",
   "billing.popover.title": "크레딧",
   "billing.unit.credits": "크레딧",
@@ -28785,7 +28756,6 @@ const ui_ko: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "취소",
   "settings.keys.description": "내 공급자 키를 저장하면 Skynet 크레딧 대신 내 계정으로 실행할 수 있습니다.",
   "settings.keys.invalid": "유효하지 않음",
-  "settings.keys.privacy": "키는 저장 시 암호화되며 저장 후에는 다시 표시되지 않습니다.",
   "settings.keys.remove": "제거",
   "settings.keys.removed_toast": "키가 제거되었습니다.",
   "settings.keys.replace": "교체",
@@ -30854,7 +30824,6 @@ const ui_pt: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "A executar com a sua própria chave de API",
   "billing.popover.byok_hint": "Os créditos geridos não são utilizados enquanto usa a sua própria chave.",
   "billing.popover.free_grant": "Gratuitos mensais",
-  "billing.popover.grant_resets": "Os créditos gratuitos renovam-se a {p1}",
   "billing.popover.paid": "Comprados",
   "billing.popover.title": "Créditos",
   "billing.unit.credits": "créditos",
@@ -31177,7 +31146,6 @@ const ui_pt: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "Cancelar",
   "settings.keys.description": "Guarde as suas próprias chaves de fornecedor para executar na sua conta em vez de usar créditos Skynet.",
   "settings.keys.invalid": "Inválida",
-  "settings.keys.privacy": "As chaves são encriptadas em repouso e nunca mais são mostradas após guardar.",
   "settings.keys.remove": "Remover",
   "settings.keys.removed_toast": "Chave removida.",
   "settings.keys.replace": "Substituir",
@@ -33471,7 +33439,6 @@ const ui_ru: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "Работа на вашем собственном API-ключе",
   "billing.popover.byok_hint": "Управляемые кредиты не используются, пока подключён ваш собственный ключ.",
   "billing.popover.free_grant": "Бесплатно в месяц",
-  "billing.popover.grant_resets": "Бесплатные кредиты обновляются {p1}",
   "billing.popover.paid": "Куплено",
   "billing.popover.title": "Кредиты",
   "billing.unit.credits": "кредиты",
@@ -33794,7 +33761,6 @@ const ui_ru: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "Отменить",
   "settings.keys.description": "Сохраните собственные ключи провайдеров, чтобы запускать на своём аккаунте вместо кредитов Skynet.",
   "settings.keys.invalid": "Недействителен",
-  "settings.keys.privacy": "Ключи хранятся в зашифрованном виде и больше не отображаются после сохранения.",
   "settings.keys.remove": "Удалить",
   "settings.keys.removed_toast": "Ключ удалён.",
   "settings.keys.replace": "Заменить",
@@ -35863,7 +35829,6 @@ const ui_tr: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "Kendi API anahtarınızla çalışıyor",
   "billing.popover.byok_hint": "Kendi anahtarınızı kullandığınız sürece yönetilen krediler harcanmaz.",
   "billing.popover.free_grant": "Aylık ücretsiz",
-  "billing.popover.grant_resets": "Ücretsiz krediler {p1} sıfırlanır",
   "billing.popover.paid": "Satın alınan",
   "billing.popover.title": "Krediler",
   "billing.unit.credits": "kredi",
@@ -36186,7 +36151,6 @@ const ui_tr: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "İptal",
   "settings.keys.description": "Skynet kredileri yerine kendi hesabınızda çalıştırmak için kendi sağlayıcı anahtarlarınızı kaydedin.",
   "settings.keys.invalid": "Geçersiz",
-  "settings.keys.privacy": "Anahtarlar saklanırken şifrelenir ve kaydedildikten sonra bir daha gösterilmez.",
   "settings.keys.remove": "Kaldır",
   "settings.keys.removed_toast": "Anahtar kaldırıldı.",
   "settings.keys.replace": "Değiştir",
@@ -38255,7 +38219,6 @@ const ui_uk: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "Працює з вашим власним ключем API",
   "billing.popover.byok_hint": "Керовані кредити не використовуються, поки ви застосовуєте власний ключ.",
   "billing.popover.free_grant": "Безкоштовно щомісяця",
-  "billing.popover.grant_resets": "Безкоштовні кредити оновлюються {p1}",
   "billing.popover.paid": "Придбано",
   "billing.popover.title": "Кредити",
   "billing.unit.credits": "кредитів",
@@ -38578,7 +38541,6 @@ const ui_uk: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "Скасувати",
   "settings.keys.description": "Збережіть власні ключі постачальників, щоб запускати у своєму обліковому записі замість кредитів Skynet.",
   "settings.keys.invalid": "Недійсний",
-  "settings.keys.privacy": "Ключі зашифровано при зберіганні й більше не показуються після збереження.",
   "settings.keys.remove": "Видалити",
   "settings.keys.removed_toast": "Ключ видалено.",
   "settings.keys.replace": "Замінити",
@@ -40704,7 +40666,6 @@ const ui_zh_Hans: Partial<Record<MessageKey, string>> = {
   "billing.popover.byok_active": "正在使用你自己的 API 密钥运行",
   "billing.popover.byok_hint": "使用你自己的密钥时，不会消耗托管额度。",
   "billing.popover.free_grant": "每月免费",
-  "billing.popover.grant_resets": "免费额度将于 {p1} 重置",
   "billing.popover.paid": "已购买",
   "billing.popover.title": "额度",
   "billing.unit.credits": "额度",
@@ -41027,7 +40988,6 @@ const ui_zh_Hans: Partial<Record<MessageKey, string>> = {
   "settings.keys.cancel": "取消",
   "settings.keys.description": "保存你自己的提供方密钥，即可使用你的账户而非 Skynet 额度来运行。",
   "settings.keys.invalid": "无效",
-  "settings.keys.privacy": "密钥以加密方式存储，保存后将不再显示。",
   "settings.keys.remove": "移除",
   "settings.keys.removed_toast": "密钥已移除。",
   "settings.keys.replace": "替换",
