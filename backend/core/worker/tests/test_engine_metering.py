@@ -296,6 +296,29 @@ def test_stamp_billing_records_billed_outcome() -> None:
     assert store.updates == [{"id": "opt-1", "result": result}]
 
 
+def test_stamp_billing_records_estimate_for_reconciliation() -> None:
+    """A run carrying a projected bracket echoes it for the estimate-vs-actual line."""
+    store = _Store(engine=object())
+    worker = _worker(store)
+    result: dict[str, Any] = {"total_tokens": 5000}
+    worker._stamp_billing_outcome("opt-1", result, billed=7, refunded=0, estimated_low=4, estimated_high=12)
+    assert result["details"]["billing"] == {
+        "outcome": "billed",
+        "credits": 7,
+        "estimated_low": 4,
+        "estimated_high": 12,
+    }
+
+
+def test_stamp_billing_omits_estimate_when_partial() -> None:
+    """A half-present estimate is dropped — reconciliation needs both bounds."""
+    store = _Store(engine=object())
+    worker = _worker(store)
+    result: dict[str, Any] = {"total_tokens": 5000}
+    worker._stamp_billing_outcome("opt-1", result, billed=7, refunded=0, estimated_low=4, estimated_high=None)
+    assert result["details"]["billing"] == {"outcome": "billed", "credits": 7}
+
+
 def test_stamp_billing_refund_wins_over_bill() -> None:
     """A refund (guarantee held) frames the outcome as a free run, not a charge."""
     store = _Store(engine=object())

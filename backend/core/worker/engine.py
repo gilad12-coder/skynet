@@ -32,6 +32,8 @@ from ..config import settings
 from ..constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
+    PAYLOAD_OVERVIEW_ESTIMATED_HIGH,
+    PAYLOAD_OVERVIEW_ESTIMATED_LOW,
     PAYLOAD_OVERVIEW_MODEL_NAME,
     PAYLOAD_OVERVIEW_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
@@ -707,7 +709,14 @@ class BackgroundWorker:
                             # run is the receipt the lift was real, a refunded run
                             # shows the credits restored. Re-persisted because the two
                             # billing calls run after the first completion write.
-                            self._stamp_billing_outcome(optimization_id, result_dict, billed=billed, refunded=refunded)
+                            self._stamp_billing_outcome(
+                                optimization_id,
+                                result_dict,
+                                billed=billed,
+                                refunded=refunded,
+                                estimated_low=overview.get(PAYLOAD_OVERVIEW_ESTIMATED_LOW),
+                                estimated_high=overview.get(PAYLOAD_OVERVIEW_ESTIMATED_HIGH),
+                            )
                             self._report_run_usage_best_effort(_username, billed)
                     if final_status == "success":
                         self._schedule_embedding_indexing(optimization_id)
@@ -1074,25 +1083,33 @@ class BackgroundWorker:
         *,
         billed: int,
         refunded: int,
+        estimated_low: int | None = None,
+        estimated_high: int | None = None,
     ) -> None:
         """Record the run's billing outcome on its result for the proof screen.
 
         Writes ``result['details']['billing']`` — ``{outcome, credits}`` where
         ``outcome`` is ``"refunded"`` when the guarantee returned credits (the run
         was free) or ``"billed"`` otherwise, and ``credits`` is the amount restored
-        (refund) or charged (bill). The result screen reads this to frame billing
-        as proof: a charge is the receipt the lift was real, a refund the evidence
-        the guarantee held. Only stamps single-run results (a grid envelope has no
-        per-run ``details``) and only when a credit amount exists, so a free-grant
-        run that cost nothing adds no row. Re-persists the result via the job store
-        because the billing calls run after the first completion write; wrapped so a
-        store hiccup can never flip job status.
+        (refund) or charged (bill). When the run was submitted with a projected
+        bracket, ``estimated_low``/``estimated_high`` are echoed alongside so the
+        proof screen can reconcile the estimate against the actual charge. The
+        result screen reads this to frame billing as proof: a charge is the receipt
+        the lift was real, a refund the evidence the guarantee held. Only stamps
+        single-run results (a grid envelope has no per-run ``details``) and only
+        when a credit amount exists, so a free-grant run that cost nothing adds no
+        row. Re-persists the result via the job store because the billing calls run
+        after the first completion write; wrapped so a store hiccup can never flip
+        job status.
 
         Args:
             optimization_id: The finished run whose result is updated.
             result_dict: The serialized run result; mutated in place and re-saved.
             billed: Credits charged by :meth:`_debit_run_credits`.
             refunded: Credits returned by :meth:`_apply_guarantee_best_effort`.
+            estimated_low: Low end of the projected credit bracket, or None when
+                the run carried no estimate.
+            estimated_high: High end of the projected credit bracket, or None.
         """
         if not isinstance(result_dict, dict) or "pair_results" in result_dict:
             return
@@ -1105,7 +1122,11 @@ class BackgroundWorker:
             if not isinstance(details, dict):
                 details = {}
                 result_dict["details"] = details
-            details["billing"] = {"outcome": outcome, "credits": credits}
+            billing: dict[str, Any] = {"outcome": outcome, "credits": credits}
+            if estimated_low is not None and estimated_high is not None:
+                billing["estimated_low"] = estimated_low
+                billing["estimated_high"] = estimated_high
+            details["billing"] = billing
             self._job_store.update_job(optimization_id, result=result_dict)
         except Exception as exc:  # isolation boundary: stamping must never impact job status
             logger.debug("Billing-outcome stamp for %s failed: %s", optimization_id, exc)

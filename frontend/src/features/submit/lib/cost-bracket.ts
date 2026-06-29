@@ -17,7 +17,12 @@
  */
 
 import type { CatalogModel } from "@/shared/types/api";
-import { creditsForUsage, type ModelTokenUsage } from "@/features/billing";
+import {
+  creditsForUsage,
+  platformFeeCredits,
+  type ModelTokenUsage,
+  type TokenSourceMode,
+} from "@/features/billing";
 
 /** GEPA metric-call budgets by `auto` tier — mirrors the backend `_AUTO_BUDGETS`. */
 const AUTO_METRIC_CALLS: Record<string, number> = {
@@ -153,6 +158,25 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     creditsForUsage(splitUsage(highTokens, taskModel, reflectionModel)),
   );
   return { lowCredits, highCredits };
+}
+
+/**
+ * The credit bracket the user is actually charged, given the token source.
+ *
+ * A managed run is charged the full per-model cost; a BYOK run pays only
+ * Skynet's platform fee (the provider tokens are billed on the user's own key).
+ * Centralised so the pre-run estimate, the review-step recap, and the value
+ * persisted for the post-run reconciliation all derive the charge the same way
+ * and cannot drift apart.
+ */
+export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): CostBracket {
+  if (mode === "byok") {
+    return {
+      lowCredits: platformFeeCredits(bracket.lowCredits),
+      highCredits: platformFeeCredits(bracket.highCredits),
+    };
+  }
+  return bracket;
 }
 
 /**

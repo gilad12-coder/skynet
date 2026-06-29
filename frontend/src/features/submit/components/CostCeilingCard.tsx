@@ -4,10 +4,11 @@ import * as React from "react";
 import { Gauge } from "lucide-react";
 import { Switch } from "@/shared/ui/primitives/switch";
 import { NumberInput } from "@/shared/ui/number-input";
-import { formatCredits, platformFeeCredits, type TokenSourceMode } from "@/features/billing";
+import { formatCredits, type TokenSourceMode } from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
+import { chargeableBracket } from "../lib/cost-bracket";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 
 /**
@@ -28,12 +29,7 @@ export function CostCeilingCard({ w, mode }: { w: SubmitWizardContext; mode: Tok
   const byok = mode === "byok";
   // In BYOK the user is charged only Skynet's platform fee, so the headline range
   // shows the fee, not the full per-model cost the provider key absorbs.
-  const displayBracket = byok
-    ? {
-        lowCredits: platformFeeCredits(costBracket.lowCredits),
-        highCredits: platformFeeCredits(costBracket.highCredits),
-      }
-    : costBracket;
+  const displayBracket = chargeableBracket(costBracket, mode);
   const bracketKey = byok ? "submit.cost_ceiling.bracket_byok" : "submit.cost_ceiling.bracket";
 
   const toggleCap = (on: boolean) => {

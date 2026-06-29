@@ -48,6 +48,7 @@ import { buildOptimizerKwargs } from "../lib/build-kwargs";
 import {
   projectCostBracket,
   defaultCeilingForBracket,
+  chargeableBracket,
   type CostBracket,
 } from "../lib/cost-bracket";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
@@ -1529,6 +1530,10 @@ export function useSubmitWizard() {
         librarySourceRef.current && librarySourceRef.current.parsed === parsedDataset
           ? librarySourceRef.current.id
           : null;
+      // Persist the chargeable bracket the user just saw so the post-run proof
+      // moment can reconcile it against the actual charge. Same bracket the cost
+      // surface and review recap showed (managed: full per-model; byok: fee).
+      const estimate = chargeableBracket(costBracket, wallet.mode);
       const base = {
         name: jobName.trim() || undefined,
         description: jobDescription.trim() || undefined,
@@ -1549,6 +1554,8 @@ export function useSubmitWizard() {
         shuffle,
         is_private: isPrivate,
         token_source: wallet.mode,
+        estimated_credits_low: estimate.lowCredits,
+        estimated_credits_high: estimate.highCredits,
         ...(maxCostCredits != null && { max_cost_credits: maxCostCredits }),
         ...(seed != null && { seed }),
         ...(Object.keys(optKw).length > 0 && { optimizer_kwargs: optKw }),
