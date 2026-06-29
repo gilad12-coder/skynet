@@ -70,11 +70,6 @@ LOCAL_CUSTOMER_PREFIX = "local:"
 # the catalog, so it is re-priceable without touching credit counts elsewhere.
 TOKENS_PER_CREDIT = 1000
 
-# One Stripe meter unit bills 1000 tokens. The metered price holds the dollar
-# rate per unit (see scripts/provision_stripe.py), so the markup is re-priced in
-# Stripe without code changes; this only fixes the token-to-unit granularity.
-METER_UNIT_TOKENS = 1000
-
 # Share of a run's credit cost that is Skynet's platform fee (vs. pass-through
 # compute). On a no-lift BYOK run the provider tokens are already spent on the
 # user's own key, so only this fee is refundable; a managed no-lift run refunds
@@ -152,26 +147,6 @@ def credits_for_tokens(total_tokens: int) -> int:
     if total_tokens <= 0:
         return 0
     return -(-total_tokens // TOKENS_PER_CREDIT)
-
-
-def tokens_for_credits(credits: int) -> int:
-    """Convert a credit ceiling to the run-token budget it represents.
-
-    The inverse of :func:`credits_for_tokens`, used by the per-job cost ceiling:
-    a user-set cap in credits becomes the token budget the run is hard-stopped
-    against. Because :func:`credits_for_tokens` rounds a partial credit up, a cap
-    of ``n`` credits buys up to ``n * TOKENS_PER_CREDIT`` tokens — the run is
-    stopped once accumulated usage exceeds that budget.
-
-    Args:
-        credits: The credit ceiling; non-positive yields ``0`` (no budget).
-
-    Returns:
-        The non-negative token budget the ceiling allows.
-    """
-    if credits <= 0:
-        return 0
-    return credits * TOKENS_PER_CREDIT
 
 
 def platform_fee_credits(total_tokens: int) -> int:
