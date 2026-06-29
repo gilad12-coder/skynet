@@ -58,23 +58,34 @@ printf 'sk-%s' "$(openssl rand -hex 24)" | \
 # 3. Build the Dockerfile here (--path-as-root makes this dir the build context)
 railway up . --path-as-root --service litellm --ci
 
-# 4. Public domain on the proxy's port, then health-check
-railway domain --port 4000 --service litellm
-curl -s https://<proxy-domain>/health/liveliness   # -> "I'm alive!"
+# 4. Keep the proxy private — its only caller is the backend, in the same
+#    project, so it needs NO public domain. The backend reaches it over Railway's
+#    internal network. Verify from inside that network:
+railway ssh --service backend -- \
+  curl -s http://litellm.railway.internal:4000/health/liveliness   # -> "I'm alive!"
 ```
 
-Once it's healthy, mint a virtual key and point the backend at it (these two
-backend vars are the only switch — see below):
+The proxy binds `::` (see the Dockerfile) because Railway's private network is
+IPv6-only. Admin endpoints (`/key/generate`, `/spend/logs`) take the master key;
+run them from inside the network too — never expose them publicly:
 
 ```bash
-curl -s https://<proxy-domain>/key/generate \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"max_budget": 50, "duration": "30d"}'        # returns {"key": "sk-..."}
+# Mint a virtual key (the master key already lives in the litellm container env):
+railway ssh --service litellm -- sh -c \
+  'curl -s http://localhost:4000/key/generate \
+     -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "Content-Type: application/json" \
+     -d "{\"max_budget\": 50, \"duration\": \"30d\"}"'             # returns {"key": "sk-..."}
 
-railway variable set 'LITELLM_PROXY_URL=https://<proxy-domain>/v1' --service backend --skip-deploys
+# Point the backend at the proxy over the internal domain — plain http, since TLS
+# is unnecessary inside the private network:
+railway variable set 'LITELLM_PROXY_URL=http://litellm.railway.internal:4000/v1' --service backend --skip-deploys
 echo "<virtual-key>" | railway variable set LITELLM_PROXY_API_KEY --stdin --service backend --skip-deploys
 railway redeploy --service backend --yes
 ```
+
+If you ever need to reach the proxy from outside the project (local dev, a
+separate worker), attach a domain temporarily and delete it when done:
+`railway domain --port 4000 --service litellm` … `railway domain delete <id>`.
 
 The `litellm` service is deployed from a local build via `railway up`. To switch
 it to GitHub autodeploys once this is on `main`, connect the repo with this
