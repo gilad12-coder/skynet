@@ -2361,6 +2361,7 @@
   "submit.code_validation_failed": "Code validation failed",
   "submit.cost_ceiling.label": "Max cost ceiling",
   "submit.cost_ceiling.bracket": "Projected range: {low}–{high} credits",
+  "submit.cost_ceiling.bracket_byok": "Platform fee: {low}–{high} credits — your provider key pays the model",
   "submit.cost_ceiling.enable": "Cap this run's cost",
   "submit.cost_ceiling.cap_label": "Ceiling",
   "submit.cost_ceiling.cap_unit": "credits",

@@ -21,6 +21,9 @@ export const MARKUP = 1.5;
 export const DEFAULT_INPUT_COST_PER_TOKEN = 1e-6;
 export const DEFAULT_OUTPUT_COST_PER_TOKEN = 3e-6;
 
+/** Share of a run's full credit cost charged as the platform fee on a BYOK run — mirrors the backend. */
+export const PLATFORM_FEE_FRACTION = 0.2;
+
 /** Projected or measured token usage attributed to one model. */
 export interface ModelTokenUsage {
   /** The model the tokens ran on; `null`/`undefined` prices at the defaults. */
@@ -60,4 +63,14 @@ export function creditsForUsage(usages: ModelTokenUsage[]): number {
   const cost = rawCostUsd(usages) * MARKUP;
   if (cost <= 0) return 0;
   return Math.max(1, Math.ceil(cost / CREDIT_USD_VALUE));
+}
+
+/**
+ * The BYOK platform fee for a run's full credit cost, rounding up — mirrors
+ * backend `platform_fee_credits_for_usage`. On a BYOK run the provider tokens are
+ * paid on the user's own key, so only this fraction is charged in credits.
+ */
+export function platformFeeCredits(fullCredits: number): number {
+  if (fullCredits <= 0) return 0;
+  return Math.max(1, Math.ceil(fullCredits * PLATFORM_FEE_FRACTION));
 }

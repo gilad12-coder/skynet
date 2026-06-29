@@ -2385,6 +2385,7 @@ export type MessageKey =
   | "submit.code.agent.tool.signature.title"
   | "submit.code_validation_failed"
   | "submit.cost_ceiling.bracket"
+  | "submit.cost_ceiling.bracket_byok"
   | "submit.cost_ceiling.cap_label"
   | "submit.cost_ceiling.cap_unit"
   | "submit.cost_ceiling.enable"
@@ -4924,6 +4925,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.code.agent.tool.signature.title": "עריכת {term.signature}",
   "submit.code_validation_failed": "שגיאה באימות הקוד",
   "submit.cost_ceiling.bracket": "טווח צפוי: {low}–{high} קרדיטים",
+  "submit.cost_ceiling.bracket_byok": "עמלת פלטפורמה: {low}–{high} קרדיטים — מפתח הספק שלך משלם על המודל",
   "submit.cost_ceiling.cap_label": "תקרה",
   "submit.cost_ceiling.cap_unit": "קרדיטים",
   "submit.cost_ceiling.enable": "הגבלת עלות הריצה",
@@ -12325,6 +12327,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.code.agent.tool.signature.title": "Edit Signature",
   "submit.code_validation_failed": "Code validation failed",
   "submit.cost_ceiling.bracket": "Projected range: {low}–{high} credits",
+  "submit.cost_ceiling.bracket_byok": "Platform fee: {low}–{high} credits — your provider key pays the model",
   "submit.cost_ceiling.cap_label": "Ceiling",
   "submit.cost_ceiling.cap_unit": "credits",
   "submit.cost_ceiling.enable": "Cap this run's cost",

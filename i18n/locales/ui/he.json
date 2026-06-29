@@ -2361,6 +2361,7 @@
   "submit.code_validation_failed": "שגיאה באימות הקוד",
   "submit.cost_ceiling.label": "תקרת עלות",
   "submit.cost_ceiling.bracket": "טווח צפוי: {low}–{high} קרדיטים",
+  "submit.cost_ceiling.bracket_byok": "עמלת פלטפורמה: {low}–{high} קרדיטים — מפתח הספק שלך משלם על המודל",
   "submit.cost_ceiling.enable": "הגבלת עלות הריצה",
   "submit.cost_ceiling.cap_label": "תקרה",
   "submit.cost_ceiling.cap_unit": "קרדיטים",
