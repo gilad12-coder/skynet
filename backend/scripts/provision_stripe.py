@@ -30,7 +30,9 @@ _PACKS: list[tuple[str, str, int]] = [
 ]
 _PREMIUM = ("skynet_premium", "Skynet Premium", 2000)
 _FOUNDERS = ("skynet_founders", "Skynet Founder's Rate", 2000)
-_METERED = ("skynet_metered", "Skynet Token Overage", 1)
+# One meter unit = one credit, priced at 1 cent ($0.01 = one credit's value), so
+# metered overage matches the per-model credit ledger one-to-one.
+_METERED = ("skynet_metered", "Skynet Credit Overage", 1)
 
 
 def _find_price(lookup_key: str) -> str | None:
@@ -46,9 +48,7 @@ def _find_price(lookup_key: str) -> str | None:
     return existing.data[0].id if existing.data else None
 
 
-def _ensure_price(
-    lookup_key: str, name: str, unit_amount: int, recurring: dict | None = None
-) -> str:
+def _ensure_price(lookup_key: str, name: str, unit_amount: int, recurring: dict | None = None) -> str:
     """Return the price id for a pack/subscription, creating it if absent.
 
     Args:
@@ -96,7 +96,7 @@ def _ensure_meter(event_name: str) -> str | None:
                 print(f"  reuse  meter {event_name} -> {meter.id}")
                 return meter.id
         meter = stripe.billing.Meter.create(
-            display_name="Skynet token usage",
+            display_name="Skynet credit usage",
             event_name=event_name,
             default_aggregation={"formula": "sum"},
             customer_mapping={"event_payload_key": "stripe_customer_id", "type": "by_id"},
@@ -123,14 +123,10 @@ def main() -> int:
     pack_ids = {key: _ensure_price(key, name, amount) for key, name, amount in _PACKS}
 
     print("Provisioning Premium subscription ...")
-    premium_id = _ensure_price(
-        _PREMIUM[0], _PREMIUM[1], _PREMIUM[2], recurring={"interval": "month"}
-    )
+    premium_id = _ensure_price(_PREMIUM[0], _PREMIUM[1], _PREMIUM[2], recurring={"interval": "month"})
 
     print("Provisioning Founder's Rate subscription ...")
-    founders_id = _ensure_price(
-        _FOUNDERS[0], _FOUNDERS[1], _FOUNDERS[2], recurring={"interval": "month"}
-    )
+    founders_id = _ensure_price(_FOUNDERS[0], _FOUNDERS[1], _FOUNDERS[2], recurring={"interval": "month"})
 
     print("Provisioning metered overage (optional) ...")
     meter_id = _ensure_meter(settings.stripe_meter_event_name)

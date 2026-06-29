@@ -27,7 +27,6 @@ from core.billing.service import (
     FOUNDERS_LOCK_DAYS,
     FREE_GRANT_CREDITS,
     GRANT_WINDOW_DAYS,
-    METER_UNIT_TOKENS,
     PREMIUM_GRANT_CREDITS,
     TOKENS_PER_CREDIT,
     StripeBillingService,
@@ -98,26 +97,26 @@ def test_report_run_usage_noop_without_billing_customer(engine: object, configur
         assert session.get(BillingCustomerModel, "nobody@x.com") is None
 
 
-def test_report_run_usage_noop_below_one_unit(engine: object, configured: None) -> None:
-    """A run smaller than one meter unit reports nothing rather than rounding up."""
+def test_report_run_usage_noop_for_zero_credits(engine: object, configured: None) -> None:
+    """A run that cost nothing reports no meter event."""
     _seed_customer(engine, "u@x.com")
     service = StripeBillingService(engine=engine)
     with patch("stripe.billing.MeterEvent.create") as create:
-        service.report_run_usage("u@x.com", METER_UNIT_TOKENS - 1)
+        service.report_run_usage("u@x.com", 0)
     create.assert_not_called()
 
 
-def test_report_run_usage_meters_whole_units_for_customer(engine: object, configured: None) -> None:
-    """Tokens are floored to whole meter units and pushed for the right customer."""
+def test_report_run_usage_meters_credits_for_customer(engine: object, configured: None) -> None:
+    """Credits are metered one-to-one (one unit per credit) for the right customer."""
     _seed_customer(engine, "u@x.com")
     service = StripeBillingService(engine=engine)
     with patch("stripe.billing.MeterEvent.create") as create:
-        service.report_run_usage("u@x.com", 2 * METER_UNIT_TOKENS + 500)
+        service.report_run_usage("u@x.com", 7)
     create.assert_called_once()
     kwargs = create.call_args.kwargs
     assert kwargs["event_name"] == settings.stripe_meter_event_name
     assert kwargs["payload"]["stripe_customer_id"] == "cus_u@x.com"
-    assert kwargs["payload"]["value"] == "2"
+    assert kwargs["payload"]["value"] == "7"
 
 
 def test_subscription_checkout_includes_metered_item(

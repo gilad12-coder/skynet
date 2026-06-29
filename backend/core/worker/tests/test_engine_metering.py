@@ -78,24 +78,24 @@ def configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "stripe_secret_key", SecretStr("sk_test_dummy"))
 
 
-def test_hook_meters_tokens_for_successful_run(configured: None) -> None:
-    """With an engine, Stripe configured, and tokens present, usage is reported."""
+def test_hook_meters_credits_for_successful_run(configured: None) -> None:
+    """With an engine, Stripe configured, and a cost, the run's credits are metered."""
     engine = object()
     worker = _worker(_Store(engine=engine))
     with (
         patch("core.worker.engine.threading.Thread", _SyncThread),
         patch("core.worker.engine.StripeBillingService") as billing_cls,
     ):
-        worker._report_run_usage_best_effort("u@x.com", {"total_tokens": 5000})
+        worker._report_run_usage_best_effort("u@x.com", 42)
     billing_cls.assert_called_once_with(engine=engine)
-    billing_cls.return_value.report_run_usage.assert_called_once_with("u@x.com", 5000)
+    billing_cls.return_value.report_run_usage.assert_called_once_with("u@x.com", 42)
 
 
 def test_hook_noop_without_engine(configured: None) -> None:
     """A store without a SQL engine (legacy/in-memory) meters nothing."""
     worker = _worker(_Store(engine=None))
     with patch("core.worker.engine.threading.Thread") as thread:
-        worker._report_run_usage_best_effort("u@x.com", {"total_tokens": 5000})
+        worker._report_run_usage_best_effort("u@x.com", 42)
     thread.assert_not_called()
 
 
@@ -104,17 +104,15 @@ def test_hook_noop_when_stripe_unconfigured(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(settings, "stripe_secret_key", None)
     worker = _worker(_Store(engine=object()))
     with patch("core.worker.engine.threading.Thread") as thread:
-        worker._report_run_usage_best_effort("u@x.com", {"total_tokens": 5000})
+        worker._report_run_usage_best_effort("u@x.com", 42)
     thread.assert_not_called()
 
 
-def test_hook_noop_without_token_usage(configured: None) -> None:
-    """A run that reported no token total (None or absent) meters nothing."""
+def test_hook_noop_without_cost(configured: None) -> None:
+    """A run that cost nothing (zero credits) meters nothing."""
     worker = _worker(_Store(engine=object()))
     with patch("core.worker.engine.threading.Thread") as thread:
-        worker._report_run_usage_best_effort("u@x.com", {"total_tokens": None})
-        worker._report_run_usage_best_effort("u@x.com", {})
-        worker._report_run_usage_best_effort("u@x.com", None)
+        worker._report_run_usage_best_effort("u@x.com", 0)
     thread.assert_not_called()
 
 

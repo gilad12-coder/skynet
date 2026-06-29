@@ -708,7 +708,7 @@ class BackgroundWorker:
                             # shows the credits restored. Re-persisted because the two
                             # billing calls run after the first completion write.
                             self._stamp_billing_outcome(optimization_id, result_dict, billed=billed, refunded=refunded)
-                            self._report_run_usage_best_effort(_username, result_dict)
+                            self._report_run_usage_best_effort(_username, billed)
                     if final_status == "success":
                         self._schedule_embedding_indexing(optimization_id)
                 except KeyError:
@@ -1110,36 +1110,33 @@ class BackgroundWorker:
         except Exception as exc:  # isolation boundary: stamping must never impact job status
             logger.debug("Billing-outcome stamp for %s failed: %s", optimization_id, exc)
 
-    def _report_run_usage_best_effort(self, username: str, result_dict: dict[str, Any] | None) -> None:
-        """Meter a finished run's token usage to Stripe, off the worker hot path.
+    def _report_run_usage_best_effort(self, username: str, credits: int) -> None:
+        """Meter a finished run's credit cost to Stripe, off the worker hot path.
 
-        Reads the run's ``total_tokens`` (captured from LM history into the
-        result payload) and reports it on a daemon thread so a slow or hung
-        Stripe call cannot stall the worker. A no-op when the store exposes no
-        SQL engine (legacy/in-memory), Stripe is unconfigured, the caller is
-        anonymous, or the run reported no token usage — billing must never
-        affect job status.
+        Meters the run's per-model credit cost (the same figure the local debit
+        charged) on a daemon thread so a slow or hung Stripe call cannot stall the
+        worker. A no-op when the store exposes no SQL engine (legacy/in-memory),
+        Stripe is unconfigured, the caller is anonymous, or the run cost nothing —
+        billing must never affect job status.
 
         Args:
             username: Account the run is billed to.
-            result_dict: The serialized run/grid result; its ``total_tokens`` is
-                the figure metered.
+            credits: The run's credit cost to meter (the debited amount).
         """
         engine = getattr(self._job_store, "engine", None)
         if engine is None or not username or settings.stripe_secret_key is None:
             return
-        total_tokens = result_dict.get("total_tokens") if isinstance(result_dict, dict) else None
-        if not isinstance(total_tokens, int) or total_tokens <= 0:
+        if not isinstance(credits, int) or credits <= 0:
             return
         threading.Thread(
             target=self._meter_run_usage,
-            args=(engine, username, total_tokens),
+            args=(engine, username, credits),
             name=f"meter-{username[:8]}",
             daemon=True,
         ).start()
 
-    def _meter_run_usage(self, engine: Any, username: str, total_tokens: int) -> None:
-        """Report run usage to Stripe, swallowing failures so they never reach the worker.
+    def _meter_run_usage(self, engine: Any, username: str, credits: int) -> None:
+        """Report run credits to Stripe, swallowing failures so they never reach the worker.
 
         A Stripe outage or an unconfigured meter only surfaces on this daemon
         thread; the job is already marked success by the time this runs.
@@ -1147,10 +1144,10 @@ class BackgroundWorker:
         Args:
             engine: SQLAlchemy engine backing the billing tables.
             username: Account the run is billed to.
-            total_tokens: Tokens the run consumed.
+            credits: The run's credit cost to meter.
         """
         try:
-            StripeBillingService(engine=engine).report_run_usage(username, total_tokens)
+            StripeBillingService(engine=engine).report_run_usage(username, credits)
         except Exception as exc:  # isolation boundary: metering must never impact job status
             logger.debug("Metered usage report for %s failed: %s", username, exc)
 

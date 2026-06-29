@@ -1046,14 +1046,16 @@ class StripeBillingService:
                 row.grant_reset_at = row.subscription_current_period_end
         row.updated_at = datetime.now(UTC)
 
-    def report_run_usage(self, username: str, total_tokens: int) -> None:
-        """Meter a finished run's token usage to Stripe Billing Meters.
+    def report_run_usage(self, username: str, credits: int) -> None:
+        """Meter a finished run's credit cost to Stripe Billing Meters.
 
         Called once per successful optimization by the worker (see
-        :class:`core.worker.engine.BackgroundWorker`). Converts the run's token
-        total to whole meter units (:data:`METER_UNIT_TOKENS` tokens each) and
-        pushes a meter event Stripe aggregates against the account's metered
-        price — the usage-based overage path. Only Premium subscribers whose
+        :class:`core.worker.engine.BackgroundWorker`). Pushes the run's per-model
+        credit cost — one meter unit per credit — as an event Stripe aggregates
+        against the account's metered price (the usage-based overage path).
+        Metering credits, not raw tokens, keeps the meter in step with the
+        per-model ledger so overage and credit burn agree; the Stripe per-unit
+        price is set to one credit ($0.01). Only Premium subscribers whose
         subscription carries the metered price are actually charged; for everyone
         else the event is recorded as analytics and never billed.
 
@@ -1064,13 +1066,10 @@ class StripeBillingService:
 
         Args:
             username: Account the usage is billed to.
-            total_tokens: Tokens the run consumed; ignored when it rounds to less
-                than one meter unit, or when Stripe is unconfigured.
+            credits: The run's credit cost to meter; ignored when non-positive or
+                when Stripe is unconfigured.
         """
-        if total_tokens <= 0 or settings.stripe_secret_key is None:
-            return
-        units = total_tokens // METER_UNIT_TOKENS
-        if units <= 0:
+        if credits <= 0 or settings.stripe_secret_key is None:
             return
         with Session(self._engine) as session:
             customer = session.get(BillingCustomerModel, username)
@@ -1080,5 +1079,5 @@ class StripeBillingService:
         stripe_mod = self._stripe()
         stripe_mod.billing.MeterEvent.create(
             event_name=settings.stripe_meter_event_name,
-            payload={"stripe_customer_id": customer_id, "value": str(units)},
+            payload={"stripe_customer_id": customer_id, "value": str(credits)},
         )
