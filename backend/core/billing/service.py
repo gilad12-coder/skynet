@@ -15,6 +15,7 @@ portal) require ``settings.is_stripe_configured`` and raise
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -37,13 +38,16 @@ from ..storage.models import (
     CreditLedgerModel,
     GuaranteeRunModel,
 )
+from .pricing import ModelUsage, credits_for_usage
 
 # Credits granted per one-time pack. Mirrors the frontend CREDIT_PACKS catalog;
 # the dollar price lives in Stripe (the price id), the credits granted live here.
 PACK_CREDITS: dict[str, int] = {"starter": 500, "plus": 2200, "pro": 6500}
 
-# Renewing allowance that keeps the free tier usable on mini models.
-FREE_GRANT_CREDITS = 500
+# Renewing allowance that keeps the free tier usable on mini models. Under
+# per-model pricing a credit is real marked-up provider cost, so 150 credits is
+# ~$1 of mini inference (~2-3 light runs) — trial-tight, never a frontier loss.
+FREE_GRANT_CREDITS = 150
 
 # Renewing allowance for an active Premium subscriber — the monthly credit
 # allotment the subscription buys, replacing (not stacking on) the free grant.
@@ -189,6 +193,49 @@ def platform_fee_credits(total_tokens: int) -> int:
     if cost <= 0:
         return 0
     return max(1, math.ceil(cost * PLATFORM_FEE_FRACTION))
+
+
+def platform_fee_credits_for_usage(usages: Iterable[ModelUsage]) -> int:
+    """Return the platform-fee portion of a run's per-model credit cost, rounding up.
+
+    The per-model analogue of :func:`platform_fee_credits`: the
+    :data:`PLATFORM_FEE_FRACTION` share of the run's full per-model cost
+    (:func:`core.billing.pricing.credits_for_usage`). The only amount a **BYOK**
+    run is charged or refunded, since the provider tokens were paid on the user's
+    own key. At least one credit when the run cost anything.
+
+    Args:
+        usages: Per-model token usage for the run.
+
+    Returns:
+        The non-negative platform-fee credits (``0`` when the run cost nothing).
+    """
+    full = credits_for_usage(usages)
+    if full <= 0:
+        return 0
+    return max(1, math.ceil(full * PLATFORM_FEE_FRACTION))
+
+
+def run_cost_credits(usages: Iterable[ModelUsage], token_source: str) -> int:
+    """Return the credits a run costs: full per-model cost, or the BYOK platform fee.
+
+    A managed run is charged its full per-model token cost
+    (:func:`core.billing.pricing.credits_for_usage`); a BYOK run is charged only
+    Skynet's platform fee (:func:`platform_fee_credits_for_usage`), since the
+    provider tokens were paid on the user's own key. The shared basis for both
+    the live debit and the guarantee refund, so the refund always equals the
+    charge.
+
+    Args:
+        usages: Per-model token usage for the run.
+        token_source: ``"managed"`` (full cost) or ``"byok"`` (platform fee only).
+
+    Returns:
+        The non-negative credit cost.
+    """
+    if token_source == TOKEN_SOURCE_BYOK:
+        return platform_fee_credits_for_usage(usages)
+    return credits_for_usage(usages)
 
 
 def cost_ceiling_budget(spendable: int, token_source: str) -> int:
@@ -535,9 +582,7 @@ class StripeBillingService:
         """
         stripe_mod = self._stripe()
         customer_id = self.get_or_create_customer(username)
-        portal = stripe_mod.billing_portal.Session.create(
-            customer=customer_id, return_url=self._return_url("portal")
-        )
+        portal = stripe_mod.billing_portal.Session.create(customer=customer_id, return_url=self._return_url("portal"))
         return str(portal.url)
 
     def get_wallet(self, username: str) -> WalletSnapshot:
@@ -641,30 +686,31 @@ class StripeBillingService:
     def debit_run(
         self,
         username: str,
-        total_tokens: int,
+        usages: Iterable[ModelUsage],
         *,
         model: str | None,
         description: str,
         token_source: str = TOKEN_SOURCE_MANAGED,
     ) -> int:
-        """Charge a finished run's credit cost to the account, free grant first.
+        """Charge a finished run's per-model credit cost to the account, grant first.
 
         Writes one signed negative ``run`` row to ``credit_ledger`` and draws the
         cost from the free grant before the purchased balance, mirroring how
         :meth:`get_wallet` reports spendable credits (grant then paid). A **managed**
-        run is charged its full per-token cost (:func:`credits_for_tokens`); a
-        **BYOK** run is charged only Skynet's platform fee
-        (:func:`platform_fee_credits`), since the provider tokens were already paid
-        on the user's own key — so credits still meter the platform on a BYOK run
-        without double-charging for inference. The rolling grant reset is applied
-        first so a run that completes after the window elapsed bills against the
-        topped-up grant. Idempotency is the caller's responsibility: the worker
-        debits inside its once-only completion claim, so a redelivered/re-run job
-        never double-charges. A run costing zero credits writes nothing.
+        run is charged its full per-model token cost; a **BYOK** run is charged only
+        Skynet's platform fee (:func:`run_cost_credits`), since the provider tokens
+        were already paid on the user's own key — so credits still meter the
+        platform on a BYOK run without double-charging for inference. The rolling
+        grant reset is applied first so a run that completes after the window
+        elapsed bills against the topped-up grant. Idempotency is the caller's
+        responsibility: the worker debits inside its once-only completion claim, so
+        a redelivered/re-run job never double-charges. A run costing zero credits
+        writes nothing.
 
         Args:
             username: Account the run is billed to.
-            total_tokens: Tokens the run consumed; converted to a credit cost.
+            usages: Per-model token usage for the run; priced per-model into the
+                credit cost.
             model: Model id stamped on the ledger row, or ``None``.
             description: Human label for the ledger row (typically the run name).
             token_source: ``"managed"`` (full cost) or ``"byok"`` (platform fee
@@ -673,11 +719,7 @@ class StripeBillingService:
         Returns:
             The credit cost charged (``0`` when nothing was billed).
         """
-        cost = (
-            platform_fee_credits(total_tokens)
-            if token_source == TOKEN_SOURCE_BYOK
-            else credits_for_tokens(total_tokens)
-        )
+        cost = run_cost_credits(usages, token_source)
         if cost <= 0:
             return 0
         now = datetime.now(UTC)
@@ -771,7 +813,7 @@ class StripeBillingService:
         guarantee: dict[str, Any] | None,
         *,
         token_source: str,
-        total_tokens: int,
+        usages: Iterable[ModelUsage],
         model: str | None,
         description: str,
     ) -> int:
@@ -799,7 +841,7 @@ class StripeBillingService:
             guarantee: ``{"basis", "baseline", "optimized"}`` from the result, or
                 ``None`` when the run produced no comparable pair.
             token_source: ``"managed"`` or ``"byok"`` — sets the refund scope.
-            total_tokens: Tokens the run consumed (sizes the refund).
+            usages: Per-model token usage; sizes the refund (equal to the charge).
             model: Model id stamped on the refund row, or ``None``.
             description: Human label for the refund ledger row.
 
@@ -833,11 +875,7 @@ class StripeBillingService:
                 session.commit()
                 return 0
 
-            refund = (
-                platform_fee_credits(total_tokens)
-                if token_source == TOKEN_SOURCE_BYOK
-                else credits_for_tokens(total_tokens)
-            )
+            refund = run_cost_credits(usages, token_source)
             if refund <= 0:
                 session.commit()
                 return 0
@@ -907,9 +945,7 @@ class StripeBillingService:
         with Session(self._engine) as session:
             if session.get(BillingWebhookEventModel, event_id) is not None:
                 return
-            session.add(
-                BillingWebhookEventModel(event_id=event_id, event_type=str(event["type"]))
-            )
+            session.add(BillingWebhookEventModel(event_id=event_id, event_type=str(event["type"])))
             self._apply_event(session, event)
             session.commit()
 
@@ -992,9 +1028,7 @@ class StripeBillingService:
         price_id = items[0]["price"]["id"] if items else None
         # current_period_end sits on the subscription in older API versions and on
         # the subscription item in newer ones (2025-03+); read whichever is present.
-        period_end_ts = obj.get("current_period_end") or (
-            items[0].get("current_period_end") if items else None
-        )
+        period_end_ts = obj.get("current_period_end") or (items[0].get("current_period_end") if items else None)
         was_active = row.subscription_status in _ACTIVE_SUBSCRIPTION_STATUSES
         row.subscription_status = str(obj.get("status") or "")
         row.subscription_price_id = price_id

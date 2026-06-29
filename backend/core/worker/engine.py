@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ..billing import ProviderKeyVault, StripeBillingService, inject_byok_connections
+from ..billing.pricing import ModelUsage
 from ..config import settings
 from ..constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
@@ -52,6 +53,46 @@ from .constants import EVENT_ERROR, EVENT_LOG, EVENT_PROGRESS, EVENT_RESULT
 from .subprocess_runner import run_service_in_subprocess, set_fork_service
 
 logger = logging.getLogger(__name__)
+
+
+def _usages_from_result(result_dict: dict[str, Any] | None, fallback_model: str | None) -> list[ModelUsage]:
+    """Build per-model :class:`ModelUsage` from a serialized run/grid result.
+
+    Reads the result's ``usage_by_model`` rows (stamped by the optimizer from the
+    LM histories). A result that predates the per-model split — or an in-flight
+    job spanning the deploy — has no rows; it falls back to pricing the whole
+    ``total_tokens`` on ``fallback_model``, attributing it to input (the cheaper
+    side) so the legacy path under-charges rather than over-charges.
+
+    Args:
+        result_dict: The serialized run/grid result, or ``None``.
+        fallback_model: Model id to price a rows-less legacy result against.
+
+    Returns:
+        Per-model usage rows with positive token counts, or ``[]`` when the run
+        reported no usage at all.
+    """
+    if not isinstance(result_dict, dict):
+        return []
+    usages: list[ModelUsage] = []
+    rows = result_dict.get("usage_by_model")
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            model = row.get("model")
+            in_tokens = row.get("input_tokens", 0)
+            out_tokens = row.get("output_tokens", 0)
+            if not isinstance(model, str) or not isinstance(in_tokens, int) or not isinstance(out_tokens, int):
+                continue
+            if in_tokens > 0 or out_tokens > 0:
+                usages.append(ModelUsage(model=model, input_tokens=in_tokens, output_tokens=out_tokens))
+    if usages:
+        return usages
+    total_tokens = result_dict.get("total_tokens")
+    if isinstance(total_tokens, int) and total_tokens > 0:
+        return [ModelUsage(model=fallback_model or "unknown", input_tokens=total_tokens, output_tokens=0)]
+    return []
 
 
 class CancellationError(Exception):
@@ -652,8 +693,7 @@ class BackgroundWorker:
                                 result_dict,
                                 run_name=overview.get(PAYLOAD_OVERVIEW_NAME) or "",
                                 model=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
-                                token_source=overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE)
-                                or TOKEN_SOURCE_MANAGED,
+                                token_source=overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE) or TOKEN_SOURCE_MANAGED,
                             )
                             # Adjudicate the guarantee after the debit so a no-lift
                             # first run can write its offsetting refund against the
@@ -667,9 +707,7 @@ class BackgroundWorker:
                             # run is the receipt the lift was real, a refunded run
                             # shows the credits restored. Re-persisted because the two
                             # billing calls run after the first completion write.
-                            self._stamp_billing_outcome(
-                                optimization_id, result_dict, billed=billed, refunded=refunded
-                            )
+                            self._stamp_billing_outcome(optimization_id, result_dict, billed=billed, refunded=refunded)
                             self._report_run_usage_best_effort(_username, result_dict)
                     if final_status == "success":
                         self._schedule_embedding_indexing(optimization_id)
@@ -933,8 +971,8 @@ class BackgroundWorker:
 
         Args:
             username: Account the run is billed to.
-            result_dict: The serialized run/grid result; its ``total_tokens`` is
-                the figure charged.
+            result_dict: The serialized run/grid result; its ``usage_by_model`` is
+                priced per-model into the charge (falling back to ``total_tokens``).
             run_name: Run name for the ledger row's human label.
             model: Model id stamped on the ledger row, or ``None``.
             token_source: ``"managed"`` (full cost) or ``"byok"`` (platform fee
@@ -947,13 +985,13 @@ class BackgroundWorker:
         engine = getattr(self._job_store, "engine", None)
         if engine is None or not username:
             return 0
-        total_tokens = result_dict.get("total_tokens") if isinstance(result_dict, dict) else None
-        if not isinstance(total_tokens, int) or total_tokens <= 0:
+        usages = _usages_from_result(result_dict, model)
+        if not usages:
             return 0
         try:
             return StripeBillingService(engine=engine).debit_run(
                 username,
-                total_tokens,
+                usages,
                 model=model,
                 description=run_name or "Run",
                 token_source=token_source,
@@ -986,7 +1024,7 @@ class BackgroundWorker:
         Args:
             username: Account the run was billed to.
             result_dict: The serialized run/grid result; carries ``guarantee``
-                and ``total_tokens``.
+                and ``usage_by_model`` (falling back to ``total_tokens``).
             overview: The job's payload overview (task fingerprint, token source,
                 run name, model).
             optimization_id: The finished run claiming or skipping the slot.
@@ -1001,8 +1039,8 @@ class BackgroundWorker:
         task_fingerprint = overview.get(PAYLOAD_OVERVIEW_TASK_FINGERPRINT)
         if not task_fingerprint:
             return 0
-        total_tokens = result_dict.get("total_tokens")
-        if not isinstance(total_tokens, int) or total_tokens <= 0:
+        usages = _usages_from_result(result_dict, overview.get(PAYLOAD_OVERVIEW_MODEL_NAME))
+        if not usages:
             return 0
         token_source = overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE) or TOKEN_SOURCE_MANAGED
         run_name = overview.get(PAYLOAD_OVERVIEW_NAME) or "Run"
@@ -1013,7 +1051,7 @@ class BackgroundWorker:
                 str(optimization_id),
                 result_dict.get("guarantee"),
                 token_source=str(token_source),
-                total_tokens=total_tokens,
+                usages=usages,
                 model=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
                 description=f"No lift — refunded · {run_name}",
             )

@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr
 
+from core.billing.pricing import ModelUsage
 from core.config import settings
 from core.storage import JobStore
 from core.worker.engine import BackgroundWorker
@@ -130,12 +131,40 @@ def test_debit_hook_charges_credits_for_successful_run() -> None:
     engine = object()
     worker = _worker(_Store(engine=engine))
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
-        worker._debit_run_credits(
-            "u@x.com", {"total_tokens": 5000}, run_name="sentiment v3", model="m1"
-        )
+        worker._debit_run_credits("u@x.com", {"total_tokens": 5000}, run_name="sentiment v3", model="m1")
     billing_cls.assert_called_once_with(engine=engine)
+    # No usage_by_model on the result → legacy fallback prices the total on the
+    # run's model, attributed to input.
     billing_cls.return_value.debit_run.assert_called_once_with(
-        "u@x.com", 5000, model="m1", description="sentiment v3", token_source="managed"
+        "u@x.com",
+        [ModelUsage(model="m1", input_tokens=5000, output_tokens=0)],
+        model="m1",
+        description="sentiment v3",
+        token_source="managed",
+    )
+
+
+def test_debit_hook_prices_per_model_usage_when_present() -> None:
+    """When the result carries usage_by_model, the worker charges from that split."""
+    worker = _worker(_Store(engine=object()))
+    result = {
+        "total_tokens": 999,  # ignored in favour of the per-model breakdown
+        "usage_by_model": [
+            {"model": "openai/gpt-4o-mini", "input_tokens": 1000, "output_tokens": 200},
+            {"model": "anthropic/claude-opus-4-8", "input_tokens": 300, "output_tokens": 50},
+        ],
+    }
+    with patch("core.worker.engine.StripeBillingService") as billing_cls:
+        worker._debit_run_credits("u@x.com", result, run_name="r", model="openai/gpt-4o-mini")
+    billing_cls.return_value.debit_run.assert_called_once_with(
+        "u@x.com",
+        [
+            ModelUsage(model="openai/gpt-4o-mini", input_tokens=1000, output_tokens=200),
+            ModelUsage(model="anthropic/claude-opus-4-8", input_tokens=300, output_tokens=50),
+        ],
+        model="openai/gpt-4o-mini",
+        description="r",
+        token_source="managed",
     )
 
 
@@ -144,11 +173,13 @@ def test_debit_hook_charges_platform_fee_for_byok_run() -> None:
     engine = object()
     worker = _worker(_Store(engine=engine))
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
-        worker._debit_run_credits(
-            "u@x.com", {"total_tokens": 5000}, run_name="r", model="m1", token_source="byok"
-        )
+        worker._debit_run_credits("u@x.com", {"total_tokens": 5000}, run_name="r", model="m1", token_source="byok")
     billing_cls.return_value.debit_run.assert_called_once_with(
-        "u@x.com", 5000, model="m1", description="r", token_source="byok"
+        "u@x.com",
+        [ModelUsage(model="m1", input_tokens=5000, output_tokens=0)],
+        model="m1",
+        description="r",
+        token_source="byok",
     )
 
 
@@ -208,7 +239,9 @@ def test_guarantee_hook_adjudicates_for_successful_run() -> None:
     assert call.args[:3] == ("u@x.com", "task-1", "opt-1")
     assert call.args[3] == result["guarantee"]
     assert call.kwargs["token_source"] == "managed"
-    assert call.kwargs["total_tokens"] == 5000
+    # No usage_by_model and no model in the overview → legacy fallback prices the
+    # total on the "unknown" model.
+    assert call.kwargs["usages"] == [ModelUsage(model="unknown", input_tokens=5000, output_tokens=0)]
 
 
 def test_guarantee_hook_noop_without_task_fingerprint() -> None:
@@ -243,9 +276,7 @@ def test_guarantee_hook_defaults_token_source_to_managed() -> None:
     worker = _worker(_Store(engine=object()))
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
         billing_cls.return_value.adjudicate_guarantee.return_value = 0
-        worker._apply_guarantee_best_effort(
-            "u@x.com", {"total_tokens": 5000}, _overview(token_source=None), "opt-1"
-        )
+        worker._apply_guarantee_best_effort("u@x.com", {"total_tokens": 5000}, _overview(token_source=None), "opt-1")
     assert billing_cls.return_value.adjudicate_guarantee.call_args.kwargs["token_source"] == "managed"
 
 
