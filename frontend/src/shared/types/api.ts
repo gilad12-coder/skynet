@@ -440,6 +440,10 @@ export interface CatalogModel {
   supports_vision: boolean;
   available: boolean;
   max_input_tokens?: number | null;
+  // Provider per-token costs (USD) from LiteLLM; null/absent when unpriced, so
+  // the estimate falls back to a default rate rather than treating it as free.
+  input_cost_per_token?: number | null;
+  output_cost_per_token?: number | null;
 }
 
 export interface CatalogProvider {
