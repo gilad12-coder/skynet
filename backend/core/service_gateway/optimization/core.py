@@ -58,7 +58,7 @@ from ...models import (
     SplitCounts,
 )
 from ...models.artifacts import ProgramArtifact, ReactOverlay
-from ...models.results import GuaranteeBasis
+from ...models.results import GuaranteeBasis, ModelTokenUsage
 from ...registry import (
     ResolverError,
     ServiceRegistry,
@@ -67,7 +67,12 @@ from ...registry import (
     resolve_optimizer_factory,
 )
 from ...worker.log_handler import set_current_pair_index
-from ..language_models import apply_model_reasoning_config, build_language_model, total_tokens_from_history
+from ..language_models import (
+    apply_model_reasoning_config,
+    build_language_model,
+    total_tokens_from_history,
+    usage_by_model_from_history,
+)
 from ..react_compat import REACT_CLASS
 from ..safe_exec import validate_metric_code, validate_signature_code
 from .artifacts import persist_program
@@ -114,6 +119,52 @@ from .validators import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _usage_by_model_rows(*language_models: object) -> list[ModelTokenUsage]:
+    """Build a result's per-model usage rows from the run's LM histories.
+
+    Wraps :func:`usage_by_model_from_history`, turning its ``model → (input,
+    output)`` breakdown into the :class:`ModelTokenUsage` rows the billing worker
+    charges from and the UI reconciles against. Returns an empty list when usage
+    is untracked (e.g. mocked LMs), mirroring the ``total_tokens`` companion.
+
+    Args:
+        *language_models: The run's LMs — generation and, when present, reflection.
+
+    Returns:
+        One row per distinct model that recorded usage.
+    """
+    breakdown = usage_by_model_from_history(*language_models)
+    if not breakdown:
+        return []
+    return [
+        ModelTokenUsage(model=model, input_tokens=in_out[0], output_tokens=in_out[1])
+        for model, in_out in breakdown.items()
+    ]
+
+
+def _merge_usage_rows(rows: list[ModelTokenUsage]) -> list[ModelTokenUsage]:
+    """Fold per-model usage rows from several runs into one row per model.
+
+    Used to sum a grid search's pairs into a single per-model breakdown the
+    worker charges the whole grid from.
+
+    Args:
+        rows: Per-model usage rows across all pairs (models may repeat).
+
+    Returns:
+        One :class:`ModelTokenUsage` per distinct model, token counts summed.
+    """
+    merged: dict[str, list[int]] = {}
+    for row in rows:
+        accumulator = merged.setdefault(row.model, [0, 0])
+        accumulator[0] += row.input_tokens
+        accumulator[1] += row.output_tokens
+    return [
+        ModelTokenUsage(model=model, input_tokens=in_out[0], output_tokens=in_out[1])
+        for model, in_out in merged.items()
+    ]
 
 
 def _resolve_max_metric_calls(optimizer_kwargs: dict[str, Any]) -> int:
@@ -548,6 +599,7 @@ def _run_grid_pair(
             runtime_seconds=round(pair_runtime, 2),
             num_lm_calls=pair_lm_calls,
             total_tokens=total_tokens_from_history(language_model, reflection_lm),
+            usage_by_model=_usage_by_model_rows(language_model, reflection_lm),
             avg_response_time_ms=pair_avg_ms,
             lm_activity=pair_lm_activity,
             program_artifact=program_artifact,
@@ -944,6 +996,7 @@ class DspyService:
             runtime_seconds=runtime_seconds,
             num_lm_calls=num_lm_calls,
             total_tokens=total_tokens_from_history(language_model, reflection_lm),
+            usage_by_model=_usage_by_model_rows(language_model, reflection_lm),
             avg_response_time_ms=avg_response_time_ms,
             lm_activity=lm_activity,
             baseline_test_results=baseline_test_results,
@@ -1208,6 +1261,7 @@ class DspyService:
             runtime_seconds=runtime_seconds,
             num_lm_calls=num_lm_calls,
             total_tokens=total_tokens_from_history(student_lm, reflection_lm),
+            usage_by_model=_usage_by_model_rows(student_lm, reflection_lm),
             avg_response_time_ms=avg_response_time_ms,
             # Generation-stage activity: student rollouts are bucketed into
             # baseline/training/evaluation via the timing_callbacks passed into
@@ -1438,6 +1492,7 @@ class DspyService:
         failed_count = len([p for p in pair_results if p.error is not None])
         pair_token_counts = [p.total_tokens for p in pair_results if p.total_tokens is not None]
         grid_total_tokens = sum(pair_token_counts) if pair_token_counts else None
+        grid_usage_by_model = _merge_usage_rows([row for p in pair_results for row in p.usage_by_model])
 
         logger.info(
             "Grid search finished: %d/%d completed, %d failed, best=%s (%.1fs total)",
@@ -1477,6 +1532,7 @@ class DspyService:
             best_pair=best_pair,
             runtime_seconds=round(grid_runtime, 2),
             total_tokens=grid_total_tokens,
+            usage_by_model=grid_usage_by_model,
             guarantee=guarantee,
         )
 

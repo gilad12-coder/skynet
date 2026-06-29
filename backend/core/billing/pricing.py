@@ -30,7 +30,8 @@ CREDIT_USD_VALUE = 0.01
 # This is the single re-priceable margin lever for runs (it replaces the markup
 # that used to be implicit in the flat token→credit rate). Tune here; keep it in
 # step with the Stripe metered per-unit price so ledger and invoice agree.
-MARKUP = 1.4
+# 1.5× nets ~42% gross margin after OpenRouter's 5.5% deposit fee.
+MARKUP = 1.5
 
 # Fallback per-token cost (USD) for a model LiteLLM does not price — a mid-tier
 # standard rate so an unknown model estimates and charges sanely rather than at
