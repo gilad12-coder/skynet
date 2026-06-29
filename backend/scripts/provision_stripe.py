@@ -108,6 +108,49 @@ def _ensure_meter(event_name: str) -> str | None:
         return None
 
 
+def _ensure_metered_price(lookup_key: str, name: str, unit_amount: int, meter_id: str) -> str:
+    """Return a metered price bound to ``meter_id``, rebinding on a meter cutover.
+
+    A metered price is permanently tied to one meter, so changing
+    ``STRIPE_METER_EVENT_NAME`` (a new meter) requires a fresh price — reusing the
+    existing one by ``lookup_key`` would leave overage billing pointed at the old
+    meter. When the price found under ``lookup_key`` aggregates a different meter,
+    the new price is created with ``transfer_lookup_key`` so Stripe atomically
+    moves the key onto it; the old price is left active and bound to the old meter
+    so in-flight subscriptions keep billing until they are migrated off it (it is
+    also the default price of its product, which Stripe refuses to archive). An
+    already-correct price is reused unchanged.
+
+    Args:
+        lookup_key: Stable idempotency key for the metered price.
+        name: Product display name used when a new price is created.
+        unit_amount: Price per metered unit in cents.
+        meter_id: Billing Meter id the price must aggregate.
+
+    Returns:
+        The Stripe price id bound to ``meter_id``.
+    """
+    params: dict = {
+        "currency": "usd",
+        "unit_amount": unit_amount,
+        "lookup_key": lookup_key,
+        "product_data": {"name": name},
+        "recurring": {"interval": "month", "usage_type": "metered", "meter": meter_id},
+    }
+    existing = stripe.Price.list(lookup_keys=[lookup_key], active=True, limit=1)
+    if existing.data:
+        price = existing.data[0]
+        bound = price.recurring.get("meter") if price.recurring else None
+        if bound == meter_id:
+            print(f"  reuse  {lookup_key} -> {price.id}")
+            return price.id
+        params["transfer_lookup_key"] = True
+        print(f"  rebind {lookup_key}: moving key off {price.id} (was meter {bound})")
+    price = stripe.Price.create(**params)
+    print(f"  create {lookup_key} -> {price.id}")
+    return price.id
+
+
 def main() -> int:
     """Provision every Stripe price + meter and print the env lines to set.
 
@@ -132,12 +175,7 @@ def main() -> int:
     meter_id = _ensure_meter(settings.stripe_meter_event_name)
     metered_id = None
     if meter_id:
-        metered_id = _ensure_price(
-            _METERED[0],
-            _METERED[1],
-            _METERED[2],
-            recurring={"interval": "month", "usage_type": "metered", "meter": meter_id},
-        )
+        metered_id = _ensure_metered_price(_METERED[0], _METERED[1], _METERED[2], meter_id)
 
     print("\nDone. Paste these into backend/.env:\n")
     print(f"STRIPE_PRICE_PACK_STARTER={pack_ids['skynet_pack_starter']}")
