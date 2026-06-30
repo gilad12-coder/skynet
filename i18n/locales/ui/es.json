@@ -41,6 +41,7 @@
   "billing.plans.free.f2": "Ejecuta cualquier modelo del catálogo",
   "billing.plans.free.f3": "Prueba de antes y después en cada ejecución",
   "billing.plans.free.f4": "Historial de versiones completo",
+  "billing.plans.free.f5": "Sin mejora, sin cargo en tu primera ejecución",
   "billing.plans.free.headline": "Empieza a optimizar",
   "billing.plans.free.included": "Incluido",
   "billing.plans.free.name": "Gratis",

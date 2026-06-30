@@ -41,6 +41,7 @@
   "billing.plans.free.f2": "카탈로그의 모든 모델 실행",
   "billing.plans.free.f3": "모든 실행에 전후 비교 증명",
   "billing.plans.free.f4": "전체 버전 기록",
+  "billing.plans.free.f5": "첫 실행은 향상 없으면 청구 없음",
   "billing.plans.free.headline": "최적화 시작하기",
   "billing.plans.free.included": "포함됨",
   "billing.plans.free.name": "무료",

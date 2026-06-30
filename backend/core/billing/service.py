@@ -921,9 +921,10 @@ class StripeBillingService:
     ) -> int:
         """Apply the "No lift, no charge" guarantee to a finished run.
 
-        The guarantee is a Premium benefit: only an account with an active
-        subscription is eligible. A free account bills normally and never claims
-        the slot, so its one covered run travels with it if it later subscribes.
+        The guarantee is available to everyone, but coverage depth is the Premium
+        differentiator: a **Premium** account is covered on the first run of every
+        task, while a **free** account gets a single **lifetime** guarantee — its
+        first covered run only — after which its runs bill normally.
 
         Only the **first** run per ``(username, task_fingerprint)`` is covered:
         an atomic insert claims that one-time slot, so a redelivered or re-run
@@ -958,11 +959,23 @@ class StripeBillingService:
         if not username or not task_fingerprint:
             return 0
         with Session(self._engine) as session:
-            # Premium-gated: a run on a free account is billed normally and never
-            # claims the one-time slot, so the cover survives a later upgrade.
+            # Premium is covered per task; a free account gets one lifetime slot,
+            # so a non-subscriber that already holds any slot bills normally from
+            # then on. A subscriber skips this cap and only collides (below) on a
+            # re-run of the same task.
             customer = session.get(BillingCustomerModel, username)
-            if customer is None or customer.subscription_status not in _ACTIVE_SUBSCRIPTION_STATUSES:
-                return 0
+            is_premium = (
+                customer is not None
+                and customer.subscription_status in _ACTIVE_SUBSCRIPTION_STATUSES
+            )
+            if not is_premium:
+                prior = (
+                    session.query(GuaranteeRunModel)
+                    .filter(GuaranteeRunModel.username == username)
+                    .first()
+                )
+                if prior is not None:
+                    return 0
             session.add(
                 GuaranteeRunModel(
                     username=username,
@@ -972,8 +985,8 @@ class StripeBillingService:
             )
             try:
                 # Flush the claim alone so a re-run's PK collision surfaces here
-                # (this account already spent its covered run on this task) and we
-                # bail before touching the ledger.
+                # (this account already spent this task's covered run) and we bail
+                # before touching the ledger.
                 session.flush()
             except IntegrityError:
                 session.rollback()

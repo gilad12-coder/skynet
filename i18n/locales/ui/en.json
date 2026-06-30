@@ -1753,6 +1753,7 @@
   "billing.plans.free.f2": "Run any model in the catalog",
   "billing.plans.free.f3": "Before/after proof on every run",
   "billing.plans.free.f4": "Full version history",
+  "billing.plans.free.f5": "No lift, no charge on your first run",
   "billing.plans.free.headline": "Start optimizing",
   "billing.plans.free.included": "Included",
   "billing.plans.free.name": "Free",

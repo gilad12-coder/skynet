@@ -41,6 +41,7 @@
   "billing.plans.free.f2": "カタログ内の任意のモデルを実行",
   "billing.plans.free.f3": "実行ごとにビフォー/アフターの証明",
   "billing.plans.free.f4": "完全なバージョン履歴",
+  "billing.plans.free.f5": "初回実行は改善がなければ課金なし",
   "billing.plans.free.headline": "最適化を始める",
   "billing.plans.free.included": "含まれる内容",
   "billing.plans.free.name": "無料",

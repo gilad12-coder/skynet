@@ -41,6 +41,7 @@
   "billing.plans.free.f2": "运行目录中的任意模型",
   "billing.plans.free.f3": "每次运行均提供前后对比验证",
   "billing.plans.free.f4": "完整版本历史",
+  "billing.plans.free.f5": "首次运行无提升不收费",
   "billing.plans.free.headline": "开始优化",
   "billing.plans.free.included": "已包含",
   "billing.plans.free.name": "免费版",

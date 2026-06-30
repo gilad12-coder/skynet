@@ -41,6 +41,7 @@
   "billing.plans.free.f2": "Katalogdaki herhangi bir modeli çalıştır",
   "billing.plans.free.f3": "Her çalıştırmada önce/sonra kanıtı",
   "billing.plans.free.f4": "Tam sürüm geçmişi",
+  "billing.plans.free.f5": "İlk çalıştırmada iyileşme yoksa ücret yok",
   "billing.plans.free.headline": "Optimize etmeye başla",
   "billing.plans.free.included": "Dahil",
   "billing.plans.free.name": "Ücretsiz",

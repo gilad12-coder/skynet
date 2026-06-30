@@ -613,27 +613,51 @@ def test_guarantee_billed_when_no_comparable_scores(engine: object) -> None:
         assert session.get(GuaranteeRunModel, ("u@x.com", "task-none")) is not None
 
 
-def test_guarantee_skipped_for_free_account(engine: object) -> None:
-    """A non-subscriber's no-lift run is billed normally and never claims the slot.
+def test_guarantee_covers_free_account_once(engine: object) -> None:
+    """A free account gets one lifetime guarantee; a later run bills normally.
 
-    The guarantee is Premium-only: without an active subscription adjudication
-    refunds nothing and leaves the one-time slot unclaimed, so the cover travels
-    with the account if it later subscribes.
+    The no-lift refund is available to everyone, but a non-subscriber claims at
+    most one slot ever — its first covered run. A second run, even on a new task,
+    is billed and never claims a second slot.
     """
     service = StripeBillingService(engine=engine)
-    refunded = service.adjudicate_guarantee(
-        "free@x.com",
-        "task-free",
-        "opt-1",
-        _lift(0.7, 0.7),
-        token_source=TOKEN_SOURCE_MANAGED,
-        usages=_usages(200_000),
-        model=None,
+    _seed_customer(engine, "free@x.com")  # a row, but no active subscription
+    usages = _usages(200_000)
+    first = service.adjudicate_guarantee(
+        "free@x.com", "task-one", "opt-1", _lift(0.7, 0.7),
+        token_source=TOKEN_SOURCE_MANAGED, usages=usages, model=None,
         description="No lift — refunded",
     )
-    assert refunded == 0
+    assert first == credits_for_usage(usages)
+    second = service.adjudicate_guarantee(
+        "free@x.com", "task-two", "opt-2", _lift(0.5, 0.5),
+        token_source=TOKEN_SOURCE_MANAGED, usages=usages, model=None,
+        description="No lift — refunded",
+    )
+    assert second == 0
     with Session(engine) as session:
-        assert session.get(GuaranteeRunModel, ("free@x.com", "task-free")) is None
+        rows = session.query(GuaranteeRunModel).filter_by(username="free@x.com").all()
+        assert len(rows) == 1
+        assert rows[0].task_fingerprint == "task-one"
+
+
+def test_guarantee_covers_premium_account_on_each_new_task(engine: object) -> None:
+    """Premium is covered on the first run of every task, not one lifetime run."""
+    service = StripeBillingService(engine=engine)
+    _seed_premium(engine, "pro@x.com")
+    usages = _usages(200_000)
+    a = service.adjudicate_guarantee(
+        "pro@x.com", "task-a", "opt-a", _lift(0.7, 0.7),
+        token_source=TOKEN_SOURCE_MANAGED, usages=usages, model=None,
+        description="No lift — refunded",
+    )
+    b = service.adjudicate_guarantee(
+        "pro@x.com", "task-b", "opt-b", _lift(0.5, 0.5),
+        token_source=TOKEN_SOURCE_MANAGED, usages=usages, model=None,
+        description="No lift — refunded",
+    )
+    assert a == credits_for_usage(usages)
+    assert b == credits_for_usage(usages)  # a second task is still covered on Premium
 
 
 def test_debit_run_byok_charges_only_platform_fee(engine: object) -> None:
