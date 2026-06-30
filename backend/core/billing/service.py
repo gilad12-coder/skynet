@@ -921,6 +921,10 @@ class StripeBillingService:
     ) -> int:
         """Apply the "No lift, no charge" guarantee to a finished run.
 
+        The guarantee is a Premium benefit: only an account with an active
+        subscription is eligible. A free account bills normally and never claims
+        the slot, so its one covered run travels with it if it later subscribes.
+
         Only the **first** run per ``(username, task_fingerprint)`` is covered:
         an atomic insert claims that one-time slot, so a redelivered or re-run
         job — and every later run on the same task — bills normally and returns
@@ -954,6 +958,11 @@ class StripeBillingService:
         if not username or not task_fingerprint:
             return 0
         with Session(self._engine) as session:
+            # Premium-gated: a run on a free account is billed normally and never
+            # claims the one-time slot, so the cover survives a later upgrade.
+            customer = session.get(BillingCustomerModel, username)
+            if customer is None or customer.subscription_status not in _ACTIVE_SUBSCRIPTION_STATUSES:
+                return 0
             session.add(
                 GuaranteeRunModel(
                     username=username,

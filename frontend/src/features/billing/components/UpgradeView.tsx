@@ -232,9 +232,7 @@ function PremiumCard({
 
   const features: Feature[] = [
     { label: msg("billing.plans.premium.everything_free"), header: true },
-    { label: msg("billing.plans.premium.f1") },
     { label: msg("billing.founders.stack_guarantee") },
-    { label: msg("billing.founders.stack_serving") },
     {
       label: formatMsg("billing.founders.stack_credits", {
         p1: formatCredits(PREMIUM_MONTHLY_CREDITS, locale),

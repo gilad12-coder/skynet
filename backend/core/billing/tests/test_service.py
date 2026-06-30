@@ -84,6 +84,28 @@ def _seed_customer(engine: object, username: str) -> None:
         session.commit()
 
 
+def _seed_premium(engine: object, username: str) -> None:
+    """Insert an active-subscription billing row so the account is Premium-eligible.
+
+    The no-lift guarantee is a Premium benefit, so guarantee tests seed an active
+    subscriber here; a plain :func:`_seed_customer` row is a free account.
+
+    Args:
+        engine: The SQLite engine to write to.
+        username: Account to mark as an active Premium subscriber.
+    """
+    with Session(engine) as session:
+        session.add(
+            BillingCustomerModel(
+                username=username,
+                stripe_customer_id=f"cus_{username}",
+                credit_balance=0,
+                subscription_status="active",
+            )
+        )
+        session.commit()
+
+
 def test_report_run_usage_noop_when_stripe_unconfigured(engine: object, monkeypatch: pytest.MonkeyPatch) -> None:
     """No meter event is pushed when no Stripe secret key is configured."""
     monkeypatch.setattr(settings, "stripe_secret_key", None)
@@ -455,11 +477,12 @@ def test_platform_fee_is_a_floor_and_fraction_of_cost() -> None:
 def test_guarantee_refunds_full_run_on_no_lift_managed(engine: object) -> None:
     """A managed first run with no lift is fully refunded and the slot is flagged."""
     service = StripeBillingService(engine=engine)
+    _seed_premium(engine, "u@x.com")
     usages = _usages(200_000)
     expected = credits_for_usage(usages)
     # Debit first (mirrors the worker's debit before adjudication).
     service.debit_run("u@x.com", usages, model="m1", description="r")
-    assert _balance(engine, "u@x.com")[0] == FREE_GRANT_CREDITS - expected
+    assert _balance(engine, "u@x.com")[0] == PREMIUM_GRANT_CREDITS - expected
     refunded = service.adjudicate_guarantee(
         "u@x.com",
         "task-abc",
@@ -471,7 +494,7 @@ def test_guarantee_refunds_full_run_on_no_lift_managed(engine: object) -> None:
         description="No lift — refunded",
     )
     assert refunded == expected
-    assert _balance(engine, "u@x.com")[0] == FREE_GRANT_CREDITS  # restored
+    assert _balance(engine, "u@x.com")[0] == PREMIUM_GRANT_CREDITS  # restored
     with Session(engine) as session:
         claim = session.get(GuaranteeRunModel, ("u@x.com", "task-abc"))
         assert claim is not None
@@ -483,6 +506,7 @@ def test_guarantee_refunds_full_run_on_no_lift_managed(engine: object) -> None:
 def test_guarantee_refunds_only_platform_fee_on_byok_no_lift(engine: object) -> None:
     """A BYOK no-lift run refunds only Skynet's platform fee, not provider tokens."""
     service = StripeBillingService(engine=engine)
+    _seed_premium(engine, "u@x.com")
     usages = _usages(200_000)
     refunded = service.adjudicate_guarantee(
         "u@x.com",
@@ -501,6 +525,7 @@ def test_guarantee_refunds_only_platform_fee_on_byok_no_lift(engine: object) -> 
 def test_guarantee_no_refund_when_run_has_lift(engine: object) -> None:
     """Any improvement on the basis counts as lift — the run stays billed."""
     service = StripeBillingService(engine=engine)
+    _seed_premium(engine, "u@x.com")
     refunded = service.adjudicate_guarantee(
         "u@x.com",
         "task-lift",
@@ -522,6 +547,7 @@ def test_guarantee_no_refund_when_run_has_lift(engine: object) -> None:
 def test_guarantee_only_covers_first_run_per_task(engine: object) -> None:
     """A re-run on the same task bills regardless — only the first run is covered."""
     service = StripeBillingService(engine=engine)
+    _seed_premium(engine, "u@x.com")
     usages = _usages(200_000)
     first = service.adjudicate_guarantee(
         "u@x.com",
@@ -554,6 +580,7 @@ def test_guarantee_only_covers_first_run_per_task(engine: object) -> None:
 def test_guarantee_valset_basis_judges_lift(engine: object) -> None:
     """The valset fallback basis is honored when no test split was reserved."""
     service = StripeBillingService(engine=engine)
+    _seed_premium(engine, "u@x.com")
     refunded = service.adjudicate_guarantee(
         "u@x.com",
         "task-val",
@@ -570,6 +597,7 @@ def test_guarantee_valset_basis_judges_lift(engine: object) -> None:
 def test_guarantee_billed_when_no_comparable_scores(engine: object) -> None:
     """A run with no guarantee block still spends its slot but is not refunded."""
     service = StripeBillingService(engine=engine)
+    _seed_premium(engine, "u@x.com")
     refunded = service.adjudicate_guarantee(
         "u@x.com",
         "task-none",
@@ -583,6 +611,29 @@ def test_guarantee_billed_when_no_comparable_scores(engine: object) -> None:
     assert refunded == 0
     with Session(engine) as session:
         assert session.get(GuaranteeRunModel, ("u@x.com", "task-none")) is not None
+
+
+def test_guarantee_skipped_for_free_account(engine: object) -> None:
+    """A non-subscriber's no-lift run is billed normally and never claims the slot.
+
+    The guarantee is Premium-only: without an active subscription adjudication
+    refunds nothing and leaves the one-time slot unclaimed, so the cover travels
+    with the account if it later subscribes.
+    """
+    service = StripeBillingService(engine=engine)
+    refunded = service.adjudicate_guarantee(
+        "free@x.com",
+        "task-free",
+        "opt-1",
+        _lift(0.7, 0.7),
+        token_source=TOKEN_SOURCE_MANAGED,
+        usages=_usages(200_000),
+        model=None,
+        description="No lift — refunded",
+    )
+    assert refunded == 0
+    with Session(engine) as session:
+        assert session.get(GuaranteeRunModel, ("free@x.com", "task-free")) is None
 
 
 def test_debit_run_byok_charges_only_platform_fee(engine: object) -> None:
