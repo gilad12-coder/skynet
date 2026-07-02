@@ -445,14 +445,51 @@ class GenerateMetricCode(dspy.Signature):
     )
 
 
-class GenerateSeedMessage(dspy.Signature):
-    """Write a short Hebrew chat reply describing what was generated.
+_LOCALE_LANGUAGE_NAMES = {
+    "ar": "Arabic",
+    "de": "German",
+    "en": "English",
+    "es": "Spanish",
+    "fa": "Persian",
+    "fr": "French",
+    "he": "Hebrew",
+    "hi": "Hindi",
+    "it": "Italian",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "tr": "Turkish",
+    "uk": "Ukrainian",
+    "yue": "Cantonese",
+    "zh": "Chinese",
+}
 
-    Respond in one or two short, friendly Hebrew sentences explaining what
-    the Signature and Metric actually do, grounded in the code just
-    produced. No code, no markdown, no English. Addressed to a
-    non-technical user. Keep the terms ``Signature`` and ``Metric`` in
-    English (they are product terms); everything else must be Hebrew.
+
+def _reply_language(locale: str | None) -> str:
+    """Resolve a UI locale code to the language name the agent replies in.
+
+    Args:
+        locale: UI locale code sent by the client (e.g. ``he``, ``en-GB``,
+            ``zh-Hans``), or None when the client sent none.
+
+    Returns:
+        An English language name (e.g. ``"Hebrew"``). Unknown or missing
+        locales fall back to Hebrew, the product's base language.
+    """
+    primary = (locale or "").split("-", 1)[0].strip().lower()
+    return _LOCALE_LANGUAGE_NAMES.get(primary, "Hebrew")
+
+
+class GenerateSeedMessage(dspy.Signature):
+    """Write a short chat reply describing what was generated.
+
+    Respond in one or two short, friendly sentences — written in the
+    language named by ``reply_language`` — explaining what the Signature
+    and Metric actually do, grounded in the code just produced. No code,
+    no markdown. Addressed to a non-technical user. Keep the terms
+    ``Signature`` and ``Metric`` in English (they are product terms);
+    everything else must be in the reply language.
     """
 
     dataset_columns: list[str] = dspy.InputField(desc="Every column name in the dataset.")
@@ -467,12 +504,15 @@ class GenerateSeedMessage(dspy.Signature):
     )
     signature_code: str = dspy.InputField(desc="The Signature code just produced.")
     metric_code: str = dspy.InputField(desc="The metric code just produced.")
+    reply_language: str = dspy.InputField(
+        desc="Language to write the reply in (the product UI language).",
+    )
 
     assistant_message: str = dspy.OutputField(
         desc=(
-            "One or two short Hebrew sentences for the user. No code, no "
-            "markdown, no English (except the product terms ``Signature`` "
-            "and ``Metric``, which stay in English)."
+            "One or two short sentences for the user, written in "
+            "reply_language. No code, no markdown; only the product terms "
+            "``Signature`` and ``Metric`` stay in English."
         ),
     )
 
@@ -550,23 +590,27 @@ class GenerateWorkflowGraph(dspy.Signature):
 
 
 class GenerateWorkflowSeedMessage(dspy.Signature):
-    """Write a short Hebrew chat reply describing the drafted workflow.
+    """Write a short chat reply describing the drafted workflow.
 
-    Respond in one to three short, friendly Hebrew sentences explaining
-    the pipeline that was just drafted — name what each step does and what
-    the Metric scores, grounded in the actual graph. No code, no markdown,
-    no English. Keep the terms ``Signature``, ``Metric`` and ``Workflow``
-    in English (product terms); everything else must be Hebrew.
+    Respond in one to three short, friendly sentences — written in the
+    language named by ``reply_language`` — explaining the pipeline that
+    was just drafted: name what each step does and what the Metric scores,
+    grounded in the actual graph. No code, no markdown. Keep the terms
+    ``Signature``, ``Metric`` and ``Workflow`` in English (product terms);
+    everything else must be in the reply language.
     """
 
     workflow_json: str = dspy.InputField(desc="The workflow graph JSON just produced.")
     metric_code: str = dspy.InputField(desc="The metric code just produced.")
+    reply_language: str = dspy.InputField(
+        desc="Language to write the reply in (the product UI language).",
+    )
 
     assistant_message: str = dspy.OutputField(
         desc=(
-            "One to three short Hebrew sentences for the user. No code, no "
-            "markdown, no English (except the product terms Signature, "
-            "Metric and Workflow, which stay in English)."
+            "One to three short sentences for the user, written in "
+            "reply_language. No code, no markdown; only the product terms "
+            "Signature, Metric and Workflow stay in English."
         ),
     )
 
@@ -688,11 +732,12 @@ class CodeAssistant(dspy.Signature):
 
     ## Reply format
 
-    Reply in Hebrew by default — the product UI is Hebrew. Switch to the
-    user's language ONLY if their latest message is clearly in another
-    language. Keep product terms like ``Signature``, ``Metric``,
-    ``InputField``, ``OutputField`` in English; prose around them is
-    Hebrew. Plain prose. No markdown headings, no bullet lists, no code
+    Write the reply in the language named by ``reply_language`` — that is
+    the product's configured UI language. Switch to the user's language
+    ONLY if their latest message is clearly in another language. Keep
+    product terms like ``Signature``, ``Metric``, ``InputField``,
+    ``OutputField`` in English; the prose around them follows the reply
+    language. Plain prose. No markdown headings, no bullet lists, no code
     fences. 2-5 sentences for explanations, 1-2 for confirmations.
 
     When you DO edit, pass the COMPLETE replacement file body — not a
@@ -751,6 +796,12 @@ class CodeAssistant(dspy.Signature):
     chat_history: str = dspy.InputField(
         desc="Prior conversation turns as a JSON list of {role, content} objects.",
     )
+    reply_language: str = dspy.InputField(
+        desc=(
+            "Language for user-facing prose (the product UI language). "
+            "Both ``reply`` and every tool ``reason`` are written in it."
+        ),
+    )
     user_message: str = dspy.InputField(desc="The user's latest message.")
 
     reply: str = dspy.OutputField(
@@ -758,12 +809,11 @@ class CodeAssistant(dspy.Signature):
             "Reply to the user. For questions/explanations, ground it in "
             "the literal current_signature / current_metric code — name "
             "the fields and quote the comparison. 2-5 sentences. For "
-            "edit confirmations, 1-2 sentences. Hebrew by default (the "
-            "product UI is Hebrew); mirror the user's language only if "
-            "their message is clearly in another language. Keep product "
-            "terms (Signature, Metric, InputField, OutputField, Python "
-            "identifiers) in English. Plain prose, no markdown, no code "
-            "fences."
+            "edit confirmations, 1-2 sentences. Written in reply_language; "
+            "mirror the user's language only if their message is clearly "
+            "in another language. Keep product terms (Signature, Metric, "
+            "InputField, OutputField, Python identifiers) in English. "
+            "Plain prose, no markdown, no code fences."
         ),
     )
 
@@ -810,11 +860,12 @@ class WorkflowAssistant(dspy.Signature):
 
     ## Reply format
 
-    Reply in Hebrew by default — the product UI is Hebrew. Switch to the
-    user's language ONLY if their latest message is clearly in another
-    language. Keep product terms (Signature, Metric, Workflow, node ids,
-    field names) in English. Plain prose, no markdown, no code fences.
-    2-5 sentences for explanations, 1-2 for edit confirmations.
+    Write the reply in the language named by ``reply_language`` — that is
+    the product's configured UI language. Switch to the user's language
+    ONLY if their latest message is clearly in another language. Keep
+    product terms (Signature, Metric, Workflow, node ids, field names) in
+    English. Plain prose, no markdown, no code fences. 2-5 sentences for
+    explanations, 1-2 for edit confirmations.
     """
 
     __doc__ = (__doc__ or "") + _WORKFLOW_JSON_SCHEMA_DOC
@@ -848,14 +899,20 @@ class WorkflowAssistant(dspy.Signature):
     chat_history: str = dspy.InputField(
         desc="Prior conversation turns as a JSON list of {role, content} objects.",
     )
+    reply_language: str = dspy.InputField(
+        desc=(
+            "Language for user-facing prose (the product UI language). "
+            "Both ``reply`` and every tool ``reason`` are written in it."
+        ),
+    )
     user_message: str = dspy.InputField(desc="The user's latest message.")
 
     reply: str = dspy.OutputField(
         desc=(
             "Reply to the user, grounded in the literal graph — name node "
-            "ids and fields. Hebrew by default; mirror the user's language "
-            "only if clearly different. Product terms stay in English. "
-            "Plain prose, no markdown. 2-5 sentences."
+            "ids and fields. Written in reply_language; mirror the user's "
+            "language only if clearly different. Product terms stay in "
+            "English. Plain prose, no markdown. 2-5 sentences."
         ),
     )
 
@@ -1286,6 +1343,7 @@ async def _run_seed(
     column_roles_json: str,
     column_kinds_json: str,
     sample_rows_json: str,
+    reply_language: str,
     queue: asyncio.Queue[dict | None],
 ) -> dict[str, Any]:
     """Run the non-agentic seed: Signature + metric in parallel, then intro.
@@ -1302,6 +1360,7 @@ async def _run_seed(
         column_roles_json: JSON string mapping column → role.
         column_kinds_json: JSON string mapping input column → kind (text/image).
         sample_rows_json: JSON-encoded list of representative sample rows.
+        reply_language: Language name the intro message is written in.
         queue: SSE event queue to push token events onto.
 
     Returns:
@@ -1410,6 +1469,7 @@ async def _run_seed(
             sample_rows=sample_rows_json,
             signature_code=results["signature_code"],
             metric_code=results["metric_code"],
+            reply_language=reply_language,
         ):
             if isinstance(chunk, dspy.streaming.StreamResponse):
                 if chunk.signature_field_name == "assistant_message":
@@ -1506,11 +1566,11 @@ class _CodeEditSession:
         the edit is rejected and the observation returns the error message
         so you can fix the code and try again in the next iteration.
 
-        ``reason`` must be HEBREW prose (≤10 words); product terms like
+        ``reason`` must be prose in the reply language — the ``reply_language`` input (≤10 words); product terms like
         Signature/Metric may stay in English.
 
         Args:
-            reason: Short Hebrew rationale for the edit.
+            reason: Short rationale for the edit, in the reply language.
             new_code: Complete replacement Signature class body.
 
         Returns:
@@ -1584,12 +1644,12 @@ class _CodeEditSession:
         the edit is rejected and the observation returns the error message
         so you can fix the code and try again in the next iteration.
 
-        ``reason`` must be HEBREW prose (≤10 words); product terms like
+        ``reason`` must be prose in the reply language — the ``reply_language`` input (≤10 words); product terms like
         Signature/Metric may stay in English. ``new_code`` must return
         ``dspy.Prediction(score=..., feedback=...)``.
 
         Args:
-            reason: Short Hebrew rationale for the edit.
+            reason: Short rationale for the edit, in the reply language.
             new_code: Complete replacement metric function body.
 
         Returns:
@@ -1773,11 +1833,11 @@ class _WorkflowEditSession:
         starts unwired: follow up with ``connect`` calls for every input
         port and for whatever consumes its outputs, before ``finish``.
 
-        ``reason`` must be HEBREW prose (≤10 words); product terms may stay
+        ``reason`` must be prose in the reply language — the ``reply_language`` input (≤10 words); product terms may stay
         in English.
 
         Args:
-            reason: Short Hebrew rationale for the edit.
+            reason: Short rationale for the edit, in the reply language.
             node_json: The complete node object as JSON.
 
         Returns:
@@ -1824,10 +1884,10 @@ class _WorkflowEditSession:
         Use for editing a signature node's code, a transform's code/fields,
         or an anchor's field list. The id and kind must not change.
 
-        ``reason`` must be HEBREW prose (≤10 words).
+        ``reason`` must be prose in the reply language — the ``reply_language`` input (≤10 words).
 
         Args:
-            reason: Short Hebrew rationale for the edit.
+            reason: Short rationale for the edit, in the reply language.
             node_id: Id of the node to replace.
             node_json: The complete replacement node object as JSON.
 
@@ -1872,10 +1932,10 @@ class _WorkflowEditSession:
     def remove_node(self, reason: str, node_id: str) -> str:
         """Delete a non-anchor node and every edge touching it.
 
-        ``reason`` must be HEBREW prose (≤10 words).
+        ``reason`` must be prose in the reply language — the ``reply_language`` input (≤10 words).
 
         Args:
-            reason: Short Hebrew rationale for the edit.
+            reason: Short rationale for the edit, in the reply language.
             node_id: Id of the node to delete.
 
         Returns:
@@ -1908,10 +1968,10 @@ class _WorkflowEditSession:
         """Add an edge from a node's output port to another node's input port.
 
         The target port must not already be fed, and the edge must not
-        close a cycle. ``reason`` must be HEBREW prose (≤10 words).
+        close a cycle. ``reason`` must be prose in the reply language — the ``reply_language`` input (≤10 words).
 
         Args:
-            reason: Short Hebrew rationale for the edit.
+            reason: Short rationale for the edit, in the reply language.
             source: Source node id.
             source_port: Output field name on the source node.
             target: Target node id.
@@ -1966,10 +2026,10 @@ class _WorkflowEditSession:
     def disconnect(self, reason: str, source: str, source_port: str, target: str, target_port: str) -> str:
         """Remove the edge between the given ports.
 
-        ``reason`` must be HEBREW prose (≤10 words).
+        ``reason`` must be prose in the reply language — the ``reply_language`` input (≤10 words).
 
         Args:
-            reason: Short Hebrew rationale for the edit.
+            reason: Short rationale for the edit, in the reply language.
             source: Source node id.
             source_port: Output field name on the source node.
             target: Target node id.
@@ -2008,11 +2068,11 @@ class _WorkflowEditSession:
 
         The new code is validated before it's applied; a failed validation
         rejects the edit and returns the error so you can retry. ``reason``
-        must be HEBREW prose (≤10 words). ``new_code`` must return
+        must be prose in the reply language — the ``reply_language`` input (≤10 words). ``new_code`` must return
         ``dspy.Prediction(score=..., feedback=...)``.
 
         Args:
-            reason: Short Hebrew rationale for the edit.
+            reason: Short rationale for the edit, in the reply language.
             new_code: Complete replacement metric function body.
 
         Returns:
@@ -2050,6 +2110,7 @@ async def _run_agent(
     prior_metric_validation: str,
     initial_signature: str,
     initial_metric: str,
+    reply_language: str,
     queue: asyncio.Queue[dict | None],
 ) -> dict[str, str]:
     """Run a ReAct agent with ``edit_signature`` + ``edit_metric`` tools.
@@ -2079,6 +2140,7 @@ async def _run_agent(
         prior_metric_validation: Latest validator output for the metric.
         initial_signature: Original signature source before any edits this conversation.
         initial_metric: Original metric source before any edits this conversation.
+        reply_language: Language name for the reply and tool rationales.
         queue: SSE event queue receiving lifecycle and token events.
 
     Returns:
@@ -2125,6 +2187,7 @@ async def _run_agent(
         "initial_signature": initial_signature or prior_signature,
         "initial_metric": initial_metric or prior_metric,
         "chat_history": chat_history_json,
+        "reply_language": reply_language,
         "user_message": user_message,
     }
 
@@ -2158,6 +2221,7 @@ async def _run_workflow_seed(
     column_roles_json: str,
     column_kinds_json: str,
     sample_rows_json: str,
+    reply_language: str,
     queue: asyncio.Queue[dict | None],
 ) -> dict[str, Any]:
     """Run the workflow seed: draft the full graph + the metric, then intro.
@@ -2173,6 +2237,7 @@ async def _run_workflow_seed(
         column_roles_json: JSON string mapping column → role.
         column_kinds_json: JSON string mapping input column → kind.
         sample_rows_json: JSON-encoded list of representative sample rows.
+        reply_language: Language name the intro message is written in.
         queue: SSE event queue to push token events onto.
 
     Returns:
@@ -2285,6 +2350,7 @@ async def _run_workflow_seed(
         async for chunk in msg_program(
             workflow_json=json.dumps(results["workflow"] or {}, ensure_ascii=False),
             metric_code=results["metric_code"],
+            reply_language=reply_language,
         ):
             if isinstance(chunk, dspy.streaming.StreamResponse):
                 if chunk.signature_field_name == "assistant_message":
@@ -2306,6 +2372,7 @@ async def _run_workflow_agent(
     prior_workflow: dict,
     prior_metric: str,
     initial_workflow: dict | None,
+    reply_language: str,
     queue: asyncio.Queue[dict | None],
 ) -> dict[str, Any]:
     """Run a ReAct agent with graph tools over the canvas workflow.
@@ -2325,6 +2392,7 @@ async def _run_workflow_agent(
         prior_workflow: Graph spec currently on the canvas.
         prior_metric: Metric source as currently shown in the editor.
         initial_workflow: Original graph before any edits this conversation.
+        reply_language: Language name for the reply and tool rationales.
         queue: SSE event queue receiving lifecycle and token events.
 
     Returns:
@@ -2368,6 +2436,7 @@ async def _run_workflow_agent(
         "current_workflow_validation": workflow_validation or "OK",
         "initial_workflow": json.dumps(initial_workflow or prior_workflow, ensure_ascii=False),
         "chat_history": chat_history_json,
+        "reply_language": reply_language,
         "user_message": user_message,
     }
 
@@ -2416,6 +2485,7 @@ async def _run_code_agent_orchestration(
     initial_metric: str,
     prior_workflow: dict | None,
     initial_workflow: dict | None,
+    reply_language: str,
 ) -> None:
     """Run the seed or chat path and push the terminal envelope into ``queue``.
 
@@ -2442,6 +2512,7 @@ async def _run_code_agent_orchestration(
         prior_metric_validation: Latest metric validator output.
         initial_signature: Original signature source for revert support.
         initial_metric: Original metric source for revert support.
+        reply_language: Language name for all user-facing agent text.
     """
     try:
         if is_seed and prior_workflow is not None:
@@ -2451,6 +2522,7 @@ async def _run_code_agent_orchestration(
                 column_roles_json=column_roles_json,
                 column_kinds_json=column_kinds_json,
                 sample_rows_json=sample_rows_json,
+                reply_language=reply_language,
                 queue=queue,
             )
         elif prior_workflow is not None:
@@ -2464,6 +2536,7 @@ async def _run_code_agent_orchestration(
                 prior_workflow=prior_workflow,
                 prior_metric=prior_metric,
                 initial_workflow=initial_workflow,
+                reply_language=reply_language,
                 queue=queue,
             )
         elif is_seed:
@@ -2473,6 +2546,7 @@ async def _run_code_agent_orchestration(
                 column_roles_json=column_roles_json,
                 column_kinds_json=column_kinds_json,
                 sample_rows_json=sample_rows_json,
+                reply_language=reply_language,
                 queue=queue,
             )
         else:
@@ -2490,6 +2564,7 @@ async def _run_code_agent_orchestration(
                 prior_metric_validation=prior_metric_validation,
                 initial_signature=initial_signature,
                 initial_metric=initial_metric,
+                reply_language=reply_language,
                 queue=queue,
             )
         payload = dict(results)
@@ -2518,6 +2593,7 @@ async def run_code_agent(
     initial_metric: str = "",
     prior_workflow: dict | None = None,
     initial_workflow: dict | None = None,
+    locale: str | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream code-agent events to the UI.
 
@@ -2565,6 +2641,9 @@ async def run_code_agent(
         prior_workflow: Workflow graph currently on the canvas; non-None
             switches to the graph-aware seed/chat paths.
         initial_workflow: Original graph for revert support.
+        locale: UI locale code of the client; sets the language of every
+            user-facing agent string (replies, intro messages, tool
+            rationales). Unknown or missing falls back to Hebrew.
 
     Yields:
         SSE event dicts of shape ``{"event": str, "data": dict}``.
@@ -2597,6 +2676,7 @@ async def run_code_agent(
             initial_metric=initial_metric,
             prior_workflow=prior_workflow,
             initial_workflow=initial_workflow,
+            reply_language=_reply_language(locale),
         )
     )
     try:

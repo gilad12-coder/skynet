@@ -1792,6 +1792,9 @@ export interface CodeAgentRequest {
   // tools).
   prior_workflow?: WorkflowSpec | null;
   initial_workflow?: WorkflowSpec | null;
+  // Active UI locale code; the backend derives the agent's reply language
+  // from it (fallback: Hebrew).
+  locale?: string;
 }
 
 export type CodeAgentToolName =

@@ -14,6 +14,7 @@ import pytest
 
 from core.service_gateway.agents.code import (
     _parse_workflow_json,
+    _reply_language,
     _validate_workflow_dict,
     _WorkflowEditSession,
 )
@@ -185,3 +186,16 @@ def test_validate_workflow_dict_names_broken_node() -> None:
     broken_sig = _linear_spec()
     broken_sig["nodes"][1]["signature_code"] = "class X("
     assert "Node 'step_1'" in _validate_workflow_dict(broken_sig)
+
+
+def test_reply_language_maps_locales_with_hebrew_fallback() -> None:
+    """UI locale codes resolve to language names; unknowns fall back to Hebrew."""
+    assert _reply_language("he") == "Hebrew"
+    assert _reply_language("en") == "English"
+    assert _reply_language("en-GB") == "English"
+    assert _reply_language("fr-CA") == "French"
+    assert _reply_language("zh-Hans") == "Chinese"
+    assert _reply_language("HE") == "Hebrew"
+    assert _reply_language(None) == "Hebrew"
+    assert _reply_language("") == "Hebrew"
+    assert _reply_language("xx") == "Hebrew"

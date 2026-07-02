@@ -5,6 +5,7 @@ import { toast } from "react-toastify";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { streamCodeAgent, type CodeAgentToolName } from "@/shared/lib/api";
+import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import { TERMS } from "@/shared/lib/terms";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
@@ -408,6 +409,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           prior_metric_validation: summarizeValidation(snapshot.metricValidation),
           initial_signature: initialSignature,
           initial_metric: initialMetric,
+          locale: getActiveLocale(),
           ...(isWorkflow
             ? {
                 prior_workflow: priorWorkflow,
