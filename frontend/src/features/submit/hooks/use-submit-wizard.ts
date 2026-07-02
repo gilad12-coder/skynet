@@ -498,9 +498,6 @@ export function useSubmitWizard() {
         const rc = sharedState.react_config as Record<string, unknown>;
         setReactConfig((prev) => {
           const next = { ...prev };
-          if (rc.toolSourceKind === "live_mcp" || rc.toolSourceKind === "dataset_snapshot") {
-            next.toolSourceKind = rc.toolSourceKind;
-          }
           for (const field of ["mcpUrl", "toolFilter"] as const) {
             if (typeof rc[field] === "string") next[field] = rc[field] as string;
           }
@@ -1223,11 +1220,12 @@ export function useSubmitWizard() {
       // React run config — hydrate tool source from the wire model. Scoring is
       // owned by metric_code (hydrated above), so there is no reward to restore.
       // mcp_auth_header is scrubbed from cloned/shared payloads, never present.
+      // The wire `kind` is ignored: the wizard only submits live MCP now, so a
+      // clone of an old dataset-snapshot run re-runs against a live server.
       const ts = payload.tool_source as Record<string, unknown> | undefined;
       if (ts) {
         setReactConfig((prev) => {
           const next = { ...prev };
-          if (ts.kind) next.toolSourceKind = String(ts.kind) as ReactConfig["toolSourceKind"];
           if (ts.mcp_url != null) next.mcpUrl = String(ts.mcp_url);
           if (Array.isArray(ts.tool_filter)) next.toolFilter = ts.tool_filter.join(", ");
           return next;
@@ -1372,7 +1370,7 @@ export function useSubmitWizard() {
         // module is only decided here.
         const needsTools =
           isReact || (isWorkflow && !!workflowSpec && workflowUsesTools(workflowSpec));
-        if (needsTools && reactConfig.toolSourceKind === "live_mcp" && !reactConfig.mcpUrl.trim()) {
+        if (needsTools && !reactConfig.mcpUrl.trim()) {
           if (showToast) toast.error(msg("submit.validation.mcp_url_required"));
           return false;
         }
@@ -1738,11 +1736,7 @@ export function useSubmitWizard() {
     }
     const needsToolSource =
       isReact || (isWorkflow && !!workflowSpec && workflowUsesTools(workflowSpec));
-    if (
-      needsToolSource &&
-      reactConfig.toolSourceKind === "live_mcp" &&
-      !reactConfig.mcpUrl.trim()
-    ) {
+    if (needsToolSource && !reactConfig.mcpUrl.trim()) {
       toast.error(msg("submit.validation.mcp_url_required"));
       // The tool-source config lives on the code step (it appears once the
       // module choice reveals a tool-using run).
@@ -1823,10 +1817,8 @@ export function useSubmitWizard() {
           .map((s) => s.trim())
           .filter(Boolean);
         const tool_source: ToolSource = {
-          kind: reactConfig.toolSourceKind,
-          ...(reactConfig.toolSourceKind === "live_mcp" && reactConfig.mcpUrl.trim()
-            ? { mcp_url: reactConfig.mcpUrl.trim() }
-            : {}),
+          kind: "live_mcp",
+          ...(reactConfig.mcpUrl.trim() ? { mcp_url: reactConfig.mcpUrl.trim() } : {}),
           ...(reactConfig.mcpAuthHeader.trim()
             ? { mcp_auth_header: reactConfig.mcpAuthHeader.trim() }
             : {}),
@@ -1965,11 +1957,7 @@ export function useSubmitWizard() {
 
   const workflowDryRunDisabledReason = !modelConfig.name.trim()
     ? msg("workflow.dryrun.need_model")
-    : isWorkflow &&
-        workflowSpec &&
-        workflowUsesTools(workflowSpec) &&
-        reactConfig.toolSourceKind === "live_mcp" &&
-        !reactConfig.mcpUrl.trim()
+    : isWorkflow && workflowSpec && workflowUsesTools(workflowSpec) && !reactConfig.mcpUrl.trim()
       ? msg("submit.validation.mcp_url_required")
       : null;
 
@@ -1985,10 +1973,8 @@ export function useSubmitWizard() {
         .filter(Boolean);
       const tool_source: ToolSource | undefined = workflowUsesTools(workflowSpec)
         ? {
-            kind: reactConfig.toolSourceKind,
-            ...(reactConfig.toolSourceKind === "live_mcp" && reactConfig.mcpUrl.trim()
-              ? { mcp_url: reactConfig.mcpUrl.trim() }
-              : {}),
+            kind: "live_mcp",
+            ...(reactConfig.mcpUrl.trim() ? { mcp_url: reactConfig.mcpUrl.trim() } : {}),
             ...(reactConfig.mcpAuthHeader.trim()
               ? { mcp_auth_header: reactConfig.mcpAuthHeader.trim() }
               : {}),

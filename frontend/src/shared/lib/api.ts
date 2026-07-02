@@ -757,9 +757,12 @@ export function getTestResults(optimizationId: string) {
  * and reads the body as a Blob rather than JSON.
  */
 export async function downloadProgramExport(optimizationId: string): Promise<void> {
-  const res = await fetchWithAuthRetry(`${apiBase()}/optimizations/${optimizationId}/program-export`, {
-    method: "GET",
-  });
+  const res = await fetchWithAuthRetry(
+    `${apiBase()}/optimizations/${optimizationId}/program-export`,
+    {
+      method: "GET",
+    },
+  );
   if (!res.ok) {
     const parsed = parseError(await res.text().catch(() => ""));
     throw new ApiError(
@@ -1157,10 +1160,9 @@ export async function setTaggerSessionPinned(sessionId: string, pinned: boolean)
 
 /** Delete a saved session. */
 export async function deleteTaggerSession(sessionId: string) {
-  const res = await request<{ id: string; deleted: boolean }>(
-    `/tagging-sessions/${sessionId}`,
-    { method: "DELETE" },
-  );
+  const res = await request<{ id: string; deleted: boolean }>(`/tagging-sessions/${sessionId}`, {
+    method: "DELETE",
+  });
   invalidateCache("/tagging-sessions");
   return res;
 }
@@ -1583,6 +1585,21 @@ export function validateDataset(payload: ValidateDatasetRequest) {
   });
 }
 
+export interface McpProbeResponse {
+  ok: boolean;
+  tool_count: number;
+  tool_names: string[];
+  error: string | null;
+}
+
+/** Check that a live MCP server answers and list its tools (wizard preflight). */
+export function probeMcp(payload: { mcp_url: string; auth_header?: string }) {
+  return request<McpProbeResponse>("/mcp/probe", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function getQueueStatus() {
   return cachedGet<QueueStatusResponse>("/queue", QUEUE_CACHE_MS);
 }
@@ -1932,7 +1949,9 @@ export async function streamCodeAgent(
         assistant_message: String(data.assistant_message ?? ""),
         model: typeof rawModel === "string" && rawModel.length > 0 ? rawModel : null,
         workflow:
-          data.workflow && typeof data.workflow === "object" ? (data.workflow as WorkflowSpec) : null,
+          data.workflow && typeof data.workflow === "object"
+            ? (data.workflow as WorkflowSpec)
+            : null,
         workflowValid: data.workflow_valid !== false,
         // Absent on the chat path → treat as valid; the seed path sends
         // explicit booleans after its validate-and-repair pass.

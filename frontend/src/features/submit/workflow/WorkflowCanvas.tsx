@@ -11,12 +11,14 @@
  * clone hydration, agent ops) bump `specRevision`, which remounts the flow
  * so stale internal state can't survive.
  *
- * Interaction model (mirrors n8n): scroll pans, Ctrl/⌘+scroll and pinch
- * zoom, left-drag box-selects, middle-drag or Space+drag pans. Nodes are
- * added from a context menu (pane right-click, the toolbar "Add node"
- * button, or dropping a half-made connection on empty canvas — the latter
- * auto-wires the new node). Fullscreen portals the whole editor onto
- * `document.body` so no transformed/filtered ancestor can trap it.
+ * Interaction model: scroll (or pinch) zooms, left-drag pans, Shift+drag
+ * box-selects. A single click only selects a node; double-click opens the
+ * inspector, so dragging never accidentally opens configuration. Ctrl/⌘+Z
+ * undoes graph edits (Shift+Z / Y redoes), Ctrl/⌘+C/V copy-paste selected
+ * nodes. Nodes are added from a context menu (pane right-click, the toolbar
+ * "Add node" button, or dropping a half-made connection on empty canvas —
+ * the latter auto-wires the new node). Fullscreen portals the whole editor
+ * onto `document.body` so no transformed/filtered ancestor can trap it.
  *
  * The canvas itself is always LTR — data flows left→right — while inspector
  * chrome follows the page direction.
@@ -175,7 +177,9 @@ function CanvasInner({
 }: Omit<WorkflowCanvasProps, "specRevision">) {
   const { fitView, screenToFlowPosition } = useReactFlow();
   const [fullscreen, setFullscreen] = React.useState(false);
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  // Which node's configuration panel is open. Deliberately decoupled from
+  // canvas selection: single click selects/drags, double-click inspects.
+  const [inspectorId, setInspectorId] = React.useState<string | null>(null);
   const [dryRunOpen, setDryRunOpen] = React.useState(false);
   const [dryRunResult, setDryRunResult] = React.useState<WorkflowDryRunResponse | null>(null);
   const [menu, setMenu] = React.useState<MenuState | null>(null);
@@ -229,6 +233,47 @@ function CanvasInner({
   React.useEffect(() => {
     specRef.current = spec;
   }, [spec]);
+  const nodesRef = React.useRef<CanvasNode[]>([]);
+  React.useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  // Undo/redo over spec snapshots. Every local edit goes through commit();
+  // external replacements (agent ops, clone hydration) bump specRevision and
+  // remount the canvas, which intentionally resets history to that baseline.
+  const pastRef = React.useRef<WorkflowSpec[]>([]);
+  const futureRef = React.useRef<WorkflowSpec[]>([]);
+  // Coalesces bursts with the same key (inspector keystrokes) into one entry.
+  const lastCommitRef = React.useRef<{ key: string; at: number } | null>(null);
+  const commit = React.useCallback(
+    (next: WorkflowSpec, coalesceKey?: string) => {
+      const now = Date.now();
+      const last = lastCommitRef.current;
+      const coalesce = !!coalesceKey && !!last && last.key === coalesceKey && now - last.at < 1200;
+      if (!coalesce) {
+        pastRef.current.push(specRef.current);
+        if (pastRef.current.length > 100) pastRef.current.shift();
+        futureRef.current = [];
+      }
+      lastCommitRef.current = coalesceKey ? { key: coalesceKey, at: now } : null;
+      onSpecChange(next);
+    },
+    [onSpecChange],
+  );
+  const undo = React.useCallback(() => {
+    const prev = pastRef.current.pop();
+    if (!prev) return;
+    futureRef.current.push(specRef.current);
+    lastCommitRef.current = null;
+    onSpecChange(prev);
+  }, [onSpecChange]);
+  const redo = React.useCallback(() => {
+    const next = futureRef.current.pop();
+    if (!next) return;
+    pastRef.current.push(specRef.current);
+    lastCommitRef.current = null;
+    onSpecChange(next);
+  }, [onSpecChange]);
 
   const onNodesChange = React.useCallback(
     (changes: Array<NodeChange<CanvasNode>>) => {
@@ -237,25 +282,17 @@ function CanvasInner({
       );
       if (removals.size > 0) {
         const cur = specRef.current;
-        onSpecChange({
+        commit({
           nodes: cur.nodes.filter(
             (n) => !removals.has(n.id) || n.kind === "input" || n.kind === "output",
           ),
           edges: cur.edges.filter((e) => !removals.has(e.source) && !removals.has(e.target)),
         });
-        setSelectedId((id) => (id && removals.has(id) ? null : id));
+        setInspectorId((id) => (id && removals.has(id) ? null : id));
       }
       setNodes((prev) => applyNodeChanges(changes, prev));
-      const selected = changes.find((c) => c.type === "select" && c.selected);
-      if (selected) setSelectedId((selected as { id: string }).id);
-      const deselected = changes.filter((c) => c.type === "select" && !c.selected);
-      if (deselected.length > 0) {
-        setSelectedId((id) =>
-          deselected.some((c) => (c as { id: string }).id === id) ? null : id,
-        );
-      }
     },
-    [onSpecChange],
+    [commit],
   );
 
   const onEdgesChange = React.useCallback(
@@ -265,14 +302,14 @@ function CanvasInner({
       );
       if (removals.size > 0) {
         const cur = specRef.current;
-        onSpecChange({
+        commit({
           ...cur,
           edges: cur.edges.filter((e) => !removals.has(edgeId(e))),
         });
       }
       setEdges((prev) => applyEdgeChanges(changes, prev));
     },
-    [onSpecChange],
+    [commit],
   );
 
   const isValidConnection: IsValidConnection<Edge> = React.useCallback((conn) => {
@@ -290,7 +327,7 @@ function CanvasInner({
     (conn: Connection) => {
       if (!conn.sourceHandle || !conn.targetHandle) return;
       const cur = specRef.current;
-      onSpecChange({
+      commit({
         ...cur,
         edges: [
           ...cur.edges,
@@ -304,7 +341,7 @@ function CanvasInner({
       });
       setEdges((prev) => addEdge(conn, prev));
     },
-    [onSpecChange],
+    [commit],
   );
 
   // A connection dropped on empty canvas opens the add-node menu at the drop
@@ -334,21 +371,23 @@ function CanvasInner({
     [screenToFlowPosition],
   );
 
-  const onNodeDragStop = React.useCallback(() => {
-    setNodes((prev) => {
+  // Commit dragged positions from the event args — never from inside a
+  // setNodes updater, which React may run during render (setState-in-render).
+  const onNodeDragStop = React.useCallback(
+    (_event: MouseEvent | TouchEvent, _node: CanvasNode, dragged: CanvasNode[]) => {
+      const moved = new Map(dragged.map((n) => [n.id, n.position]));
+      if (moved.size === 0) return;
       const cur = specRef.current;
-      onSpecChange({
+      commit({
         ...cur,
         nodes: cur.nodes.map((n) => {
-          const flowNode = prev.find((fn) => fn.id === n.id);
-          return flowNode
-            ? { ...n, position: { x: flowNode.position.x, y: flowNode.position.y } }
-            : n;
+          const pos = moved.get(n.id);
+          return pos ? { ...n, position: { x: pos.x, y: pos.y } } : n;
         }),
       });
-      return prev;
-    });
-  }, [onSpecChange]);
+    },
+    [commit],
+  );
 
   const addNodeAt = React.useCallback(
     (
@@ -397,10 +436,10 @@ function CanvasInner({
           }
         }
       }
-      onSpecChange({ nodes: [...cur.nodes, node], edges: nextEdges });
-      setSelectedId(node.id);
+      commit({ nodes: [...cur.nodes, node], edges: nextEdges });
+      setInspectorId(node.id);
     },
-    [onSpecChange],
+    [commit],
   );
 
   const duplicateNode = React.useCallback(
@@ -416,47 +455,134 @@ function CanvasInner({
         x: (orig.position?.x ?? 0) + 48,
         y: (orig.position?.y ?? 0) + 48,
       };
-      onSpecChange({ ...cur, nodes: [...cur.nodes, copy] });
-      setSelectedId(copy.id);
+      commit({ ...cur, nodes: [...cur.nodes, copy] });
     },
-    [onSpecChange],
+    [commit],
   );
 
   const updateNode = React.useCallback(
     (next: WorkflowNodeSpec) => {
       const cur = specRef.current;
-      onSpecChange({
-        ...cur,
-        nodes: cur.nodes.map((n) => (n.id === next.id ? next : n)),
-      });
+      commit(
+        {
+          ...cur,
+          nodes: cur.nodes.map((n) => (n.id === next.id ? next : n)),
+        },
+        // Inspector edits arrive per keystroke; fold a burst into one undo step.
+        `update:${next.id}`,
+      );
     },
-    [onSpecChange],
+    [commit],
   );
 
   const deleteNode = React.useCallback(
     (id: string) => {
       const cur = specRef.current;
-      onSpecChange({
+      commit({
         nodes: cur.nodes.filter((n) => n.id !== id),
         edges: cur.edges.filter((e) => e.source !== id && e.target !== id),
       });
-      setSelectedId(null);
+      setInspectorId((open) => (open === id ? null : open));
     },
-    [onSpecChange],
+    [commit],
   );
 
   const deleteEdge = React.useCallback(
     (id: string) => {
       const cur = specRef.current;
-      onSpecChange({ ...cur, edges: cur.edges.filter((e) => edgeId(e) !== id) });
+      commit({ ...cur, edges: cur.edges.filter((e) => edgeId(e) !== id) });
     },
-    [onSpecChange],
+    [commit],
   );
 
   const tidyUp = React.useCallback(() => {
-    onSpecChange(autoLayoutSpec(specRef.current));
+    commit(autoLayoutSpec(specRef.current));
     window.setTimeout(() => fitView({ ...FIT_VIEW, duration: 300 }), 50);
-  }, [onSpecChange, fitView]);
+  }, [commit, fitView]);
+
+  // Clipboard for node copy/paste. Internal edges (both endpoints copied)
+  // come along; ids are re-minted on paste so copies never collide.
+  const clipboardRef = React.useRef<{
+    nodes: WorkflowNodeSpec[];
+    edges: WorkflowSpec["edges"];
+  } | null>(null);
+
+  const copySelection = React.useCallback(() => {
+    const picked = nodesRef.current
+      .filter((n) => n.selected)
+      .map((n) => n.data.spec)
+      .filter((s) => s.kind !== "input" && s.kind !== "output");
+    if (picked.length === 0) return false;
+    const ids = new Set(picked.map((s) => s.id));
+    const cur = specRef.current;
+    clipboardRef.current = JSON.parse(
+      JSON.stringify({
+        nodes: picked,
+        edges: cur.edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
+      }),
+    ) as { nodes: WorkflowNodeSpec[]; edges: WorkflowSpec["edges"] };
+    return true;
+  }, []);
+
+  const pasteClipboard = React.useCallback(() => {
+    const clip = clipboardRef.current;
+    if (!clip || clip.nodes.length === 0) return;
+    const cur = specRef.current;
+    let scratch = cur;
+    const idMap = new Map<string, string>();
+    const copies = clip.nodes.map((n) => {
+      const prefix = n.kind === "signature" ? "step" : n.kind === "mcp" ? "tool" : "transform";
+      const copy = JSON.parse(JSON.stringify(n)) as WorkflowNodeSpec;
+      copy.id = makeNodeId(prefix, scratch);
+      idMap.set(n.id, copy.id);
+      copy.position = { x: (n.position?.x ?? 0) + 48, y: (n.position?.y ?? 0) + 48 };
+      scratch = { ...scratch, nodes: [...scratch.nodes, copy] };
+      return copy;
+    });
+    const copiedEdges = clip.edges.map((e) => ({
+      ...e,
+      source: idMap.get(e.source) ?? e.source,
+      target: idMap.get(e.target) ?? e.target,
+    }));
+    commit({ nodes: [...cur.nodes, ...copies], edges: [...cur.edges, ...copiedEdges] });
+  }, [commit]);
+
+  // Editor shortcuts: Ctrl/⌘+Z undo, Shift+Z / Y redo, C/V copy-paste nodes.
+  // Skips events aimed at text inputs and CodeMirror so their own shortcuts
+  // (including the code editors' undo) still win.
+  React.useEffect(() => {
+    const inTextTarget = (t: EventTarget | null) =>
+      t instanceof HTMLElement &&
+      t.closest("input, textarea, select, [contenteditable=true], .cm-editor") !== null;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || inTextTarget(e.target)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (key === "y") {
+        e.preventDefault();
+        redo();
+      } else if (key === "c") {
+        // Leave real text copying alone.
+        if (window.getSelection()?.isCollapsed === false) return;
+        if (copySelection()) e.preventDefault();
+      } else if (key === "v") {
+        if (clipboardRef.current) {
+          e.preventDefault();
+          pasteClipboard();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undo, redo, copySelection, pasteClipboard]);
+
+  // If an undo or agent change removed the inspected node, close the panel.
+  React.useEffect(() => {
+    setInspectorId((id) => (id && !spec.nodes.some((n) => n.id === id) ? null : id));
+  }, [spec]);
 
   const openMenuAt = React.useCallback(
     (clientX: number, clientY: number, target: MenuTarget) => {
@@ -526,7 +652,14 @@ function CanvasInner({
     [screenToFlowPosition],
   );
 
-  const closeMenu = React.useCallback(() => setMenu(null), []);
+  const onNodeDoubleClick = React.useCallback((_event: React.MouseEvent, node: CanvasNode) => {
+    setInspectorId(node.id);
+  }, []);
+
+  const onPaneClick = React.useCallback(() => {
+    setMenu(null);
+    setInspectorId(null);
+  }, []);
 
   // Dismiss the menu on any pointer-down outside it (capture phase so canvas
   // interactions can't swallow the event first).
@@ -540,18 +673,24 @@ function CanvasInner({
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [menu]);
 
-  // ESC closes the menu first, then exits fullscreen — like a modal stack.
+  // ESC closes the menu first, then the inspector, then exits fullscreen —
+  // like a modal stack.
+  const inspectorOpenRef = React.useRef(false);
   React.useEffect(() => {
-    if (!menu && !fullscreen) return;
+    inspectorOpenRef.current = inspectorId !== null;
+  }, [inspectorId]);
+  React.useEffect(() => {
+    if (!menu && !fullscreen && !inspectorId) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
       if (menuOpenRef.current) setMenu(null);
+      else if (inspectorOpenRef.current) setInspectorId(null);
       else setFullscreen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [menu, fullscreen]);
+  }, [menu, fullscreen, inspectorId]);
 
   // Lock page scroll while the fullscreen overlay is open (portal pattern
   // shared with the trajectory tree).
@@ -580,7 +719,7 @@ function CanvasInner({
     navTimerRef.current = window.setTimeout(() => setNavActive(false), 1000);
   }, []);
 
-  const selectedNode = spec.nodes.find((n) => n.id === selectedId) ?? null;
+  const inspectorNode = spec.nodes.find((n) => n.id === inspectorId) ?? null;
   const inputAnchor = spec.nodes.find((n) => n.kind === "input");
   const inputFieldNames = inputAnchor ? nodePorts(inputAnchor).outputs.map((p) => p.name) : [];
 
@@ -643,7 +782,7 @@ function CanvasInner({
       <div
         className={cn(
           "grid min-h-0 flex-1",
-          selectedNode
+          inspectorNode
             ? fullscreen
               ? "grid-cols-[minmax(0,1fr)_360px]"
               : "grid-cols-[minmax(0,1fr)_320px]"
@@ -664,19 +803,17 @@ function CanvasInner({
             onConnect={onConnect}
             onConnectEnd={onConnectEnd}
             onNodeDragStop={onNodeDragStop}
+            onNodeDoubleClick={onNodeDoubleClick}
             isValidConnection={isValidConnection}
             onPaneContextMenu={onPaneContextMenu}
             onNodeContextMenu={onNodeContextMenu}
             onEdgeContextMenu={onEdgeContextMenu}
-            onPaneClick={closeMenu}
+            onPaneClick={onPaneClick}
             onMoveStart={handleMoveStart}
             onMoveEnd={handleMoveEnd}
             minZoom={0.1}
             maxZoom={3}
-            panOnScroll
-            zoomOnScroll={false}
-            panOnDrag={[1]}
-            selectionOnDrag
+            zoomOnDoubleClick={false}
             snapToGrid
             snapGrid={SNAP_GRID}
             connectionRadius={60}
@@ -695,7 +832,7 @@ function CanvasInner({
                 dir="auto"
                 className="whitespace-nowrap rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] text-muted-foreground/80 shadow-xs backdrop-blur"
               >
-                {msg("workflow.canvas.hint")}
+                {msg("workflow.canvas.gestures")}
               </span>
             </Panel>
             <MiniMap
@@ -716,15 +853,16 @@ function CanvasInner({
             />
           </ReactFlow>
         </div>
-        {selectedNode && (
+        {inspectorNode && (
           <div className="min-h-0 overflow-hidden border-s border-border/40">
             <NodeInspector
-              spec={selectedNode}
-              issues={issuesByNode.get(selectedNode.id) ?? []}
+              onClose={() => setInspectorId(null)}
+              spec={inspectorNode}
+              issues={issuesByNode.get(inspectorNode.id) ?? []}
               onChange={updateNode}
               onDelete={
-                selectedNode.kind !== "input" && selectedNode.kind !== "output"
-                  ? () => deleteNode(selectedNode.id)
+                inspectorNode.kind !== "input" && inspectorNode.kind !== "output"
+                  ? () => deleteNode(inspectorNode.id)
                   : undefined
               }
             />
