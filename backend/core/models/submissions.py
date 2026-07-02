@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .common import ColumnMapping, ModelConfig, OptimizationStatus, OptimizationType, SplitFractions
+from .workflow import WORKFLOW_MODULE_NAME, WorkflowSpec
 
 
 # Where a react run sources its tool roster: a live MCP endpoint or a snapshot
@@ -42,7 +43,22 @@ class _OptimizationRequestBase(BaseModel):
     )
     module_name: str
     module_kwargs: dict[str, Any] = Field(default_factory=dict)
-    signature_code: str
+    signature_code: str | None = Field(
+        default=None,
+        description=(
+            "The single dspy.Signature the module wraps. Required for every module except "
+            "'workflow', whose per-node signatures live inside the workflow spec instead."
+        ),
+    )
+    workflow: WorkflowSpec | None = Field(
+        default=None,
+        description=(
+            "Workflow graph spec. Required when module_name is 'workflow', forbidden otherwise. "
+            "The graph's input-anchor fields are the run's input ports (covered by "
+            "column_mapping.inputs) and its output-anchor fields are the final outputs the "
+            "metric scores (covered by column_mapping.outputs)."
+        ),
+    )
     metric_code: str | None = None
     optimizer_name: str
     optimizer_kwargs: dict[str, Any] = Field(default_factory=dict)
@@ -148,6 +164,31 @@ class _OptimizationRequestBase(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _ensure_module_shape(self) -> _OptimizationRequestBase:
+        """Pair ``module_name`` with the matching program definition.
+
+        Workflow runs carry their signatures per node inside ``workflow``;
+        every other module wraps exactly one top-level ``signature_code``.
+
+        Returns:
+            The validated request instance.
+
+        Raises:
+            ValueError: When a workflow run lacks ``workflow``, a non-workflow
+                run lacks ``signature_code``, or ``workflow`` is supplied for a
+                non-workflow module.
+        """
+        if self.module_name.lower() == WORKFLOW_MODULE_NAME:
+            if self.workflow is None:
+                raise ValueError("workflow is required when module_name is 'workflow'.")
+        else:
+            if self.workflow is not None:
+                raise ValueError("workflow is only valid when module_name is 'workflow'.")
+            if not self.signature_code:
+                raise ValueError("signature_code is required.")
+        return self
+
 
 class RunRequest(_OptimizationRequestBase):
     """Payload for the /run endpoint."""
@@ -174,6 +215,31 @@ class RunRequest(_OptimizationRequestBase):
         """
         if self.metric_code is None:
             raise ValueError("metric_code is required.")
+        return self
+
+    @model_validator(mode="after")
+    def _require_tool_source_for_workflow_tools(self) -> RunRequest:
+        """Require a run-level tool roster when the graph contains tool-using nodes.
+
+        Workflow react and mcp nodes resolve their tools from the run's
+        single ``tool_source`` (optionally narrowed per node), mirroring how
+        a top-level react run sources its roster.
+
+        Returns:
+            The validated request instance.
+
+        Raises:
+            ValueError: When the workflow has react/mcp nodes but no
+                ``tool_source`` is supplied.
+        """
+        if self.workflow is not None and self.tool_source is None:
+            tool_users = [
+                node.id
+                for node in self.workflow.nodes
+                if node.kind == "mcp" or (node.kind == "signature" and node.module_name == "react")
+            ]
+            if tool_users:
+                raise ValueError(f"tool_source is required — these workflow nodes use tools: {tool_users}.")
         return self
 
 
@@ -214,6 +280,8 @@ class GridSearchRequest(_OptimizationRequestBase):
                 when ``reflection_models`` is empty and
                 ``use_all_available_reflection_models`` is false.
         """
+        if self.module_name.lower() == WORKFLOW_MODULE_NAME:
+            raise ValueError("Grid search does not support workflow modules yet — submit via /run.")
         if self.metric_code is None:
             raise ValueError("metric_code is required.")
         if not self.use_all_available_generation_models and not self.generation_models:

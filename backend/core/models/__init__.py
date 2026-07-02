@@ -71,6 +71,20 @@ from .submissions import (
 )
 from .telemetry import JobLogEntry, ProgressEvent
 from .validation import ValidateCodeRequest, ValidateCodeResponse
+from .workflow import (
+    WORKFLOW_MODULE_NAME,
+    WorkflowEdge,
+    WorkflowField,
+    WorkflowInputNode,
+    WorkflowMcpNode,
+    WorkflowNode,
+    WorkflowNodePosition,
+    WorkflowOutputNode,
+    WorkflowSignatureNode,
+    WorkflowSpec,
+    WorkflowTransformNode,
+    workflow_topological_order,
+)
 
 __all__ = [
     "HEALTH_STATUS_OK",
@@ -138,4 +152,16 @@ __all__ = [
     "ValidateCodeResponse",
     "ValidateDatasetRequest",
     "ValidateDatasetResponse",
+    "WORKFLOW_MODULE_NAME",
+    "WorkflowEdge",
+    "WorkflowField",
+    "WorkflowInputNode",
+    "WorkflowMcpNode",
+    "WorkflowNode",
+    "WorkflowNodePosition",
+    "WorkflowOutputNode",
+    "WorkflowSignatureNode",
+    "WorkflowSpec",
+    "WorkflowTransformNode",
+    "workflow_topological_order",
 ]
