@@ -34,6 +34,7 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
     workflowSpec,
     setWorkflowSpec,
     workflowRevision,
+    agentPulseNodeId,
     workflowSampleInputs,
     workflowDryRunDisabledReason,
     runWorkflowDryRun,
@@ -75,44 +76,74 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
     return (
       <div data-tutorial="wizard-step-4">
         <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl shadow-lg">
-          <div className="border-b border-border/30 px-6 py-3">
-            <h3 className="inline-flex text-lg font-semibold tracking-tight text-foreground">
-              <HelpTip text={tip("module.workflow")}>{msg("workflow.step.title")}</HelpTip>
-            </h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {msg("workflow.step.subtitle")}
-            </p>
-          </div>
-          {workflowSpec && (
-            <WorkflowCanvas
-              spec={workflowSpec}
-              specRevision={workflowRevision}
-              onSpecChange={setWorkflowSpec}
-              dryRun={{
-                disabledReason: workflowDryRunDisabledReason,
-                sampleInputs: workflowSampleInputs,
-                run: runWorkflowDryRun,
-              }}
-            />
-          )}
-          <div className="space-y-2 border-t border-border/30 px-6 py-4" data-tutorial="metric-editor">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <HelpTip text={tip("code.metric")}>{msg("workflow.step.metric_title")}</HelpTip>
-            </Label>
-            <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-              {msg("workflow.step.metric_hint")}
-            </p>
-            <CodeEditor
-              value={metricCode}
-              onChange={(v) => {
-                setMetricCode(v);
-                setMetricManuallyEdited(true);
-                setMetricValidation(null);
-              }}
-              height="180px"
-              onRun={runMetricValidation}
-              validationResult={metricValidation}
-            />
+          <ModeToggle
+            value={codeAssistMode}
+            onChange={setCodeAssistMode}
+            disabledReason={disabledReason}
+          />
+          <div
+            className={cn(
+              "grid grid-cols-1",
+              codeAssistMode === "auto" && "lg:grid-cols-[400px_minmax(0,1fr)]",
+            )}
+          >
+            {codeAssistMode === "auto" && (
+              <div className="relative min-h-[560px] self-stretch overflow-hidden border-b border-border/40 lg:border-b-0 lg:border-e">
+                <CodeAgentPanel
+                  agent={agent}
+                  disabled={!hasContext}
+                  disabledReason={disabledReason}
+                  className="absolute inset-0"
+                />
+              </div>
+            )}
+            <div className="flex min-w-0 flex-col self-stretch">
+              <div className="border-b border-border/30 px-6 py-3">
+                <h3 className="inline-flex text-lg font-semibold tracking-tight text-foreground">
+                  <HelpTip text={tip("module.workflow")}>{msg("workflow.step.title")}</HelpTip>
+                </h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {msg("workflow.step.subtitle")}
+                </p>
+              </div>
+              {workflowSpec && (
+                <WorkflowCanvas
+                  spec={workflowSpec}
+                  specRevision={workflowRevision}
+                  onSpecChange={setWorkflowSpec}
+                  pulseNodeId={agentPulseNodeId}
+                  dryRun={{
+                    disabledReason: workflowDryRunDisabledReason,
+                    sampleInputs: workflowSampleInputs,
+                    run: runWorkflowDryRun,
+                  }}
+                />
+              )}
+              <div
+                className="space-y-2 border-t border-border/30 px-6 py-4"
+                data-tutorial="metric-editor"
+              >
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <HelpTip text={tip("code.metric")}>{msg("workflow.step.metric_title")}</HelpTip>
+                </Label>
+                <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                  {msg("workflow.step.metric_hint")}
+                </p>
+                <CodeEditor
+                  value={metricCode}
+                  onChange={(v) => {
+                    setMetricCode(v);
+                    setMetricManuallyEdited(true);
+                    setMetricValidation(null);
+                  }}
+                  height="180px"
+                  onRun={runMetricValidation}
+                  validationResult={metricValidation}
+                  streaming={codeAssistMode === "auto" && agent.metricStatus === "writing"}
+                  flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>

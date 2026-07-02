@@ -19,6 +19,7 @@ import type {
   ValidateDatasetResponse,
   WorkflowDryRunRequest,
   WorkflowDryRunResponse,
+  WorkflowSpec,
 } from "@/shared/types/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { I18N_KEY, tI18n } from "@/shared/lib/i18n";
@@ -1786,9 +1787,31 @@ export interface CodeAgentRequest {
   prior_metric_validation?: string;
   initial_signature?: string;
   initial_metric?: string;
+  // Workflow graph currently on the canvas. Non-null switches both agent
+  // modes to their graph-aware paths (seed drafts the DAG, chat gets graph
+  // tools).
+  prior_workflow?: WorkflowSpec | null;
+  initial_workflow?: WorkflowSpec | null;
 }
 
-export type CodeAgentToolName = "edit_signature" | "edit_metric";
+export type CodeAgentToolName =
+  | "edit_signature"
+  | "edit_metric"
+  | "add_node"
+  | "update_node"
+  | "remove_node"
+  | "connect"
+  | "disconnect";
+
+const CODE_AGENT_TOOLS = new Set<CodeAgentToolName>([
+  "edit_signature",
+  "edit_metric",
+  "add_node",
+  "update_node",
+  "remove_node",
+  "connect",
+  "disconnect",
+]);
 
 export interface CodeAgentToolStart {
   id: string;
@@ -1809,6 +1832,9 @@ export interface CodeAgentHandlers {
   onMessagePatch?: (chunk: string) => void;
   onSignatureReplace?: (code: string) => void;
   onMetricReplace?: (code: string) => void;
+  // Full-graph snapshot after a seed draft or a successful graph tool op;
+  // changedNodeId (null for seed/removals) drives the canvas pulse.
+  onWorkflowReplace?: (workflow: WorkflowSpec, changedNodeId: string | null) => void;
   onToolStart?: (ev: CodeAgentToolStart) => void;
   onToolEnd?: (ev: CodeAgentToolEnd) => void;
   onDone: (result: {
@@ -1816,6 +1842,8 @@ export interface CodeAgentHandlers {
     metric_code: string;
     assistant_message: string;
     model: string | null;
+    workflow?: WorkflowSpec | null;
+    workflowValid?: boolean;
     /**
      * Seed-path validation outcome. The seed runner validates (and repairs)
      * the generated code; these flags are absent on the chat path (where
@@ -1868,9 +1896,16 @@ export async function streamCodeAgent(
       handlers.onSignatureReplace?.(String(data.code ?? ""));
     } else if (event === "metric_replace") {
       handlers.onMetricReplace?.(String(data.code ?? ""));
+    } else if (event === "workflow_replace") {
+      if (data.workflow && typeof data.workflow === "object") {
+        handlers.onWorkflowReplace?.(
+          data.workflow as WorkflowSpec,
+          typeof data.changed_node_id === "string" ? data.changed_node_id : null,
+        );
+      }
     } else if (event === "tool_start") {
-      const tool = String(data.tool ?? "");
-      if (tool === "edit_signature" || tool === "edit_metric") {
+      const tool = String(data.tool ?? "") as CodeAgentToolName;
+      if (CODE_AGENT_TOOLS.has(tool)) {
         handlers.onToolStart?.({
           id: String(data.id ?? ""),
           tool,
@@ -1878,8 +1913,8 @@ export async function streamCodeAgent(
         });
       }
     } else if (event === "tool_end") {
-      const tool = String(data.tool ?? "");
-      if (tool === "edit_signature" || tool === "edit_metric") {
+      const tool = String(data.tool ?? "") as CodeAgentToolName;
+      if (CODE_AGENT_TOOLS.has(tool)) {
         handlers.onToolEnd?.({
           id: String(data.id ?? ""),
           tool,
@@ -1893,6 +1928,9 @@ export async function streamCodeAgent(
         metric_code: String(data.metric_code ?? ""),
         assistant_message: String(data.assistant_message ?? ""),
         model: typeof rawModel === "string" && rawModel.length > 0 ? rawModel : null,
+        workflow:
+          data.workflow && typeof data.workflow === "object" ? (data.workflow as WorkflowSpec) : null,
+        workflowValid: data.workflow_valid !== false,
         // Absent on the chat path → treat as valid; the seed path sends
         // explicit booleans after its validate-and-repair pass.
         signatureValid: data.signature_valid !== false,

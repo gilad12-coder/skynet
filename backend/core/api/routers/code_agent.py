@@ -83,6 +83,18 @@ class CodeAgentRequest(BaseModel):
             "when no edits have happened yet."
         ),
     )
+    prior_workflow: dict | None = Field(
+        default=None,
+        description=(
+            "The workflow graph currently on the canvas (WorkflowSpec wire "
+            "shape). Non-None switches both modes to their graph-aware "
+            "paths: seed drafts the full DAG, chat gets graph tools."
+        ),
+    )
+    initial_workflow: dict | None = Field(
+        default=None,
+        description="The original graph from the very first version, for revert support.",
+    )
 
 
 class EditCodeRequest(BaseModel):
@@ -160,9 +172,13 @@ def create_code_agent_router() -> APIRouter:
         * ``reasoning_patch`` — ``{"chunk": "<token>"}`` (both modes)
         * ``tool_start`` — ``{"id", "tool", "reason"}`` (chat mode)
         * ``signature_replace`` / ``metric_replace`` — ``{"code"}``
+        * ``workflow_replace`` — ``{"workflow", "changed_node_id"}``
+          (workflow mode: seed snapshot + one per graph tool op)
         * ``tool_end`` — ``{"id", "tool", "status"}``
         * ``message_patch`` — ``{"chunk": "<token>"}`` (chat mode reply stream)
         * ``done`` — ``{"signature_code", "metric_code", "assistant_message"}``
+          (workflow mode carries ``workflow`` + ``workflow_valid`` instead
+          of ``signature_code``)
         * ``error`` — ``{"error": "<message>"}``
 
         Args:
@@ -186,6 +202,8 @@ def create_code_agent_router() -> APIRouter:
             prior_metric_validation=req.prior_metric_validation,
             initial_signature=req.initial_signature,
             initial_metric=req.initial_metric,
+            prior_workflow=req.prior_workflow,
+            initial_workflow=req.initial_workflow,
         )
         return StreamingResponse(
             sse_from_events(source),

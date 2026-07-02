@@ -2602,6 +2602,13 @@ export type MessageKey =
   | "usage.stat.refunded"
   | "usage.stat.runs"
   | "usage.stat.spent"
+  | "workflow.agent.editing_graph"
+  | "workflow.agent.tool.add_node"
+  | "workflow.agent.tool.connect"
+  | "workflow.agent.tool.disconnect"
+  | "workflow.agent.tool.remove_node"
+  | "workflow.agent.tool.update_node"
+  | "workflow.agent.undo"
   | "workflow.dryrun.cancel"
   | "workflow.dryrun.description"
   | "workflow.dryrun.dismiss"
@@ -5263,6 +5270,13 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "usage.stat.refunded": "קרדיטים שהוחזרו",
   "usage.stat.runs": "ריצות",
   "usage.stat.spent": "קרדיטים שנוצלו",
+  "workflow.agent.editing_graph": "עורך את הגרף…",
+  "workflow.agent.tool.add_node": "הוספת צומת",
+  "workflow.agent.tool.connect": "חיבור צמתים",
+  "workflow.agent.tool.disconnect": "ניתוק חיבור",
+  "workflow.agent.tool.remove_node": "הסרת צומת",
+  "workflow.agent.tool.update_node": "עדכון צומת",
+  "workflow.agent.undo": "ביטול השינוי האחרון בגרף",
   "workflow.dryrun.cancel": "ביטול",
   "workflow.dryrun.description": "הרצה אחת של הגרף הלא-מאופטם על קלט לדוגמה, כדי לוודא שהחיווט תקין לפני שמוציאים קרדיטים על אופטימיזציה",
   "workflow.dryrun.dismiss": "סגירת תוצאת ההרצה",
@@ -13119,6 +13133,13 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "usage.stat.refunded": "Credits refunded",
   "usage.stat.runs": "Runs",
   "usage.stat.spent": "Credits spent",
+  "workflow.agent.editing_graph": "Editing the graph…",
+  "workflow.agent.tool.add_node": "Add node",
+  "workflow.agent.tool.connect": "Connect nodes",
+  "workflow.agent.tool.disconnect": "Disconnect",
+  "workflow.agent.tool.remove_node": "Remove node",
+  "workflow.agent.tool.update_node": "Update node",
+  "workflow.agent.undo": "Undo the last graph change",
   "workflow.dryrun.cancel": "Cancel",
   "workflow.dryrun.description": "One execution of the unoptimized graph on a sample input, to verify the wiring before spending optimization credits",
   "workflow.dryrun.dismiss": "Dismiss dry-run result",

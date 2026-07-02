@@ -38,6 +38,8 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   spec: WorkflowNodeSpec;
   issues: string[];
   trace?: NodeTraceState | null;
+  // Briefly true right after the code agent changed this node.
+  pulse?: boolean;
 }
 
 export type CanvasNode = Node<WorkflowNodeData>;
@@ -108,7 +110,7 @@ function PortRow({
 }
 
 function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
-  const { spec, issues, trace } = data;
+  const { spec, issues, trace, pulse } = data;
   const Icon = KIND_ICONS[spec.kind];
   const ports = nodePorts(spec);
   const isAnchor = spec.kind === "input" || spec.kind === "output";
@@ -120,6 +122,7 @@ function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
         "min-w-44 max-w-56 rounded-lg border bg-card text-card-foreground shadow-sm transition-shadow duration-150",
         selected ? "border-[#3D2E22] shadow-md" : "border-border",
         trace?.status === "error" && "border-destructive",
+        pulse && "animate-pulse border-[#C8A882] ring-2 ring-[#C8A882]/50",
       )}
       data-node-kind={spec.kind}
     >

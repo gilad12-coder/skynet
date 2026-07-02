@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Bot, XCircle, RotateCcw, Ruler, FileCode2, MessageSquarePlus } from "lucide-react";
+import { Bot, XCircle, RotateCcw, Ruler, FileCode2, MessageSquarePlus, Undo2, Waypoints } from "lucide-react";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
@@ -136,6 +136,19 @@ export function CodeAgentPanel({ agent, disabled, disabledReason, className }: P
                   </div>
                 </div>
               )}
+
+              {!isEditingAny && !streaming && agent.undoWorkflow && (
+                <div className="flex justify-center pt-1">
+                  <button
+                    type="button"
+                    onClick={agent.undoWorkflow}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[#3D2E22]/10 bg-[#3D2E22]/[0.02] px-2.5 py-1 text-[0.6875rem] font-medium text-[#3D2E22]/75 transition-colors hover:border-[#3D2E22]/20 hover:bg-[#3D2E22]/[0.06] hover:text-[#3D2E22] cursor-pointer"
+                  >
+                    <Undo2 className="size-3" />
+                    {msg("workflow.agent.undo")}
+                  </button>
+                </div>
+              )}
             </>
           )}
         />
@@ -241,10 +254,13 @@ function computeLineDiff(oldText: string, newText: string): DiffLine[] {
 function ToolCallCard({ call, isRetry = false }: { call: SharedAgentToolCall; isRetry?: boolean }) {
   const codeCall = call as AgentToolCall;
   const isSignature = codeCall.tool === "edit_signature";
-  const Icon = isSignature ? FileCode2 : Ruler;
+  const isMetric = codeCall.tool === "edit_metric";
+  const Icon = isSignature ? FileCode2 : isMetric ? Ruler : Waypoints;
   const title = isSignature
     ? msg("submit.code.agent.tool.signature.title")
-    : msg("submit.code.agent.tool.metric.title");
+    : isMetric
+      ? msg("submit.code.agent.tool.metric.title")
+      : msg(`workflow.agent.tool.${codeCall.tool}` as Parameters<typeof msg>[0]);
 
   const diff = React.useMemo<DiffLine[]>(() => {
     if (!codeCall.newCode) return [];

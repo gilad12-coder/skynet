@@ -54,6 +54,7 @@ import type {
 } from "@/shared/types/api";
 
 import {
+  autoLayoutSpec,
   nodePorts,
   newNodeSpec,
   validateWorkflowSpec,
@@ -78,6 +79,8 @@ interface WorkflowCanvasProps {
   specRevision: number;
   onSpecChange: (spec: WorkflowSpec) => void;
   dryRun?: WorkflowDryRunBinding;
+  // Node the code agent just changed — pulsed briefly on the canvas.
+  pulseNodeId?: string | null;
   className?: string;
 }
 
@@ -89,6 +92,7 @@ function deriveNodes(
   issuesByNode: Map<string, string[]>,
   traces: Map<string, NodeTraceState>,
   prev: CanvasNode[],
+  pulseNodeId: string | null,
 ): CanvasNode[] {
   const prevById = new Map(prev.map((n) => [n.id, n]));
   return spec.nodes.map((node, index) => ({
@@ -101,6 +105,7 @@ function deriveNodes(
       spec: node,
       issues: issuesByNode.get(node.id) ?? [],
       trace: traces.get(node.id) ?? null,
+      pulse: node.id === pulseNodeId,
     },
   }));
 }
@@ -118,7 +123,13 @@ function deriveEdges(spec: WorkflowSpec, prev: Edge[]): Edge[] {
   }));
 }
 
-function CanvasInner({ spec, onSpecChange, dryRun, className }: Omit<WorkflowCanvasProps, "specRevision">) {
+function CanvasInner({
+  spec,
+  onSpecChange,
+  dryRun,
+  pulseNodeId = null,
+  className,
+}: Omit<WorkflowCanvasProps, "specRevision">) {
   const { fitView } = useReactFlow();
   const [fullscreen, setFullscreen] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
@@ -151,14 +162,14 @@ function CanvasInner({ spec, onSpecChange, dryRun, className }: Omit<WorkflowCan
   }, [dryRunResult]);
 
   const [nodes, setNodes] = React.useState<CanvasNode[]>(() =>
-    deriveNodes(spec, issuesByNode, traces, []),
+    deriveNodes(spec, issuesByNode, traces, [], pulseNodeId),
   );
   const [edges, setEdges] = React.useState<Edge[]>(() => deriveEdges(spec, []));
 
   React.useEffect(() => {
-    setNodes((prev) => deriveNodes(spec, issuesByNode, traces, prev));
+    setNodes((prev) => deriveNodes(spec, issuesByNode, traces, prev, pulseNodeId));
     setEdges((prev) => deriveEdges(spec, prev));
-  }, [spec, issuesByNode, traces]);
+  }, [spec, issuesByNode, traces, pulseNodeId]);
 
   const specRef = React.useRef(spec);
   React.useEffect(() => {
@@ -295,37 +306,8 @@ function CanvasInner({ spec, onSpecChange, dryRun, className }: Omit<WorkflowCan
     [onSpecChange],
   );
 
-  // Layered auto-layout: column = longest-path depth from the input anchor,
-  // row = order within the column. Deterministic, no extra dependency.
   const tidyUp = React.useCallback(() => {
-    const cur = specRef.current;
-    const depth = new Map<string, number>(cur.nodes.map((n) => [n.id, 0]));
-    for (let pass = 0; pass < cur.nodes.length; pass += 1) {
-      let changed = false;
-      for (const e of cur.edges) {
-        const next = (depth.get(e.source) ?? 0) + 1;
-        if (next > (depth.get(e.target) ?? 0)) {
-          depth.set(e.target, next);
-          changed = true;
-        }
-      }
-      if (!changed) break;
-    }
-    const output = cur.nodes.find((n) => n.kind === "output");
-    if (output) {
-      const maxDepth = Math.max(...[...depth.values()]);
-      depth.set(output.id, maxDepth);
-    }
-    const rows = new Map<number, number>();
-    onSpecChange({
-      ...cur,
-      nodes: cur.nodes.map((n) => {
-        const d = depth.get(n.id) ?? 0;
-        const row = rows.get(d) ?? 0;
-        rows.set(d, row + 1);
-        return { ...n, position: { x: d * 300, y: row * 160 + (d % 2) * 40 } };
-      }),
-    });
+    onSpecChange(autoLayoutSpec(specRef.current));
     window.setTimeout(() => fitView({ padding: 0.2, duration: 200 }), 50);
   }, [onSpecChange, fitView]);
 

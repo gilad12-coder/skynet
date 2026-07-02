@@ -4,16 +4,16 @@ import * as React from "react";
 import { toast } from "react-toastify";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
-import { streamCodeAgent } from "@/shared/lib/api";
+import { streamCodeAgent, type CodeAgentToolName } from "@/shared/lib/api";
 import { TERMS } from "@/shared/lib/terms";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
-import type { ValidateCodeResponse } from "@/shared/types/api";
+import type { ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
 
 type AgentStatus = "idle" | "streaming" | "done" | "error";
 type AgentMode = "seed" | "chat";
 export type ArtifactStatus = "idle" | "waiting" | "writing" | "done";
 
-type AgentToolName = "edit_signature" | "edit_metric";
+type AgentToolName = CodeAgentToolName;
 type AgentToolStatus = "running" | "done" | "error";
 
 export interface AgentToolCall {
@@ -97,6 +97,9 @@ export interface CodeAgentState {
   reasoning: string;
   reasoningStartedAt: number | null;
   reasoningEndedAt: number | null;
+  // Undo backstop for agent graph edits: restores the spec captured before
+  // the current run's first graph op. Null when there is nothing to undo.
+  undoWorkflow: (() => void) | null;
   goToSignatureVersion: (index: number) => void;
   goToMetricVersion: (index: number) => void;
   send: (message: string) => void;
@@ -130,6 +133,14 @@ export interface UseCodeAgentArgs {
   metricValidation: ValidateCodeResponse | null;
   runSignatureValidation: (overrideCode?: string) => Promise<unknown>;
   runMetricValidation: (overrideCode?: string) => Promise<unknown>;
+  // Workflow mode (module_name === "workflow"): the agent authors the graph
+  // instead of a single signature. `workflowTouched` guards the auto-seed
+  // like the manual-edit flags do for code; `applyAgentWorkflow` lands a
+  // graph snapshot on the canvas (with the changed node pulsed).
+  isWorkflow?: boolean;
+  workflowSpec?: WorkflowSpec | null;
+  workflowTouched?: boolean;
+  applyAgentWorkflow?: (spec: WorkflowSpec, changedNodeId: string | null) => void;
 }
 
 export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
@@ -154,6 +165,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     metricValidation,
     runSignatureValidation,
     runMetricValidation,
+    isWorkflow = false,
+    workflowSpec = null,
+    workflowTouched = false,
+    applyAgentWorkflow,
   } = args;
 
   const [status, setStatus] = React.useState<AgentStatus>("idle");
@@ -195,6 +210,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     metricCode,
     signatureValidation,
     metricValidation,
+    workflowSpec,
   });
   React.useEffect(() => {
     snapshotRef.current = {
@@ -202,8 +218,19 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       metricCode,
       signatureValidation,
       metricValidation,
+      workflowSpec,
     };
-  }, [signatureCode, metricCode, signatureValidation, metricValidation]);
+  }, [signatureCode, metricCode, signatureValidation, metricValidation, workflowSpec]);
+
+  // Revert support across the conversation (first graph ever seen) and the
+  // single-level undo backstop (graph before the current run's first op).
+  const initialWorkflowRef = React.useRef<WorkflowSpec | null>(null);
+  const workflowUndoRef = React.useRef<WorkflowSpec | null>(null);
+  const [workflowUndoAvailable, setWorkflowUndoAvailable] = React.useState(false);
+  const applyAgentWorkflowRef = React.useRef(applyAgentWorkflow);
+  React.useEffect(() => {
+    applyAgentWorkflowRef.current = applyAgentWorkflow;
+  }, [applyAgentWorkflow]);
 
   const runnersRef = React.useRef({ runSignatureValidation, runMetricValidation });
   React.useEffect(() => {
@@ -359,6 +386,14 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
         if (kind === "image") imageColumnKinds[col] = "image";
       }
 
+      const priorWorkflow = isWorkflow ? (snapshot.workflowSpec ?? null) : null;
+      if (isWorkflow && !initialWorkflowRef.current && priorWorkflow) {
+        initialWorkflowRef.current = priorWorkflow;
+      }
+      // Capture the undo snapshot on this run's FIRST graph op only, so one
+      // undo reverts the whole turn rather than just the last op.
+      let undoCapturedThisRun = false;
+
       void streamCodeAgent(
         {
           dataset_columns: parsedDataset.columns,
@@ -373,6 +408,12 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           prior_metric_validation: summarizeValidation(snapshot.metricValidation),
           initial_signature: initialSignature,
           initial_metric: initialMetric,
+          ...(isWorkflow
+            ? {
+                prior_workflow: priorWorkflow,
+                initial_workflow: initialWorkflowRef.current ?? priorWorkflow,
+              }
+            : {}),
         },
         {
           signal: controller.signal,
@@ -414,10 +455,12 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             setStatusLabel(
               ev.tool === "edit_signature"
                 ? msg("auto.features.submit.hooks.use.code.agent.literal.5")
-                : msg("auto.features.submit.hooks.use.code.agent.literal.6"),
+                : ev.tool === "edit_metric"
+                  ? msg("auto.features.submit.hooks.use.code.agent.literal.6")
+                  : msg("workflow.agent.editing_graph"),
             );
             if (ev.tool === "edit_signature") setSignatureStatus("writing");
-            else setMetricStatus("writing");
+            else if (ev.tool === "edit_metric") setMetricStatus("writing");
             pushToolCall({
               id: ev.id,
               tool: ev.tool,
@@ -430,7 +473,15 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           onToolEnd: (ev) => {
             finishToolCall(ev.id, ev.status === "ok" ? "done" : "error");
             if (ev.tool === "edit_signature") setSignatureStatus("done");
-            else setMetricStatus("done");
+            else if (ev.tool === "edit_metric") setMetricStatus("done");
+          },
+          onWorkflowReplace: (workflow, changedNodeId) => {
+            if (!undoCapturedThisRun) {
+              workflowUndoRef.current = snapshot.workflowSpec ?? null;
+              undoCapturedThisRun = true;
+              setWorkflowUndoAvailable(!!snapshot.workflowSpec);
+            }
+            applyAgentWorkflowRef.current?.(workflow, changedNodeId);
           },
           onSignatureReplace: (code) => {
             const prevCode = lastSignatureCode;
@@ -477,7 +528,25 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             });
           },
           onDone: async (result) => {
-            if (!isChat) {
+            if (!isChat && isWorkflow) {
+              // Workflow seed: the graph landed via workflow_replace (or
+              // rides the done payload after a repair); only the metric
+              // flows through the code editor.
+              if (result.workflow) {
+                applyAgentWorkflowRef.current?.(result.workflow, null);
+              }
+              setMetricCode(result.metric_code);
+              setMetricManuallyEdited(false);
+              setMetricVersions((prev) => {
+                const next = [...prev, { code: result.metric_code, ts: Date.now() }];
+                setMetricVersionIndex(next.length - 1);
+                return next;
+              });
+              pendingValidationsRef.current.push({
+                kind: "metric",
+                promise: runnersRef.current.runMetricValidation(result.metric_code),
+              });
+            } else if (!isChat) {
               setSignatureCode(result.signature_code);
               setMetricCode(result.metric_code);
               setSignatureManuallyEdited(false);
@@ -616,6 +685,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       hasRequiredContext,
       columnRoles,
       columnKinds,
+      isWorkflow,
       setSignatureCode,
       setMetricCode,
       setSignatureValidation,
@@ -685,6 +755,14 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     [metricVersions, setMetricCode, setMetricManuallyEdited],
   );
 
+  const undoWorkflowImpl = React.useCallback(() => {
+    const prev = workflowUndoRef.current;
+    if (!prev) return;
+    applyAgentWorkflowRef.current?.(prev, null);
+    workflowUndoRef.current = null;
+    setWorkflowUndoAvailable(false);
+  }, []);
+
   const fallbackToManual = React.useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -731,6 +809,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     setMetricVersionIndex(-1);
     setSignatureFlashLines([]);
     setMetricFlashLines([]);
+    initialWorkflowRef.current = null;
+    workflowUndoRef.current = null;
+    setWorkflowUndoAvailable(false);
     // Clear the manual-edit gate so the auto-seed effect re-fires on
     // sessionKey bump — otherwise "new chat" would wipe the messages
     // but leave the old Signature/Metric untouched.
@@ -773,7 +854,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     if (codeAssistMode !== "auto") return;
     if (autoRanRef.current) return;
     if (!hasRequiredContext) return;
-    if (signatureManuallyEdited || metricManuallyEdited) return;
+    // Workflow mode waits for the wizard's starter graph (the request needs
+    // a prior_workflow to route the graph-aware path) and respects canvas
+    // edits the way the code path respects manual code edits.
+    if (isWorkflow && (!workflowSpec || workflowTouched || metricManuallyEdited)) return;
+    if (!isWorkflow && (signatureManuallyEdited || metricManuallyEdited)) return;
     autoRanRef.current = true;
     autoFixAttemptsRef.current = 0;
     runAgent("", []);
@@ -782,6 +867,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     hasRequiredContext,
     signatureManuallyEdited,
     metricManuallyEdited,
+    isWorkflow,
+    workflowSpec,
+    workflowTouched,
     runAgent,
     sessionKey,
   ]);
@@ -811,6 +899,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     reasoning,
     reasoningStartedAt,
     reasoningEndedAt,
+    undoWorkflow: workflowUndoAvailable ? undoWorkflowImpl : null,
     goToSignatureVersion,
     goToMetricVersion,
     send,

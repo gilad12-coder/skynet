@@ -61,6 +61,7 @@ import {
 } from "../lib/wizard-draft";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import {
+  autoLayoutSpec,
   defaultWorkflowSpec,
   validateWorkflowSpec,
   workflowUsesTools,
@@ -131,6 +132,13 @@ export function useSubmitWizard() {
   // pristine starter graph re-seeds when the dataset's column roles change,
   // an edited one is never clobbered.
   const workflowPristineRef = useRef(true);
+  // Mirrors "manually edited" for the graph: gates the code agent's
+  // auto-seed so it never overwrites canvas work. Agent-authored graphs do
+  // NOT set it (the agent may keep iterating), but they do clear pristine.
+  const [workflowTouched, setWorkflowTouched] = useState(false);
+  // Node the agent just changed — the canvas pulses it briefly.
+  const [agentPulseNodeId, setAgentPulseNodeId] = useState<string | null>(null);
+  const pulseClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const replaceWorkflowSpec = useCallback((spec: WorkflowSpec | null) => {
     workflowSpecRef.current = spec;
     setWorkflowSpec(spec);
@@ -138,8 +146,23 @@ export function useSubmitWizard() {
   }, []);
   const updateWorkflowSpec = useCallback((spec: WorkflowSpec) => {
     workflowPristineRef.current = false;
+    setWorkflowTouched(true);
     workflowSpecRef.current = spec;
     setWorkflowSpec(spec);
+  }, []);
+  const applyAgentWorkflow = useCallback((spec: WorkflowSpec, changedNodeId: string | null) => {
+    // Agent-authored nodes arrive without canvas positions; lay the whole
+    // graph out so they never pile on top of each other.
+    const laid = spec.nodes.some((n) => !n.position) ? autoLayoutSpec(spec) : spec;
+    workflowPristineRef.current = false;
+    workflowSpecRef.current = laid;
+    setWorkflowSpec(laid);
+    setWorkflowRevision((r) => r + 1);
+    setAgentPulseNodeId(changedNodeId);
+    if (pulseClearRef.current) clearTimeout(pulseClearRef.current);
+    if (changedNodeId) {
+      pulseClearRef.current = setTimeout(() => setAgentPulseNodeId(null), 1600);
+    }
   }, []);
 
   const [signatureCode, setSignatureCode] = useState(() => buildSignatureTemplate({}));
@@ -387,6 +410,7 @@ export function useSubmitWizard() {
     if (d.workflowSpec) {
       replaceWorkflowSpec(d.workflowSpec);
       workflowPristineRef.current = false;
+      setWorkflowTouched(true);
     }
     setSignatureCode(d.signatureCode);
     setMetricCode(d.metricCode);
@@ -1970,6 +1994,10 @@ export function useSubmitWizard() {
     metricValidation,
     runSignatureValidation,
     runMetricValidation,
+    isWorkflow,
+    workflowSpec,
+    workflowTouched,
+    applyAgentWorkflow,
   });
 
   return {
@@ -2005,6 +2033,7 @@ export function useSubmitWizard() {
     setWorkflowSpec: updateWorkflowSpec,
     replaceWorkflowSpec,
     workflowRevision,
+    agentPulseNodeId,
     workflowSampleInputs,
     workflowDryRunDisabledReason,
     runWorkflowDryRun,
