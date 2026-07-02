@@ -23,6 +23,7 @@ export interface WizardDraftData {
   jobName: string;
   jobDescription: string;
   moduleName: string;
+  moduleChosen: boolean;
   optimizerName: string;
   reactConfig: ReactConfig;
   workflowSpec?: WorkflowSpec | null;

@@ -8,53 +8,70 @@
  * Flow state is re-derived from it after every structural mutation. Pure
  * drag movement stays inside React Flow until drag-stop, when positions are
  * committed back onto the spec. External spec replacements (dataset init,
- * clone hydration, future agent ops) bump `specRevision`, which remounts the
- * flow so stale internal state can't survive.
+ * clone hydration, agent ops) bump `specRevision`, which remounts the flow
+ * so stale internal state can't survive.
+ *
+ * Interaction model (mirrors n8n): scroll pans, Ctrl/⌘+scroll and pinch
+ * zoom, left-drag box-selects, middle-drag or Space+drag pans. Nodes are
+ * added from a context menu (pane right-click, the toolbar "Add node"
+ * button, or dropping a half-made connection on empty canvas — the latter
+ * auto-wires the new node). Fullscreen portals the whole editor onto
+ * `document.body` so no transformed/filtered ancestor can trap it.
  *
  * The canvas itself is always LTR — data flows left→right — while inspector
  * chrome follows the page direction.
  */
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import {
   Background,
-  Controls,
+  ConnectionLineType,
+  MarkerType,
+  MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
   useReactFlow,
+  useStore,
   type Connection,
   type Edge,
   type EdgeChange,
+  type FinalConnectionState,
   type IsValidConnection,
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
   AlertTriangle,
+  ChevronDown,
   Code2,
+  Copy,
   LayoutGrid,
   Maximize2,
   Minimize2,
   Play,
+  Plus,
+  Scan,
   Sparkles,
+  Trash2,
   Wrench,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 
 import { Button } from "@/shared/ui/primitives/button";
 import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import type {
-  WorkflowDryRunResponse,
-  WorkflowNodeSpec,
-  WorkflowSpec,
-} from "@/shared/types/api";
+import type { WorkflowDryRunResponse, WorkflowNodeSpec, WorkflowSpec } from "@/shared/types/api";
 
 import {
   autoLayoutSpec,
+  makeNodeId,
   nodePorts,
   newNodeSpec,
   validateWorkflowSpec,
@@ -82,6 +99,30 @@ interface WorkflowCanvasProps {
   // Node the code agent just changed — pulsed briefly on the canvas.
   pulseNodeId?: string | null;
   className?: string;
+}
+
+const SNAP_GRID: [number, number] = [16, 16];
+const FIT_VIEW = { padding: 0.2, maxZoom: 1 };
+const EDGE_COLOR = "#8A7563";
+
+const ADD_KINDS = [
+  { kind: "signature", icon: Sparkles, labelKey: "workflow.toolbar.add_signature" },
+  { kind: "transform", icon: Code2, labelKey: "workflow.toolbar.add_transform" },
+  { kind: "mcp", icon: Wrench, labelKey: "workflow.toolbar.add_tool" },
+] as const;
+
+type MenuTarget = { type: "pane" } | { type: "node"; id: string } | { type: "edge"; id: string };
+
+interface MenuState {
+  // Position relative to the canvas root element (physical px).
+  x: number;
+  y: number;
+  // Where an added node lands, in flow coordinates.
+  flow: { x: number; y: number };
+  target: MenuTarget;
+  // Set when the menu opened from a connection dropped on empty canvas —
+  // the added node gets auto-wired to this handle.
+  pending: { nodeId: string; handleId: string; dir: "out" | "in" } | null;
 }
 
 const edgeId = (e: { source: string; source_port: string; target: string; target_port: string }) =>
@@ -119,7 +160,9 @@ function deriveEdges(spec: WorkflowSpec, prev: Edge[]): Edge[] {
     target: e.target,
     targetHandle: e.target_port,
     selected: prevById.get(edgeId(e))?.selected ?? false,
-    style: { stroke: "#8A7563", strokeWidth: 1.5 },
+    style: { stroke: EDGE_COLOR, strokeWidth: 2 },
+    markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_COLOR, width: 16, height: 16 },
+    interactionWidth: 40,
   }));
 }
 
@@ -130,11 +173,22 @@ function CanvasInner({
   pulseNodeId = null,
   className,
 }: Omit<WorkflowCanvasProps, "specRevision">) {
-  const { fitView } = useReactFlow();
+  const { fitView, screenToFlowPosition } = useReactFlow();
   const [fullscreen, setFullscreen] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [dryRunOpen, setDryRunOpen] = React.useState(false);
   const [dryRunResult, setDryRunResult] = React.useState<WorkflowDryRunResponse | null>(null);
+  const [menu, setMenu] = React.useState<MenuState | null>(null);
+  // Minimap fades in while the viewport is moving and back out shortly after.
+  const [navActive, setNavActive] = React.useState(false);
+  const navTimerRef = React.useRef<number | null>(null);
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const flowWrapRef = React.useRef<HTMLDivElement | null>(null);
+  const menuRef = React.useRef<HTMLDivElement | null>(null);
+  const menuOpenRef = React.useRef(false);
+  React.useEffect(() => {
+    menuOpenRef.current = menu !== null;
+  }, [menu]);
 
   const issues: WorkflowIssue[] = React.useMemo(
     () => validateWorkflowSpec(spec, workflowIssueText),
@@ -221,19 +275,16 @@ function CanvasInner({
     [onSpecChange],
   );
 
-  const isValidConnection: IsValidConnection<Edge> = React.useCallback(
-    (conn) => {
-      if (!conn.source || !conn.target || !conn.sourceHandle || !conn.targetHandle) return false;
-      if (conn.source === conn.target) return false;
-      const cur = specRef.current;
-      const portTaken = cur.edges.some(
-        (e) => e.target === conn.target && e.target_port === conn.targetHandle,
-      );
-      if (portTaken) return false;
-      return !wouldCreateCycle(cur, conn.source, conn.target);
-    },
-    [],
-  );
+  const isValidConnection: IsValidConnection<Edge> = React.useCallback((conn) => {
+    if (!conn.source || !conn.target || !conn.sourceHandle || !conn.targetHandle) return false;
+    if (conn.source === conn.target) return false;
+    const cur = specRef.current;
+    const portTaken = cur.edges.some(
+      (e) => e.target === conn.target && e.target_port === conn.targetHandle,
+    );
+    if (portTaken) return false;
+    return !wouldCreateCycle(cur, conn.source, conn.target);
+  }, []);
 
   const onConnect = React.useCallback(
     (conn: Connection) => {
@@ -256,6 +307,33 @@ function CanvasInner({
     [onSpecChange],
   );
 
+  // A connection dropped on empty canvas opens the add-node menu at the drop
+  // point; the picked node is wired straight to the dangling handle (n8n's
+  // drag-to-spawn gesture).
+  const onConnectEnd = React.useCallback(
+    (event: MouseEvent | TouchEvent, state: FinalConnectionState) => {
+      if (state.isValid || !state.fromNode || !state.fromHandle) return;
+      const targetEl = event.target as Element | null;
+      if (!targetEl?.closest(".react-flow__pane")) return;
+      const point = "changedTouches" in event ? event.changedTouches[0] : event;
+      const root = rootRef.current;
+      if (!root || !point) return;
+      const rect = root.getBoundingClientRect();
+      setMenu({
+        x: Math.min(point.clientX - rect.left, rect.width - 200),
+        y: Math.min(point.clientY - rect.top, rect.height - 170),
+        flow: screenToFlowPosition({ x: point.clientX, y: point.clientY }),
+        target: { type: "pane" },
+        pending: {
+          nodeId: state.fromNode.id,
+          handleId: state.fromHandle.id ?? "",
+          dir: state.fromHandle.type === "source" ? "out" : "in",
+        },
+      });
+    },
+    [screenToFlowPosition],
+  );
+
   const onNodeDragStop = React.useCallback(() => {
     setNodes((prev) => {
       const cur = specRef.current;
@@ -272,13 +350,74 @@ function CanvasInner({
     });
   }, [onSpecChange]);
 
-  const addNode = React.useCallback(
-    (kind: "signature" | "transform" | "mcp") => {
+  const addNodeAt = React.useCallback(
+    (
+      kind: "signature" | "transform" | "mcp",
+      position: { x: number; y: number },
+      pending: MenuState["pending"],
+    ) => {
       const cur = specRef.current;
-      const maxX = Math.max(...cur.nodes.map((n) => n.position?.x ?? 0));
-      const node = newNodeSpec(kind, cur, { x: maxX / 2 + 160, y: 320 });
-      onSpecChange({ ...cur, nodes: [...cur.nodes, node] });
+      const node = newNodeSpec(kind, cur, {
+        x: Math.round(position.x / SNAP_GRID[0]) * SNAP_GRID[0],
+        y: Math.round(position.y / SNAP_GRID[1]) * SNAP_GRID[1],
+      });
+      let nextEdges = cur.edges;
+      if (pending) {
+        const ports = nodePorts(node);
+        if (pending.dir === "out") {
+          const target = ports.inputs[0];
+          if (target) {
+            nextEdges = [
+              ...nextEdges,
+              {
+                source: pending.nodeId,
+                source_port: pending.handleId,
+                target: node.id,
+                target_port: target.name,
+              },
+            ];
+          }
+        } else {
+          // Dragged backwards from an input handle — only wire it if that
+          // port isn't already fed (single-producer rule).
+          const source = ports.outputs[0];
+          const fed = cur.edges.some(
+            (e) => e.target === pending.nodeId && e.target_port === pending.handleId,
+          );
+          if (source && !fed) {
+            nextEdges = [
+              ...nextEdges,
+              {
+                source: node.id,
+                source_port: source.name,
+                target: pending.nodeId,
+                target_port: pending.handleId,
+              },
+            ];
+          }
+        }
+      }
+      onSpecChange({ nodes: [...cur.nodes, node], edges: nextEdges });
       setSelectedId(node.id);
+    },
+    [onSpecChange],
+  );
+
+  const duplicateNode = React.useCallback(
+    (id: string) => {
+      const cur = specRef.current;
+      const orig = cur.nodes.find((n) => n.id === id);
+      if (!orig || orig.kind === "input" || orig.kind === "output") return;
+      const prefix =
+        orig.kind === "signature" ? "step" : orig.kind === "mcp" ? "tool" : "transform";
+      const copy: WorkflowNodeSpec = JSON.parse(JSON.stringify(orig));
+      copy.id = makeNodeId(prefix, cur);
+      copy.position = {
+        x: (orig.position?.x ?? 0) + 48,
+        y: (orig.position?.y ?? 0) + 48,
+      };
+      onSpecChange({ ...cur, nodes: [...cur.nodes, copy] });
+      setSelectedId(copy.id);
     },
     [onSpecChange],
   );
@@ -306,35 +445,170 @@ function CanvasInner({
     [onSpecChange],
   );
 
+  const deleteEdge = React.useCallback(
+    (id: string) => {
+      const cur = specRef.current;
+      onSpecChange({ ...cur, edges: cur.edges.filter((e) => edgeId(e) !== id) });
+    },
+    [onSpecChange],
+  );
+
   const tidyUp = React.useCallback(() => {
     onSpecChange(autoLayoutSpec(specRef.current));
-    window.setTimeout(() => fitView({ padding: 0.2, duration: 200 }), 50);
+    window.setTimeout(() => fitView({ ...FIT_VIEW, duration: 300 }), 50);
   }, [onSpecChange, fitView]);
 
-  const toggleFullscreen = React.useCallback(() => {
-    setFullscreen((f) => !f);
-    window.setTimeout(() => fitView({ padding: 0.2 }), 60);
-  }, [fitView]);
+  const openMenuAt = React.useCallback(
+    (clientX: number, clientY: number, target: MenuTarget) => {
+      const root = rootRef.current;
+      if (!root) return;
+      const rect = root.getBoundingClientRect();
+      setMenu({
+        x: Math.min(clientX - rect.left, rect.width - 200),
+        y: Math.min(clientY - rect.top, rect.height - 170),
+        flow: screenToFlowPosition({ x: clientX, y: clientY }),
+        target,
+        pending: null,
+      });
+    },
+    [screenToFlowPosition],
+  );
+
+  const onPaneContextMenu = React.useCallback(
+    (event: MouseEvent | React.MouseEvent) => {
+      event.preventDefault();
+      openMenuAt(event.clientX, event.clientY, { type: "pane" });
+    },
+    [openMenuAt],
+  );
+
+  const onNodeContextMenu = React.useCallback(
+    (event: React.MouseEvent, node: CanvasNode) => {
+      event.preventDefault();
+      const kind = node.data.spec.kind;
+      if (kind === "input" || kind === "output") return;
+      openMenuAt(event.clientX, event.clientY, { type: "node", id: node.id });
+    },
+    [openMenuAt],
+  );
+
+  const onEdgeContextMenu = React.useCallback(
+    (event: React.MouseEvent, edge: Edge) => {
+      event.preventDefault();
+      openMenuAt(event.clientX, event.clientY, { type: "edge", id: edge.id });
+    },
+    [openMenuAt],
+  );
+
+  const openAddMenuFromToolbar = React.useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      const root = rootRef.current;
+      const flowEl = flowWrapRef.current;
+      if (!root || !flowEl) return;
+      const rootRect = root.getBoundingClientRect();
+      const btnRect = event.currentTarget.getBoundingClientRect();
+      const flowRect = flowEl.getBoundingClientRect();
+      setMenu((prev) =>
+        prev
+          ? null
+          : {
+              x: btnRect.left - rootRect.left,
+              y: btnRect.bottom - rootRect.top + 4,
+              flow: screenToFlowPosition({
+                x: flowRect.left + flowRect.width / 2,
+                y: flowRect.top + flowRect.height / 2,
+              }),
+              target: { type: "pane" },
+              pending: null,
+            },
+      );
+    },
+    [screenToFlowPosition],
+  );
+
+  const closeMenu = React.useCallback(() => setMenu(null), []);
+
+  // Dismiss the menu on any pointer-down outside it (capture phase so canvas
+  // interactions can't swallow the event first).
+  React.useEffect(() => {
+    if (!menu) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = menuRef.current;
+      if (el && e.target instanceof globalThis.Node && !el.contains(e.target)) setMenu(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [menu]);
+
+  // ESC closes the menu first, then exits fullscreen — like a modal stack.
+  React.useEffect(() => {
+    if (!menu && !fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      if (menuOpenRef.current) setMenu(null);
+      else setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menu, fullscreen]);
+
+  // Lock page scroll while the fullscreen overlay is open (portal pattern
+  // shared with the trajectory tree).
+  React.useEffect(() => {
+    if (!fullscreen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [fullscreen]);
+
+  // Re-fit after the portal moves the canvas between containers.
+  React.useEffect(() => {
+    const t = window.setTimeout(() => fitView({ ...FIT_VIEW, duration: 200 }), 80);
+    return () => window.clearTimeout(t);
+  }, [fullscreen, fitView]);
+
+  const handleMoveStart = React.useCallback(() => {
+    if (navTimerRef.current) window.clearTimeout(navTimerRef.current);
+    setNavActive(true);
+    setMenu(null);
+  }, []);
+  const handleMoveEnd = React.useCallback(() => {
+    if (navTimerRef.current) window.clearTimeout(navTimerRef.current);
+    navTimerRef.current = window.setTimeout(() => setNavActive(false), 1000);
+  }, []);
 
   const selectedNode = spec.nodes.find((n) => n.id === selectedId) ?? null;
   const inputAnchor = spec.nodes.find((n) => n.kind === "input");
   const inputFieldNames = inputAnchor ? nodePorts(inputAnchor).outputs.map((p) => p.name) : [];
 
-  return (
+  const menuNode = menu?.target.type === "node" ? menu.target.id : null;
+  const menuEdge = menu?.target.type === "edge" ? menu.target.id : null;
+
+  const body = (
     <div
+      ref={rootRef}
       className={cn(
         fullscreen
-          ? "fixed inset-0 z-50 flex flex-col bg-background p-3"
+          ? "fixed inset-0 z-50 flex h-screen w-screen flex-col bg-background"
           : "relative flex flex-col",
         className,
       )}
       data-tutorial="workflow-canvas"
     >
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border/40 bg-[#FAF8F5] px-3 py-2">
-        <ToolbarButton icon={Sparkles} label={msg("workflow.toolbar.add_signature")} onClick={() => addNode("signature")} />
-        <ToolbarButton icon={Code2} label={msg("workflow.toolbar.add_transform")} onClick={() => addNode("transform")} />
-        <ToolbarButton icon={Wrench} label={msg("workflow.toolbar.add_tool")} onClick={() => addNode("mcp")} />
-        <div className="mx-1 h-4 w-px bg-border" />
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1.5 px-2.5 text-xs"
+          onClick={openAddMenuFromToolbar}
+        >
+          <Plus className="size-3.5" />
+          {msg("workflow.toolbar.add_node")}
+          <ChevronDown className="size-3 text-muted-foreground" />
+        </Button>
         <ToolbarButton icon={LayoutGrid} label={msg("workflow.toolbar.tidy")} onClick={tidyUp} />
         <span className="ms-auto" />
         {issues.length > 0 && (
@@ -358,8 +632,10 @@ function CanvasInner({
         )}
         <ToolbarButton
           icon={fullscreen ? Minimize2 : Maximize2}
-          label={msg(fullscreen ? "workflow.toolbar.exit_fullscreen" : "workflow.toolbar.fullscreen")}
-          onClick={toggleFullscreen}
+          label={msg(
+            fullscreen ? "workflow.toolbar.exit_fullscreen" : "workflow.toolbar.fullscreen",
+          )}
+          onClick={() => setFullscreen((f) => !f)}
           iconOnly
         />
       </div>
@@ -367,10 +643,18 @@ function CanvasInner({
       <div
         className={cn(
           "grid min-h-0 flex-1",
-          selectedNode ? "grid-cols-[minmax(0,1fr)_320px]" : "grid-cols-1",
+          selectedNode
+            ? fullscreen
+              ? "grid-cols-[minmax(0,1fr)_360px]"
+              : "grid-cols-[minmax(0,1fr)_320px]"
+            : "grid-cols-1",
         )}
       >
-        <div dir="ltr" className={cn("relative", fullscreen ? "min-h-0" : "h-[480px]")}>
+        <div
+          dir="ltr"
+          ref={flowWrapRef}
+          className={cn("relative", fullscreen ? "min-h-0" : "h-[480px]")}
+        >
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -378,16 +662,58 @@ function CanvasInner({
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onConnectEnd={onConnectEnd}
             onNodeDragStop={onNodeDragStop}
             isValidConnection={isValidConnection}
+            onPaneContextMenu={onPaneContextMenu}
+            onNodeContextMenu={onNodeContextMenu}
+            onEdgeContextMenu={onEdgeContextMenu}
+            onPaneClick={closeMenu}
+            onMoveStart={handleMoveStart}
+            onMoveEnd={handleMoveEnd}
+            minZoom={0.1}
+            maxZoom={3}
+            panOnScroll
+            zoomOnScroll={false}
+            panOnDrag={[1]}
+            selectionOnDrag
+            snapToGrid
+            snapGrid={SNAP_GRID}
+            connectionRadius={60}
+            connectionLineType={ConnectionLineType.Bezier}
+            connectionLineStyle={{ stroke: EDGE_COLOR, strokeWidth: 2 }}
             fitView
-            fitViewOptions={{ padding: 0.2 }}
+            fitViewOptions={FIT_VIEW}
             proOptions={{ hideAttribution: true }}
             deleteKeyCode={["Backspace", "Delete"]}
             className="bg-[#FDFCFA]"
           >
-            <Background gap={20} size={1} color="#E5DDD1" />
-            <Controls showInteractive={false} position="bottom-left" />
+            <Background gap={16} size={1.25} color="#E3D9CB" />
+            <ZoomControls />
+            <Panel position="bottom-center" className="pointer-events-none !m-3">
+              <span
+                dir="auto"
+                className="whitespace-nowrap rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] text-muted-foreground/80 shadow-xs backdrop-blur"
+              >
+                {msg("workflow.canvas.hint")}
+              </span>
+            </Panel>
+            <MiniMap
+              pannable
+              zoomable
+              position="bottom-right"
+              nodeColor={(n) =>
+                n.type === "input_anchor" || n.type === "output_anchor" ? "#C8A882" : "#DDD2C2"
+              }
+              nodeStrokeColor="#B9A78F"
+              nodeBorderRadius={10}
+              maskColor="rgba(61, 46, 34, 0.06)"
+              bgColor="#FAF8F5"
+              className={cn(
+                "!m-3 overflow-hidden rounded-lg border border-border/60 shadow-sm transition-opacity duration-300",
+                navActive ? "opacity-100" : "pointer-events-none opacity-0",
+              )}
+            />
           </ReactFlow>
         </div>
         {selectedNode && (
@@ -420,7 +746,178 @@ function CanvasInner({
           onResult={setDryRunResult}
         />
       )}
+
+      {menu && (
+        <div
+          ref={menuRef}
+          className="absolute z-30 min-w-44 rounded-lg border border-border/70 bg-popover p-1 text-popover-foreground shadow-xl"
+          style={{ left: menu.x, top: menu.y }}
+        >
+          {menu.target.type === "pane" && (
+            <>
+              {ADD_KINDS.map(({ kind, icon, labelKey }) => (
+                <MenuItem
+                  key={kind}
+                  icon={icon}
+                  label={msg(labelKey)}
+                  onClick={() => {
+                    addNodeAt(kind, menu.flow, menu.pending);
+                    setMenu(null);
+                  }}
+                />
+              ))}
+              {!menu.pending && (
+                <>
+                  <div className="mx-1 my-1 h-px bg-border/70" />
+                  <MenuItem
+                    icon={LayoutGrid}
+                    label={msg("workflow.toolbar.tidy")}
+                    onClick={() => {
+                      tidyUp();
+                      setMenu(null);
+                    }}
+                  />
+                  <MenuItem
+                    icon={Scan}
+                    label={msg("workflow.controls.fit")}
+                    onClick={() => {
+                      void fitView({ ...FIT_VIEW, duration: 300 });
+                      setMenu(null);
+                    }}
+                  />
+                </>
+              )}
+            </>
+          )}
+          {menuNode && (
+            <>
+              <MenuItem
+                icon={Copy}
+                label={msg("workflow.menu.duplicate")}
+                onClick={() => {
+                  duplicateNode(menuNode);
+                  setMenu(null);
+                }}
+              />
+              <div className="mx-1 my-1 h-px bg-border/70" />
+              <MenuItem
+                icon={Trash2}
+                label={msg("workflow.menu.delete")}
+                danger
+                onClick={() => {
+                  deleteNode(menuNode);
+                  setMenu(null);
+                }}
+              />
+            </>
+          )}
+          {menuEdge && (
+            <MenuItem
+              icon={Trash2}
+              label={msg("workflow.menu.delete_edge")}
+              danger
+              onClick={() => {
+                deleteEdge(menuEdge);
+                setMenu(null);
+              }}
+            />
+          )}
+        </div>
+      )}
     </div>
+  );
+
+  if (!fullscreen) return body;
+  return (
+    <>
+      {/* Placeholder keeps the wizard card's height while the editor lives
+          in the portal, so the page doesn't collapse behind the overlay. */}
+      <div className="h-[521px] bg-muted/20" aria-hidden />
+      {createPortal(body, document.body)}
+    </>
+  );
+}
+
+function MenuItem({
+  icon: Icon,
+  label,
+  onClick,
+  danger = false,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1.5 text-xs transition-colors",
+        danger ? "text-destructive hover:bg-destructive/10" : "text-foreground hover:bg-muted",
+      )}
+    >
+      <Icon className="size-3.5 shrink-0" />
+      <span dir="auto">{label}</span>
+    </button>
+  );
+}
+
+function ZoomControls() {
+  const { zoomIn, zoomOut, zoomTo, fitView } = useReactFlow();
+  const zoom = useStore((s) => s.transform[2]);
+  return (
+    <Panel position="bottom-left" className="!m-3">
+      <div className="flex items-center overflow-hidden rounded-lg border border-border/60 bg-background/95 shadow-sm backdrop-blur">
+        <ControlButton
+          icon={ZoomOut}
+          label={msg("workflow.controls.zoom_out")}
+          onClick={() => zoomOut({ duration: 150 })}
+        />
+        <button
+          type="button"
+          onClick={() => zoomTo(1, { duration: 200 })}
+          title={msg("workflow.controls.zoom_reset")}
+          className="h-7 min-w-12 cursor-pointer px-1 text-center text-[0.6875rem] font-medium tabular-nums text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <ControlButton
+          icon={ZoomIn}
+          label={msg("workflow.controls.zoom_in")}
+          onClick={() => zoomIn({ duration: 150 })}
+        />
+        <div className="h-4 w-px bg-border/70" />
+        <ControlButton
+          icon={Scan}
+          label={msg("workflow.controls.fit")}
+          onClick={() => fitView({ ...FIT_VIEW, duration: 300 })}
+        />
+      </div>
+    </Panel>
+  );
+}
+
+function ControlButton({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="flex h-7 w-7 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+    >
+      <Icon className="size-3.5" />
+    </button>
   );
 }
 

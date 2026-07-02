@@ -104,6 +104,10 @@ export function useSubmitWizard() {
   const [jobName, setJobName] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [moduleName, setModuleName] = useState("predict");
+  // In advanced mode the code step opens with a module picker; the editors
+  // (and the agent's seed pass) wait until the user actively commits to a
+  // module. Simple mode skips the picker and always runs predict.
+  const [moduleChosen, setModuleChosen] = useState(false);
   const [optimizerName, setOptimizerName] = useState("gepa");
 
   // React (ReAct-agent) tool roster. Only sent when moduleName is "react".
@@ -116,6 +120,12 @@ export function useSubmitWizard() {
   );
   const isReact = moduleName.toLowerCase() === "react";
   const isWorkflow = moduleName.toLowerCase() === "workflow";
+  const moduleSelectionRequired = prefs.advancedMode && !moduleChosen;
+  const chooseModule = useCallback((name: string) => {
+    setModuleName(name);
+    setModuleChosen(true);
+  }, []);
+  const reopenModulePicker = useCallback(() => setModuleChosen(false), []);
 
   // Workflow graph spec — the canvas's single source of truth. `null` until
   // the user first picks the workflow module (the starter graph is seeded
@@ -356,6 +366,7 @@ export function useSubmitWizard() {
       jobName,
       jobDescription,
       moduleName,
+      moduleChosen,
       optimizerName,
       reactConfig,
       workflowSpec,
@@ -405,6 +416,7 @@ export function useSubmitWizard() {
     setJobName(d.jobName);
     setJobDescription(d.jobDescription);
     setModuleName(d.moduleName);
+    setModuleChosen(d.moduleChosen);
     setOptimizerName(d.optimizerName);
     setReactConfig(d.reactConfig);
     if (d.workflowSpec) {
@@ -481,6 +493,7 @@ export function useSubmitWizard() {
         setOptimizerName(sharedState.optimizer_name);
       } else if (key === "module_name" && typeof sharedState.module_name === "string") {
         setModuleName(sharedState.module_name);
+        setModuleChosen(true);
       } else if (key === "react_config" && sharedState.react_config) {
         const rc = sharedState.react_config as Record<string, unknown>;
         setReactConfig((prev) => {
@@ -1080,6 +1093,9 @@ export function useSubmitWizard() {
       if (displayName) setJobName(String(displayName));
       if (payload.description) setJobDescription(String(payload.description));
       if (payload.module_name) setModuleName(String(payload.module_name));
+      // A clone is a complete prior submission — its module (absent = the
+      // predict default) is already decided, so the picker never reopens.
+      setModuleChosen(true);
       if (payload.optimizer_name) setOptimizerName(String(payload.optimizer_name));
       if (payload.signature_code) {
         setSignatureCode(String(payload.signature_code));
@@ -1340,21 +1356,26 @@ export function useSubmitWizard() {
         return true;
       }
       case 2: {
-        // Tool-using runs (react, or a workflow with react/mcp nodes) need a
-        // live tool endpoint; gate it here so the empty URL is caught when
-        // leaving the params step instead of only at submit.
-        const needsTools = isReact || (isWorkflow && !!workflowSpec && workflowUsesTools(workflowSpec));
-        if (needsTools && reactConfig.toolSourceKind === "live_mcp" && !reactConfig.mcpUrl.trim()) {
-          if (showToast) toast.error(msg("submit.validation.mcp_url_required"));
-          return false;
-        }
         if (datasetValidation && datasetValidation.errors.length > 0) {
           if (showToast) toast.error(msg("submit.validation.split_too_small"));
           return false;
         }
         return true;
       }
-      case 3:
+      case 3: {
+        if (moduleSelectionRequired) {
+          if (showToast) toast.error(msg("submit.validation.module_required"));
+          return false;
+        }
+        // Tool-using runs (react, or a workflow with react/mcp nodes) need a
+        // live tool endpoint; the tool config lives on this step now that the
+        // module is only decided here.
+        const needsTools =
+          isReact || (isWorkflow && !!workflowSpec && workflowUsesTools(workflowSpec));
+        if (needsTools && reactConfig.toolSourceKind === "live_mcp" && !reactConfig.mcpUrl.trim()) {
+          if (showToast) toast.error(msg("submit.validation.mcp_url_required"));
+          return false;
+        }
         if (isWorkflow) {
           if (!workflowSpec) return false;
           if (validateWorkflowSpec(workflowSpec, workflowIssueText).length > 0) {
@@ -1378,6 +1399,7 @@ export function useSubmitWizard() {
           return false;
         }
         return true;
+      }
       case 4: {
         if (jobType === "run") {
           if (!modelConfig.name.trim()) {
@@ -1563,7 +1585,13 @@ export function useSubmitWizard() {
         const passed = await handleValidateDataset();
         if (!passed) return;
       }
-      if (step === 3 && signatureCode.trim() && parsedDataset && metricCode.trim()) {
+      if (
+        step === 3 &&
+        !moduleSelectionRequired &&
+        signatureCode.trim() &&
+        parsedDataset &&
+        metricCode.trim()
+      ) {
         const passed = await handleValidateCode();
         if (!passed) return;
       }
@@ -1708,10 +1736,17 @@ export function useSubmitWizard() {
       goTo(3);
       return;
     }
-    const needsToolSource = isReact || (isWorkflow && !!workflowSpec && workflowUsesTools(workflowSpec));
-    if (needsToolSource && reactConfig.toolSourceKind === "live_mcp" && !reactConfig.mcpUrl.trim()) {
+    const needsToolSource =
+      isReact || (isWorkflow && !!workflowSpec && workflowUsesTools(workflowSpec));
+    if (
+      needsToolSource &&
+      reactConfig.toolSourceKind === "live_mcp" &&
+      !reactConfig.mcpUrl.trim()
+    ) {
       toast.error(msg("submit.validation.mcp_url_required"));
-      goTo(2);
+      // The tool-source config lives on the code step (it appears once the
+      // module choice reveals a tool-using run).
+      goTo(3);
       return;
     }
 
@@ -1998,6 +2033,10 @@ export function useSubmitWizard() {
     workflowSpec,
     workflowTouched,
     applyAgentWorkflow,
+    // Hold the seed pass while the module picker is still open — seeding for
+    // the default module would be wasted (and visibly wrong) if the user then
+    // picks another one.
+    seedEnabled: !moduleSelectionRequired,
   });
 
   return {
@@ -2027,6 +2066,10 @@ export function useSubmitWizard() {
     setJobDescription,
     moduleName,
     setModuleName,
+    moduleChosen,
+    chooseModule,
+    reopenModulePicker,
+    moduleSelectionRequired,
     isReact,
     isWorkflow,
     workflowSpec,

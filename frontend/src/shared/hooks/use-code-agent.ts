@@ -142,6 +142,9 @@ export interface UseCodeAgentArgs {
   workflowSpec?: WorkflowSpec | null;
   workflowTouched?: boolean;
   applyAgentWorkflow?: (spec: WorkflowSpec, changedNodeId: string | null) => void;
+  // Gates the auto-seed while the wizard's module picker is still open; the
+  // seed fires as soon as this flips true (i.e. the user picked a module).
+  seedEnabled?: boolean;
 }
 
 export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
@@ -170,6 +173,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     workflowSpec = null,
     workflowTouched = false,
     applyAgentWorkflow,
+    seedEnabled = true,
   } = args;
 
   const [status, setStatus] = React.useState<AgentStatus>("idle");
@@ -854,6 +858,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   // which marks both flags true) — a fresh dataset upload clears the flags.
   React.useEffect(() => {
     if (codeAssistMode !== "auto") return;
+    if (!seedEnabled) return;
     if (autoRanRef.current) return;
     if (!hasRequiredContext) return;
     // Workflow mode waits for the wizard's starter graph (the request needs
@@ -866,6 +871,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     runAgent("", []);
   }, [
     codeAssistMode,
+    seedEnabled,
     hasRequiredContext,
     signatureManuallyEdited,
     metricManuallyEdited,

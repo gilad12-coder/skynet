@@ -75,15 +75,7 @@ function displayName(spec: WorkflowNodeSpec): string {
   return spec.id;
 }
 
-function PortRow({
-  port,
-  side,
-  nodeId,
-}: {
-  port: PortInfo;
-  side: "in" | "out";
-  nodeId: string;
-}) {
+function PortRow({ port, side, nodeId }: { port: PortInfo; side: "in" | "out"; nodeId: string }) {
   const isStr = port.annotation === "str" || port.annotation === "";
   return (
     <div
@@ -100,7 +92,7 @@ function PortRow({
         position={side === "in" ? Position.Left : Position.Right}
         id={port.name}
         className={cn(
-          "!size-2.5 !border-2 !border-background",
+          "!size-3 !border-2 !border-[#FDFCFA]",
           isStr ? "!bg-[#3D2E22]" : "!bg-[#C8A882]",
         )}
         aria-label={`${nodeId}.${port.name}`}
@@ -119,16 +111,19 @@ function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
   return (
     <div
       className={cn(
-        "min-w-44 max-w-56 rounded-lg border bg-card text-card-foreground shadow-sm transition-shadow duration-150",
-        selected ? "border-[#3D2E22] shadow-md" : "border-border",
+        "min-w-44 max-w-60 select-none rounded-xl border-[1.5px] bg-card text-card-foreground",
+        "shadow-[0_1px_3px_rgba(61,46,34,0.08)] transition-[box-shadow,border-color] duration-150",
+        selected
+          ? "border-[#3D2E22] shadow-[0_4px_16px_rgba(61,46,34,0.16)] ring-4 ring-[#3D2E22]/10"
+          : "border-[#E2D8CA] hover:border-[#C8A882] hover:shadow-[0_3px_10px_rgba(61,46,34,0.12)]",
         trace?.status === "error" && "border-destructive",
-        pulse && "animate-pulse border-[#C8A882] ring-2 ring-[#C8A882]/50",
+        pulse && "animate-pulse border-[#C8A882] ring-4 ring-[#C8A882]/40",
       )}
       data-node-kind={spec.kind}
     >
       <div
         className={cn(
-          "flex items-center gap-1.5 rounded-t-lg border-b border-border/60 px-3 py-1.5",
+          "flex items-center gap-1.5 rounded-t-[10px] border-b border-border/60 px-3 py-1.5",
           isAnchor ? "bg-[#F3EDE3]" : "bg-[#FAF8F5]",
         )}
       >
