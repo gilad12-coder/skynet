@@ -2615,6 +2615,7 @@
   "workflow.agent.undo": "Undo the last graph change",
   "workflow.canvas.gestures": "Right-click to add a node · double-click to configure · scroll to zoom",
   "workflow.controls.fit": "Fit view",
+  "workflow.controls.reset": "Reset view",
   "workflow.controls.zoom_in": "Zoom in",
   "workflow.controls.zoom_out": "Zoom out",
   "workflow.controls.zoom_reset": "Reset zoom to 100%",

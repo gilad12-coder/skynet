@@ -57,8 +57,10 @@ import {
   saveWizardDraft,
   readWizardDraft,
   clearWizardDraft,
+  stashWizardDraftForReload,
   type WizardDraftData,
 } from "../lib/wizard-draft";
+import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import {
   autoLayoutSpec,
@@ -396,6 +398,26 @@ export function useSubmitWizard() {
       maxCostCredits,
     };
   });
+
+  // A locale switch reloads the page (see LocaleProvider), which would lose
+  // this in-memory form. Stash the live snapshot for that one hop so the user
+  // comes back to the same step in the new language instead of a blank wizard.
+  useEffect(() => {
+    const onLocaleReload = () => {
+      const d = draftRef.current;
+      if (
+        d &&
+        (d.step > 0 ||
+          d.parsedDataset !== null ||
+          d.datasetFileName !== null ||
+          d.jobName.trim() !== "")
+      ) {
+        stashWizardDraftForReload(d);
+      }
+    };
+    window.addEventListener(LOCALE_RELOAD_EVENT, onLocaleReload);
+    return () => window.removeEventListener(LOCALE_RELOAD_EVENT, onLocaleReload);
+  }, []);
 
   // Restore a parked draft on mount so switching to another sidebar tab and
   // coming back lands the user on the same step with inputs intact. Skipped when

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
+import { AnimatePresence, motion } from "framer-motion";
 import { Bot, Brain, Check, Repeat2, Sparkles, Workflow, Zap } from "lucide-react";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
@@ -90,17 +91,6 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
         })
     : undefined;
 
-  // Advanced mode: the step opens as a module picker; once a module is
-  // committed the step re-renders as that module's editor, with a chip in
-  // the header to go back and switch.
-  if (moduleSelectionRequired) {
-    return (
-      <div data-tutorial="wizard-step-4">
-        <ModulePicker onChoose={chooseModule} />
-      </div>
-    );
-  }
-
   const moduleChip = prefs.advancedMode
     ? {
         label: MODULE_META.find((m) => m.value === moduleName.toLowerCase())?.label ?? moduleName,
@@ -108,92 +98,98 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
       }
     : null;
 
-  if (isWorkflow) {
-    return (
-      <div data-tutorial="wizard-step-4">
-        <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl shadow-lg">
-          <ModeToggle
-            value={codeAssistMode}
-            onChange={setCodeAssistMode}
-            disabledReason={disabledReason}
-            module={moduleChip}
-          />
-          <div
-            className={cn(
-              "grid grid-cols-1",
-              codeAssistMode === "auto" && "lg:grid-cols-[400px_minmax(0,1fr)]",
-            )}
-          >
-            {codeAssistMode === "auto" && (
-              <div className="relative min-h-[560px] self-stretch overflow-hidden border-b border-border/40 lg:border-b-0 lg:border-e">
-                <CodeAgentPanel
-                  agent={agent}
-                  disabled={!hasContext}
-                  disabledReason={disabledReason}
-                  className="absolute inset-0"
-                />
-              </div>
-            )}
-            <div className="flex min-w-0 flex-col self-stretch">
-              <div className="border-b border-border/30 px-6 py-3">
-                <h3 className="inline-flex text-lg font-semibold tracking-tight text-foreground">
-                  <HelpTip text={tip("module.workflow")}>{msg("workflow.step.title")}</HelpTip>
-                </h3>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {msg("workflow.step.subtitle")}
-                </p>
-              </div>
-              {workflowSpec && (
-                <WorkflowCanvas
-                  spec={workflowSpec}
-                  specRevision={workflowRevision}
-                  onSpecChange={setWorkflowSpec}
-                  pulseNodeId={agentPulseNodeId}
-                  dryRun={{
-                    disabledReason: workflowDryRunDisabledReason,
-                    sampleInputs: workflowSampleInputs,
-                    run: runWorkflowDryRun,
-                  }}
-                />
-              )}
-              <div
-                className="space-y-2 border-t border-border/30 px-6 py-4"
-                data-tutorial="metric-editor"
-              >
-                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <HelpTip text={tip("code.metric")}>{msg("workflow.step.metric_title")}</HelpTip>
-                </Label>
-                <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-                  {msg("workflow.step.metric_hint")}
-                </p>
-                <CodeEditor
-                  value={metricCode}
-                  onChange={(v) => {
-                    setMetricCode(v);
-                    setMetricManuallyEdited(true);
-                    setMetricValidation(null);
-                  }}
-                  height="180px"
-                  onRun={runMetricValidation}
-                  validationResult={metricValidation}
-                  streaming={codeAssistMode === "auto" && agent.metricStatus === "writing"}
-                  flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
-                />
-              </div>
-              {workflowSpec && workflowUsesTools(workflowSpec) && (
-                <div className="border-t border-border/30 px-6 py-4">
-                  <ReactConfigSection w={w} />
-                </div>
-              )}
+  // Advanced mode: the step opens as a module picker; once a module is
+  // committed the step re-renders as that module's editor, with a chip in
+  // the header to go back and switch. The three views share one
+  // AnimatePresence so picking or switching a module cross-fades instead of
+  // hard-swapping the card.
+  const view = moduleSelectionRequired ? "picker" : isWorkflow ? "workflow" : "code";
+
+  let content: React.ReactNode;
+  if (view === "picker") {
+    content = <ModulePicker onChoose={chooseModule} />;
+  } else if (view === "workflow") {
+    content = (
+      <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl shadow-lg">
+        <ModeToggle
+          value={codeAssistMode}
+          onChange={setCodeAssistMode}
+          disabledReason={disabledReason}
+          module={moduleChip}
+        />
+        <div
+          className={cn(
+            "grid grid-cols-1",
+            codeAssistMode === "auto" && "lg:grid-cols-[400px_minmax(0,1fr)]",
+          )}
+        >
+          {codeAssistMode === "auto" && (
+            <div className="relative min-h-[560px] self-stretch overflow-hidden border-b border-border/40 lg:border-b-0 lg:border-e">
+              <CodeAgentPanel
+                agent={agent}
+                disabled={!hasContext}
+                disabledReason={disabledReason}
+                className="absolute inset-0"
+              />
             </div>
+          )}
+          <div className="flex min-w-0 flex-col self-stretch">
+            <div className="border-b border-border/30 px-6 py-3">
+              <h3 className="inline-flex text-lg font-semibold tracking-tight text-foreground">
+                <HelpTip text={tip("module.workflow")}>{msg("workflow.step.title")}</HelpTip>
+              </h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {msg("workflow.step.subtitle")}
+              </p>
+            </div>
+            {workflowSpec && (
+              <WorkflowCanvas
+                spec={workflowSpec}
+                specRevision={workflowRevision}
+                onSpecChange={setWorkflowSpec}
+                pulseNodeId={agentPulseNodeId}
+                dryRun={{
+                  disabledReason: workflowDryRunDisabledReason,
+                  sampleInputs: workflowSampleInputs,
+                  run: runWorkflowDryRun,
+                }}
+              />
+            )}
+            <div
+              className="space-y-2 border-t border-border/30 px-6 py-4"
+              data-tutorial="metric-editor"
+            >
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <HelpTip text={tip("code.metric")}>{msg("workflow.step.metric_title")}</HelpTip>
+              </Label>
+              <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                {msg("workflow.step.metric_hint")}
+              </p>
+              <CodeEditor
+                value={metricCode}
+                onChange={(v) => {
+                  setMetricCode(v);
+                  setMetricManuallyEdited(true);
+                  setMetricValidation(null);
+                }}
+                height="180px"
+                onRun={runMetricValidation}
+                validationResult={metricValidation}
+                streaming={codeAssistMode === "auto" && agent.metricStatus === "writing"}
+                flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
+              />
+            </div>
+            {workflowSpec && workflowUsesTools(workflowSpec) && (
+              <div className="border-t border-border/30 px-6 py-4">
+                <ReactConfigSection w={w} />
+              </div>
+            )}
           </div>
         </div>
       </div>
     );
-  }
-
-  return (
-    <div data-tutorial="wizard-step-4">
+  } else {
+    content = (
       <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl shadow-lg">
         <ModeToggle
           value={codeAssistMode}
@@ -320,6 +316,22 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
           </div>
         </div>
       </div>
+    );
+  }
+
+  return (
+    <div data-tutorial="wizard-step-4">
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={view}
+          initial={{ opacity: 0, y: 10, scale: 0.99 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -10, scale: 0.99 }}
+          transition={{ duration: 0.18, ease: "easeOut" }}
+        >
+          {content}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }
@@ -337,11 +349,14 @@ function ModulePicker({ onChoose }: { onChoose: (module: string) => void }) {
         className="mx-auto mt-6 grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2"
         data-tutorial="module-selector"
       >
-        {MODULE_META.map(({ value, label, icon: Icon, tipKey }) => (
-          <button
+        {MODULE_META.map(({ value, label, icon: Icon, tipKey }, index) => (
+          <motion.button
             key={value}
             type="button"
             onClick={() => onChoose(value)}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, delay: index * 0.05, ease: "easeOut" }}
             className="group flex cursor-pointer flex-col items-start gap-2 rounded-xl border border-border/60 bg-background/60 p-4 text-start transition-all duration-150 hover:-translate-y-0.5 hover:border-[#C8A882] hover:shadow-md"
           >
             <span className="flex size-9 items-center justify-center rounded-lg bg-[#F3EDE3] text-[#3D2E22] transition-colors duration-150 group-hover:bg-[#3D2E22] group-hover:text-[#FAF8F5]">
@@ -349,7 +364,7 @@ function ModulePicker({ onChoose }: { onChoose: (module: string) => void }) {
             </span>
             <span className="text-sm font-semibold text-foreground">{label}</span>
             <span className="text-xs leading-relaxed text-muted-foreground">{tip(tipKey)}</span>
-          </button>
+          </motion.button>
         ))}
       </div>
     </div>

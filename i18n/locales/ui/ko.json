@@ -1,4 +1,5 @@
 {
+  "workflow.controls.reset": "보기 초기화",
   "submit.react.mcp_checking": "연결 확인 중…",
   "submit.react.mcp_connected": "연결됨 — 도구 {p1}개 사용 가능",
   "submit.react.mcp_failed": "연결 실패",

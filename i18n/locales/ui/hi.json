@@ -1,4 +1,5 @@
 {
+  "workflow.controls.reset": "व्यू रीसेट करें",
   "submit.react.mcp_checking": "कनेक्शन जाँचा जा रहा है…",
   "submit.react.mcp_connected": "कनेक्ट हो गया — {p1} टूल उपलब्ध",
   "submit.react.mcp_failed": "कनेक्शन विफल",

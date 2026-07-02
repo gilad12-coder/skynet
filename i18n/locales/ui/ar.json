@@ -1,4 +1,5 @@
 {
+  "workflow.controls.reset": "إعادة تعيين العرض",
   "submit.react.mcp_checking": "جارٍ التحقق من الاتصال…",
   "submit.react.mcp_connected": "متصل — {p1} أداة متاحة",
   "submit.react.mcp_failed": "فشل الاتصال",

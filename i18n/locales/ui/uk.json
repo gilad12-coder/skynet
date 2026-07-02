@@ -1,4 +1,5 @@
 {
+  "workflow.controls.reset": "Скинути вигляд",
   "submit.react.mcp_checking": "Перевірка з'єднання…",
   "submit.react.mcp_connected": "Підключено — доступно інструментів: {p1}",
   "submit.react.mcp_failed": "Не вдалося підключитися",

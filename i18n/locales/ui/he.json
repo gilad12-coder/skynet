@@ -2615,6 +2615,7 @@
   "workflow.agent.undo": "ביטול השינוי האחרון בגרף",
   "workflow.canvas.gestures": "קליק ימני להוספת צומת · לחיצה כפולה לעריכה · גלילה לזום",
   "workflow.controls.fit": "התאמת תצוגה",
+  "workflow.controls.reset": "אפס/י תצוגה",
   "workflow.controls.zoom_in": "התקרבות",
   "workflow.controls.zoom_out": "התרחקות",
   "workflow.controls.zoom_reset": "איפוס זום ל-100%",

@@ -47,6 +47,8 @@ import {
   type NodeChange,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { AnimatePresence, motion } from "framer-motion";
+import { toast } from "react-toastify";
 import {
   AlertTriangle,
   ChevronDown,
@@ -57,6 +59,7 @@ import {
   Minimize2,
   Play,
   Plus,
+  RotateCcw,
   Scan,
   Sparkles,
   Trash2,
@@ -720,6 +723,9 @@ function CanvasInner({
   }, []);
 
   const inspectorNode = spec.nodes.find((n) => n.id === inspectorId) ?? null;
+  // The inspector slides in from the inline end; page direction decides which
+  // physical side that is. Client-only component, so document is available.
+  const slideFrom = document.documentElement.dir === "rtl" ? -24 : 24;
   const inputAnchor = spec.nodes.find((n) => n.kind === "input");
   const inputFieldNames = inputAnchor ? nodePorts(inputAnchor).outputs.map((p) => p.name) : [];
 
@@ -761,9 +767,21 @@ function CanvasInner({
             size="sm"
             variant="outline"
             className="h-7 gap-1.5 text-xs"
-            disabled={issues.length > 0 || !!dryRun.disabledReason}
             title={dryRun.disabledReason ?? undefined}
-            onClick={() => setDryRunOpen(true)}
+            onClick={() => {
+              // Always clickable: a blocked run explains itself instead of
+              // silently ignoring the click behind a disabled button.
+              const firstIssue = issues[0];
+              if (firstIssue) {
+                toast.error(firstIssue.message);
+                return;
+              }
+              if (dryRun.disabledReason) {
+                toast.error(dryRun.disabledReason);
+                return;
+              }
+              setDryRunOpen(true);
+            }}
           >
             <Play className="size-3" />
             {msg("workflow.toolbar.dry_run")}
@@ -779,20 +797,14 @@ function CanvasInner({
         />
       </div>
 
-      <div
-        className={cn(
-          "grid min-h-0 flex-1",
-          inspectorNode
-            ? fullscreen
-              ? "grid-cols-[minmax(0,1fr)_360px]"
-              : "grid-cols-[minmax(0,1fr)_320px]"
-            : "grid-cols-1",
-        )}
-      >
+      {/* The inspector overlays the canvas (slides in from the inline end)
+          instead of claiming a grid column, so opening it never resizes or
+          re-fits the graph. */}
+      <div className="relative flex min-h-0 flex-1">
         <div
           dir="ltr"
           ref={flowWrapRef}
-          className={cn("relative", fullscreen ? "min-h-0" : "h-[480px]")}
+          className={cn("min-w-0 flex-1", fullscreen ? "min-h-0" : "h-[480px]")}
         >
           <ReactFlow
             nodes={nodes}
@@ -853,21 +865,33 @@ function CanvasInner({
             />
           </ReactFlow>
         </div>
-        {inspectorNode && (
-          <div className="min-h-0 overflow-hidden border-s border-border/40">
-            <NodeInspector
-              onClose={() => setInspectorId(null)}
-              spec={inspectorNode}
-              issues={issuesByNode.get(inspectorNode.id) ?? []}
-              onChange={updateNode}
-              onDelete={
-                inspectorNode.kind !== "input" && inspectorNode.kind !== "output"
-                  ? () => deleteNode(inspectorNode.id)
-                  : undefined
-              }
-            />
-          </div>
-        )}
+        <AnimatePresence>
+          {inspectorNode && (
+            <motion.div
+              key="inspector"
+              initial={{ x: slideFrom, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: slideFrom, opacity: 0 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              className={cn(
+                "absolute inset-y-0 end-0 z-20 overflow-hidden border-s border-border/40 bg-card shadow-xl",
+                fullscreen ? "w-[360px]" : "w-[320px]",
+              )}
+            >
+              <NodeInspector
+                onClose={() => setInspectorId(null)}
+                spec={inspectorNode}
+                issues={issuesByNode.get(inspectorNode.id) ?? []}
+                onChange={updateNode}
+                onDelete={
+                  inspectorNode.kind !== "input" && inspectorNode.kind !== "output"
+                    ? () => deleteNode(inspectorNode.id)
+                    : undefined
+                }
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {dryRunResult && (
@@ -885,83 +909,90 @@ function CanvasInner({
         />
       )}
 
-      {menu && (
-        <div
-          ref={menuRef}
-          className="absolute z-30 min-w-44 rounded-lg border border-border/70 bg-popover p-1 text-popover-foreground shadow-xl"
-          style={{ left: menu.x, top: menu.y }}
-        >
-          {menu.target.type === "pane" && (
-            <>
-              {ADD_KINDS.map(({ kind, icon, labelKey }) => (
+      <AnimatePresence>
+        {menu && (
+          <motion.div
+            key={`${menu.x}:${menu.y}`}
+            ref={menuRef}
+            initial={{ opacity: 0, scale: 0.95, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.08 } }}
+            transition={{ duration: 0.12, ease: "easeOut" }}
+            className="absolute z-30 min-w-44 rounded-lg border border-border/70 bg-popover p-1 text-popover-foreground shadow-xl"
+            style={{ left: menu.x, top: menu.y, transformOrigin: "top left" }}
+          >
+            {menu.target.type === "pane" && (
+              <>
+                {ADD_KINDS.map(({ kind, icon, labelKey }) => (
+                  <MenuItem
+                    key={kind}
+                    icon={icon}
+                    label={msg(labelKey)}
+                    onClick={() => {
+                      addNodeAt(kind, menu.flow, menu.pending);
+                      setMenu(null);
+                    }}
+                  />
+                ))}
+                {!menu.pending && (
+                  <>
+                    <div className="mx-1 my-1 h-px bg-border/70" />
+                    <MenuItem
+                      icon={LayoutGrid}
+                      label={msg("workflow.toolbar.tidy")}
+                      onClick={() => {
+                        tidyUp();
+                        setMenu(null);
+                      }}
+                    />
+                    <MenuItem
+                      icon={Scan}
+                      label={msg("workflow.controls.fit")}
+                      onClick={() => {
+                        void fitView({ ...FIT_VIEW, duration: 300 });
+                        setMenu(null);
+                      }}
+                    />
+                  </>
+                )}
+              </>
+            )}
+            {menuNode && (
+              <>
                 <MenuItem
-                  key={kind}
-                  icon={icon}
-                  label={msg(labelKey)}
+                  icon={Copy}
+                  label={msg("workflow.menu.duplicate")}
                   onClick={() => {
-                    addNodeAt(kind, menu.flow, menu.pending);
+                    duplicateNode(menuNode);
                     setMenu(null);
                   }}
                 />
-              ))}
-              {!menu.pending && (
-                <>
-                  <div className="mx-1 my-1 h-px bg-border/70" />
-                  <MenuItem
-                    icon={LayoutGrid}
-                    label={msg("workflow.toolbar.tidy")}
-                    onClick={() => {
-                      tidyUp();
-                      setMenu(null);
-                    }}
-                  />
-                  <MenuItem
-                    icon={Scan}
-                    label={msg("workflow.controls.fit")}
-                    onClick={() => {
-                      void fitView({ ...FIT_VIEW, duration: 300 });
-                      setMenu(null);
-                    }}
-                  />
-                </>
-              )}
-            </>
-          )}
-          {menuNode && (
-            <>
-              <MenuItem
-                icon={Copy}
-                label={msg("workflow.menu.duplicate")}
-                onClick={() => {
-                  duplicateNode(menuNode);
-                  setMenu(null);
-                }}
-              />
-              <div className="mx-1 my-1 h-px bg-border/70" />
+                <div className="mx-1 my-1 h-px bg-border/70" />
+                <MenuItem
+                  icon={Trash2}
+                  label={msg("workflow.menu.delete")}
+                  danger
+                  onClick={() => {
+                    deleteNode(menuNode);
+                    setMenu(null);
+                  }}
+                />
+              </>
+            )}
+            {menuEdge && (
               <MenuItem
                 icon={Trash2}
-                label={msg("workflow.menu.delete")}
+                label={msg("workflow.menu.delete_edge")}
                 danger
                 onClick={() => {
-                  deleteNode(menuNode);
+                  deleteEdge(menuEdge);
                   setMenu(null);
                 }}
               />
-            </>
-          )}
-          {menuEdge && (
-            <MenuItem
-              icon={Trash2}
-              label={msg("workflow.menu.delete_edge")}
-              danger
-              onClick={() => {
-                deleteEdge(menuEdge);
-                setMenu(null);
-              }}
-            />
-          )}
-        </div>
-      )}
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 
@@ -1028,8 +1059,10 @@ function ZoomControls() {
         />
         <div className="h-4 w-px bg-border/70" />
         <ControlButton
-          icon={Scan}
-          label={msg("workflow.controls.fit")}
+          icon={RotateCcw}
+          label={msg("workflow.controls.reset")}
+          // Back to the original framing — the same fit the canvas opened
+          // with (mirrors the trajectory tree's reset control).
           onClick={() => fitView({ ...FIT_VIEW, duration: 300 })}
         />
       </div>

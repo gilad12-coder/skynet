@@ -1,4 +1,5 @@
 {
+  "workflow.controls.reset": "Restablecer vista",
   "submit.react.mcp_checking": "Comprobando la conexión…",
   "submit.react.mcp_connected": "Conectado — {p1} herramientas disponibles",
   "submit.react.mcp_failed": "Error de conexión",

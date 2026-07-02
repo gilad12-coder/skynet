@@ -111,7 +111,7 @@ function NodeCard({ data, selected }: NodeProps<CanvasNode>) {
   return (
     <div
       className={cn(
-        "min-w-44 max-w-60 select-none rounded-xl border-[1.5px] bg-card text-card-foreground",
+        "wf-node-enter min-w-44 max-w-60 select-none rounded-xl border-[1.5px] bg-card text-card-foreground",
         "shadow-[0_1px_3px_rgba(61,46,34,0.08)] transition-[box-shadow,border-color] duration-150",
         selected
           ? "border-[#3D2E22] shadow-[0_4px_16px_rgba(61,46,34,0.16)] ring-4 ring-[#3D2E22]/10"

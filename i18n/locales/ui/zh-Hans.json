@@ -1,4 +1,5 @@
 {
+  "workflow.controls.reset": "重置视图",
   "submit.react.mcp_checking": "正在检查连接…",
   "submit.react.mcp_connected": "已连接 — 可使用 {p1} 个工具",
   "submit.react.mcp_failed": "连接失败",

@@ -1,4 +1,5 @@
 {
+  "workflow.controls.reset": "Görünümü sıfırla",
   "submit.react.mcp_checking": "Bağlantı kontrol ediliyor…",
   "submit.react.mcp_connected": "Bağlandı — {p1} araç kullanılabilir",
   "submit.react.mcp_failed": "Bağlantı başarısız",

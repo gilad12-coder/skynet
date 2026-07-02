@@ -1417,3 +1417,20 @@ table {
   background: rgba(200, 168, 130, 0.08) !important;
   border: 1px dashed #c8a882 !important;
 }
+
+/* Node cards scale in on mount — new nodes, pastes, and agent rewrites all
+   announce themselves. Animates the inner card, not the React Flow wrapper,
+   whose transform carries the node's canvas position. */
+@keyframes wf-node-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.wf-node-enter {
+  animation: wf-node-enter 0.18s ease-out;
+}
