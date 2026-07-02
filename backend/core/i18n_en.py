@@ -171,8 +171,8 @@ ENGLISH_MESSAGES: dict[str, str] = {
         "path like 'dspy.teleprompt.GEPA'."
     ),
     "wizard.module_unknown": (
-        "'{name}' is not a recognized DSPy module. Use the aliases 'predict' or "
-        "'cot', or a fully qualified dotted path like 'dspy.Predict'."
+        "'{name}' is not a recognized DSPy module. Use the aliases 'predict', "
+        "'cot', or 'workflow', or a fully qualified dotted path like 'dspy.Predict'."
     ),
     "wizard.split_fractions_negative": "split_fractions must be non-negative.",
     "wizard.split_fractions_not_number": "split_fractions values must be numbers: {error}",
