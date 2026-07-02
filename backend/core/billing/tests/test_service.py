@@ -2,15 +2,16 @@
 
 Covers ``report_run_usage`` (whether/with-what-units a meter event is pushed),
 ``create_subscription_checkout`` (whether the metered price rides on the
-subscription), and the Phase-0 credit-ledger backbone — ``credits_for_tokens``,
-the one-time free grant and the renewing Premium allotment, run debiting (grant
-before paid balance), and the ``spendable_credits`` figure the submit gate reads. Each test
+subscription), and the Phase-0 credit-ledger backbone — the one-time free grant
+and the renewing Premium allotment, run debiting (grant before paid balance), and
+the ``spendable_credits`` figure the submit gate reads. Each test
 stands up an in-memory SQLite engine with the billing tables and patches the
 ``stripe`` module so no network call is made.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -28,12 +29,10 @@ from core.billing.service import (
     FOUNDERS_LOCK_DAYS,
     FREE_GRANT_CREDITS,
     GRANT_WINDOW_DAYS,
+    PLATFORM_FEE_FRACTION,
     PREMIUM_GRANT_CREDITS,
-    TOKENS_PER_CREDIT,
     StripeBillingService,
     cost_ceiling_budget,
-    credits_for_tokens,
-    platform_fee_credits,
     platform_fee_credits_for_usage,
 )
 from core.config import settings
@@ -277,16 +276,6 @@ def _grant_remaining(engine: object, username: str) -> int | None:
         return None if customer is None else customer.grant_remaining
 
 
-def test_credits_for_tokens_rounds_up_and_floors_at_zero() -> None:
-    """A partial credit's tokens cost a whole credit; non-positive costs nothing."""
-    assert credits_for_tokens(0) == 0
-    assert credits_for_tokens(-10) == 0
-    assert credits_for_tokens(1) == 1
-    assert credits_for_tokens(TOKENS_PER_CREDIT) == 1
-    assert credits_for_tokens(TOKENS_PER_CREDIT + 1) == 2
-    assert credits_for_tokens(3 * TOKENS_PER_CREDIT) == 3
-
-
 def test_wallet_reports_full_grant_for_new_account(engine: object) -> None:
     """A brand-new account reads a full grant without a row being created."""
     snapshot = StripeBillingService(engine=engine).get_wallet("new@x.com")
@@ -460,13 +449,6 @@ def _balance(engine: object, username: str) -> tuple[int, int]:
     with Session(engine) as session:
         c = session.get(BillingCustomerModel, username)
         return (0, 0) if c is None else (int(c.grant_remaining or 0), int(c.credit_balance))
-
-
-def test_platform_fee_is_a_floor_and_fraction_of_cost() -> None:
-    """The platform fee is at least one credit and a fraction of the full cost."""
-    assert platform_fee_credits(0) == 0
-    assert platform_fee_credits(TOKENS_PER_CREDIT) == 1  # 20% of 1 credit, floored up to 1
-    assert platform_fee_credits(100 * TOKENS_PER_CREDIT) == 20  # 20% of 100
 
 
 def test_guarantee_refunds_full_run_on_no_lift_managed(engine: object) -> None:
@@ -696,8 +678,8 @@ def test_cost_ceiling_budget_byok_is_fee_aware_and_larger(engine: object) -> Non
     assert budget > 100
     # ...and the fee of a run that exhausts the budget never exceeds the balance,
     # while one credit more would (the cap is tight, erring conservative on floats).
-    assert platform_fee_credits(budget * TOKENS_PER_CREDIT) <= 100
-    assert platform_fee_credits((budget + 1) * TOKENS_PER_CREDIT) > 100
+    assert max(1, math.ceil(budget * PLATFORM_FEE_FRACTION)) <= 100
+    assert max(1, math.ceil((budget + 1) * PLATFORM_FEE_FRACTION)) > 100
 
 
 def test_wallet_reports_premium_grant_total_for_subscriber(engine: object) -> None:

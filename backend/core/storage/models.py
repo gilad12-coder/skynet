@@ -91,8 +91,8 @@ class BillingCustomerModel(Base):
     rather than a foreign key to ``users`` so SSO accounts — which never get a
     ``users`` row — are billed too. ``stripe_customer_id`` is the durable link to
     Stripe. ``credit_balance`` is the denormalized spendable purchased-credit
-    total, kept in step with ``credit_ledger`` on every mutation so the
-    frontier-access gate reads a single fast integer. The ``subscription_*``
+    total, kept in step with ``credit_ledger`` on every mutation so a balance
+    read is a single fast integer. The ``subscription_*``
     columns mirror the account's Premium subscription as last reported by a
     Stripe webhook (the sync-Stripe-to-DB pattern): the DB is a cache of Stripe,
     never the source of truth for subscription state.

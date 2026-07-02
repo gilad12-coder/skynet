@@ -2,11 +2,11 @@
  * Credit-wallet domain model shared by the billing UI surfaces.
  *
  * Skynet runs on pay-as-you-go prepaid credits: every new account gets a one-time
- * free grant (mini models only), and buying credit packs unlocks the frontier
- * task/reflection models — the free/paid line is drawn by balance, not by a
- * subscription. Credits are the unit of account; the dollar value is always
- * shown alongside (`CREDIT_USD_VALUE`), and the markup that protects margin lives
- * in the credit→cost mapping, not in this UI.
+ * free grant, and beyond it users buy credit packs or start Premium. Credits are
+ * spendable on any model — the free/paid line is about balance, not catalog
+ * access. Credits are the unit of account; the dollar value is always shown
+ * alongside (`CREDIT_USD_VALUE`), and the markup that protects margin lives in the
+ * credit→cost mapping, not in this UI.
  *
  * Everything here is framework-agnostic (no React / `next/*`) so it imports from
  * server components, client components, and the provider alike. The values are
@@ -30,7 +30,7 @@ export const CREDIT_USD_VALUE = 0.01;
 /** Below this much spendable value the wallet reads as "running low" (calm, not alarming). */
 export const LOW_BALANCE_USD = 0.5;
 
-/** The one-time free grant that lets a new account try the platform on mini models. */
+/** The one-time free grant that lets a new account try the platform. */
 export interface FreeGrant {
   creditsRemaining: number;
   creditsTotal: number;
@@ -71,12 +71,12 @@ export interface AutoReload {
 
 /** The whole wallet as the UI needs it. */
 export interface CreditWallet {
-  /** Purchased credits. A positive value is what unlocks the frontier model catalog. */
+  /** Purchased credits, on top of the free grant. */
   paidBalanceCredits: number;
   freeGrant: FreeGrant;
   /** Which token source the account is actively running jobs on. */
   mode: TokenSourceMode;
-  /** Whether an active Premium subscription unlocks the frontier catalog, independent of paid credits. */
+  /** Whether an active Premium subscription is in effect. */
   premiumActive: boolean;
   autoReload: AutoReload;
   /** Most-recent-first ledger rows. */
@@ -91,11 +91,6 @@ export function creditsToUsd(credits: number): number {
 /** Total spendable credits = free grant remaining + purchased balance. */
 export function totalCredits(wallet: CreditWallet): number {
   return wallet.freeGrant.creditsRemaining + wallet.paidBalanceCredits;
-}
-
-/** True once the account holds purchased credits. */
-export function hasPaidBalance(wallet: CreditWallet): boolean {
-  return wallet.paidBalanceCredits > 0;
 }
 
 /** Derive the chip's health bucket from spendable value. */

@@ -178,7 +178,6 @@ function FreeCard({ premiumActive, index }: { premiumActive: boolean; index: num
   const features: Feature[] = [
     { label: formatMsg("billing.plans.free.f1", { p1: formatCredits(FREE_GRANT_CREDITS, locale) }) },
     { label: msg("billing.plans.free.f2") },
-    { label: msg("billing.plans.free.f3") },
     { label: msg("billing.plans.free.f5") },
     { label: msg("billing.plans.free.f4") },
   ];
@@ -367,7 +366,6 @@ function CreditsCard({ index }: { index: number }) {
   const features: Feature[] = [
     { label: msg("billing.plans.credits.f1") },
     { label: msg("billing.plans.credits.f2") },
-    { label: msg("billing.plans.credits.f3") },
   ];
 
   return (

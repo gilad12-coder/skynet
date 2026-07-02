@@ -68,11 +68,6 @@ GRANT_WINDOW_DAYS = 30
 # treats such a row as having no real Stripe customer yet and provisions one.
 LOCAL_CUSTOMER_PREFIX = "local:"
 
-# Credits charged per this many run tokens. One credit is $0.01; the markup that
-# protects margin lives in this mapping (and the Stripe per-unit price), not in
-# the catalog, so it is re-priceable without touching credit counts elsewhere.
-TOKENS_PER_CREDIT = 1000
-
 # Share of a run's credit cost that is Skynet's platform fee (vs. pass-through
 # compute). On a no-lift BYOK run the provider tokens are already spent on the
 # user's own key, so only this fee is refundable; a managed no-lift run refunds
@@ -179,50 +174,10 @@ class UsageSnapshot:
     entries: list[LedgerRow] = field(default_factory=list)
 
 
-def credits_for_tokens(total_tokens: int) -> int:
-    """Convert a run's token total to the credits it costs, rounding up.
-
-    A partial credit's worth of tokens still costs a whole credit, so a run that
-    consumed any tokens at all is never billed zero. The rate
-    (:data:`TOKENS_PER_CREDIT`) carries the markup and is re-priceable here.
-
-    Args:
-        total_tokens: Tokens the run consumed; non-positive yields ``0``.
-
-    Returns:
-        The non-negative credit cost of the run.
-    """
-    if total_tokens <= 0:
-        return 0
-    return -(-total_tokens // TOKENS_PER_CREDIT)
-
-
-def platform_fee_credits(total_tokens: int) -> int:
-    """Return the platform-fee portion of a run's credit cost, rounding up.
-
-    The refundable amount on a no-lift **BYOK** run: the provider tokens were
-    spent on the user's own key, so only Skynet's fee
-    (:data:`PLATFORM_FEE_FRACTION` of the full cost) can be returned. Always at
-    least one credit when the run cost anything, so a covered run is never
-    refunded zero.
-
-    Args:
-        total_tokens: Tokens the run consumed.
-
-    Returns:
-        The non-negative platform-fee credits (``0`` when the run cost nothing).
-    """
-    cost = credits_for_tokens(total_tokens)
-    if cost <= 0:
-        return 0
-    return max(1, math.ceil(cost * PLATFORM_FEE_FRACTION))
-
-
 def platform_fee_credits_for_usage(usages: Iterable[ModelUsage]) -> int:
     """Return the platform-fee portion of a run's per-model credit cost, rounding up.
 
-    The per-model analogue of :func:`platform_fee_credits`: the
-    :data:`PLATFORM_FEE_FRACTION` share of the run's full per-model cost
+    The :data:`PLATFORM_FEE_FRACTION` share of the run's full per-model cost
     (:func:`core.billing.pricing.credits_for_usage`). The only amount a **BYOK**
     run is charged or refunded, since the provider tokens were paid on the user's
     own key. At least one credit when the run cost anything.
