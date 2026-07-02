@@ -2643,6 +2643,7 @@
   "workflow.node.mcp": "כלי",
   "workflow.node.output": "פלט",
   "workflow.node.transform": "עיבוד",
+  "workflow.playground.trace_title": "מסלול הריצה בגרף",
   "workflow.step.metric_hint": "המדד מקבל את הפלט הסופי של הגרף (שדות צומת הפלט) ומחזיר ציון — האופטימיזציה מכוונת את כל הצמתים לפיו",
   "workflow.step.metric_title": "Metric — מדד סוף-לסוף",
   "workflow.step.subtitle": "חברו צמתים של Signatures, קוד Python וכלים לגרף אחד — האופטימיזציה משפרת את כל הצמתים יחד מול מדד אחד",

@@ -2645,6 +2645,7 @@ export type MessageKey =
   | "workflow.node.mcp"
   | "workflow.node.output"
   | "workflow.node.transform"
+  | "workflow.playground.trace_title"
   | "workflow.step.metric_hint"
   | "workflow.step.metric_title"
   | "workflow.step.subtitle"
@@ -5305,6 +5306,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "workflow.node.mcp": "כלי",
   "workflow.node.output": "פלט",
   "workflow.node.transform": "עיבוד",
+  "workflow.playground.trace_title": "מסלול הריצה בגרף",
   "workflow.step.metric_hint": "המדד מקבל את הפלט הסופי של הגרף (שדות צומת הפלט) ומחזיר ציון — האופטימיזציה מכוונת את כל הצמתים לפיו",
   "workflow.step.metric_title": "Metric — מדד סוף-לסוף",
   "workflow.step.subtitle": "חברו צמתים של Signatures, קוד Python וכלים לגרף אחד — האופטימיזציה משפרת את כל הצמתים יחד מול מדד אחד",
@@ -13160,6 +13162,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "workflow.node.mcp": "Tool",
   "workflow.node.output": "Output",
   "workflow.node.transform": "Transform",
+  "workflow.playground.trace_title": "Graph execution trace",
   "workflow.step.metric_hint": "The metric receives the graph's final output (the output node's fields) and returns a score — optimization tunes every node against it",
   "workflow.step.metric_title": "Metric — end-to-end score",
   "workflow.step.subtitle": "Wire Signatures, Python steps, and tools into one graph — optimization improves all nodes together against a single metric",
