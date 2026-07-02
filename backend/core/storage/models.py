@@ -110,11 +110,12 @@ class BillingCustomerModel(Base):
         default=0,
         server_default="0",
     )
-    # The free grant is a rolling, non-cumulative per-user window: ``grant_remaining``
-    # is what is left of the current 500-credit allowance, and ``grant_reset_at`` is
-    # when it tops back up to a flat 500 (leftover expires — no banking). Both are
-    # NULL until the first wallet read or run seeds them, at which point a full grant
-    # and a +30d anchor are written; the reset is lazy-evaluated on read, never cron'd.
+    # ``grant_remaining`` is what is left of the account's credit grant. The free
+    # grant is one-time (500 credits, seeded once and never renewed), so a free
+    # account's ``grant_reset_at`` is NULL. Only an active Premium allotment renews:
+    # ``grant_reset_at`` is when it next tops back up to PREMIUM_GRANT_CREDITS (a
+    # +30d / subscription-period anchor). Both are NULL until the first wallet read
+    # or run seeds them; renewal is lazy-evaluated on read, never cron'd.
     grant_remaining: Mapped[int | None] = mapped_column(
         BigInteger().with_variant(Integer(), "sqlite"), nullable=True
     )

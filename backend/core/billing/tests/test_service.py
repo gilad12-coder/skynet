@@ -3,8 +3,8 @@
 Covers ``report_run_usage`` (whether/with-what-units a meter event is pushed),
 ``create_subscription_checkout`` (whether the metered price rides on the
 subscription), and the Phase-0 credit-ledger backbone — ``credits_for_tokens``,
-the rolling/non-cumulative free-grant reset, run debiting (grant before paid
-balance), and the ``spendable_credits`` figure the submit gate reads. Each test
+the one-time free grant and the renewing Premium allotment, run debiting (grant
+before paid balance), and the ``spendable_credits`` figure the submit gate reads. Each test
 stands up an in-memory SQLite engine with the billing tables and patches the
 ``stripe`` module so no network call is made.
 """
@@ -296,18 +296,16 @@ def test_wallet_reports_full_grant_for_new_account(engine: object) -> None:
         assert session.get(BillingCustomerModel, "new@x.com") is None
 
 
-def test_wallet_seeds_grant_window_on_first_read(engine: object) -> None:
-    """Reading an existing row with no window seeds a full grant and a +30d anchor."""
+def test_wallet_seeds_one_time_free_grant_on_first_read(engine: object) -> None:
+    """Reading a free row with no grant seeds the one-time grant and no reset anchor."""
     _seed_customer(engine, "u@x.com")
-    before = datetime.now(UTC)
     snapshot = StripeBillingService(engine=engine).get_wallet("u@x.com")
     assert snapshot.free_grant_remaining == FREE_GRANT_CREDITS
+    assert snapshot.free_grant_resets_at is None
     with Session(engine) as session:
         customer = session.get(BillingCustomerModel, "u@x.com")
     assert customer.grant_remaining == FREE_GRANT_CREDITS
-    assert customer.grant_reset_at is not None
-    expected = before + timedelta(days=GRANT_WINDOW_DAYS)
-    assert abs((_as_utc(customer.grant_reset_at) - expected).total_seconds()) < 5
+    assert customer.grant_reset_at is None
 
 
 def test_debit_run_draws_from_grant_first(engine: object) -> None:
@@ -376,8 +374,8 @@ def test_debit_run_zero_cost_writes_nothing(engine: object) -> None:
         assert session.get(BillingCustomerModel, "u@x.com").grant_remaining in (None, FREE_GRANT_CREDITS)
 
 
-def test_grant_reset_is_rolling_and_non_cumulative(engine: object) -> None:
-    """Past the window the grant tops up to a flat 500; leftover does not bank."""
+def test_free_grant_is_one_time_and_never_resets(engine: object) -> None:
+    """A free grant never tops up — even past a stale anchor the leftover stands."""
     past = datetime.now(UTC) - timedelta(days=1)
     with Session(engine) as session:
         session.add(
@@ -390,13 +388,10 @@ def test_grant_reset_is_rolling_and_non_cumulative(engine: object) -> None:
             )
         )
         session.commit()
-    service = StripeBillingService(engine=engine)
-    snapshot = service.get_wallet("u@x.com")
-    assert snapshot.free_grant_remaining == FREE_GRANT_CREDITS
-    with Session(engine) as session:
-        customer = session.get(BillingCustomerModel, "u@x.com")
-    assert _as_utc(customer.grant_reset_at) > datetime.now(UTC)
-    assert customer.grant_remaining == FREE_GRANT_CREDITS
+    snapshot = StripeBillingService(engine=engine).get_wallet("u@x.com")
+    assert snapshot.free_grant_remaining == 40
+    assert snapshot.free_grant_resets_at is None
+    assert _grant_remaining(engine, "u@x.com") == 40
 
 
 def test_grant_does_not_reset_before_window_elapses(engine: object) -> None:
