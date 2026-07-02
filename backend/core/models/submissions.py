@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .common import ColumnMapping, ModelConfig, OptimizationStatus, OptimizationType, SplitFractions
+from .serve import WorkflowNodeTrace
 from .workflow import WORKFLOW_MODULE_NAME, WorkflowSpec
 
 
@@ -289,6 +290,52 @@ class GridSearchRequest(_OptimizationRequestBase):
         if not self.use_all_available_reflection_models and not self.reflection_models:
             raise ValueError("At least one reflection model is required.")
         return self
+
+
+class WorkflowDryRunRequest(BaseModel):
+    """Request payload for POST /workflows/dry-run — one unoptimized test execution."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    workflow: WorkflowSpec
+    inputs: dict[str, Any] = Field(description="Values for the workflow's input-anchor fields.")
+    model_settings: ModelConfig = Field(alias="model_config")
+    tool_source: ToolSource | None = None
+
+    @model_validator(mode="after")
+    def _require_tool_source_for_tools(self) -> WorkflowDryRunRequest:
+        """Require a tool roster when the graph contains tool-using nodes.
+
+        Returns:
+            The validated request instance.
+
+        Raises:
+            ValueError: When react/mcp nodes exist but no ``tool_source``.
+        """
+        if self.tool_source is None:
+            tool_users = [
+                node.id
+                for node in self.workflow.nodes
+                if node.kind == "mcp" or (node.kind == "signature" and node.module_name == "react")
+            ]
+            if tool_users:
+                raise ValueError(f"tool_source is required — these workflow nodes use tools: {tool_users}.")
+        return self
+
+
+class WorkflowDryRunResponse(BaseModel):
+    """Result of a workflow dry run.
+
+    A node failure is an expected outcome the canvas renders, not an HTTP
+    error: the response carries the failing node id, the error, and every
+    trace collected up to (and including) the failure.
+    """
+
+    outputs: dict[str, Any] | None = None
+    node_traces: list[WorkflowNodeTrace] = Field(default_factory=list)
+    model_used: str
+    error: str | None = None
+    failed_node_id: str | None = None
 
 
 class OptimizationSubmissionResponse(BaseModel):

@@ -178,6 +178,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "wizard.split_fractions_not_number": "split_fractions values must be numbers: {error}",
     "wizard.split_fractions_not_object": "split_fractions must be an object with train/val/test keys.",
     "wizard.split_fractions_sum": "split_fractions must sum to 1.0, got {total}",
+    "workflow.validation_failed": "Workflow validation failed: {error}",
 }
 
 

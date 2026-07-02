@@ -62,12 +62,14 @@ from .optimizations import (
     ProgramArtifactResponse,
 )
 from .results import GridSearchResponse, LMActivity, LMStageStats, PairResult, RunResponse
-from .serve import ServeInfoResponse, ServeRequest, ServeResponse
+from .serve import ServeInfoResponse, ServeRequest, ServeResponse, WorkflowNodeTrace
 from .submissions import (
     GridSearchRequest,
     OptimizationSubmissionResponse,
     RunRequest,
     ToolSource,
+    WorkflowDryRunRequest,
+    WorkflowDryRunResponse,
 )
 from .telemetry import JobLogEntry, ProgressEvent
 from .validation import ValidateCodeRequest, ValidateCodeResponse
@@ -153,12 +155,15 @@ __all__ = [
     "ValidateDatasetRequest",
     "ValidateDatasetResponse",
     "WORKFLOW_MODULE_NAME",
+    "WorkflowDryRunRequest",
+    "WorkflowDryRunResponse",
     "WorkflowEdge",
     "WorkflowField",
     "WorkflowInputNode",
     "WorkflowMcpNode",
     "WorkflowNode",
     "WorkflowNodePosition",
+    "WorkflowNodeTrace",
     "WorkflowOutputNode",
     "WorkflowSignatureNode",
     "WorkflowSpec",
