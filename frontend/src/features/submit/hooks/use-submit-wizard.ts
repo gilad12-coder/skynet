@@ -123,9 +123,23 @@ export function useSubmitWizard() {
   // canvas can remount without looping on its own edits.
   const [workflowSpec, setWorkflowSpec] = useState<WorkflowSpec | null>(null);
   const [workflowRevision, setWorkflowRevision] = useState(0);
+  const workflowSpecRef = useRef<WorkflowSpec | null>(null);
+  useEffect(() => {
+    workflowSpecRef.current = workflowSpec;
+  }, [workflowSpec]);
+  // True until the user (or a restored draft/clone) touches the graph; a
+  // pristine starter graph re-seeds when the dataset's column roles change,
+  // an edited one is never clobbered.
+  const workflowPristineRef = useRef(true);
   const replaceWorkflowSpec = useCallback((spec: WorkflowSpec | null) => {
+    workflowSpecRef.current = spec;
     setWorkflowSpec(spec);
     setWorkflowRevision((r) => r + 1);
+  }, []);
+  const updateWorkflowSpec = useCallback((spec: WorkflowSpec) => {
+    workflowPristineRef.current = false;
+    workflowSpecRef.current = spec;
+    setWorkflowSpec(spec);
   }, []);
 
   const [signatureCode, setSignatureCode] = useState(() => buildSignatureTemplate({}));
@@ -152,13 +166,15 @@ export function useSubmitWizard() {
     readPref("wizardCodeAssist"),
   );
 
-  // Seed the starter graph the first time the workflow module is selected;
-  // never clobber an existing graph when roles change later.
+  // Seed the starter graph when the workflow module is selected, and keep
+  // re-seeding from the dataset's column roles for as long as the graph is
+  // pristine (the module is often picked on the Basics step, before the
+  // dataset exists). An edited graph is never clobbered.
   useEffect(() => {
-    if (isWorkflow && workflowSpec === null) {
-      replaceWorkflowSpec(defaultWorkflowSpec(columnRoles, columnKinds));
-    }
-  }, [isWorkflow, workflowSpec, columnRoles, columnKinds, replaceWorkflowSpec]);
+    if (!isWorkflow) return;
+    if (workflowSpecRef.current !== null && !workflowPristineRef.current) return;
+    replaceWorkflowSpec(defaultWorkflowSpec(columnRoles, columnKinds));
+  }, [isWorkflow, columnRoles, columnKinds, replaceWorkflowSpec]);
 
   // Grid search doesn't support workflow modules (backend rejects it too).
   useEffect(() => {
@@ -368,7 +384,10 @@ export function useSubmitWizard() {
     setModuleName(d.moduleName);
     setOptimizerName(d.optimizerName);
     setReactConfig(d.reactConfig);
-    if (d.workflowSpec) replaceWorkflowSpec(d.workflowSpec);
+    if (d.workflowSpec) {
+      replaceWorkflowSpec(d.workflowSpec);
+      workflowPristineRef.current = false;
+    }
     setSignatureCode(d.signatureCode);
     setMetricCode(d.metricCode);
     setSignatureManuallyEdited(d.signatureManuallyEdited);
@@ -1983,7 +2002,7 @@ export function useSubmitWizard() {
     isReact,
     isWorkflow,
     workflowSpec,
-    setWorkflowSpec,
+    setWorkflowSpec: updateWorkflowSpec,
     replaceWorkflowSpec,
     workflowRevision,
     workflowSampleInputs,
