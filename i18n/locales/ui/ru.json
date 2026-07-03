@@ -33,7 +33,6 @@
   "workflow.agent.tool.disconnect": "Разъединить",
   "workflow.agent.tool.remove_node": "Удалить узел",
   "workflow.agent.tool.update_node": "Обновить узел",
-  "workflow.agent.undo": "Отменить последнее изменение графа",
   "workflow.dryrun.cancel": "Отмена",
   "workflow.dryrun.description": "Один запуск неоптимизированного графа на примере входных данных, чтобы проверить соединения перед тратой кредитов на оптимизацию",
   "workflow.dryrun.dismiss": "Закрыть результат пробного запуска",

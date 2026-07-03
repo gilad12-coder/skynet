@@ -33,7 +33,6 @@
   "workflow.agent.tool.disconnect": "Scollega",
   "workflow.agent.tool.remove_node": "Rimuovi nodo",
   "workflow.agent.tool.update_node": "Aggiorna nodo",
-  "workflow.agent.undo": "Annulla l'ultima modifica al grafo",
   "workflow.dryrun.cancel": "Annulla",
   "workflow.dryrun.description": "Un'esecuzione del grafo non ottimizzato su un input di esempio, per verificare i collegamenti prima di spendere crediti di ottimizzazione",
   "workflow.dryrun.dismiss": "Chiudi il risultato della prova",

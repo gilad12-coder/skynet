@@ -33,7 +33,6 @@
   "workflow.agent.tool.disconnect": "接続を解除",
   "workflow.agent.tool.remove_node": "ノードを削除",
   "workflow.agent.tool.update_node": "ノードを更新",
-  "workflow.agent.undo": "グラフの最後の変更を元に戻す",
   "workflow.dryrun.cancel": "キャンセル",
   "workflow.dryrun.description": "最適化クレジットを消費する前に配線を確認するため、未最適化のグラフをサンプル入力で一度実行します",
   "workflow.dryrun.dismiss": "ドライランの結果を閉じる",

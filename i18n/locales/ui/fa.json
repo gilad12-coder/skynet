@@ -33,7 +33,6 @@
   "workflow.agent.tool.disconnect": "قطع اتصال",
   "workflow.agent.tool.remove_node": "حذف گره",
   "workflow.agent.tool.update_node": "به‌روزرسانی گره",
-  "workflow.agent.undo": "واگرد آخرین تغییر گراف",
   "workflow.dryrun.cancel": "لغو",
   "workflow.dryrun.description": "یک اجرای گراف بهینه‌نشده روی یک ورودی نمونه، برای بررسی درستی اتصالات پیش از خرج کردن اعتبار بهینه‌سازی",
   "workflow.dryrun.dismiss": "بستن نتیجه اجرای آزمایشی",

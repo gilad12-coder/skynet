@@ -33,7 +33,6 @@
   "workflow.agent.tool.disconnect": "断开连接",
   "workflow.agent.tool.remove_node": "移除节点",
   "workflow.agent.tool.update_node": "更新节点",
-  "workflow.agent.undo": "撤销上一次图更改",
   "workflow.dryrun.cancel": "取消",
   "workflow.dryrun.description": "在花费优化额度之前，用一条示例输入对未优化的图执行一次，以验证连接是否正确",
   "workflow.dryrun.dismiss": "关闭试运行结果",

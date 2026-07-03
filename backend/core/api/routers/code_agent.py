@@ -177,7 +177,9 @@ def create_code_agent_router() -> APIRouter:
 
         * ``signature_patch`` / ``metric_patch`` — ``{"chunk": "<token>"}``
           (seed mode only)
-        * ``reasoning_patch`` — ``{"chunk": "<token>"}`` (both modes)
+        * ``reasoning_patch`` — ``{"chunk": "<token>", "source": "<stream>"}``
+          (both modes; ``source`` separates the parallel seed authors:
+          ``signature`` / ``metric`` / ``workflow`` / ``agent``)
         * ``tool_start`` — ``{"id", "tool", "reason"}`` (chat mode)
         * ``signature_replace`` / ``metric_replace`` — ``{"code"}``
         * ``workflow_replace`` — ``{"workflow", "changed_node_id"}``

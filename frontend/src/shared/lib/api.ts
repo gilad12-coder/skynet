@@ -1848,7 +1848,9 @@ export interface CodeAgentToolEnd {
 export interface CodeAgentHandlers {
   onSignaturePatch: (chunk: string) => void;
   onMetricPatch: (chunk: string) => void;
-  onReasoningPatch?: (chunk: string) => void;
+  // `source` names the emitting stream ("signature" | "metric" | "workflow" |
+  // "agent") — seed mode runs two authors in parallel over one SSE stream.
+  onReasoningPatch?: (chunk: string, source: string) => void;
   onMessagePatch?: (chunk: string) => void;
   onSignatureReplace?: (code: string) => void;
   onMetricReplace?: (code: string) => void;
@@ -1909,7 +1911,10 @@ export async function streamCodeAgent(
     } else if (event === "metric_patch") {
       handlers.onMetricPatch(String(data.chunk ?? ""));
     } else if (event === "reasoning_patch") {
-      handlers.onReasoningPatch?.(String(data.chunk ?? ""));
+      handlers.onReasoningPatch?.(
+        String(data.chunk ?? ""),
+        typeof data.source === "string" && data.source ? data.source : "agent",
+      );
     } else if (event === "message_patch") {
       handlers.onMessagePatch?.(String(data.chunk ?? ""));
     } else if (event === "signature_replace") {

@@ -33,7 +33,6 @@
   "workflow.agent.tool.disconnect": "Déconnecter",
   "workflow.agent.tool.remove_node": "Supprimer un nœud",
   "workflow.agent.tool.update_node": "Mettre à jour un nœud",
-  "workflow.agent.undo": "Annuler la dernière modification du graphe",
   "workflow.dryrun.cancel": "Annuler",
   "workflow.dryrun.description": "Une exécution du graphe non optimisé sur un exemple d'entrée, pour vérifier le câblage avant de dépenser des crédits d'optimisation",
   "workflow.dryrun.dismiss": "Fermer le résultat de l'essai",

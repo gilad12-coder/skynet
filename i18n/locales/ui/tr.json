@@ -33,7 +33,6 @@
   "workflow.agent.tool.disconnect": "Bağlantıyı kes",
   "workflow.agent.tool.remove_node": "Düğümü kaldır",
   "workflow.agent.tool.update_node": "Düğümü güncelle",
-  "workflow.agent.undo": "Son graf değişikliğini geri al",
   "workflow.dryrun.cancel": "İptal",
   "workflow.dryrun.description": "Optimizasyon kredisi harcamadan önce bağlantıları doğrulamak için optimize edilmemiş grafın örnek bir girdiyle bir kez çalıştırılması",
   "workflow.dryrun.dismiss": "Deneme sonucunu kapat",

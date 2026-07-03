@@ -33,7 +33,6 @@
   "workflow.agent.tool.disconnect": "فصل الاتصال",
   "workflow.agent.tool.remove_node": "إزالة عقدة",
   "workflow.agent.tool.update_node": "تحديث عقدة",
-  "workflow.agent.undo": "التراجع عن آخر تغيير في المخطط",
   "workflow.dryrun.cancel": "إلغاء",
   "workflow.dryrun.description": "تشغيل واحد للمخطط غير المُحسَّن على مدخل تجريبي، للتحقق من صحة التوصيلات قبل إنفاق أرصدة التحسين",
   "workflow.dryrun.dismiss": "إغلاق نتيجة التشغيل التجريبي",

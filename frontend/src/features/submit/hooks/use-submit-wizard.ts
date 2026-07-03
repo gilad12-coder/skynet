@@ -123,10 +123,22 @@ export function useSubmitWizard() {
   const isReact = moduleName.toLowerCase() === "react";
   const isWorkflow = moduleName.toLowerCase() === "workflow";
   const moduleSelectionRequired = prefs.advancedMode && !moduleChosen;
-  const chooseModule = useCallback((name: string) => {
-    setModuleName(name);
-    setModuleChosen(true);
-  }, []);
+  // Bound after the agent hook is created below; chooseModule only runs on
+  // user clicks, so the ref is always populated by then.
+  const agentResetRef = useRef<(() => void) | null>(null);
+  const chooseModule = useCallback(
+    (name: string) => {
+      // Switching to a different module starts a fresh agent conversation —
+      // the old module's transcript and seeded artifacts no longer apply.
+      // Re-picking the same module keeps the conversation.
+      if (moduleChosen && name.toLowerCase() !== moduleName.toLowerCase()) {
+        agentResetRef.current?.();
+      }
+      setModuleName(name);
+      setModuleChosen(true);
+    },
+    [moduleChosen, moduleName],
+  );
   const reopenModulePicker = useCallback(() => setModuleChosen(false), []);
 
   // Workflow graph spec — the canvas's single source of truth. `null` until
@@ -2033,6 +2045,9 @@ export function useSubmitWizard() {
     // wizard draft (see wizard-draft.ts).
     reloadPersistKey: "submit-code-agent",
   });
+  useEffect(() => {
+    agentResetRef.current = agent.reset;
+  }, [agent.reset]);
 
   return {
     step,

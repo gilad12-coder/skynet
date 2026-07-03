@@ -33,7 +33,6 @@
   "workflow.agent.tool.disconnect": "Verbindung trennen",
   "workflow.agent.tool.remove_node": "Knoten entfernen",
   "workflow.agent.tool.update_node": "Knoten aktualisieren",
-  "workflow.agent.undo": "Letzte Graph-Änderung rückgängig machen",
   "workflow.dryrun.cancel": "Abbrechen",
   "workflow.dryrun.description": "Eine Ausführung des nicht optimierten Graphen mit einer Beispiel-Eingabe, um die Verdrahtung zu prüfen, bevor Optimierungs-Credits ausgegeben werden",
   "workflow.dryrun.dismiss": "Testlauf-Ergebnis schließen",

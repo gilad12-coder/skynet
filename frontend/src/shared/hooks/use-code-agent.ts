@@ -69,6 +69,32 @@ function seedUserMessage(): string {
   });
 }
 
+// Seed mode runs two authors (signature+metric, or graph+metric) in parallel
+// over one multiplexed SSE stream. Keyed buffers keep each stream's reasoning
+// contiguous; multi-stream runs render as labeled sections instead of
+// token-interleaved gibberish.
+interface ReasoningSections {
+  order: string[];
+  bufs: Record<string, string>;
+}
+
+function reasoningSourceLabel(source: string): string {
+  if (source === "signature") return TERMS.signature;
+  if (source === "metric") return TERMS.metric;
+  // Module names are technical terms kept in English throughout the UI.
+  if (source === "workflow") return "Workflow";
+  return source;
+}
+
+function composeReasoning(sections: ReasoningSections): string {
+  const first = sections.order[0];
+  if (first === undefined) return "";
+  if (sections.order.length === 1) return sections.bufs[first] ?? "";
+  return sections.order
+    .map((key) => `[${reasoningSourceLabel(key)}]\n${sections.bufs[key] ?? ""}`)
+    .join("\n\n");
+}
+
 interface AgentMessage {
   role: "assistant" | "user";
   content: string;
@@ -130,9 +156,6 @@ export interface CodeAgentState {
   reasoning: string;
   reasoningStartedAt: number | null;
   reasoningEndedAt: number | null;
-  // Undo backstop for agent graph edits: restores the spec captured before
-  // the current run's first graph op. Null when there is nothing to undo.
-  undoWorkflow: (() => void) | null;
   goToSignatureVersion: (index: number) => void;
   goToMetricVersion: (index: number) => void;
   send: (message: string) => void;
@@ -260,6 +283,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   const metricBufRef = React.useRef("");
   const replyBufRef = React.useRef("");
   const reasoningBufRef = React.useRef("");
+  const reasoningSectionsRef = React.useRef<ReasoningSections>({ order: [], bufs: {} });
+  // Latches once per run: the timer stops the moment the model moves from
+  // reasoning to producing artifacts, even if a parallel stream reasons on.
+  const reasoningEndedRef = React.useRef(false);
   // A restored transcript already contains the seed exchange — never re-seed
   // over it after the locale-switch reload.
   const autoRanRef = React.useRef(restored != null);
@@ -291,11 +318,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     };
   }, [signatureCode, metricCode, signatureValidation, metricValidation, workflowSpec]);
 
-  // Revert support across the conversation (first graph ever seen) and the
-  // single-level undo backstop (graph before the current run's first op).
+  // Revert support across the conversation (first graph ever seen).
   const initialWorkflowRef = React.useRef<WorkflowSpec | null>(null);
-  const workflowUndoRef = React.useRef<WorkflowSpec | null>(null);
-  const [workflowUndoAvailable, setWorkflowUndoAvailable] = React.useState(false);
   const applyAgentWorkflowRef = React.useRef(applyAgentWorkflow);
   React.useEffect(() => {
     applyAgentWorkflowRef.current = applyAgentWorkflow;
@@ -434,6 +458,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       metricBufRef.current = "";
       replyBufRef.current = "";
       reasoningBufRef.current = "";
+      reasoningSectionsRef.current = { order: [], bufs: {} };
+      reasoningEndedRef.current = false;
       pendingValidationsRef.current = [];
 
       const isChat = userMessage.length > 0;
@@ -494,9 +520,17 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       if (isWorkflow && !initialWorkflowRef.current && priorWorkflow) {
         initialWorkflowRef.current = priorWorkflow;
       }
-      // Capture the undo snapshot on this run's FIRST graph op only, so one
-      // undo reverts the whole turn rather than just the last op.
-      let undoCapturedThisRun = false;
+
+      // Stop the thinking timer as soon as artifact output starts flowing —
+      // otherwise "Thinking" keeps pulsing through the whole code-writing
+      // stretch (which renders in the editors, not the chat) and the stream
+      // reads as stuck.
+      const markReasoningDone = () => {
+        if (reasoningBufRef.current && !reasoningEndedRef.current) {
+          reasoningEndedRef.current = true;
+          setReasoningEndedAt(Date.now());
+        }
+      };
 
       void streamCodeAgent(
         {
@@ -522,17 +556,24 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
         },
         {
           signal: controller.signal,
-          onReasoningPatch: (chunk) => {
+          onReasoningPatch: (chunk, source) => {
             if (reasoningBufRef.current === "") {
               setReasoningStartedAt(Date.now());
             }
-            reasoningBufRef.current += chunk;
+            const sections = reasoningSectionsRef.current;
+            if (!(source in sections.bufs)) {
+              sections.order.push(source);
+              sections.bufs[source] = "";
+            }
+            sections.bufs[source] += chunk;
+            reasoningBufRef.current = composeReasoning(sections);
             setReasoning(reasoningBufRef.current);
           },
           onSignaturePatch: (chunk) => {
             if (sigBufRef.current === "") {
               setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.2"));
               setSignatureStatus("writing");
+              markReasoningDone();
             }
             sigBufRef.current += chunk;
             setSignatureCode(sigBufRef.current);
@@ -543,6 +584,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.3"));
               setSignatureStatus("done");
               setMetricStatus("writing");
+              markReasoningDone();
             }
             metricBufRef.current += chunk;
             setMetricCode(metricBufRef.current);
@@ -551,12 +593,13 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           onMessagePatch: (chunk) => {
             if (replyBufRef.current === "") {
               setStatusLabel(msg("auto.features.submit.hooks.use.code.agent.literal.4"));
-              if (reasoningBufRef.current) setReasoningEndedAt(Date.now());
+              markReasoningDone();
             }
             replyBufRef.current += chunk;
             appendReply(chunk);
           },
           onToolStart: (ev) => {
+            markReasoningDone();
             setStatusLabel(
               ev.tool === "edit_signature"
                 ? msg("auto.features.submit.hooks.use.code.agent.literal.5")
@@ -581,11 +624,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             else if (ev.tool === "edit_metric") setMetricStatus("done");
           },
           onWorkflowReplace: (workflow, changedNodeId) => {
-            if (!undoCapturedThisRun) {
-              workflowUndoRef.current = snapshot.workflowSpec ?? null;
-              undoCapturedThisRun = true;
-              setWorkflowUndoAvailable(!!snapshot.workflowSpec);
-            }
+            markReasoningDone();
             applyAgentWorkflowRef.current?.(workflow, changedNodeId);
           },
           onSignatureReplace: (code) => {
@@ -860,14 +899,6 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     [metricVersions, setMetricCode, setMetricManuallyEdited],
   );
 
-  const undoWorkflowImpl = React.useCallback(() => {
-    const prev = workflowUndoRef.current;
-    if (!prev) return;
-    applyAgentWorkflowRef.current?.(prev, null);
-    workflowUndoRef.current = null;
-    setWorkflowUndoAvailable(false);
-  }, []);
-
   const fallbackToManual = React.useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -891,6 +922,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     metricBufRef.current = "";
     replyBufRef.current = "";
     reasoningBufRef.current = "";
+    reasoningSectionsRef.current = { order: [], bufs: {} };
+    reasoningEndedRef.current = false;
     pendingValidationsRef.current = [];
     autoFixAttemptsRef.current = 0;
     autoRanRef.current = false;
@@ -915,8 +948,6 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     setSignatureFlashLines([]);
     setMetricFlashLines([]);
     initialWorkflowRef.current = null;
-    workflowUndoRef.current = null;
-    setWorkflowUndoAvailable(false);
     // Clear the manual-edit gate so the auto-seed effect re-fires on
     // sessionKey bump — otherwise "new chat" would wipe the messages
     // but leave the old Signature/Metric untouched.
@@ -944,10 +975,14 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
 
   // Re-arm when the user changes their DSPy module (predict ↔ chain_of_thought
   // ↔ react, …). The manual-edit gate still protects user-authored edits;
-  // fresh seed output just flips to the new module's expected shape.
+  // fresh seed output just flips to the new module's expected shape. After a
+  // locale-reload restore, module-name churn is hydration rather than a user
+  // switch — re-arming then would seed over the restored transcript, and real
+  // switches reset the conversation via the wizard's chooseModule() anyway.
   React.useEffect(() => {
+    if (restored != null) return;
     autoRanRef.current = false;
-  }, [moduleName]);
+  }, [moduleName, restored]);
 
   // Kick off the seed run as soon as the user has a dataset + I/O roles.
   // This hook lives at the wizard level, so the seed fires even when the
@@ -1006,7 +1041,6 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     reasoning,
     reasoningStartedAt,
     reasoningEndedAt,
-    undoWorkflow: workflowUndoAvailable ? undoWorkflowImpl : null,
     goToSignatureVersion,
     goToMetricVersion,
     send,

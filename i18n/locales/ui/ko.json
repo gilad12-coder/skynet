@@ -33,7 +33,6 @@
   "workflow.agent.tool.disconnect": "연결 해제",
   "workflow.agent.tool.remove_node": "노드 제거",
   "workflow.agent.tool.update_node": "노드 업데이트",
-  "workflow.agent.undo": "마지막 그래프 변경 실행 취소",
   "workflow.dryrun.cancel": "취소",
   "workflow.dryrun.description": "최적화 크레딧을 사용하기 전에 연결 상태를 확인하기 위해, 최적화되지 않은 그래프를 샘플 입력으로 한 번 실행합니다",
   "workflow.dryrun.dismiss": "드라이 런 결과 닫기",

@@ -1208,6 +1208,7 @@ async def _pump_seed_stream(
     *,
     queue: asyncio.Queue[dict | None],
     results: dict[str, str],
+    reasoning_source: str,
 ) -> None:
     """Drive one streamify program and fan its tokens out to the shared SSE queue.
 
@@ -1223,11 +1224,19 @@ async def _pump_seed_stream(
         event_name: Outbound SSE event name for ``field`` tokens.
         queue: Shared SSE queue receiving the events.
         results: Mutable result map; the final value of ``field`` is written here.
+        reasoning_source: Stream label stamped on each ``reasoning_patch`` so
+            the UI can keep parallel seeds' reasoning apart (the signature and
+            metric authors run concurrently on one multiplexed queue).
     """
     async for chunk in program(**inputs):
         if isinstance(chunk, dspy.streaming.StreamResponse):
             if chunk.signature_field_name == REASONING_FIELD:
-                await queue.put({"event": "reasoning_patch", "data": {"chunk": chunk.chunk}})
+                await queue.put(
+                    {
+                        "event": "reasoning_patch",
+                        "data": {"chunk": chunk.chunk, "source": reasoning_source},
+                    }
+                )
             elif chunk.signature_field_name == field:
                 await queue.put({"event": event_name, "data": {"chunk": chunk.chunk}})
         elif isinstance(chunk, dspy.Prediction):
@@ -1415,6 +1424,7 @@ async def _run_seed(
                 "signature_patch",
                 queue=queue,
                 results=results,
+                reasoning_source="signature",
             ),
             _pump_seed_stream(
                 met_program,
@@ -1423,6 +1433,7 @@ async def _run_seed(
                 "metric_patch",
                 queue=queue,
                 results=results,
+                reasoning_source="metric",
             ),
         )
 
@@ -2196,7 +2207,12 @@ async def _run_agent(
         async for chunk in program(**inputs):
             if isinstance(chunk, dspy.streaming.StreamResponse):
                 if chunk.signature_field_name == REASONING_FIELD:
-                    await queue.put({"event": "reasoning_patch", "data": {"chunk": chunk.chunk}})
+                    await queue.put(
+                        {
+                            "event": "reasoning_patch",
+                            "data": {"chunk": chunk.chunk, "source": "agent"},
+                        }
+                    )
                 else:
                     delta = reply_stream.reply_delta(chunk)
                     if delta:
@@ -2274,7 +2290,12 @@ async def _run_workflow_seed(
         async for chunk in graph_program(**shared_inputs):
             if isinstance(chunk, dspy.streaming.StreamResponse):
                 if chunk.signature_field_name == REASONING_FIELD:
-                    await queue.put({"event": "reasoning_patch", "data": {"chunk": chunk.chunk}})
+                    await queue.put(
+                        {
+                            "event": "reasoning_patch",
+                            "data": {"chunk": chunk.chunk, "source": "workflow"},
+                        }
+                    )
             elif isinstance(chunk, dspy.Prediction):
                 results["workflow_json"] = getattr(chunk, "workflow_json", "") or ""
 
@@ -2288,6 +2309,7 @@ async def _run_workflow_seed(
                 "metric_patch",
                 queue=queue,
                 results=results,
+                reasoning_source="metric",
             ),
         )
 
@@ -2445,7 +2467,12 @@ async def _run_workflow_agent(
         async for chunk in program(**inputs):
             if isinstance(chunk, dspy.streaming.StreamResponse):
                 if chunk.signature_field_name == REASONING_FIELD:
-                    await queue.put({"event": "reasoning_patch", "data": {"chunk": chunk.chunk}})
+                    await queue.put(
+                        {
+                            "event": "reasoning_patch",
+                            "data": {"chunk": chunk.chunk, "source": "agent"},
+                        }
+                    )
                 else:
                     delta = reply_stream.reply_delta(chunk)
                     if delta:
