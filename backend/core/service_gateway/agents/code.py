@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncGenerator, Callable
 from functools import partial
@@ -1194,7 +1195,12 @@ def _build_agent_lm() -> dspy.LM:
     config = ModelConfig(
         name=model_name,
         base_url=settings.code_agent_base_url or None,
-        max_tokens=4000,
+        # Reasoning models spend their thinking tokens against this same
+        # budget, and on real datasets the seed's reasoning alone can run
+        # thousands of tokens; keep enough headroom that code is never cut
+        # off mid-artifact (a truncation costs a repair LLM call plus two
+        # more multi-second subprocess validations).
+        max_tokens=16000,
         extra=extra,
     )
     return build_language_model(config, disable_cache=True)
@@ -1283,6 +1289,27 @@ def _run_code_fixer(
     return (getattr(pred, "fixed_code", "") or "").strip()
 
 
+# minimax-m3 occasionally emits the chat adapter's closing field marker
+# malformed — ``[[ ## completed ## ]`` with a bracket missing — so dspy fails
+# to recognize it and the marker text leaks into the parsed field. The debris
+# turns otherwise-valid code into a syntax error ("'[' was never closed"),
+# which costs a repair LLM round-trip plus two more multi-second subprocess
+# validations on nearly every seed.
+_ADAPTER_DEBRIS_RE = re.compile(r"\s*\[\[\s*##\s*\w+\s*##\s*\]{0,2}\s*$")
+
+
+def _strip_adapter_debris(code: str) -> str:
+    """Drop a trailing (possibly malformed) chat-adapter field marker.
+
+    Args:
+        code: Freshly parsed artifact source.
+
+    Returns:
+        The source without any trailing ``[[ ## … ## ]]``-style marker.
+    """
+    return _ADAPTER_DEBRIS_RE.sub("", code).rstrip()
+
+
 async def _validate_and_repair_artifact(
     *,
     lm: dspy.LM,
@@ -1320,6 +1347,7 @@ async def _validate_and_repair_artifact(
         A ``(code, error)`` tuple — the best source produced and the final
         validator error (empty string once valid).
     """
+    code = _strip_adapter_debris(code)
     error = await asyncio.to_thread(validator, code)
     attempts = 0
     while error and attempts < max_attempts:
@@ -1441,25 +1469,30 @@ async def _run_seed(
         # repair) both artifacts here so the editor + the wizard receive
         # code that already passes the same check submit runs — otherwise a
         # stray brace or bad identifier surfaces only as a 400 at submit.
-        sig_code, sig_err = await _validate_and_repair_artifact(
-            lm=lm,
-            artifact_kind="signature",
-            code=results["signature_code"],
-            validator=_validate_signature_code,
-            dataset_columns=dataset_columns,
-            column_roles_json=column_roles_json,
-            queue=queue,
-            replace_event="signature_replace",
-        )
-        met_code, met_err = await _validate_and_repair_artifact(
-            lm=lm,
-            artifact_kind="metric",
-            code=results["metric_code"],
-            validator=_validate_metric_code,
-            dataset_columns=dataset_columns,
-            column_roles_json=column_roles_json,
-            queue=queue,
-            replace_event="metric_replace",
+        # Concurrently: each validation spawns a fresh interpreter that pays
+        # the multi-second dspy import, so running them back-to-back doubled
+        # the post-stream dead time the user sits through.
+        (sig_code, sig_err), (met_code, met_err) = await asyncio.gather(
+            _validate_and_repair_artifact(
+                lm=lm,
+                artifact_kind="signature",
+                code=results["signature_code"],
+                validator=_validate_signature_code,
+                dataset_columns=dataset_columns,
+                column_roles_json=column_roles_json,
+                queue=queue,
+                replace_event="signature_replace",
+            ),
+            _validate_and_repair_artifact(
+                lm=lm,
+                artifact_kind="metric",
+                code=results["metric_code"],
+                validator=_validate_metric_code,
+                dataset_columns=dataset_columns,
+                column_roles_json=column_roles_json,
+                queue=queue,
+                replace_event="metric_replace",
+            ),
         )
         results["signature_code"] = sig_code
         results["metric_code"] = met_code
