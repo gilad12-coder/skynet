@@ -57,6 +57,7 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
     workflowDryRunDisabledReason,
     workflowDryRunNeedsModel,
     openDryRunModelPicker,
+    modelConfig,
     runWorkflowDryRun,
     signatureCode,
     setSignatureCode,
@@ -154,6 +155,7 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
                   disabledReason: workflowDryRunDisabledReason,
                   needsModel: workflowDryRunNeedsModel,
                   pickModel: openDryRunModelPicker,
+                  modelName: modelConfig.name || null,
                   sampleInputs: workflowSampleInputs,
                   run: runWorkflowDryRun,
                 }}

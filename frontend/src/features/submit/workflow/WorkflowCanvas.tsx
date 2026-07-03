@@ -95,6 +95,9 @@ export interface WorkflowDryRunBinding {
   needsModel?: boolean;
   /** Opens the wizard's model-config modal so the user can pick in place. */
   pickModel?: () => void;
+  /** Name of the currently selected model, shown (and changeable) in the
+      dry-run dialog. */
+  modelName?: string | null;
   /** Prefill values for the input anchor's fields (first dataset row). */
   sampleInputs: Record<string, string>;
   run: (inputs: Record<string, unknown>) => Promise<WorkflowDryRunResponse>;
@@ -964,6 +967,8 @@ function CanvasInner({
           onOpenChange={setDryRunOpen}
           inputFields={inputFieldNames}
           sampleInputs={dryRun.sampleInputs}
+          modelName={dryRun.modelName ?? null}
+          onPickModel={dryRun.pickModel}
           run={dryRun.run}
           onResult={setDryRunResult}
         />

@@ -1,4 +1,5 @@
 {
+  "workflow.dryrun.change_model": "Ändern",
   "workflow.toolbar.agent": "Agent-Chat",
   "workflow.controls.reset": "Ansicht zurücksetzen",
   "submit.react.mcp_checking": "Verbindung wird geprüft…",

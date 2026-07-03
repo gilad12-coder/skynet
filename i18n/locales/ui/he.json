@@ -2616,6 +2616,7 @@
   "workflow.controls.zoom_out": "התרחקות",
   "workflow.controls.zoom_reset": "איפוס זום ל-100%",
   "workflow.dryrun.cancel": "ביטול",
+  "workflow.dryrun.change_model": "שינוי",
   "workflow.dryrun.description": "הרצה אחת של הגרף הלא-מאופטם על קלט לדוגמה, כדי לוודא שהחיווט תקין לפני שמוציאים קרדיטים על אופטימיזציה",
   "workflow.dryrun.dismiss": "סגירת תוצאת ההרצה",
   "workflow.dryrun.failed": "ההרצה נכשלה",

@@ -1,4 +1,5 @@
 {
+  "workflow.dryrun.change_model": "Изменить",
   "workflow.toolbar.agent": "Чат с агентом",
   "workflow.controls.reset": "Сбросить вид",
   "submit.react.mcp_checking": "Проверка подключения…",

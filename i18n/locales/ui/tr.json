@@ -1,4 +1,5 @@
 {
+  "workflow.dryrun.change_model": "Değiştir",
   "workflow.toolbar.agent": "Aracı sohbeti",
   "workflow.controls.reset": "Görünümü sıfırla",
   "submit.react.mcp_checking": "Bağlantı kontrol ediliyor…",

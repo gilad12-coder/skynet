@@ -1,4 +1,5 @@
 {
+  "workflow.dryrun.change_model": "변경",
   "workflow.toolbar.agent": "에이전트 채팅",
   "workflow.controls.reset": "보기 초기화",
   "submit.react.mcp_checking": "연결 확인 중…",

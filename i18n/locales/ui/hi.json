@@ -1,4 +1,5 @@
 {
+  "workflow.dryrun.change_model": "बदलें",
   "workflow.toolbar.agent": "एजेंट चैट",
   "workflow.controls.reset": "व्यू रीसेट करें",
   "submit.react.mcp_checking": "कनेक्शन जाँचा जा रहा है…",

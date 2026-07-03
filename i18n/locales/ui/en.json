@@ -2616,6 +2616,7 @@
   "workflow.controls.zoom_out": "Zoom out",
   "workflow.controls.zoom_reset": "Reset zoom to 100%",
   "workflow.dryrun.cancel": "Cancel",
+  "workflow.dryrun.change_model": "Change",
   "workflow.dryrun.description": "One execution of the unoptimized graph on a sample input, to verify the wiring before spending optimization credits",
   "workflow.dryrun.dismiss": "Dismiss dry-run result",
   "workflow.dryrun.failed": "Dry run failed",

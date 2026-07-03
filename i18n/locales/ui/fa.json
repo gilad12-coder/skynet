@@ -1,4 +1,5 @@
 {
+  "workflow.dryrun.change_model": "تغییر",
   "workflow.toolbar.agent": "گفتگوی عامل",
   "workflow.controls.reset": "بازنشانی نما",
   "submit.react.mcp_checking": "در حال بررسی اتصال…",

@@ -1,4 +1,5 @@
 {
+  "workflow.dryrun.change_model": "更改",
   "workflow.toolbar.agent": "智能体对话",
   "workflow.controls.reset": "重置视图",
   "submit.react.mcp_checking": "正在检查连接…",
