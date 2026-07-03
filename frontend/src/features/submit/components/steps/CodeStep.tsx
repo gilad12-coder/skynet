@@ -55,6 +55,8 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
     agentPulseNodeId,
     workflowSampleInputs,
     workflowDryRunDisabledReason,
+    workflowDryRunNeedsModel,
+    openDryRunModelPicker,
     runWorkflowDryRun,
     signatureCode,
     setSignatureCode,
@@ -150,6 +152,8 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
                 pulseNodeId={agentPulseNodeId}
                 dryRun={{
                   disabledReason: workflowDryRunDisabledReason,
+                  needsModel: workflowDryRunNeedsModel,
+                  pickModel: openDryRunModelPicker,
                   sampleInputs: workflowSampleInputs,
                   run: runWorkflowDryRun,
                 }}

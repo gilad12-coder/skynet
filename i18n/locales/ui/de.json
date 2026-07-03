@@ -37,7 +37,6 @@
   "workflow.dryrun.description": "Eine Ausführung des nicht optimierten Graphen mit einer Beispiel-Eingabe, um die Verdrahtung zu prüfen, bevor Optimierungs-Credits ausgegeben werden",
   "workflow.dryrun.dismiss": "Testlauf-Ergebnis schließen",
   "workflow.dryrun.failed": "Testlauf fehlgeschlagen",
-  "workflow.dryrun.need_model": "Wählen Sie im Modell-Schritt ein Modell, um einen Testlauf zu starten",
   "workflow.dryrun.run": "Ausführen",
   "workflow.dryrun.running": "Läuft…",
   "workflow.dryrun.succeeded": "Testlauf erfolgreich",

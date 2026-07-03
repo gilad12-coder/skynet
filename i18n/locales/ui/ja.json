@@ -37,7 +37,6 @@
   "workflow.dryrun.description": "最適化クレジットを消費する前に配線を確認するため、未最適化のグラフをサンプル入力で一度実行します",
   "workflow.dryrun.dismiss": "ドライランの結果を閉じる",
   "workflow.dryrun.failed": "ドライランに失敗しました",
-  "workflow.dryrun.need_model": "ドライランを実行するには、モデルステップでモデルを選択してください",
   "workflow.dryrun.run": "実行",
   "workflow.dryrun.running": "実行中…",
   "workflow.dryrun.succeeded": "ドライランに成功しました",

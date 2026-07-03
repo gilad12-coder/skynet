@@ -37,7 +37,6 @@
   "workflow.dryrun.description": "Uma execução do grafo não otimizado com uma entrada de exemplo, para verificar as ligações antes de gastar créditos de otimização",
   "workflow.dryrun.dismiss": "Fechar o resultado do teste",
   "workflow.dryrun.failed": "A execução de teste falhou",
-  "workflow.dryrun.need_model": "Escolha um modelo na etapa do modelo para executar um teste",
   "workflow.dryrun.run": "Executar",
   "workflow.dryrun.running": "Executando…",
   "workflow.dryrun.succeeded": "Execução de teste bem-sucedida",

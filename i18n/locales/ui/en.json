@@ -2619,7 +2619,6 @@
   "workflow.dryrun.description": "One execution of the unoptimized graph on a sample input, to verify the wiring before spending optimization credits",
   "workflow.dryrun.dismiss": "Dismiss dry-run result",
   "workflow.dryrun.failed": "Dry run failed",
-  "workflow.dryrun.need_model": "Pick a model on the model step to dry-run",
   "workflow.dryrun.run": "Run",
   "workflow.dryrun.running": "Running…",
   "workflow.dryrun.succeeded": "Dry run succeeded",

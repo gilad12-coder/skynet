@@ -37,7 +37,6 @@
   "workflow.dryrun.description": "ऑप्टिमाइज़ेशन क्रेडिट खर्च करने से पहले वायरिंग जाँचने के लिए, बिना-ऑप्टिमाइज़ किए ग्राफ़ का एक नमूना इनपुट पर एक बार चलाना",
   "workflow.dryrun.dismiss": "ट्रायल रन का परिणाम बंद करें",
   "workflow.dryrun.failed": "ट्रायल रन विफल रहा",
-  "workflow.dryrun.need_model": "ट्रायल रन के लिए मॉडल चरण में एक मॉडल चुनें",
   "workflow.dryrun.run": "चलाएँ",
   "workflow.dryrun.running": "चल रहा है…",
   "workflow.dryrun.succeeded": "ट्रायल रन सफल रहा",

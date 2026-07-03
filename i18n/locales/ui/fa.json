@@ -37,7 +37,6 @@
   "workflow.dryrun.description": "یک اجرای گراف بهینه‌نشده روی یک ورودی نمونه، برای بررسی درستی اتصالات پیش از خرج کردن اعتبار بهینه‌سازی",
   "workflow.dryrun.dismiss": "بستن نتیجه اجرای آزمایشی",
   "workflow.dryrun.failed": "اجرای آزمایشی ناموفق بود",
-  "workflow.dryrun.need_model": "برای اجرای آزمایشی، در مرحله مدل یک مدل انتخاب کنید",
   "workflow.dryrun.run": "اجرا",
   "workflow.dryrun.running": "در حال اجرا…",
   "workflow.dryrun.succeeded": "اجرای آزمایشی موفق بود",

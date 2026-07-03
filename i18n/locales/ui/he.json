@@ -2619,7 +2619,6 @@
   "workflow.dryrun.description": "הרצה אחת של הגרף הלא-מאופטם על קלט לדוגמה, כדי לוודא שהחיווט תקין לפני שמוציאים קרדיטים על אופטימיזציה",
   "workflow.dryrun.dismiss": "סגירת תוצאת ההרצה",
   "workflow.dryrun.failed": "ההרצה נכשלה",
-  "workflow.dryrun.need_model": "בחרו מודל בשלב המודל כדי להריץ ניסיון",
   "workflow.dryrun.run": "הרצה",
   "workflow.dryrun.running": "מריץ…",
   "workflow.dryrun.succeeded": "ההרצה הצליחה",

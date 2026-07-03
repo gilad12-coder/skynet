@@ -1978,11 +1978,21 @@ export function useSubmitWizard() {
     return samples;
   }, [parsedDataset, columnRoles]);
 
-  const workflowDryRunDisabledReason = !modelConfig.name.trim()
-    ? msg("workflow.dryrun.need_model")
-    : isWorkflow && workflowSpec && workflowUsesTools(workflowSpec) && !reactConfig.mcpUrl.trim()
+  const workflowDryRunDisabledReason =
+    isWorkflow && workflowSpec && workflowUsesTools(workflowSpec) && !reactConfig.mcpUrl.trim()
       ? msg("submit.validation.mcp_url_required")
       : null;
+  // A dry run needs a model, but the model step comes after the code step —
+  // instead of a "pick a model first" dead end, the canvas opens the shared
+  // model-config modal in place and the pick carries into the model step.
+  const workflowDryRunNeedsModel = !modelConfig.name.trim();
+  const openDryRunModelPicker = useCallback(() => {
+    setEditingModel({
+      config: modelConfig,
+      onSave: setModelConfig,
+      label: msg("model.generation.label"),
+    });
+  }, [modelConfig]);
 
   const runWorkflowDryRun = useCallback(
     async (inputs: Record<string, unknown>) => {
@@ -2089,6 +2099,8 @@ export function useSubmitWizard() {
     agentPulseNodeId,
     workflowSampleInputs,
     workflowDryRunDisabledReason,
+    workflowDryRunNeedsModel,
+    openDryRunModelPicker,
     runWorkflowDryRun,
     reactConfig,
     updateReactConfig,

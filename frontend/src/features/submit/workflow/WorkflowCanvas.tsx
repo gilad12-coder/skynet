@@ -91,6 +91,10 @@ import { DryRunDialog } from "./DryRunDialog";
 export interface WorkflowDryRunBinding {
   /** Reason the dry-run button is disabled, or null when it can run. */
   disabledReason: string | null;
+  /** True when no model is configured yet (the model step comes later). */
+  needsModel?: boolean;
+  /** Opens the wizard's model-config modal so the user can pick in place. */
+  pickModel?: () => void;
   /** Prefill values for the input anchor's fields (first dataset row). */
   sampleInputs: Record<string, string>;
   run: (inputs: Record<string, unknown>) => Promise<WorkflowDryRunResponse>;
@@ -792,6 +796,12 @@ function CanvasInner({
               }
               if (dryRun.disabledReason) {
                 toast.error(dryRun.disabledReason);
+                return;
+              }
+              // No model yet (that step comes later) — open the picker right
+              // here instead of bouncing the user to a future step.
+              if (dryRun.needsModel && dryRun.pickModel) {
+                dryRun.pickModel();
                 return;
               }
               setDryRunOpen(true);

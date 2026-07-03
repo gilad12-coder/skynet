@@ -37,7 +37,6 @@
   "workflow.dryrun.description": "Один запуск неоптимизированного графа на примере входных данных, чтобы проверить соединения перед тратой кредитов на оптимизацию",
   "workflow.dryrun.dismiss": "Закрыть результат пробного запуска",
   "workflow.dryrun.failed": "Пробный запуск не удался",
-  "workflow.dryrun.need_model": "Выберите модель на шаге модели, чтобы выполнить пробный запуск",
   "workflow.dryrun.run": "Запустить",
   "workflow.dryrun.running": "Выполняется…",
   "workflow.dryrun.succeeded": "Пробный запуск успешен",

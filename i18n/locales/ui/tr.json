@@ -37,7 +37,6 @@
   "workflow.dryrun.description": "Optimizasyon kredisi harcamadan önce bağlantıları doğrulamak için optimize edilmemiş grafın örnek bir girdiyle bir kez çalıştırılması",
   "workflow.dryrun.dismiss": "Deneme sonucunu kapat",
   "workflow.dryrun.failed": "Deneme çalıştırması başarısız oldu",
-  "workflow.dryrun.need_model": "Deneme çalıştırması için model adımında bir model seçin",
   "workflow.dryrun.run": "Çalıştır",
   "workflow.dryrun.running": "Çalışıyor…",
   "workflow.dryrun.succeeded": "Deneme çalıştırması başarılı",

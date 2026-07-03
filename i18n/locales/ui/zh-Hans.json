@@ -37,7 +37,6 @@
   "workflow.dryrun.description": "在花费优化额度之前，用一条示例输入对未优化的图执行一次，以验证连接是否正确",
   "workflow.dryrun.dismiss": "关闭试运行结果",
   "workflow.dryrun.failed": "试运行失败",
-  "workflow.dryrun.need_model": "请在模型步骤中选择一个模型后再进行试运行",
   "workflow.dryrun.run": "运行",
   "workflow.dryrun.running": "运行中…",
   "workflow.dryrun.succeeded": "试运行成功",

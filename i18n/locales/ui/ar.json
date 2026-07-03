@@ -37,7 +37,6 @@
   "workflow.dryrun.description": "تشغيل واحد للمخطط غير المُحسَّن على مدخل تجريبي، للتحقق من صحة التوصيلات قبل إنفاق أرصدة التحسين",
   "workflow.dryrun.dismiss": "إغلاق نتيجة التشغيل التجريبي",
   "workflow.dryrun.failed": "فشل التشغيل التجريبي",
-  "workflow.dryrun.need_model": "اختر نموذجًا في خطوة النموذج لإجراء تشغيل تجريبي",
   "workflow.dryrun.run": "تشغيل",
   "workflow.dryrun.running": "جارٍ التشغيل…",
   "workflow.dryrun.succeeded": "نجح التشغيل التجريبي",
