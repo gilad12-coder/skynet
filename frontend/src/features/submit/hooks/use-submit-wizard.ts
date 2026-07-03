@@ -2045,6 +2045,9 @@ export function useSubmitWizard() {
     // the default module would be wasted (and visibly wrong) if the user then
     // picks another one.
     seedEnabled: !moduleSelectionRequired,
+    // The conversation rides through the locale-switch reload alongside the
+    // wizard draft (see wizard-draft.ts).
+    reloadPersistKey: "submit-code-agent",
   });
 
   return {

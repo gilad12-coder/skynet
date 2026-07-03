@@ -6,6 +6,7 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { streamCodeAgent, type CodeAgentToolName } from "@/shared/lib/api";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
+import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
 import { TERMS } from "@/shared/lib/terms";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
@@ -80,6 +81,37 @@ interface ArtifactVersion {
   ts: number;
 }
 
+// A locale switch reloads the page (see LocaleProvider), which would drop the
+// conversation. Consumers that pass `reloadPersistKey` get their transcript
+// stashed in sessionStorage for that single hop and restored (then cleared) on
+// the next mount — the same pattern as the submit wizard's draft stash.
+interface AgentReloadStash {
+  messages: AgentMessage[];
+  mode: AgentMode;
+  signatureVersions: ArtifactVersion[];
+  metricVersions: ArtifactVersion[];
+  signatureVersionIndex: number;
+  metricVersionIndex: number;
+  reasoning: string;
+  reasoningStartedAt: number | null;
+  reasoningEndedAt: number | null;
+}
+
+function reloadStashKey(persistKey: string): string {
+  return `skynet.code-agent.reload-stash:${persistKey}`;
+}
+
+function readAgentReloadStash(persistKey: string): AgentReloadStash | null {
+  try {
+    const raw = window.sessionStorage.getItem(reloadStashKey(persistKey));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AgentReloadStash;
+    return Array.isArray(parsed?.messages) && parsed.messages.length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface CodeAgentState {
   status: AgentStatus;
   mode: AgentMode;
@@ -145,6 +177,9 @@ export interface UseCodeAgentArgs {
   // Gates the auto-seed while the wizard's module picker is still open; the
   // seed fires as soon as this flips true (i.e. the user picked a module).
   seedEnabled?: boolean;
+  // When set, the conversation survives the locale-switch reload under this
+  // stash key. Leave unset for surfaces that shouldn't persist.
+  reloadPersistKey?: string;
 }
 
 export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
@@ -174,31 +209,60 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     workflowTouched = false,
     applyAgentWorkflow,
     seedEnabled = true,
+    reloadPersistKey,
   } = args;
 
+  // Read the reload stash once at mount, before the initializers below
+  // consume it. Reading is idempotent — the stash is only cleared in the
+  // mount effect further down — so StrictMode's double-invoked initializer
+  // can't read-then-lose it.
+  const [restored] = React.useState<AgentReloadStash | null>(() =>
+    reloadPersistKey && typeof window !== "undefined"
+      ? readAgentReloadStash(reloadPersistKey)
+      : null,
+  );
+
   const [status, setStatus] = React.useState<AgentStatus>("idle");
-  const [mode, setMode] = React.useState<AgentMode>("seed");
+  const [mode, setMode] = React.useState<AgentMode>(restored?.mode ?? "seed");
   const [statusLabel, setStatusLabel] = React.useState("");
-  const [signatureStatus, setSignatureStatus] = React.useState<ArtifactStatus>("idle");
-  const [metricStatus, setMetricStatus] = React.useState<ArtifactStatus>("idle");
-  const [messages, setMessages] = React.useState<AgentMessage[]>([]);
+  const [signatureStatus, setSignatureStatus] = React.useState<ArtifactStatus>(
+    restored && restored.signatureVersions.length > 0 ? "done" : "idle",
+  );
+  const [metricStatus, setMetricStatus] = React.useState<ArtifactStatus>(
+    restored && restored.metricVersions.length > 0 ? "done" : "idle",
+  );
+  const [messages, setMessages] = React.useState<AgentMessage[]>(restored?.messages ?? []);
   const [error, setError] = React.useState<string | null>(null);
-  const [signatureVersions, setSignatureVersions] = React.useState<ArtifactVersion[]>([]);
-  const [metricVersions, setMetricVersions] = React.useState<ArtifactVersion[]>([]);
-  const [signatureVersionIndex, setSignatureVersionIndex] = React.useState(-1);
-  const [metricVersionIndex, setMetricVersionIndex] = React.useState(-1);
+  const [signatureVersions, setSignatureVersions] = React.useState<ArtifactVersion[]>(
+    restored?.signatureVersions ?? [],
+  );
+  const [metricVersions, setMetricVersions] = React.useState<ArtifactVersion[]>(
+    restored?.metricVersions ?? [],
+  );
+  const [signatureVersionIndex, setSignatureVersionIndex] = React.useState(
+    restored?.signatureVersionIndex ?? -1,
+  );
+  const [metricVersionIndex, setMetricVersionIndex] = React.useState(
+    restored?.metricVersionIndex ?? -1,
+  );
   const [signatureFlashLines, setSignatureFlashLines] = React.useState<number[]>([]);
   const [metricFlashLines, setMetricFlashLines] = React.useState<number[]>([]);
-  const [reasoning, setReasoning] = React.useState("");
-  const [reasoningStartedAt, setReasoningStartedAt] = React.useState<number | null>(null);
-  const [reasoningEndedAt, setReasoningEndedAt] = React.useState<number | null>(null);
+  const [reasoning, setReasoning] = React.useState(restored?.reasoning ?? "");
+  const [reasoningStartedAt, setReasoningStartedAt] = React.useState<number | null>(
+    restored?.reasoningStartedAt ?? null,
+  );
+  const [reasoningEndedAt, setReasoningEndedAt] = React.useState<number | null>(
+    restored?.reasoningEndedAt ?? null,
+  );
 
   const abortRef = React.useRef<AbortController | null>(null);
   const sigBufRef = React.useRef("");
   const metricBufRef = React.useRef("");
   const replyBufRef = React.useRef("");
   const reasoningBufRef = React.useRef("");
-  const autoRanRef = React.useRef(false);
+  // A restored transcript already contains the seed exchange — never re-seed
+  // over it after the locale-switch reload.
+  const autoRanRef = React.useRef(restored != null);
   const [sessionKey, setSessionKey] = React.useState(0);
   const pendingValidationsRef = React.useRef<
     Array<{ kind: "signature" | "metric"; promise: Promise<unknown> }>
@@ -250,6 +314,41 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   React.useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  // Mirror the stashable transcript every render so the locale-reload
+  // listener parks the freshest state, then stash it when the reload event
+  // fires. The mount-time removeItem is the "restored, now consume it" half
+  // of the handshake with readAgentReloadStash above.
+  const reloadSnapshotRef = React.useRef<AgentReloadStash | null>(null);
+  React.useEffect(() => {
+    reloadSnapshotRef.current = {
+      messages,
+      mode,
+      signatureVersions,
+      metricVersions,
+      signatureVersionIndex,
+      metricVersionIndex,
+      reasoning,
+      reasoningStartedAt,
+      reasoningEndedAt,
+    };
+  });
+  React.useEffect(() => {
+    if (!reloadPersistKey) return;
+    window.sessionStorage.removeItem(reloadStashKey(reloadPersistKey));
+    const stash = () => {
+      const snap = reloadSnapshotRef.current;
+      if (!snap || snap.messages.length === 0) return;
+      try {
+        window.sessionStorage.setItem(reloadStashKey(reloadPersistKey), JSON.stringify(snap));
+      } catch {
+        // Best-effort — a blown quota loses the transcript, exactly as the
+        // reload did before this stash existed.
+      }
+    };
+    window.addEventListener(LOCALE_RELOAD_EVENT, stash);
+    return () => window.removeEventListener(LOCALE_RELOAD_EVENT, stash);
+  }, [reloadPersistKey]);
 
   const hasRequiredContext = React.useMemo(() => {
     if (!parsedDataset || parsedDataset.rowCount === 0) return false;
