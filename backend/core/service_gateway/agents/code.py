@@ -1444,8 +1444,15 @@ async def _run_seed(
     )
 
     with dspy.context(lm=lm):
-        await asyncio.gather(
-            _pump_seed_stream(
+        # Two independent lanes: each artifact validates (and repairs) the
+        # moment its OWN stream finishes, so the usually-faster signature's
+        # multi-second subprocess validation overlaps the metric's remaining
+        # stream instead of waiting for it. The seed predictors stream raw,
+        # unvalidated code — without this pass a stray brace or bad
+        # identifier surfaces only as a 400 at submit.
+        async def _signature_lane() -> tuple[str, str]:
+            """Stream the signature, then validate/repair it immediately."""
+            await _pump_seed_stream(
                 sig_program,
                 shared_inputs,
                 "signature_code",
@@ -1453,27 +1460,8 @@ async def _run_seed(
                 queue=queue,
                 results=results,
                 reasoning_source="signature",
-            ),
-            _pump_seed_stream(
-                met_program,
-                shared_inputs,
-                "metric_code",
-                "metric_patch",
-                queue=queue,
-                results=results,
-                reasoning_source="metric",
-            ),
-        )
-
-        # The seed predictors stream raw, unvalidated code. Validate (and
-        # repair) both artifacts here so the editor + the wizard receive
-        # code that already passes the same check submit runs — otherwise a
-        # stray brace or bad identifier surfaces only as a 400 at submit.
-        # Concurrently: each validation spawns a fresh interpreter that pays
-        # the multi-second dspy import, so running them back-to-back doubled
-        # the post-stream dead time the user sits through.
-        (sig_code, sig_err), (met_code, met_err) = await asyncio.gather(
-            _validate_and_repair_artifact(
+            )
+            return await _validate_and_repair_artifact(
                 lm=lm,
                 artifact_kind="signature",
                 code=results["signature_code"],
@@ -1482,8 +1470,20 @@ async def _run_seed(
                 column_roles_json=column_roles_json,
                 queue=queue,
                 replace_event="signature_replace",
-            ),
-            _validate_and_repair_artifact(
+            )
+
+        async def _metric_lane() -> tuple[str, str]:
+            """Stream the metric, then validate/repair it immediately."""
+            await _pump_seed_stream(
+                met_program,
+                shared_inputs,
+                "metric_code",
+                "metric_patch",
+                queue=queue,
+                results=results,
+                reasoning_source="metric",
+            )
+            return await _validate_and_repair_artifact(
                 lm=lm,
                 artifact_kind="metric",
                 code=results["metric_code"],
@@ -1492,7 +1492,10 @@ async def _run_seed(
                 column_roles_json=column_roles_json,
                 queue=queue,
                 replace_event="metric_replace",
-            ),
+            )
+
+        (sig_code, sig_err), (met_code, met_err) = await asyncio.gather(
+            _signature_lane(), _metric_lane()
         )
         results["signature_code"] = sig_code
         results["metric_code"] = met_code
@@ -2333,9 +2336,43 @@ async def _run_workflow_seed(
                 results["workflow_json"] = getattr(chunk, "workflow_json", "") or ""
 
     with dspy.context(lm=lm):
-        await asyncio.gather(
-            _pump_graph(),
-            _pump_seed_stream(
+        # Two independent lanes (mirrors the classic seed): the graph and the
+        # metric each parse/validate/repair as soon as their OWN stream ends,
+        # so neither waits on the slower author before starting its checks.
+        async def _graph_lane() -> str:
+            """Stream the graph author, then parse/validate/repair its JSON."""
+            await _pump_graph()
+            raw_json = str(results.pop("workflow_json", "") or "")
+            spec_dict, error = _parse_workflow_json(raw_json)
+            if spec_dict is not None:
+                error = await asyncio.to_thread(_validate_workflow_dict, spec_dict)
+            fixer = dspy.Predict(FixWorkflowGraph)
+            for _attempt in range(2):
+                if not error:
+                    break
+                pred = await asyncio.to_thread(
+                    fixer,
+                    broken_workflow_json=raw_json if spec_dict is None else json.dumps(spec_dict, ensure_ascii=False),
+                    validation_error=error,
+                    dataset_columns=dataset_columns,
+                    column_roles=column_roles_json,
+                )
+                raw_json = getattr(pred, "fixed_workflow_json", "") or ""
+                spec_dict, error = _parse_workflow_json(raw_json)
+                if spec_dict is not None:
+                    error = await asyncio.to_thread(_validate_workflow_dict, spec_dict)
+
+            if spec_dict is not None:
+                results["workflow"] = spec_dict
+                await queue.put(
+                    {"event": "workflow_replace", "data": {"workflow": spec_dict, "changed_node_id": None}}
+                )
+            results["workflow_valid"] = not error
+            return error
+
+        async def _metric_lane() -> tuple[str, str]:
+            """Stream the metric, then validate/repair it immediately."""
+            await _pump_seed_stream(
                 met_program,
                 shared_inputs,
                 "metric_code",
@@ -2343,49 +2380,19 @@ async def _run_workflow_seed(
                 queue=queue,
                 results=results,
                 reasoning_source="metric",
-            ),
-        )
-
-        # Parse + validate the drafted graph, with LLM repair attempts fed
-        # the exact validator error — mirrors the classic seed's
-        # validate-and-repair loop, at graph granularity.
-        raw_json = str(results.pop("workflow_json", "") or "")
-        spec_dict, error = _parse_workflow_json(raw_json)
-        if spec_dict is not None:
-            error = await asyncio.to_thread(_validate_workflow_dict, spec_dict)
-        fixer = dspy.Predict(FixWorkflowGraph)
-        for _attempt in range(2):
-            if not error:
-                break
-            pred = await asyncio.to_thread(
-                fixer,
-                broken_workflow_json=raw_json if spec_dict is None else json.dumps(spec_dict, ensure_ascii=False),
-                validation_error=error,
+            )
+            return await _validate_and_repair_artifact(
+                lm=lm,
+                artifact_kind="metric",
+                code=results["metric_code"],
+                validator=_validate_metric_code,
                 dataset_columns=dataset_columns,
-                column_roles=column_roles_json,
+                column_roles_json=column_roles_json,
+                queue=queue,
+                replace_event="metric_replace",
             )
-            raw_json = getattr(pred, "fixed_workflow_json", "") or ""
-            spec_dict, error = _parse_workflow_json(raw_json)
-            if spec_dict is not None:
-                error = await asyncio.to_thread(_validate_workflow_dict, spec_dict)
 
-        if spec_dict is not None:
-            results["workflow"] = spec_dict
-            await queue.put(
-                {"event": "workflow_replace", "data": {"workflow": spec_dict, "changed_node_id": None}}
-            )
-        results["workflow_valid"] = not error
-
-        met_code, met_err = await _validate_and_repair_artifact(
-            lm=lm,
-            artifact_kind="metric",
-            code=results["metric_code"],
-            validator=_validate_metric_code,
-            dataset_columns=dataset_columns,
-            column_roles_json=column_roles_json,
-            queue=queue,
-            replace_event="metric_replace",
-        )
+        error, (met_code, met_err) = await asyncio.gather(_graph_lane(), _metric_lane())
         results["metric_code"] = met_code
         results["metric_valid"] = not met_err
         if error or met_err:
