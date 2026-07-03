@@ -2673,6 +2673,7 @@
   "workflow.summary.graph": "גרף עם {p1} צמתים ו-{p2} חיבורים; ה-Signatures של כל צעד מוגדרים בקנבס שבשלב הקוד",
   "workflow.toolbar.add_node": "הוספת צומת",
   "workflow.toolbar.add_signature": "Signature",
+  "workflow.toolbar.agent": "צ'אט עם הסוכן",
   "workflow.toolbar.add_tool": "כלי",
   "workflow.toolbar.add_transform": "עיבוד",
   "workflow.toolbar.dry_run": "הרצת ניסיון",

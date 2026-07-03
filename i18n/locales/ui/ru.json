@@ -1,4 +1,5 @@
 {
+  "workflow.toolbar.agent": "Чат с агентом",
   "workflow.controls.reset": "Сбросить вид",
   "submit.react.mcp_checking": "Проверка подключения…",
   "submit.react.mcp_connected": "Подключено — доступно инструментов: {p1}",

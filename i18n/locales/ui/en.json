@@ -2673,6 +2673,7 @@
   "workflow.summary.graph": "Graph with {p1} nodes and {p2} connections; each step's Signature is defined on the canvas in the code step",
   "workflow.toolbar.add_node": "Add node",
   "workflow.toolbar.add_signature": "Signature",
+  "workflow.toolbar.agent": "Agent chat",
   "workflow.toolbar.add_tool": "Tool",
   "workflow.toolbar.add_transform": "Transform",
   "workflow.toolbar.dry_run": "Dry run",

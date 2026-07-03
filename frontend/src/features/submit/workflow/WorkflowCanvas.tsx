@@ -51,6 +51,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "react-toastify";
 import {
   AlertTriangle,
+  Bot,
   ChevronDown,
   Code2,
   Copy,
@@ -102,6 +103,9 @@ interface WorkflowCanvasProps {
   dryRun?: WorkflowDryRunBinding;
   // Node the code agent just changed — pulsed briefly on the canvas.
   pulseNodeId?: string | null;
+  // Agent chat surface for fullscreen mode, where the wizard's own panel is
+  // hidden behind the portal. Rendered as a collapsible start-side overlay.
+  agentPanel?: React.ReactNode;
   className?: string;
 }
 
@@ -175,10 +179,13 @@ function CanvasInner({
   onSpecChange,
   dryRun,
   pulseNodeId = null,
+  agentPanel,
   className,
 }: Omit<WorkflowCanvasProps, "specRevision">) {
   const { fitView, screenToFlowPosition } = useReactFlow();
   const [fullscreen, setFullscreen] = React.useState(false);
+  // Fullscreen-only agent chat overlay; remembered across fullscreen toggles.
+  const [agentOpen, setAgentOpen] = React.useState(false);
   // Which node's configuration panel is open. Deliberately decoupled from
   // canvas selection: single click selects/drags, double-click inspects.
   const [inspectorId, setInspectorId] = React.useState<string | null>(null);
@@ -675,19 +682,27 @@ function CanvasInner({
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [menu]);
 
-  // ESC closes the menu first, then the inspector, then exits fullscreen —
-  // like a modal stack.
+  // ESC closes the menu first, then the inspector, then the agent overlay,
+  // then exits fullscreen — like a modal stack.
   const inspectorOpenRef = React.useRef(false);
   React.useEffect(() => {
     inspectorOpenRef.current = inspectorId !== null;
   }, [inspectorId]);
+  const agentOpenRef = React.useRef(false);
+  React.useEffect(() => {
+    agentOpenRef.current = agentOpen;
+  }, [agentOpen]);
   React.useEffect(() => {
     if (!menu && !fullscreen && !inspectorId) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // The agent composer handles its own ESC (e.g. cancel an edit); don't
+      // steal it while the user is typing there.
+      if (e.target instanceof Element && e.target.closest("input, textarea")) return;
       e.preventDefault();
       if (menuOpenRef.current) setMenu(null);
       else if (inspectorOpenRef.current) setInspectorId(null);
+      else if (agentOpenRef.current) setAgentOpen(false);
       else setFullscreen(false);
     };
     window.addEventListener("keydown", onKey);
@@ -786,6 +801,15 @@ function CanvasInner({
             {msg("workflow.toolbar.dry_run")}
           </Button>
         )}
+        {fullscreen && agentPanel && (
+          <ToolbarButton
+            icon={Bot}
+            label={msg("workflow.toolbar.agent")}
+            onClick={() => setAgentOpen((v) => !v)}
+            iconOnly
+            active={agentOpen}
+          />
+        )}
         <ToolbarButton
           icon={fullscreen ? Minimize2 : Maximize2}
           label={msg(
@@ -798,8 +822,23 @@ function CanvasInner({
 
       {/* The inspector overlays the canvas (slides in from the inline end)
           instead of claiming a grid column, so opening it never resizes or
-          re-fits the graph. */}
+          re-fits the graph. In fullscreen the agent chat mirrors it on the
+          inline start. */}
       <div className="relative flex min-h-0 flex-1">
+        <AnimatePresence>
+          {fullscreen && agentPanel && agentOpen && (
+            <motion.div
+              key="agent-panel"
+              initial={{ x: -slideFrom, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -slideFrom, opacity: 0 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              className="absolute inset-y-0 start-0 z-20 w-[400px] overflow-hidden border-e border-border/40 bg-card shadow-xl"
+            >
+              {agentPanel}
+            </motion.div>
+          )}
+        </AnimatePresence>
         <div
           dir="ltr"
           ref={flowWrapRef}
@@ -1088,20 +1127,26 @@ function ToolbarButton({
   label,
   onClick,
   iconOnly = false,
+  active = false,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   onClick: () => void;
   iconOnly?: boolean;
+  active?: boolean;
 }) {
   return (
     <Button
       size="sm"
       variant="ghost"
-      className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+      className={cn(
+        "h-7 gap-1.5 px-2 text-xs",
+        active ? "bg-[#3D2E22]/8 text-foreground" : "text-muted-foreground hover:text-foreground",
+      )}
       onClick={onClick}
       title={iconOnly ? label : undefined}
       aria-label={label}
+      aria-pressed={active}
     >
       <Icon className="size-3.5" />
       {!iconOnly && label}

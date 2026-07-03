@@ -1,4 +1,5 @@
 {
+  "workflow.toolbar.agent": "Chat agente",
   "workflow.controls.reset": "Reimposta vista",
   "submit.react.mcp_checking": "Verifica della connessione…",
   "submit.react.mcp_connected": "Connesso — {p1} strumenti disponibili",

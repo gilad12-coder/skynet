@@ -153,6 +153,15 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
                   sampleInputs: workflowSampleInputs,
                   run: runWorkflowDryRun,
                 }}
+                agentPanel={
+                  codeAssistMode === "auto" ? (
+                    <CodeAgentPanel
+                      agent={agent}
+                      disabled={!hasContext}
+                      disabledReason={disabledReason}
+                    />
+                  ) : undefined
+                }
               />
             )}
             <div
