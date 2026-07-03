@@ -10,7 +10,6 @@
   "submit.module.picker_subtitle": "Il modulo racchiude la tua signature in una tecnica di prompting. Scegline uno per configurare questo passaggio: potrai cambiarlo in seguito dall'alto.",
   "submit.module.picker_title": "Scegli un modulo",
   "submit.validation.module_required": "Scegli un modulo per continuare",
-  "workflow.controls.fit": "Adatta alla vista",
   "workflow.controls.zoom_in": "Ingrandisci",
   "workflow.controls.zoom_out": "Riduci",
   "workflow.controls.zoom_reset": "Reimposta lo zoom al 100%",

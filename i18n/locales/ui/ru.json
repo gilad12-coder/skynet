@@ -10,7 +10,6 @@
   "submit.module.picker_subtitle": "Модуль оборачивает вашу сигнатуру в технику промптинга. Выберите один, чтобы настроить этот шаг, — позже его можно сменить сверху.",
   "submit.module.picker_title": "Выберите модуль",
   "submit.validation.module_required": "Выберите модуль, чтобы продолжить",
-  "workflow.controls.fit": "По размеру",
   "workflow.controls.zoom_in": "Приблизить",
   "workflow.controls.zoom_out": "Отдалить",
   "workflow.controls.zoom_reset": "Сбросить масштаб до 100%",

@@ -10,7 +10,6 @@
   "submit.module.picker_subtitle": "Modül, imzanızı bir yönlendirme tekniğiyle sarmalar. Bu adımı ayarlamak için bir tane seçin — daha sonra üstten değiştirebilirsiniz.",
   "submit.module.picker_title": "Bir modül seçin",
   "submit.validation.module_required": "Devam etmek için bir modül seçin",
-  "workflow.controls.fit": "Görünüme sığdır",
   "workflow.controls.zoom_in": "Yakınlaştır",
   "workflow.controls.zoom_out": "Uzaklaştır",
   "workflow.controls.zoom_reset": "Yakınlaştırmayı %100'e sıfırla",

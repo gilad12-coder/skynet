@@ -60,7 +60,6 @@ import {
   Play,
   Plus,
   RotateCcw,
-  Scan,
   Sparkles,
   Trash2,
   Wrench,
@@ -942,14 +941,6 @@ function CanvasInner({
                       label={msg("workflow.toolbar.tidy")}
                       onClick={() => {
                         tidyUp();
-                        setMenu(null);
-                      }}
-                    />
-                    <MenuItem
-                      icon={Scan}
-                      label={msg("workflow.controls.fit")}
-                      onClick={() => {
-                        void fitView({ ...FIT_VIEW, duration: 300 });
                         setMenu(null);
                       }}
                     />

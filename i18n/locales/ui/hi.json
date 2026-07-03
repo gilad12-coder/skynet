@@ -10,7 +10,6 @@
   "submit.module.picker_subtitle": "मॉड्यूल आपके सिग्नेचर को एक प्रॉम्प्टिंग तकनीक में लपेटता है। इस चरण को सेट करने के लिए कोई एक चुनें — आप बाद में ऊपर से बदल सकते हैं।",
   "submit.module.picker_title": "एक मॉड्यूल चुनें",
   "submit.validation.module_required": "जारी रखने के लिए एक मॉड्यूल चुनें",
-  "workflow.controls.fit": "व्यू फ़िट करें",
   "workflow.controls.zoom_in": "ज़ूम इन करें",
   "workflow.controls.zoom_out": "ज़ूम आउट करें",
   "workflow.controls.zoom_reset": "ज़ूम 100% पर रीसेट करें",

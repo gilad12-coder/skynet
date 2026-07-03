@@ -10,7 +10,6 @@
   "submit.module.picker_subtitle": "Das Modul bettet deine Signatur in eine Prompting-Technik ein. Wähle eines aus, um diesen Schritt einzurichten – oben kannst du jederzeit wechseln.",
   "submit.module.picker_title": "Modul auswählen",
   "submit.validation.module_required": "Wähle ein Modul aus, um fortzufahren",
-  "workflow.controls.fit": "Ansicht anpassen",
   "workflow.controls.zoom_in": "Vergrößern",
   "workflow.controls.zoom_out": "Verkleinern",
   "workflow.controls.zoom_reset": "Zoom auf 100 % zurücksetzen",

@@ -10,7 +10,6 @@
   "submit.module.picker_subtitle": "モジュールはシグネチャをプロンプト技法で包み込みます。1つ選んでこのステップを設定してください。後から上部でいつでも切り替えられます。",
   "submit.module.picker_title": "モジュールを選択",
   "submit.validation.module_required": "続けるにはモジュールを選択してください",
-  "workflow.controls.fit": "全体表示",
   "workflow.controls.zoom_in": "拡大",
   "workflow.controls.zoom_out": "縮小",
   "workflow.controls.zoom_reset": "ズームを100%にリセット",

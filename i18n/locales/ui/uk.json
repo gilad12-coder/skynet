@@ -10,7 +10,6 @@
   "submit.module.picker_subtitle": "Модуль обгортає ваш підпис у техніку промптингу. Виберіть один, щоб налаштувати цей крок — пізніше його можна змінити вгорі.",
   "submit.module.picker_title": "Виберіть модуль",
   "submit.validation.module_required": "Виберіть модуль, щоб продовжити",
-  "workflow.controls.fit": "Вмістити",
   "workflow.controls.zoom_in": "Збільшити",
   "workflow.controls.zoom_out": "Зменшити",
   "workflow.controls.zoom_reset": "Скинути масштаб до 100%",

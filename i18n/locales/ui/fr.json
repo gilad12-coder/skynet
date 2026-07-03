@@ -10,7 +10,6 @@
   "submit.module.picker_subtitle": "Le module enrobe votre signature dans une technique de prompting. Choisissez-en un pour configurer cette étape — vous pourrez en changer plus tard depuis le haut.",
   "submit.module.picker_title": "Choisir un module",
   "submit.validation.module_required": "Choisissez un module pour continuer",
-  "workflow.controls.fit": "Ajuster la vue",
   "workflow.controls.zoom_in": "Zoom avant",
   "workflow.controls.zoom_out": "Zoom arrière",
   "workflow.controls.zoom_reset": "Réinitialiser le zoom à 100 %",
