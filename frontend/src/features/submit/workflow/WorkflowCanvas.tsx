@@ -762,17 +762,38 @@ function CanvasInner({
       data-tutorial="workflow-canvas"
     >
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border/40 bg-[#FAF8F5] px-3 py-2">
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 gap-1.5 px-2.5 text-xs"
-          onClick={openAddMenuFromToolbar}
-        >
-          <Plus className="size-3.5" />
-          {msg("workflow.toolbar.add_node")}
-          <ChevronDown className="size-3 text-muted-foreground" />
-        </Button>
-        <ToolbarButton icon={LayoutGrid} label={msg("workflow.toolbar.tidy")} onClick={tidyUp} />
+        {/* Fullscreen swaps the start-side editing buttons for the agent
+            toggle: node adding + tidy stay reachable via the context menu,
+            and the agent panel toggles like the generalist panel does —
+            without leaving fullscreen, over the same shared conversation. */}
+        {fullscreen ? (
+          agentPanel && (
+            <ToolbarButton
+              icon={Bot}
+              label={msg("workflow.toolbar.agent")}
+              onClick={() => setAgentOpen((v) => !v)}
+              active={agentOpen}
+            />
+          )
+        ) : (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1.5 px-2.5 text-xs"
+              onClick={openAddMenuFromToolbar}
+            >
+              <Plus className="size-3.5" />
+              {msg("workflow.toolbar.add_node")}
+              <ChevronDown className="size-3 text-muted-foreground" />
+            </Button>
+            <ToolbarButton
+              icon={LayoutGrid}
+              label={msg("workflow.toolbar.tidy")}
+              onClick={tidyUp}
+            />
+          </>
+        )}
         <span className="ms-auto" />
         {issues.length > 0 && (
           <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#A3512B]">
@@ -810,15 +831,6 @@ function CanvasInner({
             <Play className="size-3" />
             {msg("workflow.toolbar.dry_run")}
           </Button>
-        )}
-        {fullscreen && agentPanel && (
-          <ToolbarButton
-            icon={Bot}
-            label={msg("workflow.toolbar.agent")}
-            onClick={() => setAgentOpen((v) => !v)}
-            iconOnly
-            active={agentOpen}
-          />
         )}
         <ToolbarButton
           icon={fullscreen ? Minimize2 : Maximize2}
