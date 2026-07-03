@@ -17,20 +17,18 @@ export type ColumnRole = "input" | "output" | "ignore";
 // UI-side model of the react (ReAct-agent) tool-source configuration. React is
 // generic: scoring is owned by the standard authored metric_code, so no reward
 // knobs live here — only the live tool roster. Tools always come from a live
-// MCP server (the wizard no longer offers dataset snapshots; the backend keeps
-// supporting them for old runs). `toolFilter` is a comma-separated string.
+// MCP server, unfiltered (the wizard no longer offers dataset snapshots or
+// tool filters; the backend keeps supporting both for old runs).
 // `use-submit-wizard` reshapes this into the backend's ToolSource wire model
 // at submit time.
 export interface ReactConfig {
   mcpUrl: string;
   mcpAuthHeader: string;
-  toolFilter: string;
 }
 
 export const defaultReactConfig = (): ReactConfig => ({
   mcpUrl: "",
   mcpAuthHeader: "",
-  toolFilter: "",
 });
 
 // Labels are thunks, not pre-resolved strings: `msg()` reads the active locale's

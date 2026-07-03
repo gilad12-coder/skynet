@@ -163,21 +163,6 @@ export function ReactConfigSection({ w }: { w: SubmitWizardContext }) {
             )}
           </div>
         )}
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">
-            <HelpTip text={tip("react.tool_filter")}>
-              {msg("submit.react.tool_filter_label")}
-            </HelpTip>
-          </Label>
-          <Input
-            value={reactConfig.toolFilter}
-            dir="ltr"
-            placeholder={msg("submit.react.tool_filter_placeholder")}
-            className="h-9 font-mono text-xs"
-            onChange={(e) => updateReactConfig({ toolFilter: e.target.value })}
-          />
-        </div>
       </div>
     </div>
   );

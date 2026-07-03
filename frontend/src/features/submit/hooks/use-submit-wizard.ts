@@ -518,13 +518,9 @@ export function useSubmitWizard() {
         setModuleChosen(true);
       } else if (key === "react_config" && sharedState.react_config) {
         const rc = sharedState.react_config as Record<string, unknown>;
-        setReactConfig((prev) => {
-          const next = { ...prev };
-          for (const field of ["mcpUrl", "toolFilter"] as const) {
-            if (typeof rc[field] === "string") next[field] = rc[field] as string;
-          }
-          return next;
-        });
+        setReactConfig((prev) =>
+          typeof rc.mcpUrl === "string" ? { ...prev, mcpUrl: rc.mcpUrl } : prev,
+        );
       } else if (key === "signature_code" && typeof sharedState.signature_code === "string") {
         setSignatureCode(sharedState.signature_code);
         setSignatureManuallyEdited(true);
@@ -1242,16 +1238,14 @@ export function useSubmitWizard() {
       // React run config — hydrate tool source from the wire model. Scoring is
       // owned by metric_code (hydrated above), so there is no reward to restore.
       // mcp_auth_header is scrubbed from cloned/shared payloads, never present.
-      // The wire `kind` is ignored: the wizard only submits live MCP now, so a
-      // clone of an old dataset-snapshot run re-runs against a live server.
+      // The wire `kind` and `tool_filter` are ignored: the wizard only submits
+      // unfiltered live MCP now, so a clone of an old dataset-snapshot or
+      // filtered run re-runs against the live server's full roster.
       const ts = payload.tool_source as Record<string, unknown> | undefined;
       if (ts) {
-        setReactConfig((prev) => {
-          const next = { ...prev };
-          if (ts.mcp_url != null) next.mcpUrl = String(ts.mcp_url);
-          if (Array.isArray(ts.tool_filter)) next.toolFilter = ts.tool_filter.join(", ");
-          return next;
-        });
+        setReactConfig((prev) =>
+          ts.mcp_url != null ? { ...prev, mcpUrl: String(ts.mcp_url) } : prev,
+        );
       }
       toast.success(msg("submit.clone.success"));
     };
@@ -1834,17 +1828,12 @@ export function useSubmitWizard() {
       // model. mcp_auth_header is forwarded once on the wire but never persisted
       // (backend) or mirrored into shared agent state.
       const buildReactFields = (): { tool_source: ToolSource } => {
-        const filter = reactConfig.toolFilter
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
         const tool_source: ToolSource = {
           kind: "live_mcp",
           ...(reactConfig.mcpUrl.trim() ? { mcp_url: reactConfig.mcpUrl.trim() } : {}),
           ...(reactConfig.mcpAuthHeader.trim()
             ? { mcp_auth_header: reactConfig.mcpAuthHeader.trim() }
             : {}),
-          ...(filter.length > 0 ? { tool_filter: filter } : {}),
         };
         return { tool_source };
       };
@@ -1989,10 +1978,6 @@ export function useSubmitWizard() {
       const mc = { ...modelConfig };
       if (globalBaseUrl && !mc.base_url) mc.base_url = globalBaseUrl;
       if (globalApiKey && !mc.extra?.api_key) mc.extra = { ...mc.extra, api_key: globalApiKey };
-      const filter = reactConfig.toolFilter
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
       const tool_source: ToolSource | undefined = workflowUsesTools(workflowSpec)
         ? {
             kind: "live_mcp",
@@ -2000,7 +1985,6 @@ export function useSubmitWizard() {
             ...(reactConfig.mcpAuthHeader.trim()
               ? { mcp_auth_header: reactConfig.mcpAuthHeader.trim() }
               : {}),
-            ...(filter.length > 0 ? { tool_filter: filter } : {}),
           }
         : undefined;
       return dryRunWorkflow({

@@ -145,25 +145,6 @@ export function NodeInspector({ spec, issues, onChange, onDelete, onClose }: Nod
                 ))}
               </div>
             </div>
-            {spec.module_name === "react" && (
-              <div className="space-y-1.5">
-                <Label className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
-                  {msg("workflow.inspector.tool_filter")}
-                </Label>
-                <Input
-                  dir="ltr"
-                  value={(spec.tool_filter ?? []).join(", ")}
-                  placeholder={msg("workflow.inspector.tool_filter_placeholder")}
-                  onChange={(e) => {
-                    const names = e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean);
-                    onChange({ ...spec, tool_filter: names.length ? names : null });
-                  }}
-                />
-              </div>
-            )}
             <div className="space-y-1.5">
               <Label className="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
                 {msg("workflow.inspector.signature_code")}
