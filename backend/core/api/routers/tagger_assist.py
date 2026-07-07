@@ -76,6 +76,7 @@ class InterviewResponse(BaseModel):
     quick_replies: list[str] = Field(default_factory=list)
     rubric: list[str] = Field(default_factory=list)
     done: bool
+    model: str | None = None
 
 
 class PredictRequest(BaseModel):

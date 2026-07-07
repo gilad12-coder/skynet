@@ -439,6 +439,7 @@ def _parse_interview_prediction(pred: Any, asked: int) -> dict[str, Any]:
         "quick_replies": [] if done else quick,
         "rubric": rubric if done else [],
         "done": done,
+        "model": assist_model_name(),
     }
 
 

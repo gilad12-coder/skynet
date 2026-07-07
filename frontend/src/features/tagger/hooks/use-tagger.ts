@@ -562,7 +562,14 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
             onDone: (turn) => {
               patchAssist({
                 interview: {
-                  turns: [...turns, { role: "assistant" as const, content: turn.message }],
+                  turns: [
+                    ...turns,
+                    {
+                      role: "assistant" as const,
+                      content: turn.message,
+                      model: turn.model ?? null,
+                    },
+                  ],
                   done: turn.done,
                 },
                 ...(turn.done && turn.rubric.length > 0 ? { rubric: turn.rubric } : {}),

@@ -12,6 +12,7 @@ export interface InterviewTurnResult {
   quick_replies: string[];
   rubric: string[];
   done: boolean;
+  model?: string | null;
 }
 
 export interface InterviewStreamHandlers {

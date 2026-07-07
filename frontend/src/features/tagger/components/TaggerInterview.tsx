@@ -55,6 +55,7 @@ export function TaggerInterview({
   const messages: AgentMessage[] = assist.interview.turns.map((turn) => ({
     role: turn.role,
     content: turn.content,
+    model: turn.model ?? null,
   }));
   // The in-flight assistant reply streams into a trailing synthetic message,
   // exactly how the agent panel renders its live turn.
@@ -70,7 +71,7 @@ export function TaggerInterview({
   };
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-var(--header-height,53px)-3rem)] max-w-2xl flex-col md:h-[calc(100dvh-var(--header-height,53px)-4rem)]">
+    <div className="flex h-[calc(100dvh-var(--header-height,53px)-3rem)] w-full flex-col md:h-[calc(100dvh-var(--header-height,53px)-4rem)]">
       <div className="px-1 pb-3">
         <h2 className="text-base font-semibold text-foreground">
           {msg("tagger.assist.interview.title")}
@@ -104,6 +105,7 @@ export function TaggerInterview({
               streaming={busy}
               editAndResend={onEditResend}
               thinking={thinking ?? undefined}
+              animatePairs
             />
           </AgentThread>
 
