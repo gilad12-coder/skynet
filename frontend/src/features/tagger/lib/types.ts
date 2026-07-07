@@ -105,4 +105,6 @@ export interface AssistState {
   rounds: ReviewRound[];
   autotag?: AutotagProgress;
   deepOptimize?: DeepOptimizeState;
+  /** Interview refinements to the task text; config itself stays immutable. */
+  taskOverride?: { question?: string; prompt?: string };
 }
