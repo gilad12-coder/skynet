@@ -1,4 +1,6 @@
-# Skynet
+<p align="center">
+  <img src="docs/assets/skynet-wordmark.gif" width="480" alt="SKYNET" />
+</p>
 
 **A self-hostable platform for building, optimizing, and serving LLM programs — with prompt optimization (GEPA) at its core, priced at break-even.**
 
