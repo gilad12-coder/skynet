@@ -15,9 +15,9 @@ import type { CatalogModel } from "@/shared/types/api";
 import { CREDIT_USD_VALUE } from "./credit";
 
 /** Margin multiplier on raw provider cost — mirrors backend `pricing.MARKUP`.
- * 1.0 = at-cost pricing: estimates equal the raw provider cost, exactly what
- * the backend charges. */
-export const MARKUP = 1.0;
+ * 1.09 = break-even pricing: raw provider cost plus just the payment-processing
+ * fees (OpenRouter deposit + Stripe), no profit margin. */
+export const MARKUP = 1.09;
 
 /** Fallback per-token costs (USD) for a model the catalog doesn't price. */
 export const DEFAULT_INPUT_COST_PER_TOKEN = 1e-6;
