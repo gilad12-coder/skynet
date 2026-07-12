@@ -5,8 +5,8 @@
  * free grant, and beyond it users buy credit packs or start Premium. Credits are
  * spendable on any model — the free/paid line is about balance, not catalog
  * access. Credits are the unit of account; the dollar value is always shown
- * alongside (`CREDIT_USD_VALUE`), and the markup that protects margin lives in the
- * credit→cost mapping, not in this UI.
+ * alongside (`CREDIT_USD_VALUE`). Pricing is at-cost (MARKUP 1.0, zero BYOK
+ * fee): a credit buys exactly one cent of raw provider compute.
  *
  * Everything here is framework-agnostic (no React / `next/*`) so it imports from
  * server components, client components, and the provider alike. The values are
