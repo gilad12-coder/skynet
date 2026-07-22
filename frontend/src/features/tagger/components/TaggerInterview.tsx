@@ -664,7 +664,9 @@ function RubricCard({
             sweep in the reading direction — the container is authored LTR
             and mirrored in RTL so glyphs, order, and motion all flip
             together. */}
-        <Rise delay={0.16} className="flex min-w-0 justify-center lg:min-h-0">
+        {/* items-center keeps the button content-sized: the default stretch
+            made it fill the row's full height — a 580px slab on desktop. */}
+        <Rise delay={0.16} className="flex min-w-0 items-center justify-center lg:min-h-0">
           <motion.button
             type="button"
             onClick={launch}
