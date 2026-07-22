@@ -668,26 +668,19 @@ function RubricCard({
             type="button"
             onClick={launch}
             disabled={!taskValid || launching}
-            aria-label={
-              autopilot
-                ? formatMsg("tagger.assist.rubric.start_autotag", { rows: rowCount })
-                : formatMsg("tagger.assist.rubric.start_copilot_round", { rows: copilotBatch })
-            }
             animate={{ scale: [1, 1.01, 1] }}
             transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
             className={cn(
-              // At rail width the label/chevrons can't render: overflow-hidden
-              // stops spill-over and ``invisible`` on the content kills the
-              // sliced-glyph artifacts; the aria-label still names the action.
-              // The content stays in the tree so widening the rail is a
-              // class-level change.
+              // overflow-hidden: on the narrow rail a long unbreakable word
+              // (some locales) clips inside the button instead of spilling
+              // over the cards.
               "group relative flex w-[100px] cursor-pointer flex-col items-center justify-center gap-4 overflow-hidden",
               "rounded-2xl bg-primary py-8 text-base font-semibold text-primary-foreground",
               "transition-all duration-300 hover:scale-[1.01] hover:shadow-[0_0_30px_rgba(61,46,34,0.35)]",
               "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60",
             )}
           >
-            <span className="invisible flex flex-col items-center gap-1 px-4">
+            <span className="flex flex-col items-center gap-1 px-4">
               <span>
                 {autopilot
                   ? formatMsg("tagger.assist.rubric.start_autotag", { rows: rowCount })
@@ -717,7 +710,7 @@ function RubricCard({
             </span>
             <div
               dir="ltr"
-              className="invisible flex items-center -space-x-7 opacity-70 transition-opacity duration-200 group-hover:opacity-100 rtl:-scale-x-100 [&>svg]:animate-[cascadeDown_1s_ease-in-out_infinite] group-hover:[&>svg]:animate-[cascadeRightHyper_0.5s_ease-out_infinite]"
+              className="flex items-center -space-x-7 opacity-70 transition-opacity duration-200 group-hover:opacity-100 rtl:-scale-x-100 [&>svg]:animate-[cascadeDown_1s_ease-in-out_infinite] group-hover:[&>svg]:animate-[cascadeRightHyper_0.5s_ease-out_infinite]"
             >
               <ChevronRight className="size-10 [animation-delay:0s] group-hover:[animation-delay:0s]" />
               <ChevronRight className="size-10 [animation-delay:0.15s] group-hover:[animation-delay:0.08s]" />
