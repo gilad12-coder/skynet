@@ -487,11 +487,10 @@ function RubricCard({
       <div
         className={cn(
           "grid min-h-0 flex-1 gap-3 overflow-y-auto",
-          // The launch column is capped instead of fr-sized so the button
-          // stays a slim full-height block on wide screens; the cards absorb
-          // the rest. The button carries the same cap itself (max-w-40) so
-          // the stacked below-lg layout doesn't fall back to a full-width bar.
-          "lg:grid-cols-[minmax(0,1fr)_minmax(0,10rem)] lg:grid-rows-[minmax(0,1fr)] lg:overflow-visible",
+          // The launch column shrink-wraps the button (auto), so the cards
+          // always absorb every pixel the button doesn't use, at any button
+          // width.
+          "lg:grid-cols-[minmax(0,1fr)_auto] lg:grid-rows-[minmax(0,1fr)] lg:overflow-visible",
         )}
       >
         <Rise
@@ -664,21 +663,31 @@ function RubricCard({
             sweep in the reading direction — the container is authored LTR
             and mirrored in RTL so glyphs, order, and motion all flip
             together. */}
-        <Rise delay={0.16} className="flex min-w-0 justify-center lg:min-h-0">
+        <Rise delay={0.16} className="flex min-w-0 justify-end lg:min-h-0">
           <motion.button
             type="button"
             onClick={launch}
             disabled={!taskValid || launching}
+            aria-label={
+              autopilot
+                ? formatMsg("tagger.assist.rubric.start_autotag", { rows: rowCount })
+                : formatMsg("tagger.assist.rubric.start_copilot_round", { rows: copilotBatch })
+            }
             animate={{ scale: [1, 1.01, 1] }}
             transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
             className={cn(
-              "group relative flex w-full max-w-40 cursor-pointer flex-col items-center justify-center gap-4",
+              // At rail width the label/chevrons can't render: overflow-hidden
+              // stops spill-over and ``invisible`` on the content kills the
+              // sliced-glyph artifacts; the aria-label still names the action.
+              // The content stays in the tree so widening the rail is a
+              // class-level change.
+              "group relative flex w-[10px] cursor-pointer flex-col items-center justify-center gap-4 overflow-hidden",
               "rounded-2xl bg-primary py-8 text-base font-semibold text-primary-foreground",
               "transition-all duration-300 hover:scale-[1.01] hover:shadow-[0_0_30px_rgba(61,46,34,0.35)]",
               "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60",
             )}
           >
-            <span className="flex flex-col items-center gap-1 px-4">
+            <span className="invisible flex flex-col items-center gap-1 px-4">
               <span>
                 {autopilot
                   ? formatMsg("tagger.assist.rubric.start_autotag", { rows: rowCount })
@@ -708,7 +717,7 @@ function RubricCard({
             </span>
             <div
               dir="ltr"
-              className="flex items-center -space-x-7 opacity-70 transition-opacity duration-200 group-hover:opacity-100 rtl:-scale-x-100 [&>svg]:animate-[cascadeDown_1s_ease-in-out_infinite] group-hover:[&>svg]:animate-[cascadeRightHyper_0.5s_ease-out_infinite]"
+              className="invisible flex items-center -space-x-7 opacity-70 transition-opacity duration-200 group-hover:opacity-100 rtl:-scale-x-100 [&>svg]:animate-[cascadeDown_1s_ease-in-out_infinite] group-hover:[&>svg]:animate-[cascadeRightHyper_0.5s_ease-out_infinite]"
             >
               <ChevronRight className="size-10 [animation-delay:0s] group-hover:[animation-delay:0s]" />
               <ChevronRight className="size-10 [animation-delay:0.15s] group-hover:[animation-delay:0.08s]" />
