@@ -21,7 +21,6 @@ import {
 } from "@/shared/ui/primitives/dialog";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { SearchField } from "@/shared/ui/search-field";
-import { SelectCheckbox } from "@/shared/ui/select-checkbox";
 import { SelectionBar } from "@/shared/ui/selection-bar";
 import { TAGGER_SESSIONS_CHANGED } from "../hooks/use-tagger";
 import { TaggingSessionCard } from "./TaggingSessionCard";
@@ -126,15 +125,6 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
     [filteredSessions, anchorId],
   );
 
-  const allSelected =
-    filteredSessions.length > 0 && filteredSessions.every((s) => selectedIds.has(s.id));
-  const someSelected = !allSelected && filteredSessions.some((s) => selectedIds.has(s.id));
-
-  const toggleAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(filteredSessions.map((s) => s.id)));
-    setAnchorId(null);
-  };
-
   if (!loaded) {
     return (
       <section
@@ -201,29 +191,17 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
         {filteredSessions.length === 0 ? (
           <EmptyState icon={Search} title={msg("tagger.session.search_empty")} />
         ) : (
-          <>
-            <div className="flex items-center gap-3 px-4 pb-2">
-              <SelectCheckbox
-                checked={allSelected ? true : someSelected ? "mixed" : false}
-                onToggle={toggleAll}
-                ariaLabel={msg("storage.select.all")}
+          <div className="flex flex-col gap-2.5 p-0.5">
+            {filteredSessions.map((session) => (
+              <TaggingSessionCard
+                key={session.id}
+                session={session}
+                onChanged={fetchSessions}
+                selected={selectedIds.has(session.id)}
+                onToggleSelect={(shiftKey) => toggleSelected(session.id, shiftKey)}
               />
-              <span className="text-xs font-medium text-muted-foreground">
-                {msg("storage.select.all")}
-              </span>
-            </div>
-            <div className="flex flex-col gap-2.5 p-0.5">
-              {filteredSessions.map((session) => (
-                <TaggingSessionCard
-                  key={session.id}
-                  session={session}
-                  onChanged={fetchSessions}
-                  selected={selectedIds.has(session.id)}
-                  onToggleSelect={(shiftKey) => toggleSelected(session.id, shiftKey)}
-                />
-              ))}
-            </div>
-          </>
+            ))}
+          </div>
         )}
       </div>
 

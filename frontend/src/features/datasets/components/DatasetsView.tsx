@@ -15,7 +15,6 @@ import {
 } from "@/shared/ui/primitives/dialog";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { SearchField } from "@/shared/ui/search-field";
-import { SelectCheckbox } from "@/shared/ui/select-checkbox";
 import { SelectionBar } from "@/shared/ui/selection-bar";
 import {
   bulkDeleteDatasets,
@@ -142,19 +141,6 @@ export function DatasetsView() {
     [filtered, anchorId],
   );
 
-  const selectableFiltered = React.useMemo(
-    () => filtered.filter((d) => d.role === "owner"),
-    [filtered],
-  );
-  const allSelected =
-    selectableFiltered.length > 0 && selectableFiltered.every((d) => selectedIds.has(d.id));
-  const someSelected = !allSelected && selectableFiltered.some((d) => selectedIds.has(d.id));
-
-  const toggleAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(selectableFiltered.map((d) => d.id)));
-    setAnchorId(null);
-  };
-
   const handleFiles = React.useCallback(
     async (files: FileList | null) => {
       const file = files?.[0];
@@ -251,37 +237,23 @@ export function DatasetsView() {
         ) : filtered.length === 0 ? (
           <EmptyState icon={Search} title={msg("datasets.search.empty")} />
         ) : (
-          <>
-            {selectableFiltered.length > 0 && (
-              <div className="flex items-center gap-3 px-4 pb-2">
-                <SelectCheckbox
-                  checked={allSelected ? true : someSelected ? "mixed" : false}
-                  onToggle={toggleAll}
-                  ariaLabel={msg("storage.select.all")}
-                />
-                <span className="text-xs font-medium text-muted-foreground">
-                  {msg("storage.select.all")}
-                </span>
-              </div>
+          <div className="flex flex-col gap-2.5 p-0.5">
+            {dragging && (
+              <p className="pointer-events-none py-2 text-center text-sm font-medium text-[#3D2E22]/70">
+                {msg("datasets.upload.drop")}
+              </p>
             )}
-            <div className="flex flex-col gap-2.5 p-0.5">
-              {dragging && (
-                <p className="pointer-events-none py-2 text-center text-sm font-medium text-[#3D2E22]/70">
-                  {msg("datasets.upload.drop")}
-                </p>
-              )}
-              {filtered.map((dataset) => (
-                <DatasetCard
-                  key={dataset.id}
-                  dataset={dataset}
-                  onOpen={setSelected}
-                  onChanged={refetch}
-                  selected={selectedIds.has(dataset.id)}
-                  onToggleSelect={(shiftKey) => toggleSelected(dataset.id, shiftKey)}
-                />
-              ))}
-            </div>
-          </>
+            {filtered.map((dataset) => (
+              <DatasetCard
+                key={dataset.id}
+                dataset={dataset}
+                onOpen={setSelected}
+                onChanged={refetch}
+                selected={selectedIds.has(dataset.id)}
+                onToggleSelect={(shiftKey) => toggleSelected(dataset.id, shiftKey)}
+              />
+            ))}
+          </div>
         )}
       </div>
 
