@@ -28,7 +28,7 @@ from ..models import ModelConfig
 from .agents.code import ReasoningStreamListener, _reply_language
 from .agents.code_interview import INTERVIEW_TURN_ATTEMPTS, normalize_options
 from .agents.constants import REASONING_FIELD
-from .agents.parse_salvage import salvage_prediction
+from .agents.parse_salvage import salvage_prediction, strip_adapter_debris
 from .language_models import (
     apply_model_reasoning_config,
     build_language_model,
@@ -657,8 +657,11 @@ def _parse_interview_prediction(pred: Any, asked: int, config: dict[str, Any]) -
         config,
         _parse_json(getattr(pred, "task_config_json", "{}"), {}),
     )
-    # The DB name column caps at 200; 80 keeps session cards to one line.
-    title = str(getattr(pred, "session_title", "")).strip().strip("\"'")[:80]
+    # session_title is the signature's last output field, so a malformed
+    # terminal adapter marker leaks into its tail — strip it before the name
+    # reaches the session card. The DB name column caps at 200; 80 keeps
+    # session cards to one line.
+    title = strip_adapter_debris(str(getattr(pred, "session_title", ""))).strip().strip("\"'")[:80]
     return {
         "message": str(getattr(pred, "message", "")).strip(),
         "options": [] if done else options,

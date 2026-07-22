@@ -174,6 +174,10 @@ def test_interview_title_rides_the_final_turn_only() -> None:
     )
     turn = _parse_interview_prediction(pred, 1, _FREE)
     assert turn["title"] == "Routing support tickets"
+    # session_title is the last output field, so minimax's malformed terminal
+    # marker lands in its tail (seen in the wild as "… [[ ## completed ## ]").
+    pred.session_title = "Route support tickets [[ ## completed ## ]"
+    assert _parse_interview_prediction(pred, 1, _FREE)["title"] == "Route support tickets"
     pred.done = "false"
     assert _parse_interview_prediction(pred, 1, _FREE)["title"] == ""
 
