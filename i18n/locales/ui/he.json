@@ -2721,7 +2721,6 @@
   "tagger.assist.setup.autopilot_label": "אוטופיילוט",
   "tagger.assist.setup.autopilot_desc": "ראיון קצר, ואז ה-AI מתייג הכול לבד ומסמן שורות שבהן התלבט.",
   "tagger.assist.setup.recommended": "מומלץ",
-  "tagger.assist.setup.tiny_dataset": "בגודל כזה ממילא תעברו כמעט על כל שורה — ידני או אוטופיילוט יתאימו יותר.",
   "tagger.assist.retry": "נסו שוב",
   "tagger.assist.interview.title": "ראיון על הדאטה",
   "tagger.assist.interview.subtitle": "כמה שאלות כדי להבין איך אתם חושבים על הדאטה — התשובות הופכות למדריך תיוג.",

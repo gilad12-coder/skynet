@@ -31,7 +31,8 @@ import {
 } from "@/shared/ui/agent";
 import type { AgentMessage, AgentThinking } from "@/shared/ui/agent";
 import type { InterviewOption } from "@/shared/lib/api";
-import { ModelPicker } from "@/features/submit";
+import { ModelPickerDialog } from "@/features/submit";
+import { ModelChip } from "@/shared/ui/model-chip";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import type { AutotagEstimate } from "../hooks/use-tagger";
@@ -443,6 +444,7 @@ function RubricCard({
   // Launch mirrors the wizard submit: the splash plays for the shared hold,
   // then the confirm flips the phase and the next screen is revealed under it.
   const [launching, setLaunching] = useState(false);
+  const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const launch = () => {
     if (launching) return;
     setLaunching(true);
@@ -575,20 +577,25 @@ function RubricCard({
             </CardContent>
           </Card>
 
-          {/* Sits above the guide so the picker's dropdown opens over content
-              instead of extending the column's scroll area. z-10 makes that
-              real: without it the cards below — stacking contexts via the
-              card's backdrop-blur — would paint over the open dropdown. */}
-          <Card className="z-10 shrink-0">
+          <Card className="shrink-0">
             <CardHeader>
               <CardTitle className="text-base">{msg("tagger.assist.model.title")}</CardTitle>
               <CardDescription>{msg("tagger.assist.model.hint")}</CardDescription>
             </CardHeader>
             <CardContent>
-              <ModelPicker
+              <ModelChip
+                config={{ name: assist.model ?? "" }}
+                emptyLabel={msg("tagger.assist.model.placeholder")}
+                onClick={() => setModelDialogOpen(true)}
+                onRemove={assist.model ? () => onSetModel("") : undefined}
+              />
+              <ModelPickerDialog
+                open={modelDialogOpen}
+                onOpenChange={setModelDialogOpen}
                 value={assist.model ?? ""}
                 onChange={onSetModel}
-                placeholder={msg("tagger.assist.model.placeholder")}
+                title={msg("tagger.assist.model.title")}
+                description={msg("tagger.assist.model.hint")}
               />
             </CardContent>
           </Card>

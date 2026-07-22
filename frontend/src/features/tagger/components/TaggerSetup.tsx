@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Upload,
   Binary,
@@ -29,8 +29,9 @@ import { tip } from "@/shared/lib/tooltips";
 import { parseDatasetFile } from "@/shared/lib/parse-dataset";
 import { getDatasetRows } from "@/shared/lib/api";
 import { registerTutorialHook, registerTutorialQuery } from "@/features/tutorial";
-import { ModelPicker } from "@/features/submit";
+import { ModelPickerDialog } from "@/features/submit";
 import { DatasetPickerDialog } from "@/features/datasets";
+import { ModelChip } from "@/shared/ui/model-chip";
 import { useUserPrefs } from "@/features/settings";
 import type {
   AnnotationMode,
@@ -40,7 +41,6 @@ import type {
   Category,
 } from "../lib/types";
 import { isTaggerAssistEnabled } from "../lib/feature-flag";
-import { REVIEW_BATCH_SIZE, calibrationTarget } from "../lib/assist";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { perLocale } from "@/shared/lib/per-locale";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
@@ -158,13 +158,10 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   const [assistMode, setAssistMode] = useState<TaggerAssistMode>("copilot");
   // Empty = the server's default tagging model.
   const [assistModel, setAssistModel] = useState("");
+  const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [libraryName, setLibraryName] = useState<string | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-
-  // Whether the user chose an approach themselves — an explicit pick must
-  // never be overridden by the size-hint default below.
-  const assistPicked = useRef(false);
 
   const { prefs } = useUserPrefs();
   const assistAvailable = isTaggerAssistEnabled() && prefs.taggerAssist;
@@ -177,23 +174,6 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
     ...(assistAvailable ? [ASSIST_STEP] : []),
     ...(needsTaskStep ? [TASK_STEP] : []),
   ];
-
-  // The approach step precedes any interface choice, so the tiny-dataset
-  // caveat sizes against the provisional calibration target.
-  const tinyTarget = calibrationTarget({
-    mode: "freetext",
-    modeProvisional: true,
-    inputColumns: inputCols,
-  });
-  const tinyDataset = parsedRows.length > 0 && parsedRows.length <= tinyTarget + REVIEW_BATCH_SIZE;
-
-  // The pre-selected approach follows the size hint: while the hint says
-  // "Manual or Autopilot will serve you better", Co-pilot must not stay
-  // selected by default — the screen would contradict itself.
-  useEffect(() => {
-    if (assistPicked.current) return;
-    setAssistMode(tinyDataset ? "manual" : "copilot");
-  }, [tinyDataset]);
 
   const [question, setQuestion] = useState(
     msg("auto.features.tagger.components.taggersetup.literal.10"),
@@ -657,16 +637,12 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
         <CardContent className="flex flex-col gap-2">
           {ASSIST_OPTIONS.map((opt) => {
             const selected = assistMode === opt.mode;
-            const discouraged = tinyDataset && opt.mode === "copilot";
             return (
               <button
                 key={opt.mode}
                 type="button"
                 aria-pressed={selected}
-                onClick={() => {
-                  assistPicked.current = true;
-                  setAssistMode(opt.mode);
-                }}
+                onClick={() => setAssistMode(opt.mode)}
                 className={cn(
                   "flex min-w-0 flex-col gap-0.5 rounded-xl border p-3.5 text-start transition-all cursor-pointer",
                   "hover:border-primary/40 hover:bg-primary/5",
@@ -682,7 +658,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
                   >
                     {opt.label}
                   </span>
-                  {opt.recommended && !discouraged && (
+                  {opt.recommended && (
                     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
                       {msg("tagger.assist.setup.recommended")}
                     </span>
@@ -692,19 +668,23 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
               </button>
             );
           })}
-          {tinyDataset && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              {msg("tagger.assist.setup.tiny_dataset")}
-            </p>
-          )}
           {assistMode !== "manual" && (
             <div className="mt-2 space-y-1.5">
               <p className="text-sm font-medium">{msg("tagger.assist.model.title")}</p>
               <p className="text-xs text-muted-foreground">{msg("tagger.assist.model.hint")}</p>
-              <ModelPicker
+              <ModelChip
+                config={{ name: assistModel }}
+                emptyLabel={msg("tagger.assist.model.placeholder")}
+                onClick={() => setModelDialogOpen(true)}
+                onRemove={assistModel ? () => setAssistModel("") : undefined}
+              />
+              <ModelPickerDialog
+                open={modelDialogOpen}
+                onOpenChange={setModelDialogOpen}
                 value={assistModel}
                 onChange={setAssistModel}
-                placeholder={msg("tagger.assist.model.placeholder")}
+                title={msg("tagger.assist.model.title")}
+                description={msg("tagger.assist.model.hint")}
               />
             </div>
           )}
@@ -783,11 +763,9 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
         </div>
       </div>
 
-      {/* x-clip (not hidden): the step slide animates horizontally only, and
-          the model picker's dropdown must escape the wrapper vertically. z-10
-          lifts that dropdown over the footer button — the card's backdrop-blur
-          traps the dropdown's own z-index inside the card's stacking context. */}
-      <div className="relative z-10 overflow-x-clip pt-[10px]">
+      {/* x-clip (not hidden): only the horizontal slide animation needs
+          clipping — y stays visible so focus rings and shadows aren't cut. */}
+      <div className="relative overflow-x-clip pt-[10px]">
         <AnimatePresence mode="wait" custom={direction}>
           <motion.div
             key={step}

@@ -2721,7 +2721,6 @@
   "tagger.assist.setup.autopilot_label": "Autopilot",
   "tagger.assist.setup.autopilot_desc": "A short interview, then the AI tags everything on its own and flags rows it wasn't sure about.",
   "tagger.assist.setup.recommended": "Recommended",
-  "tagger.assist.setup.tiny_dataset": "At this size you would review nearly every row anyway — Manual or Autopilot will serve you better.",
   "tagger.assist.retry": "Retry",
   "tagger.assist.interview.title": "Dataset interview",
   "tagger.assist.interview.subtitle": "A few questions to learn how you think about this data — the answers become your labeling guide.",

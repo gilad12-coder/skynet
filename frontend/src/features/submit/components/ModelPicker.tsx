@@ -34,6 +34,12 @@ interface ModelPickerProps {
    */
   byokMode?: boolean;
   byokProviders?: string[];
+  /**
+   * "popover" (default) is the classic trigger-button combobox. "panel" renders
+   * the search box and list open and flat — no trigger, no absolute positioning
+   * — for embedding inside a dialog (see ModelPickerDialog).
+   */
+  variant?: "popover" | "panel";
 }
 
 interface EnrichedModel extends CatalogModel {
@@ -59,7 +65,9 @@ export function ModelPicker({
   providerFilter,
   byokMode = false,
   byokProviders,
+  variant = "popover",
 }: ModelPickerProps) {
+  const isPanel = variant === "panel";
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   // Use cached catalog instantly (prefetched on module load); fallback to async
@@ -169,9 +177,11 @@ export function ModelPicker({
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
+  // Panel mode focuses on mount (the 50ms defer outlasts the dialog's focus
+  // trap grabbing focus first); popover mode focuses on each open.
   React.useEffect(() => {
-    if (open) setTimeout(() => inputRef.current?.focus(), 50);
-  }, [open]);
+    if (open || isPanel) setTimeout(() => inputRef.current?.focus(), 50);
+  }, [open, isPanel]);
 
   const allModels: EnrichedModel[] = React.useMemo(() => {
     let staticModels = activeCatalog?.models ?? [];
@@ -246,9 +256,119 @@ export function ModelPicker({
 
   const commit = (next: string) => {
     onChange(next);
-    setOpen(false);
+    if (!isPanel) setOpen(false);
     setQuery("");
   };
+
+  const searchAndList = (
+    <>
+      <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
+        <Search className="size-3.5 shrink-0 text-muted-foreground" />
+        <input
+          ref={inputRef}
+          dir="auto"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={msg("auto.features.submit.components.modelpicker.literal.4")}
+          className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && !isPanel) {
+              setOpen(false);
+            }
+          }}
+        />
+        {discoverUrl && (
+          <button
+            type="button"
+            onClick={() => void runDiscover()}
+            disabled={discovering}
+            className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[0.6875rem] font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+            title={msg("auto.features.submit.components.modelpicker.literal.3")}
+          >
+            {discovering ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <RefreshCw className="size-3" />
+            )}
+            {msg("auto.features.submit.components.modelpicker.1")}
+          </button>
+        )}
+      </div>
+
+      <div className={cn("overflow-y-auto py-1", isPanel ? "max-h-[min(20rem,50vh)]" : "max-h-60")}>
+        {discoveryError && discoverUrl && (
+          <div className="px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            {msg("auto.features.submit.components.modelpicker.2")}
+            {discoverUrl}: {discoveryError}
+          </div>
+        )}
+        {filtered.length === 0 && (
+          <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+            {msg("auto.features.submit.components.modelpicker.3")}
+          </div>
+        )}
+        {Array.from(grouped.entries()).map(([provider, items]) => (
+          <div key={provider} className="py-1">
+            <div
+              className="px-3 py-1 text-[0.625rem] font-semibold uppercase tracking-wider text-muted-foreground text-start"
+              dir="ltr"
+            >
+              {providerLabel(provider)}
+            </div>
+            {items.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => commit(m.value)}
+                className={cn(
+                  "flex w-full items-center gap-2 px-3 py-1.5 text-start text-sm transition-colors hover:bg-accent/70",
+                  value === m.value && "bg-accent/50",
+                  !m.available && "opacity-60",
+                )}
+                role="option"
+                aria-selected={value === m.value}
+              >
+                <span className="flex min-w-0 flex-1 items-center gap-1.5" dir="ltr">
+                  <span className="truncate text-[0.8125rem]">{m.label}</span>
+                  {m.max_input_tokens && (
+                    <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground">
+                      {formatCtx(m.max_input_tokens)}
+                    </span>
+                  )}
+                  {m.supports_vision && (
+                    <span
+                      className="inline-flex shrink-0 items-center gap-0.5 rounded-sm bg-primary/10 px-1 py-px text-[9px] text-primary"
+                      title={msg("shared.model_chip.vision_badge")}
+                    >
+                      <Eye className="size-2.5" />
+                    </span>
+                  )}
+                </span>
+                <Check
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    value === m.value ? "opacity-100" : "opacity-0",
+                  )}
+                />
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
+  if (isPanel) {
+    return (
+      <div
+        ref={rootRef}
+        className={cn("overflow-hidden rounded-xl border border-border/60", className)}
+        role="listbox"
+      >
+        {searchAndList}
+      </div>
+    );
+  }
 
   return (
     <div ref={rootRef} className={cn("relative w-full", className)}>
@@ -295,99 +415,7 @@ export function ModelPicker({
           )}
           role="listbox"
         >
-          <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
-            <Search className="size-3.5 shrink-0 text-muted-foreground" />
-            <input
-              ref={inputRef}
-              dir="auto"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={msg("auto.features.submit.components.modelpicker.literal.4")}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setOpen(false);
-                }
-              }}
-            />
-            {discoverUrl && (
-              <button
-                type="button"
-                onClick={() => void runDiscover()}
-                disabled={discovering}
-                className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[0.6875rem] font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-                title={msg("auto.features.submit.components.modelpicker.literal.3")}
-              >
-                {discovering ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : (
-                  <RefreshCw className="size-3" />
-                )}
-                {msg("auto.features.submit.components.modelpicker.1")}
-              </button>
-            )}
-          </div>
-
-          <div className="max-h-60 overflow-y-auto py-1">
-            {discoveryError && discoverUrl && (
-              <div className="px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-                {msg("auto.features.submit.components.modelpicker.2")}
-                {discoverUrl}: {discoveryError}
-              </div>
-            )}
-            {filtered.length === 0 && (
-              <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                {msg("auto.features.submit.components.modelpicker.3")}
-              </div>
-            )}
-            {Array.from(grouped.entries()).map(([provider, items]) => (
-              <div key={provider} className="py-1">
-                <div
-                  className="px-3 py-1 text-[0.625rem] font-semibold uppercase tracking-wider text-muted-foreground text-start"
-                  dir="ltr"
-                >
-                  {providerLabel(provider)}
-                </div>
-                {items.map((m) => (
-                  <button
-                    key={m.value}
-                    type="button"
-                    onClick={() => commit(m.value)}
-                    className={cn(
-                      "flex w-full items-center gap-2 px-3 py-1.5 text-start text-sm transition-colors hover:bg-accent/70",
-                      value === m.value && "bg-accent/50",
-                      !m.available && "opacity-60",
-                    )}
-                    role="option"
-                    aria-selected={value === m.value}
-                  >
-                    <span className="flex min-w-0 flex-1 items-center gap-1.5" dir="ltr">
-                      <span className="truncate text-[0.8125rem]">{m.label}</span>
-                      {m.max_input_tokens && (
-                        <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground">
-                          {formatCtx(m.max_input_tokens)}
-                        </span>
-                      )}
-                      {m.supports_vision && (
-                        <span
-                          className="inline-flex shrink-0 items-center gap-0.5 rounded-sm bg-primary/10 px-1 py-px text-[9px] text-primary"
-                          title={msg("shared.model_chip.vision_badge")}
-                        >
-                          <Eye className="size-2.5" />
-                        </span>
-                      )}
-                    </span>
-                    <Check
-                      className={cn(
-                        "size-3.5 shrink-0",
-                        value === m.value ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
+          {searchAndList}
         </div>
       )}
     </div>
