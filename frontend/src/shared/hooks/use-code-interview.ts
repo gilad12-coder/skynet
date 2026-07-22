@@ -29,6 +29,9 @@ export interface CodeInterviewState {
   /** LiteLLM id of the composer menu's chosen model; null runs the default. */
   model: string | null;
   setModel: (model: string | null) => void;
+  /** Reasoning-effort level for the chosen model; null runs its default. */
+  reasoningEffort: string | null;
+  setReasoningEffort: (effort: string | null) => void;
   error: boolean;
   /** The model finished asking; the brief card is showing. */
   done: boolean;
@@ -78,6 +81,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
   const [options, setOptions] = React.useState<InterviewOption[]>([]);
   const [pending, setPending] = React.useState<"options" | "brief" | null>(null);
   const [model, setModel] = React.useState<string | null>(null);
+  const [reasoningEffort, setReasoningEffort] = React.useState<string | null>(null);
   const [error, setError] = React.useState(false);
   const [done, setDone] = React.useState(false);
   const [brief, setBrief] = React.useState<string[]>([]);
@@ -117,6 +121,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
           job_model: jobModel,
           locale: getActiveLocale(),
           model: model ?? undefined,
+          reasoning_effort: reasoningEffort ?? undefined,
         },
         {
           signal: controller.signal,
@@ -170,7 +175,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
         if (abortRef.current === controller) abortRef.current = null;
       });
     },
-    [parsedDataset, busy, columnRoles, columnKinds, jobModel, model],
+    [parsedDataset, busy, columnRoles, columnKinds, jobModel, model, reasoningEffort],
   );
 
   // Fire the opening question exactly once per eligible interview.
@@ -240,6 +245,8 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
     pending,
     model,
     setModel,
+    reasoningEffort,
+    setReasoningEffort,
     error,
     done,
     brief,

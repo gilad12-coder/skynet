@@ -365,6 +365,12 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
     if (assistRef.current) assistRef.current = { ...assistRef.current, ...patch };
   }, []);
 
+  const setInterviewEffort = useCallback((effort: string | null) => {
+    const patch = { interviewEffort: effort ?? undefined };
+    setAssist((prev) => (prev ? { ...prev, ...patch } : prev));
+    if (assistRef.current) assistRef.current = { ...assistRef.current, ...patch };
+  }, []);
+
   // ---------------------------------------------------------------- frames
   // In calibration/review the annotator surface works on a subset of rows (the
   // calibration set or the open round); everywhere else it sees the full
@@ -602,7 +608,12 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
       try {
         await streamInterviewTurn(
           sessionId,
-          { turns, locale: getActiveLocale(), model: state.interviewModel },
+          {
+            turns,
+            locale: getActiveLocale(),
+            model: state.interviewModel,
+            reasoning_effort: state.interviewEffort,
+          },
           {
             signal: controller.signal,
             onReasoningPatch: (chunk) =>
@@ -1083,6 +1094,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
     confirmRubric,
     setAssistModel,
     setInterviewModel,
+    setInterviewEffort,
     assistToggleBinary,
     assistToggleCategory,
     assistSetFreetext,

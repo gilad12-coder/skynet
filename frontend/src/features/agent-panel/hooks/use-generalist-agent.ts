@@ -29,6 +29,9 @@ export interface GeneralistAgentState {
   /** LiteLLM id of the composer menu's chosen model; null runs the default. */
   model: string | null;
   setModel: (model: string | null) => void;
+  /** Reasoning-effort level for the chosen model; null runs its default. */
+  reasoningEffort: string | null;
+  setReasoningEffort: (effort: string | null) => void;
   send: (message: string, wizardStateOverride?: WizardState) => void;
   editAndResend: (messageIndex: number, content: string) => void;
   retry: () => void;
@@ -91,6 +94,12 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
   const setModel = React.useCallback((next: string | null) => {
     modelRef.current = next;
     setModelState(next);
+  }, []);
+  const [reasoningEffort, setReasoningEffortState] = React.useState<string | null>(null);
+  const effortRef = React.useRef<string | null>(null);
+  const setReasoningEffort = React.useCallback((next: string | null) => {
+    effortRef.current = next;
+    setReasoningEffortState(next);
   }, []);
 
   const abortRef = React.useRef<AbortController | null>(null);
@@ -251,6 +260,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           regenerate,
           locale: getActiveLocale(),
           model: modelRef.current ?? undefined,
+          reasoning_effort: effortRef.current ?? undefined,
         },
         {
           signal: controller.signal,
@@ -502,6 +512,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     conversationId,
     model,
     setModel,
+    reasoningEffort,
+    setReasoningEffort,
     send,
     editAndResend,
     retry,

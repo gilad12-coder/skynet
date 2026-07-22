@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -153,6 +153,13 @@ class CodeInterviewRequest(BaseModel):
         description=(
             "LiteLLM id of the catalog model conducting the interview (the "
             "composer's model menu); absent runs the server default."
+        ),
+    )
+    reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = Field(
+        default=None,
+        description=(
+            "Explicit reasoning-effort level for the chosen model; absent "
+            "keeps the model's default."
         ),
     )
 
@@ -322,6 +329,7 @@ def create_code_agent_router() -> APIRouter:
                     turns=[t.model_dump() for t in req.turns],
                     locale=req.locale,
                     model=req.model,
+                    reasoning_effort=req.reasoning_effort,
                 ):
                     yield event
             except Exception:

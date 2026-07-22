@@ -206,12 +206,14 @@ def test_turn_forwards_chosen_model(
             "wizard_state": {},
             "trust_mode": "ask",
             "model": "openai/gpt-test",
+            "reasoning_effort": "high",
         },
         headers={"Authorization": f"Bearer {_session_token()}"},
     )
     assert resp.status_code == 200
     assert seen["model_config"] is not None
     assert seen["model_config"].name == "openai/gpt-test"
+    assert seen["model_config"].extra == {"reasoning_effort": "high"}
 
 
 def test_turn_rejects_unknown_model(

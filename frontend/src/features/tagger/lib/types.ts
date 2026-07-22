@@ -116,6 +116,8 @@ export interface AssistState {
    * menu); absent runs the server default. Distinct from ``model``, which is
    * the model that tags rows. */
   interviewModel?: string;
+  /** Reasoning-effort level for ``interviewModel``; absent runs its default. */
+  interviewEffort?: string;
   /**
    * Only sessions saved before AI-first calibration carry this; it steers the
    * legacy human-first calibration phase, which new sessions never enter.

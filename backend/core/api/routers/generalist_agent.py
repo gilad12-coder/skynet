@@ -21,7 +21,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header
@@ -101,6 +101,13 @@ class GeneralistAgentRequest(BaseModel):
         description=(
             "LiteLLM id of the catalog model to run this turn on (the "
             "composer's model menu); absent runs the server default."
+        ),
+    )
+    reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = Field(
+        default=None,
+        description=(
+            "Explicit reasoning-effort level for the chosen model; absent "
+            "keeps the model's default."
         ),
     )
 
@@ -540,7 +547,16 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
             trust_mode=req.trust_mode,
             auth_header=authorization,
             locale=req.locale,
-            model_config=ModelConfig(name=req.model) if req.model else None,
+            model_config=(
+                ModelConfig(
+                    name=req.model,
+                    extra=(
+                        {"reasoning_effort": req.reasoning_effort} if req.reasoning_effort else {}
+                    ),
+                )
+                if req.model
+                else None
+            ),
         )
         wrapped = _wrap_with_persistence(
             source,

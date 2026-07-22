@@ -38,7 +38,11 @@ from pydantic import ValidationError
 from ...config import settings
 from ...exceptions import ServiceError
 from ...models import ModelConfig, WorkflowSpec
-from ..language_models import apply_model_reasoning_config, build_language_model
+from ..language_models import (
+    apply_model_reasoning_config,
+    apply_reasoning_effort,
+    build_language_model,
+)
 from ..react_compat import REACT_CLASS, react_uses_submit
 from ..safe_exec import validate_metric_code, validate_signature_code
 from .constants import REASONING_FIELD
@@ -1186,13 +1190,17 @@ class ReactReplyStream:
         return chunk.chunk or None
 
 
-def _build_agent_lm(model_name_override: str | None = None) -> dspy.LM:
+def _build_agent_lm(
+    model_name_override: str | None = None, reasoning_effort: str | None = None
+) -> dspy.LM:
     """Construct the LM used by the code agent from global settings.
 
     Args:
         model_name_override: Optional LiteLLM id chosen by the caller (the
             interview composer's model menu); ``None`` runs the configured
             code-agent model.
+        reasoning_effort: Explicit effort level for the chosen model; ``None``
+            keeps the model's default.
 
     Reasoning knobs we send, by provider:
 
@@ -1228,6 +1236,7 @@ def _build_agent_lm(model_name_override: str | None = None) -> dspy.LM:
         max_tokens=16000,
         extra=extra,
     )
+    config = apply_reasoning_effort(config, reasoning_effort)
     # A caller-chosen model can be anything in the catalog — run it through
     # the generic reasoning-model knobs (mandatory temperature/effort for
     # OpenAI reasoning models); the configured default keeps its hand-tuned

@@ -71,7 +71,8 @@ def test_interview_streams_events_and_forwards_args(monkeypatch) -> None:
         lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test")]),
     )
     resp = _client().post(
-        "/optimizations/code-interview", json={**_INTERVIEW_BODY, "model": "openai/gpt-test"}
+        "/optimizations/code-interview",
+        json={**_INTERVIEW_BODY, "model": "openai/gpt-test", "reasoning_effort": "high"},
     )
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
@@ -85,6 +86,7 @@ def test_interview_streams_events_and_forwards_args(monkeypatch) -> None:
     assert seen["turns"] == _INTERVIEW_BODY["turns"]
     assert len(seen["sample_rows"]) == 5
     assert seen["model"] == "openai/gpt-test"
+    assert seen["reasoning_effort"] == "high"
 
 
 def test_interview_rejects_unknown_model(monkeypatch) -> None:

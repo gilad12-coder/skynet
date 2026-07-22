@@ -782,7 +782,14 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
                 placeholder={msg("auto.features.agent.panel.components.generalistpanel.literal.5")}
                 streaming={streaming}
                 disabled={codeAuthoringActive}
-                modelMenu={<ComposerModelMenu value={agent.model} onChange={agent.setModel} />}
+                modelMenu={
+              <ComposerModelMenu
+                value={agent.model}
+                onChange={agent.setModel}
+                effort={agent.reasoningEffort}
+                onEffortChange={agent.setReasoningEffort}
+              />
+            }
                 sendAriaLabel={msg(
                   "auto.features.agent.panel.components.generalistpanel.literal.6",
                 )}

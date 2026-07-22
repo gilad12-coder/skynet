@@ -84,6 +84,8 @@ interface Props {
   onSetModel: (config: ModelConfig) => void;
   /** Persist the interviewer's model (the composer's model menu). */
   onSetInterviewModel: (model: string | null) => void;
+  /** Persist the interviewer's reasoning-effort level. */
+  onSetInterviewEffort: (effort: string | null) => void;
   onSend: (content: string) => void;
   onEditResend: (index: number, content: string) => void;
   onStop: () => void;
@@ -115,6 +117,7 @@ export function TaggerInterview({
   onFetchEstimate,
   onSetModel,
   onSetInterviewModel,
+  onSetInterviewEffort,
   onSend,
   onEditResend,
   onStop,
@@ -238,6 +241,8 @@ export function TaggerInterview({
               <ComposerModelMenu
                 value={assist.interviewModel ?? null}
                 onChange={onSetInterviewModel}
+                effort={assist.interviewEffort ?? null}
+                onEffortChange={onSetInterviewEffort}
               />
             }
           />

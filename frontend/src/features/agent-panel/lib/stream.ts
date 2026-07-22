@@ -26,6 +26,8 @@ export interface GeneralistAgentRequest {
   locale?: string;
   /** LiteLLM id of the catalog model to run the turn on; absent = default. */
   model?: string;
+  /** Reasoning-effort level for the chosen model; absent = its default. */
+  reasoning_effort?: string;
 }
 
 export interface ConversationMetaPayload {

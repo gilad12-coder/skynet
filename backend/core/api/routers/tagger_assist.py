@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
@@ -69,6 +69,13 @@ class InterviewRequest(BaseModel):
         description=(
             "LiteLLM id of the catalog model conducting the interview (the "
             "composer's model menu); absent runs the server default."
+        ),
+    )
+    reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = Field(
+        default=None,
+        description=(
+            "Explicit reasoning-effort level for the chosen model; absent "
+            "keeps the model's default."
         ),
     )
 
@@ -260,7 +267,15 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             data = cast("list[dict[str, Any]]", row.data)
         require_known_model(req.model)
         try:
-            turn = tagging.interview_turn(config, columns, data, req.turns, req.locale, model=req.model)
+            turn = tagging.interview_turn(
+                config,
+                columns,
+                data,
+                req.turns,
+                req.locale,
+                model=req.model,
+                reasoning_effort=req.reasoning_effort,
+            )
         except Exception as exc:
             logger.exception("interview turn failed for session %s", session_id)
             raise DomainError("tagger.assist.llm_failed", status=502) from exc
@@ -301,7 +316,13 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             """Relay engine events, translating failures into an error event."""
             try:
                 async for event in tagging.interview_turn_stream(
-                    config, columns, data, req.turns, req.locale, model=req.model
+                    config,
+                    columns,
+                    data,
+                    req.turns,
+                    req.locale,
+                    model=req.model,
+                    reasoning_effort=req.reasoning_effort,
                 ):
                     yield event
             except Exception:

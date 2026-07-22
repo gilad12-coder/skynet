@@ -217,6 +217,7 @@ async def interview_turn_stream(
     turns: list[dict[str, str]],
     locale: str | None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> Any:
     """Run one interview turn, streaming it the way the generalist agent does.
 
@@ -243,10 +244,12 @@ async def interview_turn_stream(
         turns: Prior ``{role, content}`` turns, oldest first.
         locale: UI locale code; replies are written in that language.
         model: LiteLLM id conducting the interview; ``None`` runs the default.
+        reasoning_effort: Explicit effort level for ``model``; ``None`` keeps
+            the model's default.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
     predict = dspy.Predict(CodeInterviewTurnSig)
-    lm = _build_agent_lm(model)
+    lm = _build_agent_lm(model, reasoning_effort)
     inputs = _interview_inputs(
         dataset_columns, column_roles, column_kinds, sample_rows, job_model, turns, locale
     )

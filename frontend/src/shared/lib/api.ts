@@ -2099,6 +2099,8 @@ export interface CodeInterviewRequest {
   /** LiteLLM id of the catalog model conducting the interview; absent runs
    *  the server default. */
   model?: string;
+  /** Reasoning-effort level for the chosen model; absent runs its default. */
+  reasoning_effort?: string;
 }
 
 /**

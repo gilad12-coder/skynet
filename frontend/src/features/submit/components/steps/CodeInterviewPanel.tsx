@@ -112,7 +112,12 @@ export function CodeInterviewPanel({ interview, className }: Props) {
             streaming={interview.busy}
             placeholder={msg("submit.code.interview.placeholder")}
             modelMenu={
-              <ComposerModelMenu value={interview.model} onChange={interview.setModel} />
+              <ComposerModelMenu
+              value={interview.model}
+              onChange={interview.setModel}
+              effort={interview.reasoningEffort}
+              onEffortChange={interview.setReasoningEffort}
+            />
             }
           />
 

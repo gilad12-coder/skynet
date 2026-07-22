@@ -31,6 +31,7 @@ from .agents.constants import REASONING_FIELD
 from .agents.parse_salvage import salvage_prediction, strip_adapter_debris
 from .language_models import (
     apply_model_reasoning_config,
+    apply_reasoning_effort,
     build_language_model,
     usage_by_model_from_history,
 )
@@ -89,7 +90,11 @@ def _sanitize_model_params(params: Any) -> dict[str, Any]:
     return out
 
 
-def _build_assist_lm(model_name: str | None = None, params: dict[str, Any] | None = None) -> dspy.LM:
+def _build_assist_lm(
+    model_name: str | None = None,
+    params: dict[str, Any] | None = None,
+    reasoning_effort: str | None = None,
+) -> dspy.LM:
     """Build the assist LM from settings, mirroring the generalist agent.
 
     Args:
@@ -97,6 +102,8 @@ def _build_assist_lm(model_name: str | None = None, params: dict[str, Any] | Non
             tagging-assist model (then the generalist agent's) when empty.
         params: Sampling parameters saved alongside the chosen model
             (``assist.modelParams``); sanitized before use.
+        reasoning_effort: Explicit ``reasoning_effort`` level chosen in the
+            composer's model menu; ``None`` keeps the model's default.
 
     Returns:
         A cache-disabled ``dspy.LM`` on the requested model.
@@ -106,6 +113,7 @@ def _build_assist_lm(model_name: str | None = None, params: dict[str, Any] | Non
         base_url=settings.tagger_assist_base_url or settings.generalist_agent_base_url or None,
         **_sanitize_model_params(params),
     )
+    config = apply_reasoning_effort(config, reasoning_effort)
     return build_language_model(apply_model_reasoning_config(config), disable_cache=True)
 
 
@@ -730,6 +738,7 @@ def interview_turn(
     turns: list[dict[str, str]],
     locale: str | None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     """Run one interview turn and return the assistant's reply (non-streaming).
 
@@ -740,13 +749,15 @@ def interview_turn(
         turns: Prior ``{role, content}`` turns, oldest first.
         locale: UI locale code; replies are written in that language.
         model: LiteLLM id conducting the interview; ``None`` runs the default.
+        reasoning_effort: Explicit effort level for ``model``; ``None`` keeps
+            the model's default.
 
     Returns:
         ``{"message", "options", "rubric", "done"}`` — ``rubric`` is empty
         until ``done`` is true.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
-    lm = _build_assist_lm(model)
+    lm = _build_assist_lm(model, reasoning_effort=reasoning_effort)
     with dspy.context(lm=lm):
         pred = dspy.Predict(InterviewTurnSig)(**_interview_inputs(config, columns, data, turns, locale))
     turn = _parse_interview_prediction(pred, asked, config)
@@ -762,6 +773,7 @@ async def interview_turn_stream(
     turns: list[dict[str, str]],
     locale: str | None,
     model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> Any:
     """Run one interview turn, streaming it the way the generalist agent does.
 
@@ -791,10 +803,12 @@ async def interview_turn_stream(
         turns: Prior ``{role, content}`` turns, oldest first.
         locale: UI locale code; replies are written in that language.
         model: LiteLLM id conducting the interview; ``None`` runs the default.
+        reasoning_effort: Explicit effort level for ``model``; ``None`` keeps
+            the model's default.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
     predict = dspy.Predict(InterviewTurnSig)
-    lm = _build_assist_lm(model)
+    lm = _build_assist_lm(model, reasoning_effort=reasoning_effort)
     inputs = _interview_inputs(config, columns, data, turns, locale)
     turn: dict[str, Any] = {}
     for attempt in range(INTERVIEW_TURN_ATTEMPTS):

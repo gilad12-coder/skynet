@@ -3,6 +3,11 @@
 export type MessageKey =
   | "agent.model_menu.auto"
   | "agent.model_menu.auto_hint"
+  | "agent.model_menu.effort_default"
+  | "agent.model_menu.effort_high"
+  | "agent.model_menu.effort_label"
+  | "agent.model_menu.effort_low"
+  | "agent.model_menu.effort_medium"
   | "agent.model_menu.empty"
   | "agent.model_menu.label"
   | "agent.model_menu.search"
@@ -2868,6 +2873,11 @@ export type MessageKey =
 export const UI_MESSAGES: Record<MessageKey, string> = {
   "agent.model_menu.auto": "אוטומטי",
   "agent.model_menu.auto_hint": "מודל ברירת המחדל המומלץ",
+  "agent.model_menu.effort_default": "ברירת מחדל",
+  "agent.model_menu.effort_high": "גבוהה",
+  "agent.model_menu.effort_label": "רמת חשיבה",
+  "agent.model_menu.effort_low": "נמוכה",
+  "agent.model_menu.effort_medium": "בינונית",
   "agent.model_menu.empty": "אין מודלים תואמים",
   "agent.model_menu.label": "בחירת מודל",
   "agent.model_menu.search": "חיפוש מודלים...",
@@ -11306,6 +11316,11 @@ const ui_de_AT: Partial<Record<MessageKey, string>> = {
 const ui_en: Partial<Record<MessageKey, string>> = {
   "agent.model_menu.auto": "Auto",
   "agent.model_menu.auto_hint": "The recommended default model",
+  "agent.model_menu.effort_default": "Default",
+  "agent.model_menu.effort_high": "High",
+  "agent.model_menu.effort_label": "Thinking level",
+  "agent.model_menu.effort_low": "Low",
+  "agent.model_menu.effort_medium": "Medium",
   "agent.model_menu.empty": "No models match",
   "agent.model_menu.label": "Choose a model",
   "agent.model_menu.search": "Search models...",
