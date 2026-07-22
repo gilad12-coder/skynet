@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
+from ...models import ModelConfig
 from ...service_gateway.agents.generalist import (
     TrustMode,
     WizardState,
@@ -39,6 +40,7 @@ from ...service_gateway.embedding_pipeline import queue_conversation_embed
 from ...storage.models import AgentConversationModel, AgentMessageModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
+from ..model_catalog import require_known_model
 from ._helpers import sse_from_events
 
 logger = logging.getLogger(__name__)
@@ -92,6 +94,13 @@ class GeneralistAgentRequest(BaseModel):
             "UI locale code of the client (e.g. 'he', 'en', 'fr-CA'). Sets "
             "the language of the agent's replies; unknown or missing falls "
             "back to Hebrew."
+        ),
+    )
+    model: str | None = Field(
+        default=None,
+        description=(
+            "LiteLLM id of the catalog model to run this turn on (the "
+            "composer's model menu); absent runs the server default."
         ),
     )
 
@@ -523,6 +532,7 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
         conversation_id, title = await asyncio.to_thread(_setup_turn)
 
         wizard_state: WizardState = {**req.wizard_state}  # type: ignore[typeddict-item]
+        require_known_model(req.model)
         source = run_generalist_agent(
             wizard_state=wizard_state,
             chat_history=[t.model_dump() for t in req.chat_history],
@@ -530,6 +540,7 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
             trust_mode=req.trust_mode,
             auth_header=authorization,
             locale=req.locale,
+            model_config=ModelConfig(name=req.model) if req.model else None,
         )
         wrapped = _wrap_with_persistence(
             source,

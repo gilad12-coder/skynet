@@ -729,6 +729,7 @@ def interview_turn(
     data: list[dict[str, Any]],
     turns: list[dict[str, str]],
     locale: str | None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Run one interview turn and return the assistant's reply (non-streaming).
 
@@ -738,16 +739,20 @@ def interview_turn(
         data: The full row payload (sampled for the summary).
         turns: Prior ``{role, content}`` turns, oldest first.
         locale: UI locale code; replies are written in that language.
+        model: LiteLLM id conducting the interview; ``None`` runs the default.
 
     Returns:
         ``{"message", "options", "rubric", "done"}`` — ``rubric`` is empty
         until ``done`` is true.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
-    lm = _build_assist_lm()
+    lm = _build_assist_lm(model)
     with dspy.context(lm=lm):
         pred = dspy.Predict(InterviewTurnSig)(**_interview_inputs(config, columns, data, turns, locale))
-    return _parse_interview_prediction(pred, asked, config)
+    turn = _parse_interview_prediction(pred, asked, config)
+    if model:
+        turn["model"] = model
+    return turn
 
 
 async def interview_turn_stream(
@@ -756,6 +761,7 @@ async def interview_turn_stream(
     data: list[dict[str, Any]],
     turns: list[dict[str, str]],
     locale: str | None,
+    model: str | None = None,
 ) -> Any:
     """Run one interview turn, streaming it the way the generalist agent does.
 
@@ -784,10 +790,11 @@ async def interview_turn_stream(
         data: The full row payload (sampled for the summary).
         turns: Prior ``{role, content}`` turns, oldest first.
         locale: UI locale code; replies are written in that language.
+        model: LiteLLM id conducting the interview; ``None`` runs the default.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
     predict = dspy.Predict(InterviewTurnSig)
-    lm = _build_assist_lm()
+    lm = _build_assist_lm(model)
     inputs = _interview_inputs(config, columns, data, turns, locale)
     turn: dict[str, Any] = {}
     for attempt in range(INTERVIEW_TURN_ATTEMPTS):
@@ -841,6 +848,8 @@ async def interview_turn_stream(
             logger.warning("tagger interview finished without a rubric; retrying")
             continue
         break
+    if model and turn:
+        turn["model"] = model
     yield {"event": "interview_done", "data": turn}
 
 

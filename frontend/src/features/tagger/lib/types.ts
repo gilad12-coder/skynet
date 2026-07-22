@@ -112,6 +112,10 @@ export interface AssistState {
    * tagging LM the same way optimizations do.
    */
   modelParams?: Omit<ModelConfig, "name">;
+  /** LiteLLM id of the model conducting the interview (the composer's model
+   * menu); absent runs the server default. Distinct from ``model``, which is
+   * the model that tags rows. */
+  interviewModel?: string;
   /**
    * Only sessions saved before AI-first calibration carry this; it steers the
    * legacy human-first calibration phase, which new sessions never enter.

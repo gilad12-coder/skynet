@@ -2096,6 +2096,9 @@ export interface CodeInterviewRequest {
   // the user hasn't reached the model step yet.
   job_model?: string;
   locale?: string;
+  /** LiteLLM id of the catalog model conducting the interview; absent runs
+   *  the server default. */
+  model?: string;
 }
 
 /**

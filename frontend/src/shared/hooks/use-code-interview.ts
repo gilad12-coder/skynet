@@ -26,6 +26,9 @@ export interface CodeInterviewState {
   /** What's still generating after the reply: answer choices, or — on the
    *  final turn — the authoring brief. */
   pending: "options" | "brief" | null;
+  /** LiteLLM id of the composer menu's chosen model; null runs the default. */
+  model: string | null;
+  setModel: (model: string | null) => void;
   error: boolean;
   /** The model finished asking; the brief card is showing. */
   done: boolean;
@@ -74,6 +77,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
   const [thinking, setThinking] = React.useState<AgentThinking | null>(null);
   const [options, setOptions] = React.useState<InterviewOption[]>([]);
   const [pending, setPending] = React.useState<"options" | "brief" | null>(null);
+  const [model, setModel] = React.useState<string | null>(null);
   const [error, setError] = React.useState(false);
   const [done, setDone] = React.useState(false);
   const [brief, setBrief] = React.useState<string[]>([]);
@@ -112,6 +116,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
           turns: next.map((t) => ({ role: t.role, content: t.content })),
           job_model: jobModel,
           locale: getActiveLocale(),
+          model: model ?? undefined,
         },
         {
           signal: controller.signal,
@@ -165,7 +170,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
         if (abortRef.current === controller) abortRef.current = null;
       });
     },
-    [parsedDataset, busy, columnRoles, columnKinds, jobModel],
+    [parsedDataset, busy, columnRoles, columnKinds, jobModel, model],
   );
 
   // Fire the opening question exactly once per eligible interview.
@@ -233,6 +238,8 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
     thinking,
     options,
     pending,
+    model,
+    setModel,
     error,
     done,
     brief,

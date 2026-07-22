@@ -26,6 +26,7 @@ import {
   AgentThread,
   ChatTranscript,
   Composer,
+  ComposerModelMenu,
   QuestionChoices,
   QuestionChoicesSkeleton,
 } from "@/shared/ui/agent";
@@ -81,6 +82,8 @@ interface Props {
   onFetchEstimate: () => void;
   /** Persist the picked tagging model config on the session's assist state. */
   onSetModel: (config: ModelConfig) => void;
+  /** Persist the interviewer's model (the composer's model menu). */
+  onSetInterviewModel: (model: string | null) => void;
   onSend: (content: string) => void;
   onEditResend: (index: number, content: string) => void;
   onStop: () => void;
@@ -111,6 +114,7 @@ export function TaggerInterview({
   estimate,
   onFetchEstimate,
   onSetModel,
+  onSetInterviewModel,
   onSend,
   onEditResend,
   onStop,
@@ -230,6 +234,12 @@ export function TaggerInterview({
             disabled={!busy && messages.length === 0}
             streaming={busy}
             placeholder={msg("tagger.assist.interview.placeholder")}
+            modelMenu={
+              <ComposerModelMenu
+                value={assist.interviewModel ?? null}
+                onChange={onSetInterviewModel}
+              />
+            }
           />
 
           {canSkip && (

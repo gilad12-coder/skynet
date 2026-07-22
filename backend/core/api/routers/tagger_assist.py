@@ -42,7 +42,7 @@ from ...storage.models import TaggingSessionModel
 from ...worker.tagging_job import TaggingAutotagPayload, untagged_rows
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
-from ..model_catalog import get_catalog_cached
+from ..model_catalog import get_catalog_cached, require_known_model
 from ._helpers import sse_from_events
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,13 @@ class InterviewRequest(BaseModel):
     locale: str | None = Field(
         default=None,
         description="UI locale code; the assistant replies in that language.",
+    )
+    model: str | None = Field(
+        default=None,
+        description=(
+            "LiteLLM id of the catalog model conducting the interview (the "
+            "composer's model menu); absent runs the server default."
+        ),
     )
 
 
@@ -251,8 +258,9 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             config = _interview_config(row)
             columns = cast("list[str]", row.columns)
             data = cast("list[dict[str, Any]]", row.data)
+        require_known_model(req.model)
         try:
-            turn = tagging.interview_turn(config, columns, data, req.turns, req.locale)
+            turn = tagging.interview_turn(config, columns, data, req.turns, req.locale, model=req.model)
         except Exception as exc:
             logger.exception("interview turn failed for session %s", session_id)
             raise DomainError("tagger.assist.llm_failed", status=502) from exc
@@ -287,11 +295,14 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             config = _interview_config(row)
             columns = cast("list[str]", row.columns)
             data = cast("list[dict[str, Any]]", row.data)
+        require_known_model(req.model)
 
         async def source() -> Any:
             """Relay engine events, translating failures into an error event."""
             try:
-                async for event in tagging.interview_turn_stream(config, columns, data, req.turns, req.locale):
+                async for event in tagging.interview_turn_stream(
+                    config, columns, data, req.turns, req.locale, model=req.model
+                ):
                     yield event
             except Exception:
                 logger.exception("interview stream failed for session %s", session_id)

@@ -24,6 +24,8 @@ export interface GeneralistAgentRequest {
   conversation_id?: string | null;
   regenerate?: boolean;
   locale?: string;
+  /** LiteLLM id of the catalog model to run the turn on; absent = default. */
+  model?: string;
 }
 
 export interface ConversationMetaPayload {

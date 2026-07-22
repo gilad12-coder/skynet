@@ -8,6 +8,7 @@ import {
   AgentThread,
   ChatTranscript,
   Composer,
+  ComposerModelMenu,
   QuestionChoices,
   QuestionChoicesSkeleton,
 } from "@/shared/ui/agent";
@@ -110,6 +111,9 @@ export function CodeInterviewPanel({ interview, className }: Props) {
             disabled={!interview.busy && interview.messages.length === 0}
             streaming={interview.busy}
             placeholder={msg("submit.code.interview.placeholder")}
+            modelMenu={
+              <ComposerModelMenu value={interview.model} onChange={interview.setModel} />
+            }
           />
 
           <div className="flex justify-center border-t border-border/40 py-1.5 shrink-0">

@@ -357,6 +357,14 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
     if (assistRef.current) assistRef.current = { ...assistRef.current, ...patch };
   }, []);
 
+  // The interviewer's model (the composer menu) — same flush semantics as
+  // ``setAssistModel`` so the very next turn already runs on the new choice.
+  const setInterviewModel = useCallback((model: string | null) => {
+    const patch = { interviewModel: model ?? undefined };
+    setAssist((prev) => (prev ? { ...prev, ...patch } : prev));
+    if (assistRef.current) assistRef.current = { ...assistRef.current, ...patch };
+  }, []);
+
   // ---------------------------------------------------------------- frames
   // In calibration/review the annotator surface works on a subset of rows (the
   // calibration set or the open round); everywhere else it sees the full
@@ -594,7 +602,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
       try {
         await streamInterviewTurn(
           sessionId,
-          { turns, locale: getActiveLocale() },
+          { turns, locale: getActiveLocale(), model: state.interviewModel },
           {
             signal: controller.signal,
             onReasoningPatch: (chunk) =>
@@ -1074,6 +1082,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
     skipInterview,
     confirmRubric,
     setAssistModel,
+    setInterviewModel,
     assistToggleBinary,
     assistToggleCategory,
     assistSetFreetext,

@@ -26,6 +26,9 @@ export interface GeneralistAgentState {
   error: string | null;
   pendingApproval: PendingApprovalPayload | null;
   conversationId: string | null;
+  /** LiteLLM id of the composer menu's chosen model; null runs the default. */
+  model: string | null;
+  setModel: (model: string | null) => void;
   send: (message: string, wizardStateOverride?: WizardState) => void;
   editAndResend: (messageIndex: number, content: string) => void;
   retry: () => void;
@@ -81,6 +84,14 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
   const [error, setError] = React.useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = React.useState<PendingApprovalPayload | null>(null);
   const [conversationId, setConversationId] = React.useState<string | null>(null);
+  const [model, setModelState] = React.useState<string | null>(null);
+  // Mirrored in a ref so the streaming closures (retry, regenerate) always
+  // send the current choice without re-memoizing runAgent.
+  const modelRef = React.useRef<string | null>(null);
+  const setModel = React.useCallback((next: string | null) => {
+    modelRef.current = next;
+    setModelState(next);
+  }, []);
 
   const abortRef = React.useRef<AbortController | null>(null);
   const reasoningBufRef = React.useRef("");
@@ -239,6 +250,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           conversation_id: conversationIdRef.current,
           regenerate,
           locale: getActiveLocale(),
+          model: modelRef.current ?? undefined,
         },
         {
           signal: controller.signal,
@@ -488,6 +500,8 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
     error,
     pendingApproval,
     conversationId,
+    model,
+    setModel,
     send,
     editAndResend,
     retry,

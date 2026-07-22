@@ -216,6 +216,7 @@ async def interview_turn_stream(
     job_model: str,
     turns: list[dict[str, str]],
     locale: str | None,
+    model: str | None = None,
 ) -> Any:
     """Run one interview turn, streaming it the way the generalist agent does.
 
@@ -241,10 +242,11 @@ async def interview_turn_stream(
         job_model: The job's target model id; empty when not chosen yet.
         turns: Prior ``{role, content}`` turns, oldest first.
         locale: UI locale code; replies are written in that language.
+        model: LiteLLM id conducting the interview; ``None`` runs the default.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
     predict = dspy.Predict(CodeInterviewTurnSig)
-    lm = _build_agent_lm()
+    lm = _build_agent_lm(model)
     inputs = _interview_inputs(
         dataset_columns, column_roles, column_kinds, sample_rows, job_model, turns, locale
     )
@@ -290,4 +292,7 @@ async def interview_turn_stream(
             if attempt + 1 >= INTERVIEW_TURN_ATTEMPTS:
                 raise
             logger.warning("code interview turn failed; retrying", exc_info=True)
-    yield {"event": "interview_done", "data": _parse_interview_prediction(prediction, asked)}
+    turn = _parse_interview_prediction(prediction, asked)
+    if model:
+        turn["model"] = model
+    yield {"event": "interview_done", "data": turn}
