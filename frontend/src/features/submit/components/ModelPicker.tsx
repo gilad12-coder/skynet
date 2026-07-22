@@ -243,7 +243,10 @@ export function ModelPicker({
     // toward the container's scrollable overflow, so opening it grew a
     // scrollbar on the whole panel. Radix also brings dismissal, Escape
     // layering under a parent dialog, and edge-collision flipping.
-    <Popover open={open} onOpenChange={setOpen}>
+    // ``modal``: the parent dialog's scroll lock blocks wheel events on
+    // everything outside its subtree — including this portaled content — so
+    // the popover must own a scroll-lock layer that whitelists its list.
+    <Popover open={open} onOpenChange={setOpen} modal>
       <PopoverTrigger asChild>
         <button
           type="button"
