@@ -204,20 +204,20 @@ def test_bulk_delete_reports_per_id_outcomes() -> None:
 
 
 def test_other_user_cannot_access_session() -> None:
-    """Bob gets 403 on Alice's session for read, update, patch and delete."""
+    """Bob gets 404 on Alice's session — no access never leaks existence."""
     alice_client, store = _client(_ALICE)
     sid = _create(alice_client)
     bob_client, _ = _client(_BOB, store=store)
 
-    assert bob_client.get(f"/tagging-sessions/{sid}").status_code == 403
+    assert bob_client.get(f"/tagging-sessions/{sid}").status_code == 404
     assert (
         bob_client.put(
             f"/tagging-sessions/{sid}", json={"annotations": {}, "current_index": 0}
         ).status_code
-        == 403
+        == 404
     )
-    assert bob_client.patch(f"/tagging-sessions/{sid}", json={"pinned": True}).status_code == 403
-    assert bob_client.delete(f"/tagging-sessions/{sid}").status_code == 403
+    assert bob_client.patch(f"/tagging-sessions/{sid}", json={"pinned": True}).status_code == 404
+    assert bob_client.delete(f"/tagging-sessions/{sid}").status_code == 404
     # Bob's own list never sees Alice's session.
     assert bob_client.get("/tagging-sessions").json() == {"items": [], "total": 0}
 

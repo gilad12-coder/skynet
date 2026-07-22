@@ -14,8 +14,9 @@ rerun after cancel, crash or orphan recovery a plain resume. The status
 route reconciles the session-row mirror against the job row, so a job that
 died between mirror writes still reports honestly.
 
-Ownership is enforced on every route by comparing the authenticated principal
-to the row's ``username``. Hidden from the public Scalar reference.
+Access is resolved through :mod:`core.api.tagging_session_access`: mutating
+assist routes need ``editor`` on the session, read-only ones (estimate, autotag
+status) need ``viewer``. Hidden from the public Scalar reference.
 """
 
 from __future__ import annotations
@@ -43,6 +44,8 @@ from ...worker.tagging_job import TaggingAutotagPayload, untagged_rows
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import get_catalog_cached, require_known_model
+from ..sharing_access import ShareRole
+from ..tagging_session_access import require_role
 from ._helpers import sse_from_events
 
 logger = logging.getLogger(__name__)
@@ -139,25 +142,32 @@ class AutotagStatusResponse(BaseModel):
     )
 
 
-def _load_owned(session: Session, session_id: str, username: str) -> TaggingSessionModel:
-    """Load a session row and enforce ownership.
+def _load_for_role(
+    session: Session,
+    session_id: str,
+    user: AuthenticatedUser,
+    minimum: ShareRole = ShareRole.editor,
+) -> TaggingSessionModel:
+    """Load a session row and enforce a minimum effective role on it.
 
     Args:
         session: An open SQLAlchemy session.
         session_id: UUID of the tagger session.
-        username: The authenticated caller.
+        user: The authenticated caller.
+        minimum: Lowest tier the route requires (mutating assist routes need
+            ``editor``; read-only ones pass ``viewer``).
 
     Returns:
         The loaded row.
 
     Raises:
-        DomainError: 404 when unknown, 403 when the caller does not own it.
+        DomainError: 404 when unknown or inaccessible, 403 when the caller's
+            tier is below ``minimum``.
     """
     row = session.get(TaggingSessionModel, session_id)
     if row is None:
         raise DomainError("tagger.session.not_found", status=404)
-    if row.username != username:
-        raise DomainError("tagger.session.forbidden", status=403)
+    require_role(session, session_id, user, minimum)
     return row
 
 
@@ -261,7 +271,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             The assistant turn; ``rubric`` is populated once ``done`` is true.
         """
         with Session(job_store.engine) as db:
-            row = _load_owned(db, session_id, user.username)
+            row = _load_for_role(db, session_id, user)
             config = _interview_config(row)
             columns = cast("list[str]", row.columns)
             data = cast("list[dict[str, Any]]", row.data)
@@ -306,7 +316,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             A ``text/event-stream`` response.
         """
         with Session(job_store.engine) as db:
-            row = _load_owned(db, session_id, user.username)
+            row = _load_for_role(db, session_id, user)
             config = _interview_config(row)
             columns = cast("list[str]", row.columns)
             data = cast("list[dict[str, Any]]", row.data)
@@ -361,7 +371,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             cost of the calls made.
         """
         with Session(job_store.engine) as db:
-            row = _load_owned(db, session_id, user.username)
+            row = _load_for_role(db, session_id, user)
             config = _effective_config(row)
             data = cast("list[dict[str, Any]]", row.data)
             annotations = cast("dict[str, Any]", row.annotations)
@@ -391,13 +401,13 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
 
         Args:
             session_id: UUID of the tagger session.
-            user: Authenticated caller; must own the session.
+            user: Authenticated caller; needs at least ``viewer`` access.
 
         Returns:
             Row count, model id and a low/high credit range.
         """
         with Session(job_store.engine) as db:
-            row = _load_owned(db, session_id, user.username)
+            row = _load_for_role(db, session_id, user, ShareRole.viewer)
             config = _effective_config(row)
             data = cast("list[dict[str, Any]]", row.data)
             annotations = cast("dict[str, Any]", row.annotations)
@@ -442,7 +452,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             raise DomainError("tagger.assist.worker_unavailable", status=503)
         job_id = str(uuid4())
         with Session(job_store.engine) as db:
-            row = _load_owned(db, session_id, user.username)
+            row = _load_for_role(db, session_id, user)
             data = cast("list[dict[str, Any]]", row.data)
             annotations = cast("dict[str, Any]", row.annotations)
             pending = untagged_rows(data, annotations)
@@ -506,7 +516,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             Status, done/total counters, credits spent, and ``live``.
         """
         with Session(job_store.engine) as db:
-            row = _load_owned(db, session_id, user.username)
+            row = _load_for_role(db, session_id, user, ShareRole.viewer)
             state = cast("dict[str, Any]", row.assist) or {}
         autotag = state.get("autotag") or {}
         status = str(autotag.get("status", "done"))
@@ -548,7 +558,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             ``{"cancelled": bool}`` — false when no active job was found.
         """
         with Session(job_store.engine) as db:
-            row = _load_owned(db, session_id, user.username)
+            row = _load_for_role(db, session_id, user)
             state = cast("dict[str, Any]", row.assist) or {}
         job_id = str((state.get("autotag") or {}).get("job_id") or "")
         if not job_id:

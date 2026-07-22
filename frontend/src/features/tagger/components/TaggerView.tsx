@@ -75,6 +75,25 @@ export function TaggerView({ initialSession }: { initialSession?: TaggerSessionD
 
   if (!tagger.config) return null;
 
+  // Shared-in viewers browse read-only: every annotation surface autosaves and
+  // mutates assist state, which the backend rejects below editor, so none of
+  // them is ever mounted for a viewer — just the results table.
+  if (initialSession?.role === "viewer") {
+    return (
+      <>
+        {backBar}
+        <TaggerResultsTable
+          config={tagger.config}
+          data={tagger.data}
+          columns={tagger.columns}
+          annotations={tagger.annotations}
+          assist={tagger.assist}
+          onOpenRow={() => undefined}
+        />
+      </>
+    );
+  }
+
   if (tagger.phase === "interview" && tagger.assist) {
     return (
       <>

@@ -48,10 +48,13 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
       const res = await listTaggerSessions({ limit: 200 });
       const items = res.items.filter((session) => session.phase !== "complete");
       setSessions(items);
-      // Drop selections that no longer resolve to a listed session (deleted
-      // elsewhere or completed since), so the bar never counts ghosts.
+      // Drop selections that no longer resolve to a listed owned session
+      // (deleted elsewhere, completed since, or shared-in and therefore not
+      // bulk-deletable), so the bar never counts ghosts.
       setSelectedIds((prev) => {
-        const next = new Set([...prev].filter((id) => items.some((s) => s.id === id)));
+        const next = new Set(
+          [...prev].filter((id) => items.some((s) => s.id === id && s.role === "owner")),
+        );
         return next.size === prev.size ? prev : next;
       });
       setLoadFailed(false);
@@ -96,7 +99,8 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
 
   // Same mechanism as the storage cleanup drawer: plain click toggles one row,
   // shift-click applies the clicked row's new state to the whole visible range
-  // between it and the previous toggle.
+  // between it and the previous toggle. Shared-in rows inside a range are
+  // skipped — only owned sessions can be bulk-deleted.
   const toggleSelected = React.useCallback(
     (id: string, shiftKey: boolean) => {
       const visible = filteredSessions;
@@ -109,7 +113,7 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
           const [lo, hi] = anchor < index ? [anchor, index] : [index, anchor];
           for (let i = lo; i <= hi; i++) {
             const row = visible[i];
-            if (!row) continue;
+            if (!row || row.role !== "owner") continue;
             if (willSelect) next.add(row.id);
             else next.delete(row.id);
           }

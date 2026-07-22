@@ -1118,6 +1118,8 @@ export interface TaggerSessionSummary {
   mode?: string | null;
   /** Display name of the dataset the session was created from. */
   source_name?: string | null;
+  /** Caller's tier on the session — "owner" for their own, else the grant. */
+  role: ShareRole;
 }
 
 /** Full tagger session — everything needed to rehydrate the annotator. */
@@ -1575,6 +1577,80 @@ export async function bulkDeleteTaggerSessions(ids: string[]): Promise<BulkDelet
     method: "POST",
     body: JSON.stringify({ ids }),
   });
+  invalidateCache("/tagging-sessions");
+  return res;
+}
+
+/** Sharing config for one saved labeling session — same wire shape as datasets. */
+export type TaggerSessionSharingState = DatasetSharingState;
+
+/** Fetch the current sharing config (general access + members) for a session. */
+export function getTaggerSessionSharing(sessionId: string) {
+  return request<TaggerSessionSharingState>(`/tagging-sessions/${sessionId}/sharing`);
+}
+
+/** Set the session link policy (general access + optional anyone-link role). */
+export function putTaggerSessionSharing(
+  sessionId: string,
+  body: { general_access: GeneralAccess; general_role?: LinkRole },
+) {
+  return request<TaggerSessionSharingState>(`/tagging-sessions/${sessionId}/sharing`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Invite a user to a labeling session (add or replace a member grant). */
+export function addTaggerSessionShareMember(
+  sessionId: string,
+  body: { username: string; role: MemberRole },
+) {
+  return request<TaggerSessionSharingState>(`/tagging-sessions/${sessionId}/sharing/members`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Change an existing session member's tier role. */
+export function updateTaggerSessionShareMember(
+  sessionId: string,
+  username: string,
+  body: { role: MemberRole },
+) {
+  return request<TaggerSessionSharingState>(
+    `/tagging-sessions/${sessionId}/sharing/members/${encodeURIComponent(username)}`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  );
+}
+
+/** Remove a member's grant from a labeling session. */
+export function removeTaggerSessionShareMember(sessionId: string, username: string) {
+  return request<TaggerSessionSharingState>(
+    `/tagging-sessions/${sessionId}/sharing/members/${encodeURIComponent(username)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** Transfer session ownership to an existing member (owner-only). */
+export function transferTaggerSessionOwnership(sessionId: string, username: string) {
+  return request<TaggerSessionSharingState>(`/tagging-sessions/${sessionId}/sharing/transfer`, {
+    method: "POST",
+    body: JSON.stringify({ username }),
+  });
+}
+
+/** Result of redeeming a session share link — the target id and granted tier. */
+export interface ClaimTaggerSessionResult {
+  session_id: string;
+  role: ShareRole;
+}
+
+/** Redeem an ``anyone`` session link, durably granting its tier to the caller. */
+export async function claimSharedTaggerSession(token: string) {
+  const res = await request<ClaimTaggerSessionResult>(
+    `/tagging-sessions/share/${encodeURIComponent(token)}/claim`,
+    { method: "POST" },
+  );
   invalidateCache("/tagging-sessions");
   return res;
 }

@@ -489,15 +489,15 @@ def test_stale_running_mirror_reports_not_live_or_failed() -> None:
 
 
 def test_ownership_enforced_on_assist_routes() -> None:
-    """Another user gets 403 on every assist surface."""
+    """A user with no grant gets 404 on every assist surface (no leak)."""
     alice_client, store = _client(_ALICE)
     session_id = _create(alice_client)
     bob_client, _ = _client(_BOB, store=store)
     resp = bob_client.post(
         f"/tagging-sessions/{session_id}/assist/interview", json={"turns": []}
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 404
     resp = bob_client.post(f"/tagging-sessions/{session_id}/assist/estimate")
-    assert resp.status_code == 403
+    assert resp.status_code == 404
     resp = bob_client.get(f"/tagging-sessions/{session_id}/assist/autotag")
-    assert resp.status_code == 403
+    assert resp.status_code == 404
