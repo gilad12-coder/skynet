@@ -2,12 +2,26 @@
 
 import * as React from "react";
 import { CircleAlert, Loader2, Plus, Search, Tags } from "lucide-react";
+import { toast } from "react-toastify";
 
-import { listTaggerSessions, type TaggerSessionSummary } from "@/shared/lib/api";
-import { msg } from "@/shared/lib/messages";
+import {
+  bulkDeleteTaggerSessions,
+  listTaggerSessions,
+  type TaggerSessionSummary,
+} from "@/shared/lib/api";
+import { formatMsg, msg } from "@/shared/lib/messages";
 import { Button } from "@/shared/ui/primitives/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/ui/primitives/dialog";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { SearchField } from "@/shared/ui/search-field";
+import { SelectionBar } from "@/shared/ui/selection-bar";
 import { TAGGER_SESSIONS_CHANGED } from "../hooks/use-tagger";
 import { TaggingSessionCard } from "./TaggingSessionCard";
 
@@ -22,11 +36,21 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
   const [loaded, setLoaded] = React.useState(false);
   const [loadFailed, setLoadFailed] = React.useState(false);
   const [search, setSearch] = React.useState("");
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = React.useState(false);
+  const [bulkDeleting, setBulkDeleting] = React.useState(false);
 
   const fetchSessions = React.useCallback(async () => {
     try {
       const res = await listTaggerSessions({ limit: 200 });
-      setSessions(res.items.filter((session) => session.phase !== "complete"));
+      const items = res.items.filter((session) => session.phase !== "complete");
+      setSessions(items);
+      // Drop selections that no longer resolve to a listed session (deleted
+      // elsewhere or completed since), so the bar never counts ghosts.
+      setSelectedIds((prev) => {
+        const next = new Set([...prev].filter((id) => items.some((s) => s.id === id)));
+        return next.size === prev.size ? prev : next;
+      });
       setLoadFailed(false);
     } catch {
       setLoadFailed(true);
@@ -34,6 +58,33 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
       setLoaded(true);
     }
   }, []);
+
+  const toggleSelected = React.useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const confirmBulkDelete = async () => {
+    if (bulkDeleting) return;
+    setBulkDeleting(true);
+    try {
+      const res = await bulkDeleteTaggerSessions([...selectedIds]);
+      if (res.skipped.length > 0) {
+        toast.warn(formatMsg("shared.selection.delete_skipped", { count: res.skipped.length }));
+      }
+      setBulkOpen(false);
+      setSelectedIds(new Set());
+      window.dispatchEvent(new Event(TAGGER_SESSIONS_CHANGED));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : msg("datasets.toast.delete_failed"));
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   React.useEffect(() => {
     void fetchSessions();
@@ -116,11 +167,60 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
         ) : (
           <div className="flex flex-col gap-2.5 p-0.5">
             {filteredSessions.map((session) => (
-              <TaggingSessionCard key={session.id} session={session} onChanged={fetchSessions} />
+              <TaggingSessionCard
+                key={session.id}
+                session={session}
+                onChanged={fetchSessions}
+                selected={selectedIds.has(session.id)}
+                onToggleSelect={() => toggleSelected(session.id)}
+              />
             ))}
           </div>
         )}
       </div>
+
+      <SelectionBar
+        count={selectedIds.size}
+        onClear={() => setSelectedIds(new Set())}
+        onDelete={() => setBulkOpen(true)}
+      />
+
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent
+          className="w-[min(28rem,92vw)] max-w-[min(28rem,92vw)] sm:max-w-md"
+          showCloseButton={false}
+        >
+          <DialogHeader>
+            <DialogTitle>{msg("tagger.session.bulk_delete_title")}</DialogTitle>
+            <DialogDescription>
+              {formatMsg("tagger.session.bulk_delete_body", { count: selectedIds.size })}{" "}
+              {msg("delete.irreversible")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-2 gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setBulkOpen(false)}
+              disabled={bulkDeleting}
+              className="w-full justify-center"
+            >
+              {msg("datasets.delete.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmBulkDelete}
+              disabled={bulkDeleting}
+              className="w-full justify-center shadow-xs"
+            >
+              {bulkDeleting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                msg("datasets.delete.confirm")
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

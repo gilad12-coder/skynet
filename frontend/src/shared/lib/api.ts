@@ -1569,6 +1569,16 @@ export async function bulkDeleteDatasets(ids: string[]): Promise<BulkDeleteResul
   return res;
 }
 
+/** Bulk-delete the caller's tagging sessions. */
+export async function bulkDeleteTaggerSessions(ids: string[]): Promise<BulkDeleteResult> {
+  const res = await request<BulkDeleteResult>("/tagging-sessions/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+  invalidateCache("/tagging-sessions");
+  return res;
+}
+
 /** Bulk-delete the caller's pending (staged) uploads. */
 export async function bulkDeleteStagedUploads(ids: string[]): Promise<BulkDeleteResult> {
   const res = await request<BulkDeleteResult>("/usage/storage/staged/bulk-delete", {

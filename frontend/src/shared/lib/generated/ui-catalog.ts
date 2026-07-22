@@ -1856,6 +1856,8 @@ export type MessageKey =
   | "datasets.delete.body"
   | "datasets.delete.cancel"
   | "datasets.delete.confirm"
+  | "datasets.delete.selected_body"
+  | "datasets.delete.selected_title"
   | "datasets.delete.title"
   | "datasets.delete.used_warning"
   | "datasets.detail.loading"
@@ -1901,6 +1903,7 @@ export type MessageKey =
   | "datasets.share.not_found_title"
   | "datasets.shared_badge"
   | "datasets.subtitle"
+  | "datasets.toast.bulk_deleted"
   | "datasets.toast.clone_failed"
   | "datasets.toast.cloned"
   | "datasets.toast.deduplicated"
@@ -2348,6 +2351,11 @@ export type MessageKey =
   | "shared.score_chart.prompt_version_axis"
   | "shared.score_chart.score_axis"
   | "shared.score_chart.version_score"
+  | "shared.selection.clear"
+  | "shared.selection.count"
+  | "shared.selection.delete"
+  | "shared.selection.delete_skipped"
+  | "shared.selection.select_named"
   | "sidebar.collapse"
   | "sidebar.delete.failed"
   | "sidebar.delete.success"
@@ -2664,6 +2672,8 @@ export type MessageKey =
   | "tagger.results.who.ai_confirmed"
   | "tagger.results.who.human"
   | "tagger.session.back"
+  | "tagger.session.bulk_delete_body"
+  | "tagger.session.bulk_delete_title"
   | "tagger.session.delete_body"
   | "tagger.session.delete_title"
   | "tagger.session.empty_body"
@@ -4726,6 +4736,8 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "datasets.delete.body": "הפעולה תמחק לצמיתות את הדאטאסט הזה מהספרייה. לא ניתן לבטל פעולה זו.",
   "datasets.delete.cancel": "בטל/י",
   "datasets.delete.confirm": "מחק/י",
+  "datasets.delete.selected_body": "הפעולה תמחק לצמיתות {count} דאטאסטים מהספרייה. לא ניתן לבטל פעולה זו.",
+  "datasets.delete.selected_title": "מחיקת דאטאסטים",
   "datasets.delete.title": "מחיקת דאטאסט",
   "datasets.delete.used_warning": "{count} אופטימיזציות נבנו מהדאטאסט הזה. הן יישארו תקינות, אבל הקישור אליו מתוכן יישבר.",
   "datasets.detail.loading": "טוען…",
@@ -4771,6 +4783,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "datasets.share.not_found_title": "הקישור אינו תקין",
   "datasets.shared_badge": "משותף איתי",
   "datasets.subtitle": "הדאטאסטים ששמרת — מוכנים לשימוש חוזר באופטימיזציות",
+  "datasets.toast.bulk_deleted": "{count} דאטאסטים נמחקו",
   "datasets.toast.clone_failed": "שמירת העותק נכשלה",
   "datasets.toast.cloned": "נשמר עותק בספרייה שלך",
   "datasets.toast.deduplicated": "הדאטאסט כבר קיים בספרייה — קישרנו אותך לעותק הקיים",
@@ -5218,6 +5231,11 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "shared.score_chart.prompt_version_axis": "גרסת פרומפט",
   "shared.score_chart.score_axis": "{term.score}",
   "shared.score_chart.version_score": "ציון הגרסה",
+  "shared.selection.clear": "ניקוי הבחירה",
+  "shared.selection.count": "נבחרו {count}",
+  "shared.selection.delete": "מחיקת הפריטים שנבחרו",
+  "shared.selection.delete_skipped": "לא ניתן היה למחוק {count} פריטים",
+  "shared.selection.select_named": "בחירת {name}",
   "sidebar.collapse": "כיווץ הסרגל",
   "sidebar.delete.failed": "המחיקה נכשלה",
   "sidebar.delete.success": "נמחק",
@@ -5534,6 +5552,8 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "tagger.results.who.ai_confirmed": "AI · מאושר",
   "tagger.results.who.human": "אתם",
   "tagger.session.back": "חזרה לסשני התיוג",
+  "tagger.session.bulk_delete_body": "האם למחוק {count} סשני תיוג?",
+  "tagger.session.bulk_delete_title": "מחיקת סשני תיוג",
   "tagger.session.delete_body": "האם למחוק את סשן התיוג",
   "tagger.session.delete_title": "מחיקת סשן תיוג",
   "tagger.session.empty_body": "יש להתחיל סשן חדש כדי לתייג דאטאסט.",
@@ -13169,6 +13189,8 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "datasets.delete.body": "This permanently deletes this dataset from your library. This action cannot be undone.",
   "datasets.delete.cancel": "Cancel",
   "datasets.delete.confirm": "Delete",
+  "datasets.delete.selected_body": "This permanently deletes {count} datasets from your library. This action cannot be undone.",
+  "datasets.delete.selected_title": "Delete datasets",
   "datasets.delete.title": "Delete dataset",
   "datasets.delete.used_warning": "{count} optimizations were built from this dataset. They will remain valid, but their link back to it will break.",
   "datasets.detail.loading": "Loading…",
@@ -13214,6 +13236,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "datasets.share.not_found_title": "This link is invalid",
   "datasets.shared_badge": "Shared with me",
   "datasets.subtitle": "The datasets you've saved — ready to reuse across optimizations",
+  "datasets.toast.bulk_deleted": "{count} datasets deleted",
   "datasets.toast.clone_failed": "Failed to save the copy",
   "datasets.toast.cloned": "A copy was saved to your library",
   "datasets.toast.deduplicated": "This dataset is already in your library — we linked you to the existing copy",
@@ -13661,6 +13684,11 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "shared.score_chart.prompt_version_axis": "Prompt version",
   "shared.score_chart.score_axis": "Score",
   "shared.score_chart.version_score": "Version score",
+  "shared.selection.clear": "Clear selection",
+  "shared.selection.count": "{count} selected",
+  "shared.selection.delete": "Delete selected",
+  "shared.selection.delete_skipped": "{count} items could not be deleted",
+  "shared.selection.select_named": "Select {name}",
   "sidebar.collapse": "Collapse sidebar",
   "sidebar.delete.failed": "Delete failed",
   "sidebar.delete.success": "Deleted",
@@ -13977,6 +14005,8 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "tagger.results.who.ai_confirmed": "AI · confirmed",
   "tagger.results.who.human": "You",
   "tagger.session.back": "Back to labeling sessions",
+  "tagger.session.bulk_delete_body": "Delete {count} labeling sessions?",
+  "tagger.session.bulk_delete_title": "Delete labeling sessions",
   "tagger.session.delete_body": "Delete this labeling session",
   "tagger.session.delete_title": "Delete labeling session",
   "tagger.session.empty_body": "Start a new session to label a dataset.",

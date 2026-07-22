@@ -179,6 +179,30 @@ def test_delete_then_get_is_404() -> None:
     assert missing.json()["code"] == "tagger.session.not_found"
 
 
+def test_bulk_delete_reports_per_id_outcomes() -> None:
+    """Owned ids delete; unknown and foreign ids are skipped as not_found."""
+    alice_client, store = _client(_ALICE)
+    mine_a = _create(alice_client)
+    mine_b = _create(alice_client)
+    bob_client, _ = _client(_BOB, store=store)
+    bobs = _create(bob_client)
+
+    resp = alice_client.post(
+        "/tagging-sessions/bulk-delete",
+        json={"ids": [mine_a, mine_b, mine_a, bobs, "no-such-id"]},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["deleted"] == [mine_a, mine_b]
+    assert body["skipped"] == [
+        {"id": bobs, "reason": "not_found"},
+        {"id": "no-such-id", "reason": "not_found"},
+    ]
+    assert alice_client.get("/tagging-sessions").json()["total"] == 0
+    # Bob's session survived Alice's attempt.
+    assert bob_client.get("/tagging-sessions").json()["total"] == 1
+
+
 def test_other_user_cannot_access_session() -> None:
     """Bob gets 403 on Alice's session for read, update, patch and delete."""
     alice_client, store = _client(_ALICE)

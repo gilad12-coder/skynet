@@ -24,6 +24,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ...models import (
+    BulkDeleteByIdsRequest,
+    BulkDeleteByIdsResponse,
+    BulkDeleteByIdsSkipped,
+)
 from ...storage.models import TaggingSessionModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -475,5 +480,41 @@ def create_tagging_session_router(*, job_store) -> APIRouter:
             session.delete(row)
             session.commit()
         return {"id": session_id, "deleted": True}
+
+    @router.post(
+        "/tagging-sessions/bulk-delete",
+        response_model=BulkDeleteByIdsResponse,
+        summary="Delete many sessions in a single request",
+    )
+    def bulk_delete_tagging_sessions(
+        body: BulkDeleteByIdsRequest, user: AuthenticatedUserDep
+    ) -> BulkDeleteByIdsResponse:
+        """Delete a batch of owned sessions and report per-id outcomes.
+
+        Duplicate ids are deduplicated. An id the caller cannot delete —
+        unknown or owned by someone else — lands in ``skipped`` (both as
+        ``not_found``, so a foreign id is indistinguishable from a missing
+        one) rather than failing the whole request, mirroring the dataset
+        library's bulk delete.
+
+        Args:
+            body: The bulk-delete request body carrying the session ids.
+            user: Authenticated caller; only sessions they own are deleted.
+
+        Returns:
+            A :class:`BulkDeleteByIdsResponse` listing deleted and skipped ids.
+        """
+        deleted: list[str] = []
+        skipped: list[BulkDeleteByIdsSkipped] = []
+        with Session(job_store.engine) as session:
+            for session_id in dict.fromkeys(body.ids):
+                row = session.get(TaggingSessionModel, session_id)
+                if row is None or row.username != user.username:
+                    skipped.append(BulkDeleteByIdsSkipped(id=session_id, reason="not_found"))
+                    continue
+                session.delete(row)
+                deleted.append(session_id)
+            session.commit()
+        return BulkDeleteByIdsResponse(deleted=deleted, skipped=skipped)
 
     return router

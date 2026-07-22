@@ -22,8 +22,9 @@ import {
   renameTaggerSession,
   type TaggerSessionSummary,
 } from "@/shared/lib/api";
-import { msg, type MessageKey } from "@/shared/lib/messages";
+import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { formatRelativeTime } from "@/shared/lib/formatters";
+import { cn } from "@/shared/lib/utils";
 import { TAGGER_SESSIONS_CHANGED } from "../hooks/use-tagger";
 
 const MODE_LABEL_KEYS: Record<string, MessageKey> = {
@@ -58,9 +59,13 @@ function sessionStatus(session: TaggerSessionSummary): string {
 export function TaggingSessionCard({
   session,
   onChanged,
+  selected,
+  onToggleSelect,
 }: {
   session: TaggerSessionSummary;
   onChanged: () => void;
+  selected: boolean;
+  onToggleSelect: () => void;
 }) {
   const router = useRouter();
   const [renameOpen, setRenameOpen] = React.useState(false);
@@ -125,8 +130,26 @@ export function TaggingSessionCard({
           }
         }}
         aria-label={displayName}
-        className="group flex cursor-pointer items-center gap-4 rounded-xl border border-[#DDD4C8]/60 bg-gradient-to-b from-white/95 to-[#F8F4EF] px-4 py-3.5 text-start shadow-[0_1px_3px_rgba(28,22,18,0.03)] transition-[border-color,box-shadow] duration-200 hover:border-[#C8B9A8]/70 hover:shadow-[0_2px_10px_rgba(28,22,18,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        className={cn(
+          "group flex cursor-pointer items-center gap-4 rounded-xl border border-[#DDD4C8]/60 bg-gradient-to-b from-white/95 to-[#F8F4EF] px-4 py-3.5 text-start shadow-[0_1px_3px_rgba(28,22,18,0.03)] transition-[border-color,box-shadow] duration-200 hover:border-[#C8B9A8]/70 hover:shadow-[0_2px_10px_rgba(28,22,18,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+          selected && "border-primary/50 hover:border-primary/50",
+        )}
       >
+        {/* Wrapper stops both click and key events: a Space press on the
+            checkbox would otherwise bubble into the card's resume handler. */}
+        <span
+          className="flex shrink-0 items-center"
+          onClick={stop}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            className="size-4 cursor-pointer accent-primary"
+            checked={selected}
+            onChange={onToggleSelect}
+            aria-label={formatMsg("shared.selection.select_named", { name: displayName })}
+          />
+        </span>
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[#3D2E22]/8 text-[#3D2E22]">
           <Tags className="size-5" />
         </span>
