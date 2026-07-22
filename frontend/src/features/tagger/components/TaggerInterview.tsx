@@ -487,7 +487,9 @@ function RubricCard({
       <div
         className={cn(
           "grid min-h-0 flex-1 gap-3 overflow-y-auto",
-          "lg:grid-cols-[minmax(0,4fr)_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] lg:overflow-visible",
+          // The launch column is capped instead of fr-sized so the button
+          // stays a compact block on wide screens; the cards absorb the rest.
+          "lg:grid-cols-[minmax(0,1fr)_minmax(0,14rem)] lg:grid-rows-[minmax(0,1fr)] lg:overflow-visible",
         )}
       >
         <Rise
