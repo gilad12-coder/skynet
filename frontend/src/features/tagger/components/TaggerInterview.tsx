@@ -336,9 +336,9 @@ function Rise({
 
 /**
  * The task contract, editable in place before anything runs: the interview's
- * inferred answer style and its question/categories, alongside a read-only
- * view of the distilled labeling guide. The guide rides through the confirm
- * untouched — it steers predictions but has no editing surface. Confirming
+ * inferred answer style and its question/categories, alongside the distilled
+ * labeling guide — every rule editable, removable and extendable in place,
+ * mirroring the code interview's brief card. Confirming
  * is the moment the user takes ownership of what the AI believes. Fields for
  * a switched-to answer style start empty on purpose — the switch is a human
  * override, so the human fills it in.
@@ -383,7 +383,11 @@ function RubricCard({
   const question = config.question ?? "";
   const [categories, setCategories] = useState<Category[]>(config.categories ?? []);
   // Which just-appended field should grab focus once it mounts.
-  const focusAppended = useRef<"category" | null>(null);
+  const focusAppended = useRef<"category" | "rule" | null>(null);
+  // The guide is an editable draft, like the code interview's brief; a
+  // re-run interview replaces it.
+  const [rules, setRules] = useState<string[]>(assist.rubric);
+  useEffect(() => setRules(assist.rubric), [assist.rubric]);
 
   const styleOptions: Array<{
     mode: AnnotationMode;
@@ -430,6 +434,14 @@ function RubricCard({
   };
   const cleanedCategories = categories.filter((c) => c.label.trim());
 
+  const updateRule = (idx: number, value: string) =>
+    setRules((prev) => prev.map((r, i) => (i === idx ? value : r)));
+  const removeRule = (idx: number) => setRules((prev) => prev.filter((_, i) => i !== idx));
+  const addRule = () => {
+    focusAppended.current = "rule";
+    setRules((prev) => [...prev, ""]);
+  };
+
   const taskValid = mode !== "multiclass" || cleanedCategories.length >= 2;
 
   // Copilot's launch commits to the opening batch: the AI tags it and the
@@ -441,7 +453,7 @@ function RubricCard({
   );
 
   const confirm = () =>
-    onConfirm(assist.rubric.map((r) => r.trim()).filter(Boolean), {
+    onConfirm(rules.map((r) => r.trim()).filter(Boolean), {
       mode,
       ...(mode === "binary" ? { question: question.trim() } : {}),
       ...(mode === "multiclass" ? { categories: cleanedCategories } : {}),
@@ -636,22 +648,55 @@ function RubricCard({
                 </CardTitle>
                 <CardDescription>{msg("tagger.assist.rubric.guide_hint")}</CardDescription>
               </CardHeader>
-              <CardContent>
-                <ol className="flex flex-col gap-2.5">
-                  {assist.rubric.map((rule, idx) => (
-                    <li
-                      key={idx}
-                      className="flex gap-2.5 text-sm leading-relaxed text-foreground"
+              <CardContent className="flex flex-col gap-2.5">
+                {rules.map((rule, idx) => (
+                  <div key={idx} className="flex items-start gap-2.5">
+                    <span className="w-4 shrink-0 select-none pt-2.5 text-end font-mono text-xs tabular-nums text-muted-foreground/60">
+                      {idx + 1}
+                    </span>
+                    <textarea
+                      ref={
+                        idx === rules.length - 1
+                          ? (el: HTMLTextAreaElement | null) => {
+                              if (el && focusAppended.current === "rule") {
+                                focusAppended.current = null;
+                                focusAppendedField(el);
+                              }
+                            }
+                          : undefined
+                      }
+                      value={rule}
+                      onChange={(e) => updateRule(idx, e.target.value)}
+                      rows={2}
+                      aria-label={formatMsg("tagger.assist.rubric.rule_label", {
+                        number: idx + 1,
+                      })}
+                      className={cn(
+                        "flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm",
+                        "leading-relaxed outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                      )}
+                      dir="auto"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => removeRule(idx)}
+                      aria-label={msg("tagger.assist.rubric.rule_remove")}
+                      className="mt-1.5"
                     >
-                      <span className="w-4 shrink-0 select-none pt-px text-end font-mono text-xs tabular-nums text-muted-foreground/60">
-                        {idx + 1}
-                      </span>
-                      <span className="min-w-0" dir="auto">
-                        {rule}
-                      </span>
-                    </li>
-                  ))}
-                </ol>
+                      <Trash2 className="size-3.5 text-muted-foreground" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={addRule}
+                  className="gap-1.5 self-start text-muted-foreground"
+                >
+                  <Plus className="size-3.5" />
+                  {msg("tagger.assist.rubric.rule_add")}
+                </Button>
               </CardContent>
             </Card>
           )}

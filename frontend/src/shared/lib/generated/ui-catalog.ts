@@ -2615,6 +2615,9 @@ export type MessageKey =
   | "tagger.assist.rubric.credits_estimate_one"
   | "tagger.assist.rubric.guide_hint"
   | "tagger.assist.rubric.guide_title"
+  | "tagger.assist.rubric.rule_add"
+  | "tagger.assist.rubric.rule_label"
+  | "tagger.assist.rubric.rule_remove"
   | "tagger.assist.rubric.start_autotag"
   | "tagger.assist.rubric.start_copilot_round"
   | "tagger.assist.rubric.subtitle"
@@ -5470,8 +5473,11 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "tagger.assist.rubric.credits_estimate": "‎~{low}–{high} קרדיטים",
   "tagger.assist.rubric.credits_estimate_flat": "‎~{count} קרדיטים",
   "tagger.assist.rubric.credits_estimate_one": "‎~קרדיט אחד",
-  "tagger.assist.rubric.guide_hint": "זוקק מהתשובות שלכם ומנחה כל תיוג של ה-AI.",
+  "tagger.assist.rubric.guide_hint": "זוקק מהתשובות שלכם — אפשר לערוך הכול; הוא מנחה כל תיוג של ה-AI.",
   "tagger.assist.rubric.guide_title": "מדריך התיוג",
+  "tagger.assist.rubric.rule_add": "הוספת כלל",
+  "tagger.assist.rubric.rule_label": "כלל {number}",
+  "tagger.assist.rubric.rule_remove": "הסרת כלל",
   "tagger.assist.rubric.start_autotag": "תיוג כל {rows} השורות",
   "tagger.assist.rubric.start_copilot_round": "תיוג {rows} שורות ראשונות לבדיקה שלכם",
   "tagger.assist.rubric.subtitle": "מה שה-AI למד מהתשובות שלכם — אשרו לפני שהתיוג מתחיל.",
@@ -13900,8 +13906,11 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "tagger.assist.rubric.credits_estimate": "~{low}–{high} credits",
   "tagger.assist.rubric.credits_estimate_flat": "~{count} credits",
   "tagger.assist.rubric.credits_estimate_one": "~1 credit",
-  "tagger.assist.rubric.guide_hint": "Distilled from your answers — it steers every label the AI writes.",
+  "tagger.assist.rubric.guide_hint": "Distilled from your answers — edit anything; it steers every label the AI writes.",
   "tagger.assist.rubric.guide_title": "Labeling guide",
+  "tagger.assist.rubric.rule_add": "Add a rule",
+  "tagger.assist.rubric.rule_label": "Rule {number}",
+  "tagger.assist.rubric.rule_remove": "Remove rule",
   "tagger.assist.rubric.start_autotag": "Tag all {rows} rows",
   "tagger.assist.rubric.start_copilot_round": "Tag the first {rows} rows for my review",
   "tagger.assist.rubric.subtitle": "What the AI learned from your answers — confirm it before anything runs.",
