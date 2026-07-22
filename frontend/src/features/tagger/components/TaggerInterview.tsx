@@ -488,10 +488,10 @@ function RubricCard({
         className={cn(
           "grid min-h-0 flex-1 gap-3 overflow-y-auto",
           // The launch column is capped instead of fr-sized so the button
-          // stays a compact block on wide screens; the cards absorb the rest.
-          // The button carries the same cap itself (max-w-52) so the stacked
-          // below-lg layout doesn't fall back to a full-width bar.
-          "lg:grid-cols-[minmax(0,1fr)_minmax(0,13rem)] lg:grid-rows-[minmax(0,1fr)] lg:overflow-visible",
+          // stays a slim full-height block on wide screens; the cards absorb
+          // the rest. The button carries the same cap itself (max-w-40) so
+          // the stacked below-lg layout doesn't fall back to a full-width bar.
+          "lg:grid-cols-[minmax(0,1fr)_minmax(0,10rem)] lg:grid-rows-[minmax(0,1fr)] lg:overflow-visible",
         )}
       >
         <Rise
@@ -664,9 +664,7 @@ function RubricCard({
             sweep in the reading direction — the container is authored LTR
             and mirrored in RTL so glyphs, order, and motion all flip
             together. */}
-        {/* items-center keeps the button content-sized: the default stretch
-            made it fill the row's full height — a 580px slab on desktop. */}
-        <Rise delay={0.16} className="flex min-w-0 items-center justify-center lg:min-h-0">
+        <Rise delay={0.16} className="flex min-w-0 justify-center lg:min-h-0">
           <motion.button
             type="button"
             onClick={launch}
@@ -674,7 +672,7 @@ function RubricCard({
             animate={{ scale: [1, 1.01, 1] }}
             transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
             className={cn(
-              "group relative flex w-full max-w-52 cursor-pointer flex-col items-center justify-center gap-4",
+              "group relative flex w-full max-w-40 cursor-pointer flex-col items-center justify-center gap-4",
               "rounded-2xl bg-primary py-8 text-base font-semibold text-primary-foreground",
               "transition-all duration-300 hover:scale-[1.01] hover:shadow-[0_0_30px_rgba(61,46,34,0.35)]",
               "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60",
