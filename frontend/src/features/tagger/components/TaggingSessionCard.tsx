@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/shared/ui/primitives/dialog";
 import { Input } from "@/shared/ui/primitives/input";
+import { SelectCheckbox } from "@/shared/ui/select-checkbox";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import {
   deleteTaggerSession,
@@ -65,7 +66,8 @@ export function TaggingSessionCard({
   session: TaggerSessionSummary;
   onChanged: () => void;
   selected: boolean;
-  onToggleSelect: () => void;
+  /** ``shiftKey`` is true on shift-click, extending the panel's range anchor. */
+  onToggleSelect: (shiftKey: boolean) => void;
 }) {
   const router = useRouter();
   const [renameOpen, setRenameOpen] = React.useState(false);
@@ -135,21 +137,11 @@ export function TaggingSessionCard({
           selected && "border-primary/50 hover:border-primary/50",
         )}
       >
-        {/* Wrapper stops both click and key events: a Space press on the
-            checkbox would otherwise bubble into the card's resume handler. */}
-        <span
-          className="flex shrink-0 items-center"
-          onClick={stop}
-          onKeyDown={(e) => e.stopPropagation()}
-        >
-          <input
-            type="checkbox"
-            className="size-4 cursor-pointer accent-primary"
-            checked={selected}
-            onChange={onToggleSelect}
-            aria-label={formatMsg("shared.selection.select_named", { name: displayName })}
-          />
-        </span>
+        <SelectCheckbox
+          checked={selected}
+          onToggle={onToggleSelect}
+          ariaLabel={formatMsg("shared.selection.select_named", { name: displayName })}
+        />
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[#3D2E22]/8 text-[#3D2E22]">
           <Tags className="size-5" />
         </span>

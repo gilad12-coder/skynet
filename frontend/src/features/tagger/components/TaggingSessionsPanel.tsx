@@ -21,6 +21,7 @@ import {
 } from "@/shared/ui/primitives/dialog";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { SearchField } from "@/shared/ui/search-field";
+import { SelectCheckbox } from "@/shared/ui/select-checkbox";
 import { SelectionBar } from "@/shared/ui/selection-bar";
 import { TAGGER_SESSIONS_CHANGED } from "../hooks/use-tagger";
 import { TaggingSessionCard } from "./TaggingSessionCard";
@@ -37,6 +38,9 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
   const [loadFailed, setLoadFailed] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  // Last-toggled session id — the shift-click range anchor, kept as an id (not
+  // an index) so it survives the search filter reordering the visible list.
+  const [anchorId, setAnchorId] = React.useState<string | null>(null);
   const [bulkOpen, setBulkOpen] = React.useState(false);
   const [bulkDeleting, setBulkDeleting] = React.useState(false);
 
@@ -59,15 +63,6 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
     }
   }, []);
 
-  const toggleSelected = React.useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
   const confirmBulkDelete = async () => {
     if (bulkDeleting) return;
     setBulkDeleting(true);
@@ -78,6 +73,7 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
       }
       setBulkOpen(false);
       setSelectedIds(new Set());
+      setAnchorId(null);
       window.dispatchEvent(new Event(TAGGER_SESSIONS_CHANGED));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : msg("datasets.toast.delete_failed"));
@@ -98,6 +94,46 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
     if (!query) return sessions;
     return sessions.filter((session) => session.name.toLowerCase().includes(query));
   }, [search, sessions]);
+
+  // Same mechanism as the storage cleanup drawer: plain click toggles one row,
+  // shift-click applies the clicked row's new state to the whole visible range
+  // between it and the previous toggle.
+  const toggleSelected = React.useCallback(
+    (id: string, shiftKey: boolean) => {
+      const visible = filteredSessions;
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        const willSelect = !prev.has(id);
+        const index = visible.findIndex((s) => s.id === id);
+        const anchor = anchorId === null ? -1 : visible.findIndex((s) => s.id === anchorId);
+        if (shiftKey && anchor !== -1 && index !== -1) {
+          const [lo, hi] = anchor < index ? [anchor, index] : [index, anchor];
+          for (let i = lo; i <= hi; i++) {
+            const row = visible[i];
+            if (!row) continue;
+            if (willSelect) next.add(row.id);
+            else next.delete(row.id);
+          }
+        } else if (willSelect) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+        return next;
+      });
+      setAnchorId(id);
+    },
+    [filteredSessions, anchorId],
+  );
+
+  const allSelected =
+    filteredSessions.length > 0 && filteredSessions.every((s) => selectedIds.has(s.id));
+  const someSelected = !allSelected && filteredSessions.some((s) => selectedIds.has(s.id));
+
+  const toggleAll = () => {
+    setSelectedIds(allSelected ? new Set() : new Set(filteredSessions.map((s) => s.id)));
+    setAnchorId(null);
+  };
 
   if (!loaded) {
     return (
@@ -165,23 +201,38 @@ export function TaggingSessionsPanel({ onStartNew }: { onStartNew: () => void })
         {filteredSessions.length === 0 ? (
           <EmptyState icon={Search} title={msg("tagger.session.search_empty")} />
         ) : (
-          <div className="flex flex-col gap-2.5 p-0.5">
-            {filteredSessions.map((session) => (
-              <TaggingSessionCard
-                key={session.id}
-                session={session}
-                onChanged={fetchSessions}
-                selected={selectedIds.has(session.id)}
-                onToggleSelect={() => toggleSelected(session.id)}
+          <>
+            <div className="flex items-center gap-3 px-4 pb-2">
+              <SelectCheckbox
+                checked={allSelected ? true : someSelected ? "mixed" : false}
+                onToggle={toggleAll}
+                ariaLabel={msg("storage.select.all")}
               />
-            ))}
-          </div>
+              <span className="text-xs font-medium text-muted-foreground">
+                {msg("storage.select.all")}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2.5 p-0.5">
+              {filteredSessions.map((session) => (
+                <TaggingSessionCard
+                  key={session.id}
+                  session={session}
+                  onChanged={fetchSessions}
+                  selected={selectedIds.has(session.id)}
+                  onToggleSelect={(shiftKey) => toggleSelected(session.id, shiftKey)}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
 
       <SelectionBar
         count={selectedIds.size}
-        onClear={() => setSelectedIds(new Set())}
+        onClear={() => {
+          setSelectedIds(new Set());
+          setAnchorId(null);
+        }}
         onDelete={() => setBulkOpen(true)}
       />
 

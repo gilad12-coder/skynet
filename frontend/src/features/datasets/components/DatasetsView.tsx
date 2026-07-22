@@ -15,6 +15,7 @@ import {
 } from "@/shared/ui/primitives/dialog";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { SearchField } from "@/shared/ui/search-field";
+import { SelectCheckbox } from "@/shared/ui/select-checkbox";
 import { SelectionBar } from "@/shared/ui/selection-bar";
 import {
   bulkDeleteDatasets,
@@ -47,6 +48,9 @@ export function DatasetsView() {
   const [dragging, setDragging] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  // Last-toggled dataset id — the shift-click range anchor, kept as an id (not
+  // an index) so it survives the search filter reordering the visible list.
+  const [anchorId, setAnchorId] = React.useState<string | null>(null);
   const [bulkOpen, setBulkOpen] = React.useState(false);
   const [bulkDeleting, setBulkDeleting] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -63,15 +67,6 @@ export function DatasetsView() {
     });
   }, [datasets]);
 
-  const toggleSelected = React.useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
   const confirmBulkDelete = async () => {
     if (bulkDeleting) return;
     setBulkDeleting(true);
@@ -85,6 +80,7 @@ export function DatasetsView() {
       }
       setBulkOpen(false);
       setSelectedIds(new Set());
+      setAnchorId(null);
       refetch();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : msg("datasets.toast.delete_failed"));
@@ -113,6 +109,51 @@ export function DatasetsView() {
     if (!q) return datasets;
     return datasets.filter((d) => d.name.toLowerCase().includes(q));
   }, [datasets, search]);
+
+  // Same mechanism as the storage cleanup drawer: plain click toggles one row,
+  // shift-click applies the clicked row's new state to the whole visible range
+  // between it and the previous toggle. Shared-in rows inside a range are
+  // skipped — only owned datasets can be bulk-deleted.
+  const toggleSelected = React.useCallback(
+    (id: string, shiftKey: boolean) => {
+      const visible = filtered;
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        const willSelect = !prev.has(id);
+        const index = visible.findIndex((d) => d.id === id);
+        const anchor = anchorId === null ? -1 : visible.findIndex((d) => d.id === anchorId);
+        if (shiftKey && anchor !== -1 && index !== -1) {
+          const [lo, hi] = anchor < index ? [anchor, index] : [index, anchor];
+          for (let i = lo; i <= hi; i++) {
+            const row = visible[i];
+            if (!row || row.role !== "owner") continue;
+            if (willSelect) next.add(row.id);
+            else next.delete(row.id);
+          }
+        } else if (willSelect) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+        return next;
+      });
+      setAnchorId(id);
+    },
+    [filtered, anchorId],
+  );
+
+  const selectableFiltered = React.useMemo(
+    () => filtered.filter((d) => d.role === "owner"),
+    [filtered],
+  );
+  const allSelected =
+    selectableFiltered.length > 0 && selectableFiltered.every((d) => selectedIds.has(d.id));
+  const someSelected = !allSelected && selectableFiltered.some((d) => selectedIds.has(d.id));
+
+  const toggleAll = () => {
+    setSelectedIds(allSelected ? new Set() : new Set(selectableFiltered.map((d) => d.id)));
+    setAnchorId(null);
+  };
 
   const handleFiles = React.useCallback(
     async (files: FileList | null) => {
@@ -210,29 +251,46 @@ export function DatasetsView() {
         ) : filtered.length === 0 ? (
           <EmptyState icon={Search} title={msg("datasets.search.empty")} />
         ) : (
-          <div className="flex flex-col gap-2.5 p-0.5">
-            {dragging && (
-              <p className="pointer-events-none py-2 text-center text-sm font-medium text-[#3D2E22]/70">
-                {msg("datasets.upload.drop")}
-              </p>
+          <>
+            {selectableFiltered.length > 0 && (
+              <div className="flex items-center gap-3 px-4 pb-2">
+                <SelectCheckbox
+                  checked={allSelected ? true : someSelected ? "mixed" : false}
+                  onToggle={toggleAll}
+                  ariaLabel={msg("storage.select.all")}
+                />
+                <span className="text-xs font-medium text-muted-foreground">
+                  {msg("storage.select.all")}
+                </span>
+              </div>
             )}
-            {filtered.map((dataset) => (
-              <DatasetCard
-                key={dataset.id}
-                dataset={dataset}
-                onOpen={setSelected}
-                onChanged={refetch}
-                selected={selectedIds.has(dataset.id)}
-                onToggleSelect={() => toggleSelected(dataset.id)}
-              />
-            ))}
-          </div>
+            <div className="flex flex-col gap-2.5 p-0.5">
+              {dragging && (
+                <p className="pointer-events-none py-2 text-center text-sm font-medium text-[#3D2E22]/70">
+                  {msg("datasets.upload.drop")}
+                </p>
+              )}
+              {filtered.map((dataset) => (
+                <DatasetCard
+                  key={dataset.id}
+                  dataset={dataset}
+                  onOpen={setSelected}
+                  onChanged={refetch}
+                  selected={selectedIds.has(dataset.id)}
+                  onToggleSelect={(shiftKey) => toggleSelected(dataset.id, shiftKey)}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
 
       <SelectionBar
         count={selectedIds.size}
-        onClear={() => setSelectedIds(new Set())}
+        onClear={() => {
+          setSelectedIds(new Set());
+          setAnchorId(null);
+        }}
         onDelete={() => setBulkOpen(true)}
       />
 

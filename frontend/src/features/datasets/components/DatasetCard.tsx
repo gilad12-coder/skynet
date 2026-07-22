@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/shared/ui/primitives/dialog";
 import { Input } from "@/shared/ui/primitives/input";
+import { SelectCheckbox } from "@/shared/ui/select-checkbox";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import {
   cloneDataset,
@@ -45,7 +46,8 @@ export function DatasetCard({
   onOpen: (dataset: DatasetSummary) => void;
   onChanged: () => void;
   selected: boolean;
-  onToggleSelect: () => void;
+  /** ``shiftKey`` is true on shift-click, extending the view's range anchor. */
+  onToggleSelect: (shiftKey: boolean) => void;
 }) {
   const isOwner = dataset.role === "owner";
   const canEdit = isOwner || dataset.role === "editor";
@@ -143,22 +145,14 @@ export function DatasetCard({
           selected && "border-primary/50 hover:border-primary/50",
         )}
       >
-        {/* Wrapper stops both click and key events: a Space press on the
-            checkbox would otherwise bubble into the card's open handler.
-            Shared-in datasets can't be bulk-deleted, so their checkbox is an
+        {/* Shared-in datasets can't be bulk-deleted, so their checkbox is an
             invisible placeholder that keeps the rows column-aligned. */}
-        <span
-          className={cn("flex shrink-0 items-center", !isOwner && "invisible")}
-          onClick={stop}
-          onKeyDown={(e) => e.stopPropagation()}
-        >
-          <input
-            type="checkbox"
-            className="size-4 cursor-pointer accent-primary"
+        <span className={cn("flex shrink-0 items-center", !isOwner && "invisible")}>
+          <SelectCheckbox
             checked={selected}
-            onChange={onToggleSelect}
+            onToggle={onToggleSelect}
             disabled={!isOwner}
-            aria-label={formatMsg("shared.selection.select_named", { name: dataset.name })}
+            ariaLabel={formatMsg("shared.selection.select_named", { name: dataset.name })}
           />
         </span>
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-[#3D2E22]/8 text-[#3D2E22]">
