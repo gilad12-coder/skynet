@@ -282,6 +282,10 @@ def create_code_agent_router() -> APIRouter:
 
         * ``reasoning_patch`` — ``{"chunk": "<token>"}`` (provider thinking)
         * ``message_patch`` — ``{"chunk": "<token>"}`` (reply stream)
+        * ``message_end`` — ``{}`` (the reply is fully streamed; options and
+          brief are still generating)
+        * ``turn_hint`` — ``{"final": bool}`` (the streamed ``done`` field
+          settled; the client picks the matching placeholder)
         * ``message_reset`` — ``{}`` (a failed attempt is being retried; the
           client drops any partial reply streamed so far)
         * ``interview_done`` — ``{"message", "options", "brief", "done",

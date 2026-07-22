@@ -23,6 +23,9 @@ export interface CodeInterviewState {
   thinking: AgentThinking | null;
   /** Pickable answers for the current question; empty for an open question. */
   options: InterviewOption[];
+  /** What's still generating after the reply: answer choices, or — on the
+   *  final turn — the authoring brief. */
+  pending: "options" | "brief" | null;
   error: boolean;
   /** The model finished asking; the brief card is showing. */
   done: boolean;
@@ -70,6 +73,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
   const [streamText, setStreamText] = React.useState("");
   const [thinking, setThinking] = React.useState<AgentThinking | null>(null);
   const [options, setOptions] = React.useState<InterviewOption[]>([]);
+  const [pending, setPending] = React.useState<"options" | "brief" | null>(null);
   const [error, setError] = React.useState(false);
   const [done, setDone] = React.useState(false);
   const [brief, setBrief] = React.useState<string[]>([]);
@@ -88,6 +92,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
       setStreamText("");
       setThinking(null);
       setOptions([]);
+      setPending(null);
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -123,9 +128,13 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
             );
             setStreamText((text) => text + chunk);
           },
+          onMessageEnd: () =>
+            setPending((prev) => (prev === "brief" ? prev : "options")),
+          onTurnHint: (final) => setPending(final ? "brief" : "options"),
           onMessageReset: () => {
             setStreamText("");
             setThinking(null);
+            setPending(null);
           },
           onDone: (turn) => {
             setTurns((prev) => [
@@ -140,11 +149,13 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
             setBusy(false);
             setStreamText("");
             setThinking(null);
+            setPending(null);
           },
           onError: () => {
             setError(true);
             setBusy(false);
             setStreamText("");
+            setPending(null);
             setThinking((prev) =>
               prev ? { ...prev, streaming: false, endedAt: prev.endedAt ?? Date.now() } : prev,
             );
@@ -180,6 +191,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
     abortRef.current = null;
     setBusy(false);
     setStreamText("");
+    setPending(null);
     setThinking((prev) =>
       prev ? { ...prev, streaming: false, endedAt: prev.endedAt ?? Date.now() } : prev,
     );
@@ -220,6 +232,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
     streamText,
     thinking,
     options,
+    pending,
     error,
     done,
     brief,

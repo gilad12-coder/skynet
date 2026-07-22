@@ -2136,6 +2136,11 @@ export interface CodeInterviewTurnResult {
 export interface CodeInterviewHandlers {
   onReasoningPatch?: (chunk: string) => void;
   onMessagePatch?: (chunk: string) => void;
+  /** The reply is fully streamed; options/brief are still generating. */
+  onMessageEnd?: () => void;
+  /** The streamed ``done`` field settled: the turn ends in the brief
+   *  (final) or in another question — pick the matching placeholder. */
+  onTurnHint?: (final: boolean) => void;
   /** The server is retrying a failed attempt — drop streamed partial text. */
   onMessageReset?: () => void;
   onDone: (turn: CodeInterviewTurnResult) => void;
@@ -2178,6 +2183,12 @@ export async function streamCodeInterviewTurn(
           break;
         case "message_patch":
           handlers.onMessagePatch?.(String(data.chunk ?? ""));
+          break;
+        case "message_end":
+          handlers.onMessageEnd?.();
+          break;
+        case "turn_hint":
+          handlers.onTurnHint?.(data.final === true);
           break;
         case "message_reset":
           handlers.onMessageReset?.();

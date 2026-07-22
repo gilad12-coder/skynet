@@ -4,7 +4,13 @@ import * as React from "react";
 import { Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
 
 import { Button } from "@/shared/ui/primitives/button";
-import { AgentThread, ChatTranscript, Composer, QuestionChoices } from "@/shared/ui/agent";
+import {
+  AgentThread,
+  ChatTranscript,
+  Composer,
+  QuestionChoices,
+  QuestionChoicesSkeleton,
+} from "@/shared/ui/agent";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import type { CodeInterviewState } from "@/shared/hooks/use-code-interview";
@@ -91,6 +97,9 @@ export function CodeInterviewPanel({ interview, className }: Props) {
               hint={msg("submit.code.interview.choices_hint")}
               ariaLabel={msg("submit.code.interview.choices_label")}
             />
+          )}
+          {!interview.error && interview.busy && interview.pending === "options" && (
+            <QuestionChoicesSkeleton />
           )}
 
           <Composer

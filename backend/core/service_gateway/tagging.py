@@ -132,9 +132,13 @@ class InterviewTurnSig(dspy.Signature):
     Y when ..."), not process. Whenever the question has a small set of likely
     answers, offer 2-4 of them in ``options_json`` — each a short pickable
     answer with a one-line description of what choosing it means — so the user
-    can answer in one click. The UI always adds a free-text field, so never
-    add an "other" / "something else" option yourself. Write ``message``, the
-    options and the rubric in ``reply_language``.
+    can answer in one click. Every option must be a concrete, self-contained
+    answer. The composer under the options is always the free-text path, so
+    never spend an option on an escape hatch — no "other", "something else",
+    "none of these", "I use my own ...", or any rewording whose real meaning
+    is "I'll type it below"; when only escape hatches would fill the list,
+    offer fewer options or ask an open question instead. Write ``message``,
+    the options and the rubric in ``reply_language``.
     """
 
     task_description: str = dspy.InputField(desc="What is being labeled and the allowed labels.")
