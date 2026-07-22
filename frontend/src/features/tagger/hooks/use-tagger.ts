@@ -125,6 +125,10 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
   );
   const [currentIndex, setCurrentIndex] = useState(initialSession?.current_index ?? 0);
   const [sessionId, setSessionId] = useState<string | null>(initialSession?.id ?? null);
+  // A shared-in viewer's session is read-only server-side: progress is never
+  // buffered for autosave (the PUT would be rejected below editor) and row
+  // navigation spans the full dataset rather than any active round frame.
+  const readOnly = initialSession?.role === "viewer";
 
   // Transient AI-call states — never persisted.
   const [interviewBusy, setInterviewBusy] = useState(false);
@@ -274,14 +278,14 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
   // dataset. While the bulk job runs the server owns the row, so nothing is
   // buffered (the PUT would be rejected with 409 anyway).
   useEffect(() => {
-    if (!sessionId || phase === "setup" || phase === "autotagging") return;
+    if (!sessionId || readOnly || phase === "setup" || phase === "autotagging") return;
     pendingRef.current = {
       annotations: annotations as unknown as Record<string, unknown>,
       assist: (assist as unknown as Record<string, unknown>) ?? undefined,
       current_index: currentIndex,
       phase,
     };
-  }, [sessionId, annotations, assist, currentIndex, phase]);
+  }, [sessionId, readOnly, annotations, assist, currentIndex, phase]);
 
   // Write any buffered progress to the server. Best-effort: on failure the
   // payload is re-armed (unless a newer edit already replaced it) so the next
@@ -382,10 +386,11 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
   }, [assist]);
 
   const frameIds: string[] | null = useMemo(() => {
+    if (readOnly) return null;
     if (phase === "calibration") return assist?.calibrationIds ?? null;
     if (phase === "review") return openRound?.rowIds ?? null;
     return null;
-  }, [phase, assist, openRound]);
+  }, [readOnly, phase, assist, openRound]);
 
   const frameData: DataRow[] = useMemo(() => {
     if (!frameIds) return data;
