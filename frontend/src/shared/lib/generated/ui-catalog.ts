@@ -1845,12 +1845,14 @@ export type MessageKey =
   | "dashboard.role_short.owner"
   | "dashboard.role_short.viewer"
   | "dashboard.stat.shared"
+  | "data.tabs.sessions"
   | "datasets.action.clone"
   | "datasets.action.delete"
   | "datasets.action.edit"
   | "datasets.action.preview"
   | "datasets.action.rename"
   | "datasets.action.share"
+  | "datasets.action.tag"
   | "datasets.count.columns"
   | "datasets.count.rows"
   | "datasets.delete.body"
@@ -2364,6 +2366,7 @@ export type MessageKey =
   | "sidebar.link.copied"
   | "sidebar.mine.empty"
   | "sidebar.mine.empty.hint"
+  | "sidebar.nav.data"
   | "sidebar.nav.datasets"
   | "sidebar.nav.explore"
   | "sidebar.pin.off"
@@ -4542,7 +4545,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "auto.features.tutorial.lib.steps.template.40": "במקום להריץ {p1} אחד, סריקה משווה כמה {p2} של {p3} × {p4} על אותה {p5}. כל שורה היא {p6}: מימין {p7} האיכות, ובאמצע זמן התגובה הממוצע. הזוג המוביל הוא זה שקיבל את ציון האיכות הגבוה ביותר ומסומן בכתר.",
   "auto.features.tutorial.lib.steps.template.41": "פרטי {p1} {p2}",
   "auto.features.tutorial.lib.steps.template.42": "לחיצה על {p1} פותחת תצוגה מפורטת: {p2} לפני ואחרי, ה{p3} ב{p4}, משך הריצה, מספר הקריאות ל{p5} וגרף ההתקדמות.",
-  "auto.features.tutorial.lib.steps.template.43": "כלי לתיוג {p1}ים ישירות במערכת. העלה/העלי קובץ CSV, JSON או Excel, בחר/י מצב תיוג, ותייג/תייגי שורה אחרי שורה. בסיום אפשר לייצא את התוצאות.",
+  "auto.features.tutorial.lib.steps.template.43": "כלי לתיוג {p1}ים ישירות במערכת. הוא נמצא כאן תחת נתונים, לצד ספריית הדאטאסטים. העלה/העלי קובץ CSV, JSON או Excel — או בחר/י דאטאסט מהספרייה — בחר/י מצב תיוג, ותייג/תייגי שורה אחרי שורה. בסיום אפשר לייצא את התוצאות.",
   "auto.features.tutorial.lib.steps.template.44": "עכשיו אתה/את מכיר/ה את היכולות המרכזיות של Skynet. הגש/הגישי {p1} ראשונה, עקוב/עקבי אחרי ה{p2} בזמן אמת, ובדוק/בדקי את הפרומפט המשופר בלשונית שימוש.",
   "auto.features.tutorial.lib.steps.template.45": "Predict שולח את הקלט ישירות ל{p1} ומקבל תשובה. Chain of Thought מוסיף שדה חשיבה לפני הפלט, כדי שה{p2} יפרט את דרך הפתרון לפני התוצאה. ReAct מתאים למשימות שדורשות כלים: הסוכן משלב חשיבה עם קריאות לכלים בלולאה עד שהוא מגיע לתשובה.",
   "auto.features.tutorial.lib.steps.template.46": "גרף ביצועים שמציג לכל ריצה את {p1} כאיכות מנורמלת, ולצדו מהירות יחסית כשיש נתוני זמן. מתחתיו טבלה שמשווה את {p2} מול ה{p3} לכל ריצה.",
@@ -4725,12 +4728,14 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "dashboard.role_short.owner": "בעלים",
   "dashboard.role_short.viewer": "צופה",
   "dashboard.stat.shared": "משותפים",
+  "data.tabs.sessions": "סשני תיוג",
   "datasets.action.clone": "שמור/שמרי עותק",
   "datasets.action.delete": "מחק/י",
   "datasets.action.edit": "עריכת נתונים",
   "datasets.action.preview": "פתח/פתחי תצוגה",
   "datasets.action.rename": "שנה/שני שם",
   "datasets.action.share": "שתף/שתפי",
+  "datasets.action.tag": "תיוג הדאטאסט",
   "datasets.count.columns": "{count} עמודות",
   "datasets.count.rows": "{count} שורות",
   "datasets.delete.body": "הפעולה תמחק לצמיתות את הדאטאסט הזה מהספרייה. לא ניתן לבטל פעולה זו.",
@@ -5244,6 +5249,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "sidebar.link.copied": "קישור הועתק",
   "sidebar.mine.empty": "עדיין אין כאן ריצות",
   "sidebar.mine.empty.hint": "הריצה הראשונה שלכם תופיע כאן",
+  "sidebar.nav.data": "נתונים",
   "sidebar.nav.datasets": "דאטאסטים",
   "sidebar.nav.explore": "חיפוש",
   "sidebar.pin.off": "ההצמדה בוטלה",
@@ -12995,7 +13001,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "auto.features.tutorial.lib.steps.template.40": "Instead of running a single {p1}, a grid search compares several {p2} of {p3} × {p4} on the same {p5}. Each row is a {p6}: on the right the quality {p7}, and in the middle the average response time. The leading pair is the one that got the highest quality score and is marked with a crown.",
   "auto.features.tutorial.lib.steps.template.41": "{p1} {p2} details",
   "auto.features.tutorial.lib.steps.template.42": "Clicking a {p1} opens a detailed view: {p2} before and after, the {p3} in {p4}, the run duration, the number of {p5} calls, and the progress chart.",
-  "auto.features.tutorial.lib.steps.template.43": "A tool for labeling {p1}s directly in the system. Upload a CSV, JSON, or Excel file, choose a labeling mode, and label row by row. When you're done you can export the results.",
+  "auto.features.tutorial.lib.steps.template.43": "A tool for labeling {p1}s directly in the system. It lives here under Data, next to your dataset library. Upload a CSV, JSON, or Excel file — or pick a library dataset — choose a labeling mode, and label row by row. When you're done you can export the results.",
   "auto.features.tutorial.lib.steps.template.44": "Now you know Skynet's main capabilities. Submit your first {p1}, follow the {p2} in real time, and test the optimized prompt in the Usage tab.",
   "auto.features.tutorial.lib.steps.template.45": "Predict sends the input directly to the {p1} and gets a prediction. Chain of Thought adds a reasoning field before the output, so the {p2} lays out its reasoning before the result. ReAct suits tasks that require tools: the agent combines reasoning with tool calls in a loop until it reaches an answer.",
   "auto.features.tutorial.lib.steps.template.46": "A performance chart that shows, for each run, the {p1} as normalized quality, alongside relative speed when time data is available. Below it, a table comparing {p2} against the {p3} for each run.",
@@ -13178,12 +13184,14 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "dashboard.role_short.owner": "Owner",
   "dashboard.role_short.viewer": "Viewer",
   "dashboard.stat.shared": "Shared",
+  "data.tabs.sessions": "Labeling sessions",
   "datasets.action.clone": "Save a copy",
   "datasets.action.delete": "Delete",
   "datasets.action.edit": "Edit data",
   "datasets.action.preview": "Open preview",
   "datasets.action.rename": "Rename",
   "datasets.action.share": "Share",
+  "datasets.action.tag": "Tag this dataset",
   "datasets.count.columns": "{count} columns",
   "datasets.count.rows": "{count} rows",
   "datasets.delete.body": "This permanently deletes this dataset from your library. This action cannot be undone.",
@@ -13697,6 +13705,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "sidebar.link.copied": "Link copied",
   "sidebar.mine.empty": "No runs here yet",
   "sidebar.mine.empty.hint": "Your first run will appear here",
+  "sidebar.nav.data": "Data",
   "sidebar.nav.datasets": "Datasets",
   "sidebar.nav.explore": "Explore",
   "sidebar.pin.off": "Unpinned",

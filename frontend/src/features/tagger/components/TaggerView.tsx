@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, List } from "lucide-react";
 import type { TaggerSessionDetail } from "@/shared/lib/api";
 import { Button } from "@/shared/ui/primitives/button";
+import { DataHubTabs } from "@/shared/ui/data-hub-tabs";
 import { msg } from "@/shared/lib/messages";
 import { useTagger } from "../hooks/use-tagger";
 import { TaggerResultsTable } from "./TaggerResultsTable";
@@ -27,8 +28,22 @@ export function TaggerView({ initialSession }: { initialSession?: TaggerSessionD
   // surprise scene change mid-flip) — the overview is one click away instead.
   const [focusRow, setFocusRow] = useState(() => !allLabeled);
 
+  // "Tag this dataset" deep links (/tagger?dataset=…) skip the session chooser
+  // straight into setup, which loads the referenced dataset itself. Applied in
+  // an effect (not the state initializer) so SSR and first client paint agree.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("dataset")) setStartingNew(true);
+  }, []);
+
   if (!initialSession && !startingNew) {
-    return <TaggingSessionsPanel onStartNew={() => setStartingNew(true)} />;
+    // The app shell gives /tagger the full viewport for the annotation surface;
+    // the chooser is a list page, so cap it to match the datasets tab.
+    return (
+      <div className="mx-auto w-full max-w-7xl">
+        <DataHubTabs active="sessions" />
+        <TaggingSessionsPanel onStartNew={() => setStartingNew(true)} />
+      </div>
+    );
   }
 
   // Sessions saved at /tagger/[id] navigate back as a plain link; a session

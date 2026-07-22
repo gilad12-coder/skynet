@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { CopyPlus, Database, Loader2, Pencil, Table2, Trash2 } from "lucide-react";
+import { CopyPlus, Database, Loader2, Pencil, Table2, Tags, Trash2 } from "lucide-react";
 import { toast } from "react-toastify";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Button } from "@/shared/ui/primitives/button";
@@ -180,6 +180,19 @@ export function DatasetCard({
         </div>
 
         <div className="flex shrink-0 items-center gap-1" onClick={stop}>
+          <TooltipButton tooltip={msg("datasets.action.tag")}>
+            <Button
+              asChild
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground hover:text-foreground"
+              aria-label={msg("datasets.action.tag")}
+            >
+              <Link href={`/tagger?dataset=${dataset.id}&name=${encodeURIComponent(dataset.name)}`}>
+                <Tags className="size-4" />
+              </Link>
+            </Button>
+          </TooltipButton>
           {canEdit && (
             <TooltipButton tooltip={msg("datasets.action.edit")}>
               <Button

@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shared/ui/primitives/dialog";
+import { DataHubTabs } from "@/shared/ui/data-hub-tabs";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { SearchField } from "@/shared/ui/search-field";
 import { SelectionBar } from "@/shared/ui/selection-bar";
@@ -170,10 +171,18 @@ export function DatasetsView() {
     [uploading, refetch],
   );
 
-  if (loading) return <DatasetsSkeleton />;
+  if (loading) {
+    return (
+      <div className="pb-16">
+        <DataHubTabs active="datasets" />
+        <DatasetsSkeleton />
+      </div>
+    );
+  }
 
   return (
     <div className="pb-16">
+      <DataHubTabs active="datasets" />
       <input
         ref={fileInputRef}
         type="file"
