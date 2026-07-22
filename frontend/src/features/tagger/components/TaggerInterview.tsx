@@ -681,7 +681,7 @@ function RubricCard({
               // sliced-glyph artifacts; the aria-label still names the action.
               // The content stays in the tree so widening the rail is a
               // class-level change.
-              "group relative flex w-[50px] cursor-pointer flex-col items-center justify-center gap-4 overflow-hidden",
+              "group relative flex w-[100px] cursor-pointer flex-col items-center justify-center gap-4 overflow-hidden",
               "rounded-2xl bg-primary py-8 text-base font-semibold text-primary-foreground",
               "transition-all duration-300 hover:scale-[1.01] hover:shadow-[0_0_30px_rgba(61,46,34,0.35)]",
               "active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60",
