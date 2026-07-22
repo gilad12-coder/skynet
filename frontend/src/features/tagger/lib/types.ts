@@ -1,3 +1,5 @@
+import type { ModelConfig } from "@/shared/types/api";
+
 export type AnnotationMode = "binary" | "multiclass" | "freetext";
 
 export interface Category {
@@ -103,6 +105,13 @@ export interface AssistState {
    * bulk job alike. Absent means the server's default tagging model.
    */
   model?: string;
+  /**
+   * Sampling parameters saved with the chosen model from the shared model
+   * config dialog (temperature, max_tokens, top_p, extra.reasoning_effort).
+   * Only ever present alongside ``model``; the server merges them into the
+   * tagging LM the same way optimizations do.
+   */
+  modelParams?: Omit<ModelConfig, "name">;
   /**
    * Only sessions saved before AI-first calibration carry this; it steers the
    * legacy human-first calibration phase, which new sessions never enter.

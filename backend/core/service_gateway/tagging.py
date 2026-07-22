@@ -53,12 +53,50 @@ def assist_model_name() -> str:
     return settings.tagger_assist_model or settings.generalist_agent_model
 
 
-def _build_assist_lm(model_name: str | None = None) -> dspy.LM:
+# Reasoning-effort levels the shared model-config dialog offers.
+_REASONING_EFFORT_LEVELS = frozenset({"minimal", "low", "medium", "high"})
+
+
+def _sanitize_model_params(params: Any) -> dict[str, Any]:
+    """Reduce stored model params to the sampling knobs tagging honors.
+
+    ``assist`` is a free-form JSON column any API caller can write, so only
+    temperature, max_tokens, top_p and the reasoning-effort extra pass
+    through — coerced and clamped to the ``ModelConfig`` bounds — and
+    connection fields (endpoints, keys, arbitrary LiteLLM kwargs) never
+    reach the tagging LM.
+
+    Args:
+        params: The ``modelParams`` mapping stored on the assist state.
+
+    Returns:
+        Keyword arguments safe to construct a :class:`ModelConfig` with.
+    """
+    if not isinstance(params, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key, low, high in (("temperature", 0.0, 2.0), ("top_p", 0.0, 1.0)):
+        value = params.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            out[key] = min(high, max(low, float(value)))
+    tokens = params.get("max_tokens")
+    if isinstance(tokens, (int, float)) and not isinstance(tokens, bool) and int(tokens) >= 1:
+        out["max_tokens"] = int(tokens)
+    extra = params.get("extra")
+    effort = extra.get("reasoning_effort") if isinstance(extra, dict) else None
+    if isinstance(effort, str) and effort.lower() in _REASONING_EFFORT_LEVELS:
+        out["extra"] = {"reasoning_effort": effort.lower()}
+    return out
+
+
+def _build_assist_lm(model_name: str | None = None, params: dict[str, Any] | None = None) -> dspy.LM:
     """Build the assist LM from settings, mirroring the generalist agent.
 
     Args:
         model_name: LiteLLM model id to run on; falls back to the configured
             tagging-assist model (then the generalist agent's) when empty.
+        params: Sampling parameters saved alongside the chosen model
+            (``assist.modelParams``); sanitized before use.
 
     Returns:
         A cache-disabled ``dspy.LM`` on the requested model.
@@ -66,6 +104,7 @@ def _build_assist_lm(model_name: str | None = None) -> dspy.LM:
     config = ModelConfig(
         name=model_name or assist_model_name(),
         base_url=settings.tagger_assist_base_url or settings.generalist_agent_base_url or None,
+        **_sanitize_model_params(params),
     )
     return build_language_model(apply_model_reasoning_config(config), disable_cache=True)
 
@@ -220,9 +259,10 @@ def effective_task_config(config: dict[str, Any], assist: dict[str, Any]) -> dic
     The ``config`` column never changes after creation; the interview's
     refinements — question, categories, prompt and, on provisional-mode
     sessions, the inferred answer style — live in ``assist.taskOverride``.
-    The user's chosen tagging model (``assist.model``) rides along the same
-    way, so predictions, estimates and the bulk worker all see one merged
-    view. Every LLM surface (router routes and the bulk worker alike) reads
+    The user's chosen tagging model (``assist.model``) and its saved
+    sampling parameters (``assist.modelParams``) ride along the same way, so
+    predictions, estimates and the bulk worker all see one merged view.
+    Every LLM surface (router routes and the bulk worker alike) reads
     through this merge.
 
     Args:
@@ -250,6 +290,9 @@ def effective_task_config(config: dict[str, Any], assist: dict[str, Any]) -> dic
     model = str((assist or {}).get("model") or "").strip()
     if model:
         merged["model"] = model
+        params = (assist or {}).get("modelParams")
+        if isinstance(params, dict) and params:
+            merged["modelParams"] = params
     return merged
 
 
@@ -872,7 +915,8 @@ def predict_rows(
 
     Args:
         config: The session's effective config; when it carries the user's
-            chosen tagging model (``model``), predictions run on it.
+            chosen tagging model (``model``) and its saved sampling
+            parameters (``modelParams``), predictions run on them.
         instructions: Compiled tagging instructions.
         rows: Row payloads (each needs ``id`` and ``text``).
         on_batch: Called with each completed batch's predictions (bulk-job
@@ -883,7 +927,7 @@ def predict_rows(
         ``(predictions, credits)`` — the merged ``{row_id: prediction}`` map
         and the credit cost of the LM calls actually made.
     """
-    lm = _build_assist_lm(str(config.get("model") or "").strip() or None)
+    lm = _build_assist_lm(str(config.get("model") or "").strip() or None, config.get("modelParams"))
     prepared = [{"id": str(r.get("id")), "text": _row_text(r)} for r in rows]
     batches = [prepared[i : i + BATCH_SIZE] for i in range(0, len(prepared), BATCH_SIZE)]
     merged: dict[str, dict[str, Any]] = {}

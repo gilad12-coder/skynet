@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Binary,
@@ -31,12 +31,14 @@ import {
 } from "@/shared/ui/agent";
 import type { AgentMessage, AgentThinking } from "@/shared/ui/agent";
 import type { InterviewOption } from "@/shared/lib/api";
-import { ModelPickerDialog } from "@/features/submit";
+import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
+import type { CatalogModel, ModelConfig } from "@/shared/types/api";
+import { ModelConfigModal } from "@/features/submit";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import type { AutotagEstimate } from "../hooks/use-tagger";
-import { calibrationTarget } from "../lib/assist";
+import { assistModelConfig, calibrationTarget } from "../lib/assist";
 import type { AnnotationMode, AssistState, Category, TaggerConfig } from "../lib/types";
 
 /**
@@ -77,8 +79,8 @@ interface Props {
   rowCount: number;
   estimate: AutotagEstimate | null;
   onFetchEstimate: () => void;
-  /** Persist the picked tagging model on the session's assist state. */
-  onSetModel: (model: string) => void;
+  /** Persist the picked tagging model config on the session's assist state. */
+  onSetModel: (config: ModelConfig) => void;
   onSend: (content: string) => void;
   onEditResend: (index: number, content: string) => void;
   onStop: () => void;
@@ -361,7 +363,7 @@ function RubricCard({
   rowCount: number;
   estimate: AutotagEstimate | null;
   onFetchEstimate: () => void;
-  onSetModel: (model: string) => void;
+  onSetModel: (config: ModelConfig) => void;
   onConfirm: (rubric: string[], task: TaskContract) => void;
 }) {
   const autopilot = assist.mode === "autopilot";
@@ -371,6 +373,10 @@ function RubricCard({
   useEffect(() => {
     if (autopilot) onFetchEstimate();
   }, [autopilot, onFetchEstimate, assist.model]);
+  // Stable identity per assist snapshot: the model dialog resyncs its draft
+  // whenever this prop changes, so an inline object would reset an open
+  // dialog on any unrelated re-render (e.g. the estimate arriving).
+  const modelConfig = useMemo(() => assistModelConfig(assist), [assist]);
   const [mode, setMode] = useState<AnnotationMode>(config.mode);
   // The inferred question isn't edited here — it rides through the confirm
   // untouched; the rubric rules are the editable surface of the task.
@@ -445,6 +451,23 @@ function RubricCard({
   // then the confirm flips the phase and the next screen is revealed under it.
   const [launching, setLaunching] = useState(false);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
+  // Managed catalog for the model dialog's thinking detection and the chip's
+  // vision badge — same source the submit wizard feeds it.
+  const [catalogModels, setCatalogModels] = useState<CatalogModel[] | null>(
+    cachedCatalog()?.models ?? null,
+  );
+  useEffect(() => {
+    if (catalogModels) return;
+    let cancelled = false;
+    getModelCatalog()
+      .then((c) => {
+        if (!cancelled) setCatalogModels(c.models);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogModels]);
   const launch = () => {
     if (launching) return;
     setLaunching(true);
@@ -584,18 +607,20 @@ function RubricCard({
             </CardHeader>
             <CardContent>
               <ModelChip
-                config={{ name: assist.model ?? "" }}
+                config={modelConfig}
                 emptyLabel={msg("tagger.assist.model.placeholder")}
+                catalogModels={catalogModels ?? undefined}
                 onClick={() => setModelDialogOpen(true)}
-                onRemove={assist.model ? () => onSetModel("") : undefined}
+                onRemove={assist.model ? () => onSetModel({ name: "" }) : undefined}
               />
-              <ModelPickerDialog
+              <ModelConfigModal
                 open={modelDialogOpen}
                 onOpenChange={setModelDialogOpen}
-                value={assist.model ?? ""}
-                onChange={onSetModel}
-                title={msg("tagger.assist.model.title")}
-                description={msg("tagger.assist.model.hint")}
+                config={modelConfig}
+                onSave={onSetModel}
+                roleLabel={msg("tagger.assist.model.title")}
+                catalogModels={catalogModels ?? undefined}
+                showConnection={false}
               />
             </CardContent>
           </Card>

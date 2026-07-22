@@ -23,6 +23,7 @@ import {
   refreshRecentSession,
 } from "@/shared/lib/recent-session";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
+import type { ModelConfig } from "@/shared/types/api";
 import type { AgentThinking } from "@/shared/ui/agent";
 import { streamInterviewTurn } from "../lib/assist-stream";
 import type {
@@ -40,6 +41,7 @@ import type {
 import {
   REVIEW_BATCH_SIZE,
   agreementOver,
+  assistModelPatch,
   calibrationTarget,
   flaggedRowIds,
   initialAssistState,
@@ -192,7 +194,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
       rows: DataRow[],
       cols: string[],
       assistMode: TaggerAssistMode = "manual",
-      assistModel?: string,
+      assistModel?: ModelConfig,
     ) => {
       const startPhase: TaggerPhase = assistMode === "manual" ? "annotating" : "interview";
       const startAssist =
@@ -349,9 +351,10 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
   // The ref is mirrored synchronously (not just via the effect) so a
   // flush-then-call sequence fired in the same tick — fetching a fresh
   // estimate right after a pick — already sends the new model.
-  const setAssistModel = useCallback((model: string) => {
-    setAssist((prev) => (prev ? { ...prev, model } : prev));
-    if (assistRef.current) assistRef.current = { ...assistRef.current, model };
+  const setAssistModel = useCallback((config: ModelConfig) => {
+    const patch = assistModelPatch(config);
+    setAssist((prev) => (prev ? { ...prev, ...patch } : prev));
+    if (assistRef.current) assistRef.current = { ...assistRef.current, ...patch };
   }, []);
 
   // ---------------------------------------------------------------- frames

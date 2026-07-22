@@ -28,8 +28,10 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
 import { parseDatasetFile } from "@/shared/lib/parse-dataset";
 import { getDatasetRows } from "@/shared/lib/api";
+import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
+import type { CatalogModel, ModelConfig } from "@/shared/types/api";
 import { registerTutorialHook, registerTutorialQuery } from "@/features/tutorial";
-import { ModelPickerDialog } from "@/features/submit";
+import { ModelConfigModal } from "@/features/submit";
 import { DatasetPickerDialog } from "@/features/datasets";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { useUserPrefs } from "@/features/settings";
@@ -51,7 +53,7 @@ interface TaggerSetupProps {
     rows: DataRow[],
     columns: string[],
     assistMode?: TaggerAssistMode,
-    assistModel?: string,
+    assistModel?: ModelConfig,
   ) => void;
 }
 
@@ -156,9 +158,26 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<AnnotationMode | null>(null);
   const [assistMode, setAssistMode] = useState<TaggerAssistMode>("copilot");
-  // Empty = the server's default tagging model.
-  const [assistModel, setAssistModel] = useState("");
+  // Empty name = the server's default tagging model.
+  const [assistModel, setAssistModel] = useState<ModelConfig>({ name: "" });
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
+  // Managed catalog for the model dialog's thinking detection and the chip's
+  // vision badge — same source the submit wizard feeds it.
+  const [catalogModels, setCatalogModels] = useState<CatalogModel[] | null>(
+    cachedCatalog()?.models ?? null,
+  );
+  useEffect(() => {
+    if (catalogModels) return;
+    let cancelled = false;
+    getModelCatalog()
+      .then((c) => {
+        if (!cancelled) setCatalogModels(c.models);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogModels]);
   const [libraryName, setLibraryName] = useState<string | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -378,7 +397,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
       mapped,
       parsedCols,
       effectiveAssistMode,
-      effectiveAssistMode === "manual" ? undefined : assistModel.trim() || undefined,
+      effectiveAssistMode === "manual" || !assistModel.name.trim() ? undefined : assistModel,
     );
   };
 
@@ -673,18 +692,20 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
               <p className="text-sm font-medium">{msg("tagger.assist.model.title")}</p>
               <p className="text-xs text-muted-foreground">{msg("tagger.assist.model.hint")}</p>
               <ModelChip
-                config={{ name: assistModel }}
+                config={assistModel}
                 emptyLabel={msg("tagger.assist.model.placeholder")}
+                catalogModels={catalogModels ?? undefined}
                 onClick={() => setModelDialogOpen(true)}
-                onRemove={assistModel ? () => setAssistModel("") : undefined}
+                onRemove={assistModel.name ? () => setAssistModel({ name: "" }) : undefined}
               />
-              <ModelPickerDialog
+              <ModelConfigModal
                 open={modelDialogOpen}
                 onOpenChange={setModelDialogOpen}
-                value={assistModel}
-                onChange={setAssistModel}
-                title={msg("tagger.assist.model.title")}
-                description={msg("tagger.assist.model.hint")}
+                config={assistModel}
+                onSave={setAssistModel}
+                roleLabel={msg("tagger.assist.model.title")}
+                catalogModels={catalogModels ?? undefined}
+                showConnection={false}
               />
             </div>
           )}
