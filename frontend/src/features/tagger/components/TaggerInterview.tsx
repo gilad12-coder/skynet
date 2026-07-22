@@ -576,8 +576,10 @@ function RubricCard({
           </Card>
 
           {/* Sits above the guide so the picker's dropdown opens over content
-              instead of extending the column's scroll area. */}
-          <Card className="shrink-0">
+              instead of extending the column's scroll area. z-10 makes that
+              real: without it the cards below — stacking contexts via the
+              card's backdrop-blur — would paint over the open dropdown. */}
+          <Card className="z-10 shrink-0">
             <CardHeader>
               <CardTitle className="text-base">{msg("tagger.assist.model.title")}</CardTitle>
               <CardDescription>{msg("tagger.assist.model.hint")}</CardDescription>

@@ -11,7 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Check,
-  Database,
+  Library,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/shared/ui/primitives/button";
@@ -27,9 +27,10 @@ import { cn } from "@/shared/lib/utils";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
 import { parseDatasetFile } from "@/shared/lib/parse-dataset";
-import { getDatasetRows, listDatasets, type DatasetSummary } from "@/shared/lib/api";
+import { getDatasetRows } from "@/shared/lib/api";
 import { registerTutorialHook, registerTutorialQuery } from "@/features/tutorial";
 import { ModelPicker } from "@/features/submit";
+import { DatasetPickerDialog } from "@/features/datasets";
 import { useUserPrefs } from "@/features/settings";
 import type {
   AnnotationMode,
@@ -159,8 +160,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   const [assistModel, setAssistModel] = useState("");
   const [libraryName, setLibraryName] = useState<string | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(false);
-  const [libraryOptions, setLibraryOptions] = useState<DatasetSummary[]>([]);
-  const [pickedId, setPickedId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // Whether the user chose an approach themselves — an explicit pick must
   // never be overridden by the size-hint default below.
@@ -231,7 +231,6 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
     setError(null);
     setFile(f);
     setLibraryName(null);
-    setPickedId(null);
     try {
       const { columns, rows } = await parseDatasetFile(f);
       setParsedRows(rows as DataRow[]);
@@ -255,7 +254,6 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
       setParsedRows(detail.rows as DataRow[]);
       setParsedCols(detail.columns);
       setFile(null);
-      setPickedId(datasetId);
       setLibraryName(name || msg("tagger.setup.library_fallback_name"));
       const roles = detail.column_schema?.column_roles ?? {};
       const inputs = detail.columns.filter((c) => roles[c] === "input");
@@ -279,18 +277,6 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
     const datasetId = params.get("dataset");
     if (datasetId) void loadLibraryDataset(datasetId, params.get("name"));
   }, [loadLibraryDataset]);
-
-  useEffect(() => {
-    let alive = true;
-    listDatasets()
-      .then((res) => {
-        if (alive) setLibraryOptions(res.datasets);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -472,47 +458,27 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
         )}
         {error && <p className="text-sm text-destructive">{error}</p>}
 
-        {libraryOptions.length > 0 && (
-          <>
-            <div className="flex items-center gap-3">
-              <Separator className="flex-1" />
-              <span className="text-xs text-muted-foreground">
-                {msg("tagger.setup.library_or")}
-              </span>
-              <Separator className="flex-1" />
-            </div>
-            <div className="space-y-2">
-              <p className="text-sm font-medium">{msg("tagger.setup.library_pick")}</p>
-              <div className="max-h-44 space-y-1 overflow-y-auto">
-                {libraryOptions.map((ds) => {
-                  const selected = pickedId === ds.id;
-                  return (
-                    <button
-                      key={ds.id}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => void loadLibraryDataset(ds.id, ds.name)}
-                      className={cn(
-                        "flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-sm transition-all cursor-pointer",
-                        selected
-                          ? "bg-primary/10 border border-primary/40 text-primary font-medium"
-                          : "border border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                      )}
-                    >
-                      <Database className="size-3.5 shrink-0" />
-                      <span className="truncate min-w-0" dir="auto">
-                        {ds.name}
-                      </span>
-                      <span className="ms-auto shrink-0 text-xs text-muted-foreground">
-                        {formatMsg("datasets.count.rows", { count: ds.row_count })}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </>
-        )}
+        <div className="flex items-center gap-3">
+          <Separator className="flex-1" />
+          <span className="text-xs text-muted-foreground">{msg("tagger.setup.library_or")}</span>
+          <Separator className="flex-1" />
+        </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setPickerOpen(true)}
+          className="w-full justify-center gap-2"
+        >
+          <Library className="size-4" />
+          {msg("tagger.setup.library_pick")}
+        </Button>
+
+        <DatasetPickerDialog
+          open={pickerOpen}
+          onOpenChange={setPickerOpen}
+          onPick={(ds) => void loadLibraryDataset(ds.id, ds.name)}
+        />
 
         {parsedCols.length > 0 && (
           <>
@@ -818,8 +784,10 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
       </div>
 
       {/* x-clip (not hidden): the step slide animates horizontally only, and
-          the model picker's dropdown must escape the wrapper vertically. */}
-      <div className="relative overflow-x-clip pt-[10px]">
+          the model picker's dropdown must escape the wrapper vertically. z-10
+          lifts that dropdown over the footer button — the card's backdrop-blur
+          traps the dropdown's own z-index inside the card's stacking context. */}
+      <div className="relative z-10 overflow-x-clip pt-[10px]">
         <AnimatePresence mode="wait" custom={direction}>
           <motion.div
             key={step}

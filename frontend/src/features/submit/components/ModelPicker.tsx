@@ -328,7 +328,7 @@ export function ModelPicker({
             )}
           </div>
 
-          <div className="max-h-[120px] overflow-y-auto py-1">
+          <div className="max-h-60 overflow-y-auto py-1">
             {discoveryError && discoverUrl && (
               <div className="px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
                 {msg("auto.features.submit.components.modelpicker.2")}
