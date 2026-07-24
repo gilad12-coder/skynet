@@ -38,7 +38,7 @@ export function TtftIndicator() {
       role="status"
       aria-live="polite"
     >
-      <Ember reduce={Boolean(shouldReduceMotion)} />
+      <EmberGlyph reduce={Boolean(shouldReduceMotion)} />
       <span className="text-xs font-medium text-[#3D2E22]">{msg("shared.agent.thinking")}</span>
       {showTimer && (
         <motion.span
@@ -58,9 +58,11 @@ export function TtftIndicator() {
 }
 
 // The glyph: a warm-tan double ripple radiating from a brand-ink core that
-// breathes with a soft gold glow. It elevates the panel's existing `animate-ping`
-// halo language (see ThinkingIndicator) into a distinct, premium waiting moment.
-function Ember({ reduce }: { reduce: boolean }) {
+// breathes with a soft gold glow. It replaces the panel's flat `animate-ping`
+// halo (see ThinkingSection's ThinkingIndicator, which now reuses this) so the
+// whole pre-first-token wait — pure gap *and* reasoning — reads as one distinct,
+// premium Skynet moment rather than a plain pulsing dot.
+export function EmberGlyph({ reduce }: { reduce: boolean }) {
   if (reduce) {
     return (
       <span className="relative inline-flex size-4 items-center justify-center shrink-0" aria-hidden="true">
