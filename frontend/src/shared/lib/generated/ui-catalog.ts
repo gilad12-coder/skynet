@@ -370,6 +370,7 @@ export type MessageKey =
   | "auto.features.agent.panel.components.walletcard.free_grant"
   | "auto.features.agent.panel.components.walletcard.paid_balance"
   | "auto.features.agent.panel.components.walletcard.plan_free"
+  | "auto.features.agent.panel.components.walletcard.plan_label"
   | "auto.features.agent.panel.components.walletcard.plan_premium"
   | "auto.features.agent.panel.components.walletcard.recent"
   | "auto.features.agent.panel.components.walletcard.summary"
@@ -3340,6 +3341,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "auto.features.agent.panel.components.walletcard.free_grant": "מענק חינם",
   "auto.features.agent.panel.components.walletcard.paid_balance": "יתרה בתשלום",
   "auto.features.agent.panel.components.walletcard.plan_free": "חינם",
+  "auto.features.agent.panel.components.walletcard.plan_label": "מסלול",
   "auto.features.agent.panel.components.walletcard.plan_premium": "פרימיום",
   "auto.features.agent.panel.components.walletcard.recent": "פעילות אחרונה",
   "auto.features.agent.panel.components.walletcard.summary": "{p1} קרדיטים · {p2}",
@@ -11901,6 +11903,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "auto.features.agent.panel.components.walletcard.free_grant": "Free grant",
   "auto.features.agent.panel.components.walletcard.paid_balance": "Paid balance",
   "auto.features.agent.panel.components.walletcard.plan_free": "Free",
+  "auto.features.agent.panel.components.walletcard.plan_label": "Plan",
   "auto.features.agent.panel.components.walletcard.plan_premium": "Premium",
   "auto.features.agent.panel.components.walletcard.recent": "Recent activity",
   "auto.features.agent.panel.components.walletcard.summary": "{p1} credits · {p2}",
