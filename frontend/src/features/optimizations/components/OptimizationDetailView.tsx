@@ -22,8 +22,8 @@ import {
   Play,
   Pause,
   HardDrive,
-  Zap,
-  LayoutGrid,
+  Rocket,
+  Grid2x2,
 } from "lucide-react";
 import { toast } from "react-toastify";
 
@@ -1045,12 +1045,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 >
                   {job.optimization_type === "grid_search" ? (
                     <>
-                      <LayoutGrid />
+                      <Grid2x2 />
                       {msg("auto.app.optimizations.id.page.literal.2")}
                     </>
                   ) : (
                     <>
-                      <Zap />
+                      <Rocket />
                       {msg("auto.app.optimizations.id.page.literal.3")}
                     </>
                   )}
