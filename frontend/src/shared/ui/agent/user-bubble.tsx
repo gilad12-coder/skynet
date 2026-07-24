@@ -126,7 +126,7 @@ export function UserBubbleEditor({
           <button
             type="button"
             onClick={onCancel}
-            className="text-[0.6875rem] text-muted-foreground hover:text-foreground px-3 py-1 rounded-lg hover:bg-muted transition-colors cursor-pointer"
+            className="text-[0.6875rem] font-medium text-muted-foreground hover:text-foreground px-3 py-1 rounded-lg hover:bg-muted transition-all duration-150 cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3D2E22]/30 focus-visible:ring-offset-1"
           >
             {msg("shared.agent.cancel")}
           </button>
@@ -134,7 +134,7 @@ export function UserBubbleEditor({
             type="button"
             onClick={onSubmit}
             disabled={!value.trim() || disabled}
-            className="text-[0.6875rem] text-white bg-[#3D2E22] hover:bg-[#3D2E22]/90 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1 rounded-lg transition-colors cursor-pointer"
+            className="text-[0.6875rem] font-medium text-white bg-[#3D2E22] hover:bg-[#3D2E22]/90 shadow-sm px-3 py-1 rounded-lg transition-all duration-150 cursor-pointer active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3D2E22]/40 focus-visible:ring-offset-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:active:scale-100"
           >
             {msg("shared.agent.send")}
           </button>
