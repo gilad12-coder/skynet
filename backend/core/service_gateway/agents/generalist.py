@@ -50,8 +50,8 @@ from ..language_models import (
     build_language_model,
     served_model_from,
 )
+from ..optimization.retrying_react import RetryingReActV2
 from ..optimization.training_ground.registry import hash_tool_schema
-from ..react_compat import REACT_CLASS
 from .code import ReactReplyStream, _format_agent_error, _reply_language
 from .constants import REASONING_FIELD
 
@@ -84,7 +84,21 @@ def _build_generalist_lm() -> dspy.LM:
             base_url=settings.generalist_agent_base_url or None,
         )
     )
+    _apply_interactive_timeout(config)
     return build_language_model(config, disable_cache=True)
+
+
+def _apply_interactive_timeout(config: ModelConfig) -> None:
+    """Give a chat-turn LM an interactive timeout instead of the job-scale one.
+
+    ``build_language_model`` defaults to ``lm_request_timeout_seconds`` (sized
+    for batch optimization runs) with watchdog-derived retries — on a stalled
+    provider that is tens of minutes of dead air for a chat turn. ``extra``
+    merges over those defaults, so seed it with the chat-scale knobs unless the
+    caller pinned its own.
+    """
+    config.extra.setdefault("timeout", settings.agent_request_timeout_seconds)
+    config.extra.setdefault("num_retries", 2)
 
 
 logger = logging.getLogger(__name__)
@@ -121,6 +135,14 @@ _SAFE_MUTATIONS: frozenset[str] = frozenset(
         "bulk_pin_jobs_optimizations_bulk_pin_post",
     }
 )
+
+
+# Upper bound on how long a tool waits for the user's approval decision. The
+# registry is per-process, so a confirm POST that lands on another replica (or
+# a client that vanished) can never resolve the future — without a bound the
+# stream hangs forever with a spinning tool pill. Long enough for a human who
+# stepped away; on expiry the tool is treated as declined.
+APPROVAL_TIMEOUT_SECONDS = 900.0
 
 
 class ApprovalRegistry:
@@ -484,7 +506,13 @@ class _ApprovalGatedTool:
                     }
                 )
                 try:
-                    approved = await fut
+                    # Bounded wait: the confirm POST resolves an in-process
+                    # registry, so a confirm that lands on another replica (or
+                    # never arrives) would otherwise hang this stream forever.
+                    approved = await asyncio.wait_for(fut, timeout=APPROVAL_TIMEOUT_SECONDS)
+                except TimeoutError:
+                    self._registry.cancel(call_id)
+                    approved = False
                 except asyncio.CancelledError:
                     self._registry.cancel(call_id)
                     self._emit(
@@ -1544,7 +1572,11 @@ async def _drive_generalist_agent(
                 },
             }
         )
-        react = REACT_CLASS(GeneralistSig, tools=dspy_tools, max_iters=8)
+        # RetryingReActV2, not the stock class: the default generalist model is
+        # minimax-class, which occasionally breaks the turn protocol and raises
+        # AdapterParseError — the retrying loop resamples the turn instead of
+        # failing the whole chat reply.
+        react = RetryingReActV2(GeneralistSig, tools=dspy_tools, max_iters=8)
         # The user's ``assistant_message`` rides a ``submit`` tool call on ReActV2
         # or a separate ``extract`` predictor on classic ReAct; ``ReactReplyStream``
         # wires the right listeners and decodes whichever shape into reply deltas.
@@ -1656,7 +1688,9 @@ async def run_generalist_agent(
                     or None
                 }
             )
-            lm = build_language_model(apply_model_reasoning_config(override), disable_cache=True)
+            override = apply_model_reasoning_config(override)
+            _apply_interactive_timeout(override)
+            lm = build_language_model(override, disable_cache=True)
         else:
             lm = _build_generalist_lm()
     except ServiceError as exc:
