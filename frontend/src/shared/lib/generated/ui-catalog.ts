@@ -2727,6 +2727,92 @@ export type MessageKey =
   | "tagger.setup.library_or"
   | "tagger.setup.library_pick"
   | "tagger.upload.parse_failed"
+  | "tooltip.analytics.dataset_size_vs_improvement"
+  | "tooltip.analytics.improvement_per_minute"
+  | "tooltip.analytics.model_performance_table"
+  | "tooltip.analytics.optimizer_avg_improvement"
+  | "tooltip.analytics.optimizer_comparison_table"
+  | "tooltip.analytics.runtime_minutes"
+  | "tooltip.analytics.runtime_vs_gain"
+  | "tooltip.analytics.score_comparison"
+  | "tooltip.analytics.submissions_per_day"
+  | "tooltip.analytics.top_improvements"
+  | "tooltip.code.metric"
+  | "tooltip.code.predictions_table"
+  | "tooltip.code.signature"
+  | "tooltip.code.signature_metric"
+  | "tooltip.compare.winner_improvement"
+  | "tooltip.compare.winner_models"
+  | "tooltip.compare.winner_runtime"
+  | "tooltip.config.section.data"
+  | "tooltip.config.section.models"
+  | "tooltip.config.section.summary"
+  | "tooltip.data.seed"
+  | "tooltip.data.shuffle_explanation"
+  | "tooltip.data.split.test"
+  | "tooltip.data.split.train"
+  | "tooltip.data.split.val"
+  | "tooltip.data.split_explanation"
+  | "tooltip.grid.avg_response_time_per_pair"
+  | "tooltip.grid.best_pair_default"
+  | "tooltip.grid.generation_models"
+  | "tooltip.grid.quality_speed_combined"
+  | "tooltip.grid.reflection_models"
+  | "tooltip.grid.score_comparison"
+  | "tooltip.lm.avg_response_time"
+  | "tooltip.lm.calls_count"
+  | "tooltip.lm_activity.cell.avg_ms"
+  | "tooltip.lm_activity.cell.calls"
+  | "tooltip.lm_activity.column.generation"
+  | "tooltip.lm_activity.column.reflection"
+  | "tooltip.lm_activity.section"
+  | "tooltip.lm_activity.stage.baseline"
+  | "tooltip.lm_activity.stage.evaluation"
+  | "tooltip.lm_activity.stage.training"
+  | "tooltip.lm_activity.total_row"
+  | "tooltip.model.generation"
+  | "tooltip.model.reflection"
+  | "tooltip.model_config.api_key"
+  | "tooltip.model_config.base_url"
+  | "tooltip.model_config.connection_section"
+  | "tooltip.model_config.max_tokens"
+  | "tooltip.model_config.model"
+  | "tooltip.model_config.temperature"
+  | "tooltip.model_config.top_p"
+  | "tooltip.module.choice"
+  | "tooltip.module.cot"
+  | "tooltip.module.predict"
+  | "tooltip.module.react"
+  | "tooltip.module.workflow"
+  | "tooltip.optimizer.choice"
+  | "tooltip.pair.runtime"
+  | "tooltip.prompt.demonstrations"
+  | "tooltip.prompt.optimized"
+  | "tooltip.react.auth"
+  | "tooltip.react.mcp_url"
+  | "tooltip.react.optimized_tools"
+  | "tooltip.react.tool_source"
+  | "tooltip.score.baseline"
+  | "tooltip.score.improvement"
+  | "tooltip.score.logged_metrics"
+  | "tooltip.score.optimized"
+  | "tooltip.score.progression"
+  | "tooltip.serve.api_url_pair"
+  | "tooltip.serve.api_url_react"
+  | "tooltip.serve.api_url_run"
+  | "tooltip.serve.integration_code"
+  | "tooltip.serve.section_pair"
+  | "tooltip.serve.section_run"
+  | "tooltip.submit.depth"
+  | "tooltip.submit.eval_rounds"
+  | "tooltip.submit.merge"
+  | "tooltip.submit.reflection_minibatch"
+  | "tooltip.tagger.binary_question"
+  | "tooltip.tagger.freetext_instruction"
+  | "tooltip.tagger.mode"
+  | "tooltip.tagger.multiclass_categories"
+  | "tooltip.tagger.text_column"
+  | "tooltip.tagger.upload_file"
   | "trajectory.a11y.node_label"
   | "trajectory.a11y.tree_label"
   | "trajectory.chat.recorded_count"
@@ -5633,6 +5719,92 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "tagger.setup.library_or": "או",
   "tagger.setup.library_pick": "בחירה מהספרייה שלכם",
   "tagger.upload.parse_failed": "טעינת הקובץ נכשלה",
+  "tooltip.analytics.dataset_size_vs_improvement": "האם יותר נתונים מובילים ל{term.scoreImprovement} טוב יותר — כל נקודה היא {term.optimization} אחת",
+  "tooltip.analytics.improvement_per_minute": "אחוזי {term.scoreImprovement} לכל דקת {term.optimizationTypeRun} — ערך גבוה משמעו {term.optimization} יעילה יותר",
+  "tooltip.analytics.model_performance_table": "ביצועי המודלים השונים: תדירות שימוש ושיפור ממוצע",
+  "tooltip.analytics.optimizer_avg_improvement": "{term.scoreImprovement} ממוצע באחוזים שכל {term.optimizer} השיג על פני כל ה{term.optimizationTypeRunPlural}",
+  "tooltip.analytics.optimizer_comparison_table": "השוואה מפורטת בין ה{term.optimizerPlural}: שיפור ממוצע, מספר {term.optimizationTypeRunPlural}, וזמן {term.optimizationTypeRun}",
+  "tooltip.analytics.runtime_minutes": "משך ה{term.optimizationTypeRun} בדקות לכל {term.optimization} שהושלמה",
+  "tooltip.analytics.runtime_vs_gain": "ניתוח זמני {term.optimizationTypeRun} ויעילות — כמה שיפור מתקבל ביחס לזמן",
+  "tooltip.analytics.score_comparison": "השוואת {term.baselineScore} מול ה{term.optimizedScore} לכל {term.optimization} שהושלמה",
+  "tooltip.analytics.submissions_per_day": "מספר ה{term.optimizationPlural} שהוגשו לפי יום",
+  "tooltip.analytics.top_improvements": "ה{term.optimizationTypeRunPlural} שהשיגו את השיפור הגדול ביותר בציון, מהטוב לפחות טוב",
+  "tooltip.code.metric": "פונקציה שמודדת את איכות ה{term.prediction} — מחזירה {term.score} מספרי לכל {term.example}",
+  "tooltip.code.predictions_table": "תוצאות הרצת ה{term.program} על דוגמאות הבדיקה — {term.score} לכל {term.example} וסיכום כולל",
+  "tooltip.code.signature": "הגדרת שדות הקלט והפלט של ה{term.task} — מה ה{term.model} מקבל ומה הוא צריך להחזיר",
+  "tooltip.code.signature_metric": "קוד המקור של ה{term.signature} ו{term.metric} שהוגדרו ל{term.optimization} זו",
+  "tooltip.compare.winner_improvement": "אחוז ה{term.scoreImprovement} של ה{term.optimizationTypeRun} הזוכה — ההפרש בין ה{term.optimizedScore} ל{term.baselineScore}",
+  "tooltip.compare.winner_models": "זוג מודלי השפה של ה{term.optimizationTypeRun} הזוכה — {term.generationModel} שמייצר פלט, ו{term.reflectionModel} שמשפר את ההנחיות",
+  "tooltip.compare.winner_runtime": "משך הזמן הכולל של ה{term.optimizationTypeRun} הזוכה, מרגע השיגור ועד סיום ה{term.optimization}",
+  "tooltip.config.section.data": "חלוקת ה{term.dataset} ל{term.splitTrain}, {term.splitVal} ו{term.splitTest}, והגדרות ערבוב",
+  "tooltip.config.section.models": "מודלי השפה שהוגדרו — {term.generationModelShort} לייצור תשובות, מודל משוב לניתוח שגיאות",
+  "tooltip.config.section.summary": "ה{term.module}, ה{term.optimizer}, והפרמטרים שנבחרו ל{term.optimizationTypeRun} זו",
+  "tooltip.data.seed": "מספר התחלתי קבוע ששומר על אותה חלוקה ואותו ערבוב בכל הרצה חוזרת",
+  "tooltip.data.shuffle_explanation": "מערבב את סדר השורות לפני ה{term.split}, כדי שסדר הקובץ לא ישפיע בטעות על התוצאות",
+  "tooltip.data.split.test": "דוגמאות שמורות למדידה הסופית, אחרי שהפרומפט כבר נבחר",
+  "tooltip.data.split.train": "דוגמאות שה{term.optimizer} משתמש בהן כדי לבנות מועמדים לפרומפט",
+  "tooltip.data.split.val": "דוגמאות שמדרגות את המועמדים בזמן ה{term.optimization}",
+  "tooltip.data.split_explanation": "ה{term.dataset} מתחלק לשלושה חלקים: {term.splitTrain} ללמידה, {term.splitVal} לבחירת הפרומפט, ו{term.splitTest} למדידה סופית",
+  "tooltip.grid.avg_response_time_per_pair": "משך זמן ממוצע לכל קריאה למודל שפה, לפי זוג מודלים",
+  "tooltip.grid.best_pair_default": "ברירת מחדל: הזוג עם ציון האיכות הגבוה ביותר. ניתן להחליף לכל זוג אחר.",
+  "tooltip.grid.generation_models": "המודלים שמייצרים תשובות. כל {term.pair} בסריקה משתמש ב{term.generationModel} אחר",
+  "tooltip.grid.quality_speed_combined": "איכות ומהירות לכל זוג מודלים, זה לצד זה. ככל שהאיכות והמהירות גבוהות יותר, כך הזוג טוב יותר.",
+  "tooltip.grid.reflection_models": "המודלים שמנתחים שגיאות ומציעים שיפורים. כל {term.pair} משתמש ב{term.reflectionModel} אחר",
+  "tooltip.grid.score_comparison": "השוואת {term.baselineScore} וה{term.optimizedScore} לכל {term.pair} מודלים",
+  "tooltip.lm.avg_response_time": "הזמן הממוצע שלקח ל{term.model} לענות לכל קריאה",
+  "tooltip.lm.calls_count": "מספר הקריאות ל{term.model} השפה במהלך ה{term.optimization}",
+  "tooltip.lm_activity.cell.avg_ms": "הזמן הממוצע לקריאה בשלב הזה",
+  "tooltip.lm_activity.cell.calls": "מספר הקריאות שבוצעו בשלב הזה",
+  "tooltip.lm_activity.column.generation": "קריאות שבוצעו ל{term.generationModel} — המודל שמייצר תשובות",
+  "tooltip.lm_activity.column.reflection": "קריאות שבוצעו ל{term.reflectionModel} — המודל שמנתח שגיאות ומציע שיפורים",
+  "tooltip.lm_activity.section": "פעילות מודלי השפה לפי שלב — כמה קריאות בוצעו וכמה זמן לקחו, מה{term.generationModelShort} וממודל המשוב בנפרד",
+  "tooltip.lm_activity.stage.baseline": "קריאות שבוצעו בעת מדידת ה{term.baselineScore} — לפני שה{term.optimizer} התחיל לפעול",
+  "tooltip.lm_activity.stage.evaluation": "קריאות שבוצעו בעת מדידת ה{term.optimizedScore} — אחרי שה{term.optimization} הסתיימה",
+  "tooltip.lm_activity.stage.training": "קריאות שבוצעו במהלך ה{term.optimization} עצמה — כשהאופטימייזר בנה מועמדים לפרומפט",
+  "tooltip.lm_activity.total_row": "סך הכול הקריאות והזמן הממוצע על פני כל השלבים",
+  "tooltip.model.generation": "ה{term.model} שמייצר את התשובה בפועל בזמן ה{term.optimizationTypeRun}",
+  "tooltip.model.reflection": "ה{term.model} שבודק טעויות ומציע איך לשפר את ההנחיות במהלך ה{term.optimization}",
+  "tooltip.model_config.api_key": "מפתח גישה לשרת ה{term.model}. אופציונלי — אם ריק, נלקח ממשתנה סביבה. לא נשמר בשרת ונמחק מהטופס אחרי השליחה",
+  "tooltip.model_config.base_url": "כתובת לשרת תואם-OpenAI משלך — Ollama, vLLM, LM Studio או שער ארגוני. השאר/השאירי ריק כדי להשתמש בשרת ברירת המחדל של ה{term.provider}",
+  "tooltip.model_config.connection_section": "הרצת ה{term.model} על שרת משלך: נקודת קצה תואמת-OpenAI (Ollama, vLLM, LM Studio או שער ארגוני) ומפתח גישה. השאר/השאירי סגור כדי להשתמש בספקים המובנים",
+  "tooltip.model_config.max_tokens": "אורך ה{term.prediction} המקסימלי — טוקן הוא בערך מילה אחת",
+  "tooltip.model_config.model": "ה{term.model} שיריץ את ה{term.optimization}. בחר/י מ{term.modelCatalog}, או מודל מותאם אישית שהתגלה מכתובת ה-Base URL",
+  "tooltip.model_config.temperature": "מידת היצירתיות של ה{term.model} — ערך נמוך נותן תשובות עקביות, גבוה מגוון יותר",
+  "tooltip.model_config.top_p": "top_p (nucleus sampling): מגביל את מגוון המילים שה{term.model} שוקל — ערך נמוך ממקד, גבוה מאפשר יותר מגוון",
+  "tooltip.module.choice": "מודול DSPy הוא רכיב בתוכנית שמפעילה מודל שפה: הוא עוטף כל signature בטכניקת prompting ומגדיר את מבנה הקריאה למודל כדי להפיק את הפלט שמוגדר ב-signature. בתוך המסגרת הזו האופטימייזר מכוון את הפרמטרים הניתנים ללמידה של המודול, כמו הוראות ודוגמאות בפרומפט",
+  "tooltip.module.cot": "Chain of Thought — מוסיף שדה reasoning שמוביל את המודל לחשוב שלב-אחר-שלב לפני התשובה הסופית; לרוב משפר דיוק במשימות מורכבות",
+  "tooltip.module.predict": "Predict — המודול הבסיסי: ממפה את הקלט לפלט בקריאה אחת למודל, ללא שלבי ביניים",
+  "tooltip.module.react": "ReAct — סוכן שמשלב חשיבה עם קריאה לכלים (tools) בלולאה, עד שהוא מפיק את הפלט שב-signature",
+  "tooltip.module.workflow": "Workflow — גרף של כמה צעדים: Signatures, קוד Python וכלים המחוברים זה לזה בקנבס ויזואלי. האופטימיזציה משפרת את ההוראות של כל הצעדים יחד, מול מדד אחד על הפלט הסופי",
+  "tooltip.optimizer.choice": "השיטה שמנסה לשפר את הפרומפט ולמצוא גרסה עם {term.score} גבוה יותר",
+  "tooltip.pair.runtime": "משך {term.optimizationTypeRun} ה{term.optimization} עבור {term.pair} המודלים הזה",
+  "tooltip.prompt.demonstrations": "דוגמאות קלט-פלט (few-shot demonstrations) שמוצגות ל{term.model} כדי להראות לו את הפורמט והתשובה הרצויים",
+  "tooltip.prompt.optimized": "הפרומפט שה{term.optimizer} בנה: הנחיות משופרות ודוגמאות שנבחרו מתוך ה{term.dataset}",
+  "tooltip.react.auth": "כותרת אימות (Authorization header) לשרת ה-MCP. לא נשמרת בשרת ולא נחשפת לסוכן הצ'אט",
+  "tooltip.react.mcp_url": "כתובת שרת ה-MCP שממנו נטענים הכלים של הסוכן",
+  "tooltip.react.optimized_tools": "הכלים שהסוכן (ReAct) מפעיל בלולאה, עם התיאורים והארגומנטים שה{term.optimizer} חידד במהלך ה{term.optimization}",
+  "tooltip.react.tool_source": "מהיכן נטענת רשימת הכלים: שרת MCP חי, או תצלום כלים מתוך הדאטאסט",
+  "tooltip.score.baseline": "{term.baselineScore} לפני {term.optimization}: איך ה{term.program} הצליחה בלי פרומפט משופר או דוגמאות נבחרות",
+  "tooltip.score.improvement": "הפער בין ה{term.optimizedScore} ל{term.baselineScore}. ככל שהוא גדול יותר, ה{term.optimization} שיפרה יותר את התוצאה",
+  "tooltip.score.logged_metrics": "מדדים שה{term.metric} תיעדה עם log_metrics — למשל precision ו-recall — בממוצע על פני סט הבדיקה, לפני ואחרי ה{term.optimization}",
+  "tooltip.score.optimized": "{term.optimizedScore} אחרי {term.optimization}: איך ה{term.program} הצליחה עם הפרומפט והדוגמאות שנבחרו",
+  "tooltip.score.progression": "איך ה{term.score} השתנה מניסיון לניסיון בזמן שה{term.optimizer} חיפש פרומפט טוב יותר",
+  "tooltip.serve.api_url_pair": "כתובת ה-API של הזוג הנבחר",
+  "tooltip.serve.api_url_react": "כתובת ה-API שאליה שולחים בקשת POST עם הודעת המשתמש; תשובת סוכן ה-ReAct המותאם משודרת בחזרה בזרם SSE",
+  "tooltip.serve.api_url_run": "כתובת ה-API שאליה שולחים בקשות POST עם שדות הקלט כדי לקבל {term.prediction} מה{term.program} המשופרת",
+  "tooltip.serve.integration_code": "דוגמאות קוד מוכנות להעתקה",
+  "tooltip.serve.section_pair": "כתובת API וקטעי קוד לשילוב הזוג הנבחר באפליקציה שלך",
+  "tooltip.serve.section_run": "כתובת API וקטעי קוד לשילוב ה{term.program} המשופרת באפליקציה שלך",
+  "tooltip.submit.depth": "כמה רחב החיפוש של GEPA: קל רץ מהר עם פחות ניסיונות; מעמיק בודק יותר אפשרויות ולוקח יותר זמן",
+  "tooltip.submit.eval_rounds": "כמה פעמים להריץ הערכה מלאה כדי לבדוק מועמדים לפרומפט",
+  "tooltip.submit.merge": "כשפעיל, GEPA יכול לבצע merge ולשלב רעיונות מכמה מועמדים טובים לפרומפט אחד",
+  "tooltip.submit.reflection_minibatch": "כמה דוגמאות ה{term.model} בודק בכל סבב משוב כדי למצוא דפוסי שגיאה",
+  "tooltip.tagger.binary_question": "השאלה שתוצג מעל כפתורי כן/לא. כדאי לנסח שאלה שאפשר לענות עליה בבירור",
+  "tooltip.tagger.freetext_instruction": "ההנחיה שתוצג מעל שדה הטקסט. הסבר/הסבירי בקצרה מה צריך לכתוב",
+  "tooltip.tagger.mode": "בחר/י את סוג התיוג שמתאים למשימה: כן/לא, בחירה מרשימה או טקסט חופשי",
+  "tooltip.tagger.multiclass_categories": "הגדר/הגדירי את הקטגוריות הזמינות לבחירה בזמן התיוג — לפחות שתיים",
+  "tooltip.tagger.text_column": "בחר/י את העמודה שמכילה את הטקסט לתיוג. שאר העמודות יישמרו בייצוא",
+  "tooltip.tagger.upload_file": "העלה/העלי קובץ CSV, JSON או Excel. כל שורה תהפוך לפריט לתיוג",
   "trajectory.a11y.node_label": "מועמד {id}, דור {gen}, ציון {score}",
   "trajectory.a11y.tree_label": "עץ המועמדים של האופטימיזציה",
   "trajectory.chat.recorded_count": "{n} הודעות",
@@ -13886,6 +14058,92 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "tagger.setup.library_or": "or",
   "tagger.setup.library_pick": "Choose from your library",
   "tagger.upload.parse_failed": "Failed to load the file",
+  "tooltip.analytics.dataset_size_vs_improvement": "Whether more data leads to better score improvement — each point is one optimization",
+  "tooltip.analytics.improvement_per_minute": "Score improvement percentage per minute of run — a high value means a more efficient optimization",
+  "tooltip.analytics.model_performance_table": "Performance of the different models: usage frequency and average improvement",
+  "tooltip.analytics.optimizer_avg_improvement": "Average score improvement percentage each optimizer achieved across all runs",
+  "tooltip.analytics.optimizer_comparison_table": "Detailed comparison between the optimizers: average improvement, number of runs, and run time",
+  "tooltip.analytics.runtime_minutes": "The duration of the run in minutes for every completed optimization",
+  "tooltip.analytics.runtime_vs_gain": "Analysis of run times and efficiency — how much improvement is gained relative to time",
+  "tooltip.analytics.score_comparison": "Comparison of the baseline score versus the optimized score for every completed optimization",
+  "tooltip.analytics.submissions_per_day": "The number of optimizations submitted per day",
+  "tooltip.analytics.top_improvements": "The runs that achieved the largest improvement in score, from best to least",
+  "tooltip.code.metric": "A function that measures the quality of the prediction — returns a numeric score for each example",
+  "tooltip.code.predictions_table": "Results of running the program on the test examples — a score for each example and an overall summary",
+  "tooltip.code.signature": "Defines the input and output fields of the task — what the model receives and what it needs to return",
+  "tooltip.code.signature_metric": "The source code of the Signature and metric defined for this optimization",
+  "tooltip.compare.winner_improvement": "The score improvement percentage of the winning run — the difference between the optimized score and the baseline score",
+  "tooltip.compare.winner_models": "The language model pair of the winning run — generation model that produces output, and feedback model that improves the instructions",
+  "tooltip.compare.winner_runtime": "The total duration of the winning run, from launch until the optimization finished",
+  "tooltip.config.section.data": "Splitting the dataset into train, val and test, and shuffle settings",
+  "tooltip.config.section.models": "The language models configured — generation for producing answers, feedback for analyzing errors",
+  "tooltip.config.section.summary": "The module, the optimizer, and the parameters chosen for this run",
+  "tooltip.data.seed": "A fixed starting number that keeps the same split and the same shuffle on every repeated run",
+  "tooltip.data.shuffle_explanation": "Shuffles the order of rows before the split, so the file order does not accidentally affect the results",
+  "tooltip.data.split.test": "Examples reserved for the final measurement, after the prompt has been chosen",
+  "tooltip.data.split.train": "Examples the optimizer uses to build prompt candidates",
+  "tooltip.data.split.val": "Examples that rank the candidates during optimization",
+  "tooltip.data.split_explanation": "The dataset is split into three parts: train for learning, val for choosing the prompt, and test for the final measurement",
+  "tooltip.grid.avg_response_time_per_pair": "Average duration per language model call, by model pair",
+  "tooltip.grid.best_pair_default": "Default: the pair with the highest quality score. You can switch to any other pair.",
+  "tooltip.grid.generation_models": "The models that produce answers. Each pair in the grid search uses a different generation model",
+  "tooltip.grid.quality_speed_combined": "Quality and speed for each model pair, side by side. The higher the quality and speed, the better the pair.",
+  "tooltip.grid.reflection_models": "The models that analyze errors and suggest improvements. Each pair uses a different feedback model",
+  "tooltip.grid.score_comparison": "Comparison of the baseline score and the optimized score for each model pair",
+  "tooltip.lm.avg_response_time": "The average time it took the model to respond to each call",
+  "tooltip.lm.calls_count": "The number of calls to the language model during optimization",
+  "tooltip.lm_activity.cell.avg_ms": "The average time per call in this stage",
+  "tooltip.lm_activity.cell.calls": "The number of calls made in this stage",
+  "tooltip.lm_activity.column.generation": "Calls made to the generation model — the model that produces answers",
+  "tooltip.lm_activity.column.reflection": "Calls made to the feedback model — the model that analyzes errors and suggests improvements",
+  "tooltip.lm_activity.section": "Language model activity by stage — how many calls were made and how long they took, for the generation and feedback models separately",
+  "tooltip.lm_activity.stage.baseline": "Calls made while measuring the baseline score — before the optimizer started working",
+  "tooltip.lm_activity.stage.evaluation": "Calls made while measuring the optimized score — after the optimization finished",
+  "tooltip.lm_activity.stage.training": "Calls made during the optimization itself — while the optimizer built prompt candidates",
+  "tooltip.lm_activity.total_row": "Total calls and average time across all stages",
+  "tooltip.model.generation": "The model that actually produces the answer during the optimization run",
+  "tooltip.model.reflection": "The model that checks mistakes and suggests how to improve the instructions during optimization",
+  "tooltip.model_config.api_key": "Access key for the model server. Optional — if empty, it is taken from an environment variable. Not stored on the server and removed from the form after submission",
+  "tooltip.model_config.base_url": "The address of your own OpenAI-compatible server — Ollama, vLLM, LM Studio or an enterprise gateway. Leave empty to use the provider's default server",
+  "tooltip.model_config.connection_section": "Run the model on your own server: an OpenAI-compatible endpoint (Ollama, vLLM, LM Studio or an enterprise gateway) and an access key. Leave closed to use the built-in providers",
+  "tooltip.model_config.max_tokens": "The maximum prediction length — a token is roughly one word",
+  "tooltip.model_config.model": "The model that will run the optimization. Choose from the model catalog, or a custom model discovered from the Base URL",
+  "tooltip.model_config.temperature": "How creative the model is — a low value gives consistent answers, a high one more varied",
+  "tooltip.model_config.top_p": "top_p (nucleus sampling): limits the range of words the model considers — a low value narrows it, a high one allows more variety",
+  "tooltip.module.choice": "A DSPy module is a component in the program that calls a language model: it wraps each signature in a prompting technique and defines the structure of the call to the model in order to produce the output defined in the signature. Within this framework the optimizer tunes the module's learnable parameters, such as instructions and examples in the prompt",
+  "tooltip.module.cot": "Chain of Thought — adds a reasoning field that leads the model to think step-by-step before the final answer; usually improves accuracy on complex tasks",
+  "tooltip.module.predict": "Predict — the basic module: maps the input to the output in a single call to the model, with no intermediate steps",
+  "tooltip.module.react": "ReAct — an agent that combines thinking with calling tools in a loop, until it produces the output in the signature",
+  "tooltip.module.workflow": "Workflow — a graph of several steps: Signatures, Python code, and tools wired together on a visual canvas. Optimization improves the instructions of all steps together, against one metric on the final output",
+  "tooltip.optimizer.choice": "The method that tries to improve the prompt and find a version with a higher score",
+  "tooltip.pair.runtime": "The duration of the optimization run for this model pair",
+  "tooltip.prompt.demonstrations": "Input-output examples (few-shot demonstrations) shown to the model to show it the desired format and answer",
+  "tooltip.prompt.optimized": "The prompt the optimizer built: improved instructions and examples selected from the dataset",
+  "tooltip.react.auth": "Authentication header (Authorization header) for the MCP server. Not stored on the server and not exposed to the chat agent",
+  "tooltip.react.mcp_url": "The address of the MCP server from which the agent's tools are loaded",
+  "tooltip.react.optimized_tools": "The tools the agent (ReAct) runs in a loop, with the descriptions and arguments the optimizer refined during optimization",
+  "tooltip.react.tool_source": "Where the tool list is loaded from: a live MCP server, or a snapshot of tools from the dataset",
+  "tooltip.score.baseline": "Baseline score before optimization: how the program did without an improved prompt or selected examples",
+  "tooltip.score.improvement": "The gap between the optimized score and the baseline score. The larger it is, the more the optimization improved the result",
+  "tooltip.score.logged_metrics": "Scores your metric recorded with log_metrics — e.g. precision and recall — averaged over the test set, before and after optimization",
+  "tooltip.score.optimized": "Optimized score after optimization: how the program did with the chosen prompt and examples",
+  "tooltip.score.progression": "How the score changed from attempt to attempt while the optimizer searched for a better prompt",
+  "tooltip.serve.api_url_pair": "The API URL of the selected pair",
+  "tooltip.serve.api_url_react": "The API URL you send a POST request to with the user message; the optimized ReAct agent's response is streamed back over SSE",
+  "tooltip.serve.api_url_run": "The API URL you send POST requests to with the input fields in order to get a prediction from the improved program",
+  "tooltip.serve.integration_code": "Ready-to-copy code examples",
+  "tooltip.serve.section_pair": "API URL and code snippets to integrate the selected pair into your app",
+  "tooltip.serve.section_run": "API URL and code snippets to integrate the improved program into your app",
+  "tooltip.submit.depth": "How wide GEPA's search is: light runs fast with fewer attempts; deeper checks more options and takes more time",
+  "tooltip.submit.eval_rounds": "How many times to run a full evaluation to check prompt candidates",
+  "tooltip.submit.merge": "When enabled, GEPA can merge and combine ideas from several good candidates into one prompt",
+  "tooltip.submit.reflection_minibatch": "How many examples the model checks in each feedback round to find error patterns",
+  "tooltip.tagger.binary_question": "The question shown above the yes/no buttons. It helps to phrase a question that can be answered clearly",
+  "tooltip.tagger.freetext_instruction": "The instruction shown above the text field. Briefly explain what needs to be written",
+  "tooltip.tagger.mode": "Choose the tagging type that fits the task: yes/no, selection from a list, or free text",
+  "tooltip.tagger.multiclass_categories": "Define the categories available for selection while tagging — at least two",
+  "tooltip.tagger.text_column": "Choose the column that contains the text to tag. The other columns are kept in the export",
+  "tooltip.tagger.upload_file": "Upload a CSV, JSON or Excel file. Each row becomes an item to tag",
   "trajectory.a11y.node_label": "Candidate {id}, generation {gen}, score {score}",
   "trajectory.a11y.tree_label": "The optimization's candidate tree",
   "trajectory.chat.recorded_count": "{n} messages",
