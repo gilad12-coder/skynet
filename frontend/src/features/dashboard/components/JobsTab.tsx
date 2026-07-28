@@ -404,10 +404,16 @@ export function JobsTab({
                             width and overflows past the cell boundary. */}
                         <div className="flex items-center gap-1.5 min-w-0">
                           {ACTIVE_STATUSES.has(job.status) && <PingDot className="shrink-0" />}
+                          {/* Rests as plain mono text aligned with the column;
+                              on hover it materializes into the app's glossy
+                              rounded-full chip (primary tint + inset highlight,
+                              same recipe as Badge) so the ID reads as the
+                              click target. The negative logical margin offsets
+                              the always-on padding, so no layout shift. */}
                           <button
                             type="button"
                             onClick={() => onOpenJob(job.optimization_id)}
-                            className="font-mono text-xs text-primary truncate min-w-0 rounded cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                            className="font-mono text-xs text-primary truncate min-w-0 -ms-1.5 rounded-full px-1.5 py-0.5 cursor-pointer transition-[background-color,box-shadow] duration-150 hover:bg-primary/10 hover:ring-1 hover:ring-inset hover:ring-primary/25 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] active:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                             aria-label={formatMsg(
                               "auto.features.dashboard.components.jobstab.template.3",
                               { p1: TERMS.optimization },
