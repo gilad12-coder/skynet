@@ -202,7 +202,7 @@ export function JobsTab({
           >
             <Table
               style={{ minWidth: "640px" }}
-              className="table-stack [&_thead_th]:ps-1 [&_thead_th]:pe-2 [&_thead_th]:py-2 [&_thead_th]:text-[0.6875rem] [&_thead_th_button]:px-1 [&_thead_svg]:size-2.5 [&_tbody_td]:px-1.5"
+              className="table-stack no-copy-underline [&_thead_th]:ps-1 [&_thead_th]:pe-2 [&_thead_th]:py-2 [&_thead_th]:text-[0.6875rem] [&_thead_th_button]:px-1 [&_thead_svg]:size-2.5 [&_tbody_td]:px-1.5"
             >
               <TableHeader className="bg-muted/20 [&_tr]:border-b-border/40">
                 <TableRow>
