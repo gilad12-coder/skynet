@@ -407,7 +407,7 @@ export function JobsTab({
                           <button
                             type="button"
                             onClick={() => onOpenJob(job.optimization_id)}
-                            className="font-mono text-xs text-primary truncate min-w-0 rounded cursor-pointer hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                            className="font-mono text-xs text-primary truncate min-w-0 rounded cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                             aria-label={formatMsg(
                               "auto.features.dashboard.components.jobstab.template.3",
                               { p1: TERMS.optimization },
