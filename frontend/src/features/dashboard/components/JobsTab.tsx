@@ -404,7 +404,6 @@ export function JobsTab({
                       </TableCell>
                       <TableCell
                         className="px-2 max-w-[100px]"
-                        title={job.optimization_id}
                         data-label={msg("auto.features.dashboard.components.jobstab.template.1")}
                       >
                         {/* ``min-w-0`` lets the flex item shrink so the
@@ -423,18 +422,34 @@ export function JobsTab({
                               layout shift. ``dir="ltr"`` keeps hex IDs that
                               start with a digit from bidi-reordering in RTL
                               locales. */}
-                          <button
-                            type="button"
-                            dir="ltr"
-                            onClick={() => onOpenJob(job.optimization_id)}
-                            className="font-mono text-xs text-primary truncate min-w-0 -ms-1.5 rounded-md border border-transparent px-1.5 py-0.5 cursor-pointer transition-[background-color,border-color,box-shadow,transform] duration-150 hover:bg-primary/10 hover:border-primary/30 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] active:bg-primary/15 active:scale-[0.98] focus-visible:outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                            aria-label={formatMsg(
-                              "auto.features.dashboard.components.jobstab.template.3",
-                              { p1: TERMS.optimization },
-                            )}
+                          <TooltipButton
+                            tooltip={
+                              <span className="flex flex-col gap-0.5">
+                                <span>
+                                  {formatMsg(
+                                    "auto.features.dashboard.components.jobstab.template.3",
+                                    { p1: TERMS.optimization },
+                                  )}
+                                </span>
+                                <span className="font-mono text-[0.6875rem] opacity-80" dir="ltr">
+                                  {job.optimization_id}
+                                </span>
+                              </span>
+                            }
                           >
-                            {formatId(job.optimization_id)}
-                          </button>
+                            <button
+                              type="button"
+                              dir="ltr"
+                              onClick={() => onOpenJob(job.optimization_id)}
+                              className="font-mono text-xs text-primary truncate min-w-0 -ms-1.5 rounded-md border border-transparent px-1.5 py-0.5 cursor-pointer transition-[background-color,border-color,box-shadow,transform] duration-150 hover:bg-primary/10 hover:border-primary/30 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] active:bg-primary/15 active:scale-[0.98] focus-visible:outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                              aria-label={formatMsg(
+                                "auto.features.dashboard.components.jobstab.template.3",
+                                { p1: TERMS.optimization },
+                              )}
+                            >
+                              {formatId(job.optimization_id)}
+                            </button>
+                          </TooltipButton>
                         </div>
                       </TableCell>
                       <TableCell
