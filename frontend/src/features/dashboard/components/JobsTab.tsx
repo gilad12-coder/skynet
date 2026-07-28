@@ -404,20 +404,20 @@ export function JobsTab({
                             width and overflows past the cell boundary. */}
                         <div className="flex items-center gap-1.5 min-w-0">
                           {ACTIVE_STATUSES.has(job.status) && <PingDot className="shrink-0" />}
-                          {/* The ID rests as a code-token chip (Badge's glossy
-                              inset over a faint primary wash) so the click
-                              target is discoverable without hover; hover
-                              deepens the tint and border, press dips the
-                              scale like the app's buttons. ``dir="ltr"``
-                              keeps hex IDs that start with a digit from
-                              bidi-reordering in RTL locales. The negative
-                              logical margin offsets the chip padding so the
-                              ID text stays aligned with the column. */}
+                          {/* Rests as plain mono text; on hover it becomes a
+                              rectangular code-token chip (Badge's glossy inset
+                              over a primary wash), and press dips the scale
+                              like the app's buttons. The always-on transparent
+                              border and padding (offset by the negative
+                              logical margin) mean the chip appears with zero
+                              layout shift. ``dir="ltr"`` keeps hex IDs that
+                              start with a digit from bidi-reordering in RTL
+                              locales. */}
                           <button
                             type="button"
                             dir="ltr"
                             onClick={() => onOpenJob(job.optimization_id)}
-                            className="font-mono text-xs text-primary truncate min-w-0 -ms-1.5 rounded-md border border-primary/15 bg-primary/[0.05] px-1.5 py-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] cursor-pointer transition-[background-color,border-color,box-shadow,transform] duration-150 hover:bg-primary/10 hover:border-primary/30 active:bg-primary/15 active:scale-[0.98] focus-visible:outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                            className="font-mono text-xs text-primary truncate min-w-0 -ms-1.5 rounded-md border border-transparent px-1.5 py-0.5 cursor-pointer transition-[background-color,border-color,box-shadow,transform] duration-150 hover:bg-primary/10 hover:border-primary/30 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] active:bg-primary/15 active:scale-[0.98] focus-visible:outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                             aria-label={formatMsg(
                               "auto.features.dashboard.components.jobstab.template.3",
                               { p1: TERMS.optimization },
