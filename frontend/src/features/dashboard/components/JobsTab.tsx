@@ -374,9 +374,19 @@ export function JobsTab({
                     <TableRow
                       key={job.optimization_id}
                       data-selected={isSelected}
-                      className="group border-border/30 transition-colors duration-150 data-[selected=true]:bg-primary/[0.08] hover:bg-foreground/[0.025] data-[selected=true]:hover:bg-primary/[0.12]"
+                      className="group border-border/30 transition-colors duration-150 data-[selected=true]:bg-primary/[0.08] hover:bg-foreground/[0.025] data-[selected=true]:hover:bg-primary/[0.12] cursor-pointer [&_td:first-child]:cursor-default"
                       style={{
                         animation: `fadeSlideIn 0.25s ease-out ${idx * 0.03}s both`,
+                      }}
+                      onClick={(e) => {
+                        // Convenience target only — the ID button remains the
+                        // accessible/keyboard path. The checkbox cell is
+                        // excluded so a missed checkbox click can't navigate.
+                        const target = e.target as HTMLElement;
+                        if (target.closest("button, a, input")) return;
+                        const td = target.closest("td");
+                        if (!td || td === td.parentElement?.firstElementChild) return;
+                        onOpenJob(job.optimization_id);
                       }}
                     >
                       <TableCell className="w-10 px-3">
