@@ -59,6 +59,20 @@ function postLoginTarget(): string {
 }
 
 /**
+ * OAuth round-trips leave this page entirely, so there is no moment to pause
+ * on the enrollment offer the way password sign-ins do. Route the provider's
+ * success redirect back through /login with a marker; the mount effect spots
+ * it, runs the same one-time offer, and then continues to the real target
+ * (still carried in ``callbackUrl``).
+ */
+function oauthReturnUrl(): string {
+  const target = postLoginTarget();
+  const params = new URLSearchParams({ passkey_offer: "1" });
+  if (target !== "/") params.set("callbackUrl", target);
+  return `/login?${params.toString()}`;
+}
+
+/**
  * Oversized SKYNET wordmark shared by every login state, so the SSO redirect
  * moment and the credential form read as the same place. It fills the column
  * width and morphs continuously as an ambient "alive" signal.
@@ -135,20 +149,35 @@ export function LoginView() {
   useEffect(() => {
     // If the providers endpoint errors (network blip, mis-deployed [...nextauth]
     // route), fall back to the credential form instead of hanging on the spinner.
-    void getProviders()
-      .then((providers) => {
-        if (providers?.adfs) {
-          setMode("sso");
-          void signIn("adfs", { callbackUrl: postLoginTarget() });
-          return;
-        }
-        setOauth({ google: !!providers?.google, github: !!providers?.github });
-        setMode("ready");
-      })
-      .catch((err) => {
-        console.warn("LoginView: getProviders failed", err);
-        setMode("ready");
-      });
+    const loadProviders = () =>
+      getProviders()
+        .then((providers) => {
+          if (providers?.adfs) {
+            setMode("sso");
+            void signIn("adfs", { callbackUrl: postLoginTarget() });
+            return;
+          }
+          setOauth({ google: !!providers?.google, github: !!providers?.github });
+          setMode("ready");
+        })
+        .catch((err) => {
+          console.warn("LoginView: getProviders failed", err);
+          setMode("ready");
+        });
+    // Back from the OAuth round-trip (?passkey_offer=1): keep the spinner up
+    // and run the same enrollment offer password sign-ins get. Arriving here
+    // without a session (cancelled consent, provider error) falls through to
+    // the normal form.
+    const returning =
+      new URLSearchParams(window.location.search).get("passkey_offer") === "1";
+    if (!returning) {
+      void loadProviders();
+      return;
+    }
+    void getSession().then((session) => {
+      if (session?.backendAccessToken) return offerPasskeyOrFinish();
+      return loadProviders();
+    });
   }, []);
 
   /**
@@ -168,7 +197,7 @@ export function LoginView() {
 
   function handleOAuth(provider: "google" | "github") {
     setError("");
-    void signIn(provider, { callbackUrl: postLoginTarget() });
+    void signIn(provider, { callbackUrl: oauthReturnUrl() });
   }
 
   /**
@@ -210,6 +239,8 @@ export function LoginView() {
         return;
       }
       setLoading(false);
+      // The OAuth-return path arrives with the card still on its spinner.
+      setMode("ready");
       setPasskeyOffer("offer");
     } catch {
       finishLogin();
