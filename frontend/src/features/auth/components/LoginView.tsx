@@ -1,11 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { signIn, getProviders } from "next-auth/react";
+import { signIn, getProviders, getSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Loader2, Github, Fingerprint, ArrowLeft } from "lucide-react";
-import { browserSupportsWebAuthn, startAuthentication } from "@simplewebauthn/browser";
+import {
+  browserSupportsWebAuthn,
+  platformAuthenticatorIsAvailable,
+  startAuthentication,
+  startRegistration,
+} from "@simplewebauthn/browser";
 import { Button } from "@/shared/ui/primitives/button";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
 import { Input } from "@/shared/ui/primitives/input";
@@ -13,6 +18,12 @@ import { Label } from "@/shared/ui/primitives/label";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
 import { msg } from "@/shared/lib/messages";
+import {
+  getPasskeyRegistrationOptions,
+  getSecurityStatus,
+  registerPasskey,
+  setApiAuthToken,
+} from "@/shared/lib/api";
 import { tI18n } from "@/shared/lib/i18n";
 import { cn } from "@/shared/lib/utils";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
@@ -115,6 +126,7 @@ export function LoginView() {
   const [sendingCode, setSendingCode] = useState(false);
   const [passkeyLoading, setPasskeyLoading] = useState(false);
   const [passkeySupported, setPasskeySupported] = useState(false);
+  const [passkeyOffer, setPasskeyOffer] = useState<"offer" | "saving" | null>(null);
 
   useEffect(() => {
     setPasskeySupported(browserSupportsWebAuthn());
@@ -167,6 +179,61 @@ export function LoginView() {
   function finishLogin() {
     router.push(postLoginTarget());
     router.refresh();
+  }
+
+  /**
+   * After a password sign-in on hardware with Face ID / Touch ID, pause once to
+   * offer creating a passkey here. WebAuthn can only enroll an authenticated
+   * user, so the "sign in with a passkey" button alone can never reach the
+   * platform authenticator on a device with nothing stored — the browser falls
+   * back to its cross-device QR sheet. Any hiccup while asking the question
+   * (no platform authenticator, the status probe failing, a passkey already
+   * registered) falls through to the normal redirect.
+   */
+  async function offerPasskeyOrFinish() {
+    try {
+      if (!browserSupportsWebAuthn() || !(await platformAuthenticatorIsAvailable())) {
+        finishLogin();
+        return;
+      }
+      // The session broadcast that normally feeds the api layer its bearer is
+      // still in flight this soon after signIn — mint the token directly.
+      const session = await getSession();
+      if (!session?.backendAccessToken) {
+        finishLogin();
+        return;
+      }
+      setApiAuthToken(session.backendAccessToken);
+      const status = await getSecurityStatus();
+      if (status.passkeys.length > 0) {
+        finishLogin();
+        return;
+      }
+      setLoading(false);
+      setPasskeyOffer("offer");
+    } catch {
+      finishLogin();
+    }
+  }
+
+  /**
+   * Run the browser's platform-authenticator enrollment (Face ID / Touch ID
+   * sheet) and store the credential. Enrollment is a nicety on top of an
+   * already-successful sign-in, so every exit — saved, cancelled, or failed —
+   * continues into the app rather than trapping the user on the login card.
+   */
+  async function enrollPasskey() {
+    setPasskeyOffer("saving");
+    try {
+      const options = await getPasskeyRegistrationOptions();
+      const credential = await startRegistration(
+        options as unknown as Parameters<typeof startRegistration>[0],
+      );
+      await registerPasskey(credential, "");
+    } catch {
+      // NotAllowedError means the user dismissed the sheet — same as "not now".
+    }
+    finishLogin();
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -226,7 +293,7 @@ export function LoginView() {
       } else {
         track(TelemetryEvent.LoginSucceeded, { method: "credentials" });
       }
-      finishLogin();
+      await offerPasskeyOrFinish();
     } catch {
       setError(msg("auth.login.error"));
       setLoading(false);
@@ -263,7 +330,7 @@ export function LoginView() {
         return;
       }
       track(TelemetryEvent.LoginSucceeded, { method: "credentials_2fa" });
-      finishLogin();
+      await offerPasskeyOrFinish();
     } catch {
       setError(msg("auth.login.error"));
       setLoading(false);
@@ -385,7 +452,43 @@ export function LoginView() {
             <LoginHeader />
             <Card className="mt-9 w-full">
               <CardContent className="px-6">
-                {twoFactor ? (
+                {passkeyOffer ? (
+                  <div className="flex flex-col items-center py-2 text-center">
+                    <div className="flex size-12 items-center justify-center rounded-full bg-accent">
+                      <Fingerprint className="size-6 text-foreground" aria-hidden="true" />
+                    </div>
+                    <p className="mt-4 text-sm font-semibold text-foreground">
+                      {msg("auth.login.passkey_offer_title")}
+                    </p>
+                    <p className="mt-1 max-w-[36ch] text-xs leading-relaxed text-muted-foreground">
+                      {msg("auth.login.passkey_offer_description")}
+                    </p>
+                    <Button
+                      type="button"
+                      size="lg"
+                      disabled={passkeyOffer === "saving"}
+                      onClick={() => void enrollPasskey()}
+                      className="mt-5 h-11 w-full gap-2 text-[0.9375rem] font-medium"
+                    >
+                      {passkeyOffer === "saving" ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Fingerprint className="size-[18px]" />
+                      )}
+                      {msg("auth.login.passkey_offer_accept")}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="lg"
+                      disabled={passkeyOffer === "saving"}
+                      onClick={finishLogin}
+                      className="mt-2 h-11 w-full text-[0.9375rem] font-medium text-muted-foreground"
+                    >
+                      {msg("auth.login.passkey_offer_skip")}
+                    </Button>
+                  </div>
+                ) : twoFactor ? (
                   <div>
                     <button
                       type="button"
