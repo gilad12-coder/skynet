@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { signIn, getProviders } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Loader2, Github, Fingerprint, ArrowLeft } from "lucide-react";
 import { browserSupportsWebAuthn, startAuthentication } from "@simplewebauthn/browser";
 import { Button } from "@/shared/ui/primitives/button";
@@ -96,6 +96,7 @@ interface TwoFactorState {
 
 export function LoginView() {
   const router = useRouter();
+  const prefersReduced = useReducedMotion();
   const [mode, setMode] = useState<"loading" | "sso" | "ready">("loading");
   const [authMode, setAuthMode] = useState<AuthMode>("signin");
   const [oauth, setOauth] = useState<{ google: boolean; github: boolean }>({
@@ -507,15 +508,31 @@ export function LoginView() {
                           aria-selected={authMode === tab}
                           onClick={() => switchMode(tab)}
                           className={cn(
-                            "flex-1 cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200",
+                            "relative flex-1 cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200",
                             authMode === tab
-                              ? "bg-background text-foreground shadow-sm"
+                              ? "text-foreground"
                               : "text-muted-foreground hover:text-foreground",
                           )}
                         >
-                          {msg(
-                            tab === "signin" ? "auth.login.tab_signin" : "auth.login.tab_signup",
+                          {/* Shared-layoutId pill: the same id on whichever tab is
+                              active lets Framer SLIDE the highlight between the two
+                              instead of snapping, mirroring the settings rail. */}
+                          {authMode === tab && (
+                            <motion.div
+                              layoutId="login-tab-active"
+                              className="absolute inset-0 rounded-md bg-background shadow-sm"
+                              transition={
+                                prefersReduced
+                                  ? { duration: 0 }
+                                  : { type: "spring", stiffness: 400, damping: 32 }
+                              }
+                            />
                           )}
+                          <span className="relative z-10">
+                            {msg(
+                              tab === "signin" ? "auth.login.tab_signin" : "auth.login.tab_signup",
+                            )}
+                          </span>
                         </button>
                       ))}
                     </div>
