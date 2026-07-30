@@ -1637,7 +1637,7 @@
   "billing.chip.aria": "Credit balance: {p1}",
   "billing.chip.byok": "Your key",
   "billing.chip.empty": "Add credits",
-  "billing.chip.low_note": "Running low. Add credits when it suits you — mini models keep running on your free grant.",
+  "billing.chip.low_note": "Running low. Add credits when it suits you.",
   "billing.history.byok_tag": "BYOK",
   "billing.mode.aria": "Choose how runs are billed",
   "billing.mode.byok": "Your own key",
