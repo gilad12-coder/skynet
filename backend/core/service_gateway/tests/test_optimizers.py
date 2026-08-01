@@ -14,10 +14,10 @@ from core.exceptions import ServiceError
 from core.models import ModelConfig
 from core.service_gateway.optimization.data import DatasetSplits
 from core.service_gateway.optimization.optimizers import (
+    TargetScoreStopper,
     _callable_accepts_metric,
     _compile_accepts_valset,
     _extract_factory_targets,
-    TargetScoreStopper,
     compile_program,
     evaluate_on_test,
     instantiate_optimizer,

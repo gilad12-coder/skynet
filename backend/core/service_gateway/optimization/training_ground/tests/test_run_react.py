@@ -276,7 +276,7 @@ def test_run_react_optimization_passes_target_score_stopper(
         )
 
     stopper = captured["stop_callbacks"][0]
-    assert getattr(stopper, "threshold") == pytest.approx(0.85)
+    assert stopper.threshold == pytest.approx(0.85)
 
 
 def test_run_react_optimization_buckets_lm_activity_per_stage(
