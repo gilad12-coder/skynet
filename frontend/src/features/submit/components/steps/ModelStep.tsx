@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, Boxes, Trash2 } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -11,66 +11,41 @@ import {
 } from "@/shared/ui/primitives/card";
 import { Label } from "@/shared/ui/primitives/label";
 import { Separator } from "@/shared/ui/primitives/separator";
-import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip, AddModelButton } from "@/shared/ui/model-chip";
 import { TokenSourceToggle, useCredits } from "@/features/billing";
+import { useUserPrefs } from "@/features/settings";
 import { CostCeilingCard } from "../CostCeilingCard";
 
 import { emptyModelConfig } from "../../constants";
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 
-interface AllAvailableChipProps {
-  availableCount: number;
-  onReset: () => void;
-}
-
 /**
- * Wide chip shown in place of the manual list once "all available" is on.
- *
- * Uses the same visual language as ModelChip but reads as a single pinned
- * selection that sweeps every catalog model. The reset button flips the
- * sentinel flag back off, returning the side to manual mode.
+ * Two-line primer distinguishing the two model roles this step configures:
+ * the generation model does the task, the reflection model rewrites the
+ * prompt between rounds. The distinction trips up even people who have used
+ * DSPy before, so it's stated inline here rather than hidden behind a hover.
  */
-function AllAvailableChip({ availableCount, onReset }: AllAvailableChipProps) {
+function ModelRolesExplainer() {
   return (
-    <div
-      className={cn(
-        "group relative flex w-full items-center gap-3 rounded-lg border px-3 py-2.5",
-        "border-primary/30 bg-primary/5",
-      )}
-    >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-        <Boxes className="size-4" />
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="text-sm font-medium text-foreground">
-          {msg("auto.features.submit.components.steps.modelstep.1")}
-        </span>
-        <span className="text-[0.6875rem] text-muted-foreground">
-          {msg("auto.features.submit.components.steps.modelstep.2")}
-          {TERMS.optimization}
-          {msg("auto.features.submit.components.steps.modelstep.3")}
-          {TERMS.model}
-          {msg("auto.features.submit.components.steps.modelstep.4")}
-          {availableCount}
-          {msg("auto.features.submit.components.steps.modelstep.5")}
-        </span>
-      </div>
-      <button
-        type="button"
-        onClick={onReset}
-        className="cursor-pointer rounded-md p-1 text-muted-foreground opacity-60 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-        title={msg("auto.features.submit.components.steps.modelstep.literal.1")}
-      >
-        <Trash2 className="size-3.5" />
-      </button>
+    <div className="space-y-2 rounded-lg border border-border/50 bg-muted/20 px-3.5 py-3">
+      <p className="text-[0.75rem] leading-relaxed text-muted-foreground">
+        <span className="font-semibold text-foreground">{msg("model.generation.label")}</span>
+        {" — "}
+        {msg("model.generation.explainer")}
+      </p>
+      <p className="text-[0.75rem] leading-relaxed text-muted-foreground">
+        <span className="font-semibold text-foreground">{TERMS.reflectionModel}</span>
+        {" — "}
+        {msg("model.reflection.explainer")}
+      </p>
     </div>
   );
 }
-
 export function ModelStep({ w }: { w: SubmitWizardContext }) {
+  const { prefs } = useUserPrefs();
+  const advanced = prefs.advancedMode;
   const {
     jobType,
     modelConfig,
@@ -81,10 +56,6 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
     setGenerationModels,
     reflectionModels,
     setReflectionModels,
-    useAllGenerationModels,
-    setUseAllGenerationModels,
-    useAllReflectionModels,
-    setUseAllReflectionModels,
     setEditingModel,
     catalog,
   } = w;
@@ -109,7 +80,8 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
       </CardHeader>
       <CardContent className="space-y-5">
         <TokenSourceToggle />
-        {jobType === "run" ? (
+        <ModelRolesExplainer />
+        {jobType === "run" || !advanced ? (
           <div className="space-y-3" data-tutorial="model-catalog">
             <Label className="text-sm font-semibold">
               {msg("auto.features.submit.components.steps.modelstep.13")}
@@ -157,117 +129,99 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
               <Label className="text-sm font-semibold">
                 {msg("model.generation.label_plural")}
               </Label>
-              {useAllGenerationModels ? (
-                <AllAvailableChip
-                  availableCount={availableCount}
-                  onReset={() => setUseAllGenerationModels(false)}
-                />
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {generationModels.map((m, i) => (
-                    <ModelChip
-                      key={i}
-                      config={m}
-                      catalogModels={catalog?.models}
-                      onClick={() =>
-                        setEditingModel({
-                          config: m,
-                          onSave: (c) => {
-                            const u = [...generationModels];
-                            u[i] = c;
-                            setGenerationModels(u);
-                          },
-                          label: `${msg("model.generation.label")} ${i + 1}`,
-                          onSelectAllAvailable: () => setUseAllGenerationModels(true),
-                        })
-                      }
-                      onRemove={() => {
-                        const next = generationModels.filter((_, j) => j !== i);
-                        setGenerationModels(next.length ? next : [emptyModelConfig()]);
-                      }}
-                    />
-                  ))}
-                  {generationModels.every((m) => m.name.trim()) && (
-                    <AddModelButton
-                      label={msg("auto.features.submit.components.steps.modelstep.literal.7")}
-                      onClick={() =>
-                        setEditingModel({
-                          config: generationModels.length
-                            ? { ...generationModels[generationModels.length - 1], name: "" }
-                            : emptyModelConfig(),
-                          onSave: (c) =>
-                            setGenerationModels([
-                              ...generationModels.filter((m) => m.name.trim()),
-                              c,
-                            ]),
-                          label: msg("model.generation.new"),
-                          onSelectAllAvailable: () => setUseAllGenerationModels(true),
-                        })
-                      }
-                    />
-                  )}
-                </div>
-              )}
+              <div className="flex flex-wrap gap-2">
+                {generationModels.map((m, i) => (
+                  <ModelChip
+                    key={i}
+                    config={m}
+                    catalogModels={catalog?.models}
+                    onClick={() =>
+                      setEditingModel({
+                        config: m,
+                        onSave: (c) => {
+                          const u = [...generationModels];
+                          u[i] = c;
+                          setGenerationModels(u);
+                        },
+                        label: `${msg("model.generation.label")} ${i + 1}`,
+                      })
+                    }
+                    onRemove={() => {
+                      const next = generationModels.filter((_, j) => j !== i);
+                      setGenerationModels(next.length ? next : [emptyModelConfig()]);
+                    }}
+                  />
+                ))}
+                {generationModels.every((m) => m.name.trim()) && (
+                  <AddModelButton
+                    label={msg("auto.features.submit.components.steps.modelstep.literal.7")}
+                    onClick={() =>
+                      setEditingModel({
+                        config: generationModels.length
+                          ? { ...generationModels[generationModels.length - 1], name: "" }
+                          : emptyModelConfig(),
+                        onSave: (c) =>
+                          setGenerationModels([
+                            ...generationModels.filter((m) => m.name.trim()),
+                            c,
+                          ]),
+                        label: msg("model.generation.new"),
+                      })
+                    }
+                  />
+                )}
+              </div>
             </div>
             <Separator />
             <div className="space-y-2">
               <Label className="text-sm font-semibold">
                 {msg("auto.features.submit.components.steps.modelstep.15")}
               </Label>
-              {useAllReflectionModels ? (
-                <AllAvailableChip
-                  availableCount={availableCount}
-                  onReset={() => setUseAllReflectionModels(false)}
-                />
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {reflectionModels.map((m, i) => (
-                    <ModelChip
-                      key={i}
-                      config={m}
-                      catalogModels={catalog?.models}
-                      onClick={() =>
-                        setEditingModel({
-                          config: m,
-                          onSave: (c) => {
-                            const u = [...reflectionModels];
-                            u[i] = c;
-                            setReflectionModels(u);
-                          },
-                          label: `${TERMS.reflectionModel} ${i + 1}`,
-                          onSelectAllAvailable: () => setUseAllReflectionModels(true),
-                        })
-                      }
-                      onRemove={() => {
-                        const next = reflectionModels.filter((_, j) => j !== i);
-                        setReflectionModels(next.length ? next : [emptyModelConfig()]);
-                      }}
-                    />
-                  ))}
-                  {reflectionModels.every((m) => m.name.trim()) && (
-                    <AddModelButton
-                      label={msg("auto.features.submit.components.steps.modelstep.literal.8")}
-                      onClick={() =>
-                        setEditingModel({
-                          config: reflectionModels.length
-                            ? { ...reflectionModels[reflectionModels.length - 1], name: "" }
-                            : emptyModelConfig(),
-                          onSave: (c) =>
-                            setReflectionModels([
-                              ...reflectionModels.filter((m) => m.name.trim()),
-                              c,
-                            ]),
-                          label: formatMsg(
-                            "auto.features.submit.components.steps.modelstep.template.2",
-                            { p1: TERMS.reflectionModel },
-                          ),
-                          onSelectAllAvailable: () => setUseAllReflectionModels(true),
-                        })
-                      }
-                    />
-                  )}
-                </div>
-              )}
+              <div className="flex flex-wrap gap-2">
+                {reflectionModels.map((m, i) => (
+                  <ModelChip
+                    key={i}
+                    config={m}
+                    catalogModels={catalog?.models}
+                    onClick={() =>
+                      setEditingModel({
+                        config: m,
+                        onSave: (c) => {
+                          const u = [...reflectionModels];
+                          u[i] = c;
+                          setReflectionModels(u);
+                        },
+                        label: `${TERMS.reflectionModel} ${i + 1}`,
+                      })
+                    }
+                    onRemove={() => {
+                      const next = reflectionModels.filter((_, j) => j !== i);
+                      setReflectionModels(next.length ? next : [emptyModelConfig()]);
+                    }}
+                  />
+                ))}
+                {reflectionModels.every((m) => m.name.trim()) && (
+                  <AddModelButton
+                    label={msg("auto.features.submit.components.steps.modelstep.literal.8")}
+                    onClick={() =>
+                      setEditingModel({
+                        config: reflectionModels.length
+                          ? { ...reflectionModels[reflectionModels.length - 1], name: "" }
+                          : emptyModelConfig(),
+                        onSave: (c) =>
+                          setReflectionModels([
+                            ...reflectionModels.filter((m) => m.name.trim()),
+                            c,
+                          ]),
+                        label: formatMsg(
+                          "auto.features.submit.components.steps.modelstep.template.2",
+                          { p1: TERMS.reflectionModel },
+                        ),
+                      })
+                    }
+                  />
+                )}
+              </div>
             </div>
           </div>
         )}
