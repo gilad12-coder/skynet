@@ -1896,6 +1896,12 @@ export type MessageKey =
   | "explore.suggest.clear"
   | "explore.suggest.popular"
   | "explore.suggest.recent"
+  | "export.table.aria"
+  | "export.table.button"
+  | "export.table.columnar"
+  | "export.table.done"
+  | "export.table.empty"
+  | "export.table.failed"
   | "model.generation.label"
   | "model.generation.label_plural"
   | "model.generation.label_short"
@@ -4759,6 +4765,12 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "explore.suggest.clear": "נקה/נקי",
   "explore.suggest.popular": "חיפושים פופולריים",
   "explore.suggest.recent": "חיפושים אחרונים",
+  "export.table.aria": "ייצוא הטבלה",
+  "export.table.button": "ייצוא",
+  "export.table.columnar": "מהיר ודחיס",
+  "export.table.done": "יוצאו {count} שורות",
+  "export.table.empty": "אין נתונים לייצוא",
+  "export.table.failed": "הייצוא נכשל",
   "model.generation.label": "{term.generationModel}",
   "model.generation.label_plural": "{term.generationModelPlural}",
   "model.generation.label_short": "{term.generationModelShort}",
@@ -13199,6 +13211,12 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "explore.suggest.clear": "Clear",
   "explore.suggest.popular": "Popular searches",
   "explore.suggest.recent": "Recent searches",
+  "export.table.aria": "Export table",
+  "export.table.button": "Export",
+  "export.table.columnar": "Fast & compressible",
+  "export.table.done": "Exported {count} rows",
+  "export.table.empty": "No data to export",
+  "export.table.failed": "Export failed",
   "model.generation.label": "Generation model",
   "model.generation.label_plural": "Generation models",
   "model.generation.label_short": "Generation",
