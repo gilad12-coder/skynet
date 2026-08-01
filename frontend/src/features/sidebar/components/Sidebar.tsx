@@ -16,8 +16,6 @@ import {
   Loader2,
   Grid2x2,
   ChevronLeft,
-  ChevronsLeft,
-  ChevronsRight,
   Compass,
   CopyPlus,
   Database,
@@ -93,8 +91,12 @@ const SIDEBAR_MIN_WIDTH = 210;
 const SIDEBAR_MAX_WIDTH = 420;
 const SIDEBAR_DEFAULT_WIDTH = 240;
 // Icon-rail width when collapsed: just enough to center a nav icon (and the
-// account avatar / storage icon) with comfortable padding. Fixed, not draggable.
+// account avatar / storage icon) with comfortable padding.
 const SIDEBAR_COLLAPSED_WIDTH = 64;
+// Drag the resize grip narrower than this and the rail snaps shut to the icon
+// rail; drag back past it and it re-expands. Sits ~50px below the min width so
+// resting at the minimum doesn't accidentally collapse.
+const SIDEBAR_COLLAPSE_THRESHOLD = 160;
 const SIDEBAR_WIDTH_STORAGE_KEY = "skynet.sidebar.width";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "skynet.sidebar.collapsed";
 const DESKTOP_MQ = "(min-width: 768px)";
@@ -137,15 +139,6 @@ export function Sidebar() {
   const effectiveWidth = isCollapsed ? SIDEBAR_COLLAPSED_WIDTH : width;
   // Collapsed tooltips read toward the content area: right in LTR, left in RTL.
   const tooltipSide = isRtl ? "left" : "right";
-  // Chevrons point the way the rail's inline-end edge travels on click: collapse
-  // pushes it toward the rail's own side, expand pushes it toward the content.
-  const ToggleIcon = isCollapsed
-    ? isRtl
-      ? ChevronsLeft
-      : ChevronsRight
-    : isRtl
-      ? ChevronsRight
-      : ChevronsLeft;
 
   // Width is a desktop affordance — the mobile drawer uses a viewport-capped
   // width regardless. Hydrate the persisted width client-side (SSR can't read
@@ -176,21 +169,23 @@ export function Sidebar() {
     }
   }, []);
 
-  const toggleCollapsed = React.useCallback(() => {
+  const setCollapsedPersist = React.useCallback((value: boolean) => {
     setCollapsed((prev) => {
-      const next = !prev;
+      if (prev === value) return prev;
       try {
-        window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, next ? "1" : "0");
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, value ? "1" : "0");
       } catch {
         /* noop */
       }
-      return next;
+      return value;
     });
   }, []);
 
-  // Drag-resize. The rail is pinned to the inline-start edge (left in LTR, right
-  // in RTL), so the dragged inline-end edge maps to clientX in LTR and to
-  // (innerWidth - clientX) in RTL.
+  // Drag-resize doubles as the collapse control. The rail is pinned to the
+  // inline-start edge (left in LTR, right in RTL), so the dragged inline-end
+  // edge maps to clientX in LTR and to (innerWidth - clientX) in RTL. Drag it
+  // below the collapse threshold and the rail snaps to the icon rail; drag back
+  // out and it re-expands, tracking the cursor.
   const resizingRef = React.useRef(false);
   const startResize = React.useCallback(
     (e: React.MouseEvent) => {
@@ -202,7 +197,13 @@ export function Sidebar() {
       document.body.style.cursor = "col-resize";
       const onMove = (ev: MouseEvent) => {
         if (!resizingRef.current) return;
-        persistWidth(isRtl ? window.innerWidth - ev.clientX : ev.clientX);
+        const raw = isRtl ? window.innerWidth - ev.clientX : ev.clientX;
+        if (raw < SIDEBAR_COLLAPSE_THRESHOLD) {
+          setCollapsedPersist(true);
+        } else {
+          setCollapsedPersist(false);
+          persistWidth(raw);
+        }
       };
       const onUp = () => {
         resizingRef.current = false;
@@ -214,7 +215,7 @@ export function Sidebar() {
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
     },
-    [isRtl, persistWidth],
+    [isRtl, persistWidth, setCollapsedPersist],
   );
 
   // Sidebar infinite scroll: fetchData (polling + external invalidation)
@@ -406,53 +407,27 @@ export function Sidebar() {
       data-tutorial="sidebar-full"
     >
       {/* Drag-to-resize grip on the rail's inline-end edge (desktop only — the
-          mobile drawer isn't resizable, and a collapsed rail is a fixed width).
-          Invisible until hovered, then a primary hairline; the grab math is
-          mirrored for RTL in ``startResize``. */}
-      {!isCollapsed && (
-        <button
-          type="button"
-          onMouseDown={startResize}
-          aria-label={msg("auto.features.sidebar.components.sidebar.literal.15")}
-          tabIndex={-1}
-          className="group absolute inset-y-0 end-0 z-20 hidden w-1.5 cursor-col-resize md:block"
-        >
-          <span
-            aria-hidden="true"
-            className="absolute inset-y-0 end-0 w-px bg-transparent transition-colors duration-150 group-hover:bg-primary/30 group-active:bg-primary/50"
-          />
-        </button>
-      )}
+          mobile drawer isn't resizable). Also the collapse control: dragging it
+          past the threshold snaps the rail shut, and it stays grabbable on the
+          collapsed rail's edge to drag back open. Invisible until hovered, then a
+          primary hairline; the grab math is mirrored for RTL in ``startResize``. */}
+      <button
+        type="button"
+        onMouseDown={startResize}
+        aria-label={msg("auto.features.sidebar.components.sidebar.literal.15")}
+        tabIndex={-1}
+        className="group absolute inset-y-0 end-0 z-20 hidden w-1.5 cursor-col-resize md:block"
+      >
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 end-0 w-px bg-transparent transition-colors duration-150 group-hover:bg-primary/30 group-active:bg-primary/50"
+        />
+      </button>
       <div className="flex flex-col h-full">
-        {/* Collapse toggle — desktop only (the mobile drawer opens/closes via the
-            header menu button, so it has no use for an icon-rail toggle). The
-            chevrons point the way the rail's edge will move. */}
-        <div
-          className={cn(
-            "hidden md:flex items-center px-3 pt-3 pb-1",
-            isCollapsed ? "justify-center" : "justify-end",
-          )}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={toggleCollapsed}
-                aria-label={isCollapsed ? msg("sidebar.expand") : msg("sidebar.collapse")}
-                className="inline-flex items-center justify-center rounded-lg p-1.5 text-muted-foreground/60 transition-colors duration-150 hover:bg-sidebar-accent/40 hover:text-foreground cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-              >
-                <ToggleIcon className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side={tooltipSide}>
-              {isCollapsed ? msg("sidebar.expand") : msg("sidebar.collapse")}
-            </TooltipContent>
-          </Tooltip>
-        </div>
         <nav
           className={cn(
-            "flex flex-col gap-1 pb-3",
-            isCollapsed ? "px-2 pt-1" : "px-3 pt-3 md:pt-1",
+            "flex flex-col gap-1 pb-3 pt-3",
+            isCollapsed ? "px-2" : "px-3",
           )}
           role="navigation"
           aria-label={msg("auto.features.sidebar.components.sidebar.literal.7")}
