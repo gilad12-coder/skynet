@@ -93,10 +93,14 @@ const SIDEBAR_DEFAULT_WIDTH = 240;
 // Icon-rail width when collapsed: just enough to center a nav icon (and the
 // account avatar / storage icon) with comfortable padding.
 const SIDEBAR_COLLAPSED_WIDTH = 64;
-// Drag the resize grip narrower than this and the rail snaps shut to the icon
-// rail; drag back past it and it re-expands. Sits ~50px below the min width so
-// resting at the minimum doesn't accidentally collapse.
-const SIDEBAR_COLLAPSE_THRESHOLD = 160;
+// Drag-to-collapse hysteresis. While expanded, the rail shrinks with the cursor
+// and rests at its min; only pulling the grip in past COLLAPSE_AT (well under
+// the min) snaps it shut. While collapsed, pushing the grip back out past
+// EXPAND_AT re-expands it. The gap between the two thresholds means a jittery
+// hand near the edge can't rapidly toggle the state — that gap is what a single
+// threshold lacked, so it flickered between the icon rail and the min width.
+const SIDEBAR_COLLAPSE_AT = 150;
+const SIDEBAR_EXPAND_AT = 196;
 const SIDEBAR_WIDTH_STORAGE_KEY = "skynet.sidebar.width";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "skynet.sidebar.collapsed";
 const DESKTOP_MQ = "(min-width: 768px)";
@@ -183,14 +187,20 @@ export function Sidebar() {
 
   // Drag-resize doubles as the collapse control. The rail is pinned to the
   // inline-start edge (left in LTR, right in RTL), so the dragged inline-end
-  // edge maps to clientX in LTR and to (innerWidth - clientX) in RTL. Drag it
-  // below the collapse threshold and the rail snaps to the icon rail; drag back
-  // out and it re-expands, tracking the cursor.
+  // edge maps to clientX in LTR and to (innerWidth - clientX) in RTL.
+  //
+  // ``persistWidth`` clamps to [min, max], so while expanded the rail tracks the
+  // cursor and simply rests at its min — pulling in further does nothing until
+  // the cursor crosses COLLAPSE_AT, which snaps to the icon rail. ``dragCollapsed``
+  // holds the drag's own collapsed flag so the hysteresis compares against where
+  // this gesture last committed, not a stale render value; that's what keeps a
+  // jittery hand from toggling on a single pixel.
   const resizingRef = React.useRef(false);
   const startResize = React.useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       resizingRef.current = true;
+      let dragCollapsed = collapsed;
       const prevUserSelect = document.body.style.userSelect;
       const prevCursor = document.body.style.cursor;
       document.body.style.userSelect = "none";
@@ -198,10 +208,16 @@ export function Sidebar() {
       const onMove = (ev: MouseEvent) => {
         if (!resizingRef.current) return;
         const raw = isRtl ? window.innerWidth - ev.clientX : ev.clientX;
-        if (raw < SIDEBAR_COLLAPSE_THRESHOLD) {
+        if (dragCollapsed) {
+          if (raw > SIDEBAR_EXPAND_AT) {
+            dragCollapsed = false;
+            setCollapsedPersist(false);
+            persistWidth(raw);
+          }
+        } else if (raw < SIDEBAR_COLLAPSE_AT) {
+          dragCollapsed = true;
           setCollapsedPersist(true);
         } else {
-          setCollapsedPersist(false);
           persistWidth(raw);
         }
       };
@@ -215,7 +231,7 @@ export function Sidebar() {
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
     },
-    [isRtl, persistWidth, setCollapsedPersist],
+    [collapsed, isRtl, persistWidth, setCollapsedPersist],
   );
 
   // Sidebar infinite scroll: fetchData (polling + external invalidation)
