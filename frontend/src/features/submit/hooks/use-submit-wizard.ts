@@ -436,14 +436,6 @@ export function useSubmitWizard() {
     wizardCtxRef.current = wizardCtx;
   }, [wizardCtx]);
   const submittedRef = useRef(false);
-  // Flipped the instant before a "start over" remount so the unmount cleanup
-  // treats it like a submit — reset the shared agent state and drop the parked
-  // draft — instead of restoring the half-filled form we're discarding.
-  const startingOverRef = useRef(false);
-  const startOver = useCallback(() => {
-    startingOverRef.current = true;
-  }, []);
-
   // Mirror the full serializable wizard snapshot into a ref every commit so the
   // unmount cleanup below parks the *latest* values — a []-deps cleanup would
   // otherwise close over the first render's state.
@@ -569,10 +561,9 @@ export function useSubmitWizard() {
 
   useEffect(
     () => () => {
-      if (submittedRef.current || startingOverRef.current) {
-        // A submit — or an explicit "start over" — leaves on purpose: reset the
-        // shared agent state and drop any draft parked on an earlier nav-away,
-        // rather than parking this form to restore later.
+      if (submittedRef.current) {
+        // A submit leaves on purpose: reset the shared agent state and drop any
+        // draft parked on an earlier nav-away, rather than parking this form.
         wizardCtxRef.current?.reset();
         clearWizardDraft();
         return;
@@ -2335,11 +2326,6 @@ export function useSubmitWizard() {
     agent,
     interview,
     interviewEligible,
-    startOver,
-    // Offer "start over" only once there's something to discard — the same
-    // has-progress guard the unmount cleanup uses to decide whether to park.
-    canStartOver:
-      step > 0 || parsedDataset !== null || datasetFileName !== null || jobName.trim() !== "",
   };
 }
 
