@@ -136,6 +136,9 @@ export function Sidebar() {
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [width, setWidth] = React.useState(SIDEBAR_DEFAULT_WIDTH);
   const [collapsed, setCollapsed] = React.useState(false);
+  // Arms the collapse/expand width glide for the discrete snap only; continuous
+  // resize drags leave it false so the rail tracks the cursor 1:1.
+  const [snapping, setSnapping] = React.useState(false);
   const [isDesktop, setIsDesktop] = React.useState(true);
   // Collapse is a desktop-only affordance: the mobile drawer always shows the
   // full rail, so gate the icon-rail on the breakpoint.
@@ -211,13 +214,19 @@ export function Sidebar() {
         if (dragCollapsed) {
           if (raw > SIDEBAR_EXPAND_AT) {
             dragCollapsed = false;
+            // Discrete snap back to text mode — glide the width jump.
+            setSnapping(true);
             setCollapsedPersist(false);
             persistWidth(raw);
           }
         } else if (raw < SIDEBAR_COLLAPSE_AT) {
           dragCollapsed = true;
+          // Discrete snap to the icon rail — glide the width jump.
+          setSnapping(true);
           setCollapsedPersist(true);
         } else {
+          // Continuous resize within range: track the cursor 1:1, no transition.
+          setSnapping(false);
           persistWidth(raw);
         }
       };
@@ -412,14 +421,30 @@ export function Sidebar() {
   // shell's flow and can't reserve its own width. Publish the live width as a CSS
   // var the shell's <main> consumes for its inline margin — one source of truth,
   // updated as the rail is dragged so content and rail never overlap.
-  React.useEffect(() => {
-    document.documentElement.style.setProperty("--app-sidebar-width", `${effectiveWidth}px`);
-  }, [effectiveWidth]);
+  //
+  // ``data-sidebar-snapping`` arms the matched rail-width / main-margin glide
+  // (globals.css) for the discrete collapse/expand snap only. useLayoutEffect,
+  // not useEffect: the attribute must be on <html> *before* the browser paints
+  // the new width, or the snap paints once — unanimated — before the transition
+  // could arm, which is exactly the jump this smooths out. Cleared on the next
+  // continuous drag and when the glide's transitionend fires.
+  React.useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--app-sidebar-width", `${effectiveWidth}px`);
+    if (snapping) root.setAttribute("data-sidebar-snapping", "");
+    else root.removeAttribute("data-sidebar-snapping");
+  }, [effectiveWidth, snapping]);
 
   return (
     <aside
-      className="relative flex h-full shrink-0 flex-col border-e border-sidebar-border/60 bg-sidebar/80 backdrop-blur-xl overflow-hidden"
+      className="app-sidebar-rail relative flex h-full shrink-0 flex-col border-e border-sidebar-border/60 bg-sidebar/80 backdrop-blur-xl overflow-hidden"
       style={{ width: isDesktop ? `${effectiveWidth}px` : `min(${width}px, 88vw)` }}
+      onTransitionEnd={(e) => {
+        // Disarm once the collapse/expand width glide lands so the next
+        // continuous drag tracks the cursor 1:1. Guard against transitionend
+        // bubbling up from descendant width animations (e.g. the storage bar).
+        if (e.target === e.currentTarget && e.propertyName === "width") setSnapping(false);
+      }}
       data-tutorial="sidebar-full"
     >
       {/* Drag-to-resize grip on the rail's inline-end edge (desktop only — the
