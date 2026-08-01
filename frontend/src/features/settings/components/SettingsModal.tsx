@@ -1421,14 +1421,16 @@ const SETTINGS_TAB_ORDER = [
   "about",
 ] as const;
 type SettingsTab = (typeof SETTINGS_TAB_ORDER)[number];
+type SettingsMessageKey = Parameters<typeof msg>[0];
 
 const SETTINGS_TAB_META: Record<
   SettingsTab,
   {
     icon: LucideIcon;
-    labelKey: Parameters<typeof msg>[0];
+    labelKey: SettingsMessageKey;
     group: "workflows" | "assistants" | "preferences" | "access" | "system";
     keywords: readonly string[];
+    searchKeys: readonly SettingsMessageKey[];
   }
 > = {
   wizard: {
@@ -1436,72 +1438,184 @@ const SETTINGS_TAB_META: Record<
     labelKey: "settings.tab.wizard",
     group: "workflows",
     keywords: ["optimization", "wizard", "models", "code", "split"],
+    searchKeys: [
+      "settings.wizard.code_assist.label",
+      "settings.wizard.code_assist.auto",
+      "settings.wizard.code_assist.manual",
+      "settings.wizard.split_mode.label",
+      "settings.wizard.split_mode.auto",
+      "settings.wizard.split_mode.manual",
+    ],
   },
   tagging: {
     icon: Tags,
     labelKey: "settings.tab.tagging",
     group: "workflows",
     keywords: ["tagging", "labels", "copilot", "autopilot", "dataset"],
+    searchKeys: [
+      "settings.tagger.assist.label",
+      "settings.tagger.assist.description",
+      "settings.tagger.default_model.label",
+      "settings.tagger.default_model.description",
+      "tagger.assist.model.placeholder",
+    ],
   },
   agent: {
     icon: Bot,
     labelKey: "settings.tab.agent",
     group: "assistants",
     keywords: ["agent", "assistant", "model", "voice", "dictation", "trust", "memory"],
+    searchKeys: [
+      "settings.agent.default_model.label",
+      "settings.agent.default_model.description",
+      "settings.agent.dictation.label",
+      "settings.agent.dictation.description",
+      "settings.agent.trust.label",
+      "settings.agent.trust.description",
+      "settings.agent.trust.ask",
+      "settings.agent.trust.auto_safe",
+      "settings.agent.trust.yolo",
+      "settings.agent.shortcut.label",
+      "settings.agent.shortcut.description",
+      "settings.agent.memory.wake.label",
+      "settings.agent.memory.wake.description",
+      "settings.agent.memory.entry.label",
+      "settings.agent.memory.entry.description",
+      "settings.agent.memory.recall.label",
+      "settings.agent.memory.recall.description",
+    ],
   },
   account: {
     icon: User,
     labelKey: "settings.tab.account",
     group: "preferences",
     keywords: ["account", "language", "advanced", "lite", "performance", "preferences"],
+    searchKeys: [
+      "settings.account.username.label",
+      "settings.account.role.label",
+      "shared.language.switch_aria",
+      "settings.account.advanced_mode.label",
+      "settings.account.advanced_mode.description",
+      "settings.account.expand_advanced.label",
+      "settings.account.expand_advanced.description",
+      "settings.account.lite.label",
+      "settings.account.lite.description",
+    ],
   },
   security: {
     icon: ShieldCheck,
     labelKey: "settings.tab.security",
     group: "access",
     keywords: ["security", "two-factor", "2fa", "passkey", "authenticator", "login"],
+    searchKeys: [
+      "settings.security.totp.label",
+      "settings.security.totp.description",
+      "settings.security.email.label",
+      "settings.security.email.description",
+      "settings.security.passkeys.label",
+      "settings.security.passkeys.description",
+      "settings.security.passkeys.add",
+      "settings.security.provider_managed.label",
+      "settings.security.provider_managed.description",
+    ],
   },
   privacy: {
     icon: Lock,
     labelKey: "settings.tab.privacy",
     group: "access",
     keywords: ["privacy", "data", "analytics", "cache", "email"],
+    searchKeys: [
+      "settings.privacy.analytics.label",
+      "settings.privacy.analytics.description",
+      "settings.privacy.clear_cache.label",
+      "settings.privacy.clear_cache.description",
+      "settings.privacy.copy_username.label",
+      "settings.privacy.copy_email.label",
+    ],
   },
   billing: {
     icon: CreditCard,
     labelKey: "settings.tab.billing",
     group: "access",
     keywords: ["billing", "credits", "plan", "payment", "wallet"],
+    searchKeys: [
+      "billing.popover.title",
+      "billing.wallet.autoreload_label",
+      "billing.wallet.autoreload_amount_label",
+      "billing.action.add_credits",
+      "billing.plans.credits.custom",
+    ],
   },
   usage: {
     icon: BarChart3,
     labelKey: "settings.tab.usage",
     group: "access",
     keywords: ["usage", "spend", "cost", "tokens", "runs"],
+    searchKeys: [
+      "usage.action.export",
+      "usage.col.day",
+      "usage.col.model",
+      "usage.col.credits",
+      "usage.col.runs",
+      "usage.col.tokens",
+      "usage.series.billed",
+      "usage.empty.title",
+    ],
   },
   providers: {
     icon: Plug,
     labelKey: "settings.tab.providers",
     group: "access",
     keywords: ["providers", "api keys", "openai", "anthropic", "byok"],
+    searchKeys: [
+      "settings.keys.title",
+      "settings.keys.description",
+      "settings.keys.add",
+      "settings.keys.base_url_hint",
+      "settings.keys.save",
+    ],
   },
   api: {
     icon: KeyRound,
     labelKey: "settings.tab.api",
     group: "access",
     keywords: ["api", "token", "developer", "integration", "documentation"],
+    searchKeys: [
+      "settings.api.title",
+      "settings.api.docs_label",
+      "settings.api.docs_description",
+      "settings.api.generate",
+      "settings.api.revoke",
+    ],
   },
   admin: {
     icon: HardDrive,
     labelKey: "settings.tab.admin",
     group: "system",
     keywords: ["admin", "storage", "quota", "users"],
+    searchKeys: [
+      "settings.admin.storage.title",
+      "settings.admin.storage.default_budget",
+      "settings.admin.storage.view_list",
+      "settings.admin.storage.username",
+      "settings.admin.storage.budget",
+      "settings.admin.storage.used",
+      "settings.admin.storage.updated_by",
+      "settings.admin.storage.add_row",
+    ],
   },
   about: {
     icon: Info,
     labelKey: "settings.tab.about",
     group: "system",
     keywords: ["about", "version", "reset", "defaults"],
+    searchKeys: [
+      "settings.about.version.label",
+      "settings.about.api_url.label",
+      "settings.about.reset_all.label",
+      "settings.about.reset_all.description",
+      "settings.about.reset_all.action",
+    ],
   },
 };
 
@@ -1552,7 +1666,10 @@ export function SettingsModal() {
     if (!query) return tabs;
     return tabs.filter((tab) => {
       const meta = SETTINGS_TAB_META[tab];
-      const haystack = [msg(meta.labelKey), ...meta.keywords].join(" ").toLocaleLowerCase();
+      const localizedSettings = meta.searchKeys.map((key) => msg(key));
+      const haystack = [msg(meta.labelKey), ...meta.keywords, ...localizedSettings]
+        .join(" ")
+        .toLocaleLowerCase();
       return haystack.includes(query);
     });
   }, [searchQuery, tabs]);
