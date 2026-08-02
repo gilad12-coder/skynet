@@ -970,7 +970,7 @@ function GridOverviewImpl({
           return (
             <div
               key={pr.pair_index}
-              className={`group rounded-xl border p-4 transition-all duration-200 cursor-pointer hover:shadow-sm ${
+              className={`group rounded-xl border p-4 transition-colors duration-200 cursor-pointer hover:shadow-sm ${
                 pr.error
                   ? "border-[#B04030]/30 bg-[#B04030]/[0.02] hover:border-[#B04030]/50"
                   : isOverall
