@@ -43,7 +43,6 @@ from sqlalchemy.orm import Session
 from ...constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
-    OPTIMIZATION_TYPE_TAGGING,
     PAYLOAD_OVERVIEW_IS_PRIVATE,
     PAYLOAD_OVERVIEW_MODEL_NAME,
     PAYLOAD_OVERVIEW_MODEL_SETTINGS,
@@ -113,6 +112,10 @@ from .constants import TERMINAL_STATUSES
 from .optimizations._local import remap_test_indices
 
 logger = logging.getLogger(__name__)
+
+_USER_FACING_OPTIMIZATION_TYPES = frozenset(
+    {OPTIMIZATION_TYPE_RUN, OPTIMIZATION_TYPE_GRID_SEARCH}
+)
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
@@ -1126,12 +1129,13 @@ def create_share_router(*, job_store) -> APIRouter:
         except KeyError:
             raise DomainError("share.not_found", status=404) from None
         overview = parse_overview(job_data)
+        optimization_type = (
+            overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE)
+            or job_data.get("optimization_type")
+            or OPTIMIZATION_TYPE_RUN
+        )
         if (
-            (
-                overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE)
-                or job_data.get("optimization_type")
-            )
-            == OPTIMIZATION_TYPE_TAGGING
+            optimization_type not in _USER_FACING_OPTIMIZATION_TYPES
             or status_to_job_status(job_data.get("status", "pending"))
             != OptimizationStatus.success
         ):

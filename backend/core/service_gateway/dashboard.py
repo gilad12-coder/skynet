@@ -34,7 +34,8 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..constants import (
-    OPTIMIZATION_TYPE_TAGGING,
+    OPTIMIZATION_TYPE_GRID_SEARCH,
+    OPTIMIZATION_TYPE_RUN,
     PAYLOAD_OVERVIEW_DESCRIPTION,
     PAYLOAD_OVERVIEW_MODEL_NAME,
     PAYLOAD_OVERVIEW_MODULE_NAME,
@@ -61,13 +62,13 @@ _CACHE_TTL_SECONDS = 300
 _LOCK = threading.Lock()
 _CACHE: dict[str, Any] = {"fingerprint": None, "at": 0.0, "payload": None}
 
-# Tagger auto-tag jobs share the jobs table with optimization runs so the
-# worker fleet can claim them. They are an internal implementation detail and
-# must never enter an Explore corpus or search result.
+# Explore is a catalog of user-facing optimization jobs, not the worker's
+# shared jobs table. Keep this allowlist strict so new internal job types do
+# not become publicly discoverable by default.
 _PUBLIC_CORPUS_TYPE_SQL = (
     "COALESCE(je.optimization_type, j.optimization_type, "
     f"j.payload_overview->>'{PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE}', '') "
-    f"<> '{OPTIMIZATION_TYPE_TAGGING}'"
+    f"IN ('{OPTIMIZATION_TYPE_RUN}', '{OPTIMIZATION_TYPE_GRID_SEARCH}')"
 )
 
 # "Shared with me" scope: restrict to optimizations the caller holds a member

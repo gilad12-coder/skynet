@@ -111,6 +111,17 @@ def test_get_job_returns_404_for_internal_tagger_job(
     assert resp.status_code == 404
 
 
+def test_get_job_returns_404_for_unknown_internal_job_type(
+    opt_client: TestClient, store: _ExtendedFakeJobStore
+) -> None:
+    """Unknown worker job types cannot render as optimization details."""
+    store.seed_job("future-internal", payload_overview={"optimization_type": "future_internal_job"})
+
+    resp = opt_client.get("/optimizations/future-internal")
+
+    assert resp.status_code == 404
+
+
 def test_get_job_returns_200_for_existing_job(opt_client: TestClient, store: _ExtendedFakeJobStore) -> None:
     """An existing job can be fetched by id."""
     store.seed_job("abc", status="success")
