@@ -276,11 +276,13 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                       <Switch checked={useMerge} onCheckedChange={setUseMerge} />
                     </div>
                     {optimizerName.toLowerCase() === "gepa" && (
-                      <div className="col-span-2 space-y-1.5">
-                        <Label htmlFor="target-score" className="text-xs">
-                          {msg("auto.features.submit.components.steps.paramsstep.16")}
+                      <div className="col-span-2 space-y-2">
+                        <Label htmlFor="target-score" className="cursor-pointer text-sm">
+                          <HelpTip text={tip("submit.target_score")}>
+                            {msg("auto.features.submit.components.steps.paramsstep.16")}
+                          </HelpTip>
                         </Label>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center">
                           <div className="relative w-full max-w-48">
                             <input
                               id="target-score"
@@ -298,9 +300,6 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                               %
                             </span>
                           </div>
-                          <p className="text-xs leading-relaxed text-muted-foreground">
-                            {msg("auto.features.submit.components.steps.paramsstep.17")}
-                          </p>
                         </div>
                       </div>
                     )}
