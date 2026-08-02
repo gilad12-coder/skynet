@@ -2,18 +2,18 @@
 
 import { memo, useMemo, useState } from "react";
 import {
-  ChevronLeft,
-  ChevronRight,
+  ArrowCounterClockwise,
+  CaretLeft,
+  CaretRight,
+  CircleNotch,
   Crown,
   Gauge,
-  Loader2,
   Play,
-  RotateCcw,
-  Trash2,
+  Trash,
   Trophy,
   X,
   XCircle,
-} from "lucide-react";
+} from "@/shared/ui/icons";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "react-toastify";
 import {
@@ -65,7 +65,7 @@ function GridOverviewImpl({
   onPairDeleted?: (pairIndex: number) => void;
 }) {
   const lite = useLiteMode();
-  const OpenIcon = getActiveDir() === "rtl" ? ChevronLeft : ChevronRight;
+  const OpenIcon = getActiveDir() === "rtl" ? CaretLeft : CaretRight;
   const [pendingDelete, setPendingDelete] = useState<PairResult | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [rerunningPair, setRerunningPair] = useState<number | null>(null);
@@ -1063,7 +1063,7 @@ function GridOverviewImpl({
                           }`}
                         />
                       ) : (
-                        <RotateCcw className={`size-3.5${rerunBusy ? " animate-spin" : ""}`} />
+                        <ArrowCounterClockwise className={`size-3.5${rerunBusy ? " animate-spin" : ""}`} />
                       )}
                     </Button>
                   </TooltipButton>
@@ -1084,7 +1084,7 @@ function GridOverviewImpl({
                       setPendingDelete(pr);
                     }}
                   >
-                    <Trash2 className="size-3.5" />
+                    <Trash className="size-3.5" />
                   </Button>
                 </TooltipButton>
 
@@ -1138,7 +1138,7 @@ function GridOverviewImpl({
               className="w-full justify-center"
             >
               {deleting ? (
-                <Loader2 className="size-4 animate-spin" />
+                <CircleNotch className="size-4 animate-spin" />
               ) : (
                 msg("auto.features.optimizations.components.gridoverview.literal.30")
               )}
