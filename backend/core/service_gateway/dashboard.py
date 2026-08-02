@@ -8,7 +8,7 @@ filters, and model/optimizer options.
 2. Bulk fetch — every public success job's lightweight metadata. Heavy
    fields (``signature_code``, ``optimizer_kwargs``, ``metric_name``,
    ``winning_rank``, ``is_recommendable``) are not used by the explore UI
-   and are dropped to keep the payload under ~5 MB (gzipped) at 100k points.
+   and are dropped to keep the response focused on searchable metadata.
 3. Cache — keyed by fingerprint, 5 min TTL; any indexed refresh changes the
    fingerprint immediately.
 
@@ -45,11 +45,6 @@ from .embedding_pipeline.embeddings import get_embedder
 
 logger = logging.getLogger(__name__)
 
-
-# Defensive ceiling. The /explore page is designed for up to 100k points;
-# beyond that, building the payload on the request thread becomes a real
-# outage risk.
-MAX_POINTS = 100_000
 
 # Free-text fields are truncated for the bulk response. Full text is
 # only useful when a point is selected — and the truncated text is what
@@ -274,7 +269,6 @@ def _fetch_corpus_points(session: Session, je_rel: str) -> list[dict[str, Any]]:
                 "AND NOT COALESCE(je.is_private, "
                 "(j.payload_overview->>'is_private')::boolean, FALSE) "
                 "ORDER BY j.created_at DESC, j.optimization_id DESC "
-                f"LIMIT {MAX_POINTS}"
             )
         )
         .mappings()

@@ -51,6 +51,16 @@ def test_fingerprint_includes_embedding_and_completion_freshness() -> None:
     )
 
 
+def test_corpus_fetch_has_no_artificial_point_cap() -> None:
+    """The public corpus query returns every matching success row."""
+    session = MagicMock(name="session")
+    session.execute.return_value.mappings.return_value.all.return_value = []
+
+    assert dashboard._fetch_corpus_points(session, "job_embeddings") == []
+    statement = session.execute.call_args.args[0]
+    assert "LIMIT" not in statement.text.upper()
+
+
 def test_normalize_query_for_log_collapses_and_drops_short() -> None:
     """Normalization lowercases, collapses whitespace, and drops sub-2-char noise."""
     assert dashboard._normalize_query_for_log("  GPT-4o   MINI ") == "gpt-4o mini"
