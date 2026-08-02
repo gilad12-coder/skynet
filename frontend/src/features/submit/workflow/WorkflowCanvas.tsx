@@ -206,6 +206,7 @@ function CanvasInner({
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const flowWrapRef = React.useRef<HTMLDivElement | null>(null);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
+  const addNodeBtnRef = React.useRef<HTMLButtonElement | null>(null);
   const menuOpenRef = React.useRef(false);
   React.useEffect(() => {
     menuOpenRef.current = menu !== null;
@@ -679,12 +680,17 @@ function CanvasInner({
   }, []);
 
   // Dismiss the menu on any pointer-down outside it (capture phase so canvas
-  // interactions can't swallow the event first).
+  // interactions can't swallow the event first). The toolbar's add-node
+  // trigger is excluded: it toggles the menu itself, so letting this handler
+  // close it first would close-then-reopen and the menu could never collapse.
   React.useEffect(() => {
     if (!menu) return;
     const onPointerDown = (e: PointerEvent) => {
       const el = menuRef.current;
-      if (el && e.target instanceof globalThis.Node && !el.contains(e.target)) setMenu(null);
+      const btn = addNodeBtnRef.current;
+      if (!(e.target instanceof globalThis.Node)) return;
+      if (btn?.contains(e.target)) return;
+      if (el && !el.contains(e.target)) setMenu(null);
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
@@ -784,6 +790,7 @@ function CanvasInner({
         ) : (
           <>
             <Button
+              ref={addNodeBtnRef}
               size="sm"
               variant="outline"
               className="h-7 gap-1.5 px-2.5 text-xs"
