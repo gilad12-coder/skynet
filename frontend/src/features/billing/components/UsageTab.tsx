@@ -5,7 +5,6 @@ import {
   ArrowDownLeft,
   BarChart3,
   Coins,
-  Download,
   Gift,
   Plus,
   RefreshCw,
@@ -22,23 +21,16 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { toast } from "react-toastify";
 import { ChartTooltip, ChartEmptyState } from "@/shared/charts/chart-utils";
 import { ChartTable } from "@/shared/charts/chart-table";
 import { useLiteMode } from "@/features/settings";
 import { EmptyState } from "@/shared/ui/empty-state";
-import { Button } from "@/shared/ui/primitives/button";
-import {
-  Tooltip as UITooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@/shared/ui/primitives/tooltip";
-import { Popover as PopoverPrimitive } from "radix-ui";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { useLocale } from "@/shared/providers";
 import { getUsage, type BillingUsageEntry, type BillingUsageResponse } from "@/shared/lib/api";
 import { SkynetDatePicker, toISODate } from "@/shared/ui/skynet-date-picker";
+import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { useCredits } from "../providers/credit-provider";
 import { creditsToUsd, formatCredits, formatResetDate, formatUsd, type UsageEntry } from "../lib/credit";
 
@@ -200,51 +192,6 @@ function bucketDays(
     .map(([key, billed]) => ({ key, label: formatDay(key, locale), billed }));
 }
 
-/** Quote a CSV cell only when it carries a comma, quote, or newline. */
-function csvCell(value: string): string {
-  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-}
-
-/** Download the in-range ledger as a CSV; toast the outcome. */
-function exportCsv(entries: BillingUsageEntry[]): void {
-  if (entries.length === 0) {
-    toast.error(msg("usage.export.empty"));
-    return;
-  }
-  const header = ["date", "label", "model", "kind", "credits"];
-  const lines = [header, ...entries.map((e) => [e.at, e.label, e.model ?? "", e.kind, String(e.credits)])];
-  const csv = lines.map((row) => row.map(csvCell).join(",")).join("\n");
-  triggerDownload(csv, "skynet-usage.csv", "text/csv;charset=utf-8;");
-  toast.success(formatMsg("usage.export.done", { p1: String(entries.length) }));
-}
-
-/** Download the in-range ledger as JSON; toast the outcome. Mirrors the CSV columns. */
-function exportJson(entries: BillingUsageEntry[]): void {
-  if (entries.length === 0) {
-    toast.error(msg("usage.export.empty"));
-    return;
-  }
-  const rows = entries.map((e) => ({
-    date: e.at,
-    label: e.label,
-    model: e.model ?? null,
-    kind: e.kind,
-    credits: e.credits,
-  }));
-  triggerDownload(JSON.stringify(rows, null, 2), "skynet-usage.json", "application/json");
-  toast.success(formatMsg("usage.export.done", { p1: String(entries.length) }));
-}
-
-/** Stream a blob to the browser as a file download. */
-function triggerDownload(content: string, filename: string, mimeType: string): void {
-  const url = URL.createObjectURL(new Blob([content], { type: mimeType }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
 function PanelHeading({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
@@ -299,48 +246,6 @@ function Segmented<T extends string>({
         );
       })}
     </div>
-  );
-}
-
-/** Export the in-range ledger from a compact icon dropdown: CSV or JSON. */
-function ExportDropdown({ entries }: { entries: BillingUsageEntry[] }) {
-  const formats = [
-    { label: "CSV", run: () => exportCsv(entries) },
-    { label: "JSON", run: () => exportJson(entries) },
-  ];
-  return (
-    <PopoverPrimitive.Root>
-      <UITooltip>
-        <TooltipTrigger asChild>
-          <PopoverPrimitive.Trigger asChild>
-            <Button variant="ghost" size="icon-sm" aria-label={msg("usage.action.export")}>
-              <Download className="size-4" />
-            </Button>
-          </PopoverPrimitive.Trigger>
-        </TooltipTrigger>
-        <TooltipContent>{msg("usage.action.export")}</TooltipContent>
-      </UITooltip>
-      <PopoverPrimitive.Portal>
-        <PopoverPrimitive.Content
-          side="bottom"
-          align="end"
-          sideOffset={8}
-          className="z-50 w-40 rounded-lg border bg-background p-1 shadow-lg animate-in fade-in-0 zoom-in-95"
-        >
-          {formats.map(({ label, run }) => (
-            <PopoverPrimitive.Close key={label} asChild>
-              <button
-                type="button"
-                onClick={run}
-                className="flex w-full items-center rounded-md px-3 py-1.5 text-xs font-medium text-foreground cursor-pointer transition-colors hover:bg-accent"
-              >
-                {label}
-              </button>
-            </PopoverPrimitive.Close>
-          ))}
-        </PopoverPrimitive.Content>
-      </PopoverPrimitive.Portal>
-    </PopoverPrimitive.Root>
   );
 }
 
@@ -692,7 +597,21 @@ export function UsageTab() {
             ariaLabel={msg("usage.group.label")}
             layoutId="usage-group-pill"
           />
-          <ExportDropdown entries={entries} />
+          <ExportTableMenu
+            iconOnly
+            disabled={entries.length === 0}
+            getData={() => ({
+              columns: ["date", "label", "model", "kind", "credits"],
+              rows: entries.map((entry) => ({
+                date: entry.at,
+                label: entry.label,
+                model: entry.model,
+                kind: entry.kind,
+                credits: entry.credits,
+              })),
+              filename: "skynet-usage",
+            })}
+          />
         </div>
       </div>
       {range === "custom" && (
