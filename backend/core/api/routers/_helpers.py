@@ -439,10 +439,11 @@ def load_job_with_role(
             job_data = get_job_no_payload(job_store, optimization_id)
     except KeyError:
         raise DomainError("optimization.not_found", status=404, optimization_id=optimization_id) from None
+    overview = parse_overview(job_data)
     if (
-        parse_overview(job_data).get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE)
-        == OPTIMIZATION_TYPE_TAGGING
-    ):
+        overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE)
+        or job_data.get("optimization_type")
+    ) == OPTIMIZATION_TYPE_TAGGING:
         raise DomainError("optimization.not_found", status=404, optimization_id=optimization_id)
     if is_admin(user):
         return job_data, ShareRole.owner

@@ -1127,7 +1127,11 @@ def create_share_router(*, job_store) -> APIRouter:
             raise DomainError("share.not_found", status=404) from None
         overview = parse_overview(job_data)
         if (
-            overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_TAGGING
+            (
+                overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE)
+                or job_data.get("optimization_type")
+            )
+            == OPTIMIZATION_TYPE_TAGGING
             or status_to_job_status(job_data.get("status", "pending"))
             != OptimizationStatus.success
         ):
