@@ -47,6 +47,7 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
     optimizerSettingsOpen,
     setOptimizerSettingsOpen,
   } = w;
+  const targetScoreValue = Number.parseFloat(targetScore);
 
   return (
     <Card
@@ -284,17 +285,14 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                         </Label>
                         <div className="flex items-center">
                           <div className="relative w-full max-w-48">
-                            <input
+                            <NumberInput
                               id="target-score"
-                              type="number"
                               min={1}
                               max={100}
                               step={0.1}
-                              value={targetScore}
-                              onChange={(event) => setTargetScore(event.target.value)}
-                              placeholder="85"
-                              className="h-9 w-full rounded-xl border border-input/90 bg-background/75 px-3 pe-8 text-sm tabular-nums shadow-[inset_0_1px_0_rgba(255,255,255,0.72),0_12px_26px_-24px_rgba(15,23,42,0.45)] outline-none transition-[border-color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                              dir="ltr"
+                              value={Number.isFinite(targetScoreValue) ? targetScoreValue : ""}
+                              onChange={(value) => setTargetScore(String(value))}
+                              className="pe-8"
                             />
                             <span className="pointer-events-none absolute inset-y-0 end-3 flex items-center text-xs text-muted-foreground">
                               %
