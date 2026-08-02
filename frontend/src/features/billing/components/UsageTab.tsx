@@ -302,31 +302,6 @@ function Segmented<T extends string>({
   );
 }
 
-/** A compact icon button for the toolbar (refresh / export). */
-function ToolbarButton({
-  icon: Icon,
-  label,
-  onClick,
-  spinning,
-}: {
-  icon: LucideIcon;
-  label: string;
-  onClick: () => void;
-  spinning?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      className="inline-flex size-8 cursor-pointer items-center justify-center rounded-md border border-border/60 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
-    >
-      <Icon className={cn("size-3.5", spinning && "animate-spin")} aria-hidden="true" />
-    </button>
-  );
-}
-
 /** Export the in-range ledger from a compact icon dropdown: CSV or JSON. */
 function ExportDropdown({ entries }: { entries: BillingUsageEntry[] }) {
   const formats = [
@@ -716,12 +691,6 @@ export function UsageTab() {
             onChange={setGroupBy}
             ariaLabel={msg("usage.group.label")}
             layoutId="usage-group-pill"
-          />
-          <ToolbarButton
-            icon={RefreshCw}
-            label={msg("usage.action.refresh")}
-            onClick={load}
-            spinning={loading}
           />
           <ExportDropdown entries={entries} />
         </div>
