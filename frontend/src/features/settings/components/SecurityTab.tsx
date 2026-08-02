@@ -206,7 +206,7 @@ export function SecurityTab() {
     try {
       await renamePasskey(credentialId, nickname);
       toast.success(msg("settings.security.passkeys.renamed"));
-      cancelPasskeyRename();
+      if (editingPasskey === credentialId) cancelPasskeyRename();
       refresh();
     } catch (err) {
       toast.error(describeError(err));
@@ -379,6 +379,7 @@ export function SecurityTab() {
                     variant="ghost"
                     size="icon-sm"
                     aria-label={msg("settings.security.passkeys.rename")}
+                    disabled={renaming !== null}
                     onClick={() => beginPasskeyRename(passkey)}
                   >
                     <Pencil className="size-3.5" />

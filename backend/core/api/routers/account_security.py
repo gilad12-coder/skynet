@@ -254,7 +254,6 @@ class PasskeyRegisterRequest(BaseModel):
     nickname: str = Field(default="", description="Label for the settings list; defaults to 'Passkey'.")
 
 
-# A replacement display label for an existing passkey.
 class PasskeyRenameRequest(BaseModel):
     nickname: str = Field(description="New label for the settings list.")
 
