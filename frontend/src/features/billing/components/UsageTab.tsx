@@ -48,8 +48,6 @@ type PresetRange = "7d" | "30d" | "90d" | "all";
 type RangeKey = PresetRange | "custom";
 /** Time bucket for the spend-over-time chart. */
 type GroupBy = "day" | "week";
-/** Which slice of the ledger the activity list shows. */
-type LedgerFilter = "all" | "costs";
 
 const RANGE_DAYS: Record<PresetRange, number | null> = { "7d": 7, "30d": 30, "90d": 90, all: null };
 
@@ -65,11 +63,6 @@ const GROUP_LABEL: Record<GroupBy, MessageKey> = {
   day: "usage.group.day",
   week: "usage.group.week",
 };
-
-const LEDGER_FILTERS: ReadonlyArray<{ value: LedgerFilter; labelKey: MessageKey }> = [
-  { value: "all", labelKey: "billing.wallet.filter_all" },
-  { value: "costs", labelKey: "billing.wallet.filter_costs" },
-];
 
 // Run rows lead with a spark; top-ups/grants with their own glyph. Keyed loosely
 // so an unrecognized backend kind still resolves to a sensible default.
@@ -653,7 +646,6 @@ export function UsageTab() {
   const [groupBy, setGroupBy] = React.useState<GroupBy>("day");
   const [data, setData] = React.useState<BillingUsageResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [usageFilter, setUsageFilter] = React.useState<LedgerFilter>("all");
   const reqId = React.useRef(0);
 
   const todayIso = React.useMemo(() => toISODate(new Date()), []);
@@ -697,10 +689,6 @@ export function UsageTab() {
   );
 
   const entries = data?.entries ?? [];
-  const visibleEntries = React.useMemo(() => {
-    if (usageFilter === "costs") return entries.filter((entry) => entry.credits < 0);
-    return entries;
-  }, [entries, usageFilter]);
 
   const rangeOptions = (Object.keys(RANGE_DAYS) as RangeKey[]).map((value) => ({
     value,
@@ -710,7 +698,6 @@ export function UsageTab() {
     value,
     label: msg(GROUP_LABEL[value]),
   }));
-  const filterOptions = LEDGER_FILTERS.map(({ value, labelKey }) => ({ value, label: msg(labelKey) }));
 
   const toolbar = (
     <div className="flex flex-col gap-3">
@@ -843,23 +830,14 @@ export function UsageTab() {
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-3">
           <PanelHeading>{msg("usage.panel.recent")}</PanelHeading>
-          {entries.length > 0 && (
-            <Segmented
-              options={filterOptions}
-              value={usageFilter}
-              onChange={setUsageFilter}
-              ariaLabel={msg("usage.panel.recent")}
-              layoutId="usage-ledger-filter-pill"
-            />
-          )}
         </div>
-        {visibleEntries.length === 0 ? (
+        {entries.length === 0 ? (
           <p className="px-1 py-6 text-center text-xs text-muted-foreground">
             {msg("billing.wallet.filter_empty")}
           </p>
         ) : (
           <ul className="flex max-h-72 flex-col overflow-y-auto pe-1">
-            {visibleEntries.map((entry) => (
+            {entries.map((entry) => (
               <LedgerRow key={entry.id} entry={entry} locale={locale} />
             ))}
           </ul>
