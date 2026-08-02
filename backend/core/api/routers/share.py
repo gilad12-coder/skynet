@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session
 from ...constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
+    OPTIMIZATION_TYPE_TAGGING,
     PAYLOAD_OVERVIEW_IS_PRIVATE,
     PAYLOAD_OVERVIEW_MODEL_NAME,
     PAYLOAD_OVERVIEW_MODEL_SETTINGS,
@@ -1100,11 +1101,12 @@ def create_share_router(*, job_store) -> APIRouter:
 
         Mirrors the access-gated ``GET /share/{token}`` composite but is keyed by
         optimization id and gated on the Explore-corpus ``is_private`` flag rather
-        than a share token: a public optimization grants every caller the
+        than a share token: a public, successful user optimization grants every caller the
         ``viewer`` tier (read + clone) — the owner is shown for attribution,
         secrets (API keys, base URLs) are stripped from the payload, and inference
         is disabled (``serve_info`` is ``null``, so no caller can spend the
-        owner's key). A private optimization 404s, exactly as if it were unlisted.
+        owner's key). Internal tagger jobs, non-successful jobs, and private
+        optimizations 404, exactly as if they were unlisted.
         This backs the Explore "public" tab so that a *listed* run is also
         *openable* and *forkable* — public discoverability and view access stay in
         sync.
@@ -1124,6 +1126,12 @@ def create_share_router(*, job_store) -> APIRouter:
         except KeyError:
             raise DomainError("share.not_found", status=404) from None
         overview = parse_overview(job_data)
+        if (
+            overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_TAGGING
+            or status_to_job_status(job_data.get("status", "pending"))
+            != OptimizationStatus.success
+        ):
+            raise DomainError("share.not_found", status=404)
         if bool(overview.get(PAYLOAD_OVERVIEW_IS_PRIVATE, False)):
             raise DomainError("share.not_found", status=404)
 

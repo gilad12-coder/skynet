@@ -26,6 +26,7 @@ from ...config import settings
 from ...constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
+    OPTIMIZATION_TYPE_TAGGING,
     PAYLOAD_OVERVIEW_COMPILE_KWARGS,
     PAYLOAD_OVERVIEW_MODEL_NAME,
     PAYLOAD_OVERVIEW_MODULE_KWARGS,
@@ -438,6 +439,11 @@ def load_job_with_role(
             job_data = get_job_no_payload(job_store, optimization_id)
     except KeyError:
         raise DomainError("optimization.not_found", status=404, optimization_id=optimization_id) from None
+    if (
+        parse_overview(job_data).get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE)
+        == OPTIMIZATION_TYPE_TAGGING
+    ):
+        raise DomainError("optimization.not_found", status=404, optimization_id=optimization_id)
     if is_admin(user):
         return job_data, ShareRole.owner
     owner = job_owner(job_data)
