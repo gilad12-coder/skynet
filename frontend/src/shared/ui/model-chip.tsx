@@ -7,6 +7,7 @@ import type { CatalogModel, ModelConfig } from "@/shared/types/api";
 import { msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 
 interface ModelChipProps {
   config: ModelConfig;
@@ -23,6 +24,8 @@ interface ModelChipProps {
   catalogModels?: CatalogModel[];
   /** Placeholder when no model is set; overrides the required/not-configured copy. */
   emptyLabel?: string;
+  /** Explanation shown when hovering or focusing the model card. */
+  tooltip?: string | null;
   className?: string;
 }
 
@@ -63,6 +66,7 @@ export function ModelChip({
   onCopyFrom,
   catalogModels,
   emptyLabel,
+  tooltip,
   className,
 }: ModelChipProps) {
   const effort = config.extra?.reasoning_effort as string | undefined;
@@ -73,7 +77,7 @@ export function ModelChip({
   const isEmpty = !config.name;
   const supportsVision = !!catalogModels?.find((m) => m.value === config.name)?.supports_vision;
 
-  return (
+  const card = (
     <div
       className={cn(
         "group relative flex items-center gap-2.5 rounded-lg border px-3 py-2 cursor-pointer",
@@ -181,6 +185,16 @@ export function ModelChip({
         <Gear className="size-3.5 text-muted-foreground/60 group-hover:text-foreground/70 transition-colors" />
       </div>
     </div>
+  );
+
+  if (!tooltip) return card;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{card}</TooltipTrigger>
+      <TooltipContent side="top" className="max-w-80 text-center leading-relaxed" dir={getActiveDir()}>
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
