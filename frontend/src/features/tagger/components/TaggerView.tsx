@@ -340,6 +340,7 @@ export function TaggerView({ initialSession }: { initialSession?: TaggerSessionD
             frameData={tagger.frameData}
             currentIndex={tagger.currentIndex}
             openRound={tagger.openRound}
+            roundPredicting={tagger.roundPredicting}
             onAccept={tagger.acceptPrediction}
             onGoTo={tagger.goTo}
             onFinishRound={tagger.finishRound}

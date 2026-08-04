@@ -336,10 +336,15 @@ export function TaggerAnnotation({
           {aiPending && (
             <div
               role="status"
-              className="mb-2 flex items-center justify-center gap-1.5 text-xs text-muted-foreground motion-safe:animate-in motion-safe:fade-in-0"
+              className="mb-2 flex items-center justify-center motion-safe:animate-in motion-safe:fade-in-0"
             >
-              <CircleNotch className="size-3 animate-spin" aria-hidden="true" />
-              {msg("tagger.assist.review.predicting")}
+              <span className="flex items-center gap-1.5 rounded-full border border-primary/15 bg-primary/5 px-2.5 py-1 text-xs text-muted-foreground">
+                <Sparkle
+                  className="size-3 text-primary/60 motion-safe:animate-pulse"
+                  aria-hidden="true"
+                />
+                {msg("tagger.assist.review.predicting")}
+              </span>
             </div>
           )}
 
@@ -361,7 +366,10 @@ export function TaggerAnnotation({
                 </Badge>
                 {msg("auto.features.tagger.components.taggerannotation.5")}
                 {isBinaryYes(aiPick) && (
-                  <Sparkle className="size-3.5 text-primary/70" aria-hidden="true" />
+                  <Sparkle
+                    className="size-3.5 text-primary/70 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-50"
+                    aria-hidden="true"
+                  />
                 )}
               </Button>
               <Button
@@ -380,7 +388,10 @@ export function TaggerAnnotation({
                 </Badge>
                 {msg("auto.features.tagger.components.taggerannotation.7")}
                 {isBinaryNo(aiPick) && (
-                  <Sparkle className="size-3.5 text-primary/70" aria-hidden="true" />
+                  <Sparkle
+                    className="size-3.5 text-primary/70 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-50"
+                    aria-hidden="true"
+                  />
                 )}
               </Button>
             </div>
@@ -420,7 +431,10 @@ export function TaggerAnnotation({
                     )}
                     <span className="min-w-0 break-words">{cat.label}</span>
                     {aiPickedCats.has(cat.id) && (
-                      <Sparkle className="size-3.5 shrink-0 text-primary/70" aria-hidden="true" />
+                      <Sparkle
+                        className="size-3.5 shrink-0 text-primary/70 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-50"
+                        aria-hidden="true"
+                      />
                     )}
                   </Button>
                 );

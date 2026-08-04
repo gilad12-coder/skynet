@@ -2596,6 +2596,7 @@ export type MessageKey =
   | "tagger.assist.rail.reveal"
   | "tagger.assist.rail.reviewed"
   | "tagger.assist.rail.switch"
+  | "tagger.assist.rail.tagging"
   | "tagger.assist.rail.title"
   | "tagger.assist.rail.waiting"
   | "tagger.assist.retry"
@@ -5523,6 +5524,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "tagger.assist.rail.reveal": "השוואה לניחוש שלי",
   "tagger.assist.rail.reviewed": "{done} מתוך {total} נבדקו",
   "tagger.assist.rail.switch": "לקחת את של ה-AI",
+  "tagger.assist.rail.tagging": "ה-AI מתייג את הסבב…",
   "tagger.assist.rail.title": "קו-פיילוט",
   "tagger.assist.rail.waiting": "תייגו את השורה — אני מנחש בשקט ברקע.",
   "tagger.assist.retry": "נסו שוב",
@@ -14001,6 +14003,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "tagger.assist.rail.reveal": "Compare with my guess",
   "tagger.assist.rail.reviewed": "{done} of {total} reviewed",
   "tagger.assist.rail.switch": "Use the AI's",
+  "tagger.assist.rail.tagging": "AI is tagging the batch…",
   "tagger.assist.rail.title": "Co-pilot",
   "tagger.assist.rail.waiting": "Label this row — I'm guessing silently in the background.",
   "tagger.assist.retry": "Retry",
