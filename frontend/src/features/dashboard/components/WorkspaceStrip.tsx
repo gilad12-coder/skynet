@@ -3,7 +3,6 @@
 import { Fragment, type ReactElement, type ReactNode } from "react";
 import Link from "next/link";
 import { CaretRight, Coins, Database, Tag } from "@/shared/ui/icons";
-import { Card } from "@/shared/ui/primitives/card";
 import { creditsToUsd, formatCredits, formatUsd, useCredits } from "@/features/billing";
 import { useSettingsModal } from "@/features/settings";
 import { formatBytes } from "@/shared/lib/formatters";
@@ -44,7 +43,7 @@ function WorkspaceSection({
     </span>
   );
   return (
-    <div className="group/ws min-w-0 p-4 lg:flex-1">
+    <div className="group/ws min-w-0 p-4 sm:p-5 lg:flex-1">
       {href ? (
         <Link
           href={href}
@@ -87,11 +86,12 @@ function EmptyHint({ text }: { text: string }) {
 }
 
 /**
- * One connected card surfacing the workspace surfaces the run-centric
- * dashboard predates: labeling sessions, the dataset library (with its
- * storage meter), and the credit wallet, divided into sections. Every
- * section is one cheap, mostly-cached call — the strip renders nothing for
- * a section whose fetch failed rather than blocking the page.
+ * The workspace band of the dashboard's summary card (rendered under the
+ * KPI band), surfacing the surfaces the run-centric dashboard predates:
+ * labeling sessions, the dataset library (with its storage meter), and the
+ * credit wallet, as divider-separated sections. Every section is one cheap,
+ * mostly-cached call — the band renders nothing for a section whose fetch
+ * failed rather than blocking the page.
  */
 export function WorkspaceStrip() {
   const { tagging, datasets, loading } = useWorkspaceSummary();
@@ -103,7 +103,7 @@ export function WorkspaceStrip() {
     return (
       <div
         aria-hidden="true"
-        className="h-40 animate-pulse rounded-2xl border border-border/40 bg-card/60 lg:h-28"
+        className="h-40 animate-pulse border-t border-[#DDD4C8]/50 bg-card/60 first:border-t-0 lg:h-28"
       />
     );
   }
@@ -213,7 +213,7 @@ export function WorkspaceStrip() {
   }
 
   return (
-    <Card className="gap-0 p-0 lg:flex-row lg:items-stretch">
+    <div className="flex flex-col border-t border-[#DDD4C8]/50 first:border-t-0 lg:flex-row lg:items-stretch">
       {sections.map((section, i) => (
         <Fragment key={section.key}>
           {i > 0 && (
@@ -225,6 +225,6 @@ export function WorkspaceStrip() {
           {section}
         </Fragment>
       ))}
-    </Card>
+    </div>
   );
 }

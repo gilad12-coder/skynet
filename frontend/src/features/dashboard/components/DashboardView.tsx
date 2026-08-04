@@ -7,6 +7,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { ChartBar, Table } from "@/shared/ui/icons";
 import { DashboardSkeleton } from "./DashboardSkeleton";
 import { toast } from "react-toastify";
+import { Card } from "@/shared/ui/primitives/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/primitives/tabs";
 import { FadeIn } from "@/shared/ui/motion";
 import { msg } from "@/shared/lib/messages";
@@ -329,8 +330,10 @@ export function DashboardView() {
   return (
     <>
       <div className="flex flex-col gap-6 -mt-2 md:-mt-4">
-        <DashboardHeader stats={stats} />
-        <WorkspaceStrip />
+        <Card className="gap-0 p-0">
+          <DashboardHeader stats={stats} />
+          <WorkspaceStrip />
+        </Card>
         <QueueStatusAlert queueStatus={queueStatus} />
 
         <FadeIn delay={0.2}>

@@ -1,7 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { Users } from "@/shared/ui/icons";
 import { AnimatedNumber } from "@/shared/ui/motion";
-import { Card } from "@/shared/ui/primitives/card";
 import type { DashboardStats } from "../lib/get-dashboard-stats";
 import { msg } from "@/shared/lib/messages";
 
@@ -88,13 +87,13 @@ export function DashboardHeader({ stats }: DashboardHeaderProps) {
   }
 
   return (
-    <Card className="flex-row items-stretch gap-0 p-0" data-tutorial="dashboard-kpis">
+    <div className="flex items-stretch" data-tutorial="dashboard-kpis">
       {cells.map((cell, i) => (
         <Fragment key={cell.label}>
           {i > 0 && <div aria-hidden className="my-4 w-px shrink-0 bg-[#DDD4C8]/50" />}
           <StatCell {...cell} />
         </Fragment>
       ))}
-    </Card>
+    </div>
   );
 }
