@@ -2693,6 +2693,7 @@
   "tagger.assist.rail.decided_confirmed": "אושר",
   "tagger.assist.rail.decided_corrected": "תוקן — ה-AI ילמד מזה",
   "tagger.assist.rail.finish_round": "סיום הסבב",
+  "tagger.assist.rail.next_unreviewed": "לשורה הבאה שטרם נבדקה (נותרו {count})",
   "tagger.assist.gate.preparing": "מכין את הסבב הבא…",
   "tagger.assist.gate.autopilot_title": "מוכן לתייג הכול",
   "tagger.assist.gate.autopilot_subtitle": "ה-AI יתייג כל שורה לפי המדריך ויסמן כל שורה שבה יתלבט.",

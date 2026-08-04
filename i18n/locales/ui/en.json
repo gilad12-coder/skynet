@@ -2693,6 +2693,7 @@
   "tagger.assist.rail.decided_confirmed": "Confirmed",
   "tagger.assist.rail.decided_corrected": "Corrected — the AI will learn from this",
   "tagger.assist.rail.finish_round": "Finish this round",
+  "tagger.assist.rail.next_unreviewed": "Next unreviewed row ({count} left)",
   "tagger.assist.gate.preparing": "Preparing the next batch…",
   "tagger.assist.gate.autopilot_title": "Ready to tag everything",
   "tagger.assist.gate.autopilot_subtitle": "The AI will label every row by your guide and flag anything it's unsure about.",
