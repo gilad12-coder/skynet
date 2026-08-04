@@ -39,7 +39,7 @@ import { AnalyticsTab } from "./AnalyticsTab";
 // triggers via Framer's layoutId (see DashboardView). The button itself stays
 // transparent and only fades text color + reacts to the press transform.
 const DASHBOARD_TAB_CLASS =
-  "relative z-10 min-h-10 rounded-md px-3 py-2 text-sm font-semibold cursor-pointer border-none bg-transparent text-foreground/65 shadow-none transition-[color,transform] data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:border-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 sm:px-4";
+  "relative z-10 min-h-10 rounded-full px-3 py-2 text-sm font-semibold cursor-pointer border-none bg-transparent text-foreground/65 shadow-none transition-[color,transform] data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:border-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 sm:px-4";
 
 function getJobField(job: OptimizationSummaryResponse, key: string): unknown {
   return (job as unknown as Record<string, unknown>)[key];
@@ -339,7 +339,7 @@ export function DashboardView() {
         <FadeIn delay={0.2}>
           {mounted && (
             <Tabs value={activeTab} onValueChange={handleTabChange}>
-              <TabsList className="inline-flex h-auto w-full gap-1 rounded-lg border border-border/60 bg-muted/50 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]">
+              <TabsList className="inline-flex h-auto w-full gap-1 rounded-full border border-border/60 bg-muted/50 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]">
                 <TabsTrigger
                   value="jobs"
                   className={DASHBOARD_TAB_CLASS}
@@ -348,7 +348,7 @@ export function DashboardView() {
                     <motion.span
                       layoutId="dashboardTabPill"
                       transition={tabPillTransition}
-                      className="absolute inset-0 z-0 rounded-md bg-background shadow-sm"
+                      className="absolute inset-0 z-0 rounded-full bg-background shadow-sm"
                       aria-hidden="true"
                     />
                   )}
@@ -366,7 +366,7 @@ export function DashboardView() {
                     <motion.span
                       layoutId="dashboardTabPill"
                       transition={tabPillTransition}
-                      className="absolute inset-0 z-0 rounded-md bg-background shadow-sm"
+                      className="absolute inset-0 z-0 rounded-full bg-background shadow-sm"
                       aria-hidden="true"
                     />
                   )}
