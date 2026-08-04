@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { CaretRight, Coins, Database, Tag } from "@/shared/ui/icons";
 import { Card } from "@/shared/ui/primitives/card";
-import { formatCredits, useCredits } from "@/features/billing";
+import { creditsToUsd, formatCredits, formatUsd, useCredits } from "@/features/billing";
 import { useSettingsModal } from "@/features/settings";
 import { formatBytes } from "@/shared/lib/formatters";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -113,6 +113,7 @@ export function WorkspaceStrip() {
   const usagePct = datasets
     ? Math.min(100, Math.round((datasets.usage.used_bytes / Math.max(1, datasets.usage.quota_bytes)) * 100))
     : 0;
+  const walletTotal = wallet.paidBalanceCredits + wallet.freeGrant.creditsRemaining;
 
   return (
     <div className={cn("grid gap-3 sm:gap-4", "md:grid-cols-2 lg:grid-cols-3")}>
@@ -174,15 +175,35 @@ export function WorkspaceStrip() {
           title={msg("dashboard.workspace.credits.title")}
           onOpen={() => openTo("billing")}
         >
-          <p className="text-xl font-bold leading-none tracking-tight text-foreground tabular-nums">
-            {formatCredits(wallet.paidBalanceCredits + wallet.freeGrant.creditsRemaining, locale)}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {formatMsg("dashboard.workspace.credits.free", {
-              remaining: formatCredits(wallet.freeGrant.creditsRemaining, locale),
-              total: formatCredits(wallet.freeGrant.creditsTotal, locale),
-            })}
-          </p>
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <p className="text-xl font-bold leading-none tracking-tight text-foreground tabular-nums">
+              {formatCredits(walletTotal, locale)}
+            </p>
+            <span className="text-xs text-muted-foreground" dir="ltr">
+              ≈ {formatUsd(creditsToUsd(walletTotal), locale)}
+            </span>
+          </div>
+          {wallet.usage.length === 0 ? (
+            <EmptyHint text={msg("dashboard.workspace.credits.cta")} />
+          ) : (
+            wallet.usage.slice(0, 3).map((entry) => (
+              <div key={entry.id} className="flex items-baseline justify-between gap-3 text-xs">
+                <span className="min-w-0 truncate text-foreground/80" dir="auto">
+                  {entry.label}
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 tabular-nums",
+                    entry.credits > 0 ? "text-emerald-600" : "text-muted-foreground",
+                  )}
+                  dir="ltr"
+                >
+                  {entry.credits > 0 ? "+" : ""}
+                  {formatCredits(entry.credits, locale)}
+                </span>
+              </div>
+            ))
+          )}
         </WorkspaceCard>
       )}
     </div>
