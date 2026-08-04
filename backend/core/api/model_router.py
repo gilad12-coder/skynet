@@ -32,11 +32,12 @@ AUTO_INTELLIGENT_ID = "auto:intelligent"
 # prefix plus their ``openrouter/auto-beta`` model id.
 OPENROUTER_AUTO_ID = "openrouter/openrouter/auto-beta"
 
-# The default ("balanced") model, pinned per the 2026-08 five-model eval on
-# sanitized production cases: best judged-pass rate (14/20, ahead of
-# gpt-5.6-sol, kimi-k3, claude-opus-4.8, claude-opus-5) at the lowest
-# measured cost and latency, with bare routing beating every routing
-# variant. Re-measure before changing — the eval is re-runnable.
+# The default ("balanced") model, pinned per the 2026-08 nine-model eval on
+# sanitized production cases (two rounds). gpt-5.6-luna scored higher
+# (16/20 vs Terra's 14/20 judged passes) but Terra was kept deliberately:
+# fastest (3.1s vs 7.1s avg) and cheapest of the top scorers, and the only
+# candidate whose routing variants were also validated (bare beat every
+# variant). Re-measure before changing — the eval is re-runnable.
 BALANCED_PINNED_MODEL_ID = "openrouter/openai/gpt-5.6-terra"
 
 # OpenRouter's dial: 0 = pure quality, 10 = cheapest wins (their default is
