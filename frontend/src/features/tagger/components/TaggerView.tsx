@@ -262,6 +262,7 @@ export function TaggerView({ initialSession }: { initialSession?: TaggerSessionD
       annotations={tagger.annotations}
       provenance={tagger.assist?.provenance}
       suggestions={tagger.phase === "review" ? tagger.assist?.predictions : undefined}
+      suggestionsPending={tagger.phase === "review" && tagger.roundPredicting}
       currentIndex={tagger.currentIndex}
       taggedCount={tagger.frameTaggedCount}
       reviewProgress={reviewProgress}

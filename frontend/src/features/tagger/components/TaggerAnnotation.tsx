@@ -58,6 +58,9 @@ interface Props {
   // answer is highlighted on the answer surface itself until the row is
   // decided; blind phases simply omit the prop.
   suggestions?: Record<string, AssistPrediction>;
+  // The open round's predictions are still streaming in — rows whose
+  // suggestion hasn't landed yet show a "tagging…" hint instead of nothing.
+  suggestionsPending?: boolean;
   currentIndex: number;
   taggedCount: number;
   // Review rounds pre-label every row, so tagged/total reads full before the
@@ -84,6 +87,7 @@ export function TaggerAnnotation({
   annotations,
   provenance,
   suggestions,
+  suggestionsPending = false,
   currentIndex,
   taggedCount,
   reviewProgress,
@@ -122,6 +126,10 @@ export function TaggerAnnotation({
       : typeof currentAnn === "string" && currentAnn !== "";
   const aiPick = rowCommitted ? undefined : suggestions?.[id]?.value;
   const aiPickedCats = new Set(Array.isArray(aiPick) ? aiPick : []);
+  // This row's suggestion is still on its way (predictions stream in one
+  // chunk at a time); hidden the moment the human commits either way.
+  const aiPending =
+    suggestionsPending && !rowCommitted && suggestions !== undefined && !suggestions[id];
 
   const showConfettiBriefly = useCallback(() => {
     setShowConfetti(true);
@@ -324,6 +332,16 @@ export function TaggerAnnotation({
             {config.mode === "freetext" &&
               (config.prompt ?? msg("auto.features.tagger.components.taggerannotation.literal.3"))}
           </CardTitle>
+
+          {aiPending && (
+            <div
+              role="status"
+              className="mb-2 flex items-center justify-center gap-1.5 text-xs text-muted-foreground motion-safe:animate-in motion-safe:fade-in-0"
+            >
+              <CircleNotch className="size-3 animate-spin" aria-hidden="true" />
+              {msg("tagger.assist.review.predicting")}
+            </div>
+          )}
 
           {config.mode === "binary" && (
             <div className="flex flex-1 min-h-0 flex-col gap-2">

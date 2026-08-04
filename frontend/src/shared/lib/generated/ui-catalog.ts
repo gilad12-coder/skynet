@@ -2599,6 +2599,7 @@ export type MessageKey =
   | "tagger.assist.rail.title"
   | "tagger.assist.rail.waiting"
   | "tagger.assist.retry"
+  | "tagger.assist.review.predicting"
   | "tagger.assist.rubric.answer_style"
   | "tagger.assist.rubric.credits_estimate"
   | "tagger.assist.rubric.credits_estimate_flat"
@@ -5525,6 +5526,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "tagger.assist.rail.title": "קו-פיילוט",
   "tagger.assist.rail.waiting": "תייגו את השורה — אני מנחש בשקט ברקע.",
   "tagger.assist.retry": "נסו שוב",
+  "tagger.assist.review.predicting": "ה-AI מתייג את השורה הזו…",
   "tagger.assist.rubric.answer_style": "סגנון מענה",
   "tagger.assist.rubric.credits_estimate": "‎~{low}–{high} קרדיטים",
   "tagger.assist.rubric.credits_estimate_flat": "‎~{count} קרדיטים",
@@ -14002,6 +14004,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "tagger.assist.rail.title": "Co-pilot",
   "tagger.assist.rail.waiting": "Label this row — I'm guessing silently in the background.",
   "tagger.assist.retry": "Retry",
+  "tagger.assist.review.predicting": "The AI is tagging this row…",
   "tagger.assist.rubric.answer_style": "Answer style",
   "tagger.assist.rubric.credits_estimate": "~{low}–{high} credits",
   "tagger.assist.rubric.credits_estimate_flat": "~{count} credits",
