@@ -32,6 +32,7 @@ const MODULE_CHOICES = [
   ["predict", "Predict"],
   ["cot", "CoT"],
   ["react", "ReAct"],
+  ["flex", "Flex"],
 ] as const;
 
 interface NodeInspectorProps {

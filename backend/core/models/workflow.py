@@ -114,7 +114,9 @@ class WorkflowSignatureNode(_WorkflowNodeBase):
     """An LLM step: a dspy.Signature run by a per-node module choice."""
 
     kind: Literal["signature"]
-    module_name: Literal["predict", "cot", "react"] = "predict"
+    # ``flex`` is a code-optimizable node: GEPA rewrites its module source
+    # instead of only its instructions, and it needs dspy 3.3+ at build time.
+    module_name: Literal["predict", "cot", "react", "flex"] = "predict"
     signature_code: str = Field(min_length=1)
     tool_filter: list[str] | None = Field(
         default=None,

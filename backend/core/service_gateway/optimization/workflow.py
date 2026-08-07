@@ -2,9 +2,10 @@
 
 ``build_workflow_program`` turns a structurally-valid ``WorkflowSpec`` into a
 ``WorkflowProgram`` — a ``dspy.Module`` whose signature nodes are named
-sub-modules (so GEPA discovers and jointly optimizes every node's
-instructions), whose transform nodes execute user Python, and whose mcp
-nodes call tools from the run-level roster. The same builder reconstructs
+sub-modules (so GEPA discovers and jointly optimizes every node, tuning
+instructions for predict/cot/react nodes and rewriting code for flex
+ones), whose transform nodes execute user Python, and whose mcp nodes
+call tools from the run-level roster. The same builder reconstructs
 the module shell at serve time before ``load_state`` overlays the optimized
 instructions, so construction must stay deterministic for a given spec.
 
@@ -32,7 +33,7 @@ from ...config import settings as app_settings
 from ...exceptions import ServiceError
 from ...models import WorkflowSpec, workflow_topological_order
 from ...models.workflow import WorkflowNode
-from ...registry.resolvers import resolve_module_factory
+from ...registry.resolvers import ResolverError, resolve_module_factory
 from ..react_compat import REACT_CLASS
 from ..safe_exec import validate_signature_code, validate_transform_code
 from .data import extract_signature_fields, load_signature_from_code, load_transform_from_code
@@ -119,9 +120,11 @@ class WorkflowProgram(dspy.Module):
 
     Signature nodes are plain attributes (``n_<node_id>``) holding their
     DSPy modules, which is exactly what GEPA's predictor discovery walks —
-    every node's instructions are optimized jointly against the single
-    end-to-end metric. Transforms and tools are held in dicts so they stay
-    invisible to predictor discovery.
+    every node is optimized jointly against the single end-to-end metric.
+    A flex node is a ``dspy.Flex``, which GEPA picks up by type and whose
+    rewritten code becomes its component instead of an instruction string;
+    every other node contributes its predictors' instructions. Transforms
+    and tools are held in dicts so they stay invisible to that discovery.
     """
 
     def __init__(
@@ -311,7 +314,15 @@ def build_workflow_program(
                     signature_cls, tools=_filter_roster(roster, node.tool_filter, node.id)
                 )
             else:
-                factory, _auto = resolve_module_factory(node.module_name)
+                try:
+                    factory, _auto = resolve_module_factory(node.module_name)
+                except ResolverError as exc:
+                    # Reachable for flex on a dspy build without ``dspy.Flex``;
+                    # name the node so the canvas can anchor the error.
+                    raise ServiceError(
+                        f"Workflow node '{node.id}' requests module '{node.module_name}', "
+                        f"which this DSPy build cannot provide: {exc}"
+                    ) from exc
                 signature_modules[node.id] = factory(signature=signature_cls)
         elif node.kind == "transform":
             transforms[node.id] = load_transform_from_code(node.transform_code)

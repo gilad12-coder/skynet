@@ -95,7 +95,7 @@ export interface WorkflowOutputNodeSpec extends WorkflowNodeSpecBase {
 
 export interface WorkflowSignatureNodeSpec extends WorkflowNodeSpecBase {
   kind: "signature";
-  module_name: "predict" | "cot" | "react";
+  module_name: "predict" | "cot" | "react" | "flex";
   signature_code: string;
   tool_filter?: string[] | null;
 }
