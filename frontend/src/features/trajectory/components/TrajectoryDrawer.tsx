@@ -21,6 +21,12 @@ import {
   type TrajectoryNode,
   type ValsetRow,
 } from "../lib/types";
+import {
+  decomposeFlexSource,
+  matchSignature,
+  type FlexDecomposition,
+  type FlexSignature,
+} from "../lib/flex-source";
 import { cn } from "@/shared/lib/utils";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -1606,15 +1612,28 @@ function looksLikeModuleCode(value: string): boolean {
 // submodule's source) or an INSTRUCTION, plus the component's candidate key. A
 // Flex code candidate used to render as an anonymous monospace blob that read like
 // an instruction prompt; this makes the kind explicit and names the component.
-function PromptKindHeader({ isCode, label }: { isCode: boolean; label: string }) {
+// When the module decomposes into signature + code sub-blocks, the header reads
+// "Module" — the "Code" label then belongs to the code sub-block, not the whole.
+function PromptKindHeader({
+  isCode,
+  label,
+  decomposed = false,
+}: {
+  isCode: boolean;
+  label: string;
+  decomposed?: boolean;
+}) {
   const KindIcon = isCode ? Code : TextAlignLeft;
+  const kindText = decomposed
+    ? msg("trajectory.prompt.kind.module")
+    : isCode
+      ? msg("trajectory.prompt.kind.code")
+      : msg("trajectory.prompt.kind.instructions");
   return (
     <div className="mb-2 flex items-center justify-between gap-2">
       <span className="inline-flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
         <KindIcon className="size-3" />
-        {isCode
-          ? msg("trajectory.prompt.kind.code")
-          : msg("trajectory.prompt.kind.instructions")}
+        {kindText}
       </span>
       {label.length > 0 ? (
         <span className="truncate font-mono text-[0.625rem] text-muted-foreground/70" dir="ltr">
@@ -1649,25 +1668,152 @@ function PromptEntry({
   );
   // React overlays are structured agent instructions, never code.
   const isCode = overlay === null && looksLikeModuleCode(prompt);
+  // A Flex module that parses into predictor signatures renders decomposed:
+  // its signatures (prose) apart from its code (structure). When parsing finds
+  // no signature (unusual source shape), fall through to the whole-module view.
+  const decomposition = useMemo(
+    () => (isCode ? decomposeFlexSource(prompt) : null),
+    [isCode, prompt],
+  );
+  const parentDecomposition = useMemo(
+    () => (isCode && parentPrompt.length > 0 ? decomposeFlexSource(parentPrompt) : null),
+    [isCode, parentPrompt],
+  );
 
   return (
     <>
       <div className="overflow-hidden rounded-md border border-border/40 bg-background/60 p-3">
-        <PromptKindHeader isCode={isCode} label={label} />
-        <PromptBody
-          prompt={prompt}
-          parentPrompt={parentPrompt}
-          overlay={overlay}
-          parentOverlay={parentOverlay}
-          mode={mode}
-          hasParent={hasParent}
-          isCode={isCode}
-        />
+        <PromptKindHeader isCode={isCode} label={label} decomposed={decomposition !== null} />
+        {decomposition !== null ? (
+          <FlexModuleView
+            decomposition={decomposition}
+            parentDecomposition={parentDecomposition}
+            mode={mode}
+            hasParent={hasParent}
+          />
+        ) : (
+          <PromptBody
+            prompt={prompt}
+            parentPrompt={parentPrompt}
+            overlay={overlay}
+            parentOverlay={parentOverlay}
+            mode={mode}
+            hasParent={hasParent}
+            isCode={isCode}
+          />
+        )}
       </div>
       {overlay !== null ? (
         <ReactToolsSection overlay={overlay} parentOverlay={parentOverlay} />
       ) : null}
     </>
+  );
+}
+
+// A decomposed Flex module: its predictor signatures (fields + natural-language
+// instructions) rendered apart from the surrounding code structure. GEPA rewrites
+// the whole source each step, but a change is often confined to a signature's
+// instructions — a prompt edit wearing a code blob's clothes. Splitting them lets
+// the reader diff the prose (Signature) separately from the structure (Code), so a
+// pure instructions change reads as one and isn't mistaken for a code rewrite.
+function FlexModuleView({
+  decomposition,
+  parentDecomposition,
+  mode,
+  hasParent,
+}: {
+  decomposition: FlexDecomposition;
+  parentDecomposition: FlexDecomposition | null;
+  mode: View;
+  hasParent: boolean;
+}) {
+  const showDiff = mode === "diff" && hasParent && parentDecomposition !== null;
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <SectionLabel
+          label={msg("trajectory.prompt.kind.signature")}
+          info={msg("trajectory.prompt.kind.signature.explain")}
+        />
+        <div className="space-y-2">
+          {decomposition.signatures.map((sig, idx) => (
+            <SignatureRow
+              key={`${sig.name}:${idx}`}
+              sig={sig}
+              parentSig={matchSignature(parentDecomposition, sig, idx)}
+              showDiff={showDiff}
+            />
+          ))}
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <SectionLabel
+          label={msg("trajectory.prompt.kind.code")}
+          info={msg("trajectory.prompt.kind.code.explain")}
+        />
+        {showDiff && parentDecomposition !== null ? (
+          <PromptDiff
+            before={parentDecomposition.codeSkeleton}
+            after={decomposition.codeSkeleton}
+          />
+        ) : (
+          <PromptCodeView value={decomposition.codeSkeleton} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// One predictor's signature: its field spec (`review: str -> score: int`) on the
+// header line, its natural-language instructions below. In compare mode the
+// fields show an inline old→new when they changed and the instructions run
+// through the same line diff as any prose prompt.
+function SignatureRow({
+  sig,
+  parentSig,
+  showDiff,
+}: {
+  sig: FlexSignature;
+  parentSig: FlexSignature | null;
+  showDiff: boolean;
+}) {
+  const fieldsChanged = showDiff && parentSig !== null && parentSig.fields !== sig.fields;
+  return (
+    <div className="space-y-1.5 rounded-md border border-border/40 bg-background/60 p-2.5">
+      <div
+        className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono text-[10px]"
+        dir="ltr"
+      >
+        {sig.name.length > 0 ? (
+          <span className="text-foreground/70">{`self.${sig.name}`}</span>
+        ) : null}
+        {fieldsChanged && parentSig !== null ? (
+          <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+            <span className="line-through" style={{ color: "#6e2e16" }}>
+              {parentSig.fields}
+            </span>
+            <span style={{ color: "#3f4d1f" }}>{sig.fields}</span>
+          </span>
+        ) : (
+          <span className="text-muted-foreground/80">{sig.fields}</span>
+        )}
+      </div>
+      {showDiff && parentSig !== null ? (
+        <PromptDiff before={parentSig.instructions} after={sig.instructions} />
+      ) : sig.instructions.length > 0 ? (
+        <div
+          className="whitespace-pre-wrap text-[11px] leading-relaxed text-foreground/90"
+          dir="auto"
+          style={{ wordBreak: "break-word" }}
+        >
+          {sig.instructions}
+        </div>
+      ) : (
+        <div className="text-[11px] italic text-muted-foreground/60">
+          {msg("trajectory.prompt.signature.no_instructions")}
+        </div>
+      )}
+    </div>
   );
 }
 
