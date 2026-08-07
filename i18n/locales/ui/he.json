@@ -2518,6 +2518,8 @@
   "trajectory.node.header.sub.examples": "{n} דוגמאות",
   "trajectory.node.section.prompt": "הפרומפט",
   "trajectory.node.section.prompt.explain": "הוראות הסוכן עבור המועמד הזה — הטקסט שמודל המשוב משנה כדי לשפר את הביצועים.",
+  "trajectory.prompt.kind.code": "קוד",
+  "trajectory.prompt.kind.instructions": "הוראות",
   "trajectory.node.section.score_detail.valset": "ציונים לכל דוגמת אימות",
   "trajectory.node.winning_label": "מוביל",
   "trajectory.outline.best": "הטוב ביותר",

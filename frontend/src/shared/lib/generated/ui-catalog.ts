@@ -2811,6 +2811,8 @@ export type MessageKey =
   | "trajectory.pareto.cell.prediction_label.explain"
   | "trajectory.pareto.cell.prediction_unavailable"
   | "trajectory.pareto.cell_detail_pending"
+  | "trajectory.prompt.kind.code"
+  | "trajectory.prompt.kind.instructions"
   | "trajectory.prompt.react.tool.added"
   | "trajectory.prompt.react.tool.changed"
   | "trajectory.prompt.react.tool.removed"
@@ -5742,6 +5744,8 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "trajectory.pareto.cell.prediction_label.explain": "התשובה שהמועמד הציע על הקלט הזה במהלך הריצה על דוגמאות האימות.",
   "trajectory.pareto.cell.prediction_unavailable": "התשובה לא נמצאה",
   "trajectory.pareto.cell_detail_pending": "תוכן הדוגמה עדיין לא נטען מהשרת",
+  "trajectory.prompt.kind.code": "קוד",
+  "trajectory.prompt.kind.instructions": "הוראות",
   "trajectory.prompt.react.tool.added": "נוסף",
   "trajectory.prompt.react.tool.changed": "שונה",
   "trajectory.prompt.react.tool.removed": "הוסר",
@@ -14188,6 +14192,8 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "trajectory.pareto.cell.prediction_label.explain": "The prediction the candidate made for this input during the run over the validation examples.",
   "trajectory.pareto.cell.prediction_unavailable": "Prediction not found",
   "trajectory.pareto.cell_detail_pending": "Example content has not loaded from the server yet",
+  "trajectory.prompt.kind.code": "Code",
+  "trajectory.prompt.kind.instructions": "Instructions",
   "trajectory.prompt.react.tool.added": "Added",
   "trajectory.prompt.react.tool.changed": "Changed",
   "trajectory.prompt.react.tool.removed": "Removed",

@@ -2518,6 +2518,8 @@
   "trajectory.node.header.sub.examples": "{n} examples",
   "trajectory.node.section.prompt": "Prompt",
   "trajectory.node.section.prompt.explain": "The agent instructions for this candidate — the text the feedback model changes to improve performance.",
+  "trajectory.prompt.kind.code": "Code",
+  "trajectory.prompt.kind.instructions": "Instructions",
   "trajectory.node.section.score_detail.valset": "Scores per validation example",
   "trajectory.node.winning_label": "Winning",
   "trajectory.outline.best": "Best",

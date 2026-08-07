@@ -1,7 +1,8 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { CaretRight, GitDiff, Hash, TextAlignLeft, XCircle, type Icon } from "@/shared/ui/icons";
+import dynamic from "next/dynamic";
+import { CaretRight, Code, GitDiff, Hash, TextAlignLeft, XCircle, type Icon } from "@/shared/ui/icons";
 import {
   createContext,
   useContext,
@@ -25,6 +26,7 @@ import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { Skeleton } from "@/shared/ui/skeleton";
 import { RecordedChatTranscript, type ChatMessage } from "./RecordedChat";
 import { UserBubble } from "@/shared/ui/agent/user-bubble";
 import { AgentBubble } from "@/shared/ui/agent/agent-bubble";
@@ -65,6 +67,16 @@ const ToolSeveritiesContext = createContext<Record<string, string>>({});
 // Stable fallback for the provider value — an inline `?? {}` would hand the
 // context a fresh identity every render and re-render all consumers.
 const EMPTY_SEVERITIES: Record<string, string> = {};
+
+// A Flex submodule's optimizable candidate value is its full Python source — one
+// dspy.Module subclass whose predictors carry their instructions inline — not an
+// instruction string. GEPA rewrites that whole source, so a code candidate must
+// read as CODE. Rendered read-only through the same CodeMirror viewer the artifact
+// tab uses; lazy so CodeMirror stays out of the drawer's initial bundle.
+const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
+  ssr: false,
+  loading: () => <Skeleton height={140} borderRadius={6} />,
+});
 
 export type DrawerSelection =
   | { kind: "candidate"; node: TrajectoryNode; parent: TrajectoryNode | null }
@@ -307,6 +319,7 @@ function NodeBody({
                   {promptEntries.map(([predictor, prompt]) => (
                     <PromptEntry
                       key={predictor}
+                      label={predictor}
                       prompt={prompt}
                       parentPrompt={view.parentPrompt[predictor] ?? ""}
                       mode={promptViewMode}
@@ -1577,15 +1590,53 @@ function toolToText(tool: ReactToolView): string {
   return lines.join("\n");
 }
 
-// One prompt predictor: its instruction/diff card, with the tool-descriptions
-// section lifted out to sit *below* the card as its own block instead of nested
-// inside it. Parses the react overlay once and shares it with both halves.
+// Distinguish a candidate component that is CODE (a dspy.Flex submodule's full
+// source) from one that is a natural-language instruction. GEPA stores both as
+// plain strings in the candidate map, so we classify by structure: a module
+// source always defines `forward`, or a class with an `__init__`. High precision
+// — instruction prose never contains these — so a false positive is unrealistic.
+function looksLikeModuleCode(value: string): boolean {
+  const t = value.trimStart();
+  if (t.length === 0) return false;
+  if (/\bdef\s+forward\s*\(/.test(t)) return true;
+  return /\bclass\s+\w+/.test(t) && /\bdef\s+__init__\s*\(/.test(t);
+}
+
+// The label above each candidate entry: whether this change is CODE (a Flex
+// submodule's source) or an INSTRUCTION, plus the component's candidate key. A
+// Flex code candidate used to render as an anonymous monospace blob that read like
+// an instruction prompt; this makes the kind explicit and names the component.
+function PromptKindHeader({ isCode, label }: { isCode: boolean; label: string }) {
+  const KindIcon = isCode ? Code : TextAlignLeft;
+  return (
+    <div className="mb-2 flex items-center justify-between gap-2">
+      <span className="inline-flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
+        <KindIcon className="size-3" />
+        {isCode
+          ? msg("trajectory.prompt.kind.code")
+          : msg("trajectory.prompt.kind.instructions")}
+      </span>
+      {label.length > 0 ? (
+        <span className="truncate font-mono text-[0.625rem] text-muted-foreground/70" dir="ltr">
+          {label}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// One prompt predictor: a kind header (code vs instruction) over its
+// instruction/diff card, with the tool-descriptions section lifted out to sit
+// *below* the card as its own block instead of nested inside it. Parses the react
+// overlay once and shares it with both halves.
 function PromptEntry({
+  label,
   prompt,
   parentPrompt,
   mode,
   hasParent,
 }: {
+  label: string;
   prompt: string;
   parentPrompt: string;
   mode: View;
@@ -1596,10 +1647,13 @@ function PromptEntry({
     () => (parentPrompt.length > 0 ? parseReactOverlay(parentPrompt) : null),
     [parentPrompt],
   );
+  // React overlays are structured agent instructions, never code.
+  const isCode = overlay === null && looksLikeModuleCode(prompt);
 
   return (
     <>
       <div className="overflow-hidden rounded-md border border-border/40 bg-background/60 p-3">
+        <PromptKindHeader isCode={isCode} label={label} />
         <PromptBody
           prompt={prompt}
           parentPrompt={parentPrompt}
@@ -1607,6 +1661,7 @@ function PromptEntry({
           parentOverlay={parentOverlay}
           mode={mode}
           hasParent={hasParent}
+          isCode={isCode}
         />
       </div>
       {overlay !== null ? (
@@ -1623,6 +1678,7 @@ function PromptBody({
   parentOverlay,
   mode,
   hasParent,
+  isCode,
 }: {
   prompt: string;
   parentPrompt: string;
@@ -1630,10 +1686,12 @@ function PromptBody({
   parentOverlay: ReactOverlay | null;
   mode: View;
   hasParent: boolean;
+  isCode: boolean;
 }) {
   if (mode === "diff" && hasParent) {
     // React overlays keep their structured shape in compare mode; non-overlay
-    // prompts fall back to a flat line diff.
+    // prompts (including code) fall back to a flat line diff, which reads as a
+    // code diff just as well.
     if (overlay !== null && parentOverlay !== null) {
       return <ReactOverlayDiffView before={parentOverlay} after={overlay} />;
     }
@@ -1643,6 +1701,9 @@ function PromptBody({
   if (overlay !== null) {
     return <ReactOverlayView overlay={overlay} />;
   }
+  if (isCode) {
+    return <PromptCodeView value={prompt} />;
+  }
   return (
     <pre
       className="text-xs whitespace-pre-wrap leading-relaxed font-mono text-foreground/90"
@@ -1651,6 +1712,20 @@ function PromptBody({
     >
       {prompt}
     </pre>
+  );
+}
+
+// Plain-mode render of a code candidate: the same read-only CodeMirror viewer the
+// artifact tab uses, height-fit to the source (capped so a long module scrolls
+// inside the drawer rather than stretching it).
+function PromptCodeView({ value }: { value: string }) {
+  return (
+    <CodeEditor
+      value={value}
+      onChange={() => {}}
+      height={`${Math.min((value.split("\n").length + 1) * 19.6 + 8, 480)}px`}
+      readOnly
+    />
   );
 }
 
