@@ -46,7 +46,12 @@ export interface FlexSignature {
 
 export interface FlexDecomposition {
   signatures: FlexSignature[];
-  /** The source with every signature's fields/instructions elided to `…`. */
+  /**
+   * The source with every predictor's instructions string elided to `…`. The
+   * field spec is left intact — it's genuine structure, so it belongs in the
+   * code view — and the instructions render separately as a prompt, so they
+   * aren't duplicated here.
+   */
   codeSkeleton: string;
 }
 
@@ -187,7 +192,6 @@ export function decomposeFlexSource(src: string): FlexDecomposition | null {
       fields: fields.value,
       instructions: instructions?.value ?? "",
     });
-    elide.push(fields);
     if (instructions !== undefined) elide.push(instructions);
   }
 

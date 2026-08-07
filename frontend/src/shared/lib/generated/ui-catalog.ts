@@ -2815,8 +2815,6 @@ export type MessageKey =
   | "trajectory.prompt.kind.code.explain"
   | "trajectory.prompt.kind.instructions"
   | "trajectory.prompt.kind.module"
-  | "trajectory.prompt.kind.signature"
-  | "trajectory.prompt.kind.signature.explain"
   | "trajectory.prompt.react.tool.added"
   | "trajectory.prompt.react.tool.changed"
   | "trajectory.prompt.react.tool.removed"
@@ -5750,11 +5748,9 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "trajectory.pareto.cell.prediction_unavailable": "התשובה לא נמצאה",
   "trajectory.pareto.cell_detail_pending": "תוכן הדוגמה עדיין לא נטען מהשרת",
   "trajectory.prompt.kind.code": "קוד",
-  "trajectory.prompt.kind.code.explain": "מבנה הקוד של המודול, כשטקסט ה-Signature מוסתר, כך ששינוי הוראות בלבד לא מופיע כאן.",
+  "trajectory.prompt.kind.code.explain": "מבנה הקוד של המודול, כשההוראות של כל predictor מוסתרות ומוצגות כפרומפט למעלה, כך ששינוי הוראות בלבד לא מופיע כאן.",
   "trajectory.prompt.kind.instructions": "הוראות",
   "trajectory.prompt.kind.module": "מודול",
-  "trajectory.prompt.kind.signature": "Signature",
-  "trajectory.prompt.kind.signature.explain": "השדות וההוראות בשפה טבעית של ה-predictor — החלק ברמת הפרומפט של המודול ש-GEPA יכול לשכתב.",
   "trajectory.prompt.react.tool.added": "נוסף",
   "trajectory.prompt.react.tool.changed": "שונה",
   "trajectory.prompt.react.tool.removed": "הוסר",
@@ -14203,11 +14199,9 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "trajectory.pareto.cell.prediction_unavailable": "Prediction not found",
   "trajectory.pareto.cell_detail_pending": "Example content has not loaded from the server yet",
   "trajectory.prompt.kind.code": "Code",
-  "trajectory.prompt.kind.code.explain": "The module's code structure with the signature text elided, so an instructions-only change doesn't appear here.",
+  "trajectory.prompt.kind.code.explain": "The module's code structure with each predictor's instructions elided and shown as a prompt above, so an instructions-only change doesn't appear here.",
   "trajectory.prompt.kind.instructions": "Instructions",
   "trajectory.prompt.kind.module": "Module",
-  "trajectory.prompt.kind.signature": "Signature",
-  "trajectory.prompt.kind.signature.explain": "The predictor's fields and natural-language instructions — the prompt-level part of the module GEPA can rewrite.",
   "trajectory.prompt.react.tool.added": "Added",
   "trajectory.prompt.react.tool.changed": "Changed",
   "trajectory.prompt.react.tool.removed": "Removed",

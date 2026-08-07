@@ -1710,12 +1710,12 @@ function PromptEntry({
   );
 }
 
-// A decomposed Flex module: its predictor signatures (fields + natural-language
-// instructions) rendered apart from the surrounding code structure. GEPA rewrites
-// the whole source each step, but a change is often confined to a signature's
-// instructions — a prompt edit wearing a code blob's clothes. Splitting them lets
-// the reader diff the prose (Signature) separately from the structure (Code), so a
-// pure instructions change reads as one and isn't mistaken for a code rewrite.
+// A decomposed Flex module: each predictor's natural-language instructions
+// rendered as a prompt (prose, or a line diff in compare mode) above the module's
+// surrounding code structure. GEPA rewrites the whole source each step, but a
+// change is often confined to a predictor's instructions — a prompt edit wearing a
+// code blob's clothes. Rendering the instructions as a prompt, apart from the Code
+// sub-block, lets a pure instructions change read as one, not a code rewrite.
 function FlexModuleView({
   decomposition,
   parentDecomposition,
@@ -1728,23 +1728,19 @@ function FlexModuleView({
   hasParent: boolean;
 }) {
   const showDiff = mode === "diff" && hasParent && parentDecomposition !== null;
+  const named = decomposition.signatures.length > 1;
   return (
     <div className="space-y-3">
-      <div className="space-y-1.5">
-        <SectionLabel
-          label={msg("trajectory.prompt.kind.signature")}
-          info={msg("trajectory.prompt.kind.signature.explain")}
-        />
-        <div className="space-y-2">
-          {decomposition.signatures.map((sig, idx) => (
-            <SignatureRow
-              key={`${sig.name}:${idx}`}
-              sig={sig}
-              parentSig={matchSignature(parentDecomposition, sig, idx)}
-              showDiff={showDiff}
-            />
-          ))}
-        </div>
+      <div className="space-y-2">
+        {decomposition.signatures.map((sig, idx) => (
+          <PredictorInstructions
+            key={`${sig.name}:${idx}`}
+            sig={sig}
+            parentSig={matchSignature(parentDecomposition, sig, idx)}
+            showDiff={showDiff}
+            named={named}
+          />
+        ))}
       </div>
       <div className="space-y-1.5">
         <SectionLabel
@@ -1764,50 +1760,38 @@ function FlexModuleView({
   );
 }
 
-// One predictor's signature: its field spec (`review: str -> score: int`) on the
-// header line, its natural-language instructions below. In compare mode the
-// fields show an inline old→new when they changed and the instructions run
-// through the same line diff as any prose prompt.
-function SignatureRow({
+// One predictor's instructions, rendered like any prompt: prose in plain mode, a
+// line diff in compare mode — the same rendering a scalar predictor's instruction
+// candidate gets. The `self.<name>` label only shows when the module has more than
+// one predictor, to tell them apart; a lone predictor renders as bare prose.
+function PredictorInstructions({
   sig,
   parentSig,
   showDiff,
+  named,
 }: {
   sig: FlexSignature;
   parentSig: FlexSignature | null;
   showDiff: boolean;
+  named: boolean;
 }) {
-  const fieldsChanged = showDiff && parentSig !== null && parentSig.fields !== sig.fields;
   return (
-    <div className="space-y-1.5 rounded-md border border-border/40 bg-background/60 p-2.5">
-      <div
-        className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 font-mono text-[10px]"
-        dir="ltr"
-      >
-        {sig.name.length > 0 ? (
-          <span className="text-foreground/70">{`self.${sig.name}`}</span>
-        ) : null}
-        {fieldsChanged && parentSig !== null ? (
-          <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-            <span className="line-through" style={{ color: "#6e2e16" }}>
-              {parentSig.fields}
-            </span>
-            <span style={{ color: "#3f4d1f" }}>{sig.fields}</span>
-          </span>
-        ) : (
-          <span className="text-muted-foreground/80">{sig.fields}</span>
-        )}
-      </div>
+    <div className="space-y-1">
+      {named && sig.name.length > 0 ? (
+        <span className="font-mono text-[0.625rem] text-muted-foreground/70" dir="ltr">
+          {`self.${sig.name}`}
+        </span>
+      ) : null}
       {showDiff && parentSig !== null ? (
         <PromptDiff before={parentSig.instructions} after={sig.instructions} />
       ) : sig.instructions.length > 0 ? (
-        <div
-          className="whitespace-pre-wrap text-[11px] leading-relaxed text-foreground/90"
+        <pre
+          className="text-xs whitespace-pre-wrap leading-relaxed font-mono text-foreground/90"
           dir="auto"
           style={{ wordBreak: "break-word" }}
         >
           {sig.instructions}
-        </div>
+        </pre>
       ) : (
         <div className="text-[11px] italic text-muted-foreground/60">
           {msg("trajectory.prompt.signature.no_instructions")}
