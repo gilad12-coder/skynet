@@ -221,6 +221,15 @@ function NodeBody({
   }, [view.rawId]);
 
   const promptEntries = useMemo(() => Object.entries(view.prompt), [view.prompt]);
+  // A Flex candidate's prompt map holds module source, not instruction prose. When
+  // every entry is module code, the whole section is a module — so its title, help
+  // text, and view toggle read "Module", not "Prompt".
+  const isModuleSection = useMemo(
+    () =>
+      promptEntries.length > 0 &&
+      promptEntries.every(([, p]) => parseReactOverlay(p) === null && looksLikeModuleCode(p)),
+    [promptEntries],
+  );
   const toolDescriptions = useMemo(() => deriveToolDescriptions(view.prompt), [view.prompt]);
   const valsetById = useMemo(() => {
     const m = new Map<string, ValsetRow>();
@@ -304,17 +313,29 @@ function NodeBody({
             <Section
               title={
                 view.kind === "rejected"
-                  ? msg("trajectory.drawer.rejected.prompt_title")
-                  : msg("trajectory.node.section.prompt")
+                  ? isModuleSection
+                    ? msg("trajectory.drawer.rejected.module_title")
+                    : msg("trajectory.drawer.rejected.prompt_title")
+                  : isModuleSection
+                    ? msg("trajectory.node.section.module")
+                    : msg("trajectory.node.section.prompt")
               }
               info={
                 view.kind === "rejected"
-                  ? msg("trajectory.drawer.rejected.prompt_title.explain")
-                  : msg("trajectory.node.section.prompt.explain")
+                  ? isModuleSection
+                    ? msg("trajectory.drawer.rejected.module_title.explain")
+                    : msg("trajectory.drawer.rejected.prompt_title.explain")
+                  : isModuleSection
+                    ? msg("trajectory.node.section.module.explain")
+                    : msg("trajectory.node.section.prompt.explain")
               }
               action={
                 promptEntries.length > 0 && Object.keys(view.parentPrompt).length > 0 ? (
-                  <PromptViewToggle view={promptViewMode} onChange={setPromptViewMode} />
+                  <PromptViewToggle
+                    view={promptViewMode}
+                    onChange={setPromptViewMode}
+                    isModule={isModuleSection}
+                  />
                 ) : undefined
               }
             >
@@ -1732,16 +1753,22 @@ function FlexModuleView({
   const named = decomposition.signatures.length > 1;
   return (
     <div className="space-y-3">
-      <div className="space-y-2">
-        {decomposition.signatures.map((sig, idx) => (
-          <PredictorInstructions
-            key={`${sig.name}:${idx}`}
-            sig={sig}
-            parentSig={matchSignature(parentDecomposition, sig, idx)}
-            showDiff={showDiff}
-            named={named}
-          />
-        ))}
+      <div className="space-y-1.5">
+        <SectionLabel
+          label={msg("trajectory.prompt.kind.instructions")}
+          info={msg("trajectory.prompt.kind.instructions.explain")}
+        />
+        <div className="space-y-2">
+          {decomposition.signatures.map((sig, idx) => (
+            <PredictorInstructions
+              key={`${sig.name}:${idx}`}
+              sig={sig}
+              parentSig={matchSignature(parentDecomposition, sig, idx)}
+              showDiff={showDiff}
+              named={named}
+            />
+          ))}
+        </div>
       </div>
       <div className="space-y-1.5">
         <SectionLabel
@@ -2407,14 +2434,30 @@ function usePromptView(): readonly [View, (v: View) => void] {
   return [view, setView] as const;
 }
 
-function PromptViewToggle({ view, onChange }: { view: View; onChange: (v: View) => void }) {
+function PromptViewToggle({
+  view,
+  onChange,
+  isModule,
+}: {
+  view: View;
+  onChange: (v: View) => void;
+  isModule: boolean;
+}) {
   return (
     <SegmentedToggle
       value={view}
       onChange={onChange}
-      ariaLabel={msg("trajectory.drawer.toggle.aria")}
+      ariaLabel={
+        isModule ? msg("trajectory.drawer.toggle.module.aria") : msg("trajectory.drawer.toggle.aria")
+      }
       options={[
-        { value: "prompt", label: msg("trajectory.drawer.toggle.prompt"), icon: TextAlignLeft },
+        {
+          value: "prompt",
+          label: isModule
+            ? msg("trajectory.drawer.toggle.module")
+            : msg("trajectory.drawer.toggle.prompt"),
+          icon: isModule ? Code : TextAlignLeft,
+        },
         { value: "diff", label: msg("trajectory.drawer.toggle.diff"), icon: GitDiff },
       ]}
     />

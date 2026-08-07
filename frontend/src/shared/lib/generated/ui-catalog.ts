@@ -2767,6 +2767,8 @@ export type MessageKey =
   | "trajectory.detail.pareto_passed"
   | "trajectory.detail.pareto_title"
   | "trajectory.detail.pareto_title.explain"
+  | "trajectory.drawer.rejected.module_title"
+  | "trajectory.drawer.rejected.module_title.explain"
   | "trajectory.drawer.rejected.prompt_title"
   | "trajectory.drawer.rejected.prompt_title.explain"
   | "trajectory.drawer.rejected.prompt_unavailable"
@@ -2774,6 +2776,8 @@ export type MessageKey =
   | "trajectory.drawer.section.minibatch.explain"
   | "trajectory.drawer.toggle.aria"
   | "trajectory.drawer.toggle.diff"
+  | "trajectory.drawer.toggle.module"
+  | "trajectory.drawer.toggle.module.aria"
   | "trajectory.drawer.toggle.prompt"
   | "trajectory.explainer.trajectory"
   | "trajectory.ghost.legend"
@@ -2794,6 +2798,8 @@ export type MessageKey =
   | "trajectory.node.header.label.score_valset"
   | "trajectory.node.header.rejected_title"
   | "trajectory.node.header.sub.examples"
+  | "trajectory.node.section.module"
+  | "trajectory.node.section.module.explain"
   | "trajectory.node.section.prompt"
   | "trajectory.node.section.prompt.explain"
   | "trajectory.node.section.score_detail.valset"
@@ -2814,6 +2820,7 @@ export type MessageKey =
   | "trajectory.prompt.kind.code"
   | "trajectory.prompt.kind.code.explain"
   | "trajectory.prompt.kind.instructions"
+  | "trajectory.prompt.kind.instructions.explain"
   | "trajectory.prompt.kind.module"
   | "trajectory.prompt.react.tool.added"
   | "trajectory.prompt.react.tool.changed"
@@ -5703,6 +5710,8 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "trajectory.detail.pareto_passed": "{count} עברו מתוך {total}",
   "trajectory.detail.pareto_title": "דוגמאות האימות",
   "trajectory.detail.pareto_title.explain": "כל ריבוע מייצג דוגמת אימות. ירוק = תשובה נכונה, אדום = תשובה שגויה. לחץ/י כדי לפתוח את הדוגמה.",
+  "trajectory.drawer.rejected.module_title": "המודול שהוצע ונדחה",
+  "trajectory.drawer.rejected.module_title.explain": "ההבדל בין מודול ההורה למודול שמודל המשוב יצר ושנדחה.",
   "trajectory.drawer.rejected.prompt_title": "הפרומפט שהוצע ונדחה",
   "trajectory.drawer.rejected.prompt_title.explain": "ההבדל בין פרומפט ההורה לבין הפרומפט שמודל המשוב יצר ושנדחה. שורות בירוק נוספו, שורות באדום הוסרו.",
   "trajectory.drawer.rejected.prompt_unavailable": "טקסט ההצעה לא נשמר בריצה זו",
@@ -5710,6 +5719,8 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "trajectory.drawer.section.minibatch.explain": "mini-batch = תת-קבוצה קטנה של דוגמאות שעליה ההצעה נבחנה לפני שהוחלט אם לאמץ אותה.",
   "trajectory.drawer.toggle.aria": "תצוגת הפרומפט",
   "trajectory.drawer.toggle.diff": "השוואה",
+  "trajectory.drawer.toggle.module": "מודול",
+  "trajectory.drawer.toggle.module.aria": "תצוגת המודול",
   "trajectory.drawer.toggle.prompt": "פרומפט",
   "trajectory.explainer.trajectory": "רצף המועמדים שאומצו לאורך הריצה",
   "trajectory.ghost.legend": "הצעות שנדחו",
@@ -5730,6 +5741,8 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "trajectory.node.header.label.score_valset": "ציון האימות",
   "trajectory.node.header.rejected_title": "הצעה שנדחתה",
   "trajectory.node.header.sub.examples": "{n} דוגמאות",
+  "trajectory.node.section.module": "מודול",
+  "trajectory.node.section.module.explain": "המודול שעבר אופטימיזציה ב-GEPA עבור המועמד הזה — ההוראות של ה-predictors שלו והקוד שמסביב. מודל המשוב משכתב אותם כדי לשפר את הביצועים.",
   "trajectory.node.section.prompt": "הפרומפט",
   "trajectory.node.section.prompt.explain": "הוראות הסוכן עבור המועמד הזה — הטקסט שמודל המשוב משנה כדי לשפר את הביצועים.",
   "trajectory.node.section.score_detail.valset": "ציונים לכל דוגמת אימות",
@@ -5750,6 +5763,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "trajectory.prompt.kind.code": "קוד",
   "trajectory.prompt.kind.code.explain": "מבנה הקוד של המודול, כשההוראות של כל predictor מוסתרות ומוצגות כפרומפט למעלה, כך ששינוי הוראות בלבד לא מופיע כאן.",
   "trajectory.prompt.kind.instructions": "הוראות",
+  "trajectory.prompt.kind.instructions.explain": "ההוראות בשפה טבעית של כל predictor — הפרומפט ש-GEPA משכתב כדי לשפר את המודול, מוצג בנפרד מהקוד שמתחת.",
   "trajectory.prompt.kind.module": "מודול",
   "trajectory.prompt.react.tool.added": "נוסף",
   "trajectory.prompt.react.tool.changed": "שונה",
@@ -14154,6 +14168,8 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "trajectory.detail.pareto_passed": "{count} of {total} passed",
   "trajectory.detail.pareto_title": "Validation examples",
   "trajectory.detail.pareto_title.explain": "Each square is a validation example. Green = correct prediction, red = incorrect prediction. Click to open the example.",
+  "trajectory.drawer.rejected.module_title": "Proposed and rejected module",
+  "trajectory.drawer.rejected.module_title.explain": "The difference between the parent module and the module the feedback model produced and that was rejected.",
   "trajectory.drawer.rejected.prompt_title": "Proposed and rejected prompt",
   "trajectory.drawer.rejected.prompt_title.explain": "The difference between the parent prompt and the prompt the feedback model produced and that was rejected. Green lines were added, red lines were removed.",
   "trajectory.drawer.rejected.prompt_unavailable": "The proposal text was not saved in this run",
@@ -14161,6 +14177,8 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "trajectory.drawer.section.minibatch.explain": "mini-batch = a small subset of examples the proposal was tested on before deciding whether to accept it.",
   "trajectory.drawer.toggle.aria": "Prompt view",
   "trajectory.drawer.toggle.diff": "Diff",
+  "trajectory.drawer.toggle.module": "Module",
+  "trajectory.drawer.toggle.module.aria": "Module view",
   "trajectory.drawer.toggle.prompt": "Prompt",
   "trajectory.explainer.trajectory": "The sequence of candidates accepted over the run",
   "trajectory.ghost.legend": "Rejected proposals",
@@ -14181,6 +14199,8 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "trajectory.node.header.label.score_valset": "Validation score",
   "trajectory.node.header.rejected_title": "Rejected proposal",
   "trajectory.node.header.sub.examples": "{n} examples",
+  "trajectory.node.section.module": "Module",
+  "trajectory.node.section.module.explain": "The GEPA-optimized module for this candidate — its predictors' instructions and the surrounding code. The feedback model rewrites these to improve performance.",
   "trajectory.node.section.prompt": "Prompt",
   "trajectory.node.section.prompt.explain": "The agent instructions for this candidate — the text the feedback model changes to improve performance.",
   "trajectory.node.section.score_detail.valset": "Scores per validation example",
@@ -14201,6 +14221,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "trajectory.prompt.kind.code": "Code",
   "trajectory.prompt.kind.code.explain": "The module's code structure with each predictor's instructions elided and shown as a prompt above, so an instructions-only change doesn't appear here.",
   "trajectory.prompt.kind.instructions": "Instructions",
+  "trajectory.prompt.kind.instructions.explain": "Each predictor's natural-language instructions — the prompt GEPA rewrites to improve the module, shown apart from the code below.",
   "trajectory.prompt.kind.module": "Module",
   "trajectory.prompt.react.tool.added": "Added",
   "trajectory.prompt.react.tool.changed": "Changed",
