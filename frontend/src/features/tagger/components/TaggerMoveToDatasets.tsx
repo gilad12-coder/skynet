@@ -111,9 +111,10 @@ export function TaggerMoveToDatasets({
         <TooltipButton tooltip={msg("tagger.move.cta")}>
           <Button
             onClick={openDialog}
+            variant="ghost"
             size="icon"
             aria-label={msg("tagger.move.cta")}
-            className="shrink-0 self-end shadow-sm sm:self-center"
+            className="shrink-0 self-end text-foreground focus-visible:border-[#c8a882] focus-visible:ring-[#c8a882]/45 sm:self-center"
           >
             <ArrowLineRight className="size-4 rtl:-scale-x-100" />
           </Button>
