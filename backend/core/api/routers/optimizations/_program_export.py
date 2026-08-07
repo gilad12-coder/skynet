@@ -202,7 +202,8 @@ def _build_metadata(optimization_id: str, artifact: ProgramArtifact, overview: d
         "optimizer": overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME),
         "dspy_version": _installed_dspy_version(),
         "is_react": artifact.react_overlay is not None,
-        "is_flex": artifact.optimized_module_src is not None,
+        "is_flex": artifact.optimized_module_src is not None or bool(artifact.optimized_component_srcs),
+        "flex_components": sorted(artifact.optimized_component_srcs),
     }
 
 
@@ -228,12 +229,25 @@ def _build_readme(metadata: dict[str, Any]) -> str:
         if metadata.get("is_react")
         else ""
     )
+    components = metadata.get("flex_components") or []
+    flex_where = (
+        "sources are in `optimized_modules/` — one file per Flex submodule"
+        if components
+        else "source is in `optimized_module.py`"
+    )
+    flex_contents: list[str] = []
+    if components:
+        flex_contents = [
+            f"- `optimized_modules/` — the GEPA-rewritten source of each Flex submodule: {', '.join(components)}."
+        ]
+    elif metadata.get("is_flex"):
+        flex_contents = ["- `optimized_module.py` — the GEPA-rewritten program source, human-readable."]
     flex_note = (
         "\n## Optimized code (Flex)\n\n"
         "GEPA rewrote this program's **code** as well as its prompt. The rewritten "
-        "source is in `optimized_module.py` for you to read; `load_program()` "
-        "rebuilds it from `program.json` (which embeds the same source), so you do "
-        "not import that file directly.\n"
+        f"{flex_where} for you to read; `load_program()` rebuilds it from "
+        "`program.json` (which embeds the same source), so you do not import those "
+        "files directly.\n"
         if metadata.get("is_flex")
         else ""
     )
@@ -253,11 +267,7 @@ def _build_readme(metadata: dict[str, Any]) -> str:
         "- `load_program.py` — rebuilds the module and loads the state. Run or import it.",
         "- `metadata.json` — the module recipe (module name, kwargs, default model).",
         "- `prompt.json` — the optimized instructions and few-shot demos, human-readable.",
-        *(
-            ["- `optimized_module.py` — the GEPA-rewritten program source, human-readable."]
-            if metadata.get("is_flex")
-            else []
-        ),
+        *flex_contents,
         "- `requirements.txt` — the `dspy` version this was trained on.",
         "",
         "## Run it",
@@ -327,6 +337,11 @@ def build_program_export_zip(
             archive.writestr(
                 "optimized_module.py",
                 _optimized_module_file(artifact.optimized_module_src),
+            )
+        for path, module_src in sorted(artifact.optimized_component_srcs.items()):
+            archive.writestr(
+                f"optimized_modules/{path}.py",
+                _optimized_module_file(module_src),
             )
         if artifact.react_overlay is not None:
             archive.writestr(

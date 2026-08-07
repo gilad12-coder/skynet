@@ -188,6 +188,28 @@ def test_flex_export_ships_readable_module_source() -> None:
     assert "optimized_module.py" in archive.read("README.md").decode("utf-8")
 
 
+def test_nested_flex_export_ships_one_file_per_component() -> None:
+    """A workflow's flex nodes each get a readable file under ``optimized_modules/``."""
+    artifact, overview = _persisted_artifact()
+    module_src = "import dspy\n\n\nclass RefineModule(dspy.Module):\n    pass\n"
+    artifact = artifact.model_copy(update={"optimized_component_srcs": {"n_refine": module_src}})
+    overview["module_name"] = "workflow"
+
+    zip_bytes = build_program_export_zip(
+        optimization_id="abcd1234-workflow", artifact=artifact, overview=overview
+    )
+
+    archive = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    names = set(archive.namelist())
+    assert "optimized_modules/n_refine.py" in names
+    assert "optimized_module.py" not in names
+    assert "class RefineModule(dspy.Module):" in archive.read("optimized_modules/n_refine.py").decode("utf-8")
+    meta = json.loads(archive.read("metadata.json"))
+    assert meta["is_flex"] is True
+    assert meta["flex_components"] == ["n_refine"]
+    assert "optimized_modules/" in archive.read("README.md").decode("utf-8")
+
+
 def test_non_flex_export_omits_module_source() -> None:
     """A non-Flex export leaves out ``optimized_module.py`` and marks is_flex False."""
     artifact, overview = _persisted_artifact()
