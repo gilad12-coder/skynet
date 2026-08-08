@@ -149,10 +149,10 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
     onChangeModule: reopenModulePicker,
   };
 
-  // The step opens as the default module's editor; the chip in the header
-  // reopens the picker to switch modules. The three views share one
-  // AnimatePresence so picking or switching a module cross-fades instead of
-  // hard-swapping the card.
+  // The step opens on the picker and stays there until a module is picked;
+  // afterwards the chip in the header reopens it to switch. The three views
+  // share one AnimatePresence so picking or switching a module cross-fades
+  // instead of hard-swapping the card.
   const view = moduleSelectionRequired ? "picker" : isWorkflow ? "workflow" : "code";
 
   let content: React.ReactNode;
@@ -420,8 +420,11 @@ function ModulePicker({
   // Reopening the picker to switch modules opens on the one already in use.
   const currentIndex = MODULE_META.findIndex((m) => m.value === current.toLowerCase());
   return (
-    <div className="rounded-2xl border border-border/50 bg-card/80 px-4 py-5 shadow-lg backdrop-blur-xl sm:px-8 sm:py-7">
-      <div className="mx-auto max-w-2xl" data-tutorial="module-selector">
+    // A container, not a breakpoint: the step card is max-w-5xl in auto mode
+    // and max-w-2xl in manual, so only its own width can say whether the slide
+    // has room to sit banner-beside-copy.
+    <div className="@container rounded-2xl border border-border/50 bg-card/80 px-4 py-5 shadow-lg backdrop-blur-xl sm:px-8 sm:py-7">
+      <div data-tutorial="module-selector">
         <Carousel
           items={MODULE_META}
           itemKey={(m) => m.value}
@@ -451,9 +454,9 @@ function ModuleSlide({
 }) {
   const { value, label, icon: Icon, tipKey, taglineKey, Banner } = module;
   return (
-    <div className="overflow-hidden rounded-xl border border-border/50 bg-background/60">
+    <div className="overflow-hidden rounded-xl border border-border/50 bg-background/60 @3xl:flex @3xl:min-h-64 @3xl:items-stretch">
       <Banner />
-      <div className="flex flex-col items-center gap-2 px-6 pb-7 pt-6 text-center">
+      <div className="flex flex-col items-center justify-center gap-2 px-6 pb-7 pt-6 text-center @3xl:flex-1 @3xl:px-10 @3xl:py-8">
         <div className="flex items-center gap-2.5">
           <span className="flex size-9 items-center justify-center rounded-lg bg-[#F3EDE3] text-[#3D2E22]">
             <Icon className="size-[1.125rem]" />
@@ -503,7 +506,9 @@ function moduleDescription(label: string, tipKey: TooltipKey): string {
  */
 function BannerFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative h-36 border-b border-border/50 bg-gradient-to-br from-[#F3EDE3] via-[#FAF8F5] to-[#EDE7DD] sm:h-44">
+    // Sized only by container queries — mixing in a `sm:` height would leave
+    // two utilities competing for `height` from different variant groups.
+    <div className="relative h-36 shrink-0 border-b border-border/50 bg-gradient-to-br from-[#F3EDE3] via-[#FAF8F5] to-[#EDE7DD] @xl:h-44 @3xl:h-auto @3xl:w-[45%] @3xl:border-b-0 @3xl:border-e">
       {/* The dot grid is CSS rather than an SVG pattern so it covers the whole
           banner — the schematic letterboxes inside the viewBox, a pattern fill
           would letterbox with it and leave bare bands at the sides. */}
