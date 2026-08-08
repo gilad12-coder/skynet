@@ -10,9 +10,10 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Label } from "@/shared/ui/primitives/label";
 import { Separator } from "@/shared/ui/primitives/separator";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { tip, type TooltipKey } from "@/shared/lib/tooltips";
-import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 import { TERMS } from "@/shared/lib/terms";
 import { Carousel } from "@/features/agent-panel";
@@ -472,11 +473,33 @@ function ModuleSlide({
         <p className="min-h-[4rem] max-w-md text-[0.8125rem] leading-relaxed text-muted-foreground">
           {moduleDescription(label, tipKey)}
         </p>
-        <Button variant="outline" size="sm" className="mt-2" onClick={() => onChoose(value)}>
-          {formatMsg("submit.module.choose", { p1: label })}
-        </Button>
+        <ChooseModuleButton label={label} onClick={() => onChoose(value)} />
       </div>
     </div>
+  );
+}
+
+/**
+ * The slide's commit control: a check that picks the module it sits on.
+ *
+ * Icon-only, so "Use <Module>" carries as the tooltip and as the button's
+ * accessible name — the same string in both, which is what keeps the hover
+ * label and the screen-reader label from drifting apart.
+ */
+function ChooseModuleButton({ label, onClick }: { label: string; onClick: () => void }) {
+  const name = formatMsg("submit.module.choose", { p1: label });
+  return (
+    <TooltipButton tooltip={name} side="top" dir={getActiveDir()}>
+      <Button
+        variant="outline"
+        size="icon-lg"
+        className="mt-2 rounded-full"
+        aria-label={name}
+        onClick={onClick}
+      >
+        <Check />
+      </Button>
+    </TooltipButton>
   );
 }
 
