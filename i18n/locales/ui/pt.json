@@ -90,7 +90,6 @@
   "workflow.canvas.gestures": "Clique com o botão direito para adicionar um nó · clique duas vezes para configurar · desloque para aplicar zoom",
   "workflow.inspector.close": "Fechar painel",
   "submit.module.change": "Trocar módulo",
-  "submit.module.picker_subtitle": "O módulo envolve a sua assinatura numa técnica de prompting. Escolha um para configurar este passo — pode trocar mais tarde a partir do topo.",
   "submit.module.picker_title": "Escolha um módulo",
   "submit.validation.module_required": "Escolha um módulo para continuar",
   "workflow.controls.zoom_in": "Aumentar zoom",

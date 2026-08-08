@@ -90,7 +90,6 @@
   "workflow.canvas.gestures": "Rechtsklick zum Hinzufügen eines Knotens · Doppelklick zum Konfigurieren · Scrollen zum Zoomen",
   "workflow.inspector.close": "Panel schließen",
   "submit.module.change": "Modul wechseln",
-  "submit.module.picker_subtitle": "Das Modul bettet deine Signatur in eine Prompting-Technik ein. Wähle eines aus, um diesen Schritt einzurichten – oben kannst du jederzeit wechseln.",
   "submit.module.picker_title": "Modul auswählen",
   "submit.validation.module_required": "Wähle ein Modul aus, um fortzufahren",
   "workflow.controls.zoom_in": "Vergrößern",

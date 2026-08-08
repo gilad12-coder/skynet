@@ -90,7 +90,6 @@
   "workflow.canvas.gestures": "नोड जोड़ने के लिए राइट-क्लिक करें · कॉन्फ़िगर करने के लिए डबल-क्लिक करें · ज़ूम करने के लिए स्क्रॉल करें",
   "workflow.inspector.close": "पैनल बंद करें",
   "submit.module.change": "मॉड्यूल बदलें",
-  "submit.module.picker_subtitle": "मॉड्यूल आपके सिग्नेचर को एक प्रॉम्प्टिंग तकनीक में लपेटता है। इस चरण को सेट करने के लिए कोई एक चुनें — आप बाद में ऊपर से बदल सकते हैं।",
   "submit.module.picker_title": "एक मॉड्यूल चुनें",
   "submit.validation.module_required": "जारी रखने के लिए एक मॉड्यूल चुनें",
   "workflow.controls.zoom_in": "ज़ूम इन करें",

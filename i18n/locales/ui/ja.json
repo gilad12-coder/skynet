@@ -90,7 +90,6 @@
   "workflow.canvas.gestures": "右クリックでノードを追加 · ダブルクリックで設定 · スクロールでズーム",
   "workflow.inspector.close": "パネルを閉じる",
   "submit.module.change": "モジュールを切り替え",
-  "submit.module.picker_subtitle": "モジュールはシグネチャをプロンプト技法で包み込みます。1つ選んでこのステップを設定してください。後から上部でいつでも切り替えられます。",
   "submit.module.picker_title": "モジュールを選択",
   "submit.validation.module_required": "続けるにはモジュールを選択してください",
   "workflow.controls.zoom_in": "拡大",

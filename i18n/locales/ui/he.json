@@ -2371,7 +2371,6 @@
   "submit.dataset.library_search": "חיפוש {term.dataset}…",
   "submit.dataset.library_search_empty": "לא נמצאו דאטאסטים תואמים",
   "submit.module.change": "החלפת {term.module}",
-  "submit.module.picker_subtitle": "ה{term.module} עוטף את ה-Signature בטכניקת prompting. בחר/י אחד כדי להגדיר את השלב הזה — אפשר להחליף בכל רגע מהחלק העליון.",
   "submit.module.picker_title": "בחירת {term.module}",
   "submit.module.carousel_aria": "אפשרויות {term.module}",
   "submit.module.choose": "בחירה ב-{p1}",

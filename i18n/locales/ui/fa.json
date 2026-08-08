@@ -90,7 +90,6 @@
   "workflow.canvas.gestures": "کلیک راست برای افزودن گره · دوبار کلیک برای پیکربندی · اسکرول برای بزرگ‌نمایی",
   "workflow.inspector.close": "بستن پنل",
   "submit.module.change": "تغییر ماژول",
-  "submit.module.picker_subtitle": "ماژول، امضای شما را در یک روش پرامپت‌دهی قرار می‌دهد. برای راه‌اندازی این مرحله یکی را انتخاب کنید — بعداً می‌توانید از بالا آن را تغییر دهید.",
   "submit.module.picker_title": "یک ماژول انتخاب کنید",
   "submit.validation.module_required": "برای ادامه یک ماژول انتخاب کنید",
   "workflow.controls.zoom_in": "بزرگ‌نمایی",

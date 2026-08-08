@@ -90,7 +90,6 @@
   "workflow.canvas.gestures": "انقر بالزر الأيمن لإضافة عقدة · انقر نقرًا مزدوجًا للتهيئة · مرّر للتكبير",
   "workflow.inspector.close": "إغلاق اللوحة",
   "submit.module.change": "تبديل الوحدة",
-  "submit.module.picker_subtitle": "تغلّف الوحدة توقيعك ضمن أسلوب توجيه. اختر واحدة لإعداد هذه الخطوة — يمكنك التبديل لاحقًا من الأعلى.",
   "submit.module.picker_title": "اختيار وحدة",
   "submit.validation.module_required": "اختر وحدة للمتابعة",
   "workflow.controls.zoom_in": "تكبير",

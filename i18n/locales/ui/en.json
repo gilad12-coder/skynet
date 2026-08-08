@@ -2371,7 +2371,6 @@
   "submit.dataset.library_search": "Search datasets…",
   "submit.dataset.library_search_empty": "No matching datasets found",
   "submit.module.change": "Switch module",
-  "submit.module.picker_subtitle": "The module wraps your signature in a prompting technique. Pick one to set up this step — you can switch later from the top.",
   "submit.module.picker_title": "Choose a module",
   "submit.module.carousel_aria": "Module options",
   "submit.module.choose": "Use {p1}",

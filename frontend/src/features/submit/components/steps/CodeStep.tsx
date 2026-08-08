@@ -12,6 +12,7 @@ import { Separator } from "@/shared/ui/primitives/separator";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { tip, type TooltipKey } from "@/shared/lib/tooltips";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 import { TERMS } from "@/shared/lib/terms";
 import { Carousel } from "@/features/agent-panel";
@@ -419,18 +420,19 @@ function ModulePicker({
   // Reopening the picker to switch modules opens on the one already in use.
   const currentIndex = MODULE_META.findIndex((m) => m.value === current.toLowerCase());
   return (
-    <div className="rounded-2xl border border-border/50 bg-card/80 px-6 py-8 shadow-lg backdrop-blur-xl sm:px-10">
-      <div className="mx-auto max-w-2xl text-center">
-        <h3 className="text-lg font-semibold tracking-tight text-foreground">
-          <HelpTip text={tip("module.choice")}>{msg("submit.module.picker_title")}</HelpTip>
-        </h3>
-        <p className="mt-1 text-sm text-muted-foreground">{msg("submit.module.picker_subtitle")}</p>
-      </div>
-      <div className="mx-auto mt-6 max-w-lg" data-tutorial="module-selector">
+    <div className="rounded-2xl border border-border/50 bg-card/80 px-4 py-5 shadow-lg backdrop-blur-xl sm:px-8 sm:py-7">
+      <div className="mx-auto max-w-2xl" data-tutorial="module-selector">
         <Carousel
           items={MODULE_META}
           itemKey={(m) => m.value}
           renderItem={(m) => <ModuleSlide module={m} onChoose={onChoose} />}
+          // The step heading rides the carousel's own header row, opposite the
+          // position counter, rather than sitting above it as a second block.
+          title={
+            <span className="text-sm font-semibold tracking-tight">
+              <HelpTip text={tip("module.choice")}>{msg("submit.module.picker_title")}</HelpTip>
+            </span>
+          }
           ariaLabel={msg("submit.module.carousel_aria")}
           jumpIndices={currentIndex >= 0 ? [currentIndex] : undefined}
           fluid
@@ -449,24 +451,25 @@ function ModuleSlide({
 }) {
   const { value, label, icon: Icon, tipKey, taglineKey, Banner } = module;
   return (
-    <div className="overflow-hidden rounded-xl border border-border/60 bg-background/60">
+    <div className="overflow-hidden rounded-xl border border-border/50 bg-background/60">
       <Banner />
-      <div className="flex flex-col items-center gap-2 px-6 pb-6 pt-5 text-center">
-        <div className="flex items-center gap-2">
-          <span className="flex size-8 items-center justify-center rounded-lg bg-[#F3EDE3] text-[#3D2E22]">
-            <Icon className="size-4" />
+      <div className="flex flex-col items-center gap-2 px-6 pb-7 pt-6 text-center">
+        <div className="flex items-center gap-2.5">
+          <span className="flex size-9 items-center justify-center rounded-lg bg-[#F3EDE3] text-[#3D2E22]">
+            <Icon className="size-[1.125rem]" />
           </span>
-          <h4 dir="ltr" className="text-base font-semibold tracking-tight text-foreground">
+          <h4 dir="ltr" className="text-lg font-semibold tracking-tight text-foreground">
             {label}
           </h4>
         </div>
         <p className="text-sm font-medium text-[#5C4D40]">{msg(taglineKey)}</p>
-        {/* Descriptions run one to three lines; a floor keeps the card from
-            resizing under the nav as slides change. */}
-        <p className="min-h-[3.75rem] text-xs leading-relaxed text-muted-foreground">
+        {/* The measure keeps the copy readable at full width; the floor is the
+            longest description's three lines, so the card holds one height as
+            slides change instead of shifting the nav under the cursor. */}
+        <p className="min-h-[4rem] max-w-md text-[0.8125rem] leading-relaxed text-muted-foreground">
           {moduleDescription(label, tipKey)}
         </p>
-        <Button size="pill" className="mt-3" onClick={() => onChoose(value)}>
+        <Button variant="outline" size="sm" className="mt-2" onClick={() => onChoose(value)}>
           {formatMsg("submit.module.choose", { p1: label })}
         </Button>
       </div>
@@ -481,11 +484,15 @@ function ModuleSlide({
  * the slide already carries the label as its heading — so the opener is
  * stripped here rather than maintained as a second description per locale
  * that would drift from the tooltip. Copy without the opener passes through.
+ * What follows the dash continues the label mid-sentence, so it is recased to
+ * stand alone; scripts without case are unaffected.
  */
 function moduleDescription(label: string, tipKey: TooltipKey): string {
   const text = tip(tipKey);
   const opener = `${label} — `;
-  return text.startsWith(opener) ? text.slice(opener.length) : text;
+  if (!text.startsWith(opener)) return text;
+  const rest = text.slice(opener.length);
+  return rest.charAt(0).toLocaleUpperCase(getActiveIntlLocale()) + rest.slice(1);
 }
 
 /**
@@ -496,19 +503,24 @@ function moduleDescription(label: string, tipKey: TooltipKey): string {
  */
 function BannerFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="h-32 border-b border-border/50 bg-gradient-to-br from-[#F3EDE3] via-[#FAF8F5] to-[#EDE7DD]">
+    <div className="relative h-36 border-b border-border/50 bg-gradient-to-br from-[#F3EDE3] via-[#FAF8F5] to-[#EDE7DD] sm:h-44">
+      {/* The dot grid is CSS rather than an SVG pattern so it covers the whole
+          banner — the schematic letterboxes inside the viewBox, a pattern fill
+          would letterbox with it and leave bare bands at the sides. */}
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{
+          backgroundImage: "radial-gradient(circle, rgba(61,46,34,0.07) 1px, transparent 1px)",
+          backgroundSize: "12px 12px",
+        }}
+      />
       <svg
         viewBox="0 0 240 88"
         preserveAspectRatio="xMidYMid meet"
-        className="h-full w-full"
+        className="absolute inset-0 h-full w-full"
         aria-hidden="true"
       >
-        <defs>
-          <pattern id="module-banner-grid" width="12" height="12" patternUnits="userSpaceOnUse">
-            <circle cx="1" cy="1" r="1" fill="#3D2E22" fillOpacity={0.07} />
-          </pattern>
-        </defs>
-        <rect width="240" height="88" fill="url(#module-banner-grid)" />
         {children}
       </svg>
     </div>

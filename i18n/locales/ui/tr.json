@@ -90,7 +90,6 @@
   "workflow.canvas.gestures": "Düğüm eklemek için sağ tıklayın · yapılandırmak için çift tıklayın · yakınlaştırmak için kaydırın",
   "workflow.inspector.close": "Paneli kapat",
   "submit.module.change": "Modül değiştir",
-  "submit.module.picker_subtitle": "Modül, imzanızı bir yönlendirme tekniğiyle sarmalar. Bu adımı ayarlamak için bir tane seçin — daha sonra üstten değiştirebilirsiniz.",
   "submit.module.picker_title": "Bir modül seçin",
   "submit.validation.module_required": "Devam etmek için bir modül seçin",
   "workflow.controls.zoom_in": "Yakınlaştır",

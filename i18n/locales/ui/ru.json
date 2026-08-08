@@ -90,7 +90,6 @@
   "workflow.canvas.gestures": "Правый клик — добавить узел · двойной клик — настроить · прокрутка — масштабирование",
   "workflow.inspector.close": "Закрыть панель",
   "submit.module.change": "Сменить модуль",
-  "submit.module.picker_subtitle": "Модуль оборачивает вашу сигнатуру в технику промптинга. Выберите один, чтобы настроить этот шаг, — позже его можно сменить сверху.",
   "submit.module.picker_title": "Выберите модуль",
   "submit.validation.module_required": "Выберите модуль, чтобы продолжить",
   "workflow.controls.zoom_in": "Приблизить",

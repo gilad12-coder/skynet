@@ -90,7 +90,6 @@
   "workflow.canvas.gestures": "Clic droit pour ajouter un nœud · double-clic pour configurer · défiler pour zoomer",
   "workflow.inspector.close": "Fermer le panneau",
   "submit.module.change": "Changer de module",
-  "submit.module.picker_subtitle": "Le module enrobe votre signature dans une technique de prompting. Choisissez-en un pour configurer cette étape — vous pourrez en changer plus tard depuis le haut.",
   "submit.module.picker_title": "Choisir un module",
   "submit.validation.module_required": "Choisissez un module pour continuer",
   "workflow.controls.zoom_in": "Zoom avant",

@@ -90,7 +90,6 @@
   "workflow.canvas.gestures": "Клацніть правою кнопкою, щоб додати вузол · подвійне клацання для налаштування · прокручуйте для масштабування",
   "workflow.inspector.close": "Закрити панель",
   "submit.module.change": "Змінити модуль",
-  "submit.module.picker_subtitle": "Модуль обгортає ваш підпис у техніку промптингу. Виберіть один, щоб налаштувати цей крок — пізніше його можна змінити вгорі.",
   "submit.module.picker_title": "Виберіть модуль",
   "submit.validation.module_required": "Виберіть модуль, щоб продовжити",
   "workflow.controls.zoom_in": "Збільшити",
