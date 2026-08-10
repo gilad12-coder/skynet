@@ -39,6 +39,9 @@ const WINNER_HALO = "rgba(156, 122, 63, 0.18)";
 const WINNER_FILL = "#F8EBC8";
 const WINNER_BADGE_FILL = "#9C7A3F";
 const WINNER_BADGE_INK = "#FBF4DF";
+// Painted behind score labels (paint-order: stroke) so they stay legible
+// where a lineage edge or grid line passes underneath.
+const LABEL_HALO = "rgba(250, 248, 245, 0.9)";
 
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 6;
@@ -644,13 +647,15 @@ const TreeContent = memo(function TreeContent({
           const from = idIndex.get(edge.from);
           const to = idIndex.get(edge.to);
           if (from === undefined || to === undefined) return null;
+          // Vertical-tangent cubic: the edge leaves the parent and enters the
+          // child straight down, so descent reads as lineage rather than a
+          // wireframe of center-to-center segments.
+          const midY = (from.y + to.y) / 2;
           return (
-            <motion.line
+            <motion.path
               key={`${edge.from}-${edge.to}-${i}`}
-              x1={from.x}
-              y1={from.y}
-              x2={to.x}
-              y2={to.y}
+              d={`M ${from.x} ${from.y} C ${from.x} ${midY}, ${to.x} ${midY}, ${to.x} ${to.y}`}
+              fill="none"
               stroke={edge.isMerge ? EDGE_STROKE_MERGE : EDGE_STROKE}
               strokeWidth={edge.isMerge ? 1.2 : 1.6}
               strokeLinecap="round"
@@ -816,6 +821,7 @@ const TreeContent = memo(function TreeContent({
                 fill={node.isWinner ? WINNER_FILL : NODE_CORE_FILL}
                 stroke={coreStroke}
                 strokeWidth={isSelected ? 1.4 : 0.8}
+                style={{ transition: "stroke 120ms ease, stroke-width 120ms ease" }}
               />
               <text
                 x={node.x}
@@ -840,8 +846,11 @@ const TreeContent = memo(function TreeContent({
                 fontSize="10.5"
                 fontWeight={600}
                 fill="rgba(28, 22, 18, 0.72)"
+                stroke={LABEL_HALO}
+                strokeWidth={2.5}
+                strokeLinejoin="round"
                 pointerEvents="none"
-                style={{ fontVariantNumeric: "tabular-nums" }}
+                style={{ fontVariantNumeric: "tabular-nums", paintOrder: "stroke" }}
               >
                 {node.score.toFixed(2)}
               </text>
@@ -874,7 +883,7 @@ function WinnerBadge({ x, y }: { x: number; y: number }) {
         x={cx}
         y={top + h / 2 + 3.4}
         textAnchor="middle"
-        fontFamily='"Heebo", "Assistant", system-ui, sans-serif'
+        fontFamily="var(--font-ui, system-ui)"
         fontSize="9.5"
         fontWeight={700}
         letterSpacing="0.4"
