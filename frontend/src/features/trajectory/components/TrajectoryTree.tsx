@@ -882,14 +882,14 @@ const TreeContent = memo(function TreeContent({
               ) : null}
               <motion.g
                 initial={false}
-                animate={{ y: node.isWinner && !showWinner ? -18 : 0 }}
+                animate={{ y: node.isWinner && !showWinner ? -20 : 0 }}
                 transition={
                   reduceMotion ? { duration: 0 } : { duration: 0.25, ease: "easeOut" }
                 }
               >
                 <text
                   x={node.x}
-                  y={node.y + TRAJECTORY_LAYOUT.nodeRadius + (node.isWinner ? 32 : 14)}
+                  y={node.y + TRAJECTORY_LAYOUT.nodeRadius + (node.isWinner ? 34 : 14)}
                   textAnchor="middle"
                   fontFamily="var(--font-mono, monospace)"
                   fontSize="10.5"
@@ -914,8 +914,11 @@ const TreeContent = memo(function TreeContent({
 
 function WinnerBadge({ x, y }: { x: number; y: number }) {
   const label = msg("trajectory.node.winning_label");
-  const w = 36;
-  const h = 15;
+  // SVG text can't auto-size its background rect, so estimate the label's
+  // width from its glyph count (~5.6px per glyph at 9.5px bold Heebo) and
+  // pad each side, so the gold never clips the letters in either locale.
+  const w = Math.round(label.length * 5.6) + 14;
+  const h = 16;
   const cx = x;
   const top = y + 4;
   return (
