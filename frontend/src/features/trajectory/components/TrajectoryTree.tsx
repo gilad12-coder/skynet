@@ -15,6 +15,7 @@ import { TRAJECTORY_LAYOUT, type LayoutResult } from "../lib/layout";
 import { displayCandidateId, type RejectedNode, type TrajectoryNode } from "../lib/types";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
+import { cn } from "@/shared/lib/utils";
 import {
   Tooltip as UiTooltip,
   TooltipContent,
@@ -30,7 +31,6 @@ const NODE_CORE_STROKE_HOVER = "rgba(28, 22, 18, 0.42)";
 const NODE_CORE_STROKE_SELECTED = "#1c1612";
 const DONUT_PASS_FILL = "#7C8B5A";
 const DONUT_FAIL_FILL = "#B26B4A";
-const DONUT_SEG_STROKE = "rgba(28, 22, 18, 0.12)";
 const DONUT_RING_THICKNESS = 8;
 const GHOST_FILL = "#E8E0D3";
 const GHOST_STROKE = "rgba(124, 99, 80, 0.5)";
@@ -39,6 +39,13 @@ const WINNER_HALO = "rgba(156, 122, 63, 0.18)";
 const WINNER_FILL = "#F8EBC8";
 const WINNER_BADGE_FILL = "#9C7A3F";
 const WINNER_BADGE_INK = "#FBF4DF";
+// Painted behind score labels (paint-order: stroke) so they stay legible
+// where a lineage edge or grid line passes underneath.
+const LABEL_HALO = "rgba(250, 248, 245, 0.9)";
+// Corner radius shared by the square node cores and their status rings —
+// just enough rounding to sit next to the app's soft chrome without
+// giving up the strict rectilinear read.
+const NODE_RX = 3;
 
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 6;
@@ -70,6 +77,15 @@ interface View {
   ty: number;
 }
 
+// Which visual layers of the tree are currently shown; every legend entry
+// doubles as the toggle for its layer.
+interface LayerVisibility {
+  pass: boolean;
+  fail: boolean;
+  winner: boolean;
+  rejected: boolean;
+}
+
 export interface TrajectoryTreeProps {
   layout: LayoutResult;
   selectedId: string | null;
@@ -87,90 +103,73 @@ function clampScale(k: number): number {
   return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, k));
 }
 
-function donutSegmentPath(
-  cx: number,
-  cy: number,
-  rOuter: number,
-  rInner: number,
-  startAngle: number,
-  endAngle: number,
-): string {
-  // A single SVG arc can't draw a closed circle — start and end coordinates
-  // coincide and the renderer drops the command, so the all-pass / all-fail
-  // donut would disappear when zoomed out (passes === total collapses both
-  // segments into one full sweep). Split into two semicircle arcs instead.
-  if (endAngle - startAngle >= 2 * Math.PI - 1e-6) {
-    return [
-      `M ${cx} ${cy - rOuter}`,
-      `A ${rOuter} ${rOuter} 0 1 1 ${cx} ${cy + rOuter}`,
-      `A ${rOuter} ${rOuter} 0 1 1 ${cx} ${cy - rOuter}`,
-      `M ${cx} ${cy - rInner}`,
-      `A ${rInner} ${rInner} 0 1 0 ${cx} ${cy + rInner}`,
-      `A ${rInner} ${rInner} 0 1 0 ${cx} ${cy - rInner}`,
-      "Z",
-    ].join(" ");
-  }
-  const x1 = cx + rOuter * Math.cos(startAngle);
-  const y1 = cy + rOuter * Math.sin(startAngle);
-  const x2 = cx + rOuter * Math.cos(endAngle);
-  const y2 = cy + rOuter * Math.sin(endAngle);
-  const x3 = cx + rInner * Math.cos(endAngle);
-  const y3 = cy + rInner * Math.sin(endAngle);
-  const x4 = cx + rInner * Math.cos(startAngle);
-  const y4 = cy + rInner * Math.sin(startAngle);
-  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
-  return [
-    `M ${x1} ${y1}`,
-    `A ${rOuter} ${rOuter} 0 ${largeArc} 1 ${x2} ${y2}`,
-    `L ${x3} ${y3}`,
-    `A ${rInner} ${rInner} 0 ${largeArc} 0 ${x4} ${y4}`,
-    "Z",
-  ].join(" ");
+// The pass/fail ring is a square frame drawn as stroked rects: `pathLength`
+// normalizes the frame's perimeter to `total` units so each example maps to
+// exactly one dash unit, and the dash offset rotates segment 0 to top-center
+// (the old donut's 12-o'clock start). This sidesteps hand-computing corner
+// geometry for every segment, and a full ring (all-pass / all-fail) is just
+// an undashed stroke — no closed-arc special case needed.
+const RING_R = TRAJECTORY_LAYOUT.nodeRadius - DONUT_RING_THICKNESS / 2;
+const RING_RX = NODE_RX + 1;
+const RING_PERIMETER = 4 * (2 * RING_R - 2 * RING_RX) + 2 * Math.PI * RING_RX;
+const RING_SEG_GAP_PX = 1.2;
+
+function ringSegment(
+  node: TrajectoryNode,
+  key: string,
+  fill: string,
+  startUnit: number,
+  lengthUnits: number,
+  total: number,
+): React.ReactNode {
+  // A rect's path begins just after the top-LEFT corner; shift the dash
+  // pattern so unit 0 sits at top-center instead.
+  const topCenterUnits = ((RING_R - RING_RX) / RING_PERIMETER) * total;
+  const gapUnits = (RING_SEG_GAP_PX / RING_PERIMETER) * total;
+  const full = lengthUnits >= total;
+  const dashLen = Math.max(0.05, lengthUnits - gapUnits);
+  return (
+    <rect
+      key={key}
+      x={node.x - RING_R}
+      y={node.y - RING_R}
+      width={RING_R * 2}
+      height={RING_R * 2}
+      rx={RING_RX}
+      fill="none"
+      stroke={fill}
+      strokeWidth={DONUT_RING_THICKNESS}
+      pathLength={total}
+      strokeDasharray={full ? undefined : `${dashLen} ${total - dashLen}`}
+      strokeDashoffset={full ? undefined : -(topCenterUnits + startUnit)}
+    />
+  );
 }
 
-function renderDonut(node: TrajectoryNode, detailed: boolean): React.ReactNode {
-  const cx = node.x;
-  const cy = node.y;
-  const rOuter = TRAJECTORY_LAYOUT.nodeRadius;
-  const rInner = TRAJECTORY_LAYOUT.nodeRadius - DONUT_RING_THICKNESS;
+function renderRing(
+  node: TrajectoryNode,
+  detailed: boolean,
+  showPass: boolean,
+  showFail: boolean,
+): React.ReactNode {
   const passes = node.per_example.filter((e) => e.score > 0).length;
   const total = node.per_example.length;
   if (!detailed && total > 1) {
-    const passEnd = -Math.PI / 2 + (passes / total) * 2 * Math.PI;
-    const failEnd = -Math.PI / 2 + 2 * Math.PI;
     return (
       <>
-        {passes > 0 ? (
-          <path
-            d={donutSegmentPath(cx, cy, rOuter, rInner, -Math.PI / 2, passEnd)}
-            fill={DONUT_PASS_FILL}
-            stroke={DONUT_SEG_STROKE}
-            strokeWidth={0.5}
-          />
-        ) : null}
-        {passes < total ? (
-          <path
-            d={donutSegmentPath(cx, cy, rOuter, rInner, passEnd, failEnd)}
-            fill={DONUT_FAIL_FILL}
-            stroke={DONUT_SEG_STROKE}
-            strokeWidth={0.5}
-          />
-        ) : null}
+        {showPass && passes > 0
+          ? ringSegment(node, "pass", DONUT_PASS_FILL, 0, passes, total)
+          : null}
+        {showFail && passes < total
+          ? ringSegment(node, "fail", DONUT_FAIL_FILL, passes, total - passes, total)
+          : null}
       </>
     );
   }
   return node.per_example.map((ex, idx) => {
-    const start = -Math.PI / 2 + (idx / total) * 2 * Math.PI;
-    const end = -Math.PI / 2 + ((idx + 1) / total) * 2 * Math.PI;
-    return (
-      <path
-        key={ex.id}
-        d={donutSegmentPath(cx, cy, rOuter, rInner, start, end)}
-        fill={ex.score > 0 ? DONUT_PASS_FILL : DONUT_FAIL_FILL}
-        stroke={DONUT_SEG_STROKE}
-        strokeWidth={0.5}
-      />
-    );
+    const pass = ex.score > 0;
+    if (pass ? !showPass : !showFail) return null;
+    return ringSegment(node, ex.id, pass ? DONUT_PASS_FILL : DONUT_FAIL_FILL, idx, 1, total);
   });
 }
 
@@ -202,6 +201,15 @@ export function TrajectoryTree({
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [layers, setLayers] = useState<LayerVisibility>({
+    pass: true,
+    fail: true,
+    winner: true,
+    rejected: true,
+  });
+  const toggleLayer = useCallback((key: keyof LayerVisibility) => {
+    setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
   const panStateRef = useRef<null | {
     pointerId: number;
     startClientX: number;
@@ -472,6 +480,10 @@ export function TrajectoryTree({
             hoveredId={hoveredId}
             newestId={newestId}
             detailed={view.k >= DONUT_DETAIL_THRESHOLD}
+            showPass={layers.pass}
+            showFail={layers.fail}
+            showWinner={layers.winner}
+            showRejected={layers.rejected}
             reduceMotion={!!reduceMotion}
             onNodeClick={handleNodeClick}
             onGhostClick={handleGhostClick}
@@ -526,32 +538,38 @@ export function TrajectoryTree({
 
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
         <div
-          className="pointer-events-auto inline-flex flex-wrap items-center gap-x-3 gap-y-1 rounded-full border border-[#DDD4C8]/70 bg-background/85 px-4 py-1.5 text-[11px] font-medium text-muted-foreground/90 backdrop-blur-sm"
+          className="pointer-events-auto inline-flex flex-wrap items-center gap-x-1 gap-y-1 rounded-lg border border-[#DDD4C8]/70 bg-background/85 px-2 py-1 text-[11px] font-medium text-muted-foreground/90 backdrop-blur-sm"
         >
-          <LegendItem
+          <LegendToggle
+            pressed={layers.pass}
+            onToggle={() => toggleLayer("pass")}
             swatch={
               <span
-                className="inline-block size-2.5 rounded-full"
+                className="inline-block size-2.5 rounded-[2px]"
                 style={{ background: DONUT_PASS_FILL }}
               />
             }
             label={msg("trajectory.minibatch.pass_label")}
           />
           <LegendDivider />
-          <LegendItem
+          <LegendToggle
+            pressed={layers.fail}
+            onToggle={() => toggleLayer("fail")}
             swatch={
               <span
-                className="inline-block size-2.5 rounded-full"
+                className="inline-block size-2.5 rounded-[2px]"
                 style={{ background: DONUT_FAIL_FILL }}
               />
             }
             label={msg("trajectory.minibatch.fail_label")}
           />
           <LegendDivider />
-          <LegendItem
+          <LegendToggle
+            pressed={layers.winner}
+            onToggle={() => toggleLayer("winner")}
             swatch={
               <span
-                className="inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[8px] font-semibold leading-none tracking-wider"
+                className="inline-flex items-center justify-center rounded-sm px-1.5 py-0.5 text-[8px] font-semibold leading-none tracking-wider"
                 style={{
                   background: WINNER_BADGE_FILL,
                   color: WINNER_BADGE_INK,
@@ -565,10 +583,12 @@ export function TrajectoryTree({
           {ghosts.length > 0 ? (
             <>
               <LegendDivider />
-              <LegendItem
+              <LegendToggle
+                pressed={layers.rejected}
+                onToggle={() => toggleLayer("rejected")}
                 swatch={
                   <span
-                    className="inline-block size-2.5 rounded-full"
+                    className="inline-block size-2.5 rounded-[2px]"
                     style={{
                       background: GHOST_FILL,
                       border: `1px solid ${GHOST_STROKE}`,
@@ -610,6 +630,10 @@ interface TreeContentProps {
   hoveredId: string | null;
   newestId: string | null;
   detailed: boolean;
+  showPass: boolean;
+  showFail: boolean;
+  showWinner: boolean;
+  showRejected: boolean;
   reduceMotion: boolean;
   onNodeClick: (id: string, e: React.MouseEvent) => void;
   onGhostClick: (rejectionId: string, e: React.MouseEvent) => void;
@@ -632,6 +656,10 @@ const TreeContent = memo(function TreeContent({
   hoveredId,
   newestId,
   detailed,
+  showPass,
+  showFail,
+  showWinner,
+  showRejected,
   reduceMotion,
   onNodeClick,
   onGhostClick,
@@ -644,16 +672,21 @@ const TreeContent = memo(function TreeContent({
           const from = idIndex.get(edge.from);
           const to = idIndex.get(edge.to);
           if (from === undefined || to === undefined) return null;
+          // Orthogonal elbow routing: drop from the parent, run flat at the
+          // midpoint row, drop into the child. Siblings overlap on the shared
+          // vertical stub, which reads as one strict connector bus.
+          const midY = (from.y + to.y) / 2;
+          const d =
+            from.x === to.x
+              ? `M ${from.x} ${from.y} L ${to.x} ${to.y}`
+              : `M ${from.x} ${from.y} L ${from.x} ${midY} L ${to.x} ${midY} L ${to.x} ${to.y}`;
           return (
-            <motion.line
+            <motion.path
               key={`${edge.from}-${edge.to}-${i}`}
-              x1={from.x}
-              y1={from.y}
-              x2={to.x}
-              y2={to.y}
+              d={d}
+              fill="none"
               stroke={edge.isMerge ? EDGE_STROKE_MERGE : EDGE_STROKE}
               strokeWidth={edge.isMerge ? 1.2 : 1.6}
-              strokeLinecap="round"
               strokeDasharray={edge.isMerge ? "4 4" : undefined}
               initial={reduceMotion ? false : { pathLength: 0, opacity: 0 }}
               animate={reduceMotion ? undefined : { pathLength: 1, opacity: 1 }}
@@ -663,40 +696,48 @@ const TreeContent = memo(function TreeContent({
         })}
       </g>
 
-      <g>
-        {ghosts.map((ghost) => {
-          const parent = idIndex.get(ghost.parent_id);
-          if (parent === undefined) return null;
-          return (
-            <line
-              key={`ghost-edge-${ghost.rejection_id}`}
-              x1={parent.x}
-              y1={parent.y}
-              x2={ghost.x}
-              y2={ghost.y}
-              stroke={EDGE_STROKE_GHOST}
-              strokeWidth={1}
-              strokeDasharray="3 3"
+      {showRejected ? (
+        <g>
+          {ghosts.map((ghost) => {
+            const parent = idIndex.get(ghost.parent_id);
+            if (parent === undefined) return null;
+            // Single-corner elbow along the dominant axis, so ghost spokes
+            // stay rectilinear like the lineage edges.
+            const d =
+              Math.abs(ghost.x - parent.x) > Math.abs(ghost.y - parent.y)
+                ? `M ${parent.x} ${parent.y} L ${ghost.x} ${parent.y} L ${ghost.x} ${ghost.y}`
+                : `M ${parent.x} ${parent.y} L ${parent.x} ${ghost.y} L ${ghost.x} ${ghost.y}`;
+            return (
+              <path
+                key={`ghost-edge-${ghost.rejection_id}`}
+                d={d}
+                fill="none"
+                stroke={EDGE_STROKE_GHOST}
+                strokeWidth={1}
+                strokeDasharray="3 3"
+              />
+            );
+          })}
+          {ghosts.map((ghost) => (
+            <motion.rect
+              key={`ghost-${ghost.rejection_id}`}
+              x={ghost.x - TRAJECTORY_LAYOUT.ghostRadius}
+              y={ghost.y - TRAJECTORY_LAYOUT.ghostRadius}
+              width={TRAJECTORY_LAYOUT.ghostRadius * 2}
+              height={TRAJECTORY_LAYOUT.ghostRadius * 2}
+              rx={1.5}
+              fill={GHOST_FILL}
+              stroke={GHOST_STROKE}
+              strokeWidth={0.9}
+              initial={reduceMotion ? false : { scale: 0.5, opacity: 0 }}
+              animate={reduceMotion ? undefined : { scale: 1, opacity: 1 }}
+              transition={reduceMotion ? undefined : { duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{ cursor: "pointer" }}
+              onClick={(e) => onGhostClick(ghost.rejection_id, e)}
             />
-          );
-        })}
-        {ghosts.map((ghost) => (
-          <motion.circle
-            key={`ghost-${ghost.rejection_id}`}
-            cx={ghost.x}
-            cy={ghost.y}
-            r={TRAJECTORY_LAYOUT.ghostRadius}
-            fill={GHOST_FILL}
-            stroke={GHOST_STROKE}
-            strokeWidth={0.9}
-            initial={reduceMotion ? false : { scale: 0.5, opacity: 0 }}
-            animate={reduceMotion ? undefined : { scale: 1, opacity: 1 }}
-            transition={reduceMotion ? undefined : { duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
-            style={{ cursor: "pointer" }}
-            onClick={(e) => onGhostClick(ghost.rejection_id, e)}
-          />
-        ))}
-      </g>
+          ))}
+        </g>
+      ) : null}
 
       <g>
         {nodes.map((node) => {
@@ -708,10 +749,11 @@ const TreeContent = memo(function TreeContent({
             : isHovered
               ? NODE_CORE_STROKE_HOVER
               : NODE_CORE_STROKE;
-          const hasDonut = node.per_example.length > 0;
-          const innerRadius = hasDonut
+          const hasRing = node.per_example.length > 0;
+          const innerRadius = hasRing
             ? TRAJECTORY_LAYOUT.nodeRadius - DONUT_RING_THICKNESS
             : TRAJECTORY_LAYOUT.nodeRadius;
+          const winnerShown = node.isWinner && showWinner;
           return (
             <motion.g
               key={node.candidate_id}
@@ -738,59 +780,57 @@ const TreeContent = memo(function TreeContent({
               style={{ cursor: "pointer" }}
             >
               {isNewest && !reduceMotion ? (
-                <motion.circle
-                  cx={node.x}
-                  cy={node.y}
-                  r={TRAJECTORY_LAYOUT.nodeRadius}
+                <motion.rect
+                  x={node.x - TRAJECTORY_LAYOUT.nodeRadius}
+                  y={node.y - TRAJECTORY_LAYOUT.nodeRadius}
+                  width={TRAJECTORY_LAYOUT.nodeRadius * 2}
+                  height={TRAJECTORY_LAYOUT.nodeRadius * 2}
+                  rx={NODE_RX + 3}
                   fill="none"
                   stroke={WINNER_INDICATOR}
                   strokeWidth="1.6"
-                  initial={{ r: TRAJECTORY_LAYOUT.nodeRadius, opacity: 0.6 }}
-                  animate={{ r: TRAJECTORY_LAYOUT.nodeRadius * 2.2, opacity: 0 }}
+                  initial={{ scale: 1, opacity: 0.6 }}
+                  animate={{ scale: 2.2, opacity: 0 }}
                   transition={{ duration: 1.2, ease: "easeOut", repeat: 2 }}
                 />
               ) : null}
               {isSelected ? (
-                <circle
-                  cx={node.x}
-                  cy={node.y}
-                  r={TRAJECTORY_LAYOUT.nodeRadius + 5}
+                <rect
+                  x={node.x - TRAJECTORY_LAYOUT.nodeRadius - 5}
+                  y={node.y - TRAJECTORY_LAYOUT.nodeRadius - 5}
+                  width={(TRAJECTORY_LAYOUT.nodeRadius + 5) * 2}
+                  height={(TRAJECTORY_LAYOUT.nodeRadius + 5) * 2}
+                  rx={NODE_RX + 2}
                   fill="none"
                   stroke={NODE_CORE_STROKE_SELECTED}
                   strokeWidth={1.5}
                   strokeOpacity={0.7}
                 />
               ) : null}
-              {node.isWinner ? (
+              {winnerShown ? (
                 <>
-                  <circle
-                    cx={node.x}
-                    cy={node.y}
-                    r={TRAJECTORY_LAYOUT.nodeRadius + 11}
+                  <rect
+                    x={node.x - TRAJECTORY_LAYOUT.nodeRadius - 11}
+                    y={node.y - TRAJECTORY_LAYOUT.nodeRadius - 11}
+                    width={(TRAJECTORY_LAYOUT.nodeRadius + 11) * 2}
+                    height={(TRAJECTORY_LAYOUT.nodeRadius + 11) * 2}
+                    rx={NODE_RX + 4}
                     fill="none"
                     stroke={WINNER_HALO}
                     strokeWidth={3}
                   />
                   {reduceMotion ? null : (
-                    <motion.circle
-                      cx={node.x}
-                      cy={node.y}
-                      r={TRAJECTORY_LAYOUT.nodeRadius + 4}
+                    <motion.rect
+                      x={node.x - TRAJECTORY_LAYOUT.nodeRadius - 8}
+                      y={node.y - TRAJECTORY_LAYOUT.nodeRadius - 8}
+                      width={(TRAJECTORY_LAYOUT.nodeRadius + 8) * 2}
+                      height={(TRAJECTORY_LAYOUT.nodeRadius + 8) * 2}
+                      rx={NODE_RX + 3}
                       fill="none"
                       stroke={WINNER_INDICATOR}
                       strokeWidth={1.4}
-                      initial={{
-                        opacity: 0.5,
-                        r: TRAJECTORY_LAYOUT.nodeRadius + 4,
-                      }}
-                      animate={{
-                        opacity: [0.5, 0.12, 0.5],
-                        r: [
-                          TRAJECTORY_LAYOUT.nodeRadius + 4,
-                          TRAJECTORY_LAYOUT.nodeRadius + 10,
-                          TRAJECTORY_LAYOUT.nodeRadius + 4,
-                        ],
-                      }}
+                      initial={{ opacity: 0.45 }}
+                      animate={{ opacity: [0.45, 0.1, 0.45] }}
                       transition={{
                         duration: 3.2,
                         ease: "easeInOut",
@@ -798,24 +838,29 @@ const TreeContent = memo(function TreeContent({
                       }}
                     />
                   )}
-                  <circle
-                    cx={node.x}
-                    cy={node.y}
-                    r={TRAJECTORY_LAYOUT.nodeRadius + 4}
+                  <rect
+                    x={node.x - TRAJECTORY_LAYOUT.nodeRadius - 4}
+                    y={node.y - TRAJECTORY_LAYOUT.nodeRadius - 4}
+                    width={(TRAJECTORY_LAYOUT.nodeRadius + 4) * 2}
+                    height={(TRAJECTORY_LAYOUT.nodeRadius + 4) * 2}
+                    rx={NODE_RX + 2}
                     fill="none"
                     stroke={WINNER_INDICATOR}
                     strokeWidth={2.6}
                   />
                 </>
               ) : null}
-              {hasDonut ? renderDonut(node, detailed) : null}
-              <circle
-                cx={node.x}
-                cy={node.y}
-                r={innerRadius}
-                fill={node.isWinner ? WINNER_FILL : NODE_CORE_FILL}
+              {hasRing ? renderRing(node, detailed, showPass, showFail) : null}
+              <rect
+                x={node.x - innerRadius}
+                y={node.y - innerRadius}
+                width={innerRadius * 2}
+                height={innerRadius * 2}
+                rx={NODE_RX}
+                fill={winnerShown ? WINNER_FILL : NODE_CORE_FILL}
                 stroke={coreStroke}
                 strokeWidth={isSelected ? 1.4 : 0.8}
+                style={{ transition: "stroke 120ms ease, stroke-width 120ms ease" }}
               />
               <text
                 x={node.x}
@@ -829,19 +874,22 @@ const TreeContent = memo(function TreeContent({
               >
                 {displayCandidateId(node.candidate_id)}
               </text>
-              {node.isWinner ? (
+              {winnerShown ? (
                 <WinnerBadge x={node.x} y={node.y + TRAJECTORY_LAYOUT.nodeRadius + 4} />
               ) : null}
               <text
                 x={node.x}
-                y={node.y + TRAJECTORY_LAYOUT.nodeRadius + (node.isWinner ? 32 : 14)}
+                y={node.y + TRAJECTORY_LAYOUT.nodeRadius + (winnerShown ? 32 : 14)}
                 textAnchor="middle"
                 fontFamily="var(--font-mono, monospace)"
                 fontSize="10.5"
                 fontWeight={600}
                 fill="rgba(28, 22, 18, 0.72)"
+                stroke={LABEL_HALO}
+                strokeWidth={2.5}
+                strokeLinejoin="round"
                 pointerEvents="none"
-                style={{ fontVariantNumeric: "tabular-nums" }}
+                style={{ fontVariantNumeric: "tabular-nums", paintOrder: "stroke" }}
               >
                 {node.score.toFixed(2)}
               </text>
@@ -866,8 +914,8 @@ function WinnerBadge({ x, y }: { x: number; y: number }) {
         y={top}
         width={w}
         height={h}
-        rx={h / 2}
-        ry={h / 2}
+        rx={NODE_RX}
+        ry={NODE_RX}
         fill={WINNER_BADGE_FILL}
       />
       <text
@@ -886,12 +934,30 @@ function WinnerBadge({ x, y }: { x: number; y: number }) {
   );
 }
 
-function LegendItem({ swatch, label }: { swatch: React.ReactNode; label: string }) {
+function LegendToggle({
+  swatch,
+  label,
+  pressed,
+  onToggle,
+}: {
+  swatch: React.ReactNode;
+  label: string;
+  pressed: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onToggle}
+      className={cn(
+        "inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 py-0.5 transition-[opacity,color,background-color] duration-150 hover:bg-accent/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        !pressed && "opacity-40",
+      )}
+    >
       {swatch}
       <span>{label}</span>
-    </span>
+    </button>
   );
 }
 
