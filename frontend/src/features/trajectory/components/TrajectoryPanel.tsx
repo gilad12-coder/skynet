@@ -2,7 +2,14 @@
 
 import { motion } from "framer-motion";
 import { GitBranch } from "@/shared/ui/icons";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from "react";
 import type { OptimizationStatusResponse } from "@/shared/types/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import { FadeIn } from "@/shared/ui/motion";
@@ -23,10 +30,40 @@ import { layoutTrajectory } from "../lib/layout";
 import { TrajectoryTree } from "./TrajectoryTree";
 import { TrajectoryOutline } from "./TrajectoryOutline";
 import { TrajectoryDrawer, type DrawerSelection } from "./TrajectoryDrawer";
+import type { PreviewProps } from "./previews/preview-shared";
+import { NotebookPreview } from "./previews/NotebookPreview";
+import { TransitPreview } from "./previews/TransitPreview";
+import { GitGraphPreview } from "./previews/GitGraphPreview";
+import { FigurePreview } from "./previews/FigurePreview";
+import { FieldFigurePreview } from "./previews/FieldFigurePreview";
 
 const NEWEST_HIGHLIGHT_MS = 2200;
 
 type Selected = { kind: "candidate" | "rejected"; id: string };
+
+// Temporary design-direction previews: static renderings of the same run data
+// so a direction can be chosen in-app. Remove once one direction is picked.
+const PREVIEW_OPTIONS = [
+  { value: "current", labelKey: "trajectory.preview.current" },
+  { value: "notebook", labelKey: "trajectory.preview.notebook" },
+  { value: "transit", labelKey: "trajectory.preview.transit" },
+  { value: "git", labelKey: "trajectory.preview.git" },
+  { value: "figure", labelKey: "trajectory.preview.figure" },
+  { value: "hybrid", labelKey: "trajectory.preview.hybrid" },
+] as const;
+
+type PreviewChoice = (typeof PREVIEW_OPTIONS)[number]["value"];
+
+const PREVIEW_COMPONENTS: Record<
+  Exclude<PreviewChoice, "current">,
+  ComponentType<PreviewProps>
+> = {
+  notebook: NotebookPreview,
+  transit: TransitPreview,
+  git: GitGraphPreview,
+  figure: FigurePreview,
+  hybrid: FieldFigurePreview,
+};
 
 function isLive(job: OptimizationStatusResponse): boolean {
   return job.status === "running" || job.status === "validating" || job.status === "pending";
@@ -88,6 +125,7 @@ export function TrajectoryPanel({
   );
   const [selected, setSelected] = useState<Selected | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [designPreview, setDesignPreview] = useState<PreviewChoice>("current");
   const [newestId, setNewestId] = useState<string | null>(null);
   const newestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevCountRef = useRef(0);
@@ -171,6 +209,9 @@ export function TrajectoryPanel({
 
   if (candidates.length === 0) return null;
 
+  const PreviewComponent =
+    designPreview === "current" ? null : PREVIEW_COMPONENTS[designPreview];
+
   return (
     <FadeIn delay={0.12}>
       <Card
@@ -233,14 +274,31 @@ export function TrajectoryPanel({
               onSelectRejected={handleSelectRejected}
             />
           ) : (
-            <TrajectoryTree
-              layout={layout}
-              selectedId={selectedTreeId}
-              newestId={newestId}
-              onSelectCandidate={handleSelectCandidate}
-              onSelectRejected={handleSelectRejected}
-              previewLayout={previewLayout}
-            />
+            <>
+              <DesignPreviewSwitcher value={designPreview} onChange={setDesignPreview} />
+              {PreviewComponent === null ? (
+                <TrajectoryTree
+                  layout={layout}
+                  selectedId={selectedTreeId}
+                  newestId={newestId}
+                  onSelectCandidate={handleSelectCandidate}
+                  onSelectRejected={handleSelectRejected}
+                  previewLayout={previewLayout}
+                />
+              ) : (
+                <div className="space-y-1.5">
+                  <PreviewComponent
+                    layout={layout}
+                    selectedId={selectedTreeId}
+                    onSelectCandidate={handleSelectCandidate}
+                    onSelectRejected={handleSelectRejected}
+                  />
+                  <p className="text-center text-[10px] text-muted-foreground">
+                    {msg("trajectory.preview.static_note")}
+                  </p>
+                </div>
+              )}
+            </>
           )}
           <TrajectoryDrawer
             selection={drawerSelection}
@@ -260,6 +318,43 @@ export function TrajectoryPanel({
         </CardContent>
       </Card>
     </FadeIn>
+  );
+}
+
+function DesignPreviewSwitcher({
+  value,
+  onChange,
+}: {
+  value: PreviewChoice;
+  onChange: (next: PreviewChoice) => void;
+}) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1.5"
+      role="radiogroup"
+      aria-label={msg("trajectory.preview.label")}
+    >
+      <span className="me-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {msg("trajectory.preview.label")}
+      </span>
+      {PREVIEW_OPTIONS.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          role="radio"
+          aria-checked={value === opt.value}
+          onClick={() => onChange(opt.value)}
+          className={cn(
+            "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+            value === opt.value
+              ? "border-[#1c1612] bg-[#1c1612] text-[#faf8f5]"
+              : "border-border/50 bg-background/70 text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {msg(opt.labelKey)}
+        </button>
+      ))}
+    </div>
   );
 }
 

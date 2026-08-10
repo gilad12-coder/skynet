@@ -2882,6 +2882,18 @@ export type MessageKey =
   | "trajectory.pareto.cell.prediction_label.explain"
   | "trajectory.pareto.cell.prediction_unavailable"
   | "trajectory.pareto.cell_detail_pending"
+  | "trajectory.preview.axis_iteration"
+  | "trajectory.preview.axis_score"
+  | "trajectory.preview.baseline"
+  | "trajectory.preview.best"
+  | "trajectory.preview.current"
+  | "trajectory.preview.figure"
+  | "trajectory.preview.git"
+  | "trajectory.preview.hybrid"
+  | "trajectory.preview.label"
+  | "trajectory.preview.notebook"
+  | "trajectory.preview.static_note"
+  | "trajectory.preview.transit"
   | "trajectory.prompt.kind.code"
   | "trajectory.prompt.kind.code.explain"
   | "trajectory.prompt.kind.instructions"
@@ -5900,6 +5912,18 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "trajectory.pareto.cell.prediction_label.explain": "התשובה שהמועמד הציע על הקלט הזה במהלך הריצה על דוגמאות האימות.",
   "trajectory.pareto.cell.prediction_unavailable": "התשובה לא נמצאה",
   "trajectory.pareto.cell_detail_pending": "תוכן הדוגמה עדיין לא נטען מהשרת",
+  "trajectory.preview.axis_iteration": "סדר גילוי",
+  "trajectory.preview.axis_score": "ציון ולידציה",
+  "trajectory.preview.baseline": "ציון הבסיס",
+  "trajectory.preview.best": "שיא",
+  "trajectory.preview.current": "נוכחי",
+  "trajectory.preview.figure": "תרשים מדעי",
+  "trajectory.preview.git": "גרף גיט",
+  "trajectory.preview.hybrid": "תרשים שדה (משולב)",
+  "trajectory.preview.label": "תצוגת עיצוב",
+  "trajectory.preview.notebook": "פנקס שדה",
+  "trajectory.preview.static_note": "תצוגות דוגמה סטטיות — ללא הזזה וזום",
+  "trajectory.preview.transit": "מפת קווים",
   "trajectory.prompt.kind.code": "קוד",
   "trajectory.prompt.kind.code.explain": "מבנה הקוד של המודול, כשההוראות של כל predictor מוסתרות ומוצגות כפרומפט למעלה, כך ששינוי הוראות בלבד לא מופיע כאן.",
   "trajectory.prompt.kind.instructions": "הוראות",
@@ -14568,6 +14592,18 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "trajectory.pareto.cell.prediction_label.explain": "The prediction the candidate made for this input during the run over the validation examples.",
   "trajectory.pareto.cell.prediction_unavailable": "Prediction not found",
   "trajectory.pareto.cell_detail_pending": "Example content has not loaded from the server yet",
+  "trajectory.preview.axis_iteration": "discovery order",
+  "trajectory.preview.axis_score": "val score",
+  "trajectory.preview.baseline": "seed baseline",
+  "trajectory.preview.best": "best",
+  "trajectory.preview.current": "Current",
+  "trajectory.preview.figure": "Scientific figure",
+  "trajectory.preview.git": "Git graph",
+  "trajectory.preview.hybrid": "Field figure (hybrid)",
+  "trajectory.preview.label": "Design preview",
+  "trajectory.preview.notebook": "Field notebook",
+  "trajectory.preview.static_note": "Static sample views — pan/zoom disabled",
+  "trajectory.preview.transit": "Transit map",
   "trajectory.prompt.kind.code": "Code",
   "trajectory.prompt.kind.code.explain": "The module's code structure with each predictor's instructions elided and shown as a prompt above, so an instructions-only change doesn't appear here.",
   "trajectory.prompt.kind.instructions": "Instructions",
