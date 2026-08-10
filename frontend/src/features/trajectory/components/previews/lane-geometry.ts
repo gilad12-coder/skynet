@@ -78,9 +78,12 @@ export function computeLaneGeometry(
     if (parent === undefined) continue;
     const idx = perParent.get(ghost.parent_id) ?? 0;
     perParent.set(ghost.parent_id, idx + 1);
+    // Hang ghosts on the side away from the node labels: labels sit above
+    // for lanes at or above the spine and below for lanes beneath it.
+    const side = parent.lane < 0 ? -1 : 1;
     ghostPos.set(ghost.rejection_id, {
       x: parent.x + xStep * (0.3 + (idx % 3) * 0.18),
-      y: parent.y + laneGap * 0.62,
+      y: parent.y + side * laneGap * 0.55,
     });
   }
 

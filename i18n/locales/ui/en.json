@@ -2843,6 +2843,7 @@
   "trajectory.drawer.toggle.module.aria": "Module view",
   "trajectory.drawer.toggle.prompt": "Prompt",
   "trajectory.explainer.trajectory": "The sequence of candidates accepted over the run",
+  "trajectory.filter.rejected": "Rejected",
   "trajectory.ghost.legend": "Rejected proposals",
   "trajectory.history.turn": "Turn {n}",
   "trajectory.json.empty_value": "Empty",

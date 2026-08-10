@@ -2843,6 +2843,7 @@
   "trajectory.drawer.toggle.module.aria": "תצוגת המודול",
   "trajectory.drawer.toggle.prompt": "פרומפט",
   "trajectory.explainer.trajectory": "רצף המועמדים שאומצו לאורך הריצה",
+  "trajectory.filter.rejected": "נדחו",
   "trajectory.ghost.legend": "הצעות שנדחו",
   "trajectory.history.turn": "תור {n}",
   "trajectory.json.empty_value": "ריק",

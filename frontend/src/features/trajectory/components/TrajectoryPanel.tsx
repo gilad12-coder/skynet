@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { GitBranch } from "@/shared/ui/icons";
+import { GitBranch, X } from "@/shared/ui/icons";
 import {
   useCallback,
   useEffect,
@@ -119,9 +119,11 @@ export function TrajectoryPanel({
     const visibleIds = new Set(visibleCandidates.map((c) => c.candidate_id));
     return rejected.filter((r) => visibleIds.has(r.parent_id));
   }, [rejected, generationFilter, visibleCandidates]);
+  const [showRejected, setShowRejected] = useState(true);
+  const shownRejected = showRejected ? visibleRejected : [];
   const layout = useMemo(
-    () => layoutTrajectory(visibleCandidates, visibleRejected),
-    [visibleCandidates, visibleRejected],
+    () => layoutTrajectory(visibleCandidates, showRejected ? visibleRejected : []),
+    [visibleCandidates, visibleRejected, showRejected],
   );
   const [selected, setSelected] = useState<Selected | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -207,6 +209,12 @@ export function TrajectoryPanel({
     setDrawerOpen(true);
   }, []);
 
+  useEffect(() => {
+    if (!showRejected && selected !== null && selected.kind === "rejected") {
+      setSelected(null);
+    }
+  }, [showRejected, selected]);
+
   if (candidates.length === 0) return null;
 
   const PreviewComponent =
@@ -263,42 +271,51 @@ export function TrajectoryPanel({
               isLive={live}
             />
           ) : null}
+          {!lite || rejected.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {!lite ? (
+                <DesignPreviewSwitcher value={designPreview} onChange={setDesignPreview} />
+              ) : null}
+              {rejected.length > 0 ? (
+                <RejectedToggle
+                  shown={showRejected}
+                  count={visibleRejected.length}
+                  onToggle={() => setShowRejected((prev) => !prev)}
+                />
+              ) : null}
+            </div>
+          ) : null}
           {lite ? (
             <TrajectoryOutline
               candidates={visibleCandidates}
-              rejected={visibleRejected}
+              rejected={shownRejected}
               winnerId={layout.winnerId}
               selectedId={selectedTreeId}
               newestId={newestId}
               onSelectCandidate={handleSelectCandidate}
               onSelectRejected={handleSelectRejected}
             />
+          ) : PreviewComponent === null ? (
+            <TrajectoryTree
+              layout={layout}
+              selectedId={selectedTreeId}
+              newestId={newestId}
+              onSelectCandidate={handleSelectCandidate}
+              onSelectRejected={handleSelectRejected}
+              previewLayout={previewLayout}
+            />
           ) : (
-            <>
-              <DesignPreviewSwitcher value={designPreview} onChange={setDesignPreview} />
-              {PreviewComponent === null ? (
-                <TrajectoryTree
-                  layout={layout}
-                  selectedId={selectedTreeId}
-                  newestId={newestId}
-                  onSelectCandidate={handleSelectCandidate}
-                  onSelectRejected={handleSelectRejected}
-                  previewLayout={previewLayout}
-                />
-              ) : (
-                <div className="space-y-1.5">
-                  <PreviewComponent
-                    layout={layout}
-                    selectedId={selectedTreeId}
-                    onSelectCandidate={handleSelectCandidate}
-                    onSelectRejected={handleSelectRejected}
-                  />
-                  <p className="text-center text-[10px] text-muted-foreground">
-                    {msg("trajectory.preview.static_note")}
-                  </p>
-                </div>
-              )}
-            </>
+            <div className="space-y-1.5">
+              <PreviewComponent
+                layout={layout}
+                selectedId={selectedTreeId}
+                onSelectCandidate={handleSelectCandidate}
+                onSelectRejected={handleSelectRejected}
+              />
+              <p className="text-center text-[10px] text-muted-foreground">
+                {msg("trajectory.preview.static_note")}
+              </p>
+            </div>
           )}
           <TrajectoryDrawer
             selection={drawerSelection}
@@ -318,6 +335,39 @@ export function TrajectoryPanel({
         </CardContent>
       </Card>
     </FadeIn>
+  );
+}
+
+function RejectedToggle({
+  shown,
+  count,
+  onToggle,
+}: {
+  shown: boolean;
+  count: number;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={shown}
+      onClick={onToggle}
+      className={cn(
+        "ms-auto flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+        shown
+          ? "border-border/50 bg-background/70 text-foreground/80 hover:text-foreground"
+          : "border-border/40 bg-background/50 text-muted-foreground/70 hover:text-foreground",
+      )}
+    >
+      <X
+        aria-hidden="true"
+        className={cn("size-3", shown ? "text-[#C2B49F]" : "text-muted-foreground/50")}
+      />
+      <span className={cn(!shown && "line-through decoration-[1.5px]")}>
+        {msg("trajectory.filter.rejected")}
+      </span>
+      <span className="tabular-nums text-muted-foreground">{count}</span>
+    </button>
   );
 }
 

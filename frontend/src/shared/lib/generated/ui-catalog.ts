@@ -2845,6 +2845,7 @@ export type MessageKey =
   | "trajectory.drawer.toggle.module.aria"
   | "trajectory.drawer.toggle.prompt"
   | "trajectory.explainer.trajectory"
+  | "trajectory.filter.rejected"
   | "trajectory.ghost.legend"
   | "trajectory.history.turn"
   | "trajectory.json.empty_value"
@@ -5875,6 +5876,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "trajectory.drawer.toggle.module.aria": "תצוגת המודול",
   "trajectory.drawer.toggle.prompt": "פרומפט",
   "trajectory.explainer.trajectory": "רצף המועמדים שאומצו לאורך הריצה",
+  "trajectory.filter.rejected": "נדחו",
   "trajectory.ghost.legend": "הצעות שנדחו",
   "trajectory.history.turn": "תור {n}",
   "trajectory.json.empty_value": "ריק",
@@ -14555,6 +14557,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "trajectory.drawer.toggle.module.aria": "Module view",
   "trajectory.drawer.toggle.prompt": "Prompt",
   "trajectory.explainer.trajectory": "The sequence of candidates accepted over the run",
+  "trajectory.filter.rejected": "Rejected",
   "trajectory.ghost.legend": "Rejected proposals",
   "trajectory.history.turn": "Turn {n}",
   "trajectory.json.empty_value": "Empty",
