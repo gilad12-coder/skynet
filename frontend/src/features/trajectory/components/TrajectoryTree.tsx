@@ -42,10 +42,6 @@ const WINNER_BADGE_INK = "#FBF4DF";
 // Painted behind score labels (paint-order: stroke) so they stay legible
 // where a lineage edge or grid line passes underneath.
 const LABEL_HALO = "rgba(250, 248, 245, 0.9)";
-// Corner radius shared by the square node cores and their status rings —
-// just enough rounding to sit next to the app's soft chrome without
-// giving up the strict rectilinear read.
-const NODE_RX = 3;
 
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 6;
@@ -67,10 +63,6 @@ const AXIS_PADDING_PX = 48;
 // silently dropped and the maximized overlay becomes transparent.
 const SURFACE_GRADIENT =
   "radial-gradient(circle at 50% 42%, var(--muted) 0%, var(--background) 58%)";
-// Below this zoom level the per-example donut collapses into a single
-// pass-fraction ring; tiny segments are unreadable and noisy when far away.
-const DONUT_DETAIL_THRESHOLD = 1.1;
-
 interface View {
   k: number;
   tx: number;
@@ -103,15 +95,13 @@ function clampScale(k: number): number {
   return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, k));
 }
 
-// The pass/fail ring is a square frame drawn as stroked rects: `pathLength`
-// normalizes the frame's perimeter to `total` units so each example maps to
-// exactly one dash unit, and the dash offset rotates segment 0 to top-center
-// (the old donut's 12-o'clock start). This sidesteps hand-computing corner
-// geometry for every segment, and a full ring (all-pass / all-fail) is just
-// an undashed stroke — no closed-arc special case needed.
+// The pass/fail ring is a stroked circle: `pathLength` normalizes the
+// circumference to `total` units so each segment spans exactly its fraction,
+// and the dash offset rotates the split to start at 12 o'clock (a circle's
+// path begins at 3 o'clock). A full ring (all-pass / all-fail) is just an
+// undashed stroke — no closed-arc special case needed.
 const RING_R = TRAJECTORY_LAYOUT.nodeRadius - DONUT_RING_THICKNESS / 2;
-const RING_RX = NODE_RX + 1;
-const RING_PERIMETER = 4 * (2 * RING_R - 2 * RING_RX) + 2 * Math.PI * RING_RX;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_R;
 const RING_SEG_GAP_PX = 1.2;
 
 function ringSegment(
@@ -122,55 +112,71 @@ function ringSegment(
   lengthUnits: number,
   total: number,
 ): React.ReactNode {
-  // A rect's path begins just after the top-LEFT corner; shift the dash
-  // pattern so unit 0 sits at top-center instead.
-  const topCenterUnits = ((RING_R - RING_RX) / RING_PERIMETER) * total;
-  const gapUnits = (RING_SEG_GAP_PX / RING_PERIMETER) * total;
+  const gapUnits = (RING_SEG_GAP_PX / RING_CIRCUMFERENCE) * total;
   const full = lengthUnits >= total;
   const dashLen = Math.max(0.05, lengthUnits - gapUnits);
   return (
-    <rect
+    <circle
       key={key}
-      x={node.x - RING_R}
-      y={node.y - RING_R}
-      width={RING_R * 2}
-      height={RING_R * 2}
-      rx={RING_RX}
+      cx={node.x}
+      cy={node.y}
+      r={RING_R}
       fill="none"
       stroke={fill}
       strokeWidth={DONUT_RING_THICKNESS}
       pathLength={total}
       strokeDasharray={full ? undefined : `${dashLen} ${total - dashLen}`}
-      strokeDashoffset={full ? undefined : -(topCenterUnits + startUnit)}
+      strokeDashoffset={full ? undefined : -(0.75 * total + startUnit)}
     />
+  );
+}
+
+// Filter layers stay mounted and cross-fade on legend toggles, so switching
+// a layer reads as a dissolve rather than a pop. Pointer events are cut
+// while hidden so an invisible layer can't swallow clicks.
+function LayerFade({
+  show,
+  reduceMotion,
+  children,
+}: {
+  show: boolean;
+  reduceMotion: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <motion.g
+      initial={false}
+      animate={{ opacity: show ? 1 : 0 }}
+      transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: "easeOut" }}
+      style={{ pointerEvents: show ? "auto" : "none" }}
+    >
+      {children}
+    </motion.g>
   );
 }
 
 function renderRing(
   node: TrajectoryNode,
-  detailed: boolean,
   showPass: boolean,
   showFail: boolean,
+  reduceMotion: boolean,
 ): React.ReactNode {
+  // Always the aggregate pass-fraction split, never per-example ticks — the
+  // ring must read identically at every zoom level.
   const passes = node.per_example.filter((e) => e.score > 0).length;
   const total = node.per_example.length;
-  if (!detailed && total > 1) {
-    return (
-      <>
-        {showPass && passes > 0
-          ? ringSegment(node, "pass", DONUT_PASS_FILL, 0, passes, total)
-          : null}
-        {showFail && passes < total
+  return (
+    <>
+      <LayerFade show={showPass} reduceMotion={reduceMotion}>
+        {passes > 0 ? ringSegment(node, "pass", DONUT_PASS_FILL, 0, passes, total) : null}
+      </LayerFade>
+      <LayerFade show={showFail} reduceMotion={reduceMotion}>
+        {passes < total
           ? ringSegment(node, "fail", DONUT_FAIL_FILL, passes, total - passes, total)
           : null}
-      </>
-    );
-  }
-  return node.per_example.map((ex, idx) => {
-    const pass = ex.score > 0;
-    if (pass ? !showPass : !showFail) return null;
-    return ringSegment(node, ex.id, pass ? DONUT_PASS_FILL : DONUT_FAIL_FILL, idx, 1, total);
-  });
+      </LayerFade>
+    </>
+  );
 }
 
 function fitView(size: { w: number; h: number }, layoutW: number, layoutH: number): View {
@@ -479,7 +485,6 @@ export function TrajectoryTree({
             selectedId={selectedId}
             hoveredId={hoveredId}
             newestId={newestId}
-            detailed={view.k >= DONUT_DETAIL_THRESHOLD}
             showPass={layers.pass}
             showFail={layers.fail}
             showWinner={layers.winner}
@@ -545,7 +550,7 @@ export function TrajectoryTree({
             onToggle={() => toggleLayer("pass")}
             swatch={
               <span
-                className="inline-block size-2.5 rounded-[2px]"
+                className="inline-block size-2.5 rounded-full"
                 style={{ background: DONUT_PASS_FILL }}
               />
             }
@@ -557,7 +562,7 @@ export function TrajectoryTree({
             onToggle={() => toggleLayer("fail")}
             swatch={
               <span
-                className="inline-block size-2.5 rounded-[2px]"
+                className="inline-block size-2.5 rounded-full"
                 style={{ background: DONUT_FAIL_FILL }}
               />
             }
@@ -629,7 +634,6 @@ interface TreeContentProps {
   selectedId: string | null;
   hoveredId: string | null;
   newestId: string | null;
-  detailed: boolean;
   showPass: boolean;
   showFail: boolean;
   showWinner: boolean;
@@ -644,9 +648,7 @@ interface TreeContentProps {
 // depends on the live pan/zoom transform (that lives on the parent <g>). Pulling
 // it into a memoized child means a pan or zoom — which fires setView on every
 // pointermove/wheel tick — re-renders only the lightweight outer <g>, not the
-// hundreds of SVG primitives below it. `detailed` (the donut-collapse boolean)
-// is the one zoom-derived input, passed as a bool so crossing the threshold is
-// the only zoom event that reconciles the tree.
+// hundreds of SVG primitives below it.
 const TreeContent = memo(function TreeContent({
   nodes,
   ghosts,
@@ -655,7 +657,6 @@ const TreeContent = memo(function TreeContent({
   selectedId,
   hoveredId,
   newestId,
-  detailed,
   showPass,
   showFail,
   showWinner,
@@ -696,7 +697,7 @@ const TreeContent = memo(function TreeContent({
         })}
       </g>
 
-      {showRejected ? (
+      <LayerFade show={showRejected} reduceMotion={reduceMotion}>
         <g>
           {ghosts.map((ghost) => {
             const parent = idIndex.get(ghost.parent_id);
@@ -737,7 +738,7 @@ const TreeContent = memo(function TreeContent({
             />
           ))}
         </g>
-      ) : null}
+      </LayerFade>
 
       <g>
         {nodes.map((node) => {
@@ -780,57 +781,59 @@ const TreeContent = memo(function TreeContent({
               style={{ cursor: "pointer" }}
             >
               {isNewest && !reduceMotion ? (
-                <motion.rect
-                  x={node.x - TRAJECTORY_LAYOUT.nodeRadius}
-                  y={node.y - TRAJECTORY_LAYOUT.nodeRadius}
-                  width={TRAJECTORY_LAYOUT.nodeRadius * 2}
-                  height={TRAJECTORY_LAYOUT.nodeRadius * 2}
-                  rx={NODE_RX + 3}
+                <motion.circle
+                  cx={node.x}
+                  cy={node.y}
+                  r={TRAJECTORY_LAYOUT.nodeRadius}
                   fill="none"
                   stroke={WINNER_INDICATOR}
                   strokeWidth="1.6"
-                  initial={{ scale: 1, opacity: 0.6 }}
-                  animate={{ scale: 2.2, opacity: 0 }}
+                  initial={{ r: TRAJECTORY_LAYOUT.nodeRadius, opacity: 0.6 }}
+                  animate={{ r: TRAJECTORY_LAYOUT.nodeRadius * 2.2, opacity: 0 }}
                   transition={{ duration: 1.2, ease: "easeOut", repeat: 2 }}
                 />
               ) : null}
               {isSelected ? (
-                <rect
-                  x={node.x - TRAJECTORY_LAYOUT.nodeRadius - 5}
-                  y={node.y - TRAJECTORY_LAYOUT.nodeRadius - 5}
-                  width={(TRAJECTORY_LAYOUT.nodeRadius + 5) * 2}
-                  height={(TRAJECTORY_LAYOUT.nodeRadius + 5) * 2}
-                  rx={NODE_RX + 2}
+                <circle
+                  cx={node.x}
+                  cy={node.y}
+                  r={TRAJECTORY_LAYOUT.nodeRadius + 5}
                   fill="none"
                   stroke={NODE_CORE_STROKE_SELECTED}
                   strokeWidth={1.5}
                   strokeOpacity={0.7}
                 />
               ) : null}
-              {winnerShown ? (
-                <>
-                  <rect
-                    x={node.x - TRAJECTORY_LAYOUT.nodeRadius - 11}
-                    y={node.y - TRAJECTORY_LAYOUT.nodeRadius - 11}
-                    width={(TRAJECTORY_LAYOUT.nodeRadius + 11) * 2}
-                    height={(TRAJECTORY_LAYOUT.nodeRadius + 11) * 2}
-                    rx={NODE_RX + 4}
+              {node.isWinner ? (
+                <LayerFade show={showWinner} reduceMotion={reduceMotion}>
+                  <circle
+                    cx={node.x}
+                    cy={node.y}
+                    r={TRAJECTORY_LAYOUT.nodeRadius + 11}
                     fill="none"
                     stroke={WINNER_HALO}
                     strokeWidth={3}
                   />
                   {reduceMotion ? null : (
-                    <motion.rect
-                      x={node.x - TRAJECTORY_LAYOUT.nodeRadius - 8}
-                      y={node.y - TRAJECTORY_LAYOUT.nodeRadius - 8}
-                      width={(TRAJECTORY_LAYOUT.nodeRadius + 8) * 2}
-                      height={(TRAJECTORY_LAYOUT.nodeRadius + 8) * 2}
-                      rx={NODE_RX + 3}
+                    <motion.circle
+                      cx={node.x}
+                      cy={node.y}
+                      r={TRAJECTORY_LAYOUT.nodeRadius + 4}
                       fill="none"
                       stroke={WINNER_INDICATOR}
                       strokeWidth={1.4}
-                      initial={{ opacity: 0.45 }}
-                      animate={{ opacity: [0.45, 0.1, 0.45] }}
+                      initial={{
+                        opacity: 0.5,
+                        r: TRAJECTORY_LAYOUT.nodeRadius + 4,
+                      }}
+                      animate={{
+                        opacity: [0.5, 0.12, 0.5],
+                        r: [
+                          TRAJECTORY_LAYOUT.nodeRadius + 4,
+                          TRAJECTORY_LAYOUT.nodeRadius + 10,
+                          TRAJECTORY_LAYOUT.nodeRadius + 4,
+                        ],
+                      }}
                       transition={{
                         duration: 3.2,
                         ease: "easeInOut",
@@ -838,29 +841,27 @@ const TreeContent = memo(function TreeContent({
                       }}
                     />
                   )}
-                  <rect
-                    x={node.x - TRAJECTORY_LAYOUT.nodeRadius - 4}
-                    y={node.y - TRAJECTORY_LAYOUT.nodeRadius - 4}
-                    width={(TRAJECTORY_LAYOUT.nodeRadius + 4) * 2}
-                    height={(TRAJECTORY_LAYOUT.nodeRadius + 4) * 2}
-                    rx={NODE_RX + 2}
+                  <circle
+                    cx={node.x}
+                    cy={node.y}
+                    r={TRAJECTORY_LAYOUT.nodeRadius + 4}
                     fill="none"
                     stroke={WINNER_INDICATOR}
                     strokeWidth={2.6}
                   />
-                </>
+                </LayerFade>
               ) : null}
-              {hasRing ? renderRing(node, detailed, showPass, showFail) : null}
-              <rect
-                x={node.x - innerRadius}
-                y={node.y - innerRadius}
-                width={innerRadius * 2}
-                height={innerRadius * 2}
-                rx={NODE_RX}
+              {hasRing ? renderRing(node, showPass, showFail, reduceMotion) : null}
+              <circle
+                cx={node.x}
+                cy={node.y}
+                r={innerRadius}
                 fill={winnerShown ? WINNER_FILL : NODE_CORE_FILL}
                 stroke={coreStroke}
                 strokeWidth={isSelected ? 1.4 : 0.8}
-                style={{ transition: "stroke 120ms ease, stroke-width 120ms ease" }}
+                style={{
+                  transition: "fill 250ms ease, stroke 120ms ease, stroke-width 120ms ease",
+                }}
               />
               <text
                 x={node.x}
@@ -874,25 +875,35 @@ const TreeContent = memo(function TreeContent({
               >
                 {displayCandidateId(node.candidate_id)}
               </text>
-              {winnerShown ? (
-                <WinnerBadge x={node.x} y={node.y + TRAJECTORY_LAYOUT.nodeRadius + 4} />
+              {node.isWinner ? (
+                <LayerFade show={showWinner} reduceMotion={reduceMotion}>
+                  <WinnerBadge x={node.x} y={node.y + TRAJECTORY_LAYOUT.nodeRadius + 4} />
+                </LayerFade>
               ) : null}
-              <text
-                x={node.x}
-                y={node.y + TRAJECTORY_LAYOUT.nodeRadius + (winnerShown ? 32 : 14)}
-                textAnchor="middle"
-                fontFamily="var(--font-mono, monospace)"
-                fontSize="10.5"
-                fontWeight={600}
-                fill="rgba(28, 22, 18, 0.72)"
-                stroke={LABEL_HALO}
-                strokeWidth={2.5}
-                strokeLinejoin="round"
-                pointerEvents="none"
-                style={{ fontVariantNumeric: "tabular-nums", paintOrder: "stroke" }}
+              <motion.g
+                initial={false}
+                animate={{ y: node.isWinner && !showWinner ? -18 : 0 }}
+                transition={
+                  reduceMotion ? { duration: 0 } : { duration: 0.25, ease: "easeOut" }
+                }
               >
-                {node.score.toFixed(2)}
-              </text>
+                <text
+                  x={node.x}
+                  y={node.y + TRAJECTORY_LAYOUT.nodeRadius + (node.isWinner ? 32 : 14)}
+                  textAnchor="middle"
+                  fontFamily="var(--font-mono, monospace)"
+                  fontSize="10.5"
+                  fontWeight={600}
+                  fill="rgba(28, 22, 18, 0.72)"
+                  stroke={LABEL_HALO}
+                  strokeWidth={2.5}
+                  strokeLinejoin="round"
+                  pointerEvents="none"
+                  style={{ fontVariantNumeric: "tabular-nums", paintOrder: "stroke" }}
+                >
+                  {node.score.toFixed(2)}
+                </text>
+              </motion.g>
             </motion.g>
           );
         })}
@@ -914,8 +925,8 @@ function WinnerBadge({ x, y }: { x: number; y: number }) {
         y={top}
         width={w}
         height={h}
-        rx={NODE_RX}
-        ry={NODE_RX}
+        rx={3}
+        ry={3}
         fill={WINNER_BADGE_FILL}
       />
       <text
