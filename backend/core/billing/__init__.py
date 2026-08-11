@@ -14,6 +14,7 @@ from .byok_vault import (
     VaultSnapshot,
     byok_provider_for_litellm,
 )
+from .openrouter_keys import OpenRouterKeyProvisioner, inject_provisioned_openrouter_key
 from .service import (
     FREE_GRANT_CREDITS,
     PACK_CREDITS,
@@ -27,6 +28,7 @@ __all__ = [
     "FREE_GRANT_CREDITS",
     "PACK_CREDITS",
     "LedgerRow",
+    "OpenRouterKeyProvisioner",
     "ProviderKeyVault",
     "ProviderKeyView",
     "StripeBillingService",
@@ -35,5 +37,6 @@ __all__ = [
     "byok_provider_for_litellm",
     "cost_ceiling_budget",
     "inject_byok_connections",
+    "inject_provisioned_openrouter_key",
     "provider_slug_for_model",
 ]
