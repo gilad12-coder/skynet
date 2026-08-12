@@ -51,6 +51,32 @@ class ReactOverlay(BaseModel):
     tool_severities: dict[str, str] = Field(default_factory=dict)
 
 
+class NodeArtifact(BaseModel):
+    """The optimized surface of a single workflow node.
+
+    Bundles whichever of a node's optimized outputs exist: a signature node
+    carries its ``optimized_prompt`` (and, for react nodes, a ``react_overlay``);
+    a flex node carries its rewritten ``optimized_src``. Keyed under the node's
+    component path (``n_<node_id>``) in :attr:`ProgramArtifact.optimized_nodes`.
+    """
+
+    optimized_prompt: OptimizedPredictor | None = Field(
+        default=None,
+        description="Extracted prompt and demos for a signature node's predictor.",
+    )
+    react_overlay: ReactOverlay | None = Field(
+        default=None,
+        description=(
+            "Tool overlay for a react node. Unset until per-node overlays are "
+            "captured; back-fill from state cannot recover it."
+        ),
+    )
+    optimized_src: str | None = Field(
+        default=None,
+        description="GEPA-rewritten source for a flex node. Unset for non-flex nodes.",
+    )
+
+
 class ProgramArtifact(BaseModel):
     """Serializable payload that carries the optimized DSPy program files."""
 
@@ -106,6 +132,14 @@ class ProgramArtifact(BaseModel):
             "nests Flex modules rather than being one itself."
         ),
     )
+    optimized_nodes: dict[str, NodeArtifact] = Field(
+        default_factory=dict,
+        description=(
+            "Per-node optimized surface for a workflow program, keyed by component "
+            "path ('n_<node_id>'): each node's prompt, react overlay, or rewritten "
+            "code. Empty for scalar (single-module) programs."
+        ),
+    )
 
     @model_validator(mode="after")
     def _backfill_module_src(self) -> ProgramArtifact:
@@ -135,4 +169,27 @@ class ProgramArtifact(BaseModel):
                 and isinstance(state.get("module_src"), str)
                 and state["module_src"].strip()
             }
+        return self
+
+    @model_validator(mode="after")
+    def _fold_flex_src_into_nodes(self) -> ProgramArtifact:
+        """Mirror each flex node's rewritten source into ``optimized_nodes``.
+
+        ``optimized_nodes`` is the unified per-node view the workflow-as-artifact
+        UI reads; flex sources are still carried in ``optimized_component_srcs``
+        (and back-filled there for old artifacts) so this folds them in under the
+        same ``n_<node_id>`` key without a data migration. Runs after
+        ``_backfill_module_src`` so the sources are already populated. Prompts are
+        set at persist time; this only supplies the code half, so a flex-only node
+        still gets an entry.
+
+        Returns:
+            The validated artifact, with each flex source attached to its node.
+        """
+        for path, src in self.optimized_component_srcs.items():
+            node = self.optimized_nodes.get(path)
+            if node is None:
+                self.optimized_nodes[path] = NodeArtifact(optimized_src=src)
+            elif node.optimized_src is None:
+                node.optimized_src = src
         return self

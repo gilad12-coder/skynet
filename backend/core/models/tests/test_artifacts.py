@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from core.models.artifacts import OptimizedDemo, OptimizedPredictor, ProgramArtifact, ReactOverlay
+from core.models.artifacts import (
+    NodeArtifact,
+    OptimizedDemo,
+    OptimizedPredictor,
+    ProgramArtifact,
+    ReactOverlay,
+)
 
 
 def test_optimized_demo_defaults_empty_dicts() -> None:
@@ -184,3 +190,58 @@ def test_program_artifact_react_overlay_round_trip() -> None:
         "kind": "live_mcp",
         "mcp_url": "http://localhost:9000/mcp",
     }
+
+
+def test_node_artifact_defaults_all_none() -> None:
+    """A bare NodeArtifact leaves every optimized surface unset."""
+    node = NodeArtifact()
+
+    assert node.optimized_prompt is None
+    assert node.react_overlay is None
+    assert node.optimized_src is None
+
+
+def test_program_artifact_optimized_nodes_defaults_empty() -> None:
+    """A scalar artifact carries no per-node map."""
+    art = ProgramArtifact(path="/opt/artifacts/scalar")
+
+    assert art.optimized_nodes == {}
+
+
+def test_optimized_nodes_folds_in_flex_src_for_flex_only_node() -> None:
+    """A workflow's flex node surfaces its rewritten code under optimized_nodes."""
+    src = "import dspy\n\n\nclass M(dspy.Module):\n    pass\n"
+    art = ProgramArtifact(
+        program_state_json={
+            "n_draft": {"demos": [], "signature": {}},
+            "n_refine": {"module_src": src, "lm": None},
+        }
+    )
+
+    assert art.optimized_nodes["n_refine"].optimized_src == src
+    assert art.optimized_nodes["n_refine"].optimized_prompt is None
+
+
+def test_optimized_nodes_fold_preserves_existing_prompt_entry() -> None:
+    """Folding flex src attaches code to a node that already carries a prompt."""
+    prompt = OptimizedPredictor(predictor_name="n_hybrid", instructions="Do X.")
+    src = "import dspy\n\n\nclass M(dspy.Module):\n    pass\n"
+    art = ProgramArtifact(
+        program_state_json={"n_hybrid": {"module_src": src}},
+        optimized_nodes={"n_hybrid": NodeArtifact(optimized_prompt=prompt)},
+    )
+
+    node = art.optimized_nodes["n_hybrid"]
+    assert node.optimized_prompt is prompt
+    assert node.optimized_src == src
+
+
+def test_optimized_nodes_round_trip() -> None:
+    """optimized_nodes survives a model_dump / model_validate round-trip."""
+    prompt = OptimizedPredictor(predictor_name="n_summarize", instructions="Summarize.")
+    art = ProgramArtifact(optimized_nodes={"n_summarize": NodeArtifact(optimized_prompt=prompt)})
+
+    restored = ProgramArtifact.model_validate(art.model_dump())
+
+    assert restored.optimized_nodes["n_summarize"].optimized_prompt is not None
+    assert restored.optimized_nodes["n_summarize"].optimized_prompt.instructions == "Summarize."
