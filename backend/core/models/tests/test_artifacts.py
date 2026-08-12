@@ -245,3 +245,95 @@ def test_optimized_nodes_round_trip() -> None:
 
     assert restored.optimized_nodes["n_summarize"].optimized_prompt is not None
     assert restored.optimized_nodes["n_summarize"].optimized_prompt.instructions == "Summarize."
+
+
+def test_optimized_nodes_backfills_prompt_from_state() -> None:
+    """An old workflow run surfaces a node's prompt, demos, and fields from state."""
+    art = ProgramArtifact(
+        program_state_json={
+            "n_step": {
+                "demos": [{"q": "2+2", "a": "4", "augmented": True, "_meta": 1}],
+                "signature": {
+                    "instructions": "Answer.",
+                    "fields": [
+                        {"prefix": "Q:", "description": "the question"},
+                        {"prefix": "A:", "description": "${a}"},
+                    ],
+                },
+                "lm": None,
+            }
+        }
+    )
+
+    prompt = art.optimized_nodes["n_step"].optimized_prompt
+    assert prompt is not None
+    assert prompt.predictor_name == "n_step"
+    assert prompt.instructions == "Answer."
+    # DSPy bookkeeping keys are dropped; the real field values survive.
+    assert prompt.demos == [OptimizedDemo(inputs={"q": "2+2", "a": "4"})]
+    assert "Q: the question" in prompt.formatted_prompt
+    # The ``${a}`` adapter placeholder is elided, leaving the bare prefix.
+    assert "A:" in prompt.formatted_prompt
+    assert "${a}" not in prompt.formatted_prompt
+    assert "q: 2+2" in prompt.formatted_prompt
+
+
+def test_optimized_nodes_backfill_groups_cot_predict_under_node() -> None:
+    """A cot node's ``.predict`` predictor state folds back to its node key."""
+    art = ProgramArtifact(
+        program_state_json={
+            "n_polish.predict": {"demos": [], "signature": {"instructions": "Polish.", "fields": []}}
+        }
+    )
+
+    assert set(art.optimized_nodes) == {"n_polish"}
+    prompt = art.optimized_nodes["n_polish"].optimized_prompt
+    assert prompt is not None
+    assert prompt.predictor_name == "n_polish.predict"
+    assert prompt.instructions == "Polish."
+
+
+def test_optimized_nodes_backfill_skips_flex_only_state() -> None:
+    """A flex node's code-only state yields a src entry but no prompt."""
+    src = "import dspy\n\n\nclass M(dspy.Module):\n    pass\n"
+    art = ProgramArtifact(program_state_json={"n_flex": {"module_src": src, "lm": None}})
+
+    node = art.optimized_nodes["n_flex"]
+    assert node.optimized_src == src
+    assert node.optimized_prompt is None
+
+
+def test_optimized_nodes_backfill_preserves_persist_time_prompt() -> None:
+    """A prompt extracted at write time is not overwritten by the state back-fill."""
+    persisted = OptimizedPredictor(predictor_name="n_x", instructions="Persisted.")
+    art = ProgramArtifact(
+        program_state_json={"n_x": {"signature": {"instructions": "FromState.", "fields": []}}},
+        optimized_nodes={"n_x": NodeArtifact(optimized_prompt=persisted)},
+    )
+
+    assert art.optimized_nodes["n_x"].optimized_prompt is persisted
+
+
+def test_optimized_nodes_backfill_first_predictor_per_node_wins() -> None:
+    """A react node's two predictors collapse to one prompt from the first in state."""
+    art = ProgramArtifact(
+        program_state_json={
+            "n_r.react": {"signature": {"instructions": "React step.", "fields": []}},
+            "n_r.extract": {"signature": {"instructions": "Extract step.", "fields": []}},
+        }
+    )
+
+    assert set(art.optimized_nodes) == {"n_r"}
+    assert art.optimized_nodes["n_r"].optimized_prompt.instructions == "React step."
+
+
+def test_optimized_nodes_backfill_ignores_scalar_state() -> None:
+    """Scalar predictors carry no ``n_`` prefix, so no per-node map is built."""
+    art = ProgramArtifact(
+        program_state_json={
+            "self": {"demos": [], "signature": {"instructions": "x", "fields": []}},
+            "metadata": {"dependency_versions": {}},
+        }
+    )
+
+    assert art.optimized_nodes == {}
