@@ -84,7 +84,7 @@ const COLUMN_ROLES = new Set<string>(["input", "output", "ignore"]);
 // every field still matches them.
 const DEFAULT_REFLECTION_MINIBATCH = "3";
 const DEFAULT_MAX_FULL_EVALS = "6";
-const DEFAULT_TARGET_SCORE = "85";
+const DEFAULT_TARGET_SCORE = "100";
 // 1x1 is GEPA's classic single-mutation sampling. Left at the default the
 // wizard sends nothing, so the server-wide GEPA_PXN_* settings still apply.
 const DEFAULT_PXN = "1";
@@ -580,7 +580,7 @@ export function useSubmitWizard() {
     setMaxFullEvals(d.maxFullEvals);
     setMaxMetricCalls(d.maxMetricCalls ?? "");
     setUseMerge(d.useMerge);
-    setTargetScore(d.targetScore ?? "");
+    setTargetScore(d.targetScore?.trim() ? d.targetScore : DEFAULT_TARGET_SCORE);
     setPxnParents(d.pxnParents ?? DEFAULT_PXN);
     setPxnProposals(d.pxnProposals ?? DEFAULT_PXN);
     setShuffle(d.shuffle);
@@ -723,7 +723,7 @@ export function useSubmitWizard() {
         if (typeof sharedState.target_score === "number") {
           setTargetScore(String(sharedState.target_score));
         } else if (sharedState.target_score == null) {
-          setTargetScore("");
+          setTargetScore(DEFAULT_TARGET_SCORE);
         }
       }
     }
