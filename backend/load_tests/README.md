@@ -43,7 +43,8 @@ The release gate fails the process when any of these conditions is true:
 - any submission or SSE connection is rejected;
 - more than 5% of Explore searches fall back during transient indexing;
 - no frontend request reaches the production Next.js server; or
-- any submitted mock-model job remains non-terminal, fails, or is cancelled.
+- any submitted mock-model job remains non-terminal after a 120-second queue
+  drain window, fails, or is cancelled.
 
 JSON and Markdown reports are written to `load_tests/results/` and contain the
 operation mix, queue state, SLO thresholds, and violations.

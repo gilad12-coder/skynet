@@ -48,6 +48,7 @@ class MixedRealisticConfig:
     sse_connections: int
     ramp_seconds: float
     soak_seconds: float
+    completion_timeout_seconds: float
     think_time_min_seconds: float
     think_time_max_seconds: float
 
@@ -61,6 +62,8 @@ class MixedRealisticConfig:
             raise ValueError("sse_connections must be between 0 and submitting_users")
         if self.ramp_seconds < 0 or self.soak_seconds <= 0:
             raise ValueError("ramp_seconds must be non-negative and soak_seconds must be positive")
+        if self.completion_timeout_seconds <= 0:
+            raise ValueError("completion_timeout_seconds must be positive")
         if not 0 <= self.think_time_min_seconds <= self.think_time_max_seconds:
             raise ValueError("think times must be non-negative and ordered")
 
@@ -465,7 +468,18 @@ async def run(config: MixedRealisticConfig) -> ScenarioResult:
     opened_streams = sum(1 for opened, _, _ in sse_results if opened)
     sse_events = sum(events for _, events, _ in sse_results)
     sse_ttfb_values = sorted(ttfb for _, _, ttfb in sse_results)
-    status_counts = db_inspector.count_job_statuses(usernames[: config.submitting_users])
+    queue_drain_started = time.monotonic()
+    queue_drain_deadline = queue_drain_started + config.completion_timeout_seconds
+    while True:
+        status_counts = db_inspector.count_job_statuses(usernames[: config.submitting_users])
+        non_terminal_jobs = sum(
+            status_counts.get(status, 0)
+            for status in ("pending", "validating", "running", "paused")
+        )
+        if non_terminal_jobs == 0 or time.monotonic() >= queue_drain_deadline:
+            break
+        await asyncio.sleep(1.0)
+    queue_drain_seconds = time.monotonic() - queue_drain_started
 
     result.extras.update(
         {
@@ -473,6 +487,8 @@ async def run(config: MixedRealisticConfig) -> ScenarioResult:
             "active_users": active_users,
             "ramp_seconds": config.ramp_seconds,
             "soak_seconds": config.soak_seconds,
+            "completion_timeout_seconds": config.completion_timeout_seconds,
+            "queue_drain_seconds": round(queue_drain_seconds, 3),
             "think_time_seconds": [config.think_time_min_seconds, config.think_time_max_seconds],
             "submissions_attempted": config.submitting_users,
             "submissions_accepted": accepted_submissions,
@@ -556,6 +572,7 @@ def default_config(api_base_url: str, mock_lm_url: str) -> MixedRealisticConfig:
         sse_connections=int(os.environ.get("LOAD_TEST_MIXED_SSE_CONNECTIONS", "24")),
         ramp_seconds=float(os.environ.get("LOAD_TEST_MIXED_RAMP_SECONDS", "20")),
         soak_seconds=float(os.environ.get("LOAD_TEST_MIXED_SOAK_SECONDS", "60")),
+        completion_timeout_seconds=float(os.environ.get("LOAD_TEST_MIXED_COMPLETION_TIMEOUT_SECONDS", "120")),
         think_time_min_seconds=float(os.environ.get("LOAD_TEST_MIXED_THINK_MIN_SECONDS", "0.25")),
         think_time_max_seconds=float(os.environ.get("LOAD_TEST_MIXED_THINK_MAX_SECONDS", "1.25")),
     )

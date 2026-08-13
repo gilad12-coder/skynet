@@ -96,6 +96,7 @@ def test_mixed_config_rejects_more_streams_than_submitters() -> None:
             sse_connections=3,
             ramp_seconds=1.0,
             soak_seconds=1.0,
+            completion_timeout_seconds=1.0,
             think_time_min_seconds=0.1,
             think_time_max_seconds=0.2,
         )
