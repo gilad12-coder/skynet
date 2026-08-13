@@ -434,7 +434,7 @@ export function DataTab({
           })()}
           <ResetFiltersButton filters={colFilters} />
           <ResetColumnsButton resize={colResize} />
-          <div className="text-[0.625rem] text-muted-foreground tabular-nums ms-auto">
+          <div className="text-[0.625rem] text-muted-foreground tabular-nums me-auto">
             {filtered.length}
             {msg("auto.features.optimizations.components.datatab.4")}
           </div>
