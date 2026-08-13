@@ -33,7 +33,7 @@ import { getUsage, type BillingUsageEntry, type BillingUsageResponse } from "@/s
 import { SkynetDatePicker, toISODate } from "@/shared/ui/skynet-date-picker";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { useCredits } from "../providers/credit-provider";
-import { creditsToUsd, formatCredits, formatResetDate, formatUsd, type UsageEntry } from "../lib/credit";
+import { formatCredits, formatResetDate, type UsageEntry } from "../lib/credit";
 
 /** A fixed look-back preset. `all` drops the lower bound. */
 type PresetRange = "7d" | "30d" | "90d" | "all";
@@ -254,12 +254,10 @@ function StatCard({
   icon: Icon,
   label,
   value,
-  secondary,
 }: {
   icon: Icon;
   label: string;
   value: string;
-  secondary?: string;
 }) {
   return (
     <div className="flex flex-col gap-1 rounded-xl border border-border/60 bg-muted/20 px-4 py-3.5">
@@ -269,9 +267,6 @@ function StatCard({
       </span>
       <span dir="ltr" className="text-2xl font-semibold tabular-nums text-foreground">
         {value}
-      </span>
-      <span dir="ltr" className="min-h-4 text-xs text-muted-foreground">
-        {secondary}
       </span>
     </div>
   );
@@ -683,13 +678,6 @@ export function UsageTab() {
     );
   }
 
-  const avgPerRun =
-    data.runs > 0
-      ? formatMsg("usage.stat.per_run", {
-          p1: formatCredits(Math.round(data.billed_credits / data.runs), locale),
-        })
-      : undefined;
-
   return (
     <div className="flex flex-col gap-6">
       {toolbar}
@@ -699,13 +687,11 @@ export function UsageTab() {
           icon={Coins}
           label={msg("usage.stat.spent")}
           value={formatCredits(data.billed_credits, locale)}
-          secondary={formatUsd(creditsToUsd(data.billed_credits), locale)}
         />
         <StatCard
           icon={Sparkle}
           label={msg("usage.stat.runs")}
           value={formatCredits(data.runs, locale)}
-          secondary={avgPerRun}
         />
       </div>
 
