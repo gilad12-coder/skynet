@@ -2,7 +2,15 @@
 
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/shared/ui/primitives/tabs";
+import {
+  SLIDING_PILL_TABS_INDICATOR_CLASS,
+  SLIDING_PILL_TABS_LIST_CLASS,
+  SLIDING_PILL_TABS_TRIGGER_CLASS,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/shared/ui/primitives/tabs";
 import { Separator } from "@/shared/ui/primitives/separator";
 import {
   User,
@@ -475,28 +483,23 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                       })}
                     </p>
                   )}
-                  <TabsList className="relative inline-flex w-full rounded-full bg-muted p-1 gap-1 border-none shadow-none h-auto">
+                  <TabsList className={SLIDING_PILL_TABS_LIST_CLASS}>
                     {displaySignatureCode && metricCode && (
                       <div
-                        className="absolute top-1 bottom-1 w-[calc(50%-6px)] rounded-full bg-[#3D2E22] shadow-sm transition-[inset-inline-start] duration-200 ease-out"
+                        className={SLIDING_PILL_TABS_INDICATOR_CLASS}
                         style={{
+                          width: "calc(50% - 6px)",
                           insetInlineStart: summaryCodeTab === "signature" ? 4 : "calc(50% + 2px)",
                         }}
                       />
                     )}
                     {displaySignatureCode && (
-                      <TabsTrigger
-                        value="signature"
-                        className="relative z-10 rounded-full px-4 py-2 text-sm font-medium cursor-pointer border-none shadow-none bg-transparent data-[state=active]:bg-transparent data-[state=active]:text-white data-[state=active]:shadow-none data-[state=active]:border-none gap-1.5"
-                      >
+                      <TabsTrigger value="signature" className={SLIDING_PILL_TABS_TRIGGER_CLASS}>
                         {msg("auto.features.submit.components.steps.summarystep.23")}
                       </TabsTrigger>
                     )}
                     {metricCode && (
-                      <TabsTrigger
-                        value="metric"
-                        className="relative z-10 rounded-full px-4 py-2 text-sm font-medium cursor-pointer border-none shadow-none bg-transparent data-[state=active]:bg-transparent data-[state=active]:text-white data-[state=active]:shadow-none data-[state=active]:border-none gap-1.5"
-                      >
+                      <TabsTrigger value="metric" className={SLIDING_PILL_TABS_TRIGGER_CLASS}>
                         {msg("auto.features.submit.components.steps.summarystep.24")}
                       </TabsTrigger>
                     )}
