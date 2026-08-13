@@ -90,6 +90,7 @@ def test_mixed_config_rejects_more_streams_than_submitters() -> None:
         MixedRealisticConfig(
             api_base_url="http://api",
             mock_lm_url="http://mock-lm/v1",
+            frontend_base_url="http://frontend",
             virtual_users=10,
             submitting_users=2,
             sse_connections=3,

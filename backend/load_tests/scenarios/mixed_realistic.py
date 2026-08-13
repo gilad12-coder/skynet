@@ -3,7 +3,8 @@
 Each virtual user ramps in once, authenticates once, and then follows a
 stateful journey through the same API families the product drives in parallel:
 optimization submission, dashboard reads, analytics, dataset profiling and
-validation, model discovery, job summaries, and long-lived SSE progress streams.
+validation, semantic Explore search, production frontend delivery, model
+discovery, job summaries, and long-lived SSE progress streams.
 The mock LM keeps the run free of provider cost while real API replicas,
 PgBouncer, Redis, Postgres, and workers remain in the measured path.
 """
@@ -41,6 +42,7 @@ class MixedRealisticConfig:
 
     api_base_url: str
     mock_lm_url: str
+    frontend_base_url: str
     virtual_users: int
     submitting_users: int
     sse_connections: int
@@ -70,6 +72,8 @@ class _JourneyMetrics:
         """Create empty aggregate and operation collectors."""
         self.overall = ScenarioMetrics("mixed_realistic")
         self._operations: dict[str, ScenarioMetrics] = {}
+        self.semantic_responses = 0
+        self.semantic_fallbacks = 0
 
     def record(self, operation: str, *, status_code: int, latency_seconds: float) -> None:
         """Record one request in both metric views.
@@ -289,12 +293,21 @@ async def _browse_once(
         rng: Deterministic per-user random source.
     """
     action = rng.choices(
-        ("dashboard", "analytics", "dataset_profile", "dataset_validate", "models"),
-        weights=(46, 18, 12, 12, 12),
+        (
+            "dashboard",
+            "analytics",
+            "dataset_profile",
+            "dataset_validate",
+            "models",
+            "semantic_search",
+            "frontend",
+        ),
+        weights=(32, 14, 10, 10, 10, 14, 10),
         k=1,
     )[0]
     method = "GET"
     json_body: dict[str, Any] | None = None
+    request_headers = headers
 
     if action == "dashboard":
         dashboard_action = rng.choice(("list", "counts", "sidebar", "summary"))
@@ -326,19 +339,45 @@ async def _browse_once(
             "row_count": len(_PROFILE_ROWS),
             "fractions": {"train": 0.7, "val": 0.15, "test": 0.15},
         }
-    else:
+    elif action == "models":
         url = f"{config.api_base_url}/models"
         operation = "models_catalog"
+    elif action == "semantic_search":
+        method = "POST"
+        url = f"{config.api_base_url}/dashboard/search"
+        operation = "semantic_search"
+        json_body = {
+            "query": "classification quality",
+            "sort": "relevance",
+            "page": 1,
+            "size": 20,
+            "owner_username": username,
+        }
+    else:
+        frontend_path = rng.choice(("/login", "/api/auth/session"))
+        url = f"{config.frontend_base_url}{frontend_path}"
+        operation = "frontend_login" if frontend_path == "/login" else "frontend_session"
+        request_headers = {}
 
-    await _request(
+    response = await _request(
         client,
         journey_metrics,
         method=method,
         url=url,
-        headers=headers,
+        headers=request_headers,
         operation=operation,
         json_body=json_body,
     )
+    if action != "semantic_search" or response is None or response.status_code != 200:
+        return
+    try:
+        search_type = response.json().get("search_type")
+    except ValueError:
+        search_type = None
+    if search_type == "semantic":
+        journey_metrics.semantic_responses += 1
+    else:
+        journey_metrics.semantic_fallbacks += 1
 
 
 async def run(config: MixedRealisticConfig) -> ScenarioResult:
@@ -447,6 +486,14 @@ async def run(config: MixedRealisticConfig) -> ScenarioResult:
             ),
             "operation_counts": {name: int(operation["requests"]) for name, operation in operation_results.items()},
             "operation_latency": operation_results,
+            "semantic_search_responses": journey_metrics.semantic_responses,
+            "semantic_search_fallbacks": journey_metrics.semantic_fallbacks,
+            "semantic_search_fallback_percent": round(
+                100.0
+                * journey_metrics.semantic_fallbacks
+                / max(journey_metrics.semantic_responses + journey_metrics.semantic_fallbacks, 1),
+                3,
+            ),
             "job_status_counts_at_end": status_counts,
         },
     )
@@ -471,6 +518,20 @@ async def run(config: MixedRealisticConfig) -> ScenarioResult:
         extra_violations.append(
             f"only {status_counts.get('success', 0)}/{accepted_submissions} accepted submissions completed successfully",
         )
+    if journey_metrics.semantic_responses == 0:
+        extra_violations.append("no Explore search response confirmed semantic pgvector execution")
+    semantic_attempts = journey_metrics.semantic_responses + journey_metrics.semantic_fallbacks
+    semantic_fallback_percent = 100.0 * journey_metrics.semantic_fallbacks / max(semantic_attempts, 1)
+    if semantic_fallback_percent > 5.0:
+        extra_violations.append(
+            f"{semantic_fallback_percent:.1f}% of Explore searches fell back from semantic mode",
+        )
+    frontend_requests = sum(
+        int(operation_results.get(name, {}).get("requests", 0))
+        for name in ("frontend_login", "frontend_session")
+    )
+    if frontend_requests == 0:
+        extra_violations.append("the production Next.js server received no mixed-journey traffic")
     apply_slo(result, _MIXED_SLO, extra_violations=extra_violations)
     return result
 
@@ -489,6 +550,7 @@ def default_config(api_base_url: str, mock_lm_url: str) -> MixedRealisticConfig:
     return MixedRealisticConfig(
         api_base_url=api_base_url,
         mock_lm_url=mock_lm_url,
+        frontend_base_url=os.environ.get("LOAD_TEST_FRONTEND_URL", "http://127.0.0.1:53001"),
         virtual_users=int(os.environ.get("LOAD_TEST_MIXED_USERS", "200")),
         submitting_users=int(os.environ.get("LOAD_TEST_MIXED_SUBMIT_USERS", "48")),
         sse_connections=int(os.environ.get("LOAD_TEST_MIXED_SSE_CONNECTIONS", "24")),

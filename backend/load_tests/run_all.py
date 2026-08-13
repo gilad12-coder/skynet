@@ -35,6 +35,7 @@ from .scenarios import dashboard_read, failure_injection, full_lifecycle, mixed_
 
 _DEFAULT_COMPOSE_FILE = str(Path(__file__).resolve().parent / "docker-compose.loadtest.yml")
 _DEFAULT_API_URL = "http://127.0.0.1:58000"
+_DEFAULT_FRONTEND_URL = "http://127.0.0.1:53001"
 _DEFAULT_MOCK_LM_URL = "http://mock-lm:9000/v1"
 _DEFAULT_DB_URL = "postgresql://skynet:loadtest@127.0.0.1:55432/skynet_loadtest"
 
@@ -69,6 +70,11 @@ def _parse_args() -> argparse.Namespace:
         "--mock-lm-url",
         default=os.environ.get("LOAD_TEST_MOCK_LM_URL", _DEFAULT_MOCK_LM_URL),
         help="Mock LM base URL embedded in scenario payloads (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--frontend-url",
+        default=os.environ.get("LOAD_TEST_FRONTEND_URL", _DEFAULT_FRONTEND_URL),
+        help="Production Next.js server driven by mixed journeys (default: %(default)s)",
     )
     parser.add_argument(
         "--scenarios",
@@ -194,6 +200,7 @@ def _ensure_env(args: argparse.Namespace) -> None:
     os.environ.setdefault("BACKEND_AUTH_SECRET", _DEFAULT_BACKEND_SECRET)
     os.environ.setdefault("LOAD_TEST_DB_URL", _DEFAULT_DB_URL)
     os.environ.setdefault("LOAD_TEST_API_URL", args.api_url)
+    os.environ.setdefault("LOAD_TEST_FRONTEND_URL", args.frontend_url)
     os.environ.setdefault("LOAD_TEST_MOCK_LM_URL", args.mock_lm_url)
     os.environ.setdefault("LOAD_TEST_COMPOSE_FILE", args.compose_file)
     os.environ.setdefault("LOAD_TEST_COMPOSE_PROJECT", args.compose_project)
@@ -252,6 +259,7 @@ async def _async_main() -> int:
 
     try:
         _wait_for_http(f"{args.api_url}/health")
+        _wait_for_http(f"{args.frontend_url}/login")
         warm = await warm_validation_cache(args.api_url)
         print(
             f"[loadtest] warmed validation cache: {warm['calls']} calls, "
