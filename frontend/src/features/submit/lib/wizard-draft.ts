@@ -38,8 +38,6 @@ export interface WizardDraftData {
   datasetFileName: string | null;
   columnRoles: Record<string, ColumnRole>;
   columnKinds: Record<string, "text" | "image">;
-  globalBaseUrl: string;
-  globalApiKey: string;
   modelConfig: ModelConfig;
   secondModelConfig: ModelConfig | null;
   generationModels: ModelConfig[];

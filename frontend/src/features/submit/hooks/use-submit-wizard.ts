@@ -41,7 +41,6 @@ import { registerTutorialHook } from "@/features/tutorial";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { useWizardStateOptional } from "@/features/agent-panel";
 import { readPref, useUserPrefs } from "@/features/settings";
-import { useCredits } from "@/features/billing";
 
 import { STEPS, emptyModelConfig, defaultSplit, defaultReactConfig } from "../constants";
 import type { ReactConfig, ColumnRole } from "../constants";
@@ -52,6 +51,7 @@ import {
   projectCostBracket,
   defaultCeilingForBracket,
   chargeableBracket,
+  aggregateTokenSource,
   type CostBracket,
 } from "../lib/cost-bracket";
 import {
@@ -89,6 +89,23 @@ const DEFAULT_TARGET_SCORE = "85";
 // wizard sends nothing, so the server-wide GEPA_PXN_* settings still apply.
 const DEFAULT_PXN = "1";
 
+function prepareModelConfig(config: ModelConfig): ModelConfig {
+  const { base_url: _baseUrl, ...fields } = config;
+  const {
+    api_key: _apiKey,
+    api_base: _ApiBase,
+    base_url: _ExtraBaseUrl,
+    ...safeExtra
+  } = fields.extra ?? {};
+  const tokenSource = fields.token_source ?? "managed";
+  return {
+    ...fields,
+    token_source: tokenSource,
+    byok_provider: tokenSource === "byok" ? fields.byok_provider : undefined,
+    extra: Object.keys(safeExtra).length > 0 ? safeExtra : undefined,
+  };
+}
+
 /** Type guard for a valid dataset column role (signature I/O). */
 function isColumnRole(value: unknown): value is ColumnRole {
   return typeof value === "string" && COLUMN_ROLES.has(value);
@@ -107,11 +124,6 @@ export function useSubmitWizard() {
   const { data: session } = useSession();
   const { prefs } = useUserPrefs();
   const advancedMode = prefs.advancedMode || readPref("advancedMode");
-  // The active token-source mode (managed credits vs the user's own key). Sent
-  // on every submit so billing mode is enforced server-side, not just shown in
-  // the wizard.
-  const { wallet } = useCredits();
-
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState(0);
   const [furthestReachedStep, setFurthestReachedStep] = useState(0);
@@ -149,21 +161,18 @@ export function useSubmitWizard() {
   // runs on user clicks, so the refs are always populated by then.
   const agentResetRef = useRef<(() => void) | null>(null);
   const interviewResetRef = useRef<(() => void) | null>(null);
-  const chooseModule = useCallback(
-    (name: string) => {
-      // Picking a module restarts its setup unconditionally — even re-picking
-      // the current one: a fresh agent conversation and a re-armed Signature &
-      // Metric interview, so the interview re-opens and re-runs for the pick.
-      // (interviewActive gates on an empty agent conversation, so the agent
-      // reset is what lets the interview panel reclaim the slot.) On a first
-      // pick both resets are no-ops on empty state.
-      agentResetRef.current?.();
-      interviewResetRef.current?.();
-      setModuleName(name);
-      setModuleChosen(true);
-    },
-    [],
-  );
+  const chooseModule = useCallback((name: string) => {
+    // Picking a module restarts its setup unconditionally — even re-picking
+    // the current one: a fresh agent conversation and a re-armed Signature &
+    // Metric interview, so the interview re-opens and re-runs for the pick.
+    // (interviewActive gates on an empty agent conversation, so the agent
+    // reset is what lets the interview panel reclaim the slot.) On a first
+    // pick both resets are no-ops on empty state.
+    agentResetRef.current?.();
+    interviewResetRef.current?.();
+    setModuleName(name);
+    setModuleChosen(true);
+  }, []);
   const reopenModulePicker = useCallback(() => setModuleChosen(false), []);
 
   // Workflow graph spec — the canvas's single source of truth. `null` until
@@ -252,9 +261,6 @@ export function useSubmitWizard() {
   useEffect(() => {
     if (isWorkflow && jobType !== "run") setOptimizationType("run");
   }, [isWorkflow, jobType]);
-
-  const [globalBaseUrl, setGlobalBaseUrl] = useState("");
-  const [globalApiKey, setGlobalApiKey] = useState("");
 
   const [modelConfig, setModelConfig] = useState<ModelConfig>(emptyModelConfig());
   const [secondModelConfig, setSecondModelConfig] = useState<ModelConfig | null>(null);
@@ -489,8 +495,6 @@ export function useSubmitWizard() {
       datasetFileName,
       columnRoles,
       columnKinds,
-      globalBaseUrl,
-      globalApiKey,
       modelConfig,
       secondModelConfig,
       generationModels,
@@ -565,8 +569,6 @@ export function useSubmitWizard() {
     setDatasetFileName(d.datasetFileName);
     setColumnRoles(d.columnRoles);
     setColumnKinds(d.columnKinds);
-    setGlobalBaseUrl(d.globalBaseUrl);
-    setGlobalApiKey(d.globalApiKey);
     setModelConfig(d.modelConfig);
     setSecondModelConfig(d.secondModelConfig);
     setGenerationModels(d.generationModels);
@@ -1603,9 +1605,7 @@ export function useSubmitWizard() {
             if (showToast) toast.error(msg("submit.validation.model_required"));
             return false;
           }
-          // Require api_key if provider has no env default AND no global key
-          const hasApiKey = !!globalApiKey || !!modelConfig.extra?.api_key;
-          if (!anyProviderHasEnvKey && !hasApiKey) {
+          if (modelConfig.token_source !== "byok" && !anyProviderHasEnvKey) {
             if (showToast) toast.error(msg("submit.validation.api_key_required"));
             return false;
           }
@@ -1667,7 +1667,11 @@ export function useSubmitWizard() {
   ): Promise<ValidateCodeResponse | EditorValidationResult> => {
     const code = overrideCode ?? (kind === "signature" ? signatureCode : metricCode);
     if (!code.trim()) {
-      return { valid: false, errors: [formatMsg("submit.validation.missing_code", { kind })], warnings: [] };
+      return {
+        valid: false,
+        errors: [formatMsg("submit.validation.missing_code", { kind })],
+        warnings: [],
+      };
     }
     if (!parsedDataset || parsedDataset.rowCount === 0) {
       return { valid: false, errors: [msg("submit.validation.dataset_before_code")], warnings: [] };
@@ -1698,7 +1702,8 @@ export function useSubmitWizard() {
       setSignatureValidation(result as ValidateCodeResponse);
       return result;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : msg("submit.validation.signature_failed");
+      const errorMessage =
+        err instanceof Error ? err.message : msg("submit.validation.signature_failed");
       return { valid: false, errors: [errorMessage], warnings: [] };
     }
   };
@@ -1711,7 +1716,8 @@ export function useSubmitWizard() {
       setMetricValidation(result as ValidateCodeResponse);
       return result;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : msg("submit.validation.metric_failed");
+      const errorMessage =
+        err instanceof Error ? err.message : msg("submit.validation.metric_failed");
       return { valid: false, errors: [errorMessage], warnings: [] };
     }
   };
@@ -1981,10 +1987,15 @@ export function useSubmitWizard() {
         librarySourceRef.current && librarySourceRef.current.parsed === parsedDataset
           ? librarySourceRef.current.id
           : null;
+      const selectedConfigs =
+        effectiveJobType === "run"
+          ? [modelConfig, ...(secondModelConfig?.name?.trim() ? [secondModelConfig] : [])]
+          : [...generationModels, ...reflectionModels];
+      const tokenSource = aggregateTokenSource(selectedConfigs);
       // Persist the chargeable bracket the user just saw so it can be
       // reconciled against the actual charge. Same bracket the cost
       // surface and review recap showed (managed: full per-model; byok: fee).
-      const estimate = chargeableBracket(costBracket, wallet.mode);
+      const estimate = chargeableBracket(costBracket, tokenSource);
       const base = {
         name: jobName.trim() || undefined,
         description: jobDescription.trim() || undefined,
@@ -2008,7 +2019,7 @@ export function useSubmitWizard() {
         split_fractions: split,
         shuffle,
         is_private: isPrivate,
-        token_source: wallet.mode,
+        token_source: tokenSource,
         estimated_credits_low: estimate.lowCredits,
         estimated_credits_high: estimate.highCredits,
         ...(maxCostCredits != null && { max_cost_credits: maxCostCredits }),
@@ -2031,15 +2042,6 @@ export function useSubmitWizard() {
         return { tool_source };
       };
 
-      // Inject global API key + base URL into any model config that doesn't override
-      const applyGlobals = (mc: ModelConfig): ModelConfig => {
-        const out = { ...mc };
-        if (globalBaseUrl && !out.base_url) out.base_url = globalBaseUrl;
-        if (globalApiKey && !out.extra?.api_key)
-          out.extra = { ...out.extra, api_key: globalApiKey };
-        return out;
-      };
-
       let result;
       if (effectiveJobType === "run") {
         if (!modelConfig.name.trim()) {
@@ -2050,11 +2052,11 @@ export function useSubmitWizard() {
           return;
         }
         const secondApplied = secondModelConfig?.name?.trim()
-          ? applyGlobals(secondModelConfig)
+          ? prepareModelConfig(secondModelConfig)
           : undefined;
         const runPayload: RunRequest = {
           ...base,
-          model_config: applyGlobals(modelConfig),
+          model_config: prepareModelConfig(modelConfig),
           ...(secondApplied ? { reflection_model_config: secondApplied } : {}),
           ...(needsToolSource ? buildReactFields() : {}),
         };
@@ -2064,8 +2066,8 @@ export function useSubmitWizard() {
           has_reflection: Boolean(secondApplied),
         });
       } else {
-        const validGen = generationModels.filter((m) => m.name.trim()).map(applyGlobals);
-        const validRef = reflectionModels.filter((m) => m.name.trim()).map(applyGlobals);
+        const validGen = generationModels.filter((m) => m.name.trim()).map(prepareModelConfig);
+        const validRef = reflectionModels.filter((m) => m.name.trim()).map(prepareModelConfig);
         if (validGen.length === 0) {
           toast.error(msg("submit.validation.generation_model_required"));
           goTo(4);
@@ -2090,20 +2092,6 @@ export function useSubmitWizard() {
           reflection_models: validRef.length,
         });
       }
-
-      // Wipe any pasted API key from the in-memory wizard state right
-      // after the submit succeeds. The wire payload already left the
-      // browser; keeping the plaintext in React state would leak it to
-      // the next submit, the recents cache, and any debug surface.
-      const stripKey = (cfg: ModelConfig): ModelConfig => {
-        if (!cfg.extra || !("api_key" in cfg.extra)) return cfg;
-        const { api_key: _omit, ...rest } = cfg.extra;
-        return { ...cfg, extra: Object.keys(rest).length > 0 ? rest : undefined };
-      };
-      setModelConfig(stripKey);
-      setSecondModelConfig((prev) => (prev ? stripKey(prev) : prev));
-      setGenerationModels((prev) => prev.map(stripKey));
-      setReflectionModels((prev) => prev.map(stripKey));
 
       // Mark the submit so the unmount cleanup clears the shared wizard state
       // once navigation tears this form down.
@@ -2164,9 +2152,7 @@ export function useSubmitWizard() {
   const runWorkflowDryRun = useCallback(
     async (inputs: Record<string, unknown>, handlers: WorkflowDryRunStreamHandlers) => {
       if (!workflowSpec) throw new Error(msg("submit.validation.workflow_invalid"));
-      const mc = { ...modelConfig };
-      if (globalBaseUrl && !mc.base_url) mc.base_url = globalBaseUrl;
-      if (globalApiKey && !mc.extra?.api_key) mc.extra = { ...mc.extra, api_key: globalApiKey };
+      const mc = prepareModelConfig(modelConfig);
       const tool_source: ToolSource | undefined = workflowUsesTools(workflowSpec)
         ? {
             kind: "live_mcp",
@@ -2186,7 +2172,7 @@ export function useSubmitWizard() {
         handlers,
       );
     },
-    [workflowSpec, modelConfig, globalBaseUrl, globalApiKey, reactConfig],
+    [workflowSpec, modelConfig, reactConfig],
   );
 
   // The Signature & Metric interview: a few grounded questions before the
@@ -2343,10 +2329,6 @@ export function useSubmitWizard() {
     setColumnRoles,
     columnKinds,
     setColumnKinds,
-    globalBaseUrl,
-    setGlobalBaseUrl,
-    globalApiKey,
-    setGlobalApiKey,
     anyProviderHasEnvKey,
     modelConfig,
     setModelConfig,

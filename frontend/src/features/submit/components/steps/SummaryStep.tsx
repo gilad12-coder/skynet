@@ -34,11 +34,11 @@ import { moduleLabel } from "@/shared/lib/formatters";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { Skeleton } from "@/shared/ui/skeleton";
-import { formatCredits, useCredits } from "@/features/billing";
+import { formatCredits } from "@/features/billing";
 import { useUserPrefs } from "@/features/settings";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
-import { chargeableBracket } from "../../lib/cost-bracket";
+import { aggregateTokenSource, chargeableBracket } from "../../lib/cost-bracket";
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
@@ -111,10 +111,14 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
   // without making them step back. BYOK shows the platform fee, not the full
   // per-model cost the provider key absorbs — same chargeable bracket the cost
   // surface used, so the two never disagree.
-  const { wallet } = useCredits();
   const locale = getActiveIntlLocale();
-  const byok = wallet.mode === "byok";
-  const estimate = chargeableBracket(costBracket, wallet.mode);
+  const selectedConfigs =
+    jobType === "run"
+      ? [modelConfig, ...(secondModelConfig ? [secondModelConfig] : [])]
+      : [...generationModels, ...reflectionModels];
+  const tokenSource = aggregateTokenSource(selectedConfigs);
+  const byok = tokenSource === "byok";
+  const estimate = chargeableBracket(costBracket, tokenSource);
 
   return (
     <div className="space-y-4" data-tutorial="wizard-step-6">
