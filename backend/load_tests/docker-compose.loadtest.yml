@@ -5,8 +5,10 @@
 #   postgres  -> dedicated DB, separate volume, port published only locally
 #   migrate   -> one-shot alembic upgrade head, exits cleanly
 #   pgbouncer -> transaction-pooling proxy, matches the production topology
+#   redis     -> shared rate-limit and login-lockout state
 #   mock-lm   -> OpenAI-compatible canned-response LM (no real provider calls)
-#   api       -> three backend replicas behind the host port range
+#   api       -> three HTTP-only backend replicas behind nginx
+#   worker    -> three standalone worker replicas consuming the shared queue
 #
 # Usage
 #   cd backend
@@ -66,6 +68,15 @@ services:
       timeout: 3s
       retries: 10
 
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   mock-lm:
     build:
       context: mock_lm
@@ -94,6 +105,12 @@ services:
       DB_POOL_SIZE: "5"
       DB_POOL_MAX_OVERFLOW: "10"
       DB_POOL_TIMEOUT: "10"
+      REDIS_URL: redis://redis:6379/0
+      # Capacity scenarios deliberately exceed the production defaults; keep
+      # the guardrails wired through Redis but above the generated workload so
+      # this rig measures saturation rather than expected 429 responses.
+      RATE_LIMIT_SUBMISSIONS_PER_MINUTE: "1000"
+      MAX_CONCURRENT_JOBS_PER_USER: "100"
       # Shared HS256 signing secret matches what the load-test harness uses
       # to mint bearer tokens; auth.py rejects every request otherwise.
       BACKEND_AUTH_SECRET: loadtest-secret-do-not-use-in-production
@@ -102,8 +119,7 @@ services:
       QUOTA_OVERRIDES: '{"load-user-0":null,"load-user-1":null,"load-user-2":null,"load-user-3":null,"load-user-4":null,"load-user-5":null,"load-user-6":null,"load-user-7":null,"load-user-burst":null,"load-user-lifecycle":null,"load-user-dashboard":null,"load-user-failure":null}'
       OPENAI_API_KEY: fake-loadtest-key
       OPENAI_API_BASE: http://mock-lm:9000/v1
-      WORKER_CONCURRENCY: "4"
-      WORKER_POLL_INTERVAL: "1.0"
+      WORKER_ENABLED: "0"
       LOG_LEVEL: WARNING
       LOG_FORMAT: text
       SKYNET_CODE_VERSION: loadtest
@@ -121,6 +137,8 @@ services:
         condition: service_healthy
       pgbouncer:
         condition: service_started
+      redis:
+        condition: service_healthy
       mock-lm:
         condition: service_started
       migrate:
@@ -131,6 +149,40 @@ services:
       timeout: 3s
       retries: 20
       start_period: 15s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    deploy:
+      replicas: 3
+    environment:
+      SERVICE_ROLE: worker
+      REMOTE_DB_URL: postgresql://skynet:loadtest@pgbouncer:5432/skynet_loadtest
+      DB_PGBOUNCER_TRANSACTION_MODE: "true"
+      DB_POOL_SIZE: "5"
+      DB_POOL_MAX_OVERFLOW: "10"
+      DB_POOL_TIMEOUT: "10"
+      REDIS_URL: redis://redis:6379/0
+      OPENAI_API_KEY: fake-loadtest-key
+      OPENAI_API_BASE: http://mock-lm:9000/v1
+      WORKER_CONCURRENCY: "4"
+      WORKER_POLL_INTERVAL: "1.0"
+      LOG_LEVEL: WARNING
+      LOG_FORMAT: text
+      SKYNET_CODE_VERSION: loadtest
+      SEARCH_BACKEND: "lexical"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      mock-lm:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
 
   # Round-robin load balancer in front of the 3 api replicas. The
   # orchestrator drives every scenario through this single host port so

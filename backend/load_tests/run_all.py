@@ -31,7 +31,7 @@ from pathlib import Path
 from .lib.metrics import ScenarioResult
 from .lib.reporter import print_result, write_json_report, write_markdown_report
 from .lib.warmup import warm_validation_cache
-from .scenarios import dashboard_read, failure_injection, full_lifecycle, submission_burst
+from .scenarios import dashboard_read, failure_injection, full_lifecycle, mixed_realistic, submission_burst
 
 _DEFAULT_COMPOSE_FILE = str(Path(__file__).resolve().parent / "docker-compose.loadtest.yml")
 _DEFAULT_API_URL = "http://127.0.0.1:58000"
@@ -45,6 +45,7 @@ _DEFAULT_BACKEND_SECRET = "loadtest-secret-do-not-use-in-production"
 ScenarioFn = Callable[[str, str], Awaitable[ScenarioResult]]
 
 _SCENARIOS: dict[str, ScenarioFn] = {
+    "mixed_realistic": mixed_realistic.main,
     "submission_burst": submission_burst.main,
     "full_lifecycle": full_lifecycle.main,
     "dashboard_read": dashboard_read.main,
@@ -241,7 +242,7 @@ async def _async_main() -> int:
     """Orchestrator entrypoint coroutine.
 
     Returns:
-        Process exit code: ``0`` on success, ``1`` on any scenario error.
+        Process exit code: ``0`` when every SLO gate passes, otherwise ``1``.
     """
     args = _parse_args()
     _ensure_env(args)
@@ -274,6 +275,11 @@ async def _async_main() -> int:
     json_path, md_path = _write_reports(results, results_dir)
     print(f"\n[loadtest] wrote {json_path}")
     print(f"[loadtest] wrote {md_path}")
+    failed = [result for result in results if result.slo_passed is False]
+    if failed:
+        names = ", ".join(result.name for result in failed)
+        print(f"[loadtest] RELEASE GATE FAILED: {names}")
+        return 1
     return 0
 
 
