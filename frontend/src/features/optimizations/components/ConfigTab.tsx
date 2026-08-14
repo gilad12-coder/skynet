@@ -160,6 +160,31 @@ const MODEL_CARD_TIPS: Record<string, string> = perLocale(() => ({
   [TERMS.reflectionModel]: tip("model.reflection"),
 }));
 
+type ModelParameterKey = "temperature" | "top_p" | "max_tokens";
+
+const MODEL_PARAMETER_DEFAULTS: Record<ModelParameterKey, number> = {
+  temperature: 0.7,
+  top_p: 1,
+  max_tokens: 1024,
+};
+
+function resolveModelParameter(cfg: Record<string, unknown>, key: ModelParameterKey): number {
+  const rawExtra = cfg.extra;
+  const extra =
+    rawExtra && typeof rawExtra === "object" && !Array.isArray(rawExtra)
+      ? (rawExtra as Record<string, unknown>)
+      : undefined;
+  const rawValue = cfg[key] ?? extra?.[key];
+  const value =
+    typeof rawValue === "number"
+      ? rawValue
+      : typeof rawValue === "string" && rawValue.trim()
+        ? Number(rawValue)
+        : Number.NaN;
+
+  return Number.isFinite(value) ? value : MODEL_PARAMETER_DEFAULTS[key];
+}
+
 /** Resolve a routed model id to the provider mark used by the config card. */
 function modelProviderSlug(id: string): string {
   const parts = id.split("/");
@@ -172,10 +197,14 @@ function ModelCard({ label, cfg }: { label: string; cfg: Record<string, unknown>
   const labelTip = MODEL_CARD_TIPS[label];
   const name = String(cfg.name || "—");
   const shortName = name.includes("/") ? name.split("/").pop()! : name;
-  const temp = cfg.temperature as number | undefined;
-  const maxTok = cfg.max_tokens as number | undefined;
+  const temp = resolveModelParameter(cfg, "temperature");
+  const topP = resolveModelParameter(cfg, "top_p");
+  const maxTok = resolveModelParameter(cfg, "max_tokens");
   const extra = (cfg.extra ?? {}) as Record<string, unknown>;
   const reasoning = extra.reasoning_effort as string | undefined;
+  const temperatureLabel = msg("auto.features.submit.components.modelconfigmodal.5");
+  const topPLabel = msg("auto.features.submit.components.modelconfigmodal.6");
+  const maxTokensLabel = msg("auto.features.submit.components.modelconfigmodal.7");
   return (
     <article className="flex min-h-36 min-w-0 flex-col justify-between gap-5 rounded-2xl border border-border/60 bg-[#F8F4EE] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
       <div className="flex min-w-0 items-start gap-3.5">
@@ -195,26 +224,36 @@ function ModelCard({ label, cfg }: { label: string; cfg: Record<string, unknown>
           </span>
         </div>
       </div>
-      {(temp != null || maxTok != null || reasoning) && (
-        <div
-          className="flex flex-wrap items-center gap-2 text-[0.6875rem] text-muted-foreground"
-          dir="ltr"
+      <div
+        className="flex flex-wrap items-center gap-2 text-[0.6875rem] text-muted-foreground"
+        dir="ltr"
+      >
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
+          aria-label={`${temperatureLabel}: ${temp.toFixed(1)}`}
+          title={temperatureLabel}
         >
-          {temp != null && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1">
-              <Thermometer className="size-3" aria-hidden="true" />
-              {temp.toFixed(1)}
-            </span>
-          )}
-          {maxTok != null && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1">
-              <TextT className="size-3" aria-hidden="true" />
-              {maxTok}
-            </span>
-          )}
-          {reasoning && <ReasoningPill value={reasoning} />}
-        </div>
-      )}
+          <Thermometer className="size-3" aria-hidden="true" />
+          {temp.toFixed(1)}
+        </span>
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
+          aria-label={`${topPLabel}: ${topP.toFixed(2)}`}
+          title={topPLabel}
+        >
+          <Target className="size-3" aria-hidden="true" />
+          {topP.toFixed(2)}
+        </span>
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
+          aria-label={`${maxTokensLabel}: ${maxTok}`}
+          title={maxTokensLabel}
+        >
+          <TextT className="size-3" aria-hidden="true" />
+          {maxTok}
+        </span>
+        {reasoning && <ReasoningPill value={reasoning} />}
+      </div>
     </article>
   );
 }
