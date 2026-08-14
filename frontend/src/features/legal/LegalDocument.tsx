@@ -161,20 +161,12 @@ export function LegalDocument({
             <span className="text-sm font-medium text-muted-foreground">{CHROME.legal}</span>
           </Link>
 
-          <nav aria-label={CHROME.relatedDocument} className="flex items-center gap-1 sm:gap-2">
-            <Button asChild variant="ghost" size="pill" className="px-3 sm:px-5">
-              <Link href={related.href} aria-label={related.label}>
-                <FileText className="size-4" aria-hidden="true" />
-                <span className="hidden sm:inline">{related.label}</span>
-              </Link>
-            </Button>
-            <Button asChild size="pill" className="px-3 sm:px-5">
-              <Link href="/" aria-label={CHROME.backToApp}>
-                <ArrowLeft className="size-4" aria-hidden="true" />
-                <span className="hidden sm:inline">{CHROME.backToApp}</span>
-              </Link>
-            </Button>
-          </nav>
+          <Button asChild size="pill" className="px-3 sm:px-5">
+            <Link href="/" aria-label={CHROME.backToApp}>
+              <ArrowLeft className="size-4" aria-hidden="true" />
+              <span className="hidden sm:inline">{CHROME.backToApp}</span>
+            </Link>
+          </Button>
         </div>
       </header>
 
