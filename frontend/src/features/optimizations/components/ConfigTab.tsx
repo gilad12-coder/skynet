@@ -13,7 +13,6 @@ import {
   Cube,
   Database,
   DiceFive,
-  FlowArrow,
   Gauge,
   Gear,
   GearSix,
@@ -497,48 +496,36 @@ export function ConfigTab({
             >
               {activeSlide === 0 && (
                 <div className="flex min-h-[24rem] flex-col gap-5">
-                  <div className="grid items-stretch gap-3 md:grid-cols-[minmax(0,1fr)_3rem_minmax(0,1fr)]">
+                  <div className="grid items-stretch gap-3 md:grid-cols-2">
                     {items.slice(0, 2).map((item, index) => (
-                      <div key={index} className="contents">
-                        <article className="flex min-h-40 min-w-0 flex-col justify-between gap-6 rounded-2xl border border-border/60 bg-[#F8F4EE] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] sm:p-6">
-                          <div className="flex items-start justify-between gap-3">
-                            <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-[#3D2E22] text-[#FAF8F5] [&_svg]:size-5">
-                              {item.icon}
-                            </span>
-                            <span
-                              className="font-mono text-[0.625rem] tabular-nums text-[#8C7A6B]/70"
-                              dir="ltr"
-                            >
-                              0{index + 1}
-                            </span>
+                      <article
+                        key={index}
+                        className="flex min-h-40 min-w-0 flex-col justify-between gap-6 rounded-2xl border border-border/60 bg-[#F8F4EE] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] sm:p-6"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-[#3D2E22] text-[#FAF8F5] [&_svg]:size-5">
+                            {item.icon}
+                          </span>
+                          <span
+                            className="font-mono text-[0.625rem] tabular-nums text-[#8C7A6B]/70"
+                            dir="ltr"
+                          >
+                            0{index + 1}
+                          </span>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
+                            {item.label}
                           </div>
-                          <div className="min-w-0">
-                            <div className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
-                              {item.label}
-                            </div>
-                            <div
-                              className="mt-1 truncate font-mono text-xl font-semibold tracking-tight text-foreground sm:text-2xl"
-                              dir="ltr"
-                              title={item.value}
-                            >
-                              {item.value}
-                            </div>
+                          <div
+                            className="mt-1 truncate font-mono text-xl font-semibold tracking-tight text-foreground sm:text-2xl"
+                            dir="ltr"
+                            title={item.value}
+                          >
+                            {item.value}
                           </div>
-                        </article>
-                        {index === 0 && (
-                          <div className="flex items-center justify-center text-[#A89680]">
-                            <span className="grid size-10 place-items-center rounded-full border border-[#C8A882]/45 bg-[#EDE7DD]">
-                              <FlowArrow
-                                className={cn(
-                                  "size-5 rotate-90 md:rotate-0",
-                                  isRtl && "md:rotate-180",
-                                )}
-                                aria-hidden="true"
-                              />
-                            </span>
-                          </div>
-                        )}
-                      </div>
+                        </div>
+                      </article>
                     ))}
                   </div>
 
