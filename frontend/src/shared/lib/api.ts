@@ -2580,9 +2580,6 @@ export interface PublicDashboardPoint {
   module_name: string | null;
   optimizer_name: string | null;
   created_at: string | null;
-  siblings: string[];
-  task_fingerprint: string | null;
-  compare_fingerprint: string | null;
 }
 
 export interface PublicDashboardResponse {
