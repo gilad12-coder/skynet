@@ -620,7 +620,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
 
   {
     id: "dd-models",
-    title: formatMsg("auto.features.tutorial.lib.steps.template.24", { p1: TERMS.modelPlural }),
+    title: msg("auto.features.tutorial.lib.steps.template.24"),
     description: formatMsg("auto.features.tutorial.lib.steps.template.25", {
       p1: TERMS.generationModel,
       p2: TERMS.reflectionModel,
@@ -674,7 +674,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-submit",
-    title: formatMsg("auto.features.tutorial.lib.steps.template.27", { p1: TERMS.optimization }),
+    title: msg("auto.features.tutorial.lib.steps.template.27"),
     description: formatMsg("auto.features.tutorial.lib.steps.template.28", {
       p1: TERMS.baselineScore,
       p2: TERMS.optimizer,
