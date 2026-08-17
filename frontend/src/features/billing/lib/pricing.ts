@@ -15,10 +15,10 @@ import type { CatalogModel } from "@/shared/types/api";
 import { CREDIT_USD_VALUE } from "./credit";
 
 /** Margin multiplier on raw provider cost — mirrors backend `pricing.MARKUP`.
- * 1.35 ≈ 1.09 × 1.10 × 1.125: ~9% covers the payment-processing fees (OpenRouter
- * deposit + Stripe), ~10% the CPU/storage a run consumes, and ~12.5% is a modest
- * profit margin that offsets the fixed hosting bill (1.20 was break-even). */
-export const MARKUP = 1.35;
+ * 1.50 = 1.09 × 1.10 × 1.25: ~9% covers the payment-processing fees (OpenRouter
+ * deposit + Stripe), ~10% the CPU/storage a run consumes, and 25% is a profit
+ * margin that offsets the fixed hosting bill (1.20 was break-even). */
+export const MARKUP = 1.5;
 
 /** Fallback per-token costs (USD) for a model the catalog doesn't price. */
 export const DEFAULT_INPUT_COST_PER_TOKEN = 1e-6;
@@ -28,7 +28,7 @@ export const DEFAULT_OUTPUT_COST_PER_TOKEN = 3e-6;
  * mirrors the backend. The infra (CPU/storage) + margin share of the markup,
  * grossed up for Stripe's cut: the tokens are on the user's own key, but the
  * compute isn't. */
-export const PLATFORM_FEE_FRACTION = 0.2;
+export const PLATFORM_FEE_FRACTION = 0.28;
 
 /** Projected or measured token usage attributed to one model. */
 export interface ModelTokenUsage {

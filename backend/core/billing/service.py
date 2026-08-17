@@ -70,12 +70,12 @@ LOCAL_CUSTOMER_PREFIX = "local:"
 # Share of a run's full credit cost charged to a BYOK run — the provider tokens
 # are paid on the user's own key, but the run still consumes Skynet's CPU and
 # storage. Derived from the managed MARKUP's decomposition (~1.09 money-movement
-# × ~1.10 infra × ~1.125 profit ≈ 1.35): everything but the money-movement slice
-# is (1.35 − 1.09)×raw = 0.26/1.35 ≈ 0.193 of the full cost, grossed up for
-# Stripe's ~2.9% cut of the money behind the fee credits (÷0.971) ≈ 0.20. No
+# × ~1.10 infra × 1.25 profit ≈ 1.50): everything but the money-movement slice
+# is (1.50 − 1.09)×raw = 0.41/1.50 ≈ 0.273 of the full cost, grossed up for
+# Stripe's ~2.9% cut of the money behind the fee credits (÷0.971) ≈ 0.28. No
 # OpenRouter deposit fee applies (no managed tokens) — the fee covers compute +
-# storage plus the same modest margin managed runs carry.
-PLATFORM_FEE_FRACTION = 0.20
+# storage plus the same margin managed runs carry.
+PLATFORM_FEE_FRACTION = 0.28
 
 # Ceiling handed to fee-less BYOK runs: far above any real run's full cost,
 # small enough to stay a safe int everywhere credits are summed.
