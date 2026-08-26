@@ -634,7 +634,7 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
         draft.set(key, {
           ...cur,
           messages: [
-            ...cur.messages,
+            ...history,
             { role: "user", content: userMessage },
             { role: "assistant", content: "", toolCalls: [] },
           ],
