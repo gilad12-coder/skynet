@@ -14,11 +14,10 @@
  * and Persian; another RTL language slots in with `dir: "rtl"` and the existing
  * BiDi / logical-CSS / `<html dir>` plumbing picks it up unchanged.
  *
- * Fallback note: Hebrew is currently the only complete, hand-authored catalog,
- * so it terminates every chain (`he` has `fallback: null`) and English — itself
- * a partial overlay — points back at it. New locales fall through English to
- * Hebrew. Once the English overlay is verified complete the source can flip
- * (`en: null`, `he: "en"`) without touching any call site.
+ * Fallback note: Hebrew remains the terminal source catalog (`he` has
+ * `fallback: null`). Every distinct language in `FULL_TRANSLATION_LOCALES` is
+ * complete; regional variants inherit from their same-language parent and only
+ * need to carry copy that genuinely differs by region.
  */
 
 export type Direction = "rtl" | "ltr";
@@ -100,6 +99,27 @@ export const LOCALE_REGISTRY = {
 >;
 
 export type Locale = keyof typeof LOCALE_REGISTRY;
+
+/** Distinct languages that promise complete UI, API-message, and term catalogs. */
+export const FULL_TRANSLATION_LOCALES = [
+  "en",
+  "he",
+  "ar",
+  "fa",
+  "zh-Hans",
+  "yue",
+  "fr",
+  "de",
+  "hi",
+  "it",
+  "ja",
+  "ko",
+  "pt",
+  "ru",
+  "es",
+  "tr",
+  "uk",
+] as const satisfies readonly Locale[];
 
 /** All supported locale tags, in registry (switcher) order. */
 export const LOCALES = Object.keys(LOCALE_REGISTRY) as Locale[];

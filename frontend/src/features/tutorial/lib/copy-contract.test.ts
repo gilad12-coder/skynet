@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
+import { FULL_TRANSLATION_LOCALES } from "../../../shared/lib/locale.ts";
+
 const TITLE_KEYS = [
   "auto.features.tutorial.lib.steps.template.24",
   "auto.features.tutorial.lib.steps.template.27",
@@ -48,24 +50,6 @@ test("tutorial title call sites do not compose grammar from term placeholders", 
 });
 
 const GUIDE_PREFIX = "auto.features.tutorial.components.concepts.guide.";
-const FULL_UI_LOCALES = [
-  "ar",
-  "de",
-  "en",
-  "es",
-  "fa",
-  "fr",
-  "he",
-  "hi",
-  "it",
-  "ja",
-  "ko",
-  "pt",
-  "ru",
-  "tr",
-  "uk",
-  "zh-Hans",
-] as const;
 
 test("the concepts guide matches the current optimization surface", () => {
   const source = fs.readFileSync(
@@ -155,7 +139,7 @@ test("every full locale contains the guide copy used by the component", () => {
   >;
   const identifierOnly = /^[A-Za-z0-9_./{}=" -]+$/;
 
-  for (const locale of FULL_UI_LOCALES) {
+  for (const locale of FULL_TRANSLATION_LOCALES) {
     const messages = JSON.parse(
       fs.readFileSync(path.join(localeDir, `${locale}.json`), "utf8"),
     ) as Record<string, string>;
@@ -185,7 +169,7 @@ test("localized guide copy preserves runtime identifiers and numeric rules", () 
     string
   >;
 
-  for (const locale of FULL_UI_LOCALES) {
+  for (const locale of FULL_TRANSLATION_LOCALES) {
     const messages = JSON.parse(
       fs.readFileSync(path.join(localeDir, `${locale}.json`), "utf8"),
     ) as Record<string, string>;
