@@ -167,15 +167,18 @@ def _apply_managed_gateway(lm_kwargs: dict[str, object]) -> None:
 
 
 def _translate_gateway_reasoning(lm_kwargs: dict[str, object]) -> None:
-    """Mirror ``reasoning_effort`` into OpenRouter's native ``reasoning`` param.
+    """Mirror reasoning controls into OpenRouter's native ``reasoning`` param.
 
     Calls that reach OpenRouter (directly via an ``openrouter/`` id, or through
     the LiteLLM proxy whose wildcard fronts OpenRouter) lose the OpenAI-style
     ``reasoning_effort`` kwarg: LiteLLM doesn't map it onto OpenRouter's
     ``reasoning`` request param — so a user-picked effort was a no-op and
     opt-in thinking models (Anthropic, Gemini) never streamed reasoning.
-    OpenRouter's ceiling vocabulary is ``xhigh``, so Anthropic's ``max`` maps
-    down to it.
+    Anthropic's ``max`` maps down to OpenRouter's ``xhigh`` ceiling for that
+    provider; models with a distinct ``max`` level (such as GLM-5.3) keep it.
+    ``summary="auto"`` explicitly opts into streamed reasoning summaries for
+    models such as OpenAI's GPT-5 family, which do not expose raw chain-of-thought
+    tokens.
 
     The kwarg is kept (aligned to the mapped value) rather than popped: dspy's
     ``Reasoning`` signature field injects ``reasoning_effort="low"`` at call
@@ -191,12 +194,15 @@ def _translate_gateway_reasoning(lm_kwargs: dict[str, object]) -> None:
     effort = lm_kwargs.get("reasoning_effort")
     if not isinstance(effort, str) or not effort:
         return
-    mapped = "xhigh" if effort == "max" else effort
+    mapped = "xhigh" if effort == "max" and "/anthropic/" in model else effort
     body = lm_kwargs.get("extra_body")
     merged = dict(body) if isinstance(body, dict) else {}
-    native = merged.setdefault("reasoning", {"effort": mapped})
-    if isinstance(native, dict) and isinstance(native.get("effort"), str) and native["effort"]:
-        mapped = native["effort"]
+    native = merged.setdefault("reasoning", {})
+    if isinstance(native, dict):
+        native.setdefault("effort", mapped)
+        native.setdefault("summary", "auto")
+        if isinstance(native.get("effort"), str) and native["effort"]:
+            mapped = native["effort"]
     lm_kwargs["reasoning_effort"] = mapped
     lm_kwargs["extra_body"] = merged
 

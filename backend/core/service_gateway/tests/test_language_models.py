@@ -401,7 +401,7 @@ def test_gateway_reasoning_translates_effort_to_native_param() -> None:
     }
     _translate_gateway_reasoning(kwargs)
     assert kwargs["reasoning_effort"] == "low"
-    assert kwargs["extra_body"] == {"reasoning": {"effort": "low"}}
+    assert kwargs["extra_body"] == {"reasoning": {"effort": "low", "summary": "auto"}}
 
 
 def test_gateway_reasoning_maps_max_to_openrouter_ceiling() -> None:
@@ -412,7 +412,18 @@ def test_gateway_reasoning_maps_max_to_openrouter_ceiling() -> None:
     }
     _translate_gateway_reasoning(kwargs)
     assert kwargs["reasoning_effort"] == "xhigh"
-    assert kwargs["extra_body"] == {"reasoning": {"effort": "xhigh"}}
+    assert kwargs["extra_body"] == {"reasoning": {"effort": "xhigh", "summary": "auto"}}
+
+
+def test_gateway_reasoning_preserves_glm_max_effort() -> None:
+    """GLM-5.3 keeps its documented distinct ``max`` reasoning level."""
+    kwargs: dict[str, object] = {
+        "model": "openrouter/z-ai/glm-5.3",
+        "reasoning_effort": "max",
+    }
+    _translate_gateway_reasoning(kwargs)
+    assert kwargs["reasoning_effort"] == "max"
+    assert kwargs["extra_body"] == {"reasoning": {"effort": "max", "summary": "auto"}}
 
 
 def test_gateway_reasoning_leaves_direct_provider_calls_alone() -> None:
@@ -434,7 +445,7 @@ def test_gateway_reasoning_preserves_existing_extra_body() -> None:
     assert kwargs["reasoning_effort"] == "high"
     assert kwargs["extra_body"] == {
         "plugins": [{"id": "auto-router"}],
-        "reasoning": {"effort": "high"},
+        "reasoning": {"effort": "high", "summary": "auto"},
     }
 
 
@@ -447,7 +458,19 @@ def test_gateway_reasoning_aligns_kwarg_to_caller_supplied_body() -> None:
     }
     _translate_gateway_reasoning(kwargs)
     assert kwargs["reasoning_effort"] == "high"
-    assert kwargs["extra_body"] == {"reasoning": {"effort": "high"}}
+    assert kwargs["extra_body"] == {"reasoning": {"effort": "high", "summary": "auto"}}
+
+
+def test_gateway_reasoning_preserves_caller_summary_choice() -> None:
+    """A caller-selected summary verbosity is not replaced by the default."""
+    kwargs: dict[str, object] = {
+        "model": "openrouter/openai/gpt-5.6-terra",
+        "reasoning_effort": "high",
+        "extra_body": {"reasoning": {"summary": "detailed"}},
+    }
+    _translate_gateway_reasoning(kwargs)
+    assert kwargs["reasoning_effort"] == "high"
+    assert kwargs["extra_body"] == {"reasoning": {"effort": "high", "summary": "detailed"}}
 
 
 def test_disable_cache_sends_proxy_no_cache_directive(monkeypatch: pytest.MonkeyPatch) -> None:
