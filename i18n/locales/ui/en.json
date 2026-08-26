@@ -20,6 +20,8 @@
   "agent.model_menu.desc_deepseek_v4_pro": "Leading open model for agents",
   "agent.model_menu.desc_gemini_3_1_pro": "Multimodal, 1M-token context",
   "agent.model_menu.desc_gemini_3_6_flash": "Near-Pro quality, Flash speed",
+  "agent.model_menu.desc_glm_5_3": "Complex coding and long-horizon agents",
+  "agent.model_menu.desc_glm_5_3_flash": "Fast multimodal coding and agents",
   "agent.model_menu.desc_gpt_5_6_luna": "Fastest, cheapest GPT-5.6",
   "agent.model_menu.desc_gpt_5_6_sol": "OpenAI's code & science flagship",
   "agent.model_menu.desc_gpt_5_6_terra": "Balanced GPT-5.6, great value",

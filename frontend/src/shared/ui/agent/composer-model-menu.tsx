@@ -74,7 +74,7 @@ const FEATURED_MODELS = [
   "openrouter/openai/gpt-5.6-terra",
   "openrouter/openai/gpt-5.6-luna",
   "openrouter/anthropic/claude-fable-5",
-  "openrouter/anthropic/claude-opus-4.8",
+  "openrouter/anthropic/claude-opus-5",
   "openrouter/anthropic/claude-sonnet-5",
   "openrouter/anthropic/claude-haiku-4.5",
   "openrouter/google/gemini-3.1-pro-preview",
@@ -103,7 +103,7 @@ function modelDescription(id: string): string | undefined {
       return msg("agent.model_menu.desc_gpt_5_6_luna");
     case "openrouter/anthropic/claude-fable-5":
       return msg("agent.model_menu.desc_claude_fable_5");
-    case "openrouter/anthropic/claude-opus-4.8":
+    case "openrouter/anthropic/claude-opus-5":
       return msg("agent.model_menu.desc_claude_opus_4_8");
     case "openrouter/anthropic/claude-sonnet-5":
       return msg("agent.model_menu.desc_claude_sonnet_5");
@@ -121,6 +121,10 @@ function modelDescription(id: string): string | undefined {
       return msg("agent.model_menu.desc_grok_4_5");
     case "openrouter/deepseek/deepseek-v4-pro":
       return msg("agent.model_menu.desc_deepseek_v4_pro");
+    case "openrouter/z-ai/glm-5.3":
+      return msg("agent.model_menu.desc_glm_5_3");
+    case "openrouter/z-ai/glm-5.3-flash":
+      return msg("agent.model_menu.desc_glm_5_3_flash");
     case "openrouter/minimax/minimax-m3":
       return msg("agent.model_menu.desc_minimax_m3");
     default:
