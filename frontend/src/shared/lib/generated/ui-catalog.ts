@@ -22,6 +22,8 @@ export type MessageKey =
   | "agent.model_menu.desc_deepseek_v4_pro"
   | "agent.model_menu.desc_gemini_3_1_pro"
   | "agent.model_menu.desc_gemini_3_6_flash"
+  | "agent.model_menu.desc_glm_5_3"
+  | "agent.model_menu.desc_glm_5_3_flash"
   | "agent.model_menu.desc_gpt_5_6_luna"
   | "agent.model_menu.desc_gpt_5_6_sol"
   | "agent.model_menu.desc_gpt_5_6_terra"
@@ -3057,6 +3059,8 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "agent.model_menu.desc_deepseek_v4_pro": "מודל פתוח מוביל לסוכני קוד",
   "agent.model_menu.desc_gemini_3_1_pro": "מולטימודאלי, הקשר של מיליון",
   "agent.model_menu.desc_gemini_3_6_flash": "כמעט Pro, במהירות פלאש",
+  "agent.model_menu.desc_glm_5_3": "קוד מורכב וסוכנים לטווח ארוך",
+  "agent.model_menu.desc_glm_5_3_flash": "קוד מולטימודאלי מהיר וסוכנים",
   "agent.model_menu.desc_gpt_5_6_luna": "המהיר והזול במשפחת GPT-5.6",
   "agent.model_menu.desc_gpt_5_6_sol": "ספינת הדגל של OpenAI לקוד",
   "agent.model_menu.desc_gpt_5_6_terra": "מאוזן ומשתלם ממשפחת GPT-5.6",
@@ -11547,6 +11551,8 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "agent.model_menu.desc_deepseek_v4_pro": "Leading open model for agents",
   "agent.model_menu.desc_gemini_3_1_pro": "Multimodal, 1M-token context",
   "agent.model_menu.desc_gemini_3_6_flash": "Near-Pro quality, Flash speed",
+  "agent.model_menu.desc_glm_5_3": "Complex coding and long-horizon agents",
+  "agent.model_menu.desc_glm_5_3_flash": "Fast multimodal coding and agents",
   "agent.model_menu.desc_gpt_5_6_luna": "Fastest, cheapest GPT-5.6",
   "agent.model_menu.desc_gpt_5_6_sol": "OpenAI's code & science flagship",
   "agent.model_menu.desc_gpt_5_6_terra": "Balanced GPT-5.6, great value",

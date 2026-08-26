@@ -20,6 +20,8 @@
   "agent.model_menu.desc_deepseek_v4_pro": "מודל פתוח מוביל לסוכני קוד",
   "agent.model_menu.desc_gemini_3_1_pro": "מולטימודאלי, הקשר של מיליון",
   "agent.model_menu.desc_gemini_3_6_flash": "כמעט Pro, במהירות פלאש",
+  "agent.model_menu.desc_glm_5_3": "קוד מורכב וסוכנים לטווח ארוך",
+  "agent.model_menu.desc_glm_5_3_flash": "קוד מולטימודאלי מהיר וסוכנים",
   "agent.model_menu.desc_gpt_5_6_luna": "המהיר והזול במשפחת GPT-5.6",
   "agent.model_menu.desc_gpt_5_6_sol": "ספינת הדגל של OpenAI לקוד",
   "agent.model_menu.desc_gpt_5_6_terra": "מאוזן ומשתלם ממשפחת GPT-5.6",
