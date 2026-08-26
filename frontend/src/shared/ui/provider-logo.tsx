@@ -16,6 +16,7 @@ import {
   OpenRouter,
   Together,
   XAI,
+  ZAI,
 } from "@lobehub/icons";
 import { Plug } from "@/shared/ui/icons";
 
@@ -58,6 +59,8 @@ function renderBrand(slug: string, size: number): React.ReactNode {
       return <Gemini.Avatar size={size} />;
     case "xai":
       return <XAI.Avatar size={size} />;
+    case "z-ai":
+      return <ZAI.Avatar size={size} />;
     case "deepseek":
       return <DeepSeek.Avatar size={size} />;
     case "meta":

@@ -13,11 +13,13 @@ const ANTHROPIC_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 const MODEL_EFFORTS: Record<string, readonly string[]> = {
   "openrouter/openai/gpt-5.6-sol": ["none", "low", "medium", "high", "xhigh", "max"],
   "openrouter/google/gemini-3.1-pro-preview": ["low", "medium", "high"],
-  "openrouter/google/gemini-3.6-flash": ["minimal", "low", "medium", "high"],
-  "openrouter/x-ai/grok-4.5": ["low", "medium", "high"],
+  "openrouter/google/gemini-3.7-flash": ["low", "medium", "high"],
+  "openrouter/x-ai/grok-4.6": ["low", "medium", "high", "xhigh"],
   "openrouter/meta/muse-spark-1.1": ["minimal", "low", "medium", "high", "xhigh"],
   // DeepSeek accepts the full set but only none/high/max are distinct.
   "openrouter/deepseek/deepseek-v4-pro": ["none", "high", "max"],
+  "openrouter/z-ai/glm-5.3": ["low", "high", "max"],
+  "openrouter/z-ai/glm-5.3-flash": ["low", "high", "max"],
   "openrouter/moonshotai/kimi-k3": ["low", "high", "max"],
   "openrouter/minimax/minimax-m3": [],
 };

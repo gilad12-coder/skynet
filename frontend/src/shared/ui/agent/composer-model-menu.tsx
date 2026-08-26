@@ -78,10 +78,12 @@ const FEATURED_MODELS = [
   "openrouter/anthropic/claude-sonnet-5",
   "openrouter/anthropic/claude-haiku-4.5",
   "openrouter/google/gemini-3.1-pro-preview",
-  "openrouter/google/gemini-3.6-flash",
+  "openrouter/google/gemini-3.7-flash",
   "openrouter/meta/muse-spark-1.1",
-  "openrouter/x-ai/grok-4.5",
+  "openrouter/x-ai/grok-4.6",
   "openrouter/deepseek/deepseek-v4-pro",
+  "openrouter/z-ai/glm-5.3",
+  "openrouter/z-ai/glm-5.3-flash",
   "openrouter/moonshotai/kimi-k3",
   "openrouter/minimax/minimax-m3",
 ];
@@ -109,13 +111,13 @@ function modelDescription(id: string): string | undefined {
       return msg("agent.model_menu.desc_claude_haiku_4_5");
     case "openrouter/google/gemini-3.1-pro-preview":
       return msg("agent.model_menu.desc_gemini_3_1_pro");
-    case "openrouter/google/gemini-3.6-flash":
+    case "openrouter/google/gemini-3.7-flash":
       return msg("agent.model_menu.desc_gemini_3_6_flash");
     case "openrouter/meta/muse-spark-1.1":
       return msg("agent.model_menu.desc_muse_spark_1_1");
     case "openrouter/moonshotai/kimi-k3":
       return msg("agent.model_menu.desc_kimi_k3");
-    case "openrouter/x-ai/grok-4.5":
+    case "openrouter/x-ai/grok-4.6":
       return msg("agent.model_menu.desc_grok_4_5");
     case "openrouter/deepseek/deepseek-v4-pro":
       return msg("agent.model_menu.desc_deepseek_v4_pro");
