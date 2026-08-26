@@ -1,9 +1,10 @@
 """Sync the translation overlays: extract missing keys, apply translations.
 
-Companion to ``generate_i18n.py``. Two surfaces are localized, selected with
+Companion to ``generate_i18n.py``. Three surfaces are localized, selected with
 ``--scope`` (default ``ui``): the per-locale UI string tree under
-``i18n/locales/ui`` and the backend error/term catalog under ``i18n/locales``
-(whose strings nest under a ``messages`` object). In both, Hebrew is the complete
+``i18n/locales/ui`` plus the backend error and term catalogs under
+``i18n/locales`` (whose strings nest under ``messages`` and ``terms``). In all,
+Hebrew is the complete
 base — every key exists in ``he.json`` — and each other ``<locale>.json`` is an
 overlay that may translate a subset, inheriting the rest through the registry
 fallback chain at runtime. Over time the *full* language overlays (the ones meant
@@ -24,9 +25,10 @@ translation step (the ``translate-i18n`` agent workflow):
                        adding a non-base key. Existing entries are left untouched;
                        new keys are inserted verbatim so diffs stay reviewable.
 
-Pass the same ``--scope`` to both phases. The intentionally-partial regional delta
-overlays (en-GB, pt-BR, fr-CA, yue, …) are left alone: a locale is topped up only
-when it is already mostly complete.
+Pass the same ``--scope`` to both phases. The intentionally-partial regional
+delta overlays (en-GB, pt-BR, fr-CA, …) are left alone because they inherit from
+a complete same-language parent. Distinct advertised languages, including
+Cantonese, are always topped up to the complete base key set.
 """
 
 from __future__ import annotations
@@ -51,29 +53,43 @@ class Scope:
     """A translatable catalog surface: where its locale files live and their shape.
 
     Attributes:
-        name: CLI identifier (``ui`` or ``backend``).
+        name: CLI identifier (``ui``, ``backend``, or ``terms``).
         directory: Folder holding the ``<locale>.json`` catalog files.
-        max_missing: A locale is topped up only when it misses no more than this
-            many base keys. The intentionally-partial regional deltas miss far
-            more and are skipped, so they keep falling back to their parent.
         section: ``None`` when the file is a flat ``{key: string}`` map (UI); the
-            name of the object the strings nest under (``"messages"``) for the
-            backend catalog, whose files also carry ``terms`` / ``$schema``.
+            name of the object the strings nest under for backend catalogs.
     """
 
     name: str
     directory: Path
-    max_missing: int
     section: str | None
 
 
-# The two surfaces the app localizes. ``ui`` is the per-locale UI string tree;
-# ``backend`` is the error/term catalog the frontend reads to localize API codes.
-# The thresholds differ because the bases differ in size (UI ~2.6k keys, backend
-# ~200): in both, full locales miss a handful while regional deltas miss most.
+# The surfaces the app localizes. ``ui`` is the per-locale UI string tree;
+# ``backend`` contains API messages and ``terms`` contains product vocabulary.
 SCOPES: dict[str, Scope] = {
-    "ui": Scope("ui", ROOT / "i18n" / "locales" / "ui", 500, None),
-    "backend": Scope("backend", ROOT / "i18n" / "locales", 50, "messages"),
+    "ui": Scope("ui", ROOT / "i18n" / "locales" / "ui", None),
+    "backend": Scope("backend", ROOT / "i18n" / "locales", "messages"),
+    "terms": Scope("terms", ROOT / "i18n" / "locales", "terms"),
+}
+
+# Distinct languages advertised by the switcher. Regional variants inherit
+# from a complete same-language parent and intentionally remain delta catalogs.
+FULL_LANGUAGE_LOCALES = {
+    "ar",
+    "de",
+    "es",
+    "fa",
+    "fr",
+    "hi",
+    "it",
+    "ja",
+    "ko",
+    "pt",
+    "ru",
+    "tr",
+    "uk",
+    "yue",
+    "zh-Hans",
 }
 
 # Endonym-free English names + writing direction, used to brief each translator.
@@ -92,12 +108,13 @@ LOCALE_META: dict[str, dict[str, str]] = {
     "ru": {"englishName": "Russian", "dir": "ltr"},
     "tr": {"englishName": "Turkish", "dir": "ltr"},
     "uk": {"englishName": "Ukrainian", "dir": "ltr"},
+    "yue": {"englishName": "Cantonese (Traditional Chinese)", "dir": "ltr"},
     "zh-Hans": {"englishName": "Chinese (Simplified)", "dir": "ltr"},
 }
 
-# Every {…} run in a string is a placeholder (named params, {term.x} vocabulary,
-# ICU plural blocks). A translation must carry exactly the same set, untranslated.
-_PLACEHOLDER_RE = re.compile(r"\{[^{}]*\}")
+_SIMPLE_PLACEHOLDER_RE = re.compile(r"^[A-Za-z0-9_.]+$")
+_PLURAL_HEADER_RE = re.compile(r"^(\w+)\s*,\s*plural\s*,\s*([\s\S]+)$")
+_PLURAL_SELECTOR_RE = re.compile(r"(?:=\d+|zero|one|two|few|many|other)\s*\{")
 
 
 def _load(scope: Scope, locale: str) -> dict[str, str]:
@@ -118,28 +135,80 @@ def _load(scope: Scope, locale: str) -> dict[str, str]:
     return section if isinstance(section, dict) else {}
 
 
-def _placeholders(text: str) -> set[str]:
-    """Return the set of ``{…}`` placeholder tokens in a string."""
-    return set(_PLACEHOLDER_RE.findall(text))
+def _matching_brace(text: str, opening: int) -> int:
+    """Return the closing brace paired with ``opening``, or ``-1``."""
+    depth = 0
+    for index in range(opening, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def _plural_branches(text: str) -> dict[str, str]:
+    """Extract ICU plural selector bodies without interpreting their copy."""
+    branches: dict[str, str] = {}
+    cursor = 0
+    while cursor < len(text):
+        match = _PLURAL_SELECTOR_RE.search(text, cursor)
+        if match is None:
+            break
+        selector = match.group(0).split("{", 1)[0].strip()
+        opening = match.end() - 1
+        closing = _matching_brace(text, opening)
+        if closing < 0:
+            break
+        branches[selector] = text[opening + 1 : closing]
+        cursor = closing + 1
+    return branches
+
+
+def _placeholder_signature(text: str) -> set[str]:
+    """Return params and ICU plural structure while ignoring translated copy."""
+    signature: set[str] = set()
+    cursor = 0
+    while cursor < len(text):
+        opening = text.find("{", cursor)
+        if opening < 0:
+            break
+        closing = _matching_brace(text, opening)
+        if closing < 0:
+            break
+        inner = text[opening + 1 : closing]
+        plural = _PLURAL_HEADER_RE.fullmatch(inner)
+        if plural is not None:
+            name, branch_text = plural.groups()
+            branches = _plural_branches(branch_text)
+            signature.add(f"plural:{name}")
+            if "other" in branches:
+                signature.add(f"plural-other:{name}")
+            for body in branches.values():
+                signature.update(_placeholder_signature(body))
+        elif _SIMPLE_PLACEHOLDER_RE.fullmatch(inner):
+            signature.add(f"param:{inner}")
+        cursor = closing + 1
+    return signature
 
 
 def _full_locales(scope: Scope, base_keys: set[str]) -> list[str]:
-    """Return the overlay locales eligible for top-up (mostly-complete, drifted).
+    """Return distinct-language catalogs that need a top-up.
 
     Args:
         scope: Catalog surface being synced.
         base_keys: The complete base key set.
 
     Returns:
-        Locale tags (sorted) that are missing some — but not too many — base keys.
+        Locale tags (sorted) that are missing at least one base key.
     """
     locales: list[str] = []
-    for path in sorted(scope.directory.glob("*.json")):
-        locale = path.stem
-        if locale in (BASE_LOCALE, SOURCE_LOCALE):
+    for locale in sorted(FULL_LANGUAGE_LOCALES):
+        if not (scope.directory / f"{locale}.json").exists():
             continue
         missing = base_keys - set(_load(scope, locale))
-        if 0 < len(missing) <= scope.max_missing:
+        if missing:
             locales.append(locale)
     return locales
 
@@ -261,7 +330,7 @@ def cmd_apply(scope: Scope, workdir: Path) -> int:
             if not isinstance(value, str) or not value.strip():
                 problems.append(f"{locale}/{key}: missing or empty")
                 continue
-            if _placeholders(value) != _placeholders(src):
+            if _placeholder_signature(value) != _placeholder_signature(src):
                 problems.append(f"{locale}/{key}: placeholder mismatch")
                 continue
             additions[key] = value
@@ -298,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
             "--scope",
             choices=sorted(SCOPES),
             default="ui",
-            help="Catalog surface to sync: 'ui' strings (default) or 'backend' messages.",
+            help="Catalog surface: 'ui' strings, 'backend' messages, or product 'terms'.",
         )
     args = parser.parse_args(argv)
     scope = SCOPES[args.scope]
