@@ -3,8 +3,10 @@
 ``run_blackbox_optimization`` is what the worker subprocess calls for a
 ``blackbox`` job: split the cases, score the starting point on the held-out
 split, run the strategy through a budgeted eval server, score the winner
-on the same split, and apply the regression guard. ``validate_blackbox_payload``
-and ``dry_run_scorer`` back the submissions router.
+on the same split, and apply the regression guard. On an agent target the
+scorer is wrapped so every scorer run first launches the harness in its
+own sandbox. ``validate_blackbox_payload`` and ``dry_run_scorer`` back the
+submissions router.
 """
 
 from __future__ import annotations
@@ -13,10 +15,12 @@ import logging
 import tempfile
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import dspy
 
+from ....config import settings
 from ....constants import (
     DETAIL_BASELINE,
     DETAIL_OPTIMIZED,
@@ -35,9 +39,11 @@ from ....constants import (
 from ....exceptions import ServiceError
 from ....models.blackbox import (
     BLACKBOX_STRATEGY_AUTO,
+    BLACKBOX_TARGET_AGENT,
     BlackboxLaneResult,
     BlackboxRunRequest,
     BlackboxRunResponse,
+    BlackboxTarget,
     ScorerDryRunRequest,
     ScorerDryRunResponse,
 )
@@ -52,9 +58,11 @@ from ...language_models import (
 from ...safe_exec import probe_scorer, validate_scorer_code
 from ..cost_ceiling import CostCeilingCallback
 from ..data import split_examples
+from .agent_eval import SandboxAgentScorer, agent_target_unavailable_reason, gateway_from_settings
 from .auto import run_strategy
 from .protocol import Candidate, EngineContext, EvalServer, ScorerFn, Task
-from .registry import get_engine
+from .registry import EngineCapabilities, get_engine
+from .sandbox import sandbox_runtime_from_settings
 from .scorer import RemoteScorer, build_scorer
 
 logger = logging.getLogger(__name__)
@@ -66,6 +74,22 @@ ProgressCallback = Callable[[str, dict[str, Any]], None]
 _PROGRESS_EVENTS = 100
 
 
+def engine_capabilities(target: BlackboxTarget) -> EngineCapabilities:
+    """Describe what this deployment and ``target`` offer the engines.
+
+    Args:
+        target: The job's target.
+
+    Returns:
+        Capabilities for the registry: sandboxes per the settings, agent
+        target per the job.
+    """
+    reason = agent_target_unavailable_reason(settings)
+    return EngineCapabilities(
+        sandbox=reason is None, agent_target=target.kind == BLACKBOX_TARGET_AGENT, sandbox_reason=reason
+    )
+
+
 def validate_blackbox_payload(payload: BlackboxRunRequest) -> None:
     """Reject a job before it is queued when it can never run.
 
@@ -73,16 +97,43 @@ def validate_blackbox_payload(payload: BlackboxRunRequest) -> None:
         payload: The submitted job.
 
     Raises:
-        ServiceError: When the chosen engine is unknown/unavailable or the
-            python scorer code does not load.
+        ServiceError: When the job has an agent target but this deployment
+            cannot run agents, the chosen engine is unknown/unavailable, or
+            the python scorer code does not load.
     """
+    caps = engine_capabilities(payload.target)
+    if caps.agent_target and not caps.sandbox:
+        raise ServiceError(f"Agent targets cannot run on this deployment: {caps.sandbox_reason}")
     if payload.strategy.mode == "single":
-        get_engine(str(payload.strategy.engine))
+        get_engine(str(payload.strategy.engine), caps)
     if payload.scorer.kind == "python":
         validate_scorer_code(str(payload.scorer.metric_code))
 
 
-def _score_holdout(scorer: ScorerFn, candidate: Candidate, holdout: list[Any] | None, *, label: str) -> float | None:
+def _agent_scorer(scorer: ScorerFn, target: BlackboxTarget, *, job_id: str) -> SandboxAgentScorer:
+    """Wrap ``scorer`` so every call runs the harness in a fresh sandbox first.
+
+    Args:
+        scorer: The user's scorer.
+        target: The job's agent target.
+        job_id: Tags the sandboxes with the job.
+
+    Returns:
+        The wrapped scorer.
+
+    Raises:
+        ServiceError: When this deployment has no sandbox runtime or gateway.
+    """
+    runtime = sandbox_runtime_from_settings(settings)
+    gateway = gateway_from_settings(settings)
+    if runtime is None or gateway is None:
+        raise ServiceError(f"Agent targets cannot run on this deployment: {agent_target_unavailable_reason(settings)}")
+    return SandboxAgentScorer(scorer, runtime=runtime, target=target, gateway=gateway, job_id=job_id)
+
+
+def _score_holdout(
+    scorer: ScorerFn, candidate: Candidate, holdout: list[Any] | None, *, label: str, concurrency: int = 1
+) -> float | None:
     """Score ``candidate`` on the held-out cases, outside the optimization budget.
 
     Args:
@@ -90,6 +141,8 @@ def _score_holdout(scorer: ScorerFn, candidate: Candidate, holdout: list[Any] | 
         candidate: The version to score.
         holdout: Held-out cases, or ``None`` in single-task mode.
         label: What the candidate is, for the error message.
+        concurrency: How many cases to score at once (agent targets run one
+            sandbox per case, so this is the number of sandboxes in flight).
 
     Returns:
         The mean held-out score, or ``None`` when there are no held-out cases.
@@ -102,7 +155,13 @@ def _score_holdout(scorer: ScorerFn, candidate: Candidate, holdout: list[Any] | 
             return scorer(candidate, None)[0]
         if not holdout:
             return None
-        return sum(scorer(candidate, case)[0] for case in holdout) / len(holdout)
+        workers = max(1, min(concurrency, len(holdout)))
+        if workers == 1:
+            scores = [scorer(candidate, case)[0] for case in holdout]
+        else:
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="holdout") as pool:
+                scores = [score for score, _ in pool.map(lambda case: scorer(candidate, case), holdout)]
+        return sum(scores) / len(scores)
     except ServiceError:
         raise
     except Exception as exc:
@@ -163,11 +222,17 @@ def run_blackbox_optimization(
         The best version with baseline vs optimized held-out scores.
 
     Raises:
-        ServiceError: When the scorer cannot be built, fails on the starting
-            point, or no engine produced a version for a seedless job.
+        ServiceError: When the scorer cannot be built, the job has an agent
+            target this deployment cannot run, the scorer fails on the
+            starting point, or no engine produced a version for a seedless job.
     """
     started = time.perf_counter()
     scorer = build_scorer(payload.scorer)
+    target = payload.target
+    caps = engine_capabilities(target)
+    if caps.agent_target:
+        scorer = _agent_scorer(scorer, target, job_id=artifact_id)
+    concurrency = target.concurrency if caps.agent_target else 1
     cases = list(payload.cases or [])
     splits = split_examples(cases, payload.split_fractions, shuffle=payload.shuffle, seed=payload.seed)
     split_counts = SplitCounts(train=len(splits.train), val=len(splits.val), test=len(splits.test))
@@ -183,7 +248,7 @@ def run_blackbox_optimization(
     seed_candidate = payload.seed_candidate
     baseline = None
     if seed_candidate is not None:
-        baseline = _score_holdout(scorer, seed_candidate, holdout, label="starting point")
+        baseline = _score_holdout(scorer, seed_candidate, holdout, label="starting point", concurrency=concurrency)
         if progress_callback is not None:
             progress_callback(PROGRESS_BASELINE, {DETAIL_BASELINE: baseline})
 
@@ -213,13 +278,16 @@ def run_blackbox_optimization(
         run_dir=gepa_log_dir_path or tempfile.mkdtemp(prefix=f"skynet-blackbox-{artifact_id}-"),
         seed=payload.seed or 0,
         stop_at_score=payload.budget.stop_at_score,
+        max_iterations=payload.budget.max_iterations,
+        concurrency=concurrency,
+        target_label=f"{target.harness} · {target.model}" if caps.agent_target else None,
     )
     callbacks = [CostCeilingCallback(payload.max_cost_credits, lm)] if payload.max_cost_credits is not None else []
     with dspy.context(callbacks=callbacks):
-        result, lanes = run_strategy(payload.strategy, task, server, ctx, progress_callback)
+        result, lanes = run_strategy(payload.strategy, task, server, ctx, progress_callback, caps=caps)
 
     best_candidate = result.best_candidate
-    optimized = _score_holdout(scorer, best_candidate, holdout, label="optimized version")
+    optimized = _score_holdout(scorer, best_candidate, holdout, label="optimized version", concurrency=concurrency)
     regression_guard_applied = False
     if seed_candidate is not None and baseline is not None and optimized is not None and optimized < baseline:
         best_candidate, optimized, regression_guard_applied = seed_candidate, baseline, True
@@ -258,7 +326,11 @@ def run_blackbox_optimization(
             ModelTokenUsage(model=model, input_tokens=in_out[0], output_tokens=in_out[1])
             for model, in_out in usage.items()
         ],
-        optimization_metadata={"strategy": payload.strategy.model_dump(), "budget": payload.budget.model_dump()},
+        optimization_metadata={
+            "strategy": payload.strategy.model_dump(),
+            "budget": payload.budget.model_dump(),
+            "target": target.model_dump(),
+        },
         details={"optimizer_best_score": result.best_score, **result.metadata},
     )
 

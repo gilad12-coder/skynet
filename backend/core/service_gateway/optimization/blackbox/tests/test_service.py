@@ -24,9 +24,10 @@ from core.exceptions import ServiceError
 from core.models.blackbox import BLACKBOX_ENGINE_BEST_OF_N, BlackboxRunRequest, ScorerDryRunRequest
 
 from .. import service as service_mod
+from ..harness import GatewayConfig
 from ..protocol import Result
 from ..service import dry_run_scorer, run_blackbox_optimization, validate_blackbox_payload
-from .mocks import VOWEL_SCORER_CODE, FakeReflectionLM
+from .mocks import AGENT_OUTPUT_SCORER_CODE, VOWEL_SCORER_CODE, FakeReflectionLM, FakeSandboxRuntime
 
 _CASES = [{"target": "aeiou", "i": i} for i in range(10)]
 
@@ -99,7 +100,12 @@ def test_run_scores_baseline_and_optimized_on_the_holdout(fake_lm: FakeReflectio
     assert [(u.model, u.input_tokens, u.output_tokens) for u in response.usage_by_model] == [
         ("fake/model", 10 * len(fake_lm.history), 5 * len(fake_lm.history))
     ]
-    assert response.optimization_metadata["budget"] == {"max_scorer_runs": 12, "stop_at_score": None}
+    assert response.optimization_metadata["budget"] == {
+        "max_scorer_runs": 12,
+        "stop_at_score": None,
+        "max_iterations": None,
+    }
+    assert response.optimization_metadata["target"]["kind"] == "text"
     assert response.details["optimizer_best_score"] == 1.0
     assert response.details["proposals"] >= 1
 
@@ -153,7 +159,10 @@ def test_regression_guard_restores_the_seed(
     monkeypatch.setattr(
         service_mod,
         "run_strategy",
-        lambda strategy, task, server, ctx, cb=None: (Result(best_candidate="xyz", best_score=0.0, total_evals=0), []),
+        lambda strategy, task, server, ctx, cb=None, *, caps=None: (
+            Result(best_candidate="xyz", best_score=0.0, total_evals=0),
+            [],
+        ),
     )
 
     response = run_blackbox_optimization(_payload(), artifact_id="job-3", gepa_log_dir_path=str(tmp_path))
@@ -298,3 +307,74 @@ def test_dry_run_reports_remote_failures(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert response.ok is False
     assert response.error == "remote scorer request failed: refused"
+
+
+_AGENT_TARGET = {
+    "kind": "agent",
+    "harness": "custom",
+    "model": "m",
+    "run_command": "run-agent",
+    "timeout_seconds": 600,
+    "concurrency": 2,
+}
+
+
+def test_validate_payload_rejects_agent_targets_this_deployment_cannot_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An agent target on a deployment with no sandbox is refused before it is queued."""
+    monkeypatch.setattr(
+        service_mod, "agent_target_unavailable_reason", lambda settings: "Agent sandboxes are not configured."
+    )
+
+    with pytest.raises(ServiceError, match="Agent targets cannot run on this deployment: Agent sandboxes are not"):
+        validate_blackbox_payload(_payload(target=_AGENT_TARGET))
+
+
+def test_agent_target_runs_every_scorer_call_in_its_own_sandbox(
+    fake_lm: FakeReflectionLM, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each scorer run opens a fresh, tagged sandbox, runs the harness, and the scorer judges its answer."""
+    runtime = FakeSandboxRuntime()
+    monkeypatch.setattr(service_mod, "agent_target_unavailable_reason", lambda settings: None)
+    monkeypatch.setattr(service_mod, "sandbox_runtime_from_settings", lambda settings: runtime)
+    monkeypatch.setattr(
+        service_mod,
+        "gateway_from_settings",
+        lambda settings: GatewayConfig(url="https://gw.example/v1", api_key="secret-key"),
+    )
+
+    response = run_blackbox_optimization(
+        _payload(
+            seed_candidate="be a helpful agent",
+            cases=[{"prompt": f"solve {i}", "i": i} for i in range(10)],
+            budget={"max_scorer_runs": 4},
+            scorer={"kind": "python", "metric_code": AGENT_OUTPUT_SCORER_CODE},
+            target=_AGENT_TARGET,
+        ),
+        artifact_id="agent-1",
+        gepa_log_dir_path=str(tmp_path),
+    )
+
+    assert runtime.sessions, "no sandbox was opened for the agent target"
+    assert len(runtime.sessions) == len(runtime.specs)
+    assert all(session.closed for session in runtime.sessions)
+    assert all(session.commands == ["run-agent"] for session in runtime.sessions)
+
+    spec = runtime.specs[0]
+    assert spec.name == "skynet-agent-1"
+    assert spec.tags == {"skynet_job": "agent-1"}
+    assert spec.env["SKYNET_MODEL"] == "m"
+    assert spec.env["SKYNET_GATEWAY_URL"] == "https://gw.example/v1"
+    assert spec.env["SKYNET_API_KEY"] == "secret-key"
+    assert spec.lifetime_seconds == 1200
+
+    # The default fake answers ``done`` (two vowels of four) for every run, so
+    # the scorer that reads the answer file scores every version at 0.5.
+    assert response.baseline_test_metric == pytest.approx(0.5)
+    assert response.optimized_test_metric == pytest.approx(0.5)
+    assert response.regression_guard_applied is False
+
+    target_meta = response.optimization_metadata["target"]
+    assert target_meta["kind"] == "agent"
+    assert target_meta["harness"] == "custom"
+    assert target_meta["model"] == "m"
+    assert target_meta["concurrency"] == 2

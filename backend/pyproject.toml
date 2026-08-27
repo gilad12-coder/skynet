@@ -38,6 +38,10 @@ dependencies = [
     # the note there). Without floor+override a bare resolve silently builds a
     # backend that won't import (0.0.27) or lacks PxN (0.1.1).
     "gepa>=0.1.4",
+    # Vercel Sandbox SDK: throwaway microVMs for black-box agent targets. The
+    # leaf package, not the ``vercel`` umbrella — that one pins cbor2>=6, which
+    # forces webauthn down a release, and pulls queue/cache/telemetry we never use.
+    "vercel-sandbox>=0.4.0",
     "litellm>=1.84.0",
     "click>=8.3.3",
     "sqlalchemy>=2.0",
