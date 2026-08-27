@@ -258,3 +258,22 @@ class BlackboxRunResponse(BaseModel):
     usage_by_model: list[ModelTokenUsage] = Field(default_factory=list)
     optimization_metadata: dict[str, Any] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)
+
+
+# One entry of ``GET /blackbox/engines``: the catalog the wizard renders,
+# with availability resolved for the requested target kind.
+class BlackboxEngineInfo(BaseModel):
+    id: str
+    label: str
+    description: str
+    available: bool
+    unavailable_reason: str | None = None
+    requires_agent_target: bool = False
+    supports_parts: bool = False
+
+
+class BlackboxEngineCatalogResponse(BaseModel):
+    target_kind: Literal["text", "agent"]
+    sandbox_available: bool
+    sandbox_reason: str | None = None
+    engines: list[BlackboxEngineInfo] = Field(default_factory=list)

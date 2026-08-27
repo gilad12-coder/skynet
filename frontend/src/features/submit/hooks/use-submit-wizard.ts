@@ -89,7 +89,7 @@ const DEFAULT_TARGET_SCORE = "100";
 // wizard sends nothing, so the server-wide GEPA_PXN_* settings still apply.
 const DEFAULT_PXN = "1";
 
-function prepareModelConfig(config: ModelConfig): ModelConfig {
+export function prepareModelConfig(config: ModelConfig): ModelConfig {
   const { base_url: _baseUrl, ...fields } = config;
   const {
     api_key: _apiKey,

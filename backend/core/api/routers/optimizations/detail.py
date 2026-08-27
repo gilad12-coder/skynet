@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field, ValidationError
 from ....billing import ProviderKeyVault, resolve_byok_model_config
 from ....config import settings
 from ....constants import (
+    OPTIMIZATION_TYPE_BLACKBOX,
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
     PAYLOAD_OVERVIEW_MODEL_NAME,
@@ -41,6 +42,7 @@ from ....constants import (
     TOKEN_SOURCE_BYOK,
 )
 from ....models import (
+    BlackboxRunResponse,
     ColumnMapping,
     GridSearchResponse,
     JobLogEntry,
@@ -250,11 +252,14 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
 
         result = None
         grid_result = None
+        blackbox_result = None
         result_data = job_data.get("result")
         if result_data and isinstance(result_data, dict):
             try:
                 if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH:
                     grid_result = GridSearchResponse.model_validate(result_data)
+                elif status == OptimizationStatus.success and optimization_type == OPTIMIZATION_TYPE_BLACKBOX:
+                    blackbox_result = BlackboxRunResponse.model_validate(result_data)
                 elif status == OptimizationStatus.success:
                     result = RunResponse.model_validate(result_data)
             except ValidationError:
@@ -306,6 +311,7 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
             logs_offset=logs_offset,
             result=result,
             grid_result=grid_result,
+            blackbox_result=blackbox_result,
             effective_role=effective_role,
             resumable=is_resumable(job_store, job_data),
             pausable=is_pausable(job_store, job_data),

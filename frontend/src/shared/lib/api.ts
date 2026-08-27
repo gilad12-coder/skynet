@@ -1,4 +1,6 @@
 import type {
+  BlackboxEngineCatalogResponse,
+  BlackboxRunRequest,
   ColumnMapping,
   EvalExampleResult,
   GridSearchResult,
@@ -13,6 +15,8 @@ import type {
   ProfileDatasetResponse,
   QueueStatusResponse,
   RunRequest,
+  ScorerDryRunRequest,
+  ScorerDryRunResponse,
   ServeInfoResponse,
   ServeResponse,
   ValidateCodeResponse,
@@ -261,7 +265,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // A network drop is caught and toasted upstream, so without this Sentry
     // would only ever hear about it if it escaped as an uncaught exception.
     reportHandledError(err, {
-      tags: { source: "api", kind: "network", endpoint: endpointTag(path), method: init?.method ?? "GET" },
+      tags: {
+        source: "api",
+        kind: "network",
+        endpoint: endpointTag(path),
+        method: init?.method ?? "GET",
+      },
     });
     throw new Error(msg("auto.shared.lib.api.literal.1"), { cause: err });
   }
@@ -451,6 +460,26 @@ export function submitGridSearch(payload: GridSearchRequest) {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function submitBlackboxRun(payload: BlackboxRunRequest) {
+  return request<OptimizationSubmissionResponse>("/blackbox/run", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function dryRunScorer(payload: ScorerDryRunRequest) {
+  return request<ScorerDryRunResponse>("/blackbox/scorer/dry-run", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getBlackboxEngines(target: "text" | "agent") {
+  return request<BlackboxEngineCatalogResponse>(
+    `/blackbox/engines?target=${encodeURIComponent(target)}`,
+  );
 }
 
 export function listJobs(params?: {

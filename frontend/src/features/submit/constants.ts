@@ -50,6 +50,17 @@ export const STEPS = [
   { id: "review", label: () => msg("auto.features.submit.constants.literal.4") },
 ] as const;
 
+export type WizardStep = { id: string; label: () => string };
+
+export const BLACKBOX_STEPS: readonly WizardStep[] = [
+  { id: "basics", label: () => msg("auto.features.submit.constants.literal.1") },
+  { id: "start", label: () => msg("submit.blackbox.step.start") },
+  { id: "cases", label: () => msg("submit.blackbox.step.cases") },
+  { id: "scorer", label: () => msg("submit.blackbox.step.scorer") },
+  { id: "optimizer", label: () => msg("submit.blackbox.step.optimizer") },
+  { id: "review", label: () => msg("auto.features.submit.constants.literal.4") },
+];
+
 export const RECENT_KEY = "skynet:recent-model-configs";
 export const MAX_RECENT = 5;
 

@@ -6,7 +6,7 @@ export type JobStatus =
   | "failed"
   | "cancelled"
   | "paused";
-export type OptimizationType = "run" | "grid_search";
+export type OptimizationType = "run" | "grid_search" | "blackbox";
 
 // Levels emitted by the backend (`backend/core/api/routers/optimizations_meta.py`).
 // `(string & {})` keeps the union behaviour for autocomplete while still
@@ -490,6 +490,130 @@ export interface GridSearchResult {
   runtime_seconds?: number | null;
 }
 
+// ── Black-box ("Optimize Anything") ─────────────────────────────────────────
+// Mirrors `backend/core/models/blackbox.py`. Scores are raw floats on whatever
+// scale the user's scorer returns — never percentages.
+
+/** A candidate is one text, or a dict of named parts (GEPA / meta_harness only). */
+export type BlackboxCandidate = string | Record<string, string>;
+
+export type BlackboxEngineId = "gepa" | "best_of_n" | "autoresearch" | "meta_harness";
+export type BlackboxHarness = "pi" | "codex" | "opencode" | "custom";
+
+export interface BlackboxScorer {
+  kind: "python" | "remote";
+  metric_code?: string | null;
+  url?: string | null;
+  secret?: string | null;
+  timeout_seconds?: number;
+}
+
+export interface BlackboxBudget {
+  max_scorer_runs: number;
+  max_iterations?: number | null;
+  stop_at_score?: number | null;
+}
+
+export interface BlackboxTarget {
+  kind: "text" | "agent";
+  harness?: BlackboxHarness;
+  model?: string | null;
+  timeout_seconds?: number;
+  concurrency?: number;
+  setup_command?: string | null;
+  install_command?: string | null;
+  run_command?: string | null;
+}
+
+export interface BlackboxStrategy {
+  mode: "auto" | "single";
+  engine?: BlackboxEngineId | null;
+}
+
+export interface BlackboxRunRequest {
+  name?: string;
+  description?: string;
+  username?: string;
+  objective?: string | null;
+  background?: string | null;
+  seed_candidate?: BlackboxCandidate | null;
+  scorer: BlackboxScorer;
+  cases?: Array<Record<string, unknown>> | null;
+  split_fractions?: SplitFractions;
+  shuffle?: boolean;
+  seed?: number | null;
+  budget: BlackboxBudget;
+  strategy: BlackboxStrategy;
+  target: BlackboxTarget;
+  reflection_model_config: ModelConfig;
+  token_source?: "managed" | "byok";
+  is_private?: boolean;
+  max_cost_credits?: number | null;
+  estimated_credits_low?: number | null;
+  estimated_credits_high?: number | null;
+}
+
+export interface ScorerDryRunRequest {
+  scorer: BlackboxScorer;
+  candidate: BlackboxCandidate;
+  case?: Record<string, unknown> | null;
+}
+
+export interface ScorerDryRunResponse {
+  ok: boolean;
+  score?: number | null;
+  side_info: Record<string, unknown>;
+  error?: string | null;
+  elapsed_ms: number;
+}
+
+export interface BlackboxLaneResult {
+  engine: BlackboxEngineId;
+  phase: "explore" | "continue" | "single";
+  status: "completed" | "failed" | "unavailable" | "budget_exhausted";
+  best_score?: number | null;
+  scorer_runs: number;
+  error?: string | null;
+}
+
+export interface BlackboxRunResult {
+  optimizer_name: string;
+  strategy_mode: "auto" | "single";
+  engine_used: BlackboxEngineId;
+  split_counts: Record<string, number>;
+  baseline_test_metric?: number | null;
+  optimized_test_metric?: number | null;
+  metric_improvement?: number | null;
+  seed_candidate?: BlackboxCandidate | null;
+  best_candidate: BlackboxCandidate;
+  regression_guard_applied: boolean;
+  lanes: BlackboxLaneResult[];
+  total_scorer_runs: number;
+  runtime_seconds: number;
+  num_lm_calls: number;
+  total_tokens?: number | null;
+  usage_by_model: Array<Record<string, unknown>>;
+  optimization_metadata: Record<string, unknown>;
+  details: Record<string, unknown>;
+}
+
+export interface BlackboxEngineInfo {
+  id: BlackboxEngineId;
+  label: string;
+  description: string;
+  available: boolean;
+  unavailable_reason?: string | null;
+  requires_agent_target: boolean;
+  supports_parts: boolean;
+}
+
+export interface BlackboxEngineCatalogResponse {
+  target_kind: "text" | "agent";
+  sandbox_available: boolean;
+  sandbox_reason?: string | null;
+  engines: BlackboxEngineInfo[];
+}
+
 export interface OptimizationStatusResponse extends OptimizationSummaryResponse {
   progress_events: ProgressEvent[];
   logs: OptimizationLogEntry[];
@@ -503,6 +627,7 @@ export interface OptimizationStatusResponse extends OptimizationSummaryResponse 
   logs_offset?: number;
   result?: RunResult | null;
   grid_result?: GridSearchResult | null;
+  blackbox_result?: BlackboxRunResult | null;
   /** Grid pair indices with a saved checkpoint: a failed pair here offers Resume, one not here offers Restart. */
   grid_resumable_pairs?: number[];
   /** Caller's share role when reached via a member grant; null for the owner's own view. */
