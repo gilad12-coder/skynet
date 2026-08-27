@@ -151,6 +151,31 @@ async function verifyBackendPasskey(assertion: string): Promise<BackendAccount |
   }
 }
 
+/**
+ * Mirror a provider-authenticated (Google/GitHub/SSO) identity into the
+ * backend's users table via the internal /auth/oauth/provision, so it gets the
+ * same first-sign-in signal as a local account. Resolves to whether this was
+ * the identity's first sign-in; false on any failure, which never blocks the
+ * sign-in itself — the provider has already authenticated the user.
+ */
+async function provisionBackendAccount(user: {
+  email?: string | null;
+  name?: string | null;
+}): Promise<boolean> {
+  if (!backendAuthSecret || !user.email) return false;
+  try {
+    const res = await fetch(`${backendBaseUrl}/auth/oauth/provision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Internal-Auth": backendAuthSecret },
+      body: JSON.stringify({ email: user.email, name: user.name ?? "" }),
+    });
+    if (!res.ok) return false;
+    return ((await res.json()) as BackendAccount).first_login === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Build a CredentialsSignin whose ``code`` survives to the client signIn result. */
 function credentialsError(code: string): CredentialsSignin {
   const error = new CredentialsSignin();
@@ -365,7 +390,7 @@ export const { handlers, auth } = NextAuth({
     authorized({ auth: session }) {
       return !!session?.user;
     },
-    jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       if (user) {
         token.name = user.name ?? token.name;
         token.email = user.email ?? token.email;
@@ -375,10 +400,14 @@ export const { handlers, auth } = NextAuth({
         // it does for SSO and email/password accounts.
         const identity = String(user.email ?? user.name ?? "").toLowerCase();
         token.role = user.role ?? (isAdmin(identity, token.groups) ? "admin" : "user");
-        // Only the backend-verified providers (credentials, passkey) know
-        // whether this is the account's first sign-in; OAuth users never
-        // touch the backend at login, so they simply never carry the flag.
-        token.firstLogin = user.firstLogin === true;
+        // The backend-verified providers (credentials, passkey) already report
+        // whether this is the account's first sign-in. Every other provider
+        // authenticates at the IdP, so its identity is mirrored to the backend
+        // here to get the same signal.
+        token.firstLogin =
+          account && account.type !== "credentials"
+            ? await provisionBackendAccount(user)
+            : user.firstLogin === true;
       }
       return token;
     },

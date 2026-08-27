@@ -22,6 +22,7 @@ from ..account_data_service import delete_account, export_account
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..passwords import verify_password
+from .accounts import _has_password
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
@@ -108,7 +109,7 @@ def create_account_data_router(*, job_store) -> APIRouter:
         """
         with Session(job_store.engine) as session:
             row = session.get(UserModel, user.username)
-            if row is not None and not verify_password(body.password, str(row.password_hash)):
+            if _has_password(row) and not verify_password(body.password, str(row.password_hash)):
                 raise DomainError("accounts.invalid_credentials", status=401)
             summary = delete_account(session, user.username)
             session.commit()

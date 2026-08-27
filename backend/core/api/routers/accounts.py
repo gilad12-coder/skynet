@@ -5,8 +5,10 @@ only unauthenticated routes in the API — they bootstrap a session before any
 token exists. To keep them from being a public abuse vector they are gated by
 the shared ``BACKEND_AUTH_SECRET``: only the Skynet frontend, which holds that
 secret, may call them (server-side, from its NextAuth credentials provider).
-OAuth (Google/GitHub) sign-ins never touch this router — they resolve identity
-at the provider and mint the session JWT directly.
+OAuth (Google/GitHub) and SSO sign-ins authenticate at the provider; the
+frontend then mirrors that identity here through ``/auth/oauth/provision`` so
+it has the same ``users`` row (minus a password) and first-sign-in signal as a
+local account.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import hmac
 import logging
 import re
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, TypeGuard
 
 from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
@@ -64,6 +66,13 @@ class LoginRequest(BaseModel):
     totp_code: str = Field(default="", description="Authenticator-app code when TOTP 2FA is enabled.")
     email_code: str = Field(default="", description="Emailed one-time code when email 2FA is enabled.")
     recovery_code: str = Field(default="", description="Single-use recovery code standing in for a lost factor.")
+
+
+# Identity the frontend has already authenticated with an external provider
+# (Google, GitHub, SSO) and now mirrors into ``users``.
+class OAuthProvisionRequest(BaseModel):
+    email: str = Field(description="Provider-asserted email; also the cross-app identity.")
+    name: str = Field(default="", description="Display name from the provider profile.")
 
 
 # The resolved account the frontend turns into a session — never carries a secret.
@@ -145,6 +154,20 @@ def _role_for(email: str) -> str:
         ``"admin"`` when the email is in the admin allowlist, else ``"user"``.
     """
     return "admin" if email in settings.admin_usernames_set else "user"
+
+
+def _has_password(row: UserModel | None) -> TypeGuard[UserModel]:
+    """Report whether a ``users`` row is a local email/password account.
+
+    Args:
+        row: The account row, or ``None`` when the identity has no row.
+
+    Returns:
+        True only for a row holding a password hash. A row provisioned for an
+        OAuth/SSO identity carries an empty hash, so password-only features
+        (password confirmation, 2FA) must not treat it as a local account.
+    """
+    return row is not None and bool(row.password_hash)
 
 
 def _require_internal_auth(header_value: str | None) -> None:
@@ -350,6 +373,61 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
             name = str(row.name)
             session.commit()
         throttle.reset(email)
+        return AccountInfo(email=email, name=name, role=_role_for(email), first_login=first_login)
+
+    @router.post(
+        "/auth/oauth/provision",
+        response_model=AccountInfo,
+        summary="Record a sign-in through an external identity provider",
+    )
+    def provision_oauth(
+        body: OAuthProvisionRequest,
+        x_internal_auth: Annotated[str | None, Header()] = None,
+    ) -> AccountInfo:
+        """Mirror a provider-authenticated identity into ``users`` and return it.
+
+        The frontend has already authenticated the user with Google, GitHub, or
+        the SSO IdP; nothing is verified here beyond the internal secret. The
+        first sign-in creates a row with no password, so ``/auth/login`` can
+        never sign in to it, and later sign-ins only stamp ``last_login_at``. A
+        local account with the same email is reused untouched, so one person
+        stays one identity however they sign in.
+
+        Args:
+            body: Provider-asserted email and display name.
+            x_internal_auth: Shared-secret header proving the caller is the
+                trusted frontend.
+
+        Returns:
+            The account (email, display name, role) and whether this is its
+            first successful sign-in.
+
+        Raises:
+            DomainError: 403 on a bad internal secret; 422 on an invalid email.
+        """
+        _require_internal_auth(x_internal_auth)
+        email = _normalise_email(body.email)
+        if not _EMAIL_RE.match(email):
+            raise DomainError("accounts.invalid_email", status=422)
+        now = datetime.now(UTC)
+        with Session(job_store.engine) as session:
+            row = session.get(UserModel, email)
+            if row is None:
+                # The provider already vouched for the email, and an empty hash
+                # never verifies, so the row is verified yet unreachable through
+                # the password path until the user sets a password.
+                row = UserModel(
+                    email=email,
+                    name=body.name.strip() or email,
+                    password_hash="",
+                    created_at=now,
+                    email_verified=True,
+                )
+                session.add(row)
+            first_login = row.last_login_at is None
+            row.last_login_at = now
+            name = str(row.name)
+            session.commit()
         return AccountInfo(email=email, name=name, role=_role_for(email), first_login=first_login)
 
     @router.post(

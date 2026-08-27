@@ -221,3 +221,25 @@ def test_delete_oauth_account_needs_no_password(harness: SimpleNamespace) -> Non
     with Session(harness.engine) as session:
         assert session.get(JobModel, f"job-{oauth_email}") is None
         assert session.get(BillingCustomerModel, oauth_email) is None
+
+
+def test_delete_provisioned_oauth_account_needs_no_password(harness: SimpleNamespace) -> None:
+    """An OAuth identity mirrored into ``users`` still deletes on bearer auth alone."""
+    oauth_email = "mirrored@example.com"
+    provisioned = harness.client.post(
+        "/auth/oauth/provision",
+        json={"email": oauth_email, "name": "Mirrored"},
+        headers=_AUTH_HEADER,
+    )
+    assert provisioned.status_code == 200
+    _seed_user_data(harness.engine, oauth_email, "cus_mirrored")
+    harness.app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(
+        username=oauth_email, role="user", groups=()
+    )
+
+    resp = harness.client.post("/account/delete", json={"password": ""})
+    assert resp.status_code == 200
+
+    with Session(harness.engine) as session:
+        assert session.get(UserModel, oauth_email) is None
+        assert session.get(JobModel, f"job-{oauth_email}") is None

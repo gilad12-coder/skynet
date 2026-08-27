@@ -305,3 +305,85 @@ def test_login_success_resets_failure_counter(accounts_client: TestClient) -> No
             headers=_AUTH_HEADER,
         )
         assert again.status_code == 401
+
+
+def test_oauth_provision_creates_passwordless_account(accounts_client: TestClient) -> None:
+    """A provider identity gets a verified, password-less row and a one-shot first_login."""
+    first = accounts_client.post(
+        "/auth/oauth/provision",
+        json={"email": "Gina@Example.com", "name": "Gina"},
+        headers=_AUTH_HEADER,
+    )
+    assert first.status_code == 200
+    assert first.json() == {
+        "email": "gina@example.com",
+        "name": "Gina",
+        "role": "user",
+        "first_login": True,
+    }
+    engine = accounts_client.app.state.job_store.engine
+    with Session(engine) as session:
+        row = session.get(UserModel, "gina@example.com")
+        assert row is not None
+        assert row.password_hash == ""
+        assert bool(row.email_verified)
+        assert row.last_login_at is not None
+
+    again = accounts_client.post(
+        "/auth/oauth/provision",
+        json={"email": "gina@example.com", "name": "Gina"},
+        headers=_AUTH_HEADER,
+    )
+    assert again.status_code == 200
+    assert again.json()["first_login"] is False
+
+    # The row has no password, so the password path can never sign in to it,
+    # and the email counts as taken for a fresh sign-up.
+    login = accounts_client.post(
+        "/auth/login",
+        json={"email": "gina@example.com", "password": ""},
+        headers=_AUTH_HEADER,
+    )
+    assert login.status_code == 401
+    register = accounts_client.post(
+        "/auth/register",
+        json={"email": "gina@example.com", "password": "longenough1"},
+        headers=_AUTH_HEADER,
+    )
+    assert register.status_code == 409
+
+
+def test_oauth_provision_reuses_local_account(accounts_client: TestClient) -> None:
+    """A provider sign-in with a registered email reuses that row, name intact."""
+    accounts_client.post(
+        "/auth/register",
+        json={"email": "hal@example.com", "password": "longenough1", "name": "Hal"},
+        headers=_AUTH_HEADER,
+    )
+    provisioned = accounts_client.post(
+        "/auth/oauth/provision",
+        json={"email": "HAL@example.com", "name": "Hal From Google"},
+        headers=_AUTH_HEADER,
+    )
+    assert provisioned.status_code == 200
+    assert provisioned.json()["name"] == "Hal"
+    assert provisioned.json()["first_login"] is True
+
+    # The first sign-in is consumed whichever path it came through.
+    login = accounts_client.post(
+        "/auth/login",
+        json={"email": "hal@example.com", "password": "longenough1"},
+        headers=_AUTH_HEADER,
+    )
+    assert login.status_code == 200
+    assert login.json()["first_login"] is False
+
+
+def test_oauth_provision_requires_secret_and_valid_email(accounts_client: TestClient) -> None:
+    """Provisioning is gated by the internal secret and rejects a malformed email."""
+    no_secret = accounts_client.post("/auth/oauth/provision", json={"email": "ivy@example.com"})
+    assert no_secret.status_code == 403
+    bad_email = accounts_client.post(
+        "/auth/oauth/provision", json={"email": "not-an-email"}, headers=_AUTH_HEADER
+    )
+    assert bad_email.status_code == 422
