@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from functools import cached_property
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +29,21 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # platform's sole LLM provider, and the router picks a concrete model
 # per request. Requires OPENROUTER_API_KEY in the env.
 DEFAULT_AGENT_MODEL_ID = "openrouter/openrouter/auto-beta"
+
+
+# Keyed on the raw CSV rather than cached on the instance: tests monkeypatch
+# the source strings at runtime, and an instance-level cache would go stale.
+@lru_cache(maxsize=16)
+def _csv_lower_set(raw: str) -> frozenset[str]:
+    """Split a comma-separated string into a lowercase frozenset of trimmed, non-empty items.
+
+    Args:
+        raw: Comma-separated text, possibly with blanks and surrounding whitespace.
+
+    Returns:
+        The distinct lowercase items.
+    """
+    return frozenset(s.strip().lower() for s in raw.split(",") if s.strip())
 
 
 class Settings(BaseSettings):
@@ -978,12 +993,12 @@ class Settings(BaseSettings):
     @property
     def admin_usernames_set(self) -> frozenset[str]:
         """Return break-glass admin usernames as a lowercase frozenset."""
-        return frozenset(s.strip().lower() for s in self.admin_usernames.split(",") if s.strip())
+        return _csv_lower_set(self.admin_usernames)
 
     @property
     def admin_groups_set(self) -> frozenset[str]:
         """Return admin IdP groups as a lowercase frozenset."""
-        return frozenset(s.strip().lower() for s in self.admin_groups.split(",") if s.strip())
+        return _csv_lower_set(self.admin_groups)
 
     @property
     def is_stripe_configured(self) -> bool:
