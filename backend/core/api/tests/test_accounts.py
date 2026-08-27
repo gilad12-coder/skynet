@@ -91,7 +91,12 @@ def test_register_then_login_succeeds(accounts_client: TestClient) -> None:
         headers=_AUTH_HEADER,
     )
     assert created.status_code == 201
-    assert created.json() == {"email": "alice@example.com", "name": "Alice", "role": "user"}
+    assert created.json() == {
+        "email": "alice@example.com",
+        "name": "Alice",
+        "role": "user",
+        "first_login": False,
+    }
 
     ok = accounts_client.post(
         "/auth/login",
@@ -100,6 +105,15 @@ def test_register_then_login_succeeds(accounts_client: TestClient) -> None:
     )
     assert ok.status_code == 200
     assert ok.json()["email"] == "alice@example.com"
+    assert ok.json()["first_login"] is True
+
+    again = accounts_client.post(
+        "/auth/login",
+        json={"email": "alice@example.com", "password": "hunter2hunter"},
+        headers=_AUTH_HEADER,
+    )
+    assert again.status_code == 200
+    assert again.json()["first_login"] is False
 
 
 def test_register_persists_profile_fields(accounts_client: TestClient) -> None:

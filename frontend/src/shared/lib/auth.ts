@@ -75,7 +75,7 @@ const backendBaseUrl =
 const googleConfigured = !!process.env.AUTH_GOOGLE_ID && !!process.env.AUTH_GOOGLE_SECRET;
 const githubConfigured = !!process.env.AUTH_GITHUB_ID && !!process.env.AUTH_GITHUB_SECRET;
 
-type BackendAccount = { email: string; name: string; role: string };
+type BackendAccount = { email: string; name: string; role: string; first_login?: boolean };
 
 type CredentialsOutcome =
   | { kind: "ok"; account: BackendAccount }
@@ -327,6 +327,7 @@ if (adfsConfigured) {
           email: result.account.email,
           groups: [],
           role: result.account.role,
+          firstLogin: result.account.first_login === true,
         };
       },
     }),
@@ -349,6 +350,7 @@ if (adfsConfigured) {
           email: account.email,
           groups: [],
           role: account.role,
+          firstLogin: account.first_login === true,
         };
       },
     }),
@@ -373,6 +375,10 @@ export const { handlers, auth } = NextAuth({
         // it does for SSO and email/password accounts.
         const identity = String(user.email ?? user.name ?? "").toLowerCase();
         token.role = user.role ?? (isAdmin(identity, token.groups) ? "admin" : "user");
+        // Only the backend-verified providers (credentials, passkey) know
+        // whether this is the account's first sign-in; OAuth users never
+        // touch the backend at login, so they simply never carry the flag.
+        token.firstLogin = user.firstLogin === true;
       }
       return token;
     },
@@ -381,6 +387,7 @@ export const { handlers, auth } = NextAuth({
       if (typeof token.email === "string") session.user.email = token.email;
       session.user.role = token.role ?? "user";
       session.user.groups = normalizeStringList(token.groups);
+      session.user.firstLogin = token.firstLogin === true;
       session.backendAccessToken = signBackendToken(token);
       return session;
     },

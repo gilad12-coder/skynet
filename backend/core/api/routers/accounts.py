@@ -71,6 +71,9 @@ class AccountInfo(BaseModel):
     email: str = Field(description="Lowercased account email, which is the identity.")
     name: str = Field(description="Display name.")
     role: str = Field(description="Authorization role: 'admin' or 'user'.")
+    first_login: bool = Field(
+        default=False, description="Whether this sign-in is the account's first."
+    )
 
 
 # Simple acknowledgement for state-changing auth calls. Lives here (not in the
@@ -297,7 +300,8 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
                 trusted frontend.
 
         Returns:
-            The authenticated account (email, display name, role).
+            The authenticated account (email, display name, role) and whether
+            this is its first successful sign-in.
 
         Raises:
             DomainError: 403 on a bad internal secret, or when the account's
@@ -341,11 +345,12 @@ def create_accounts_router(*, job_store, login_throttle: LoginThrottle | None = 
                 email,
                 exempt=_role_for(email) == "admin",
             )
+            first_login = row.last_login_at is None
             row.last_login_at = datetime.now(UTC)
             name = str(row.name)
             session.commit()
         throttle.reset(email)
-        return AccountInfo(email=email, name=name, role=_role_for(email))
+        return AccountInfo(email=email, name=name, role=_role_for(email), first_login=first_login)
 
     @router.post(
         "/auth/password-reset/request",

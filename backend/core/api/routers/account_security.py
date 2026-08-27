@@ -725,7 +725,9 @@ def create_account_security_router(*, job_store) -> APIRouter:
             email = str(row.user_email)
             user_row = session.get(UserModel, email)
             name = email
+            first_login = False
             if user_row is not None:
+                first_login = user_row.last_login_at is None
                 user_row.last_login_at = now
                 name = str(user_row.name)
             enforce_monthly_active_user_limit(
@@ -734,6 +736,6 @@ def create_account_security_router(*, job_store) -> APIRouter:
                 exempt=_role_for(email) == "admin",
             )
             session.commit()
-        return AccountInfo(email=email, name=name, role=_role_for(email))
+        return AccountInfo(email=email, name=name, role=_role_for(email), first_login=first_login)
 
     return router

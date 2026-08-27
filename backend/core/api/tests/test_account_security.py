@@ -338,6 +338,8 @@ def test_passkey_signin_resolves_identity(
     )
     assert resp.status_code == 200
     assert resp.json()["email"] == _EMAIL
+    # The fixture only registers the account, so this passkey sign-in is its first.
+    assert resp.json()["first_login"] is True
 
     store: _Store = client.app.state.job_store
     with Session(store.engine) as session:
