@@ -35,6 +35,9 @@ anyio==4.13.0
     #   py-key-value-aio
     #   sse-starlette
     #   starlette
+    #   vercel-internal-core
+    #   vercel-oidc
+    #   vercel-sandbox
     #   watchfiles
 async-timeout==5.0.1 ; python_full_version < '3.11.3'
     # via redis
@@ -63,6 +66,7 @@ certifi==2026.2.25
     #   httpcore
     #   httpx
     #   requests
+    #   sentry-sdk
 cffi==2.0.0 ; platform_python_implementation != 'PyPy'
     # via cryptography
 charset-normalizer==3.4.7
@@ -142,6 +146,9 @@ httpx==0.28.1
     #   litellm
     #   mcp
     #   openai
+    #   vercel-internal-core
+    #   vercel-oidc
+    #   vercel-sandbox
 httpx-sse==0.4.3
     # via mcp
 huggingface-hub==1.10.2
@@ -273,6 +280,7 @@ pydantic==2.12.5
     #   openapi-pydantic
     #   pydantic-settings
     #   skynet
+    #   vercel-sandbox
 pydantic-core==2.41.5
     # via pydantic
 pydantic-settings==2.14.2
@@ -408,12 +416,22 @@ typing-inspection==0.4.2
 uncalled-for==0.3.1
     # via fastmcp
 urllib3==2.7.0
-    # via requests
+    # via
+    #   requests
+    #   sentry-sdk
 uvicorn==0.44.0
     # via
     #   fastmcp
     #   mcp
     #   skynet
+vercel-headers==0.7.1
+    # via vercel-oidc
+vercel-internal-core==0.1.2
+    # via vercel-sandbox
+vercel-oidc==0.8.0
+    # via vercel-sandbox
+vercel-sandbox==0.4.0
+    # via skynet
 watchfiles==1.1.1
     # via fastmcp
 webauthn==2.8.0

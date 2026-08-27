@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -83,6 +84,14 @@ class EngineContext:
     run_dir: str
     seed: int = 0
     stop_at_score: float | None = None
+    # Cap on proposer rounds for engines that iterate (Meta-Harness); ``None``
+    # runs until the scorer budget is spent.
+    max_iterations: int | None = None
+    # How many cases an engine may score at once. Only pays off when the
+    # scorer itself runs elsewhere (one sandbox per case); 1 for text targets.
+    concurrency: int = 1
+    # "harness · model" the proposer is told it writes for, on agent targets.
+    target_label: str | None = None
 
 
 class Engine(Protocol):
@@ -110,6 +119,10 @@ class EvalServer:
     Enforces ``max_evals``, keeps a per-candidate mean so a best version is
     always recoverable even when an engine dies mid-run, and — through
     :meth:`lane` — hands out sub-budgets that count against the parent.
+
+    Safe to call from several threads at once: a call is reserved against
+    every budget in the chain before the scorer runs, so concurrent
+    evaluations can never overspend, and the bookkeeping is locked.
     """
 
     def __init__(
@@ -135,6 +148,16 @@ class EvalServer:
         self.used = 0
         self._sums: dict[str, tuple[float, int]] = {}
         self._candidates: dict[str, Candidate] = {}
+        # Locks are only ever taken child → parent, so lanes cannot deadlock.
+        self._lock = threading.Lock()
+
+    @property
+    def _root(self) -> EvalServer:
+        """Return the top of the lane chain: the server that owns the scorer and listener."""
+        server = self
+        while server._parent is not None:
+            server = server._parent
+        return server
 
     @property
     def remaining(self) -> int:
@@ -168,17 +191,32 @@ class EvalServer:
         Raises:
             BudgetExhaustedError: When no scorer calls remain.
         """
-        if self.remaining <= 0:
-            raise BudgetExhaustedError(f"scorer-run budget of {self.max_evals} exhausted")
-        if self._parent is not None:
-            score, side_info = self._parent.evaluate(candidate, example)
-        else:
-            score, side_info = self._score(candidate, example)
-        self.used += 1
-        self._record(candidate, score)
-        if self._parent is None and self._on_eval is not None:
-            self._on_eval(self, score)
+        self._reserve()
+        root = self._root
+        score, side_info = root._score(candidate, example)
+        server: EvalServer | None = self
+        while server is not None:
+            with server._lock:
+                server._record(candidate, score)
+            server = server._parent
+        if root._on_eval is not None:
+            with root._lock:
+                root._on_eval(root, score)
         return score, side_info
+
+    def _reserve(self) -> None:
+        """Claim one scorer call here and in every ancestor, or claim nothing.
+
+        Raises:
+            BudgetExhaustedError: When this server or an ancestor has no
+                calls left; no budget in the chain is touched in that case.
+        """
+        with self._lock:
+            if self.used >= self.max_evals:
+                raise BudgetExhaustedError(f"scorer-run budget of {self.max_evals} exhausted")
+            if self._parent is not None:
+                self._parent._reserve()
+            self.used += 1
 
     def _score(self, candidate: Candidate, example: Any) -> tuple[float, SideInfo]:
         """Call the scorer, turning a crash into a floor score with feedback.

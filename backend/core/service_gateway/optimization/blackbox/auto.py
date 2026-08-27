@@ -1,8 +1,10 @@
 """Strategy layer: ``single`` runs one engine; ``auto`` explores, then continues.
 
-Auto mirrors GEPA's *omni* recipe: every available engine gets an equal
-slice of the explore budget, the best explore result is handed to GEPA,
-and GEPA spends what remains continuing from it. Each lane emits
+Auto mirrors GEPA's *omni* recipe: every engine available to the job gets
+an equal slice of the explore budget, the best explore result is handed
+to GEPA, and GEPA spends what remains continuing from it. Which engines
+are available depends on :class:`EngineCapabilities` (agent sandboxes on
+the deployment, an agent target on the job). Each lane emits
 ``lane_started`` / ``lane_completed`` events and the hand-off emits
 ``lane_handoff`` so the run page can render the lane table.
 """
@@ -20,7 +22,7 @@ from ....exceptions import ServiceError
 from ....models.blackbox import BLACKBOX_ENGINE_GEPA, BlackboxStrategy
 from ..cost_ceiling import CostCeilingExceededError
 from .protocol import BudgetExhaustedError, Candidate, EngineContext, EvalServer, Result, Task
-from .registry import available_engine_ids, get_engine
+from .registry import NO_CAPABILITIES, EngineCapabilities, available_engine_ids, get_engine
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,8 @@ def run_lane(
     server: EvalServer,
     ctx: EngineContext,
     progress_callback: ProgressCallback | None = None,
+    *,
+    caps: EngineCapabilities = NO_CAPABILITIES,
 ) -> LaneOutcome:
     """Run one engine on its own budget slice, never letting it kill the run.
 
@@ -73,6 +77,7 @@ def run_lane(
         server: The lane's budget slice.
         ctx: Run context; the lane gets its own workspace under ``ctx.run_dir``.
         progress_callback: The job's progress sink, if any.
+        caps: What the deployment and the job offer the engines.
 
     Returns:
         The lane's outcome, with ``status`` describing how it ended.
@@ -80,7 +85,7 @@ def run_lane(
     _emit(progress_callback, PROGRESS_LANE_STARTED, {"engine": engine_id, "phase": phase, "budget": server.max_evals})
     outcome = LaneOutcome(engine=engine_id, phase=phase, status="completed")
     try:
-        engine = get_engine(engine_id)
+        engine = get_engine(engine_id, caps)
     except ServiceError as exc:
         outcome.status, outcome.error = "unavailable", str(exc)
     else:
@@ -137,6 +142,8 @@ def run_strategy(
     server: EvalServer,
     ctx: EngineContext,
     progress_callback: ProgressCallback | None = None,
+    *,
+    caps: EngineCapabilities = NO_CAPABILITIES,
 ) -> tuple[Result, list[LaneOutcome]]:
     """Run the requested strategy and return the best version plus every lane.
 
@@ -146,6 +153,8 @@ def run_strategy(
         server: The run's full scorer budget.
         ctx: Reflection LM, workspace and stop settings.
         progress_callback: The job's progress sink, if any.
+        caps: What the deployment and the job offer the engines; decides
+            which engines Auto explores.
 
     Returns:
         The winning result and the lane outcomes in execution order.
@@ -155,17 +164,20 @@ def run_strategy(
             starting point to fall back to.
     """
     if strategy.mode == "single":
-        lane = run_lane(str(strategy.engine), "single", task, server.lane(server.remaining), ctx, progress_callback)
+        lane = run_lane(
+            str(strategy.engine), "single", task, server.lane(server.remaining), ctx, progress_callback, caps=caps
+        )
         return _finalize(task, server, [lane], lane), [lane]
 
-    engine_ids = available_engine_ids() if task.str_mode else [BLACKBOX_ENGINE_GEPA]
+    engine_ids = available_engine_ids(caps, parts=not task.str_mode)
     if len(engine_ids) == 1:
-        lane = run_lane(engine_ids[0], "single", task, server.lane(server.remaining), ctx, progress_callback)
+        lane = run_lane(engine_ids[0], "single", task, server.lane(server.remaining), ctx, progress_callback, caps=caps)
         return _finalize(task, server, [lane], lane), [lane]
 
     per_lane = max(1, int(server.max_evals * _EXPLORE_SHARE) // len(engine_ids))
     lanes = [
-        run_lane(engine_id, "explore", task, server.lane(per_lane), ctx, progress_callback) for engine_id in engine_ids
+        run_lane(engine_id, "explore", task, server.lane(per_lane), ctx, progress_callback, caps=caps)
+        for engine_id in engine_ids
     ]
     winner = _winner(lanes)
     if winner is None or winner.best_candidate is None or server.remaining <= 0:
@@ -183,6 +195,7 @@ def run_strategy(
         server.lane(server.remaining),
         ctx,
         progress_callback,
+        caps=caps,
     )
     lanes.append(continued)
     final = continued if (continued.best_score or float("-inf")) >= (winner.best_score or float("-inf")) else winner

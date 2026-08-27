@@ -25,12 +25,28 @@ BLACKBOX_ENGINE_BEST_OF_N = "best_of_n"
 BLACKBOX_ENGINE_AUTORESEARCH = "autoresearch"
 BLACKBOX_ENGINE_META_HARNESS = "meta_harness"
 BLACKBOX_STRATEGY_AUTO = "auto"
+BLACKBOX_TARGET_TEXT = "text"
+BLACKBOX_TARGET_AGENT = "agent"
+BLACKBOX_HARNESS_PI = "pi"
+BLACKBOX_HARNESS_CODEX = "codex"
+BLACKBOX_HARNESS_CLAUDE_CODE = "claude_code"
+BLACKBOX_HARNESS_OPENCODE = "opencode"
+BLACKBOX_HARNESS_CUSTOM = "custom"
+BLACKBOX_HARNESSES = (
+    BLACKBOX_HARNESS_PI,
+    BLACKBOX_HARNESS_CODEX,
+    BLACKBOX_HARNESS_CLAUDE_CODE,
+    BLACKBOX_HARNESS_OPENCODE,
+    BLACKBOX_HARNESS_CUSTOM,
+)
+# Engines that accept a multi-part (named files) starting point.
+BLACKBOX_MULTI_PART_ENGINES = frozenset({BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_META_HARNESS})
 # Stands in for ``module_name`` in the job overview and notifications, where
 # DSPy jobs record the program they optimized.
 BLACKBOX_MODULE_NAME = "blackbox"
 
 # A text artifact under optimization. ``dict`` form names several parts that
-# are optimized together (GEPA only — agent engines refuse dict seeds).
+# are optimized together (GEPA and Meta-Harness only).
 BlackboxCandidate = str | dict[str, str]
 
 
@@ -64,10 +80,54 @@ class BlackboxScorer(BaseModel):
 
 # Hard stops for a run. ``max_scorer_runs`` caps optimizer-driven scorer
 # calls (the baseline/final test-set evaluations are outside the cap);
-# ``stop_at_score`` ends the run early once a version reaches it.
+# ``max_iterations`` caps proposer rounds for the engines that iterate
+# (Meta-Harness); ``stop_at_score`` ends the run early once a version
+# reaches it.
 class BlackboxBudget(BaseModel):
     max_scorer_runs: int = Field(default=200, ge=1, le=100_000)
+    max_iterations: int | None = Field(default=None, ge=1, le=1_000)
     stop_at_score: float | None = None
+
+
+# What the versions under optimization drive. ``text``: the scorer reads a
+# version directly. ``agent``: every scorer run first launches a coding
+# harness in its own throwaway sandbox with the version as the harness's
+# instruction file(s), and the scorer judges the run record (what the agent
+# produced) instead of the version. The ``(harness, model)`` pair is fixed
+# for the whole run — the optimizer searches harness text only (joint
+# harness + model search is a TODO). ``model`` is the target/worker model
+# id as the agent gateway knows it; the optimizer model is
+# ``reflection_model_config`` on the request.
+class BlackboxTarget(BaseModel):
+    kind: Literal["text", "agent"] = BLACKBOX_TARGET_TEXT
+    harness: str = BLACKBOX_HARNESS_PI
+    model: str | None = None
+    timeout_seconds: float = Field(default=600.0, gt=0, le=2_700)
+    concurrency: int = Field(default=2, ge=1, le=8)
+    setup_command: str | None = None
+    install_command: str | None = None
+    run_command: str | None = None
+
+    @model_validator(mode="after")
+    def _ensure_agent_fields(self) -> BlackboxTarget:
+        """Require what an agent target needs to launch.
+
+        Returns:
+            The validated target instance.
+
+        Raises:
+            ValueError: When an agent target names no model or an unknown
+                harness, or a custom harness has no run command.
+        """
+        if self.kind != BLACKBOX_TARGET_AGENT:
+            return self
+        if not (self.model or "").strip():
+            raise ValueError("An agent target needs a model.")
+        if self.harness not in BLACKBOX_HARNESSES:
+            raise ValueError(f"Unknown harness '{self.harness}'. Known harnesses: {', '.join(BLACKBOX_HARNESSES)}.")
+        if self.harness == BLACKBOX_HARNESS_CUSTOM and not (self.run_command or "").strip():
+            raise ValueError("A custom harness needs a run_command.")
+        return self
 
 
 # ``auto`` explores every available engine on a budget slice, then continues
@@ -109,6 +169,7 @@ class BlackboxRunRequest(BaseModel):
     seed: int | None = None
     budget: BlackboxBudget = Field(default_factory=BlackboxBudget)
     strategy: BlackboxStrategy = Field(default_factory=BlackboxStrategy)
+    target: BlackboxTarget = Field(default_factory=BlackboxTarget)
     reflection_model_settings: ModelConfig = Field(alias="reflection_model_config")
     token_source: Literal["managed", "byok"] = "managed"
     is_private: bool = False
@@ -125,8 +186,9 @@ class BlackboxRunRequest(BaseModel):
 
         Raises:
             ValueError: When the seed is blank, an empty dict, or missing
-                without an objective; or when a multi-part seed is paired
-                with a non-GEPA engine.
+                without an objective; when a multi-part seed is paired with
+                an engine that only takes text; or when an agent target has
+                no cases to run the agent on.
         """
         seed = self.seed_candidate
         if seed is None:
@@ -135,10 +197,15 @@ class BlackboxRunRequest(BaseModel):
         elif isinstance(seed, dict):
             if not seed:
                 raise ValueError("A multi-part starting point needs at least one part.")
-            if self.strategy.mode == "single" and self.strategy.engine != BLACKBOX_ENGINE_GEPA:
-                raise ValueError("Multi-part starting points are only supported by the gepa engine.")
+            if self.strategy.mode == "single" and self.strategy.engine not in BLACKBOX_MULTI_PART_ENGINES:
+                raise ValueError(
+                    "Multi-part starting points are only supported by the "
+                    f"{' and '.join(sorted(BLACKBOX_MULTI_PART_ENGINES))} engines."
+                )
         elif not seed.strip():
             raise ValueError("The starting point cannot be blank.")
+        if self.target.kind == BLACKBOX_TARGET_AGENT and not self.cases:
+            raise ValueError("An agent target needs at least one case: the tasks the agent is run on.")
         return self
 
 

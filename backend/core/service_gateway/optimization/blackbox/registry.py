@@ -1,8 +1,10 @@
 """Engine registry: the catalog the Auto strategy explores and ``single`` picks from.
 
-The agent engines (AutoResearch, Meta-Harness) are registered so the API
-and UI can name them, but stay unavailable until the sandboxed harness and
-its usage tracking land (design brief decisions 2 and 5, TODO-3).
+Availability is contextual. The in-process engines (GEPA, Best-of-N)
+always run; Meta-Harness needs a sandbox runtime (a deployment property)
+and an agent target (a job property). :class:`EngineCapabilities` carries
+both, so the API validates a job against the same answer the strategy
+layer later runs on.
 """
 
 from __future__ import annotations
@@ -19,9 +21,31 @@ from ....models.blackbox import (
 )
 from .best_of_n import BestOfNEngine
 from .gepa_engine import GepaEngine
+from .meta_harness import MetaHarnessEngine
 from .protocol import Engine
 
-_AGENT_ENGINE_REASON = "Agent engines run in a sandboxed coding harness that is not wired up yet."
+_AUTORESEARCH_REASON = (
+    "AutoResearch (an agent editing the version inside a long-lived sandbox loop) is not implemented yet."
+)
+_AGENT_TARGET_REASON = "Meta-Harness optimizes a coding agent's harness; the job's target must be an agent."
+_NO_SANDBOX_REASON = "Agent sandboxes are not configured on this deployment."
+
+
+@dataclass(frozen=True)
+class EngineCapabilities:
+    """What the deployment and the job offer the engines.
+
+    ``sandbox`` says whether agent sandboxes can be created here (with
+    ``sandbox_reason`` explaining why not); ``agent_target`` says whether
+    the job's versions drive a coding agent.
+    """
+
+    sandbox: bool = False
+    agent_target: bool = False
+    sandbox_reason: str | None = None
+
+
+NO_CAPABILITIES = EngineCapabilities()
 
 
 @dataclass(frozen=True)
@@ -33,11 +57,37 @@ class EngineSpec:
     description: str
     factory: Callable[[], Engine] | None = None
     unavailable_reason: str | None = None
+    requires_sandbox: bool = False
+    requires_agent_target: bool = False
+    supports_parts: bool = False
 
-    @property
-    def available(self) -> bool:
-        """Return True when the engine can run in this deployment."""
-        return self.factory is not None
+    def unavailable_reason_for(self, caps: EngineCapabilities) -> str | None:
+        """Explain why the engine cannot run for ``caps``, or return ``None`` when it can.
+
+        Args:
+            caps: What the deployment and the job offer.
+
+        Returns:
+            A user-facing reason, or ``None`` when the engine is runnable.
+        """
+        if self.factory is None:
+            return self.unavailable_reason
+        if self.requires_sandbox and not caps.sandbox:
+            return caps.sandbox_reason or _NO_SANDBOX_REASON
+        if self.requires_agent_target and not caps.agent_target:
+            return _AGENT_TARGET_REASON
+        return None
+
+    def available_for(self, caps: EngineCapabilities) -> bool:
+        """Return True when the engine can run for ``caps``.
+
+        Args:
+            caps: What the deployment and the job offer.
+
+        Returns:
+            Whether :meth:`unavailable_reason_for` is ``None``.
+        """
+        return self.unavailable_reason_for(caps) is None
 
 
 ENGINES: dict[str, EngineSpec] = {
@@ -46,6 +96,7 @@ ENGINES: dict[str, EngineSpec] = {
         label="GEPA",
         description="Reflective evolution with a Pareto front of versions.",
         factory=GepaEngine,
+        supports_parts=True,
     ),
     BLACKBOX_ENGINE_BEST_OF_N: EngineSpec(
         id=BLACKBOX_ENGINE_BEST_OF_N,
@@ -57,37 +108,50 @@ ENGINES: dict[str, EngineSpec] = {
         id=BLACKBOX_ENGINE_AUTORESEARCH,
         label="AutoResearch",
         description="A coding agent iterates on the version in a sandbox.",
-        unavailable_reason=_AGENT_ENGINE_REASON,
+        unavailable_reason=_AUTORESEARCH_REASON,
     ),
     BLACKBOX_ENGINE_META_HARNESS: EngineSpec(
         id=BLACKBOX_ENGINE_META_HARNESS,
         label="Meta-Harness",
-        description="A coding agent rewrites the optimization harness itself.",
-        unavailable_reason=_AGENT_ENGINE_REASON,
+        description="The optimizer model rewrites the agent's harness from the traces of its runs.",
+        factory=MetaHarnessEngine,
+        requires_sandbox=True,
+        requires_agent_target=True,
+        supports_parts=True,
     ),
 }
 
 
-def available_engine_ids() -> list[str]:
-    """Return the ids of engines that can run here, in catalog order."""
-    return [spec.id for spec in ENGINES.values() if spec.available]
+def available_engine_ids(caps: EngineCapabilities = NO_CAPABILITIES, *, parts: bool = False) -> list[str]:
+    """Return the ids of engines that can run for ``caps``, in catalog order.
+
+    Args:
+        caps: What the deployment and the job offer.
+        parts: When True, keep only engines that take a multi-part starting point.
+
+    Returns:
+        Runnable engine ids.
+    """
+    return [spec.id for spec in ENGINES.values() if spec.available_for(caps) and (spec.supports_parts or not parts)]
 
 
-def get_engine(engine_id: str) -> Engine:
+def get_engine(engine_id: str, caps: EngineCapabilities = NO_CAPABILITIES) -> Engine:
     """Instantiate the engine registered under ``engine_id``.
 
     Args:
         engine_id: Catalog id such as ``"gepa"``.
+        caps: What the deployment and the job offer.
 
     Returns:
         A fresh engine instance.
 
     Raises:
-        ServiceError: When the id is unknown or the engine is unavailable.
+        ServiceError: When the id is unknown or the engine cannot run for ``caps``.
     """
     spec = ENGINES.get(engine_id)
     if spec is None:
-        raise ServiceError(f"Unknown engine '{engine_id}'. Available engines: {', '.join(available_engine_ids())}.")
-    if spec.factory is None:
-        raise ServiceError(f"Engine '{engine_id}' is not available: {spec.unavailable_reason}")
+        raise ServiceError(f"Unknown engine '{engine_id}'. Available engines: {', '.join(available_engine_ids(caps))}.")
+    reason = spec.unavailable_reason_for(caps)
+    if reason is not None or spec.factory is None:
+        raise ServiceError(f"Engine '{engine_id}' is not available: {reason}")
     return spec.factory()

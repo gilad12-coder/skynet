@@ -150,6 +150,27 @@ class Settings(BaseSettings):
         alias="LITELLM_PROXY_API_KEY",
         description="Virtual key the backend presents to the LiteLLM proxy for managed runs. Only consulted when LITELLM_PROXY_URL is set.",
     )
+    vercel_token: SecretStr | None = Field(
+        default=None,
+        alias="VERCEL_TOKEN",
+        description="Vercel access token that creates the throwaway sandboxes black-box agent targets run in (one microVM per scorer run). Unset disables agent targets and the agent engines (Meta-Harness) with a typed error; VERCEL_TEAM_ID and VERCEL_PROJECT_ID must be set alongside it.",
+    )
+    vercel_team_id: str | None = Field(
+        default=None, alias="VERCEL_TEAM_ID", description="Vercel team that owns the agent sandboxes."
+    )
+    vercel_project_id: str | None = Field(
+        default=None, alias="VERCEL_PROJECT_ID", description="Vercel project the agent sandboxes are created under."
+    )
+    blackbox_agent_gateway_url: str | None = Field(
+        default=None,
+        alias="BLACKBOX_AGENT_GATEWAY_URL",
+        description="OpenAI-compatible base URL the coding harnesses inside agent sandboxes send their model calls to (e.g. https://proxy.example.com/v1). Must be reachable from Vercel's network. Unset falls back to LITELLM_PROXY_URL.",
+    )
+    blackbox_agent_gateway_api_key: SecretStr | None = Field(
+        default=None,
+        alias="BLACKBOX_AGENT_GATEWAY_API_KEY",
+        description="API key the sandboxed harnesses present to BLACKBOX_AGENT_GATEWAY_URL. Unset falls back to LITELLM_PROXY_API_KEY. TODO: mint a per-run virtual key so sandbox usage is attributable to the job.",
+    )
     openrouter_provisioning_key: SecretStr | None = Field(
         default=None,
         alias="OPENROUTER_PROVISIONING_KEY",

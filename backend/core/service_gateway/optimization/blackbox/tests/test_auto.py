@@ -15,25 +15,47 @@ from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededEr
 from .. import auto as auto_mod
 from ..auto import run_lane, run_strategy
 from ..protocol import EvalServer, Task
+from ..registry import NO_CAPABILITIES, EngineCapabilities
 from .mocks import ScriptedEngine, make_ctx, vowel_scorer
 
 
-def _install_registry(monkeypatch: pytest.MonkeyPatch, engines: dict[str, Any], *, available: list[str]) -> None:
+def _install_registry(
+    monkeypatch: pytest.MonkeyPatch,
+    engines: dict[str, Any],
+    *,
+    available: list[str],
+    parts: list[str] | None = None,
+    seen_caps: list[EngineCapabilities] | None = None,
+) -> None:
     """Point the strategy layer at a fake engine catalog.
 
     Args:
         monkeypatch: Pytest fixture.
         engines: Engine instances by id; ids missing here are "unavailable".
         available: What ``available_engine_ids`` reports.
+        parts: The subset of ``available`` that takes multi-part seeds; all of it when unset.
+        seen_caps: Collects the capabilities every registry call was given.
     """
 
-    def fake_get_engine(engine_id: str) -> Any:
+    def fake_available(caps: EngineCapabilities = NO_CAPABILITIES, *, parts_only: bool = False) -> list[str]:
+        """List the fake catalog, narrowing to multi-part engines on request."""
+        if seen_caps is not None:
+            seen_caps.append(caps)
+        return [e for e in available if not parts_only or e in (available if parts is None else parts)]
+
+    def fake_get_engine(engine_id: str, caps: EngineCapabilities = NO_CAPABILITIES) -> Any:
         """Return the fake engine or raise like the real registry."""
+        if seen_caps is not None:
+            seen_caps.append(caps)
         if engine_id not in engines:
             raise ServiceError(f"Engine '{engine_id}' is not available: fake")
         return engines[engine_id]
 
-    monkeypatch.setattr(auto_mod, "available_engine_ids", lambda: list(available))
+    monkeypatch.setattr(
+        auto_mod,
+        "available_engine_ids",
+        lambda caps=NO_CAPABILITIES, *, parts=False: fake_available(caps, parts_only=parts),
+    )
     monkeypatch.setattr(auto_mod, "get_engine", fake_get_engine)
 
 
@@ -214,11 +236,16 @@ def test_cost_ceiling_stops_the_whole_run(tmp_path: Path, monkeypatch: pytest.Mo
         )
 
 
-def test_auto_narrows_to_gepa_for_multi_part_seeds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Named-part starting points skip the explore phase and run GEPA alone."""
+def test_auto_narrows_to_multi_part_engines_for_multi_part_seeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Named-part starting points only explore the engines that take them; alone, GEPA runs single."""
     gepa = ScriptedEngine(BLACKBOX_ENGINE_GEPA, ["aaa"])
     _install_registry(
-        monkeypatch, {"alpha": ScriptedEngine("alpha", ["x"]), BLACKBOX_ENGINE_GEPA: gepa}, available=["alpha", "gepa"]
+        monkeypatch,
+        {"alpha": ScriptedEngine("alpha", ["x"]), BLACKBOX_ENGINE_GEPA: gepa},
+        available=["alpha", "gepa"],
+        parts=["gepa"],
     )
 
     _result, lanes = run_strategy(
@@ -229,6 +256,33 @@ def test_auto_narrows_to_gepa_for_multi_part_seeds(tmp_path: Path, monkeypatch: 
     )
 
     assert [(lane.engine, lane.phase) for lane in lanes] == [(BLACKBOX_ENGINE_GEPA, "single")]
+
+
+def test_capabilities_reach_every_registry_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The job's capabilities decide what Auto explores and are handed to every engine lookup."""
+    seen: list[EngineCapabilities] = []
+    _install_registry(
+        monkeypatch,
+        {
+            "alpha": ScriptedEngine("alpha", ["aax"]),
+            BLACKBOX_ENGINE_GEPA: ScriptedEngine(BLACKBOX_ENGINE_GEPA, ["aaa"]),
+        },
+        available=["alpha", BLACKBOX_ENGINE_GEPA],
+        seen_caps=seen,
+    )
+    caps = EngineCapabilities(sandbox=True, agent_target=True)
+
+    _result, lanes = run_strategy(
+        BlackboxStrategy(mode="auto"),
+        Task(seed_candidate="seed"),
+        EvalServer(vowel_scorer, max_evals=20),
+        make_ctx(str(tmp_path)),
+        caps=caps,
+    )
+
+    # One listing plus one lookup per lane (two explore lanes and the continue lane).
+    assert len(lanes) == 3
+    assert seen == [caps] * 4
 
 
 def test_auto_with_one_available_engine_runs_a_single_lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
