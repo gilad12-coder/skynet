@@ -37,6 +37,7 @@ from ..billing import (
 from ..billing.pricing import ModelUsage
 from ..config import settings
 from ..constants import (
+    OPTIMIZATION_TYPE_BLACKBOX,
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
     OPTIMIZATION_TYPE_TAGGING,
@@ -55,11 +56,12 @@ from ..constants import (
     TOKEN_SOURCE_MANAGED,
 )
 from ..i18n import CANCELLATION_REASON
-from ..models import GridSearchRequest, GridSearchResponse, PairResult, RunRequest, SplitCounts
+from ..models import BlackboxRunRequest, GridSearchRequest, GridSearchResponse, PairResult, RunRequest, SplitCounts
 from ..notifications import notify_job_completed
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.embedding_pipeline import embed_finished_job
+from ..service_gateway.optimization.blackbox.service import validate_blackbox_payload
 from ..service_gateway.optimization.core import _merge_usage_rows
 from ..service_gateway.optimization.trajectory import GEPA_STATE_FILENAME, GRID_PAIR_RESULT_FILENAME
 from ..storage import JobStore
@@ -277,7 +279,7 @@ class BackgroundWorker:
     def submit_job(
         self,
         optimization_id: str,
-        payload: RunRequest | GridSearchRequest | TaggingAutotagPayload,
+        payload: RunRequest | GridSearchRequest | BlackboxRunRequest | TaggingAutotagPayload,
         payload_dump: dict[str, Any] | None = None,
     ) -> None:
         """Persist payload to the job store; rely on DB claim for pickup.
@@ -560,6 +562,8 @@ class BackgroundWorker:
                 if self._should_distribute_grid(optimization_id, grid_payload):
                     self._fan_out_grid(optimization_id, grid_payload, overview)
                     return
+            elif optimization_type == OPTIMIZATION_TYPE_BLACKBOX:
+                blackbox_payload = BlackboxRunRequest.model_validate(payload_dict)
             else:
                 run_payload = RunRequest.model_validate(payload_dict)
 
@@ -577,6 +581,8 @@ class BackgroundWorker:
             service = self._get_service()
             if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH and hasattr(service, "validate_grid_search_payload"):
                 service.validate_grid_search_payload(grid_payload)
+            elif optimization_type == OPTIMIZATION_TYPE_BLACKBOX:
+                validate_blackbox_payload(blackbox_payload)
             elif optimization_type == OPTIMIZATION_TYPE_RUN:
                 service.validate_payload(run_payload)
 
@@ -653,7 +659,12 @@ class BackgroundWorker:
                 token_source = overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE) or TOKEN_SOURCE_MANAGED
                 byok_engine = getattr(self._job_store, "engine", None)
                 if byok_engine is not None:
-                    execution_payload = grid_payload if is_grid else run_payload
+                    if is_grid:
+                        execution_payload = grid_payload
+                    elif optimization_type == OPTIMIZATION_TYPE_BLACKBOX:
+                        execution_payload = blackbox_payload
+                    else:
+                        execution_payload = run_payload
                     if payload_uses_token_source(
                         payload_dict,
                         TOKEN_SOURCE_BYOK,
@@ -707,7 +718,7 @@ class BackgroundWorker:
                 # pinned by ``run_process``'s args tuple; only ``attempts``
                 # is read from ``job_data`` after this point.
                 job_data = {"attempts": job_data.get("attempts")}
-                run_payload = grid_payload = None
+                run_payload = grid_payload = blackbox_payload = None
 
                 # Stall watchdog: the lease heartbeat (_touch_activity) renews
                 # on every tick regardless of progress, so a child wedged on a

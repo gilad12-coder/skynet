@@ -1,0 +1,144 @@
+"""GEPA engine: runs ``gepa.optimize_anything`` against the eval server.
+
+Overlays only what Skynet owns — the scorer budget, the per-lane workspace,
+the job-log logger and the stop-at-score stopper — on GEPA's defaults; the
+eval server is the single scoring path, exactly like upstream ``gepa.oa``.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any
+
+from gepa.core.result import GEPAResult
+from gepa.core.state import GEPAState
+from gepa.optimize_anything import EngineConfig, GEPAConfig, ReflectionConfig, TrackingConfig, optimize_anything
+from gepa.utils.stop_condition import ScoreThresholdStopper
+
+from .protocol import BudgetExhaustedError, Candidate, EngineContext, EvalServer, Result, Task
+
+logger = logging.getLogger(__name__)
+
+# GEPA's internal key for a text seed; ``GEPAResult.from_state`` needs it to
+# unwrap the single-part dict it stores text candidates as.
+_STR_CANDIDATE_KEY = "current_candidate"
+
+
+class _JobLogger:
+    """GEPA ``LoggerProtocol`` adapter that writes into the job log."""
+
+    def log(self, message: str, *args: Any, **kwargs: Any) -> None:
+        """Forward one GEPA log line to the job logger.
+
+        Args:
+            message: The line GEPA wants logged.
+            *args: Ignored; kept for protocol tolerance.
+            **kwargs: Ignored; kept for protocol tolerance.
+        """
+        logger.info("%s", message)
+
+
+class GepaEngine:
+    """Reflective prompt-evolution engine backed by ``optimize_anything``."""
+
+    name = "gepa"
+
+    def run(self, task: Task, server: EvalServer, ctx: EngineContext) -> Result:
+        """Optimize ``task`` with GEPA, scoring only through ``server``.
+
+        Args:
+            task: The starting point, goal and cases.
+            server: The budgeted scorer for this lane.
+            ctx: Reflection LM, workspace and stop settings.
+
+        Returns:
+            GEPA's validation-best version, or the server's best when the
+            budget ran out before GEPA could report.
+        """
+        if server.remaining <= 0:
+            return Result(best_candidate=task.seed_candidate or "", best_score=None, total_evals=0)
+        run_dir = str(Path(ctx.run_dir) / self.name)
+        Path(run_dir).mkdir(parents=True, exist_ok=True)
+        config = GEPAConfig(
+            engine=EngineConfig(
+                run_dir=run_dir,
+                seed=ctx.seed,
+                max_metric_calls=server.remaining,
+                # Scorers may be user code or a remote endpoint with no
+                # concurrency guarantees, and a serial loop keeps the budget
+                # accounting exact.
+                parallel=False,
+                display_progress_bar=False,
+            ),
+            reflection=ReflectionConfig(reflection_lm=ctx.reflection_lm),
+            tracking=TrackingConfig(logger=_JobLogger()),
+            stop_callbacks=[ScoreThresholdStopper(ctx.stop_at_score)] if ctx.stop_at_score is not None else None,
+        )
+
+        def evaluator(candidate: Candidate, example: Any = None) -> tuple[float, dict[str, Any]]:
+            """Route one GEPA evaluation through the budgeted server.
+
+            Args:
+                candidate: The version GEPA wants scored.
+                example: The case, or ``None`` in single-task mode.
+
+            Returns:
+                The score and side information.
+            """
+            return server.evaluate(candidate, example)
+
+        kwargs: dict[str, Any] = {"seed_candidate": task.seed_candidate, "evaluator": evaluator, "config": config}
+        if task.train_set:
+            kwargs["dataset"] = task.train_set
+        if task.val_set:
+            kwargs["valset"] = task.val_set
+        if task.objective:
+            kwargs["objective"] = task.objective
+        if task.background:
+            kwargs["background"] = task.background
+
+        try:
+            gepa_result: GEPAResult[Any, Any] | None = optimize_anything(**kwargs)
+        except BudgetExhaustedError:
+            gepa_result = _load_result_from_state(run_dir, seed=ctx.seed, str_mode=task.str_mode)
+
+        if gepa_result is None:
+            fallback = server.best_candidate
+            if fallback is None:
+                return Result(best_candidate=task.seed_candidate or "", best_score=None, total_evals=server.used)
+            return Result(best_candidate=fallback, best_score=server.best_score, total_evals=server.used)
+
+        best: Any = gepa_result.best_candidate
+        if isinstance(best, dict) and task.str_mode:
+            best = next(iter(best.values()), "")
+        return Result(
+            best_candidate=best,
+            best_score=float(gepa_result.val_aggregate_scores[gepa_result.best_idx]),
+            total_evals=server.used,
+            metadata={"candidates": len(gepa_result.candidates), "gepa_metric_calls": gepa_result.total_metric_calls},
+        )
+
+
+def _load_result_from_state(run_dir: str, *, seed: int, str_mode: bool) -> GEPAResult[Any, Any] | None:
+    """Rebuild GEPA's result from the state it checkpointed before the budget ran out.
+
+    Args:
+        run_dir: Workspace holding ``gepa_state.bin``.
+        seed: RNG seed the run used.
+        str_mode: Whether candidates were plain text.
+
+    Returns:
+        The reconstructed result, or ``None`` when no usable state exists.
+    """
+    try:
+        state = GEPAState.load(run_dir)
+        return GEPAResult.from_state(
+            state,
+            run_dir=run_dir,
+            seed=seed,
+            str_candidate_key=_STR_CANDIDATE_KEY if str_mode else None,
+        )
+    except Exception as exc:
+        logger.info("no GEPA state to recover after budget exhaustion: %s", exc)
+        return None

@@ -19,11 +19,12 @@ from typing import Any
 import dspy
 
 from ..config import settings
-from ..constants import OPTIMIZATION_TYPE_GRID_SEARCH, OPTIMIZATION_TYPE_RUN
-from ..models import GridSearchRequest, RunRequest
+from ..constants import OPTIMIZATION_TYPE_BLACKBOX, OPTIMIZATION_TYPE_GRID_SEARCH, OPTIMIZATION_TYPE_RUN
+from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.language_models import activate_job_lm_budget
+from ..service_gateway.optimization.blackbox.service import run_blackbox_optimization
 from ..service_gateway.optimization.llm_error import (
     LlmErrorCapture,
     enrich_error_message,
@@ -226,6 +227,14 @@ def run_service_in_subprocess(
                 completed_pairs=completed_pairs,
                 pair_index_base=pair_index_base,
                 total_pairs_override=int(grid_total_pairs) if grid_total_pairs is not None else None,
+            )
+        elif optimization_type == OPTIMIZATION_TYPE_BLACKBOX:
+            blackbox_payload = BlackboxRunRequest.model_validate(payload_dict)
+            result = run_blackbox_optimization(
+                blackbox_payload,
+                artifact_id=artifact_id,
+                progress_callback=progress_callback,
+                gepa_log_dir_path=gepa_log_dir_path,
             )
         else:
             run_payload = RunRequest.model_validate(payload_dict)

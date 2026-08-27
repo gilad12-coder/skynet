@@ -2,9 +2,12 @@
 
 ``POST /run`` — single optimization run.
 ``POST /grid-search`` — sweep over (generation, reflection) model pairs.
+``POST /blackbox/run`` — black-box text optimization against a scorer.
+``POST /blackbox/scorer/dry-run`` — score one version before submitting.
 
-Both endpoints are part of the public dev surface and are listed in
-``_SCALAR_PUBLIC_PATHS`` (see ``backend/core/api/app.py``).
+``/run`` and ``/grid-search`` are part of the public dev surface and are
+listed in ``_SCALAR_PUBLIC_PATHS`` (see ``backend/core/api/app.py``); the
+black-box routes join it once the contract settles.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from ...config import settings
 from ...constants import (
     COMPOSITION_SINGLE,
     COMPOSITION_WORKFLOW,
+    OPTIMIZATION_TYPE_BLACKBOX,
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
     PAYLOAD_OVERVIEW_COLUMN_MAPPING,
@@ -72,17 +76,22 @@ from ...constants import (
 from ...i18n import t
 from ...i18n_keys import I18nKey
 from ...models import (
+    BlackboxRunRequest,
     GridSearchRequest,
     OptimizationStatus,
     OptimizationSubmissionResponse,
     RunRequest,
+    ScorerDryRunRequest,
+    ScorerDryRunResponse,
 )
+from ...models.blackbox import BLACKBOX_MODULE_NAME, BLACKBOX_STRATEGY_AUTO
 from ...models.common import ModelConfig, OptimizationType
 from ...models.submissions import _OptimizationRequestBase
 from ...models.workflow import WORKFLOW_MODULE_NAME
 from ...notifications import notify_job_started
 from ...registry import RegistryError
 from ...service_gateway import ServiceError
+from ...service_gateway.optimization.blackbox.service import dry_run_scorer, validate_blackbox_payload
 from ...service_gateway.safe_exec import validate_signature_code
 from ...storage.dataset_library import DatasetLibraryStore, PostgresDatasetBlobStore
 from ...storage.usage import json_byte_size
@@ -506,7 +515,9 @@ def _enforce_submission_admission(job_store, username: str) -> None:
         raise DomainError("quota.concurrent_reached", status=429, limit=limit)
 
 
-def _cap_cost_ceiling_to_balance(payload: _OptimizationRequestBase, spendable: int | None, token_source: str) -> None:
+def _cap_cost_ceiling_to_balance(
+    payload: _OptimizationRequestBase | BlackboxRunRequest, spendable: int | None, token_source: str
+) -> None:
     """Pin a run's cost ceiling to what the account's spendable credits can back.
 
     With model-tier gating gone, any model is runnable and credits are the only
@@ -533,15 +544,17 @@ def _cap_cost_ceiling_to_balance(payload: _OptimizationRequestBase, spendable: i
     payload.max_cost_credits = budget if current is None else min(current, budget)
 
 
-def _request_model_configs(payload: _OptimizationRequestBase) -> list[ModelConfig]:
+def _request_model_configs(payload: _OptimizationRequestBase | BlackboxRunRequest) -> list[ModelConfig]:
     """Return every executable model config carried by a submission.
 
     Args:
-        payload: Run or grid request.
+        payload: Run, grid or black-box request.
 
     Returns:
         Model configs in execution order.
     """
+    if isinstance(payload, BlackboxRunRequest):
+        return [payload.reflection_model_settings]
     if isinstance(payload, RunRequest):
         return [
             config
@@ -558,12 +571,12 @@ def _request_model_configs(payload: _OptimizationRequestBase) -> list[ModelConfi
 
 
 def _normalize_model_token_sources(
-    payload: _OptimizationRequestBase,
+    payload: _OptimizationRequestBase | BlackboxRunRequest,
 ) -> tuple[list[ModelConfig], dict[str, str]]:
     """Resolve legacy job-level sources into explicit per-model sources.
 
     Args:
-        payload: Run or grid request to normalize in place.
+        payload: Run, grid or black-box request to normalize in place.
 
     Returns:
         The model configs and their normalized model-to-source billing map.
@@ -1000,5 +1013,165 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             module_name=payload.module_name,
             optimizer_name=payload.optimizer_name,
         )
+
+    @router.post(
+        "/blackbox/run",
+        response_model=OptimizationSubmissionResponse,
+        status_code=201,
+        summary="Submit a black-box text optimization",
+        tags=["agent"],
+    )
+    def submit_blackbox_run(
+        payload: BlackboxRunRequest,
+        current_user: AuthenticatedUserDep,
+        idempotency_key: IdempotencyKeyHeader = None,
+    ) -> OptimizationSubmissionResponse:
+        """Queue a black-box optimization of a text artifact against a scorer.
+
+        No DSPy program is involved: the job hands the starting point, cases
+        and scorer to the strategy layer (``auto`` explores every available
+        engine, then continues from the best version with GEPA). The persisted
+        owner is the authenticated caller, not whatever the client posted.
+
+        Args:
+            payload: The black-box request body validated by FastAPI.
+            current_user: Authenticated submitter resolved from the bearer token.
+            idempotency_key: Optional dedup key; a repeat returns the original.
+
+        Returns:
+            An ``OptimizationSubmissionResponse`` carrying the assigned id
+            and ``pending`` status.
+
+        Raises:
+            DomainError: 400 (unknown engine / scorer code does not load),
+                402 (no credits), 409 (quota), 422 (malformed).
+        """
+        payload.username = current_user.username
+
+        normalized_key = (idempotency_key or "").strip() or None
+        if normalized_key:
+            existing_id = job_store.find_job_by_idempotency_key(payload.username, normalized_key)
+            if existing_id:
+                cached = _existing_submission_response(job_store, existing_id)
+                if cached is not None:
+                    logger.info(
+                        "Idempotent blackbox retry hit: returning existing %s for user=%s key=%s",
+                        existing_id,
+                        payload.username,
+                        normalized_key,
+                    )
+                    return cached
+
+        _enforce_submission_admission(job_store, payload.username)
+
+        try:
+            validate_blackbox_payload(payload)
+        except ServiceError as exc:
+            # Log the detail server-side only; don't leak it to the client.
+            logger.warning("Blackbox validation failed: %s", exc)
+            raise DomainError("submission.validation_failed", status=400) from exc
+
+        _model_configs, _token_sources_by_model = _normalize_model_token_sources(payload)
+        _spendable = _enforce_credit_balance(job_store, payload.username, payload.token_source)
+        _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
+        _enforce_byok_connections(job_store, payload.username, _model_configs)
+
+        optimization_id = str(uuid4())
+        if payload.seed is None:
+            payload.seed = stable_seed(optimization_id)
+        optimizer_name = payload.strategy.engine or BLACKBOX_STRATEGY_AUTO
+        reflection_model = payload.reflection_model_settings.normalized_identifier()
+
+        # Same single-serialization pattern as /run — see the note there.
+        payload_dump = payload.model_dump(mode="json", by_alias=True)
+        enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
+
+        job_store.create_job(optimization_id, username=payload.username, idempotency_key=normalized_key)
+        job_store.set_payload_overview(
+            optimization_id,
+            {
+                PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE: OPTIMIZATION_TYPE_BLACKBOX,
+                PAYLOAD_OVERVIEW_COMPOSITION: COMPOSITION_SINGLE,
+                PAYLOAD_OVERVIEW_NAME: payload.name,
+                PAYLOAD_OVERVIEW_DESCRIPTION: payload.description,
+                PAYLOAD_OVERVIEW_USERNAME: payload.username,
+                PAYLOAD_OVERVIEW_MODULE_NAME: BLACKBOX_MODULE_NAME,
+                PAYLOAD_OVERVIEW_OPTIMIZER_NAME: optimizer_name,
+                # The reflection model is the only model a black-box run
+                # bills, so it doubles as the overview's primary model.
+                PAYLOAD_OVERVIEW_MODEL_NAME: reflection_model,
+                PAYLOAD_OVERVIEW_MODEL_SETTINGS: strip_api_key(payload.reflection_model_settings.model_dump()),
+                PAYLOAD_OVERVIEW_REFLECTION_MODEL: reflection_model,
+                PAYLOAD_OVERVIEW_DATASET_ROWS: len(payload.cases or []),
+                PAYLOAD_OVERVIEW_SPLIT_FRACTIONS: payload.split_fractions.model_dump(),
+                PAYLOAD_OVERVIEW_SHUFFLE: payload.shuffle,
+                PAYLOAD_OVERVIEW_SEED: payload.seed,
+                PAYLOAD_OVERVIEW_TOKEN_SOURCE: payload.token_source,
+                PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL: _token_sources_by_model,
+                PAYLOAD_OVERVIEW_MAX_COST_CREDITS: payload.max_cost_credits,
+                PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_credits_low,
+                PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_credits_high,
+                PAYLOAD_OVERVIEW_IS_PRIVATE: payload.is_private,
+            },
+        )
+
+        _persist_and_signal_job(job_store, service, optimization_id, payload_dump)
+
+        logger.info(
+            "Enqueued blackbox run %s: strategy=%s optimizer=%s scorer=%s",
+            optimization_id,
+            payload.strategy.mode,
+            optimizer_name,
+            payload.scorer.kind,
+        )
+
+        notify_job_started(
+            optimization_id=optimization_id,
+            username=payload.username,
+            optimization_type=OPTIMIZATION_TYPE_BLACKBOX,
+            optimizer_name=optimizer_name,
+            module_name=BLACKBOX_MODULE_NAME,
+            model_name=reflection_model,
+        )
+
+        return OptimizationSubmissionResponse(
+            optimization_id=optimization_id,
+            optimization_type=cast(OptimizationType, OPTIMIZATION_TYPE_BLACKBOX),
+            status=OptimizationStatus.pending,
+            created_at=datetime.now(UTC),
+            name=payload.name,
+            username=payload.username,
+            module_name=BLACKBOX_MODULE_NAME,
+            optimizer_name=optimizer_name,
+        )
+
+    @router.post(
+        "/blackbox/scorer/dry-run",
+        response_model=ScorerDryRunResponse,
+        summary="Score one version with a scorer before submitting",
+        tags=["agent"],
+    )
+    def blackbox_scorer_dry_run(
+        payload: ScorerDryRunRequest,
+        current_user: AuthenticatedUserDep,
+    ) -> ScorerDryRunResponse:
+        """Run the scorer once so a broken one fails here, not in the job.
+
+        Python scorers run in the metric sandbox; remote scorers get a single
+        outbound request. Scorer failures come back as ``ok=False`` with the
+        error text rather than as an HTTP error.
+
+        Args:
+            payload: The scorer spec, one version and an optional case.
+            current_user: Authenticated caller resolved from the bearer token.
+
+        Returns:
+            The score and side information, or the error that stopped it.
+
+        Raises:
+            DomainError: 429 when over the submission rate cap.
+        """
+        enforce_submission_rate(current_user.username)
+        return dry_run_scorer(payload)
 
     return router

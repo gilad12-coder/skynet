@@ -16,6 +16,7 @@ from ...billing.service import committed_spend_credits, cost_ceiling_budget
 from ...constants import (
     COMPOSITION_SINGLE,
     COMPOSITION_WORKFLOW,
+    OPTIMIZATION_TYPE_BLACKBOX,
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
     PAYLOAD_OVERVIEW_COMPOSITION,
@@ -31,6 +32,7 @@ from ...constants import (
     PAYLOAD_OVERVIEW_USERNAME,
 )
 from ...i18n_keys import I18nKey
+from ...models.blackbox import BLACKBOX_MODULE_NAME, ScorerDryRunResponse
 from ...registry import RegistryError
 from ...service_gateway import ServiceError
 from ...storage.models import Base, BillingCustomerModel, BillingProviderKeyModel
@@ -1662,3 +1664,233 @@ def test_submit_workflow_run_returns_201_and_persists_spec(monkeypatch: pytest.M
     assert overview[PAYLOAD_OVERVIEW_COMPOSITION] == COMPOSITION_WORKFLOW
     assert overview["workflow"]["nodes"][1]["kind"] == "signature"
     assert overview["signature_code"] is None
+
+
+def _blackbox_payload() -> dict:
+    """Build a minimal valid black-box payload for ``/blackbox/run`` tests.
+
+    Returns:
+        A dict matching the black-box submission schema.
+    """
+    return {
+        "name": "test-blackbox",
+        "username": "alice",
+        "seed_candidate": "hello world",
+        "objective": "maximize vowel density",
+        "scorer": {"kind": "python", "metric_code": "def score(candidate, case=None): return 1.0"},
+        "cases": [{"target": "aeiou"}],
+        "budget": {"max_scorer_runs": 50},
+        "strategy": {"mode": "auto"},
+        "reflection_model_config": {"name": "gpt-4o"},
+    }
+
+
+@pytest.fixture
+def _skip_scorer_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the subprocess scorer validation with a no-op.
+
+    The sandbox itself is covered in the service-gateway tests; the router
+    tests only care about what the endpoint does around it.
+    """
+    monkeypatch.setattr(_sub_mod, "validate_blackbox_payload", lambda payload: None)
+
+
+@pytest.mark.usefixtures("_skip_scorer_sandbox")
+def test_submit_blackbox_run_returns_201_and_persists_overview(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A black-box submission is queued with its own optimization type and overview."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    resp = client.post("/blackbox/run", json=_blackbox_payload())
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["optimization_type"] == OPTIMIZATION_TYPE_BLACKBOX
+    assert body["module_name"] == BLACKBOX_MODULE_NAME
+    assert body["optimizer_name"] == "auto"
+    assert body["name"] == "test-blackbox"
+    assert body["status"] == "pending"
+
+    overview = store._jobs[body["optimization_id"]]["overview"]
+    assert overview[PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE] == OPTIMIZATION_TYPE_BLACKBOX
+    assert overview[PAYLOAD_OVERVIEW_COMPOSITION] == COMPOSITION_SINGLE
+    assert overview[PAYLOAD_OVERVIEW_MODULE_NAME] == BLACKBOX_MODULE_NAME
+    assert overview[PAYLOAD_OVERVIEW_OPTIMIZER_NAME] == "auto"
+    assert overview[PAYLOAD_OVERVIEW_USERNAME] == body["username"]
+    assert "gpt-4o" in overview[PAYLOAD_OVERVIEW_MODEL_NAME]
+    assert overview[PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL] == {overview[PAYLOAD_OVERVIEW_MODEL_NAME]: "managed"}
+    assert overview[PAYLOAD_OVERVIEW_IS_PRIVATE] is False
+    assert overview["dataset_rows"] == 1
+    assert overview["seed"] is not None
+
+
+@pytest.mark.usefixtures("_skip_scorer_sandbox")
+def test_submit_blackbox_run_single_engine_is_the_optimizer_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """In ``single`` mode the chosen engine is recorded as the run's optimizer."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    payload = _blackbox_payload()
+    payload["strategy"] = {"mode": "single", "engine": "best_of_n"}
+
+    resp = client.post("/blackbox/run", json=payload)
+
+    assert resp.status_code == 201
+    assert resp.json()["optimizer_name"] == "best_of_n"
+    overview = store._jobs[resp.json()["optimization_id"]]["overview"]
+    assert overview[PAYLOAD_OVERVIEW_OPTIMIZER_NAME] == "best_of_n"
+
+
+@pytest.mark.usefixtures("_skip_scorer_sandbox")
+def test_submit_blackbox_run_overrides_posted_username(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The persisted owner is the authenticated caller, whatever the client posted."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    payload = _blackbox_payload()
+    payload["username"] = "mallory"
+
+    resp = client.post("/blackbox/run", json=payload)
+
+    assert resp.status_code == 201
+    assert resp.json()["username"] != "mallory"
+
+
+def test_submit_blackbox_run_returns_400_when_validation_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ``ServiceError`` from the black-box validator surfaces as a 400 without the detail."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    def _reject(payload: Any) -> None:
+        """Fail like an unavailable engine."""
+        raise ServiceError("Engine 'autoresearch' is not available: sandbox missing")
+
+    monkeypatch.setattr(_sub_mod, "validate_blackbox_payload", _reject)
+
+    resp = client.post("/blackbox/run", json=_blackbox_payload())
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "submission.validation_failed"
+    assert "autoresearch" not in resp.text
+    assert store.created_ids() == []
+
+
+@pytest.mark.usefixtures("_skip_scorer_sandbox")
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda p: p.pop("scorer"),
+        lambda p: p.update(seed_candidate=None, objective=None),
+        lambda p: p.update(strategy={"mode": "single"}),
+        lambda p: p.update(scorer={"kind": "python"}),
+        lambda p: p.update(scorer={"kind": "remote"}),
+        lambda p: p.update(budget={"max_scorer_runs": 0}),
+    ],
+)
+def test_submit_blackbox_run_returns_422_on_contract_violations(monkeypatch: pytest.MonkeyPatch, mutate: Any) -> None:
+    """Payloads that break the black-box contract are rejected by the schema.
+
+    Args:
+        monkeypatch: Pytest fixture.
+        mutate: Callable that breaks one aspect of a valid payload in place.
+    """
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    payload = _blackbox_payload()
+    mutate(payload)
+
+    resp = client.post("/blackbox/run", json=payload)
+
+    assert resp.status_code == 422
+    assert store.created_ids() == []
+
+
+@pytest.mark.usefixtures("_skip_scorer_sandbox")
+def test_submit_blackbox_run_idempotent_retry_returns_same_optimization_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The black-box route honours ``Idempotency-Key`` the same way ``/run`` does."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    headers = {"Idempotency-Key": "blackbox-dedup-1"}
+
+    first = client.post("/blackbox/run", json=_blackbox_payload(), headers=headers)
+    second = client.post("/blackbox/run", json=_blackbox_payload(), headers=headers)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["optimization_id"] == second.json()["optimization_id"]
+    assert len(store.created_ids()) == 1
+
+
+@pytest.mark.usefixtures("_skip_scorer_sandbox")
+def test_submit_blackbox_run_returns_409_when_over_storage_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The storage byte gate applies to black-box submissions too."""
+    store = _FakeJobStore(storage_quota=0)
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    resp = client.post("/blackbox/run", json=_blackbox_payload())
+
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "user.storage.quota_exceeded"
+
+
+def test_blackbox_scorer_dry_run_returns_the_probe_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dry-run endpoint returns whatever the scorer probe produced, as a 200."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    seen: list[Any] = []
+
+    def _fake_dry_run(request: Any) -> ScorerDryRunResponse:
+        """Record the request and answer with a canned probe."""
+        seen.append(request)
+        return ScorerDryRunResponse(ok=True, score=0.75, side_info={"vowels": 3}, error=None, elapsed_ms=4)
+
+    monkeypatch.setattr(_sub_mod, "dry_run_scorer", _fake_dry_run)
+    body = {
+        "scorer": {"kind": "python", "metric_code": "def score(candidate, case=None): return 0.75"},
+        "candidate": "hello",
+        "case": {"target": "aeiou"},
+    }
+
+    resp = client.post("/blackbox/scorer/dry-run", json=body)
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "score": 0.75, "side_info": {"vowels": 3}, "error": None, "elapsed_ms": 4}
+    assert len(seen) == 1
+    assert seen[0].candidate == "hello"
+    assert seen[0].case == {"target": "aeiou"}
+    assert store.created_ids() == []
+
+
+def test_blackbox_scorer_dry_run_reports_scorer_failure_as_200(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scorer that fails is reported in the body, not as an HTTP error."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(
+        _sub_mod,
+        "dry_run_scorer",
+        lambda request: ScorerDryRunResponse(
+            ok=False, score=None, side_info={}, error="ValueError: nope", elapsed_ms=1
+        ),
+    )
+
+    resp = client.post(
+        "/blackbox/scorer/dry-run",
+        json={
+            "scorer": {"kind": "python", "metric_code": "def score(c, case=None): raise ValueError('nope')"},
+            "candidate": "x",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is False
+    assert resp.json()["error"] == "ValueError: nope"
+
+
+def test_blackbox_scorer_dry_run_returns_422_without_a_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dry run needs a version to score."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    resp = client.post(
+        "/blackbox/scorer/dry-run", json={"scorer": {"kind": "python", "metric_code": "def score(c): return 1"}}
+    )
+
+    assert resp.status_code == 422

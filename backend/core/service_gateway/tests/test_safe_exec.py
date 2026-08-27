@@ -14,9 +14,12 @@ from core.service_gateway import safe_exec
 from core.service_gateway.safe_exec import (
     MetricIntrospection,
     MetricProbeResult,
+    ScorerProbeResult,
     SignatureIntrospection,
     probe_metric_on_sample,
+    probe_scorer,
     validate_metric_code,
+    validate_scorer_code,
     validate_signature_code,
 )
 
@@ -251,3 +254,85 @@ class TestBoundedCachePut:
 
         assert len(cache) == safe_exec._VALIDATION_CACHE_MAX_ENTRIES
         assert cache["code-0"] == 999
+
+
+_VALID_SCORER = "def score(candidate, case=None):\n    return len(candidate) / 10, {'length': len(candidate)}\n"
+
+
+class TestValidateScorerCode:
+    """Tests for ``validate_scorer_code``."""
+
+    def test_valid_scorer_passes(self) -> None:
+        """A ``score(candidate, case)`` function loads cleanly."""
+        validate_scorer_code(_VALID_SCORER)
+
+    def test_metric_entrypoint_is_accepted(self) -> None:
+        """The DSPy-style ``metric`` name is accepted as the scorer entrypoint."""
+        validate_scorer_code("def metric(candidate, case=None):\n    return 1.0\n")
+
+    def test_missing_function_is_rejected(self) -> None:
+        """Code without a scorer function raises ``ServiceError``."""
+        with pytest.raises(ServiceError, match="must define a function named 'score"):
+            validate_scorer_code("x = 1\n")
+
+    def test_syntax_error_is_rejected(self) -> None:
+        """Unparseable code raises ``ServiceError`` mentioning the syntax error."""
+        with pytest.raises(ServiceError, match="syntax error"):
+            validate_scorer_code("def !!!")
+
+    def test_import_failure_is_rejected(self) -> None:
+        """Code that blows up at import time raises ``ServiceError`` with the exception."""
+        with pytest.raises(ServiceError, match="failed to load: RuntimeError: boom"):
+            validate_scorer_code("raise RuntimeError('boom')\n")
+
+
+class TestProbeScorer:
+    """Tests for ``probe_scorer``."""
+
+    def test_returns_score_and_side_info(self) -> None:
+        """A well-behaved scorer's score and side info come back from the child."""
+        probe = probe_scorer(scorer_code=_VALID_SCORER, candidate="hello", case={"k": 1})
+
+        assert probe == ScorerProbeResult(score=0.5, side_info={"length": 5}, error=None)
+
+    def test_plain_number_return_is_normalized(self) -> None:
+        """A scorer returning a bare number gets empty side info."""
+        probe = probe_scorer(scorer_code="def score(candidate):\n    return 1\n", candidate="x")
+
+        assert probe.score == 1.0
+        assert probe.side_info == {}
+        assert probe.error is None
+
+    def test_scorer_exception_is_reported_not_raised(self) -> None:
+        """A scorer that raises on the candidate is reported via ``error``."""
+        probe = probe_scorer(
+            scorer_code="def score(candidate, case=None):\n    raise ValueError('bad candidate')\n",
+            candidate="x",
+        )
+
+        assert probe.score is None
+        assert probe.side_info == {}
+        assert probe.error == "ValueError: bad candidate"
+
+    def test_unusable_return_value_is_reported(self) -> None:
+        """A scorer returning something that is not a score is reported via ``error``."""
+        probe = probe_scorer(scorer_code="def score(candidate, case=None):\n    return 'high'\n", candidate="x")
+
+        assert probe.score is None
+        assert probe.error is not None
+        assert "scorer must return" in probe.error
+
+    def test_non_json_side_info_is_stringified(self) -> None:
+        """Side info that is not JSON-serializable crosses the process boundary as text."""
+        probe = probe_scorer(
+            scorer_code="def score(candidate, case=None):\n    return 1.0, {'when': object()}\n",
+            candidate="x",
+        )
+
+        assert probe.score == 1.0
+        assert isinstance(probe.side_info["when"], str)
+
+    def test_broken_code_surfaces_as_service_error(self) -> None:
+        """A scorer that fails to load raises ``ServiceError`` from the probe entrypoint."""
+        with pytest.raises(ServiceError, match="syntax error"):
+            probe_scorer(scorer_code="def !!!", candidate="x")

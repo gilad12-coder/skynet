@@ -15,7 +15,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.exceptions import ServiceError
 from core.i18n import CANCELLATION_REASON
+from core.models import BlackboxRunRequest
 from core.storage.base import JobStore
 
 from .. import engine as engine_module
@@ -593,3 +595,97 @@ def test_process_job_records_run_failed_milestone(
     record.assert_called_once()
     assert record.call_args.kwargs["name"] == "run_failed"
     assert record.call_args.kwargs["properties"]["status"] == "failed"
+
+
+_BLACKBOX_PAYLOAD: dict = {
+    "name": "bb",
+    "username": "alice",
+    "seed_candidate": "hello world",
+    "objective": "more vowels",
+    "scorer": {"kind": "python", "metric_code": "def score(candidate, case=None): return 1.0"},
+    "reflection_model_config": {"name": "gpt-4o"},
+}
+
+_BLACKBOX_OVERVIEW: dict = {
+    "optimization_type": "blackbox",
+    "username": "alice",
+    "optimizer_name": "auto",
+    "model_name": "gpt-4o",
+    "token_source": "managed",
+}
+
+
+def test_process_job_blackbox_validates_then_succeeds(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A blackbox job is validated by the black-box validator, not the DSPy service, and completes."""
+    store.seed_job("opt-bb", payload=_BLACKBOX_PAYLOAD, payload_overview=_BLACKBOX_OVERVIEW)
+    worker.enqueue_job("opt-bb")
+
+    ctx, _proc = make_mp_context(
+        exitcode=0,
+        result_events=[
+            {
+                "type": EVENT_RESULT,
+                "result": {
+                    "baseline_test_metric": 0.2,
+                    "optimized_test_metric": 0.6,
+                    "best_candidate": "aeiou",
+                    "total_tokens": 42,
+                    "usage_by_model": [{"model": "gpt-4o", "input_tokens": 30, "output_tokens": 12}],
+                    "details": {"engine": "gepa"},
+                },
+            }
+        ],
+    )
+    worker._mp_ctx = ctx
+    worker._mp_start_method = "spawn"
+
+    with (
+        patch("core.worker.engine.notify_job_completed"),
+        patch("core.worker.engine.record_server_event") as record,
+        patch("core.worker.engine.validate_blackbox_payload") as validate_bb,
+        patch.object(worker, "_get_service") as mock_svc,
+    ):
+        mock_svc.return_value.validate_payload = MagicMock()
+        mock_svc.return_value.validate_grid_search_payload = MagicMock()
+        worker._process_job("opt-bb", 0)
+
+    assert store._jobs["opt-bb"]["status"] == "success"
+    validate_bb.assert_called_once()
+    assert isinstance(validate_bb.call_args.args[0], BlackboxRunRequest)
+    mock_svc.return_value.validate_payload.assert_not_called()
+    mock_svc.return_value.validate_grid_search_payload.assert_not_called()
+    assert record.call_args.kwargs["properties"] == {
+        "status": "success",
+        "optimization_type": "blackbox",
+        "optimizer": "auto",
+        "model": "gpt-4o",
+        "token_source": "managed",
+    }
+
+
+def test_process_job_blackbox_validation_failure_marks_job_failed(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A black-box validation error fails the job before any child process starts."""
+    store.seed_job("opt-bb-bad", payload=_BLACKBOX_PAYLOAD, payload_overview=_BLACKBOX_OVERVIEW)
+    worker.enqueue_job("opt-bb-bad")
+
+    ctx, proc = make_mp_context(exitcode=0, result_events=[])
+    worker._mp_ctx = ctx
+    worker._mp_start_method = "spawn"
+
+    with (
+        patch("core.worker.engine.notify_job_completed"),
+        patch(
+            "core.worker.engine.validate_blackbox_payload", side_effect=ServiceError("Engine 'nope' is not available")
+        ),
+        patch.object(worker, "_get_service"),
+    ):
+        worker._process_job("opt-bb-bad", 0)
+
+    assert store._jobs["opt-bb-bad"]["status"] == "failed"
+    proc.start.assert_not_called()
