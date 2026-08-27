@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { msg } from "@/shared/lib/messages";
@@ -17,7 +18,7 @@ import { CodeStep } from "./steps/CodeStep";
 import { ParamsStep } from "./steps/ParamsStep";
 import { SummaryStep } from "./steps/SummaryStep";
 
-export function SubmitWizard() {
+export function SubmitWizard({ header }: { header?: ReactNode }) {
   const w = useSubmitWizard();
 
   const steps = [
@@ -39,6 +40,8 @@ export function SubmitWizard() {
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
       <SubmitStepper w={w} />
+
+      {w.step === 0 && header}
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">
         <AnimatePresence mode="wait" custom={w.direction}>

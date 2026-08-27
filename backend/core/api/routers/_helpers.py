@@ -24,6 +24,7 @@ from ...billing import StripeBillingService
 from ...billing.metering import meter_llm_run
 from ...config import settings
 from ...constants import (
+    OPTIMIZATION_TYPE_BLACKBOX,
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
     PAYLOAD_OVERVIEW_COMPILE_KWARGS,
@@ -88,7 +89,9 @@ from .constants import TERMINAL_STATUSES
 
 logger = logging.getLogger(__name__)
 
-_USER_FACING_OPTIMIZATION_TYPES = frozenset({OPTIMIZATION_TYPE_RUN, OPTIMIZATION_TYPE_GRID_SEARCH})
+_USER_FACING_OPTIMIZATION_TYPES = frozenset(
+    {OPTIMIZATION_TYPE_RUN, OPTIMIZATION_TYPE_GRID_SEARCH, OPTIMIZATION_TYPE_BLACKBOX}
+)
 
 
 class _BoundedProgramCache(OrderedDict[str, Any]):

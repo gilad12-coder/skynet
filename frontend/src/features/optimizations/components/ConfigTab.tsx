@@ -46,6 +46,7 @@ import { cn } from "@/shared/lib/utils";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { InfoCard, ReasoningPill } from "./ui-primitives";
+import { BlackboxConfigCard } from "./BlackboxConfig";
 
 const CONFIG_SLIDES = perLocale(() => [
   {
@@ -294,6 +295,12 @@ export function ConfigTab({
     },
     [activeSlide, isRtl],
   );
+
+  if (job.optimization_type === "blackbox") {
+    return (
+      <BlackboxConfigCard job={job} payload={(payload?.payload ?? {}) as Record<string, unknown>} />
+    );
+  }
 
   const previousSlide = CONFIG_SLIDES[activeSlide - 1];
   const currentSlide = CONFIG_SLIDES[activeSlide] ?? CONFIG_SLIDES[0]!;

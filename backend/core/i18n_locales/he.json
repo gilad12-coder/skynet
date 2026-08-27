@@ -7,6 +7,7 @@
     "optimizationTypeRun": "ריצה",
     "optimizationTypeRunPlural": "ריצות",
     "optimizationTypeGrid": "סריקה",
+    "optimizationTypeBlackbox": "קופסה שחורה",
     "pair": "זוג",
     "program": "תוכנית",
     "task": "משימה",

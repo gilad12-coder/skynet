@@ -40,6 +40,8 @@ from ....exceptions import ServiceError
 from ....models.blackbox import (
     BLACKBOX_STRATEGY_AUTO,
     BLACKBOX_TARGET_AGENT,
+    BlackboxEngineCatalogResponse,
+    BlackboxEngineInfo,
     BlackboxLaneResult,
     BlackboxRunRequest,
     BlackboxRunResponse,
@@ -61,7 +63,7 @@ from ..data import split_examples
 from .agent_eval import SandboxAgentScorer, agent_target_unavailable_reason, gateway_from_settings
 from .auto import run_strategy
 from .protocol import Candidate, EngineContext, EvalServer, ScorerFn, Task
-from .registry import EngineCapabilities, get_engine
+from .registry import ENGINES, EngineCapabilities, get_engine
 from .sandbox import sandbox_runtime_from_settings
 from .scorer import RemoteScorer, build_scorer
 
@@ -87,6 +89,39 @@ def engine_capabilities(target: BlackboxTarget) -> EngineCapabilities:
     reason = agent_target_unavailable_reason(settings)
     return EngineCapabilities(
         sandbox=reason is None, agent_target=target.kind == BLACKBOX_TARGET_AGENT, sandbox_reason=reason
+    )
+
+
+def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
+    """List every engine with its availability for a job whose target is ``target_kind``.
+
+    Args:
+        target_kind: ``text`` or ``agent`` — the target the wizard is building.
+
+    Returns:
+        The catalog in registry order, each entry carrying the user-facing
+        reason it cannot run here, when it cannot.
+    """
+    reason = agent_target_unavailable_reason(settings)
+    caps = EngineCapabilities(
+        sandbox=reason is None, agent_target=target_kind == BLACKBOX_TARGET_AGENT, sandbox_reason=reason
+    )
+    return BlackboxEngineCatalogResponse(
+        target_kind=target_kind,
+        sandbox_available=caps.sandbox,
+        sandbox_reason=reason,
+        engines=[
+            BlackboxEngineInfo(
+                id=spec.id,
+                label=spec.label,
+                description=spec.description,
+                available=spec.available_for(caps),
+                unavailable_reason=spec.unavailable_reason_for(caps),
+                requires_agent_target=spec.requires_agent_target,
+                supports_parts=spec.supports_parts,
+            )
+            for spec in ENGINES.values()
+        ],
     )
 
 

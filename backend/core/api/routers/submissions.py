@@ -4,6 +4,7 @@
 ``POST /grid-search`` — sweep over (generation, reflection) model pairs.
 ``POST /blackbox/run`` — black-box text optimization against a scorer.
 ``POST /blackbox/scorer/dry-run`` — score one version before submitting.
+``GET /blackbox/engines`` — the engine catalog with per-deployment availability.
 
 ``/run`` and ``/grid-search`` are part of the public dev surface and are
 listed in ``_SCALAR_PUBLIC_PATHS`` (see ``backend/core/api/app.py``); the
@@ -15,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header
@@ -76,6 +77,7 @@ from ...constants import (
 from ...i18n import t
 from ...i18n_keys import I18nKey
 from ...models import (
+    BlackboxEngineCatalogResponse,
     BlackboxRunRequest,
     GridSearchRequest,
     OptimizationStatus,
@@ -91,7 +93,7 @@ from ...models.workflow import WORKFLOW_MODULE_NAME
 from ...notifications import notify_job_started
 from ...registry import RegistryError
 from ...service_gateway import ServiceError
-from ...service_gateway.optimization.blackbox.service import dry_run_scorer, validate_blackbox_payload
+from ...service_gateway.optimization.blackbox.service import dry_run_scorer, engine_catalog, validate_blackbox_payload
 from ...service_gateway.safe_exec import validate_signature_code
 from ...storage.dataset_library import DatasetLibraryStore, PostgresDatasetBlobStore
 from ...storage.usage import json_byte_size
@@ -1144,6 +1146,31 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             module_name=BLACKBOX_MODULE_NAME,
             optimizer_name=optimizer_name,
         )
+
+    @router.get(
+        "/blackbox/engines",
+        response_model=BlackboxEngineCatalogResponse,
+        summary="List black-box engines and their availability",
+        tags=["agent"],
+    )
+    def blackbox_engines(
+        current_user: AuthenticatedUserDep,
+        target: Literal["text", "agent"] = "text",
+    ) -> BlackboxEngineCatalogResponse:
+        """Describe every engine so the wizard can show why one cannot run here.
+
+        Availability depends on the deployment (agent sandboxes) and on the
+        job's target kind, so the caller names the target it is building.
+
+        Args:
+            current_user: Authenticated caller resolved from the bearer token.
+            target: The target kind the job will use.
+
+        Returns:
+            The catalog in registry order.
+        """
+        del current_user
+        return engine_catalog(target)
 
     @router.post(
         "/blackbox/scorer/dry-run",

@@ -134,7 +134,9 @@ export function transformChartData(analyticsData: DashboardAnalytics | null): Ch
     name:
       key === "grid_search"
         ? msg("auto.features.dashboard.lib.transform.chart.data.literal.1")
-        : msg("auto.features.dashboard.lib.transform.chart.data.literal.2"),
+        : key === "blackbox"
+          ? msg("optimization.blackbox.badge")
+          : msg("auto.features.dashboard.lib.transform.chart.data.literal.2"),
     value,
   }));
 

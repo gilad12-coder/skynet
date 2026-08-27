@@ -35,6 +35,7 @@ from ...i18n_keys import I18nKey
 from ...models.blackbox import BLACKBOX_MODULE_NAME, ScorerDryRunResponse
 from ...registry import RegistryError
 from ...service_gateway import ServiceError
+from ...service_gateway.optimization.blackbox import service as _bb_service
 from ...storage.models import Base, BillingCustomerModel, BillingProviderKeyModel
 from ...storage.usage import StorageUsage
 from ..model_catalog import CatalogModel, ModelCatalogResponse
@@ -1892,5 +1893,58 @@ def test_blackbox_scorer_dry_run_returns_422_without_a_candidate(monkeypatch: py
     resp = client.post(
         "/blackbox/scorer/dry-run", json={"scorer": {"kind": "python", "metric_code": "def score(c): return 1"}}
     )
+
+    assert resp.status_code == 422
+
+
+def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The catalog lists every engine in registry order and flips Meta-Harness on for agent targets."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: None)
+
+    text = client.get("/blackbox/engines")
+    agent = client.get("/blackbox/engines", params={"target": "agent"})
+
+    assert text.status_code == 200
+    assert text.json()["target_kind"] == "text"
+    assert text.json()["sandbox_available"] is True
+    by_id = {engine["id"]: engine for engine in text.json()["engines"]}
+    assert list(by_id) == ["gepa", "best_of_n", "autoresearch", "meta_harness"]
+    assert by_id["gepa"]["available"] is True
+    assert by_id["gepa"]["supports_parts"] is True
+    assert by_id["autoresearch"]["available"] is False
+    assert by_id["autoresearch"]["unavailable_reason"]
+    assert by_id["meta_harness"]["available"] is False
+    assert by_id["meta_harness"]["requires_agent_target"] is True
+    assert agent.status_code == 200
+    agent_by_id = {engine["id"]: engine for engine in agent.json()["engines"]}
+    assert agent_by_id["meta_harness"]["available"] is True
+    assert agent_by_id["meta_harness"]["unavailable_reason"] is None
+
+
+def test_blackbox_engine_catalog_surfaces_the_missing_sandbox_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a sandbox the catalog says so once at the top and again on the engines that need it."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: "no sandbox here")
+
+    resp = client.get("/blackbox/engines", params={"target": "agent"})
+
+    assert resp.status_code == 200
+    assert resp.json()["sandbox_available"] is False
+    assert resp.json()["sandbox_reason"] == "no sandbox here"
+    by_id = {engine["id"]: engine for engine in resp.json()["engines"]}
+    assert by_id["meta_harness"]["available"] is False
+    assert by_id["meta_harness"]["unavailable_reason"] == "no sandbox here"
+    assert by_id["gepa"]["available"] is True
+
+
+def test_blackbox_engine_catalog_rejects_unknown_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A target kind outside text|agent is a 422, not a silent fallback to text."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    resp = client.get("/blackbox/engines", params={"target": "robot"})
 
     assert resp.status_code == 422

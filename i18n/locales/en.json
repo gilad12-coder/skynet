@@ -28,6 +28,7 @@
     "notificationNewOpt": "new optimization",
     "optimization": "optimization",
     "optimizationPlural": "optimizations",
+    "optimizationTypeBlackbox": "black-box",
     "optimizationTypeGrid": "grid search",
     "optimizationTypeRun": "run",
     "optimizationTypeRunPlural": "runs",

@@ -25,6 +25,8 @@ import { InfoCard } from "./ui-primitives";
 import { PipelineStages, computeStageTimestamps } from "./PipelineStages";
 import { TrajectoryPanel } from "@/features/trajectory";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { LaneBand } from "./LaneBand";
+import { deriveLanes, formatBlackboxDelta, formatBlackboxScore } from "../lib/blackbox";
 
 const ScoreChart = dynamic(() => import("@/shared/ui/score-chart").then((m) => m.ScoreChart), {
   ssr: false,
@@ -114,7 +116,8 @@ function OverviewTabImpl({
   // Render the single-run overview blocks for both a standalone run AND a
   // grid-search pair view — the goal is "exactly identical components", so a
   // pair is just a run scoped by pair_index plus aggregation around it.
-  const renderRunBlocks = job.optimization_type === "run" || isPairContext;
+  const isBlackbox = job.optimization_type === "blackbox";
+  const renderRunBlocks = job.optimization_type === "run" || isBlackbox || isPairContext;
   const renderGridAgg = job.optimization_type === "grid_search" && !isPairContext;
 
   const pairIndex = isPairContext ? activePair.pair_index : undefined;
@@ -141,26 +144,35 @@ function OverviewTabImpl({
   // finalized); standalone run uses job.result with global event fallback.
   const baselineFromEvents = isPairContext
     ? (job.progress_events?.find(
-        (e) =>
-          e.event === "baseline_evaluated" && e.metrics?.pair_index === activePair.pair_index,
+        (e) => e.event === "baseline_evaluated" && e.metrics?.pair_index === activePair.pair_index,
       )?.metrics?.baseline_test_metric as number | undefined)
     : (job.progress_events?.find((e) => e.event === "baseline_evaluated")?.metrics
         ?.baseline_test_metric as number | undefined);
   const optimizedFromEvents = isPairContext
     ? (job.progress_events?.find(
-        (e) =>
-          e.event === "optimized_evaluated" && e.metrics?.pair_index === activePair.pair_index,
+        (e) => e.event === "optimized_evaluated" && e.metrics?.pair_index === activePair.pair_index,
       )?.metrics?.optimized_test_metric as number | undefined)
     : (job.progress_events?.find((e) => e.event === "optimized_evaluated")?.metrics
         ?.optimized_test_metric as number | undefined);
   const runResult = isPairContext ? activePair : job.result;
-  const baseline = runResult?.baseline_test_metric ?? baselineFromEvents;
-  const optimized = runResult?.optimized_test_metric ?? optimizedFromEvents;
+  // Black-box runs persist their scores on `blackbox_result` (raw scorer
+  // values, not percentages) — `job.result` stays null for them.
+  const bbResult = isBlackbox ? job.blackbox_result : null;
+  const baseline =
+    runResult?.baseline_test_metric ?? bbResult?.baseline_test_metric ?? baselineFromEvents;
+  const optimized =
+    runResult?.optimized_test_metric ?? bbResult?.optimized_test_metric ?? optimizedFromEvents;
   const improvement =
     runResult?.metric_improvement ??
+    bbResult?.metric_improvement ??
     (baseline != null && optimized != null ? optimized - baseline : undefined);
   const scoresReady =
-    runResult != null && baseline != null && optimized != null && !activePair?.error;
+    (runResult != null || bbResult != null) &&
+    baseline != null &&
+    optimized != null &&
+    !activePair?.error;
+  const fmtScore = isBlackbox ? formatBlackboxScore : formatPercent;
+  const fmtDelta = isBlackbox ? formatBlackboxDelta : formatImprovement;
   const lmActivity: LMActivity | null = (runResult?.lm_activity as LMActivity | undefined) ?? null;
 
   // Named scores the metric logged via log_metrics, macro-averaged server-side
@@ -271,7 +283,9 @@ function OverviewTabImpl({
                       className="size-1.5 shrink-0 rounded-full bg-[var(--warning)] motion-safe:animate-pulse"
                       aria-hidden="true"
                     />
-                    {msg("optimization.progress.gepa")}
+                    {isBlackbox
+                      ? msg("optimization.progress.blackbox")
+                      : msg("optimization.progress.gepa")}
                   </span>
                   <span dir="ltr" className="flex items-baseline gap-1.5 font-mono tabular-nums">
                     <span className="text-sm font-semibold text-[#1C1612]">
@@ -310,6 +324,35 @@ function OverviewTabImpl({
             onStageClick={onStageClick}
             dataTutorial={isPairContext ? undefined : "pipeline-stages"}
           />
+        </FadeIn>
+      )}
+
+      {isBlackbox && (
+        <LaneBand
+          lanes={deriveLanes(job.progress_events ?? [], bbResult?.lanes)}
+          engineUsed={bbResult?.engine_used}
+        />
+      )}
+
+      {bbResult && (
+        <FadeIn delay={0.1}>
+          <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3">
+            <InfoCard
+              label={msg("optimization.blackbox.stats.scorer_runs")}
+              value={String(bbResult.total_scorer_runs)}
+              icon={<Gauge className="size-3.5" />}
+            />
+            <InfoCard
+              label={msg("optimization.blackbox.stats.runtime")}
+              value={formatDuration(bbResult.runtime_seconds)}
+              icon={<Timer className="size-3.5" />}
+            />
+            <InfoCard
+              label={msg("optimization.blackbox.stats.lm_calls")}
+              value={String(bbResult.num_lm_calls)}
+              icon={<ChatText className="size-3.5" />}
+            />
+          </div>
         </FadeIn>
       )}
 
@@ -359,9 +402,7 @@ function OverviewTabImpl({
                 <p className="text-[0.6875rem] text-muted-foreground mb-2 font-medium tracking-wide">
                   <HelpTip text={tip("score.baseline")}>{TERMS.baselineScore}</HelpTip>
                 </p>
-                <p className="text-3xl font-mono font-bold tabular-nums">
-                  {formatPercent(baseline)}
-                </p>
+                <p className="text-3xl font-mono font-bold tabular-nums">{fmtScore(baseline)}</p>
               </TiltCard>
             </StaggerItem>
             <StaggerItem>
@@ -370,7 +411,7 @@ function OverviewTabImpl({
                   <HelpTip text={tip("score.optimized")}>{TERMS.optimizedScore}</HelpTip>
                 </p>
                 <p className="text-3xl font-mono font-bold text-primary tabular-nums">
-                  {formatPercent(optimized)}
+                  {fmtScore(optimized)}
                 </p>
               </TiltCard>
             </StaggerItem>
@@ -386,7 +427,7 @@ function OverviewTabImpl({
                 <p
                   className={`text-3xl font-mono font-bold tabular-nums ${(displayImprovement ?? 0) >= 0 ? "text-stone-600" : "text-red-600"}`}
                 >
-                  {formatImprovement(displayImprovement)}
+                  {fmtDelta(displayImprovement)}
                 </p>
               </TiltCard>
             </StaggerItem>

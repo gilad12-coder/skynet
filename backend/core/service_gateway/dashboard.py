@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..constants import (
+    OPTIMIZATION_TYPE_BLACKBOX,
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
     PAYLOAD_OVERVIEW_DESCRIPTION,
@@ -70,7 +71,7 @@ _USER_FACING_CORPUS_SQL = (
     "(COALESCE(je.optimization_type, j.optimization_type, "
     f"j.payload_overview->>'{PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE}', "
     f"'{OPTIMIZATION_TYPE_RUN}') "
-    f"IN ('{OPTIMIZATION_TYPE_RUN}', '{OPTIMIZATION_TYPE_GRID_SEARCH}') "
+    f"IN ('{OPTIMIZATION_TYPE_RUN}', '{OPTIMIZATION_TYPE_GRID_SEARCH}', '{OPTIMIZATION_TYPE_BLACKBOX}') "
     "AND j.parent_optimization_id IS NULL)"
 )
 

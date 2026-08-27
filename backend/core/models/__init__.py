@@ -23,6 +23,8 @@ from .analytics import (
 from .artifacts import NodeArtifact, OptimizedDemo, OptimizedPredictor, ProgramArtifact, ReactOverlay
 from .blackbox import (
     BlackboxBudget,
+    BlackboxEngineCatalogResponse,
+    BlackboxEngineInfo,
     BlackboxLaneResult,
     BlackboxRunRequest,
     BlackboxRunResponse,
@@ -102,6 +104,8 @@ __all__ = [
     "WORKFLOW_MODULE_NAME",
     "AnalyticsSummaryResponse",
     "BlackboxBudget",
+    "BlackboxEngineCatalogResponse",
+    "BlackboxEngineInfo",
     "BlackboxLaneResult",
     "BlackboxRunRequest",
     "BlackboxRunResponse",
