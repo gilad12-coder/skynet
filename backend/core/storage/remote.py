@@ -149,29 +149,64 @@ def _json_float(value: Any) -> float | None:
         return None
 
 
-def _assemble_analytics_row(row: Any) -> JobRecord:
-    """Rebuild one skinny analytics job dict from its extracted JSON scalars.
+def _json_str(value: Any) -> str | None:
+    """Keep one extracted JSON scalar when it is a string, else ``None``.
 
-    Keeps the shapes the aggregations rely on: absent overview keys stay
-    absent (``.get`` → ``None``), a NULL ``result`` stays ``None`` (the
-    ``if not result_data`` guard), and ``best_pair`` appears only when at
-    least one of its metrics parsed — matching how a grid row looks.
+    Both dialects hand string members back as ``str``; anything else means the
+    key held a number or a nested value, which the summaries never label with.
+    """
+    return value if isinstance(value, str) else None
 
-    Args:
-        row: The SELECT tuple from :meth:`RemoteDBJobStore.scan_jobs_for_analytics`.
+
+def _result_summary_columns() -> tuple[Any, ...]:
+    """SELECT expressions extracting the ``result`` scalars list rows carry.
+
+    These are the only ``result`` members any list surface reads — dashboard
+    cards (``build_summary``), the KPI rollups and the sidebar. Everything
+    else in the blob (per-example outputs, program artifacts, demos — the
+    multi-MB part) is only ever read off a single-job fetch, so the list
+    SELECTs project just these and leave the blob in the database. Positional
+    order is the contract with :func:`_assemble_result_summary`. Uses
+    SQLAlchemy's dialect-portable JSON operators so the same projection runs
+    on PostgreSQL (``->>``) and the SQLite test harness (``json_extract``).
 
     Returns:
-        A ``JobRecord``-shaped dict with pruned ``payload_overview``/``result``.
+        A ``result IS NULL`` flag followed by the extracted scalars.
+    """
+    result = JobModel.result
+    best_pair = result["best_pair"]
+    return (
+        result.is_(None),
+        result["baseline_test_metric"].as_string(),
+        result["optimized_test_metric"].as_string(),
+        result["runtime_seconds"].as_string(),
+        result["completed_pairs"].as_string(),
+        result["failed_pairs"].as_string(),
+        best_pair["baseline_test_metric"].as_string(),
+        best_pair["optimized_test_metric"].as_string(),
+        best_pair["runtime_seconds"].as_string(),
+        best_pair["generation_model"].as_string(),
+        best_pair["reflection_model"].as_string(),
+    )
+
+
+def _assemble_result_summary(values: Any) -> dict[str, Any] | None:
+    """Rebuild a pruned ``result`` dict from :func:`_result_summary_columns` scalars.
+
+    Keeps the shapes the readers rely on: a NULL ``result`` stays ``None``
+    (the ``if not result_data`` guards), absent or non-scalar keys stay
+    absent (``.get`` → ``None``, as on the full blob), and ``best_pair``
+    appears only when at least one of its summarized keys parsed — matching
+    how a grid row looks to ``build_summary``.
+
+    Args:
+        values: The positional scalars, in :func:`_result_summary_columns` order.
+
+    Returns:
+        The pruned ``result`` dict, or ``None`` for a result-less row.
     """
     (
-        optimization_id,
-        job_status,
         result_null,
-        ov_optimizer,
-        ov_model,
-        ov_type,
-        ov_rows,
-        ov_pairs,
         r_baseline,
         r_optimized,
         r_runtime,
@@ -180,7 +215,46 @@ def _assemble_analytics_row(row: Any) -> JobRecord:
         bp_baseline,
         bp_optimized,
         bp_runtime,
-    ) = row
+        bp_generation,
+        bp_reflection,
+    ) = values
+    if result_null:
+        return None
+    result_pairs = (
+        ("baseline_test_metric", _json_float(r_baseline)),
+        ("optimized_test_metric", _json_float(r_optimized)),
+        ("runtime_seconds", _json_float(r_runtime)),
+        ("completed_pairs", _json_int(r_completed)),
+        ("failed_pairs", _json_int(r_failed)),
+    )
+    result: dict[str, Any] = {key: value for key, value in result_pairs if value is not None}
+    best_pair_pairs = (
+        ("baseline_test_metric", _json_float(bp_baseline)),
+        ("optimized_test_metric", _json_float(bp_optimized)),
+        ("runtime_seconds", _json_float(bp_runtime)),
+        ("generation_model", _json_str(bp_generation)),
+        ("reflection_model", _json_str(bp_reflection)),
+    )
+    best_pair = {key: value for key, value in best_pair_pairs if value is not None}
+    if best_pair:
+        result["best_pair"] = best_pair
+    return result
+
+
+def _assemble_analytics_row(row: Any) -> JobRecord:
+    """Rebuild one skinny analytics job dict from its extracted JSON scalars.
+
+    Keeps the shapes the aggregations rely on: absent overview keys stay
+    absent (``.get`` → ``None``); ``result`` is rebuilt by
+    :func:`_assemble_result_summary` from the trailing scalars.
+
+    Args:
+        row: The SELECT tuple from :meth:`RemoteDBJobStore.scan_jobs_for_analytics`.
+
+    Returns:
+        A ``JobRecord``-shaped dict with pruned ``payload_overview``/``result``.
+    """
+    optimization_id, job_status, ov_optimizer, ov_model, ov_type, ov_rows, ov_pairs = row[:7]
     overview_pairs = (
         (PAYLOAD_OVERVIEW_OPTIMIZER_NAME, ov_optimizer),
         (PAYLOAD_OVERVIEW_MODEL_NAME, ov_model),
@@ -188,31 +262,12 @@ def _assemble_analytics_row(row: Any) -> JobRecord:
         (PAYLOAD_OVERVIEW_DATASET_ROWS, _json_int(ov_rows)),
         (PAYLOAD_OVERVIEW_TOTAL_PAIRS, _json_int(ov_pairs)),
     )
-    job: JobRecord = {
+    return {
         "optimization_id": optimization_id,
         "status": job_status,
         "payload_overview": {key: value for key, value in overview_pairs if value is not None},
-        "result": None,
+        "result": _assemble_result_summary(row[7:]),
     }
-    if not result_null:
-        result_pairs = (
-            ("baseline_test_metric", _json_float(r_baseline)),
-            ("optimized_test_metric", _json_float(r_optimized)),
-            ("runtime_seconds", _json_float(r_runtime)),
-            ("completed_pairs", _json_int(r_completed)),
-            ("failed_pairs", _json_int(r_failed)),
-        )
-        result: dict[str, Any] = {key: value for key, value in result_pairs if value is not None}
-        best_pair_pairs = (
-            ("baseline_test_metric", _json_float(bp_baseline)),
-            ("optimized_test_metric", _json_float(bp_optimized)),
-            ("runtime_seconds", _json_float(bp_runtime)),
-        )
-        best_pair = {key: value for key, value in best_pair_pairs if value is not None}
-        if best_pair:
-            result["best_pair"] = best_pair
-        job["result"] = result
-    return job
 
 
 def _user_facing_jobs():
@@ -467,7 +522,7 @@ class RemoteDBJobStore:
         """
         return self._session_factory()
 
-    def _job_to_dict(self, job: JobModel, *, include_payload: bool = True) -> JobRecord:
+    def _job_to_dict(self, job: JobModel, *, include_payload: bool = True, include_result: bool = True) -> JobRecord:
         """Convert a JobModel ORM instance to its TypedDict representation.
 
         Args:
@@ -475,8 +530,12 @@ class RemoteDBJobStore:
             include_payload: When ``False``, the (potentially multi-MB) ``payload``
                 JSONB is reported as ``None`` instead of being read off the row.
                 List/SSE paths pass ``False`` so the column is never materialized;
-                callers that defer it on the query (see :meth:`_rows_with_counts`)
+                callers that defer it on the query (see :meth:`_list_query`)
                 avoid the DB read entirely.
+            include_result: When ``False``, ``result`` is likewise reported as
+                ``None`` instead of being read; the list paths defer the column
+                and splice in the pruned summary from
+                :func:`_assemble_result_summary` instead.
 
         Returns:
             A ``JobRecord`` with ISO-formatted timestamps and JSON columns
@@ -493,7 +552,7 @@ class RemoteDBJobStore:
                 "estimated_remaining_seconds": job.estimated_remaining_seconds,
                 "message": job.message,
                 "latest_metrics": job.latest_metrics or {},
-                "result": job.result,
+                "result": job.result if include_result else None,
                 "payload_overview": job.payload_overview or {},
                 "payload": job.payload if include_payload else None,
                 "username": job.username,
@@ -812,7 +871,10 @@ class RemoteDBJobStore:
         """
         session = self._get_session()
         try:
-            return session.query(JobModel).filter(JobModel.optimization_id == optimization_id).first() is not None
+            return (
+                session.query(JobModel.optimization_id).filter(JobModel.optimization_id == optimization_id).first()
+                is not None
+            )
         finally:
             session.close()
 
@@ -1212,6 +1274,7 @@ class RemoteDBJobStore:
         try:
             rows = (
                 session.query(JobModel)
+                .options(defer(JobModel.payload))
                 .filter(JobModel.parent_optimization_id == parent_optimization_id)
                 .order_by(JobModel.pair_index.asc())
                 .all()
@@ -1767,6 +1830,7 @@ class RemoteDBJobStore:
             )
             orphaned = (
                 session.query(JobModel)
+                .options(defer(JobModel.payload), defer(JobModel.result))
                 .filter(JobModel.status.in_(["running", "validating"]))
                 .filter((JobModel.lease_expires_at.is_(None)) | (JobModel.lease_expires_at < now))
                 .filter(~has_children)
@@ -1891,9 +1955,10 @@ class RemoteDBJobStore:
                 return None
             optimization_id = row[0]
 
-        # Re-load the full row through the ORM so the returned dict matches
-        # the shape of the rest of the API.
-        return self.get_job(optimization_id)
+        # Re-load the row through the ORM so the returned dict matches the
+        # shape of the rest of the API. The worker only reads the id off a
+        # claim and fetches the payload separately once it starts the job.
+        return self.get_job(optimization_id, include_payload=False)
 
     def _claim_next_job_fallback(self, worker_id: str, lease_seconds: float) -> JobRecord | None:
         """Best-effort claim for non-Postgres backends (tests).
@@ -1931,7 +1996,7 @@ class RemoteDBJobStore:
             job.lease_expires_at = lease_until  # type: ignore[assignment]
             session.commit()
             session.refresh(job)
-            return self._job_to_dict(job)
+            return self._job_to_dict(job, include_payload=False)
         finally:
             session.close()
 
@@ -2003,14 +2068,14 @@ class RemoteDBJobStore:
         """
         session = self._get_session()
         try:
-            jobs = (
-                session.query(JobModel)
+            rows = (
+                session.query(JobModel.optimization_id)
                 .filter(JobModel.status == "pending")
                 .filter(or_(JobModel.code_version.is_(None), JobModel.code_version == self._current_code_version))
                 .order_by(JobModel.created_at.asc())
                 .all()
             )
-            return [str(j.optimization_id) for j in jobs]
+            return [str(row[0]) for row in rows]
         finally:
             session.close()
 
@@ -2458,27 +2523,17 @@ class RemoteDBJobStore:
             Skinny job rows in newest-first order.
         """
         overview = JobModel.payload_overview
-        result = JobModel.result
-        best_pair = result["best_pair"]
         session = self._get_session()
         try:
             q = session.query(
                 JobModel.optimization_id,
                 JobModel.status,
-                result.is_(None).label("result_null"),
                 overview[PAYLOAD_OVERVIEW_OPTIMIZER_NAME].as_string(),
                 overview[PAYLOAD_OVERVIEW_MODEL_NAME].as_string(),
                 overview[PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE].as_string(),
                 overview[PAYLOAD_OVERVIEW_DATASET_ROWS].as_string(),
                 overview[PAYLOAD_OVERVIEW_TOTAL_PAIRS].as_string(),
-                result["baseline_test_metric"].as_string(),
-                result["optimized_test_metric"].as_string(),
-                result["runtime_seconds"].as_string(),
-                result["completed_pairs"].as_string(),
-                result["failed_pairs"].as_string(),
-                best_pair["baseline_test_metric"].as_string(),
-                best_pair["optimized_test_metric"].as_string(),
-                best_pair["runtime_seconds"].as_string(),
+                *_result_summary_columns(),
             ).order_by(JobModel.created_at.desc())
             q = q.filter(_user_facing_jobs())
             if status:
@@ -2489,6 +2544,39 @@ class RemoteDBJobStore:
         finally:
             session.close()
         return [_assemble_analytics_row(row) for row in rows]
+
+    def _list_query(self, session: Session):
+        """Base SELECT shared by the list surfaces.
+
+        Every ``jobs`` column except the two JSON blobs, plus the ``result``
+        scalars from :func:`_result_summary_columns`. ``payload`` (the
+        training set) and ``result`` (per-example outputs, program artifacts)
+        are the multi-MB members of a row and no list reader looks past the
+        summary scalars, so neither leaves the database.
+
+        Args:
+            session: The open session to build the query on.
+
+        Returns:
+            A query yielding ``(JobModel, *result scalars)`` rows.
+        """
+        return session.query(JobModel, *_result_summary_columns()).options(
+            defer(JobModel.payload), defer(JobModel.result)
+        )
+
+    def _list_row_to_dict(self, row: Any) -> JobRecord:
+        """Convert one :meth:`_list_query` row to a ``JobRecord`` carrying the pruned ``result``.
+
+        Args:
+            row: A ``(JobModel, *result scalars)`` row.
+
+        Returns:
+            The ``JobRecord`` with ``payload`` omitted and ``result`` summarized.
+        """
+        job, *summary = row
+        record = self._job_to_dict(job, include_payload=False, include_result=False)
+        record["result"] = _assemble_result_summary(summary)
+        return record
 
     def list_jobs(
         self,
@@ -2521,10 +2609,13 @@ class RemoteDBJobStore:
         Returns:
             Matching ``JobRecord`` rows in newest-first order, with
             ``progress_count`` / ``log_count`` populated when ``with_counts``.
+            ``result`` carries only its summary scalars (see
+            :func:`_assemble_result_summary`); :meth:`get_job` returns the
+            full blob.
         """
         session = self._get_session()
         try:
-            q = session.query(JobModel).options(defer(JobModel.payload)).order_by(JobModel.created_at.desc())
+            q = self._list_query(session).order_by(JobModel.created_at.desc())
             if status:
                 q = q.filter(JobModel.status == status)
             if username:
@@ -2533,29 +2624,30 @@ class RemoteDBJobStore:
                 q = q.filter(JobModel.optimization_type == optimization_type, _top_level_jobs())
             else:
                 q = q.filter(_user_facing_jobs())
-            jobs = q.offset(offset).limit(limit).all()
+            records = [self._list_row_to_dict(row) for row in q.offset(offset).limit(limit).all()]
             if not with_counts:
-                return [self._job_to_dict(j, include_payload=False) for j in jobs]
-            return self._rows_with_counts(session, jobs)
+                return records
+            return self._rows_with_counts(session, records)
         finally:
             session.close()
 
-    def _rows_with_counts(self, session, jobs: list[JobModel]) -> list[JobRecord]:
-        """Fold progress/log counts and summary text into job rows.
+    def _rows_with_counts(self, session: Session, records: list[JobRecord]) -> list[JobRecord]:
+        """Fold progress/log counts and summary text into list rows.
 
         Two aggregate queries (plus the embedding lookup) keyed on the page's
         ``optimization_ids`` so each row carries ``progress_count`` /
         ``log_count`` / ``summary_text`` without an N-per-row round trip. Shared
-        by :meth:`list_jobs` and :meth:`list_jobs_shared_with`.
+        by :meth:`list_jobs`, :meth:`list_jobs_shared_with` and
+        :meth:`list_jobs_visible_to`.
 
         Args:
-            session: The open session the ``jobs`` were loaded on.
-            jobs: The page of ``JobModel`` rows to enrich.
+            session: The open session the ``records`` were loaded on.
+            records: The page of :meth:`_list_row_to_dict` rows to enrich in place.
 
         Returns:
-            The rows as ``JobRecord`` dicts with the folded counts.
+            The same rows with the folded counts.
         """
-        optimization_ids = [j.optimization_id for j in jobs]
+        optimization_ids = [str(record["optimization_id"]) for record in records]
         progress_counts: dict[str, int] = (
             {
                 row[0]: row[1]
@@ -2594,15 +2686,12 @@ class RemoteDBJobStore:
             if optimization_ids and settings.embeddings_enabled
             else {}
         )
-        result: list[JobRecord] = []
-        for j in jobs:
-            d = self._job_to_dict(j, include_payload=False)
-            oid = str(j.optimization_id)
-            d["progress_count"] = progress_counts.get(oid, 0)
-            d["log_count"] = log_counts.get(oid, 0)
-            d["summary_text"] = summary_texts.get(oid)
-            result.append(d)
-        return result
+        for record in records:
+            oid = str(record["optimization_id"])
+            record["progress_count"] = progress_counts.get(oid, 0)
+            record["log_count"] = log_counts.get(oid, 0)
+            record["summary_text"] = summary_texts.get(oid)
+        return records
 
     def list_jobs_shared_with(self, username: str, *, limit: int = 50, offset: int = 0) -> list[JobRecord]:
         """List jobs shared with ``username`` via a member grant, newest first.
@@ -2619,14 +2708,14 @@ class RemoteDBJobStore:
             offset: Number of rows to skip from the start.
 
         Returns:
-            Matching ``JobRecord`` rows in newest-first order.
+            Matching ``JobRecord`` rows in newest-first order, with ``result``
+            pruned to its summary scalars as in :meth:`list_jobs`.
         """
         normalized = username.strip().lower()
         session = self._get_session()
         try:
-            jobs = (
-                session.query(JobModel)
-                .options(defer(JobModel.payload))
+            rows = (
+                self._list_query(session)
                 .join(
                     OptimizationShareGrantModel,
                     OptimizationShareGrantModel.optimization_id == JobModel.optimization_id,
@@ -2638,7 +2727,7 @@ class RemoteDBJobStore:
                 .limit(limit)
                 .all()
             )
-            return self._rows_with_counts(session, jobs)
+            return self._rows_with_counts(session, [self._list_row_to_dict(row) for row in rows])
         finally:
             session.close()
 
@@ -2676,6 +2765,7 @@ class RemoteDBJobStore:
         optimization_type: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        with_counts: bool = True,
     ) -> list[JobRecord]:
         """List jobs the caller owns or was granted access to, newest first.
 
@@ -2692,10 +2782,15 @@ class RemoteDBJobStore:
             optimization_type: Restrict to a particular run type when set.
             limit: Maximum number of rows to return.
             offset: Number of rows to skip from the start.
+            with_counts: When ``False``, skip the progress/log/summary
+                aggregate folding, as in :meth:`list_jobs` — the dashboard
+                analytics scan never reads those fields.
 
         Returns:
             Matching ``JobRecord`` rows in newest-first order with
-            ``progress_count`` / ``log_count`` / ``summary_text`` folded in.
+            ``progress_count`` / ``log_count`` / ``summary_text`` folded in
+            when ``with_counts``, and ``result`` pruned to its summary
+            scalars as in :meth:`list_jobs`.
         """
         normalized = username.strip().lower()
         session = self._get_session()
@@ -2703,10 +2798,8 @@ class RemoteDBJobStore:
             grant_ids = session.query(OptimizationShareGrantModel.optimization_id).filter(
                 OptimizationShareGrantModel.grantee_username == normalized
             )
-            q = (
-                session.query(JobModel)
-                .options(defer(JobModel.payload))
-                .filter(or_(JobModel.username == username, JobModel.optimization_id.in_(grant_ids)))
+            q = self._list_query(session).filter(
+                or_(JobModel.username == username, JobModel.optimization_id.in_(grant_ids))
             )
             if status:
                 q = q.filter(JobModel.status == status)
@@ -2714,8 +2807,11 @@ class RemoteDBJobStore:
                 q = q.filter(JobModel.optimization_type == optimization_type, _top_level_jobs())
             else:
                 q = q.filter(_user_facing_jobs())
-            jobs = q.order_by(JobModel.created_at.desc()).offset(offset).limit(limit).all()
-            return self._rows_with_counts(session, jobs)
+            rows = q.order_by(JobModel.created_at.desc()).offset(offset).limit(limit).all()
+            records = [self._list_row_to_dict(row) for row in rows]
+            if not with_counts:
+                return records
+            return self._rows_with_counts(session, records)
         finally:
             session.close()
 

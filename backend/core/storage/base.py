@@ -300,7 +300,10 @@ class JobStore(Protocol):
             offset: Number of rows to skip from the start.
 
         Returns:
-            Matching ``JobRecord`` rows in newest-first order.
+            Matching ``JobRecord`` rows in newest-first order. Implementations
+            may prune ``result`` down to the summary scalars list surfaces
+            read (test metrics, runtime, pair counters, ``best_pair`` labels);
+            use :meth:`get_job` for the full blob.
         """
         ...
 
@@ -366,7 +369,9 @@ class JobStore(Protocol):
                 must call :meth:`extend_lease` to renew it.
 
         Returns:
-            The claimed ``JobRecord``, or ``None`` if no claimable job exists.
+            The claimed ``JobRecord`` (``payload`` may be omitted — the worker
+            re-reads it via :meth:`get_job` when the run starts), or ``None``
+            if no claimable job exists.
         """
         ...
 
