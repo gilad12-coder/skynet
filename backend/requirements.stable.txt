@@ -437,6 +437,14 @@ uvicorn==0.49.0
     #   skynet (pyproject.toml)
     #   fastmcp-slim
     #   mcp
+vercel-headers==0.7.1
+    # via vercel-oidc
+vercel-internal-core==0.1.2
+    # via vercel-sandbox
+vercel-oidc==0.8.0
+    # via vercel-sandbox
+vercel-sandbox==0.4.0
+    # via skynet (pyproject.toml)
 watchfiles==1.2.0
     # via fastmcp-slim
 webauthn==2.8.0
