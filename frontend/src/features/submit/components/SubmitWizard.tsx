@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { msg } from "@/shared/lib/messages";
@@ -16,22 +17,30 @@ import { ModelStep } from "./steps/ModelStep";
 import { CodeStep } from "./steps/CodeStep";
 import { ParamsStep } from "./steps/ParamsStep";
 import { SummaryStep } from "./steps/SummaryStep";
+import { SplitSection } from "./steps/SplitSection";
 
-export function SubmitWizard() {
+export function SubmitWizard({ header }: { header?: ReactNode }) {
   const w = useSubmitWizard();
 
   const steps = [
     <BasicsStep key="basics" w={w} />,
-    <DatasetStep key="data" w={w} />,
-    <ParamsStep key="params" w={w} />,
-    <CodeStep key="code" w={w} />,
-    <ModelStep key="model" w={w} />,
+    <CodeStep key="start" w={w} part="start" />,
+    <div key="cases" className="space-y-4 md:space-y-6">
+      <DatasetStep w={w} />
+      <SplitSection w={w} />
+    </div>,
+    <CodeStep key="scorer" w={w} part="scorer" />,
+    <div key="optimizer" className="space-y-4 md:space-y-6">
+      <ParamsStep w={w} />
+      <ModelStep w={w} />
+    </div>,
     <SummaryStep key="review" w={w} />,
   ];
 
-  // Code step (index 3) renders a two-pane layout with an agent side-panel
-  // in auto mode, so it needs more horizontal room than the other steps.
-  const isCodeStep = w.step === 3;
+  // The Starting point (1) and Scorer (3) steps render a two-pane layout with
+  // an agent side-panel in auto mode, so they need more horizontal room than
+  // the other steps.
+  const isCodeStep = w.step === 1 || w.step === 3;
   const containerWidthClass = isCodeStep && w.codeAssistMode === "auto" ? "max-w-5xl" : "max-w-2xl";
 
   return (
@@ -39,6 +48,8 @@ export function SubmitWizard() {
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
       <SubmitStepper w={w} />
+
+      {w.step === 0 && header}
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">
         <AnimatePresence mode="wait" custom={w.direction}>

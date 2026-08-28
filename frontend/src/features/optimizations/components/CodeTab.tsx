@@ -38,11 +38,14 @@ export function CodeTab({
   signatureCode,
   metricCode,
   workflowSpec = null,
+  metricLabel,
 }: {
   signatureCode: string;
   metricCode: string;
   workflowSpec?: WorkflowSpec | null;
+  metricLabel?: string;
 }) {
+  const metricTabLabel = metricLabel ?? msg("auto.features.optimizations.components.codetab.4");
   const workflowCode = useMemo(
     () => (workflowSpec ? compileWorkflowToCode(workflowSpec) : null),
     [workflowSpec],
@@ -51,18 +54,14 @@ export function CodeTab({
   const tabs: Array<{ value: string; label: string }> = workflowSpec
     ? [
         { value: "code", label: msg("optimization.code.tab_program") },
-        ...(metricCode
-          ? [{ value: "metric", label: msg("auto.features.optimizations.components.codetab.4") }]
-          : []),
+        ...(metricCode ? [{ value: "metric", label: metricTabLabel }] : []),
         { value: "workflow", label: msg("optimization.code.tab_workflow") },
       ]
     : [
         ...(signatureCode
           ? [{ value: "signature", label: msg("auto.features.optimizations.components.codetab.3") }]
           : []),
-        ...(metricCode
-          ? [{ value: "metric", label: msg("auto.features.optimizations.components.codetab.4") }]
-          : []),
+        ...(metricCode ? [{ value: "metric", label: metricTabLabel }] : []),
       ];
 
   const [activeCodeTab, setActiveCodeTab] = useState<string>(

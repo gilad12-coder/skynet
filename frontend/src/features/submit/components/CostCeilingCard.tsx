@@ -22,7 +22,12 @@ import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
  * shows only the platform fee (the provider tokens are paid on the user's own
  * key), so the surface stays honest in both modes. Warm, calm, factual.
  */
-export function CostCeilingCard({ w, mode }: { w: SubmitWizardContext; mode: TokenSourceMode }) {
+type CostContext = Pick<
+  SubmitWizardContext,
+  "costBracket" | "suggestedCeiling" | "maxCostCredits" | "setMaxCostCredits"
+>;
+
+export function CostCeilingCard({ w, mode }: { w: CostContext; mode: TokenSourceMode }) {
   const { costBracket, suggestedCeiling, maxCostCredits, setMaxCostCredits } = w;
   const locale = getActiveIntlLocale();
   const capped = maxCostCredits != null;

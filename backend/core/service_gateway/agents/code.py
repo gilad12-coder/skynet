@@ -16,6 +16,13 @@ Two distinct modes share this module:
   ``signature_replace`` (or ``metric_replace``) / ``tool_end`` around the
   call so the UI can render a tool-call card and swap the code atomically.
 
+A black-box authoring context (the "optimize anything" wizard) switches
+both modes to their black-box counterparts: the seed drafts the job's
+starting point and a python scorer (``score(candidate, case=None)``), and
+the chat agent gets ``edit_seed`` / ``edit_scorer``. Both ride the DSPy
+artifacts' events — ``signature_*`` for the starting point, ``metric_*``
+for the scorer — so the editor wiring is shared.
+
 The agent runs on whatever LiteLLM-compatible model is configured via
 ``settings.code_agent_model`` (default: ``openrouter/openrouter/auto-beta``,
 OpenRouter's Auto Router). Users can point it at an internal gateway via
@@ -24,6 +31,7 @@ OpenRouter's Auto Router). Users can point it at an internal gateway via
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import logging
@@ -162,6 +170,46 @@ def _validate_metric_code(code: str) -> str:
         return str(exc)
     except Exception as exc:
         return f"metric error: {exc}"
+    return ""
+
+
+# Mirrors ``blackbox.scorer._ENTRYPOINT_NAMES``: the runtime loader looks the
+# entrypoint up by these names before falling back to a lone function.
+_SCORER_ENTRYPOINTS = ("score", "metric")
+
+
+def _validate_scorer_code(code: str) -> str:
+    """Statically check a black-box scorer snippet.
+
+    The runtime enforces the full contract (``score(candidate, case=None)``,
+    stdlib only, the injected ``llm`` helper) inside a sandbox; here a
+    syntax error, a missing entrypoint or one that takes no arguments is
+    caught before the code lands in the editor — the guarantee the DSPy
+    artifacts get from their validators, without executing model-written
+    code in the API process.
+
+    Args:
+        code: Scorer source code.
+
+    Returns:
+        An empty string when the snippet parses and defines a usable
+        entrypoint, otherwise a short error message.
+    """
+    if not code.strip():
+        return "scorer error: the scorer is empty."
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return f"scorer error: {exc.msg} (line {exc.lineno})."
+    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
+    by_name = {fn.name: fn for fn in functions}
+    entrypoint = next((by_name[name] for name in _SCORER_ENTRYPOINTS if name in by_name), None)
+    if entrypoint is None and len(functions) == 1:
+        entrypoint = functions[0]
+    if entrypoint is None:
+        return "scorer error: define a function named 'score(candidate, case=None)'."
+    if not (entrypoint.args.posonlyargs or entrypoint.args.args or entrypoint.args.vararg):
+        return f"scorer error: '{entrypoint.name}' must accept the candidate as its first argument."
     return ""
 
 
@@ -737,9 +785,10 @@ class FixWorkflowGraph(dspy.Signature):
 
 
 class FixCodeArtifact(dspy.Signature):
-    """Repair a DSPy code artifact that failed validation.
+    """Repair a code artifact that failed validation.
 
-    You are given a Signature class or metric function that does NOT pass
+    You are given a Signature class, a metric function or a black-box
+    python scorer (``def score(candidate, case=None)``) that does NOT pass
     validation, together with the exact validator error. Return the
     corrected full source with the SAME intent — make the smallest change
     that resolves the error (e.g. delete a stray brace, fix an identifier,
@@ -748,7 +797,7 @@ class FixCodeArtifact(dspy.Signature):
     markdown fences, no commentary, no surrounding prose.
     """
 
-    artifact_kind: str = dspy.InputField(desc="Either 'signature' or 'metric'.")
+    artifact_kind: str = dspy.InputField(desc="'signature', 'metric' or 'scorer'.")
     broken_code: str = dspy.InputField(desc="The current source that failed validation.")
     validation_error: str = dspy.InputField(desc="The validator's error message to resolve.")
     dataset_columns: list[str] = dspy.InputField(desc="Every column name in the dataset.")
@@ -911,6 +960,221 @@ class CodeAssistant(dspy.Signature):
             "in another language. Keep product terms (Signature, Metric, "
             "InputField, OutputField, Python identifiers) in English. "
             "Plain prose, no markdown, no code fences."
+        ),
+    )
+
+_SCORER_CONTRACT = """The scorer is one python function, def score(candidate, case=None):
+- candidate (str) is the version under optimization: the full text of the starting point as the optimizer rewrote it.
+- case is one row of the case file as a dict keyed by the case columns; None when the job has no cases (still return a score).
+- Return a float, higher is better, 0.0 to 1.0 by convention, or a (score, side_info) tuple where side_info is a dict with a short "feedback" string. The optimizer reads that feedback to learn WHY a version scored low, so name the expected value or the failed check whenever you can.
+- Standard library only (re, json, math, difflib, statistics, ...): no third-party imports, no network, no files.
+- Never raise: catch failures and return 0.0 with the error in feedback.
+- Read case columns by their exact names; never invent columns."""
+
+_SCORER_AGENT_CONTRACT = """The target is an AGENT: candidate is the instructions file a coding agent runs with, and the agent has ALREADY run on the case when the scorer is called, so case is the run record, not the raw case. case["case"] is the original case dict; case["output"] is the agent's answer (the answer file, else its final message; None when it produced nothing); case["exit_code"], case["timed_out"], case["error"] and case["transcript"] describe the run. Score case["output"] against case["case"]; never try to run the agent yourself."""
+
+_SCORER_LLM_CONTRACT = """A helper llm(prompt, input=None) -> str is injected at run time: do not import or define it. llm(candidate, case["<input column>"]) runs the candidate as the system message with the case's input column as the user message and returns the reply; that is how a prompt is exercised. With a single argument, llm(rubric_text) asks the model a free-form question, e.g. to grade a reply against a rubric: parse the answer defensively (look for a number or a verdict word, default to 0.0)."""
+
+_SCORER_NO_LLM_CONTRACT = """No model is attached to the scorer, so there is NO llm helper: never call llm(). Score the candidate text itself with deterministic checks (structure, required content, length, regexes, numeric fields, similarity to the expected column)."""
+
+
+def _scorer_contract(target_kind: str, scorer_has_model: bool) -> str:
+    """Spell out the contract a black-box scorer must satisfy for this job.
+
+    Args:
+        target_kind: ``"text"`` or ``"agent"`` — what a version is.
+        scorer_has_model: Whether the scorer step has a model, i.e. whether
+            the ``llm`` helper is injected at run time.
+
+    Returns:
+        The contract text handed to the scorer author and the chat agent.
+    """
+    parts = [_SCORER_CONTRACT]
+    if target_kind == "agent":
+        parts.append(_SCORER_AGENT_CONTRACT)
+    parts.append(_SCORER_LLM_CONTRACT if scorer_has_model else _SCORER_NO_LLM_CONTRACT)
+    return "\n\n".join(parts)
+
+
+class GenerateBlackboxSeed(dspy.Signature):
+    """Write the starting point for a black-box optimization job.
+
+    The user described an objective and picked a recipe. Write the first
+    version the optimizer will improve: not a placeholder but a real,
+    complete attempt that already reads as a strong answer to the
+    objective. What you write depends on ``recipe``:
+
+    * ``prompt`` — a system prompt. Each case's input column becomes the
+      user message, so the prompt must tell the model how to answer such
+      inputs: role, task, constraints, output format, edge cases.
+    * ``code`` — a complete program or function in the language the
+      objective and background imply (python when unclear), solving the
+      task the cases pose.
+    * ``anything`` — the text the objective asks for (a document, a
+      config, a policy, a template, ...), ready to use.
+
+    An ``agent`` target means the text is an instructions file a coding
+    agent runs with on each case: write it as such (goal, how to work,
+    what to produce and where).
+
+    Ground everything in the sample cases and honor every directive in
+    ``authoring_brief``. Output ONLY the artifact: no markdown fences, no
+    commentary, no title.
+    """
+
+    objective: str = dspy.InputField(desc="What a better version achieves, in the user's words.")
+    background: str = dspy.InputField(desc="Free-form context from the user: domain, constraints, examples; may be empty.")
+    recipe: str = dspy.InputField(desc="'prompt' | 'code' | 'anything' — what kind of artifact to write.")
+    target_kind: str = dspy.InputField(
+        desc="'text' (the artifact is used as-is) or 'agent' (an instructions file a coding agent runs with).",
+    )
+    case_columns: list[str] = dspy.InputField(desc="Column names of the case file; empty when the job has no cases.")
+    sample_cases: str = dspy.InputField(desc="JSON array of up to 5 representative cases.")
+    authoring_brief: str = dspy.InputField(
+        desc="Directives confirmed in the interview, one per line; empty when no interview happened.",
+    )
+
+    seed_text: str = dspy.OutputField(desc="The complete starting point. No fences, no prose around it.")
+
+
+class GenerateBlackboxScorer(dspy.Signature):
+    """Write the python scorer for a black-box optimization job.
+
+    The optimizer proposes new versions of the starting point and keeps
+    the ones that score higher, so the scorer IS the objective: it must
+    reward exactly what the user described and nothing else. Read the
+    objective, the background and the sample cases, decide what a
+    measurably better version looks like, then implement it under
+    ``scorer_contract`` — that contract is exact; follow it literally.
+    Prefer graded scores over pass/fail so the optimizer sees progress,
+    and always explain the score in ``feedback``. Use the case columns by
+    their exact names from ``case_columns``. Honor every directive in
+    ``authoring_brief``. Output ONLY the python code: no markdown fences,
+    no commentary.
+    """
+
+    objective: str = dspy.InputField(desc="What a better version achieves, in the user's words.")
+    background: str = dspy.InputField(desc="Free-form context from the user; may be empty.")
+    recipe: str = dspy.InputField(desc="'prompt' | 'code' | 'anything' — what the candidate is.")
+    target_kind: str = dspy.InputField(desc="'text' or 'agent'; see scorer_contract for what the scorer receives.")
+    case_columns: list[str] = dspy.InputField(desc="Column names of the case file; empty when the job has no cases.")
+    sample_cases: str = dspy.InputField(desc="JSON array of up to 5 representative cases.")
+    scorer_contract: str = dspy.InputField(desc="The exact contract the scorer must satisfy; follow it literally.")
+    authoring_brief: str = dspy.InputField(
+        desc="Directives confirmed in the interview, one per line; empty when no interview happened.",
+    )
+
+    scorer_code: str = dspy.OutputField(
+        desc="Complete python source defining score(candidate, case=None). No fences, no prose.",
+    )
+
+
+class GenerateBlackboxSeedMessage(dspy.Signature):
+    """Introduce the drafted starting point and scorer to the user.
+
+    Both were just written from the objective and the sample cases and are
+    now in the editors. In 2-4 sentences say what the starting point does
+    and what the scorer rewards (name the concrete checks and the case
+    columns it reads), then invite the user to edit either or ask for
+    changes. Plain prose in ``reply_language``; keep python identifiers
+    in English; no markdown, no code fences.
+    """
+
+    objective: str = dspy.InputField(desc="What a better version achieves, in the user's words.")
+    recipe: str = dspy.InputField(desc="'prompt' | 'code' | 'anything'.")
+    seed_text: str = dspy.InputField(desc="The drafted starting point.")
+    scorer_code: str = dspy.InputField(desc="The drafted scorer.")
+    reply_language: str = dspy.InputField(desc="Language the message is written in.")
+
+    assistant_message: str = dspy.OutputField(desc="2-4 sentences of plain prose.")
+
+
+class BlackboxAssistant(dspy.Signature):
+    """Chat assistant attached to a black-box job's starting-point + scorer editors.
+
+    The user is setting up an optimization job: ``current_seed`` is the
+    version the optimizer starts from (a system prompt, a program or any
+    text — see ``recipe``; with an 'agent' target, a coding agent's
+    instructions file) and ``current_scorer`` is the python function that
+    scores every version the optimizer proposes.
+
+    ## Your tools
+
+    * ``edit_seed(reason, new_text)`` — REWRITES the starting point.
+    * ``edit_scorer(reason, new_code)`` — REWRITES the scorer.
+    * ``finish`` — end the turn and answer in ``reply``.
+
+    ## Rule 1: Default to ``finish``. Editing is the exception.
+
+    Call ``edit_seed`` or ``edit_scorer`` ONLY when the user's latest
+    message is a direct instruction to CHANGE, MODIFY, REPLACE, ADD,
+    REMOVE, FIX, or REWRITE that artifact.
+
+    For EVERYTHING ELSE — questions, explanations, "how does X work",
+    confirmations, clarifications, opinions, critique, small talk — call
+    ``finish`` immediately and answer in ``reply``. Never edit just to
+    "satisfy" a question. If the user says "don't change anything" (or
+    any variant), you MUST call ``finish`` and answer in ``reply`` only.
+
+    ## Rule 1a: Revert requests use ``initial_seed`` / ``initial_scorer``.
+
+    If the user asks to REVERT, UNDO, RESTORE, or go back to the ORIGINAL
+    (any language), call the matching ``edit_*`` tool with the new text
+    set VERBATIM to ``initial_seed`` or ``initial_scorer`` — those fields
+    hold the actual pre-edit versions. NEVER guess the original from the
+    chat history, and NEVER claim "already reverted" without checking
+    whether ``current_*`` differs from ``initial_*``.
+
+    ## Rule 2: Ground every reply in the actual artifacts.
+
+    When explaining or answering, READ ``current_seed`` and
+    ``current_scorer`` line by line, then reference what you see: quote
+    the instruction or the check, name the case columns the scorer reads,
+    and state the concrete score values and feedback strings. Do NOT
+    answer abstractly and do NOT re-describe the overall system.
+
+    ## Rule 3: A new scorer must satisfy ``scorer_contract`` literally.
+
+    Keep ``def score(candidate, case=None)``, read case columns by their
+    exact names, return a float or ``(score, {"feedback": ...})``, and
+    call ``llm`` only when the contract says it exists. When
+    ``current_scorer_validation`` reports an error and the user asks for a
+    fix, fix exactly that error.
+
+    ## Reply format
+
+    Written in ``reply_language``; mirror the user's language only if
+    their message is clearly in another language. Keep python
+    identifiers and product terms in English. Plain prose, no markdown,
+    no code fences. 2-5 sentences for explanations, 1-2 for edit
+    confirmations.
+    """
+
+    objective: str = dspy.InputField(desc="What a better version achieves, in the user's words.")
+    background: str = dspy.InputField(desc="Free-form context from the user; may be empty.")
+    recipe: str = dspy.InputField(desc="'prompt' | 'code' | 'anything' — what the starting point is.")
+    target_kind: str = dspy.InputField(desc="'text' or 'agent' (a coding agent's instructions file).")
+    case_columns: list[str] = dspy.InputField(desc="Column names of the case file; empty when the job has no cases.")
+    sample_cases: str = dspy.InputField(desc="JSON array of up to 5 representative cases.")
+    scorer_contract: str = dspy.InputField(desc="The exact contract any new scorer must satisfy.")
+    current_seed: str = dspy.InputField(desc="The starting point as currently shown in the editor.")
+    current_scorer: str = dspy.InputField(desc="The scorer as currently shown in the editor.")
+    current_scorer_validation: str = dspy.InputField(
+        desc="Latest validation result for the current scorer ('OK', an error, or empty when not run).",
+    )
+    initial_seed: str = dspy.InputField(desc="The original starting point before any edits; used verbatim for reverts.")
+    initial_scorer: str = dspy.InputField(desc="The original scorer before any edits; used verbatim for reverts.")
+    chat_history: str = dspy.InputField(desc="Prior conversation turns as a JSON list of {role, content} objects.")
+    reply_language: str = dspy.InputField(
+        desc="Language for user-facing prose. Both ``reply`` and every tool ``reason`` are written in it.",
+    )
+    user_message: str = dspy.InputField(desc="The user's latest message.")
+
+    reply: str = dspy.OutputField(
+        desc=(
+            "Reply to the user, grounded in the literal current_seed / "
+            "current_scorer. Written in reply_language; plain prose, no "
+            "markdown, no code fences."
         ),
     )
 
@@ -2094,6 +2358,176 @@ class _CodeEditSession:
         )
 
 
+class _BlackboxEditSession:
+    """Per-turn state for the ReAct ``edit_seed`` / ``edit_scorer`` tools.
+
+    The black-box twin of :class:`_CodeEditSession`: the starting point
+    rides the ``signature_*`` events and the scorer the ``metric_*`` events
+    so the editor wiring is shared with the DSPy artifacts. Same per-turn
+    guardrail (one successful edit per artifact) and the same thread-safe
+    emit callback; the scorer is checked with :func:`_validate_scorer_code`
+    before it is applied, the starting point only has to be non-empty.
+    """
+
+    def __init__(self, *, seed_text: str, scorer_code: str, emit: Callable[[dict], None]) -> None:
+        """Initialize the session with the starting artifacts and a thread-safe emitter.
+
+        Args:
+            seed_text: The starting point as currently shown in the editor.
+            scorer_code: The scorer source as currently shown in the editor.
+            emit: Callback used to publish SSE events thread-safely.
+        """
+        self._slots = {"seed": seed_text, "scorer": scorer_code}
+        self._successful_edits = {"seed": 0, "scorer": 0}
+        self._emit = emit
+
+    @property
+    def seed_text(self) -> str:
+        """Return the live starting point (updated after each successful edit).
+
+        Returns:
+            The current starting-point text.
+        """
+        return self._slots["seed"]
+
+    @property
+    def scorer_code(self) -> str:
+        """Return the live scorer source (updated after each successful edit).
+
+        Returns:
+            The current scorer source.
+        """
+        return self._slots["scorer"]
+
+    def _apply(
+        self,
+        *,
+        slot: str,
+        tool: str,
+        label: str,
+        reason: str,
+        new_text: str,
+        validator: Callable[[str], str] | None,
+        replace_event: str,
+    ) -> str:
+        """Run the guard → strip → validate → publish pipeline for one tool call.
+
+        Args:
+            slot: ``"seed"`` or ``"scorer"``.
+            tool: Tool name stamped on the ``tool_start`` / ``tool_end`` events.
+            label: Human name of the artifact for the observation strings.
+            reason: The model's rationale for the edit.
+            new_text: The proposed replacement.
+            validator: Returns an error message for a rejected replacement,
+                or an empty string; ``None`` skips validation.
+            replace_event: SSE event carrying the accepted replacement.
+
+        Returns:
+            The observation string the ReAct agent reads back.
+        """
+        call_id = uuid.uuid4().hex[:8]
+        self._emit({"event": "tool_start", "data": {"id": call_id, "tool": tool, "reason": reason or ""}})
+
+        def _reject(message: str) -> str:
+            """Close the tool call as failed and return its observation."""
+            self._emit({"event": "tool_end", "data": {"id": call_id, "tool": tool, "status": "error"}})
+            return message
+
+        if self._successful_edits[slot] >= 1:
+            return _reject(
+                f"Edit rejected — the {label} was already replaced in this turn. "
+                "STOP editing; call finish and summarize the change in reply."
+            )
+        # Tool args can carry the same malformed trailing field marker the
+        # seed path strips (see ``_CodeEditSession``).
+        new_text = strip_adapter_debris(new_text)
+        if new_text.strip() == self._slots[slot].strip():
+            return _reject(f"Edit rejected — the new {label} is identical to the current one. Call finish.")
+        if not new_text.strip():
+            return _reject(f"Edit rejected — the new {label} is empty. Send the complete replacement.")
+        err = validator(new_text) if validator is not None else ""
+        if err:
+            return _reject(
+                f"Edit rejected — the new {label} is invalid: {err} "
+                f"Fix the error and call {tool} again with the corrected full source."
+            )
+        self._slots[slot] = new_text
+        self._successful_edits[slot] += 1
+        self._emit({"event": replace_event, "data": {"code": new_text}})
+        self._emit({"event": "tool_end", "data": {"id": call_id, "tool": tool, "status": "ok"}})
+        return (
+            f"{label[0].upper()}{label[1:]} replaced. Do NOT edit the {label} again this turn — "
+            "call finish and summarize the change in reply."
+        )
+
+    def edit_seed(self, reason: str, new_text: str) -> str:
+        """Replace the starting point in the editor.
+
+        Call ONLY when the user asks for a change to the starting point
+        (the prompt / code / text the optimizer starts from) and it has
+        NOT yet been edited this turn. For questions, explanations, or
+        after any successful edit, call ``finish`` and answer in ``reply``
+        instead.
+
+        ``reason`` must be prose in the reply language — the
+        ``reply_language`` input (≤10 words). ``new_text`` is the COMPLETE
+        replacement, not a diff.
+
+        Args:
+            reason: Short rationale for the edit, in the reply language.
+            new_text: Complete replacement starting point.
+
+        Returns:
+            An observation string the ReAct agent reads back: a confirmation
+            on success or a rejection message on policy failure.
+        """
+        return self._apply(
+            slot="seed",
+            tool="edit_seed",
+            label="starting point",
+            reason=reason,
+            new_text=new_text,
+            validator=None,
+            replace_event="signature_replace",
+        )
+
+    def edit_scorer(self, reason: str, new_code: str) -> str:
+        """Replace the scorer function in the editor.
+
+        Call ONLY when the user asks for a change to the scorer and it has
+        NOT yet been edited this turn. For questions, explanations, or
+        after any successful edit, call ``finish`` and answer in ``reply``
+        instead.
+
+        The new code is checked before it's applied. If the check fails,
+        the edit is rejected and the observation returns the error message
+        so you can fix the code and try again in the next iteration.
+
+        ``reason`` must be prose in the reply language — the
+        ``reply_language`` input (≤10 words). ``new_code`` must be the
+        COMPLETE python source and satisfy ``scorer_contract``:
+        ``def score(candidate, case=None)`` returning a float or
+        ``(score, {"feedback": ...})``.
+
+        Args:
+            reason: Short rationale for the edit, in the reply language.
+            new_code: Complete replacement scorer source.
+
+        Returns:
+            An observation string the ReAct agent reads back: a confirmation
+            on success or a rejection message on validation/policy failure.
+        """
+        return self._apply(
+            slot="scorer",
+            tool="edit_scorer",
+            label="scorer",
+            reason=reason,
+            new_text=new_code,
+            validator=_validate_scorer_code,
+            replace_event="metric_replace",
+        )
+
+
 class _WorkflowEditSession:
     """Per-turn state for the ReAct workflow-graph tools.
 
@@ -2874,6 +3308,253 @@ async def _run_workflow_agent(
     }
 
 
+def _blackbox_inputs(blackbox: dict[str, Any], case_columns: list[str], sample_cases_json: str) -> dict[str, Any]:
+    """Map the wizard's authoring context onto the black-box signatures' shared inputs.
+
+    Args:
+        blackbox: ``recipe``, ``objective``, ``background``, ``target_kind``,
+            ``scorer_has_model`` as the wizard sent them.
+        case_columns: Column names of the case file; empty without cases.
+        sample_cases_json: JSON-encoded representative cases.
+
+    Returns:
+        The input fields every black-box signature declares, plus
+        ``scorer_contract`` for the ones that take it.
+    """
+    target_kind = str(blackbox.get("target_kind", "text") or "text")
+    return {
+        "objective": str(blackbox.get("objective", "")).strip(),
+        "background": str(blackbox.get("background", "") or "").strip(),
+        "recipe": str(blackbox.get("recipe", "anything")),
+        "target_kind": target_kind,
+        "case_columns": case_columns,
+        "sample_cases": sample_cases_json,
+        "scorer_contract": _scorer_contract(target_kind, bool(blackbox.get("scorer_has_model"))),
+    }
+
+
+async def _run_blackbox_seed(
+    *,
+    lm: dspy.LM,
+    blackbox: dict[str, Any],
+    case_columns: list[str],
+    sample_cases_json: str,
+    authoring_brief: str,
+    reply_language: str,
+    queue: asyncio.Queue[dict | None],
+) -> dict[str, Any]:
+    """Run the black-box seed: starting point + scorer in parallel, then intro.
+
+    The starting point streams as ``signature_patch`` and the scorer as
+    ``metric_patch`` — the black-box editors sit on the same slots as the
+    DSPy Signature / metric — and the finished pair is returned under
+    ``signature_code`` / ``metric_code`` for the same reason. The scorer
+    gets the static check + repair loop the DSPy artifacts get; the
+    starting point is prose or code in any language, so it is only
+    stripped of adapter debris.
+
+    Args:
+        lm: The language model driving the seed predictors.
+        blackbox: The wizard's authoring context.
+        case_columns: Column names of the case file; empty without cases.
+        sample_cases_json: JSON-encoded representative cases.
+        authoring_brief: Interview directives both authors must honor; empty
+            when no interview happened.
+        reply_language: Language name the intro message is written in.
+        queue: SSE event queue to push token events onto.
+
+    Returns:
+        Mapping with keys ``signature_code`` (the starting point),
+        ``metric_code`` (the scorer), ``assistant_message``, the boolean
+        ``signature_valid`` / ``metric_valid`` flags, and an optional
+        ``validation_error`` string when the scorer could not be repaired
+        within the attempt budget.
+    """
+    seed_predict = dspy.Predict(GenerateBlackboxSeed)
+    scorer_predict = dspy.Predict(GenerateBlackboxScorer)
+    seed_program = dspy.streamify(
+        seed_predict,
+        stream_listeners=[
+            dspy.streaming.StreamListener(signature_field_name="seed_text"),
+            ReasoningStreamListener(predict=seed_predict),
+        ],
+        async_streaming=True,
+    )
+    scorer_program = dspy.streamify(
+        scorer_predict,
+        stream_listeners=[
+            dspy.streaming.StreamListener(signature_field_name="scorer_code"),
+            ReasoningStreamListener(predict=scorer_predict),
+        ],
+        async_streaming=True,
+    )
+    msg_predict = dspy.Predict(GenerateBlackboxSeedMessage)
+    msg_program = dspy.streamify(
+        msg_predict,
+        stream_listeners=[dspy.streaming.StreamListener(signature_field_name="assistant_message")],
+        async_streaming=True,
+    )
+
+    shared = _blackbox_inputs(blackbox, case_columns, sample_cases_json)
+    scorer_inputs = {**shared, "authoring_brief": authoring_brief}
+    seed_inputs = {k: v for k, v in scorer_inputs.items() if k != "scorer_contract"}
+    streamed: dict[str, Any] = {"seed_text": "", "scorer_code": ""}
+
+    with dspy.context(lm=lm):
+
+        async def _seed_lane() -> str:
+            """Stream the starting point, then strip adapter debris."""
+            await _pump_seed_stream(
+                seed_program,
+                seed_inputs,
+                "seed_text",
+                "signature_patch",
+                queue=queue,
+                results=streamed,
+                reasoning_source="signature",
+            )
+            return strip_adapter_debris(streamed["seed_text"])
+
+        async def _scorer_lane() -> tuple[str, str]:
+            """Stream the scorer, then check/repair it immediately."""
+            await _pump_seed_stream(
+                scorer_program,
+                scorer_inputs,
+                "scorer_code",
+                "metric_patch",
+                queue=queue,
+                results=streamed,
+                reasoning_source="metric",
+            )
+            return await _validate_and_repair_artifact(
+                lm=lm,
+                artifact_kind="scorer",
+                code=streamed["scorer_code"],
+                validator=_validate_scorer_code,
+                dataset_columns=case_columns,
+                column_roles_json="{}",
+                queue=queue,
+                replace_event="metric_replace",
+            )
+
+        seed_text, (scorer_code, scorer_err) = await asyncio.gather(_seed_lane(), _scorer_lane())
+        results: dict[str, Any] = {
+            "signature_code": seed_text,
+            "metric_code": scorer_code,
+            "assistant_message": "",
+            "signature_valid": bool(seed_text.strip()),
+            "metric_valid": not scorer_err,
+        }
+        if scorer_err:
+            results["validation_error"] = f"Scorer: {scorer_err}"
+
+        async for chunk in msg_program(
+            objective=shared["objective"],
+            recipe=shared["recipe"],
+            seed_text=seed_text,
+            scorer_code=scorer_code,
+            reply_language=reply_language,
+        ):
+            if isinstance(chunk, dspy.streaming.StreamResponse):
+                if chunk.signature_field_name == "assistant_message":
+                    await queue.put({"event": "message_patch", "data": {"chunk": chunk.chunk}})
+            elif isinstance(chunk, dspy.Prediction):
+                results["assistant_message"] = getattr(chunk, "assistant_message", "") or ""
+
+    return results
+
+
+async def _run_blackbox_agent(
+    *,
+    lm: dspy.LM,
+    blackbox: dict[str, Any],
+    case_columns: list[str],
+    sample_cases_json: str,
+    user_message: str,
+    chat_history_json: str,
+    prior_seed: str,
+    prior_scorer: str,
+    prior_scorer_validation: str,
+    initial_seed: str,
+    initial_scorer: str,
+    reply_language: str,
+    queue: asyncio.Queue[dict | None],
+) -> dict[str, str]:
+    """Run a ReAct agent with ``edit_seed`` + ``edit_scorer`` tools.
+
+    The black-box twin of :func:`_run_agent`: tools are bound methods on a
+    :class:`_BlackboxEditSession` that emit ``tool_start`` /
+    ``signature_replace`` (starting point) or ``metric_replace`` (scorer) /
+    ``tool_end`` thread-safely, and the ``reply`` streams as
+    ``message_patch`` tokens.
+
+    Args:
+        lm: Language model bound to the ReAct loop.
+        blackbox: The wizard's authoring context.
+        case_columns: Column names of the case file; empty without cases.
+        sample_cases_json: JSON-encoded representative cases.
+        user_message: The user's latest message driving the turn.
+        chat_history_json: JSON-encoded prior chat turns.
+        prior_seed: Starting point as currently shown in the editor.
+        prior_scorer: Scorer source as currently shown in the editor.
+        prior_scorer_validation: Latest dry-run / validator summary for the scorer.
+        initial_seed: Original starting point before any edits this conversation.
+        initial_scorer: Original scorer before any edits this conversation.
+        reply_language: Language name for the reply and tool rationales.
+        queue: SSE event queue receiving lifecycle and token events.
+
+    Returns:
+        Mapping with keys ``signature_code`` (the starting point),
+        ``metric_code`` (the scorer) and ``assistant_message`` reflecting
+        post-turn state.
+    """
+    loop = asyncio.get_running_loop()
+    emit: Callable[[dict], None] = partial(_emit_to_code_queue, loop, queue)
+    session = _BlackboxEditSession(seed_text=prior_seed, scorer_code=prior_scorer, emit=emit)
+
+    # Same iteration budget as ``_run_agent``: both artifacts edited with one
+    # validator-driven retry each, plus the submit carrying the reply.
+    react = REACT_CLASS(BlackboxAssistant, tools=[session.edit_seed, session.edit_scorer], max_iters=5)
+    reply_stream = ReactReplyStream(react, "reply")
+    program = dspy.streamify(react, stream_listeners=reply_stream.listeners(), async_streaming=True)
+
+    inputs = {
+        **_blackbox_inputs(blackbox, case_columns, sample_cases_json),
+        "current_seed": prior_seed,
+        "current_scorer": prior_scorer,
+        "current_scorer_validation": prior_scorer_validation or "",
+        "initial_seed": initial_seed or prior_seed,
+        "initial_scorer": initial_scorer or prior_scorer,
+        "chat_history": chat_history_json,
+        "reply_language": reply_language,
+        "user_message": user_message,
+    }
+
+    reply_text = ""
+    with dspy.context(lm=lm):
+        async for chunk in program(**inputs):
+            if isinstance(chunk, dspy.streaming.StreamResponse):
+                if chunk.signature_field_name == REASONING_FIELD:
+                    await queue.put(
+                        {"event": "reasoning_patch", "data": {"chunk": chunk.chunk, "source": "agent"}}
+                    )
+                else:
+                    delta = reply_stream.reply_delta(chunk)
+                    if delta:
+                        reply_text += delta
+                        await queue.put({"event": "message_patch", "data": {"chunk": delta}})
+            elif isinstance(chunk, dspy.Prediction):
+                final = getattr(chunk, "reply", "") or ""
+                if final and final != reply_text:
+                    reply_text = final
+
+    return {
+        "signature_code": session.seed_text,
+        "metric_code": session.scorer_code,
+        "assistant_message": reply_text,
+    }
+
+
 async def _run_code_agent_orchestration(
     *,
     is_seed: bool,
@@ -2896,13 +3577,15 @@ async def _run_code_agent_orchestration(
     prior_workflow: dict | None,
     initial_workflow: dict | None,
     reply_language: str,
+    blackbox: dict[str, Any] | None,
 ) -> None:
     """Run the seed or chat path and push the terminal envelope into ``queue``.
 
     Dispatches to :func:`_run_seed` when ``is_seed`` is true (the user sent
     no message and we need to generate the initial Signature + metric) and
     to :func:`_run_agent` otherwise; a non-None ``prior_workflow`` routes
-    both modes to their graph-aware counterparts instead. Emits exactly one
+    both modes to their graph-aware counterparts instead, and a non-None
+    ``blackbox`` to the black-box starting-point + scorer paths. Emits exactly one
     terminal event (``done`` on success, ``error`` on failure) followed by
     the ``None`` sentinel that unblocks the outer consumer.
 
@@ -2926,9 +3609,40 @@ async def _run_code_agent_orchestration(
         initial_signature: Original signature source for revert support.
         initial_metric: Original metric source for revert support.
         reply_language: Language name for all user-facing agent text.
+        blackbox: The black-box wizard's authoring context; ``None`` for the
+            DSPy paths. Set, ``dataset_columns`` / ``sample_rows_json`` are
+            the case columns / sample cases and the ``prior_*`` /
+            ``initial_*`` signature and metric slots hold the starting
+            point and the scorer.
     """
     try:
-        if is_seed and prior_workflow is not None:
+        if blackbox is not None and is_seed:
+            results = await _run_blackbox_seed(
+                lm=lm,
+                blackbox=blackbox,
+                case_columns=dataset_columns,
+                sample_cases_json=sample_rows_json,
+                authoring_brief=authoring_brief,
+                reply_language=reply_language,
+                queue=queue,
+            )
+        elif blackbox is not None:
+            results = await _run_blackbox_agent(
+                lm=lm,
+                blackbox=blackbox,
+                case_columns=dataset_columns,
+                sample_cases_json=sample_rows_json,
+                user_message=user_message,
+                chat_history_json=chat_history_json,
+                prior_seed=prior_signature,
+                prior_scorer=prior_metric,
+                prior_scorer_validation=prior_metric_validation,
+                initial_seed=initial_signature,
+                initial_scorer=initial_metric,
+                reply_language=reply_language,
+                queue=queue,
+            )
+        elif is_seed and prior_workflow is not None:
             results = await _run_workflow_seed(
                 lm=lm,
                 dataset_columns=dataset_columns,
@@ -3015,6 +3729,7 @@ async def run_code_agent(
     reasoning_effort: str | None = None,
     lm_extra_body: dict[str, Any] | None = None,
     usage_sink: list | None = None,
+    blackbox: dict[str, Any] | None = None,
 ) -> AsyncGenerator[dict, None]:
     """Stream code-agent events to the UI.
 
@@ -3031,6 +3746,15 @@ async def run_code_agent(
     ``workflow_replace`` — ``{"workflow", "changed_node_id"}`` — so the
     canvas re-renders atomically. The ``done`` payload then carries
     ``workflow`` + ``workflow_valid`` instead of ``signature_code``.
+
+    A non-None ``blackbox`` switches both modes to the black-box paths of
+    the "optimize anything" wizard: the seed drafts the starting point and
+    a python scorer, the chat agent gets ``edit_seed`` / ``edit_scorer``.
+    The starting point rides the signature events and slots
+    (``signature_patch`` / ``signature_replace`` / ``signature_code``) and
+    the scorer the metric ones, so the wizard's editors share one wire
+    contract; ``dataset_columns`` and ``sample_rows`` are then the case
+    columns and sample cases (both may be empty).
 
     Events:
 
@@ -3076,6 +3800,9 @@ async def run_code_agent(
             dial) merged into the LM's request payload.
         usage_sink: Optional list the built LM is appended to, so the caller
             can meter the turn's token usage on any exit path.
+        blackbox: The black-box wizard's authoring context (``recipe``,
+            ``objective``, ``background``, ``target_kind``,
+            ``scorer_has_model``); ``None`` runs the DSPy paths.
 
     Yields:
         SSE event dicts of shape ``{"event": str, "data": dict}``.
@@ -3115,6 +3842,7 @@ async def run_code_agent(
             prior_workflow=prior_workflow,
             initial_workflow=initial_workflow,
             reply_language=_reply_language(locale),
+            blackbox=blackbox,
         )
     )
     try:

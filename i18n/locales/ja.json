@@ -2,6 +2,7 @@
   "$schema": "../schema.json",
   "locale": "ja",
   "terms": {
+    "optimizationTypeBlackbox": "ブラックボックス",
     "apiKey": "APIキー",
     "baseline": "ベースライン",
     "baselineScore": "ベースラインスコア",

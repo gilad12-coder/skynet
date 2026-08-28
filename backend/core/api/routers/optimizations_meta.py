@@ -59,8 +59,9 @@ def _sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     The stored submission payload echoes whatever the caller posted, including
     inline ``model_settings.extra.api_key`` values that the operator never
     intended to surface back through the read API. This sanitiser walks every
-    well-known ``ModelConfig`` slot — single-run model fields and grid-search
-    model lists — and runs each one through :func:`strip_api_key`.
+    well-known ``ModelConfig`` slot — single-run model fields, grid-search
+    model lists and a black-box scorer's ``llm()`` model — and runs each one
+    through :func:`strip_api_key`.
 
     Args:
         payload: Raw payload dict pulled off the job row.
@@ -77,6 +78,9 @@ def _sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         value = sanitised.get(field)
         if isinstance(value, list):
             sanitised[field] = [strip_api_key(item) if isinstance(item, dict) else item for item in value]
+    scorer = sanitised.get("scorer")
+    if isinstance(scorer, dict) and isinstance(scorer.get("model"), dict):
+        sanitised["scorer"] = {**scorer, "model": strip_api_key(scorer["model"])}
     return sanitised
 
 

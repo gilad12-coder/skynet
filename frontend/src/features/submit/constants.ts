@@ -1,7 +1,5 @@
 import type { ModelConfig, SplitFractions } from "@/shared/types/api";
-import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
-import { sentenceCase } from "@/shared/lib/formatters";
 
 export const emptyModelConfig = (): ModelConfig => ({
   name: "",
@@ -38,17 +36,20 @@ export const defaultReactConfig = (): ReactConfig => ({
 // server (frozen process-wide to the raw key) but populated in the browser —
 // resolving eagerly here would hydrate-mismatch. Resolving per render keeps both
 // sides inside the request, where the catalog is pinned.
+// Every recipe walks the same spine: what you start from, the cases it is
+// judged on, how it is scored, how hard to search, then review.
 export const STEPS = [
   { id: "basics", label: () => msg("auto.features.submit.constants.literal.1") },
-  // Glossary terms are lowercase for mid-sentence use; the stepper sits them
-  // beside capitalized labels ("Basic details", "Parameters"), so they get
-  // sentence case here.
-  { id: "data", label: () => sentenceCase(TERMS.dataset) },
-  { id: "params", label: () => msg("auto.features.submit.constants.literal.2") },
-  { id: "code", label: () => msg("auto.features.submit.constants.literal.3") },
-  { id: "model", label: () => sentenceCase(TERMS.model) },
+  { id: "start", label: () => msg("submit.blackbox.step.start") },
+  { id: "cases", label: () => msg("submit.blackbox.step.cases") },
+  { id: "scorer", label: () => msg("submit.blackbox.step.scorer") },
+  { id: "optimizer", label: () => msg("submit.blackbox.step.optimizer") },
   { id: "review", label: () => msg("auto.features.submit.constants.literal.4") },
 ] as const;
+
+export type WizardStep = { id: string; label: () => string };
+
+export const BLACKBOX_STEPS: readonly WizardStep[] = STEPS;
 
 export const RECENT_KEY = "skynet:recent-model-configs";
 export const MAX_RECENT = 5;

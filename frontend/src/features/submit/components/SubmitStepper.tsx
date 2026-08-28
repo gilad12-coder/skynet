@@ -4,21 +4,32 @@ import { Check } from "@/shared/ui/icons";
 import { motion } from "framer-motion";
 import { cn } from "@/shared/lib/utils";
 
-import { STEPS } from "../constants";
+import { STEPS, type WizardStep } from "../constants";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 
-export function SubmitStepper({ w }: { w: SubmitWizardContext }) {
+type StepperContext = Pick<
+  SubmitWizardContext,
+  "step" | "maxReachableStep" | "validateStep" | "handleTabClick"
+>;
+
+export function SubmitStepper({
+  w,
+  steps = STEPS,
+}: {
+  w: StepperContext;
+  steps?: readonly WizardStep[];
+}) {
   const { step, maxReachableStep, validateStep, handleTabClick } = w;
 
   return (
     <div className="relative" data-tutorial="wizard-stepper">
       <div className="flex items-center justify-between">
-        {STEPS.map((s, i) => {
+        {steps.map((s, i) => {
           const reachable = i <= maxReachableStep;
           const completed = i < step && validateStep(i);
           const active = i === step;
           const clickable = i <= step || reachable;
-          const isLast = i === STEPS.length - 1;
+          const isLast = i === steps.length - 1;
           const segmentDone = i + 1 <= step;
           return (
             <div key={s.id} className="flex flex-col items-center relative z-10 flex-1">
@@ -81,7 +92,7 @@ export function SubmitStepper({ w }: { w: SubmitWizardContext }) {
         className="mt-2 text-center text-xs font-medium text-foreground sm:hidden"
         aria-live="polite"
       >
-        {STEPS[step]?.label()}
+        {steps[step]?.label()}
       </p>
     </div>
   );

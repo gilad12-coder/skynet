@@ -2,6 +2,7 @@
   "$schema": "../schema.json",
   "locale": "es",
   "terms": {
+    "optimizationTypeBlackbox": "caja negra",
     "apiKey": "clave de API",
     "baseline": "línea base",
     "baselineScore": "puntuación de línea base",

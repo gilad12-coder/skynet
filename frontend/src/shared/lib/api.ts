@@ -1,4 +1,6 @@
 import type {
+  BlackboxEngineCatalogResponse,
+  BlackboxRunRequest,
   ColumnMapping,
   EvalExampleResult,
   GridSearchResult,
@@ -13,6 +15,8 @@ import type {
   ProfileDatasetResponse,
   QueueStatusResponse,
   RunRequest,
+  ScorerDryRunRequest,
+  ScorerDryRunResponse,
   ServeInfoResponse,
   ServeResponse,
   ValidateCodeResponse,
@@ -261,7 +265,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // A network drop is caught and toasted upstream, so without this Sentry
     // would only ever hear about it if it escaped as an uncaught exception.
     reportHandledError(err, {
-      tags: { source: "api", kind: "network", endpoint: endpointTag(path), method: init?.method ?? "GET" },
+      tags: {
+        source: "api",
+        kind: "network",
+        endpoint: endpointTag(path),
+        method: init?.method ?? "GET",
+      },
     });
     throw new Error(msg("auto.shared.lib.api.literal.1"), { cause: err });
   }
@@ -451,6 +460,26 @@ export function submitGridSearch(payload: GridSearchRequest) {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function submitBlackboxRun(payload: BlackboxRunRequest) {
+  return request<OptimizationSubmissionResponse>("/blackbox/run", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function dryRunScorer(payload: ScorerDryRunRequest) {
+  return request<ScorerDryRunResponse>("/blackbox/scorer/dry-run", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getBlackboxEngines(target: "text" | "agent") {
+  return request<BlackboxEngineCatalogResponse>(
+    `/blackbox/engines?target=${encodeURIComponent(target)}`,
+  );
 }
 
 export function listJobs(params?: {
@@ -2265,6 +2294,19 @@ export interface CodeAgentChatTurn {
   content: string;
 }
 
+/** Black-box authoring context. Present on "prompt" / "code" / "anything"
+ *  jobs: the agent then drafts the starting point (signature slot) and the
+ *  Python scorer (metric slot) instead of DSPy code, and works without a
+ *  dataset — cases are optional context. */
+export interface BlackboxAuthoringContext {
+  recipe: "prompt" | "code" | "anything";
+  objective: string;
+  background?: string;
+  target_kind?: "text" | "agent";
+  // True when a model is attached in the Scorer step, so the scorer may call llm().
+  scorer_has_model?: boolean;
+}
+
 export interface CodeAgentRequest {
   dataset_columns: string[];
   // Plain string roles (input/output/ignore); the code agent only consumes
@@ -2296,11 +2338,14 @@ export interface CodeAgentRequest {
   model?: string;
   // Explicit reasoning-effort level for the chosen model; absent keeps its default.
   reasoning_effort?: string;
+  blackbox?: BlackboxAuthoringContext;
 }
 
 export type CodeAgentToolName =
   | "edit_signature"
   | "edit_metric"
+  | "edit_seed"
+  | "edit_scorer"
   | "add_node"
   | "update_node"
   | "remove_node"
@@ -2310,6 +2355,8 @@ export type CodeAgentToolName =
 const CODE_AGENT_TOOLS = new Set<CodeAgentToolName>([
   "edit_signature",
   "edit_metric",
+  "edit_seed",
+  "edit_scorer",
   "add_node",
   "update_node",
   "remove_node",
@@ -2481,6 +2528,7 @@ export interface CodeInterviewRequest {
   model?: string;
   /** Reasoning-effort level for the chosen model; absent runs its default. */
   reasoning_effort?: string;
+  blackbox?: BlackboxAuthoringContext;
 }
 
 /**

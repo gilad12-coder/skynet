@@ -14,6 +14,13 @@ export function typeBadge(jobType: string) {
       </Badge>
     );
   }
+  if (jobType === "blackbox") {
+    return (
+      <Badge variant="outline" className="border-[#C8A882]/45 text-[#3D2E22]">
+        {msg("optimization.blackbox.badge")}
+      </Badge>
+    );
+  }
   return <Badge variant="secondary">{msg("auto.features.dashboard.lib.status.badges.2")}</Badge>;
 }
 

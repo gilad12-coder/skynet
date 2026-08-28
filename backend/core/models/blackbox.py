@@ -25,6 +25,7 @@ BLACKBOX_ENGINE_BEST_OF_N = "best_of_n"
 BLACKBOX_ENGINE_AUTORESEARCH = "autoresearch"
 BLACKBOX_ENGINE_META_HARNESS = "meta_harness"
 BLACKBOX_STRATEGY_AUTO = "auto"
+BLACKBOX_STRATEGY_PLATEAU = "plateau"
 BLACKBOX_TARGET_TEXT = "text"
 BLACKBOX_TARGET_AGENT = "agent"
 BLACKBOX_HARNESS_PI = "pi"
@@ -53,12 +54,16 @@ BlackboxCandidate = str | dict[str, str]
 # How a version is scored. ``python`` runs ``metric_code`` inside the worker's
 # metric sandbox; ``remote`` POSTs the version and case to ``url`` with the
 # shared ``secret`` as a bearer token (TODO-1: allow-list + SSRF guard).
+# ``model`` is the model a python scorer may call through the injected
+# ``llm(prompt, input=None)`` helper (e.g. to run the prompt under
+# optimization on a case); its usage is billed with the run.
 class BlackboxScorer(BaseModel):
     kind: Literal["python", "remote"] = "python"
     metric_code: str | None = None
     url: str | None = None
     secret: str | None = None
     timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    model: ModelConfig | None = None
 
     @model_validator(mode="after")
     def _ensure_kind_fields(self) -> BlackboxScorer:
@@ -131,10 +136,15 @@ class BlackboxTarget(BaseModel):
 
 
 # ``auto`` explores every available engine on a budget slice, then continues
-# from the best version with GEPA; ``single`` runs one named engine.
+# from the best version with GEPA; ``single`` runs one named engine;
+# ``plateau`` relays over the available engines in Auto's order, handing the
+# best version to the next engine whenever ``patience`` scorer runs pass
+# without improvement, until the budget, the target score or a full round
+# without progress.
 class BlackboxStrategy(BaseModel):
-    mode: Literal["auto", "single"] = "auto"
+    mode: Literal["auto", "single", "plateau"] = "auto"
     engine: str | None = None
+    patience: int = Field(default=40, ge=5, le=10_000)
 
     @model_validator(mode="after")
     def _ensure_engine_for_single(self) -> BlackboxStrategy:
@@ -223,14 +233,16 @@ class ScorerDryRunResponse(BaseModel):
     side_info: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
     elapsed_ms: float
+    usage_by_model: list[ModelTokenUsage] = Field(default_factory=list)
 
 
 # One engine lane of a run. ``explore`` lanes share the budget; the
-# ``continue`` lane resumes from the best explore result.
+# ``continue`` lane resumes from the best explore result; ``relay`` lanes
+# are the plateau strategy's hand-offs.
 class BlackboxLaneResult(BaseModel):
     engine: str
-    phase: Literal["explore", "continue", "single"]
-    status: Literal["completed", "failed", "unavailable", "budget_exhausted"]
+    phase: Literal["explore", "continue", "single", "relay"]
+    status: Literal["completed", "failed", "unavailable", "budget_exhausted", "plateaued"]
     best_score: float | None = None
     scorer_runs: int = 0
     error: str | None = None
@@ -241,7 +253,7 @@ class BlackboxLaneResult(BaseModel):
 # billing paths read them unchanged.
 class BlackboxRunResponse(BaseModel):
     optimizer_name: str
-    strategy_mode: Literal["auto", "single"]
+    strategy_mode: Literal["auto", "single", "plateau"]
     engine_used: str
     split_counts: SplitCounts
     baseline_test_metric: float | None = None
@@ -258,3 +270,22 @@ class BlackboxRunResponse(BaseModel):
     usage_by_model: list[ModelTokenUsage] = Field(default_factory=list)
     optimization_metadata: dict[str, Any] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)
+
+
+# One entry of ``GET /blackbox/engines``: the catalog the wizard renders,
+# with availability resolved for the requested target kind.
+class BlackboxEngineInfo(BaseModel):
+    id: str
+    label: str
+    description: str
+    available: bool
+    unavailable_reason: str | None = None
+    requires_agent_target: bool = False
+    supports_parts: bool = False
+
+
+class BlackboxEngineCatalogResponse(BaseModel):
+    target_kind: Literal["text", "agent"]
+    sandbox_available: bool
+    sandbox_reason: str | None = None
+    engines: list[BlackboxEngineInfo] = Field(default_factory=list)

@@ -40,6 +40,8 @@ from ....exceptions import ServiceError
 from ....models.blackbox import (
     BLACKBOX_STRATEGY_AUTO,
     BLACKBOX_TARGET_AGENT,
+    BlackboxEngineCatalogResponse,
+    BlackboxEngineInfo,
     BlackboxLaneResult,
     BlackboxRunRequest,
     BlackboxRunResponse,
@@ -60,8 +62,9 @@ from ..cost_ceiling import CostCeilingCallback
 from ..data import split_examples
 from .agent_eval import SandboxAgentScorer, agent_target_unavailable_reason, gateway_from_settings
 from .auto import run_strategy
+from .llm_helper import ScorerLLM, build_scorer_llm
 from .protocol import Candidate, EngineContext, EvalServer, ScorerFn, Task
-from .registry import EngineCapabilities, get_engine
+from .registry import ENGINES, EngineCapabilities, get_engine
 from .sandbox import sandbox_runtime_from_settings
 from .scorer import RemoteScorer, build_scorer
 
@@ -87,6 +90,39 @@ def engine_capabilities(target: BlackboxTarget) -> EngineCapabilities:
     reason = agent_target_unavailable_reason(settings)
     return EngineCapabilities(
         sandbox=reason is None, agent_target=target.kind == BLACKBOX_TARGET_AGENT, sandbox_reason=reason
+    )
+
+
+def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
+    """List every engine with its availability for a job whose target is ``target_kind``.
+
+    Args:
+        target_kind: ``text`` or ``agent`` — the target the wizard is building.
+
+    Returns:
+        The catalog in registry order, each entry carrying the user-facing
+        reason it cannot run here, when it cannot.
+    """
+    reason = agent_target_unavailable_reason(settings)
+    caps = EngineCapabilities(
+        sandbox=reason is None, agent_target=target_kind == BLACKBOX_TARGET_AGENT, sandbox_reason=reason
+    )
+    return BlackboxEngineCatalogResponse(
+        target_kind=target_kind,
+        sandbox_available=caps.sandbox,
+        sandbox_reason=reason,
+        engines=[
+            BlackboxEngineInfo(
+                id=spec.id,
+                label=spec.label,
+                description=spec.description,
+                available=spec.available_for(caps),
+                unavailable_reason=spec.unavailable_reason_for(caps),
+                requires_agent_target=spec.requires_agent_target,
+                supports_parts=spec.supports_parts,
+            )
+            for spec in ENGINES.values()
+        ],
     )
 
 
@@ -227,7 +263,8 @@ def run_blackbox_optimization(
             starting point, or no engine produced a version for a seedless job.
     """
     started = time.perf_counter()
-    scorer = build_scorer(payload.scorer)
+    scorer_llm: ScorerLLM | None = build_scorer_llm(payload.scorer.model) if payload.scorer.model else None
+    scorer = build_scorer(payload.scorer, llm=scorer_llm)
     target = payload.target
     caps = engine_capabilities(target)
     if caps.agent_target:
@@ -282,7 +319,10 @@ def run_blackbox_optimization(
         concurrency=concurrency,
         target_label=f"{target.harness} · {target.model}" if caps.agent_target else None,
     )
-    callbacks = [CostCeilingCallback(payload.max_cost_credits, lm)] if payload.max_cost_credits is not None else []
+    # The scorer's own model calls are part of the run: they count toward
+    # the credit ceiling and the usage the worker bills.
+    lms = [lm] if scorer_llm is None else [lm, scorer_llm.lm]
+    callbacks = [CostCeilingCallback(payload.max_cost_credits, *lms)] if payload.max_cost_credits is not None else []
     with dspy.context(callbacks=callbacks):
         result, lanes = run_strategy(payload.strategy, task, server, ctx, progress_callback, caps=caps)
 
@@ -294,10 +334,10 @@ def run_blackbox_optimization(
     if progress_callback is not None:
         progress_callback(PROGRESS_OPTIMIZED, {DETAIL_OPTIMIZED: optimized})
 
-    usage = usage_by_model_from_history(lm) or {}
+    usage = usage_by_model_from_history(*lms) or {}
     engine_used = str(result.metadata.get("engine") or payload.strategy.engine or BLACKBOX_STRATEGY_AUTO)
     return BlackboxRunResponse(
-        optimizer_name=payload.strategy.engine or BLACKBOX_STRATEGY_AUTO,
+        optimizer_name=payload.strategy.engine or payload.strategy.mode,
         strategy_mode=payload.strategy.mode,
         engine_used=engine_used,
         split_counts=split_counts,
@@ -320,8 +360,8 @@ def run_blackbox_optimization(
         ],
         total_scorer_runs=server.used,
         runtime_seconds=time.perf_counter() - started,
-        num_lm_calls=lm_call_count(lm) or 0,
-        total_tokens=total_tokens_from_history(lm),
+        num_lm_calls=sum(lm_call_count(model) or 0 for model in lms),
+        total_tokens=total_tokens_from_history(*lms),
         usage_by_model=[
             ModelTokenUsage(model=model, input_tokens=in_out[0], output_tokens=in_out[1])
             for model, in_out in usage.items()
@@ -345,12 +385,14 @@ def dry_run_scorer(request: ScorerDryRunRequest) -> ScorerDryRunResponse:
         request: The scorer spec, candidate and optional case.
 
     Returns:
-        The score and side information, or the error that stopped it.
+        The score and side information, or the error that stopped it, plus
+        what the scorer's ``llm()`` calls consumed.
     """
     started = time.perf_counter()
     score: float | None = None
     side_info: dict[str, Any] = {}
     error: str | None = None
+    usage: dict[str, tuple[int, int]] = {}
     try:
         if request.scorer.kind == "remote":
             remote = RemoteScorer(
@@ -359,9 +401,12 @@ def dry_run_scorer(request: ScorerDryRunRequest) -> ScorerDryRunResponse:
             score, side_info = remote(request.candidate, request.case)
         else:
             probe = probe_scorer(
-                scorer_code=str(request.scorer.metric_code), candidate=request.candidate, case=request.case
+                scorer_code=str(request.scorer.metric_code),
+                candidate=request.candidate,
+                case=request.case,
+                scorer_model=request.scorer.model.model_dump(mode="json") if request.scorer.model else None,
             )
-            score, side_info, error = probe.score, probe.side_info, probe.error
+            score, side_info, error, usage = probe.score, probe.side_info, probe.error, probe.usage_by_model
     except ServiceError as exc:
         error = str(exc)
     except Exception as exc:
@@ -372,4 +417,8 @@ def dry_run_scorer(request: ScorerDryRunRequest) -> ScorerDryRunResponse:
         side_info=side_info,
         error=error,
         elapsed_ms=(time.perf_counter() - started) * 1000.0,
+        usage_by_model=[
+            ModelTokenUsage(model=model, input_tokens=in_out[0], output_tokens=in_out[1])
+            for model, in_out in usage.items()
+        ],
     )

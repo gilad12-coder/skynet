@@ -2,6 +2,7 @@
   "$schema": "../schema.json",
   "locale": "ko",
   "terms": {
+    "optimizationTypeBlackbox": "블랙박스",
     "apiKey": "API 키",
     "baseline": "기준선",
     "baselineScore": "기준 점수",

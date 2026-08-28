@@ -81,8 +81,8 @@ def test_terminal_statuses_are_finite() -> None:
 
 
 def test_valid_job_types_covers_run_and_grid() -> None:
-    """The whitelisted optimization types cover the public run/grid options."""
-    assert {"run", "grid_search"} == VALID_OPTIMIZATION_TYPES
+    """The whitelisted optimization types cover the public run/grid/black-box options."""
+    assert {"run", "grid_search", "blackbox"} == VALID_OPTIMIZATION_TYPES
 
 
 def test_build_summary_on_pending_job_without_result() -> None:

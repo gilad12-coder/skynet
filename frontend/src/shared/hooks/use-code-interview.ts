@@ -6,6 +6,7 @@ import { readPref } from "@/features/settings";
 import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
 import {
   streamCodeInterviewTurn,
+  type BlackboxAuthoringContext,
   type CodeAgentChatTurn,
   type InterviewOption,
 } from "@/shared/lib/api";
@@ -70,6 +71,8 @@ export interface UseCodeInterviewArgs {
   columnKinds: Record<string, "text" | "image">;
   /** LiteLLM id of the job's target model; empty when not chosen yet. */
   jobModel: string;
+  /** Black-box authoring context; the interview then runs without a dataset. */
+  blackbox?: BlackboxAuthoringContext | null;
 }
 
 /**
@@ -80,7 +83,7 @@ export interface UseCodeInterviewArgs {
  * the tagger's dataset interview; the transcript is client-owned.
  */
 export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState {
-  const { enabled, parsedDataset, columnRoles, columnKinds, jobModel } = args;
+  const { enabled, parsedDataset, columnRoles, columnKinds, jobModel, blackbox = null } = args;
 
   const [turns, setTurns] = React.useState<InterviewTurn[]>([]);
   const [busy, setBusy] = React.useState(false);
@@ -127,7 +130,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
 
   const runTurn = React.useCallback(
     (next: InterviewTurn[]) => {
-      if (!parsedDataset || busy || localeReloadingRef.current) return;
+      if ((!parsedDataset && !blackbox) || busy || localeReloadingRef.current) return;
       setTurns(next);
       setDone(false);
       setBusy(true);
@@ -148,15 +151,16 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
 
       void streamCodeInterviewTurn(
         {
-          dataset_columns: parsedDataset.columns,
+          dataset_columns: parsedDataset?.columns ?? [],
           column_roles: columnRoles,
           column_kinds: imageColumnKinds,
-          sample_rows: parsedDataset.rows.slice(0, 5) as Array<Record<string, unknown>>,
+          sample_rows: (parsedDataset?.rows.slice(0, 5) ?? []) as Array<Record<string, unknown>>,
           turns: next.map((t) => ({ role: t.role, content: t.content })),
           job_model: jobModel,
           locale: getActiveLocale(),
           model: model ?? undefined,
           reasoning_effort: reasoningEffort ?? undefined,
+          ...(blackbox ? { blackbox } : {}),
         },
         {
           signal: controller.signal,
@@ -173,8 +177,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
             );
             setStreamText((text) => text + chunk);
           },
-          onMessageEnd: () =>
-            setPending((prev) => (prev === "brief" ? prev : "options")),
+          onMessageEnd: () => setPending((prev) => (prev === "brief" ? prev : "options")),
           onTurnHint: (final) => setPending(final ? "brief" : "options"),
           onMessageReset: () => {
             setStreamText("");
@@ -215,7 +218,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
         if (abortRef.current === controller) abortRef.current = null;
       });
     },
-    [parsedDataset, busy, columnRoles, columnKinds, jobModel, model, reasoningEffort],
+    [parsedDataset, busy, columnRoles, columnKinds, jobModel, model, reasoningEffort, blackbox],
   );
 
   // Fire the opening question exactly once per eligible interview.

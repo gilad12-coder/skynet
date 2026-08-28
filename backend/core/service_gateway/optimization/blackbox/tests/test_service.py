@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from core.constants import (
     DETAIL_BASELINE,
@@ -21,10 +22,13 @@ from core.constants import (
     TQDM_TOTAL_KEY,
 )
 from core.exceptions import ServiceError
-from core.models.blackbox import BLACKBOX_ENGINE_BEST_OF_N, BlackboxRunRequest, ScorerDryRunRequest
+from core.models.blackbox import BLACKBOX_ENGINE_BEST_OF_N, BlackboxRunRequest, BlackboxStrategy, ScorerDryRunRequest
+from core.models.results import ModelTokenUsage
+from core.service_gateway.safe_exec import ScorerProbeResult
 
 from .. import service as service_mod
 from ..harness import GatewayConfig
+from ..llm_helper import ScorerLLM
 from ..protocol import Result
 from ..service import dry_run_scorer, run_blackbox_optimization, validate_blackbox_payload
 from .mocks import AGENT_OUTPUT_SCORER_CODE, VOWEL_SCORER_CODE, FakeReflectionLM, FakeSandboxRuntime
@@ -378,3 +382,112 @@ def test_agent_target_runs_every_scorer_call_in_its_own_sandbox(
     assert target_meta["harness"] == "custom"
     assert target_meta["model"] == "m"
     assert target_meta["concurrency"] == 2
+
+
+class _JudgeLM:
+    """``dspy.LM`` double for the scorer's ``llm()``: records the messages and answers ``0.5``."""
+
+    def __init__(self) -> None:
+        """Create the double."""
+        self.model = "fake/judge"
+        self.history: list[dict[str, Any]] = []
+        self.messages: list[list[dict[str, str]]] = []
+
+    def __call__(self, prompt: str | None = None, *, messages: list[dict[str, str]] | None = None, **_: Any) -> list[str]:
+        """Record the call and answer a constant score.
+
+        Args:
+            prompt: Unused; the helper always sends ``messages``.
+            messages: The chat the helper built.
+            **_: Ignored.
+
+        Returns:
+            A single-element completion list.
+        """
+        self.messages.append(messages or [])
+        self.history.append({"prompt": prompt, "usage": {"prompt_tokens": 3, "completion_tokens": 1}})
+        return ["0.5"]
+
+
+_JUDGE_SCORER_CODE = "def score(candidate, case=None):\n    return float(llm(candidate, case['target'])), {'judge': 'fake'}\n"
+
+
+def test_plateau_run_relays_between_engines(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
+    """The plateau strategy relays over the engine order until a full round brings no record."""
+    sink: list[tuple[str, dict[str, Any]]] = []
+
+    response = run_blackbox_optimization(
+        _payload(strategy={"mode": "plateau", "patience": 5}, budget={"max_scorer_runs": 40}),
+        artifact_id="job-plateau",
+        progress_callback=lambda e, m: sink.append((e, m)),
+        gepa_log_dir_path=str(tmp_path),
+    )
+
+    assert response.strategy_mode == "plateau"
+    assert response.lanes[0].engine == "gepa"
+    assert {lane.phase for lane in response.lanes} == {"relay"}
+    assert response.lanes[0].status == "plateaued"
+    assert len(response.lanes) >= 2
+    assert response.total_scorer_runs <= 40
+    assert response.optimized_test_metric >= response.baseline_test_metric
+    handoffs = [m for e, m in sink if e == PROGRESS_LANE_HANDOFF]
+    assert handoffs[0] == {"from_engine": "gepa", "to_engine": "best_of_n", "best_score": 1.0, "reason": "plateaued"}
+
+
+def test_strategy_patience_has_bounds() -> None:
+    """Patience below five runs or above ten thousand is rejected at validation."""
+    assert BlackboxStrategy(mode="plateau").patience == 40
+    with pytest.raises(ValidationError):
+        BlackboxStrategy(mode="plateau", patience=4)
+    with pytest.raises(ValidationError):
+        BlackboxStrategy(mode="plateau", patience=10_001)
+
+
+def test_scorer_llm_usage_is_billed_with_the_run(
+    fake_lm: FakeReflectionLM, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scorer that calls ``llm()`` gets the chosen model, and its tokens land in the run's usage."""
+    judge = _JudgeLM()
+    chosen: list[str] = []
+    monkeypatch.setattr(service_mod, "build_scorer_llm", lambda config: chosen.append(config.name) or ScorerLLM(judge))
+
+    response = run_blackbox_optimization(
+        _payload(scorer={"kind": "python", "metric_code": _JUDGE_SCORER_CODE, "model": {"name": "fake/judge"}}),
+        artifact_id="job-judge",
+        gepa_log_dir_path=str(tmp_path),
+    )
+
+    assert chosen == ["fake/judge"]
+    assert judge.messages
+    assert judge.messages[0] == [{"role": "system", "content": "hello world"}, {"role": "user", "content": "aeiou"}]
+    assert all(chat[0]["role"] == "system" and chat[1] == {"role": "user", "content": "aeiou"} for chat in judge.messages)
+    assert response.baseline_test_metric == 0.5
+    usage = {u.model: (u.input_tokens, u.output_tokens) for u in response.usage_by_model}
+    assert usage["fake/judge"] == (3 * len(judge.history), len(judge.history))
+    assert usage["fake/model"] == (10 * len(fake_lm.history), 5 * len(fake_lm.history))
+    assert response.num_lm_calls == len(fake_lm.history) + len(judge.history)
+    assert response.total_tokens == 15 * len(fake_lm.history) + 4 * len(judge.history)
+
+
+def test_dry_run_binds_the_scorer_model_and_returns_its_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dry run hands the scorer's model to the sandbox and reports what ``llm()`` consumed."""
+    seen: dict[str, Any] = {}
+
+    def fake_probe(**kwargs: Any) -> ScorerProbeResult:
+        """Capture the probe arguments and answer with usage."""
+        seen.update(kwargs)
+        return ScorerProbeResult(score=0.5, side_info={}, error=None, usage_by_model={"fake/judge": (12, 3)})
+
+    monkeypatch.setattr(service_mod, "probe_scorer", fake_probe)
+    request = ScorerDryRunRequest(
+        scorer={"kind": "python", "metric_code": _JUDGE_SCORER_CODE, "model": {"name": "fake/judge"}},
+        candidate="aeiou",
+        case={"target": "aeiou"},
+    )
+
+    response = dry_run_scorer(request)
+
+    assert seen["scorer_model"]["name"] == "fake/judge"
+    assert response.ok is True
+    assert response.score == 0.5
+    assert response.usage_by_model == [ModelTokenUsage(model="fake/judge", input_tokens=12, output_tokens=3)]

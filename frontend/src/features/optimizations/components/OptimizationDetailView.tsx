@@ -25,6 +25,7 @@ import {
   RocketLaunch,
   GridFour,
   Package,
+  Cube,
 } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 
@@ -81,6 +82,7 @@ import type { OptimizationStatusResponse, OptimizationPayloadResponse } from "@/
 import type { SharedOptimizationData } from "@/shared/lib/api";
 import type { PipelineStage } from "../constants";
 import { extractScoresFromLogs } from "../lib/extract-scores";
+import { extractBlackboxScorePoints } from "../lib/blackbox";
 import { isReactModuleName } from "../lib/is-react-module";
 import { reconstructGridResult } from "../lib/reconstruct-grid";
 import { DataTab } from "./DataTab";
@@ -95,6 +97,7 @@ import { StageInfoModal } from "./StageInfoModal";
 import { PairSelectionStrip } from "./PairSelectionStrip";
 import { OverviewTab } from "./OverviewTab";
 import { RunCreditsChip } from "./RunCreditsChip";
+import { BestVersionTab } from "./BestVersionTab";
 import { GridServeTab } from "./GridServeTab";
 import { LMActivityTab } from "./LMActivityTab";
 import { ReactServeChat } from "./ReactServeChat";
@@ -295,7 +298,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   // counts the moment it flips to success. Demo runs are excluded.
   const resultsViewedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!id || isAnyDemoMode || job?.status !== "success" || resultsViewedFor.current === id) return;
+    if (!id || isAnyDemoMode || job?.status !== "success" || resultsViewedFor.current === id)
+      return;
     resultsViewedFor.current = id;
     track(TelemetryEvent.ResultsViewed, {
       optimization_type: job.optimization_type,
@@ -644,6 +648,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   useEffect(() => {
     if (skipNetwork) return;
     if (job?.status !== "success") return;
+    // Black-box runs have no servable program.
+    if (job.optimization_type === "blackbox") return;
     // A failure here used to be swallowed as `setServeInfo(null)`, which
     // silently blanked the Usage tab (e.g. when an expired bearer 401'd).
     // request() now self-heals a stale token; a persistent failure surfaces.
@@ -846,12 +852,23 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const metrics = job?.latest_metrics ?? {};
 
   const signatureCode = (payload?.payload?.signature_code as string) ?? null;
-  const metricCode = (payload?.payload?.metric_code as string) ?? null;
+  const blackboxScorer = payload?.payload?.scorer as { metric_code?: string } | undefined;
+  const metricCode =
+    (payload?.payload?.metric_code as string) ?? blackboxScorer?.metric_code ?? null;
   const workflowSpec = (payload?.payload?.workflow as WorkflowSpec | undefined) ?? null;
 
+  // Black-box runs report scores through `optimizer_progress` events rather
+  // than GEPA log lines, so the chart reads the event stream for them.
+  const jobIsBlackbox = job?.optimization_type === "blackbox";
+  const jobProgressEvents = job?.progress_events;
   const scorePoints = useMemo(
-    () => (jobLogs?.length ? extractScoresFromLogs(jobLogs) : []),
-    [jobLogs],
+    () =>
+      jobIsBlackbox
+        ? extractBlackboxScorePoints(jobProgressEvents ?? [])
+        : jobLogs?.length
+          ? extractScoresFromLogs(jobLogs)
+          : [],
+    [jobIsBlackbox, jobProgressEvents, jobLogs],
   );
 
   // Optimized prompt picks the pair's artifact in pair view, otherwise falls
@@ -993,8 +1010,11 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     ? !!shareData?.dataset
     : isPairContext
       ? isPairTerminal
-      : isTerminal && job.optimization_type !== "grid_search";
+      : isTerminal && job.optimization_type !== "grid_search" && !jobIsBlackbox;
   const showLogsTab = job.optimization_type !== "grid_search" || isPairContext;
+  const showBestVersionTab = jobIsBlackbox && !!job.blackbox_result;
+  // A remote-scorer black-box run has no code to show at all.
+  const showCodeTab = !jobIsBlackbox || !!metricCode;
   const showLmActivityTab = viewLmActivity != null;
 
   const pairCount = effectiveJob?.grid_result?.pair_results.length ?? 0;
@@ -1093,6 +1113,11 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                       <GridFour />
                       {msg("auto.app.optimizations.id.page.literal.2")}
                     </>
+                  ) : jobIsBlackbox ? (
+                    <>
+                      <Cube />
+                      {msg("optimization.blackbox.badge")}
+                    </>
                   ) : (
                     <>
                       <RocketLaunch />
@@ -1125,7 +1150,9 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                     {formatBytes(job.stored_bytes ?? 0)}
                   </Link>
                 )}
-                {!isPairContext && <RunCreditsChip details={job.result?.details} />}
+                {!isPairContext && (
+                  <RunCreditsChip details={job.result?.details ?? job.blackbox_result?.details} />
+                )}
               </div>
             </div>
             {!isShare && (
@@ -1403,13 +1430,19 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   {msg("auto.app.optimizations.id.page.15")}
                 </TabsTrigger>
               )}
+              {showBestVersionTab && (
+                <TabsTrigger value="best" className={tabCls}>
+                  <Cube className="size-3.5" />
+                  {msg("optimization.blackbox.best.tab")}
+                </TabsTrigger>
+              )}
               {showDataTab && !isPhone && (
                 <TabsTrigger value="data" className={tabCls}>
                   <Database className="size-3.5" />
                   {msg("auto.app.optimizations.id.page.16")}
                 </TabsTrigger>
               )}
-              {!isPhone && (
+              {!isPhone && showCodeTab && (
                 <TabsTrigger value="code" className={tabCls}>
                   <Code className="size-3.5" />
                   {msg("auto.app.optimizations.id.page.17")}
@@ -1507,12 +1540,19 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               </TabsContent>
             )}
 
-            {!isPhone && (
+            {showBestVersionTab && job.blackbox_result && (
+              <TabsContent value="best" className="mt-4">
+                <BestVersionTab result={job.blackbox_result} jobName={job.name} />
+              </TabsContent>
+            )}
+
+            {!isPhone && showCodeTab && (
               <TabsContent value="code" className="space-y-6 mt-4">
                 <CodeTab
                   signatureCode={signatureCode ?? ""}
                   metricCode={metricCode ?? ""}
                   workflowSpec={workflowSpec}
+                  metricLabel={jobIsBlackbox ? msg("optimization.blackbox.scorer_code") : undefined}
                 />
               </TabsContent>
             )}

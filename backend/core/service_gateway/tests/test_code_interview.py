@@ -12,7 +12,9 @@ from types import SimpleNamespace
 
 from core.service_gateway.agents.code_interview import (
     MAX_INTERVIEW_QUESTIONS,
+    BlackboxInterviewTurnSig,
     CodeInterviewTurnSig,
+    _blackbox_interview_inputs,
     _interview_inputs,
     _parse_interview_prediction,
 )
@@ -164,3 +166,64 @@ def test_interview_inputs_appends_question_count_note() -> None:
     assert f"1 of at most {MAX_INTERVIEW_QUESTIONS}" in transcript[-1]["content"]
     assert inputs["job_model"] == "openai/gpt-4o-mini"
     assert inputs["reply_language"] == "Hebrew"
+
+
+_BLACKBOX = {
+    "recipe": "prompt",
+    "objective": "  Replies that resolve the ticket in one message.  ",
+    "background": " Support desk for a SaaS product. ",
+    "target_kind": "text",
+    "scorer_has_model": True,
+}
+
+
+def test_blackbox_interview_inputs_shapes() -> None:
+    """The authoring context is mapped field-for-field, with cases JSON-encoded."""
+    inputs = _blackbox_interview_inputs(
+        _BLACKBOX,
+        case_columns=["ticket", "expected"],
+        sample_cases=[{"ticket": "hi", "expected": "hello"}],
+        job_model="",
+        turns=[],
+        locale="en",
+    )
+    assert inputs["objective"] == "Replies that resolve the ticket in one message."
+    assert inputs["background"] == "Support desk for a SaaS product."
+    assert inputs["recipe"] == "prompt"
+    assert inputs["target_kind"] == "text"
+    assert inputs["case_columns"] == ["ticket", "expected"]
+    assert json.loads(inputs["sample_cases"]) == [{"ticket": "hi", "expected": "hello"}]
+    assert inputs["scorer_has_model"] == "true"
+    assert inputs["job_model"] == "not chosen yet"
+    assert json.loads(inputs["transcript_json"]) == []
+    assert inputs["reply_language"] == "English"
+
+
+def test_blackbox_interview_inputs_defaults_and_question_note() -> None:
+    """Missing optional fields fall back sanely and the limit reminder is appended."""
+    turns = [{"role": "assistant", "content": "Q1?"}, {"role": "user", "content": "A1"}]
+    inputs = _blackbox_interview_inputs(
+        {"objective": "shorter code"},
+        case_columns=[],
+        sample_cases=[],
+        job_model="openai/gpt-4o-mini",
+        turns=turns,
+        locale=None,
+    )
+    assert inputs["recipe"] == "anything"
+    assert inputs["target_kind"] == "text"
+    assert inputs["background"] == ""
+    assert inputs["scorer_has_model"] == "false"
+    assert inputs["job_model"] == "openai/gpt-4o-mini"
+    transcript = json.loads(inputs["transcript_json"])
+    assert transcript[:2] == turns
+    assert f"1 of at most {MAX_INTERVIEW_QUESTIONS}" in transcript[-1]["content"]
+    assert inputs["reply_language"] == "Hebrew"
+
+
+def test_blackbox_interview_signature_orders_done_before_options() -> None:
+    """The model commits to ``done`` before writing options / brief, like the DSPy signature."""
+    outputs = list(BlackboxInterviewTurnSig.output_fields)
+    assert outputs.index("done") < outputs.index("options_json")
+    assert outputs.index("done") < outputs.index("brief_json")
+    assert "scorer_has_model" in BlackboxInterviewTurnSig.input_fields

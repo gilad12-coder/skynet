@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from ..protocol import BudgetExhaustedError, EvalServer, Task, candidate_key
+from ..protocol import BudgetExhaustedError, EvalServer, PlateauReachedError, PlateauWatch, Task, candidate_key
 from .mocks import vowel_scorer
 
 
@@ -127,3 +127,43 @@ def test_task_mode_flags() -> None:
     assert not Task(seed_candidate={"a": "b"}).str_mode
     assert not Task(seed_candidate="hi").has_dataset
     assert Task(seed_candidate="hi", val_set=[{"x": 1}]).has_dataset
+
+
+def test_plateau_watch_counts_runs_since_the_last_record() -> None:
+    """Only a score above the bar resets the count; the lane trips at ``patience`` and stops."""
+    parent = EvalServer(vowel_scorer, max_evals=10)
+    watch = PlateauWatch(2, best_score=0.5)
+    lane = parent.lane(10, watch=watch)
+
+    lane.evaluate("xxa")
+    assert watch.stalled == 1
+    lane.evaluate("aaa")
+    assert (watch.best_score, watch.stalled) == (1.0, 0)
+    lane.evaluate("xxx")
+    lane.evaluate("xxa")
+
+    assert watch.exhausted
+    assert lane.plateaued
+    assert lane.remaining == 0
+    assert (parent.plateaued, parent.remaining) == (False, 6)
+    with pytest.raises(PlateauReachedError, match="no improvement in the last 2 scorer runs"):
+        lane.evaluate("aaaa")
+    assert watch.tripped
+    assert parent.used == 4
+    assert issubclass(PlateauReachedError, BudgetExhaustedError)
+
+
+def test_plateau_watch_is_per_lane() -> None:
+    """A later lane on the same parent starts its own count against the run's record."""
+    parent = EvalServer(vowel_scorer, max_evals=10)
+    first = parent.lane(10, watch=PlateauWatch(1))
+    first.evaluate("aaa")
+    first.evaluate("xxx")
+    assert first.remaining == 0
+
+    second = parent.lane(parent.remaining, watch=PlateauWatch(1, best_score=parent.best_score))
+
+    assert second.remaining == 8
+    second.evaluate("aaaa")
+    assert second.plateaued
+    assert parent.best_candidate == "aaa"

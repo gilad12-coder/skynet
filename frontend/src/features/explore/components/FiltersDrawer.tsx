@@ -55,6 +55,7 @@ const TYPE_VALUES: ReadonlyArray<{
 }> = [
   { value: "run", labelKey: "explore.filter.run" },
   { value: "grid_search", labelKey: "explore.filter.grid" },
+  { value: "blackbox", labelKey: "explore.filter.blackbox" },
 ];
 
 // Lists longer than this get an inline search box. Shorter lists already

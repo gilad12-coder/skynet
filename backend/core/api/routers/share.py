@@ -41,6 +41,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ...constants import (
+    OPTIMIZATION_TYPE_BLACKBOX,
     OPTIMIZATION_TYPE_GRID_SEARCH,
     OPTIMIZATION_TYPE_RUN,
     PAYLOAD_OVERVIEW_IS_PRIVATE,
@@ -50,6 +51,7 @@ from ...constants import (
     PAYLOAD_OVERVIEW_USERNAME,
 )
 from ...models import (
+    BlackboxRunResponse,
     ColumnMapping,
     GridSearchResponse,
     JobLogEntry,
@@ -114,7 +116,7 @@ from .optimizations._local import remap_test_indices
 logger = logging.getLogger(__name__)
 
 _USER_FACING_OPTIMIZATION_TYPES = frozenset(
-    {OPTIMIZATION_TYPE_RUN, OPTIMIZATION_TYPE_GRID_SEARCH}
+    {OPTIMIZATION_TYPE_RUN, OPTIMIZATION_TYPE_GRID_SEARCH, OPTIMIZATION_TYPE_BLACKBOX}
 )
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
@@ -393,11 +395,14 @@ def _build_status_response(
 
     result = None
     grid_result = None
+    blackbox_result = None
     result_data = job_data.get("result")
     if isinstance(result_data, dict):
         try:
             if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH:
                 grid_result = GridSearchResponse.model_validate(result_data)
+            elif status == OptimizationStatus.success and optimization_type == OPTIMIZATION_TYPE_BLACKBOX:
+                blackbox_result = BlackboxRunResponse.model_validate(result_data)
             elif status == OptimizationStatus.success:
                 result = RunResponse.model_validate(result_data)
         except ValidationError:
@@ -454,6 +459,7 @@ def _build_status_response(
         logs=[JobLogEntry(**log) for log in logs],
         result=result,
         grid_result=grid_result,
+        blackbox_result=blackbox_result,
     )
 
 

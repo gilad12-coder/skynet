@@ -89,7 +89,7 @@ const DEFAULT_TARGET_SCORE = "100";
 // wizard sends nothing, so the server-wide GEPA_PXN_* settings still apply.
 const DEFAULT_PXN = "1";
 
-function prepareModelConfig(config: ModelConfig): ModelConfig {
+export function prepareModelConfig(config: ModelConfig): ModelConfig {
   const { base_url: _baseUrl, ...fields } = config;
   const {
     api_key: _apiKey,
@@ -1557,29 +1557,6 @@ export function useSubmitWizard() {
         }
         return true;
       case 1: {
-        if (!parsedDataset || parsedDataset.rowCount === 0) {
-          if (showToast) toast.error(msg("submit.validation.dataset_required"));
-          return false;
-        }
-        const m = currentColumnMapping();
-        if (Object.keys(m.inputs).length === 0) {
-          if (showToast) toast.error(msg("submit.validation.input_column_required"));
-          return false;
-        }
-        if (Object.keys(m.outputs).length === 0) {
-          if (showToast) toast.error(msg("submit.validation.output_column_required"));
-          return false;
-        }
-        return true;
-      }
-      case 2: {
-        if (datasetValidation && datasetValidation.errors.length > 0) {
-          if (showToast) toast.error(msg("submit.validation.split_too_small"));
-          return false;
-        }
-        return validateTargetScore(showToast);
-      }
-      case 3: {
         if (moduleSelectionRequired) {
           if (showToast) toast.error(msg("submit.validation.module_required"));
           return false;
@@ -1599,7 +1576,38 @@ export function useSubmitWizard() {
             if (showToast) toast.error(msg("submit.validation.workflow_invalid"));
             return false;
           }
-        } else {
+        } else if (codeAssistMode !== "auto" && !signatureCode.trim()) {
+          // In auto mode the agent drafts the signature once the cases exist
+          // (next step), so a blank editor is not an error yet.
+          if (showToast) toast.error(msg("submit.validation.signature_required"));
+          return false;
+        }
+        // Server-side signature validation needs a sample row, so it runs on
+        // the scorer step once the cases are in.
+        return true;
+      }
+      case 2: {
+        if (!parsedDataset || parsedDataset.rowCount === 0) {
+          if (showToast) toast.error(msg("submit.validation.dataset_required"));
+          return false;
+        }
+        const m = currentColumnMapping();
+        if (Object.keys(m.inputs).length === 0) {
+          if (showToast) toast.error(msg("submit.validation.input_column_required"));
+          return false;
+        }
+        if (Object.keys(m.outputs).length === 0) {
+          if (showToast) toast.error(msg("submit.validation.output_column_required"));
+          return false;
+        }
+        if (datasetValidation && datasetValidation.errors.length > 0) {
+          if (showToast) toast.error(msg("submit.validation.split_too_small"));
+          return false;
+        }
+        return true;
+      }
+      case 3: {
+        if (!isWorkflow) {
           if (!signatureCode.trim()) {
             if (showToast) toast.error(msg("submit.validation.signature_required"));
             return false;
@@ -1618,6 +1626,7 @@ export function useSubmitWizard() {
         return true;
       }
       case 4: {
+        if (!validateTargetScore(showToast)) return false;
         if (effectiveJobType === "run") {
           if (!modelConfig.name.trim()) {
             if (showToast) toast.error(msg("submit.validation.model_required"));
@@ -1800,7 +1809,7 @@ export function useSubmitWizard() {
       if (
         step === 3 &&
         !moduleSelectionRequired &&
-        signatureCode.trim() &&
+        (isWorkflow || signatureCode.trim()) &&
         parsedDataset &&
         metricCode.trim()
       ) {
@@ -1933,18 +1942,18 @@ export function useSubmitWizard() {
     }
     if (!parsedDataset || parsedDataset.rowCount === 0) {
       toast.error(msg("submit.validation.dataset_required_short"));
-      goTo(1);
+      goTo(2);
       return;
     }
     if (isWorkflow) {
       if (!workflowSpec || validateWorkflowSpec(workflowSpec, workflowIssueText).length > 0) {
         toast.error(msg("submit.validation.workflow_invalid"));
-        goTo(3);
+        goTo(1);
         return;
       }
     } else if (!signatureCode.trim()) {
       toast.error(msg("submit.validation.signature_required"));
-      goTo(3);
+      goTo(1);
       return;
     }
     if (!metricCode.trim()) {
@@ -1953,28 +1962,28 @@ export function useSubmitWizard() {
       return;
     }
     if (!validateTargetScore(true)) {
-      goTo(2);
+      goTo(4);
       return;
     }
     const needsToolSource =
       isReact || (isWorkflow && !!workflowSpec && workflowUsesTools(workflowSpec));
     if (needsToolSource && !reactConfig.mcpUrl.trim()) {
       toast.error(msg("submit.validation.mcp_url_required"));
-      // The tool-source config lives on the code step (it appears once the
-      // module choice reveals a tool-using run).
-      goTo(3);
+      // The tool-source config lives on the starting-point step (it appears
+      // once the module choice reveals a tool-using run).
+      goTo(1);
       return;
     }
 
     const columnMapping = currentColumnMapping();
     if (Object.keys(columnMapping.inputs).length === 0) {
       toast.error(msg("submit.validation.input_column_required"));
-      goTo(1);
+      goTo(2);
       return;
     }
     if (Object.keys(columnMapping.outputs).length === 0) {
       toast.error(msg("submit.validation.output_column_required"));
-      goTo(1);
+      goTo(2);
       return;
     }
 
@@ -2199,10 +2208,9 @@ export function useSubmitWizard() {
   // interview could still happen — otherwise the pre-warm seed (which fires
   // from earlier steps) would generate code before the user ever saw a
   // question. ``interviewEligible`` additionally requires a role-mapped
-  // dataset and that the user has moved past the data step (``step >= 2``),
-  // so the opening question — which costs an LLM call — pre-warms the moment
-  // dataset setup is done and is already answered-ready by the time the code
-  // step opens. Pre-existing code work (clone pre-fill, manual edits, a
+  // dataset and that the user has moved past the cases step (``step >= 3``),
+  // so the opening question — which costs an LLM call — never fires against
+  // column roles the user is still editing. Pre-existing code work (clone pre-fill, manual edits, a
   // touched canvas) rules the interview out.
   const interviewPossible =
     codeAssistMode === "auto" &&
@@ -2212,7 +2220,7 @@ export function useSubmitWizard() {
   const interviewEligible =
     interviewPossible &&
     !moduleSelectionRequired &&
-    step >= 2 &&
+    step >= 3 &&
     !!parsedDataset &&
     parsedDataset.rowCount > 0 &&
     Object.values(columnRoles).some((r) => r === "input") &&

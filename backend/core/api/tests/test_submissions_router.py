@@ -30,11 +30,13 @@ from ...constants import (
     PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL,
     PAYLOAD_OVERVIEW_TOTAL_PAIRS,
     PAYLOAD_OVERVIEW_USERNAME,
+    TOKEN_SOURCE_MANAGED,
 )
 from ...i18n_keys import I18nKey
 from ...models.blackbox import BLACKBOX_MODULE_NAME, ScorerDryRunResponse
 from ...registry import RegistryError
 from ...service_gateway import ServiceError
+from ...service_gateway.optimization.blackbox import service as _bb_service
 from ...storage.models import Base, BillingCustomerModel, BillingProviderKeyModel
 from ...storage.usage import StorageUsage
 from ..model_catalog import CatalogModel, ModelCatalogResponse
@@ -1852,7 +1854,14 @@ def test_blackbox_scorer_dry_run_returns_the_probe_result(monkeypatch: pytest.Mo
     resp = client.post("/blackbox/scorer/dry-run", json=body)
 
     assert resp.status_code == 200
-    assert resp.json() == {"ok": True, "score": 0.75, "side_info": {"vowels": 3}, "error": None, "elapsed_ms": 4}
+    assert resp.json() == {
+        "ok": True,
+        "score": 0.75,
+        "side_info": {"vowels": 3},
+        "error": None,
+        "elapsed_ms": 4,
+        "usage_by_model": [],
+    }
     assert len(seen) == 1
     assert seen[0].candidate == "hello"
     assert seen[0].case == {"target": "aeiou"}
@@ -1894,3 +1903,156 @@ def test_blackbox_scorer_dry_run_returns_422_without_a_candidate(monkeypatch: py
     )
 
     assert resp.status_code == 422
+
+
+def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The catalog lists every engine in registry order and flips Meta-Harness on for agent targets."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: None)
+
+    text = client.get("/blackbox/engines")
+    agent = client.get("/blackbox/engines", params={"target": "agent"})
+
+    assert text.status_code == 200
+    assert text.json()["target_kind"] == "text"
+    assert text.json()["sandbox_available"] is True
+    by_id = {engine["id"]: engine for engine in text.json()["engines"]}
+    assert list(by_id) == ["gepa", "best_of_n", "autoresearch", "meta_harness"]
+    assert by_id["gepa"]["available"] is True
+    assert by_id["gepa"]["supports_parts"] is True
+    assert by_id["autoresearch"]["available"] is False
+    assert by_id["autoresearch"]["unavailable_reason"]
+    assert by_id["meta_harness"]["available"] is False
+    assert by_id["meta_harness"]["requires_agent_target"] is True
+    assert agent.status_code == 200
+    agent_by_id = {engine["id"]: engine for engine in agent.json()["engines"]}
+    assert agent_by_id["meta_harness"]["available"] is True
+    assert agent_by_id["meta_harness"]["unavailable_reason"] is None
+
+
+def test_blackbox_engine_catalog_surfaces_the_missing_sandbox_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a sandbox the catalog says so once at the top and again on the engines that need it."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: "no sandbox here")
+
+    resp = client.get("/blackbox/engines", params={"target": "agent"})
+
+    assert resp.status_code == 200
+    assert resp.json()["sandbox_available"] is False
+    assert resp.json()["sandbox_reason"] == "no sandbox here"
+    by_id = {engine["id"]: engine for engine in resp.json()["engines"]}
+    assert by_id["meta_harness"]["available"] is False
+    assert by_id["meta_harness"]["unavailable_reason"] == "no sandbox here"
+    assert by_id["gepa"]["available"] is True
+
+
+def test_blackbox_engine_catalog_rejects_unknown_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A target kind outside text|agent is a 422, not a silent fallback to text."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    resp = client.get("/blackbox/engines", params={"target": "robot"})
+
+    assert resp.status_code == 422
+
+
+def _alice_billing_engine(*, grant_remaining: int) -> object:
+    """Return an in-memory billing engine holding one ``alice`` account.
+
+    Args:
+        grant_remaining: Free-grant credits left on the account.
+
+    Returns:
+        The SQLAlchemy engine, shared across threads via ``StaticPool``.
+    """
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            BillingCustomerModel(
+                username="alice", stripe_customer_id="cus_alice", credit_balance=0, grant_remaining=grant_remaining
+            )
+        )
+        session.commit()
+    return engine
+
+
+_JUDGE_DRY_RUN_BODY = {
+    "scorer": {
+        "kind": "python",
+        "metric_code": "def score(candidate, case=None): return float(llm(candidate))",
+        "model": {"name": "openai/gpt-4o-mini"},
+    },
+    "candidate": "hello",
+}
+
+
+def test_blackbox_scorer_dry_run_gates_credits_only_when_a_model_is_chosen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scorer with a model needs spendable credits; a plain scorer never touches billing."""
+    store = _FakeJobStore()
+    store.engine = _alice_billing_engine(grant_remaining=0)
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(
+        _sub_mod,
+        "dry_run_scorer",
+        lambda request: ScorerDryRunResponse(ok=True, score=1.0, side_info={}, error=None, elapsed_ms=1),
+    )
+
+    blocked = client.post("/blackbox/scorer/dry-run", json=_JUDGE_DRY_RUN_BODY)
+    allowed = client.post(
+        "/blackbox/scorer/dry-run",
+        json={"scorer": {"kind": "python", "metric_code": "def score(c): return 1.0"}, "candidate": "hello"},
+    )
+
+    assert blocked.status_code == 402
+    assert blocked.json()["code"] == "billing.insufficient_credits"
+    assert allowed.status_code == 200
+
+
+def test_blackbox_scorer_dry_run_bills_what_llm_consumed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dry run's ``llm()`` tokens are debited to the caller under the scorer's token source."""
+    store = _FakeJobStore()
+    store.engine = _alice_billing_engine(grant_remaining=50)
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    usage = [{"model": "openai/gpt-4o-mini", "input_tokens": 12, "output_tokens": 3}]
+    monkeypatch.setattr(
+        _sub_mod,
+        "dry_run_scorer",
+        lambda request: ScorerDryRunResponse(
+            ok=True, score=1.0, side_info={}, error=None, elapsed_ms=1, usage_by_model=usage
+        ),
+    )
+    metered: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(_sub_mod, "meter_llm_usage", lambda *args, **kwargs: metered.append((args, kwargs)) or 1)
+
+    resp = client.post("/blackbox/scorer/dry-run", json=_JUDGE_DRY_RUN_BODY)
+
+    assert resp.status_code == 200
+    assert resp.json()["usage_by_model"] == usage
+    assert len(metered) == 1
+    (engine, username, breakdown), kwargs = metered[0]
+    assert engine is store.engine
+    assert username == "alice"
+    assert breakdown == {"openai/gpt-4o-mini": (12, 3)}
+    assert kwargs == {"description": "Scorer dry run", "token_source": TOKEN_SOURCE_MANAGED}
+
+
+def test_blackbox_scorer_dry_run_skips_billing_without_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scorer that never called ``llm()`` is not metered even with a model chosen."""
+    store = _FakeJobStore()
+    store.engine = _alice_billing_engine(grant_remaining=50)
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(
+        _sub_mod,
+        "dry_run_scorer",
+        lambda request: ScorerDryRunResponse(ok=True, score=1.0, side_info={}, error=None, elapsed_ms=1),
+    )
+    metered: list[Any] = []
+    monkeypatch.setattr(_sub_mod, "meter_llm_usage", lambda *args, **kwargs: metered.append(args) or 0)
+
+    resp = client.post("/blackbox/scorer/dry-run", json=_JUDGE_DRY_RUN_BODY)
+
+    assert resp.status_code == 200
+    assert metered == []

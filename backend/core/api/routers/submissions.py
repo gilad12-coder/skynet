@@ -4,6 +4,7 @@
 ``POST /grid-search`` — sweep over (generation, reflection) model pairs.
 ``POST /blackbox/run`` — black-box text optimization against a scorer.
 ``POST /blackbox/scorer/dry-run`` — score one version before submitting.
+``GET /blackbox/engines`` — the engine catalog with per-deployment availability.
 
 ``/run`` and ``/grid-search`` are part of the public dev surface and are
 listed in ``_SCALAR_PUBLIC_PATHS`` (see ``backend/core/api/app.py``); the
@@ -15,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header
@@ -29,6 +30,7 @@ from ...billing import (
     cost_ceiling_budget,
     provider_slug_for_model,
 )
+from ...billing.metering import meter_llm_usage
 from ...config import settings
 from ...constants import (
     COMPOSITION_SINGLE,
@@ -76,6 +78,7 @@ from ...constants import (
 from ...i18n import t
 from ...i18n_keys import I18nKey
 from ...models import (
+    BlackboxEngineCatalogResponse,
     BlackboxRunRequest,
     GridSearchRequest,
     OptimizationStatus,
@@ -91,7 +94,7 @@ from ...models.workflow import WORKFLOW_MODULE_NAME
 from ...notifications import notify_job_started
 from ...registry import RegistryError
 from ...service_gateway import ServiceError
-from ...service_gateway.optimization.blackbox.service import dry_run_scorer, validate_blackbox_payload
+from ...service_gateway.optimization.blackbox.service import dry_run_scorer, engine_catalog, validate_blackbox_payload
 from ...service_gateway.safe_exec import validate_signature_code
 from ...storage.dataset_library import DatasetLibraryStore, PostgresDatasetBlobStore
 from ...storage.usage import json_byte_size
@@ -101,7 +104,13 @@ from ..dataset_access import resolve_effective_role
 from ..errors import DomainError
 from ..model_catalog import get_catalog_cached
 from ..rate_limit import enforce_submission_rate
-from ._helpers import compute_task_fingerprint, enforce_storage_quota, stable_seed, strip_api_key
+from ._helpers import (
+    compute_task_fingerprint,
+    enforce_llm_credits,
+    enforce_storage_quota,
+    stable_seed,
+    strip_api_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -554,7 +563,9 @@ def _request_model_configs(payload: _OptimizationRequestBase | BlackboxRunReques
         Model configs in execution order.
     """
     if isinstance(payload, BlackboxRunRequest):
-        return [payload.reflection_model_settings]
+        return [
+            config for config in (payload.reflection_model_settings, payload.scorer.model) if config is not None
+        ]
     if isinstance(payload, RunRequest):
         return [
             config
@@ -1145,6 +1156,31 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             optimizer_name=optimizer_name,
         )
 
+    @router.get(
+        "/blackbox/engines",
+        response_model=BlackboxEngineCatalogResponse,
+        summary="List black-box engines and their availability",
+        tags=["agent"],
+    )
+    def blackbox_engines(
+        current_user: AuthenticatedUserDep,
+        target: Literal["text", "agent"] = "text",
+    ) -> BlackboxEngineCatalogResponse:
+        """Describe every engine so the wizard can show why one cannot run here.
+
+        Availability depends on the deployment (agent sandboxes) and on the
+        job's target kind, so the caller names the target it is building.
+
+        Args:
+            current_user: Authenticated caller resolved from the bearer token.
+            target: The target kind the job will use.
+
+        Returns:
+            The catalog in registry order.
+        """
+        del current_user
+        return engine_catalog(target)
+
     @router.post(
         "/blackbox/scorer/dry-run",
         response_model=ScorerDryRunResponse,
@@ -1159,7 +1195,9 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
 
         Python scorers run in the metric sandbox; remote scorers get a single
         outbound request. Scorer failures come back as ``ok=False`` with the
-        error text rather than as an HTTP error.
+        error text rather than as an HTTP error. A scorer with a model
+        chosen may call ``llm()``; that usage is billed to the caller like an
+        agent turn.
 
         Args:
             payload: The scorer spec, one version and an optional case.
@@ -1169,9 +1207,22 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             The score and side information, or the error that stopped it.
 
         Raises:
-            DomainError: 429 when over the submission rate cap.
+            DomainError: 429 when over the submission rate cap; 402 when the
+                scorer has a model and the account has no credits.
         """
         enforce_submission_rate(current_user.username)
-        return dry_run_scorer(payload)
+        scorer_model = payload.scorer.model
+        if scorer_model is not None:
+            enforce_llm_credits(job_store, current_user.username)
+        response = dry_run_scorer(payload)
+        if scorer_model is not None and response.usage_by_model:
+            meter_llm_usage(
+                getattr(job_store, "engine", None),
+                current_user.username,
+                {usage.model: (usage.input_tokens, usage.output_tokens) for usage in response.usage_by_model},
+                description="Scorer dry run",
+                token_source=scorer_model.token_source or TOKEN_SOURCE_MANAGED,
+            )
+        return response
 
     return router

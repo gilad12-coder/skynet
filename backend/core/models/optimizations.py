@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from .artifacts import ProgramArtifact
+from .blackbox import BlackboxRunResponse
 from .common import ColumnMapping, Composition, OptimizationStatus, OptimizationType, SplitFractions
 from .results import GridSearchResponse, RunResponse
 from .telemetry import JobLogEntry, ProgressEvent
@@ -133,6 +134,10 @@ class OptimizationStatusResponse(_JobResponseBase):
     logs_offset: int = 0
     result: RunResponse | None = None
     grid_result: GridSearchResponse | None = None
+    # Black-box runs persist a ``BlackboxRunResponse`` (no module/metric
+    # names, plus lanes and the best version), which ``RunResponse`` rejects;
+    # they surface here, mirroring ``grid_result`` for grids.
+    blackbox_result: BlackboxRunResponse | None = None
     # Grid pair indices with a saved checkpoint: a failed pair listed here offers
     # Resume (continue mid-GEPA), one not listed offers Restart (re-run fresh).
     # Empty for single runs and for grids with no in-flight pair state.

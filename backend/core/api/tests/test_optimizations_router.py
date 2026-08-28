@@ -25,12 +25,14 @@ from sqlalchemy.pool import StaticPool
 from ...billing.byok_vault import ProviderKeyVault
 from ...config import settings
 from ...models.artifacts import ProgramArtifact
+from ...models.blackbox import BlackboxLaneResult, BlackboxRunResponse
 from ...models.common import SplitCounts
 from ...models.results import GridSearchResponse, PairResult, RunResponse
 from ...storage.models import Base
 from ..errors import DomainError
 from ..routers.optimizations import create_optimizations_router
 from ..routers.optimizations._local import clone_payload
+from ..routers.optimizations_meta import _sanitize_payload
 from .conftest import bypass_auth
 from .mocks import _BaseFakeJobStore, real_grid_response_dict
 
@@ -1579,3 +1581,66 @@ def test_clone_payload_raises_409_when_saved_payload_no_longer_validates() -> No
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.code == "optimization.cannot_resubmit_payload"
+
+
+def test_status_surfaces_blackbox_results_under_blackbox_result(
+    opt_client: TestClient, store: _ExtendedFakeJobStore
+) -> None:
+    """A finished black-box job returns its lanes and best version, not a null ``result``."""
+    blackbox_result = BlackboxRunResponse(
+        optimizer_name="auto",
+        strategy_mode="auto",
+        engine_used="gepa",
+        split_counts=SplitCounts(train=4, val=1, test=1),
+        baseline_test_metric=0.4,
+        optimized_test_metric=0.9,
+        metric_improvement=0.5,
+        seed_candidate="Be brief.",
+        best_candidate="Be brief and cite sources.",
+        lanes=[
+            BlackboxLaneResult(engine="best_of_n", phase="explore", status="completed", best_score=0.6, scorer_runs=6),
+            BlackboxLaneResult(engine="gepa", phase="continue", status="completed", best_score=0.9, scorer_runs=14),
+        ],
+        total_scorer_runs=20,
+        runtime_seconds=12.5,
+    )
+    store.seed_job(
+        "bb-done",
+        status="success",
+        payload_overview={
+            "optimization_type": "blackbox",
+            "module_name": "blackbox",
+            "optimizer_name": "auto",
+        },
+        result=blackbox_result.model_dump(),
+    )
+
+    resp = opt_client.get("/optimizations/bb-done")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["result"] is None
+    assert body["grid_result"] is None
+    assert body["blackbox_result"]["best_candidate"] == "Be brief and cite sources."
+    assert body["blackbox_result"]["engine_used"] == "gepa"
+    assert [lane["engine"] for lane in body["blackbox_result"]["lanes"]] == ["best_of_n", "gepa"]
+    assert body["blackbox_result"]["optimized_test_metric"] == 0.9
+
+
+def test_sanitize_payload_scrubs_the_scorer_model_key() -> None:
+    """A black-box scorer's ``llm()`` model loses its inline key like every other model slot."""
+    payload = {
+        "reflection_model_settings": {"name": "m", "extra": {"api_key": "sk-2"}},
+        "scorer": {
+            "kind": "python",
+            "metric_code": "def score(c): return 1.0",
+            "model": {"name": "openai/gpt-4o", "extra": {"api_key": "sk-secret", "temperature": 0.1}},
+        },
+    }
+
+    sanitised = _sanitize_payload(payload)
+
+    assert sanitised["scorer"]["model"]["extra"] == {"temperature": 0.1}
+    assert sanitised["scorer"]["metric_code"] == "def score(c): return 1.0"
+    assert "api_key" not in sanitised["reflection_model_settings"]["extra"]
+    assert payload["scorer"]["model"]["extra"]["api_key"] == "sk-secret"
