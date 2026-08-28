@@ -107,17 +107,23 @@ function RecipeSlide({
 export function RecipeChip({ recipe, onChange }: { recipe: Recipe; onChange: () => void }) {
   const Icon = RECIPES.find((r) => r.id === recipe)?.Icon ?? Cube;
   return (
+    // The chip is the picker folded shut: it keeps the picker card's surface
+    // and the wizard card's inset, so the column reads as one stack.
     <button
       type="button"
       onClick={onChange}
       data-tutorial="submit-recipe"
-      className="group flex min-h-[44px] w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background px-3 py-1.5 text-xs shadow-xs transition-colors hover:border-[#C8A882] lg:min-h-0"
+      className="group flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-2xl border border-border/50 bg-card/80 px-6 py-2.5 text-sm shadow-xs backdrop-blur-xl transition-[border-color,box-shadow] duration-300 hover:border-[#C8A882] hover:shadow-md"
     >
-      <Icon className="size-3.5 text-[#3D2E22]" aria-hidden />
-      <span className="font-semibold text-foreground">{recipeTitle(recipe)}</span>
-      <span className="ms-auto flex items-center gap-1 font-medium text-muted-foreground transition-colors group-hover:text-foreground">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-[#F3EDE3] text-[#3D2E22]">
+        <Icon className="size-4" aria-hidden />
+      </span>
+      <span className="min-w-0 truncate font-semibold tracking-tight text-foreground">
+        {recipeTitle(recipe)}
+      </span>
+      <span className="ms-auto flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground transition-colors group-hover:text-foreground">
         {msg("submit.recipe.change")}
-        <Repeat className="size-3" />
+        <Repeat className="size-3.5" />
       </span>
     </button>
   );
