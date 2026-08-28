@@ -2562,6 +2562,7 @@ export interface CodeInterviewTurnResult {
   message: string;
   options: InterviewOption[];
   brief: string[];
+  objective: string;
   done: boolean;
   model?: string | null;
   /** Concrete model the Auto Router picked for this turn, when resolved. */
@@ -2634,6 +2635,7 @@ export async function streamCodeInterviewTurn(
             message: String(data.message ?? ""),
             options: parseInterviewOptions(data.options),
             brief: Array.isArray(data.brief) ? data.brief.map(String) : [],
+            objective: typeof data.objective === "string" ? data.objective.trim() : "",
             done: data.done === true,
             model: typeof data.model === "string" && data.model ? data.model : null,
             served_model:

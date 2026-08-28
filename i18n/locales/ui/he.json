@@ -2572,7 +2572,7 @@
   "submit.blackbox.start.harness_label": "מסגרת סוכן",
   "submit.blackbox.start.install_command": "פקודת התקנה",
   "submit.blackbox.start.objective_hint": "משפט או שניים על מה נחשב לתוצאה טובה.",
-  "submit.blackbox.start.objective_hint_auto": "משפט או שניים על מה נחשב לתוצאה טובה. כשיוצאים מהשדה, הסוכן פותח ראיון קצר ומנסח ממנו את נקודת ההתחלה.",
+  "submit.blackbox.start.objective_hint_auto": "משפט או שניים על מה נחשב לתוצאה טובה. אם משאירים ריק, הראיון בצד שואל על זה קודם — כך או כך הסוכן מנסח מזה את נקודת ההתחלה.",
   "submit.blackbox.start.objective_label": "מטרה",
   "submit.blackbox.start.objective_placeholder": "למשל: תשובות קצרות ומדויקות שמצטטות את המקור",
   "submit.blackbox.start.part_key": "שם החלק",

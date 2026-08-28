@@ -122,7 +122,10 @@ class BlackboxInterviewTurnSig(dspy.Signature):
     judged (exact match, graded similarity, a rubric, numeric targets,
     length / format limits), which case columns hold the input and the
     expected outcome, edge cases, and tone / language / format constraints.
-    Never ask a generic question the objective already answers, and never
+    When ``objective`` is empty the owner has not said what they want yet:
+    open by asking what they want to optimize and what a better version
+    achieves, then report their answer through ``captured_objective`` on
+    every later turn. Never ask a generic question the objective already answers, and never
     ask which LLM to use — that is chosen elsewhere (``job_model`` tells
     you the current choice when one exists; ``scorer_has_model`` tells you
     whether the scorer may call a model at all, so never propose an LLM
@@ -172,6 +175,13 @@ class BlackboxInterviewTurnSig(dspy.Signature):
         )
     )
     brief_json: str = dspy.OutputField(desc="JSON array of authoring-directive strings; [] until done.")
+    captured_objective: str = dspy.OutputField(
+        desc=(
+            "The owner's objective in one or two sentences, in their words, "
+            "once the transcript has answered it and the ``objective`` input "
+            "was empty; '' otherwise."
+        ),
+    )
 
 
 def normalize_options(raw: Any) -> list[dict[str, str]]:
@@ -309,9 +319,10 @@ def _parse_interview_prediction(pred: Any, asked: int) -> dict[str, Any]:
         asked: Assistant questions asked before this turn (limit enforcement).
 
     Returns:
-        ``{"message", "options", "brief", "done", "model"}`` — ``options`` is
-        a list of ``{label, description}`` picks (empty once done); ``brief``
-        is empty until ``done`` is true.
+        ``{"message", "options", "brief", "done", "objective", "model"}`` —
+        ``options`` is a list of ``{label, description}`` picks (empty once
+        done); ``brief`` is empty until ``done`` is true; ``objective`` is the
+        objective a black-box interview captured over a blank field, else "".
     """
     done = str(getattr(pred, "done", "")).strip().lower() in {"true", "yes", "1"}
     brief = _parse_json(getattr(pred, "brief_json", "[]"), [])
@@ -324,6 +335,7 @@ def _parse_interview_prediction(pred: Any, asked: int) -> dict[str, Any]:
         "options": [] if done else options,
         "brief": brief if done else [],
         "done": done,
+        "objective": str(getattr(pred, "captured_objective", "") or "").strip(),
         "model": settings.code_agent_model,
     }
 

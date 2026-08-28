@@ -42,7 +42,6 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
     setSeedParts,
     objective,
     setObjective,
-    setObjectiveEditing,
     background,
     setBackground,
     targetKind,
@@ -204,8 +203,6 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
           id="bb-objective"
           value={objective}
           onChange={(e) => setObjective(e.target.value)}
-          onFocus={() => setObjectiveEditing(true)}
-          onBlur={() => setObjectiveEditing(false)}
           placeholder={msg("submit.blackbox.start.objective_placeholder")}
           rows={3}
           dir="auto"
