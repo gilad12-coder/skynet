@@ -19,26 +19,58 @@ from core.models.blackbox import (
 from .. import gepa_engine as gepa_mod
 from ..best_of_n import BestOfNEngine, _strip_fences
 from ..gepa_engine import GepaEngine
+from ..meta_harness import MetaHarnessEngine
 from ..protocol import BudgetExhaustedError, EvalServer, Task
-from ..registry import ENGINES, available_engine_ids, get_engine
+from ..registry import ENGINES, EngineCapabilities, available_engine_ids, get_engine
 from .mocks import FakeReflectionLM, make_ctx, vowel_scorer
+
+_AGENT_CAPS = EngineCapabilities(sandbox=True, agent_target=True)
 
 
 def test_registry_lists_only_runnable_engines() -> None:
-    """Agent engines are catalogued but not available; the in-process ones are."""
+    """Without sandboxes only the in-process engines run; AutoResearch never does."""
     assert available_engine_ids() == [BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_BEST_OF_N]
     assert isinstance(get_engine(BLACKBOX_ENGINE_GEPA), GepaEngine)
     assert isinstance(get_engine(BLACKBOX_ENGINE_BEST_OF_N), BestOfNEngine)
     for engine_id in (BLACKBOX_ENGINE_AUTORESEARCH, BLACKBOX_ENGINE_META_HARNESS):
-        assert not ENGINES[engine_id].available
         with pytest.raises(ServiceError, match="not available"):
             get_engine(engine_id)
+    with pytest.raises(ServiceError, match="not implemented yet"):
+        get_engine(BLACKBOX_ENGINE_AUTORESEARCH, _AGENT_CAPS)
+
+
+def test_registry_unlocks_meta_harness_for_agent_targets_with_sandboxes() -> None:
+    """Meta-Harness needs both a sandbox runtime and an agent target, and each miss is explained."""
+    assert available_engine_ids(_AGENT_CAPS) == [
+        BLACKBOX_ENGINE_GEPA,
+        BLACKBOX_ENGINE_BEST_OF_N,
+        BLACKBOX_ENGINE_META_HARNESS,
+    ]
+    assert isinstance(get_engine(BLACKBOX_ENGINE_META_HARNESS, _AGENT_CAPS), MetaHarnessEngine)
+    spec = ENGINES[BLACKBOX_ENGINE_META_HARNESS]
+    no_sandbox = EngineCapabilities(sandbox=False, agent_target=True, sandbox_reason="set VERCEL_TOKEN")
+    assert spec.unavailable_reason_for(no_sandbox) == "set VERCEL_TOKEN"
+    assert spec.unavailable_reason_for(EngineCapabilities(sandbox=False, agent_target=True)) == (
+        "Agent sandboxes are not configured on this deployment."
+    )
+    text_target = EngineCapabilities(sandbox=True, agent_target=False)
+    assert "target must be an agent" in str(spec.unavailable_reason_for(text_target))
+    with pytest.raises(ServiceError, match="target must be an agent"):
+        get_engine(BLACKBOX_ENGINE_META_HARNESS, text_target)
+
+
+def test_registry_filters_multi_part_engines() -> None:
+    """``parts=True`` keeps the engines that take a named-parts starting point."""
+    assert available_engine_ids(parts=True) == [BLACKBOX_ENGINE_GEPA]
+    assert available_engine_ids(_AGENT_CAPS, parts=True) == [BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_META_HARNESS]
 
 
 def test_registry_rejects_unknown_engine() -> None:
-    """An unknown id names the engines that do exist."""
-    with pytest.raises(ServiceError, match=r"Unknown engine 'nope'\. Available engines: gepa, best_of_n"):
+    """An unknown id names the engines that do exist for the job."""
+    with pytest.raises(ServiceError, match=r"Unknown engine 'nope'\. Available engines: gepa, best_of_n\."):
         get_engine("nope")
+    with pytest.raises(ServiceError, match=r"Available engines: gepa, best_of_n, meta_harness\."):
+        get_engine("nope", _AGENT_CAPS)
 
 
 @pytest.mark.parametrize(

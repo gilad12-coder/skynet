@@ -1,12 +1,23 @@
-"""Shared fakes for the black-box tests: a deterministic scorer and reflection LM."""
+"""Shared fakes for the black-box tests: a deterministic scorer, reflection LM and sandbox runtime."""
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..protocol import Candidate, EngineContext, EvalServer, Result, SideInfo, Task
+from ..sandbox import CommandResult, SandboxSpec
 
 VOWELS = "aeiou"
+
+# A scorer for agent targets: it judges what the agent wrote, which the
+# runner hands over in place of the case.
+AGENT_OUTPUT_SCORER_CODE = """
+def score(candidate, case=None):
+    output = (case or {}).get("output") or ""
+    vowels = sum(ch in "aeiou" for ch in output)
+    return vowels / max(1, len(output)), {"vowels": vowels, "seen_case": (case or {}).get("case")}
+"""
 
 # Scorer source in the shape users submit; the in-process twin below keeps
 # the engine tests free of the sandbox.
@@ -123,3 +134,97 @@ class ScriptedEngine:
         best = server.best_candidate
         assert best is not None
         return Result(best_candidate=best, best_score=server.best_score, total_evals=server.used)
+
+
+class FakeSandboxSession:
+    """In-memory sandbox: remembers written files, records commands, answers each from a script.
+
+    Args:
+        script: Maps a command line to its outcome; unmatched commands exit 0.
+        produces: Files a command drops into the box after it runs, keyed by
+            the command line — how the agent's answer file appears.
+    """
+
+    def __init__(
+        self,
+        *,
+        script: Callable[[str], CommandResult] | None = None,
+        produces: Mapping[str, Mapping[str, str]] | None = None,
+    ) -> None:
+        """Create the session."""
+        self.files: dict[str, str] = {}
+        self.commands: list[str] = []
+        self.closed = False
+        self._script = script or (lambda command: CommandResult(exit_code=0, stdout="ok"))
+        self._produces = produces or {}
+
+    def write_files(self, files: Mapping[str, str]) -> None:
+        """Record written files.
+
+        Args:
+            files: Relative path → content.
+        """
+        self.files.update(files)
+
+    def run(
+        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+    ) -> CommandResult:
+        """Record ``command``, drop any files it produces, and return its scripted result.
+
+        Args:
+            command: The shell command line.
+            env: Ignored.
+            timeout_seconds: Ignored.
+
+        Returns:
+            The scripted outcome.
+        """
+        self.commands.append(command)
+        self.files.update(self._produces.get(command, {}))
+        return self._script(command)
+
+    def read_file(self, path: str) -> str | None:
+        """Return the recorded file, or ``None``.
+
+        Args:
+            path: Relative file path.
+
+        Returns:
+            The file's text, or ``None``.
+        """
+        return self.files.get(path)
+
+    def close(self) -> None:
+        """Mark the session closed."""
+        self.closed = True
+
+
+class FakeSandboxRuntime:
+    """Sandbox runtime that hands out fresh :class:`FakeSandboxSession` instances.
+
+    Args:
+        session_factory: Builds a session per :meth:`open`; a default
+            clean-exit session that answers ``done`` when unset.
+    """
+
+    def __init__(self, session_factory: Callable[[], FakeSandboxSession] | None = None) -> None:
+        """Create the runtime."""
+        self.specs: list[SandboxSpec] = []
+        self.sessions: list[FakeSandboxSession] = []
+        self._factory = session_factory or (
+            lambda: FakeSandboxSession(produces={"run-agent": {"output/answer.txt": "done"}})
+        )
+
+    def open(self, spec: SandboxSpec) -> FakeSandboxSession:
+        """Record ``spec`` and return a fresh session.
+
+        Args:
+            spec: The requested sandbox spec.
+
+        Returns:
+            A new fake session.
+        """
+        self.specs.append(spec)
+        session = self._factory()
+        self.sessions.append(session)
+        return session
