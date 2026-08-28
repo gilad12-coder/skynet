@@ -109,6 +109,27 @@ def test_python_scorer_normalizes_return_values() -> None:
     assert scorer("x", None) == (0.5, {"why": "ok"})
 
 
+_SLOW_SCORER = "import time\ndef score(candidate, case=None):\n    time.sleep(2)\n    return 1.0\n"
+
+
+def test_python_scorer_gives_up_on_calls_that_outrun_the_timeout() -> None:
+    """A call slower than ``timeout_seconds`` raises ``TimeoutError`` instead of stalling the run."""
+    scorer = build_python_scorer(_SLOW_SCORER, timeout_seconds=0.05)
+
+    with pytest.raises(TimeoutError, match=r"exceeded the 0\.05s timeout"):
+        scorer("x", None)
+
+
+def test_python_scorer_keeps_results_and_errors_from_timed_calls() -> None:
+    """Within the timeout, the user's return value and exceptions pass through unchanged."""
+    fast = build_python_scorer("def score(c, case=None): return 0.5, {'ok': True}", timeout_seconds=5.0)
+    failing = build_python_scorer("def score(c, case=None): raise ValueError('bad')", timeout_seconds=5.0)
+
+    assert fast("x", None) == (0.5, {"ok": True})
+    with pytest.raises(ValueError, match="bad"):
+        failing("x", None)
+
+
 class _FakeResponse:
     """Minimal stand-in for ``httpx.Response``."""
 
@@ -253,3 +274,11 @@ def test_build_scorer_forwards_the_llm_helper() -> None:
     )
 
     assert scorer("x", None) == (0.75, {})
+
+
+def test_build_scorer_bounds_python_scorers_by_the_spec_timeout() -> None:
+    """The spec's ``timeout_seconds`` applies to python scorers, not only remote ones."""
+    scorer = build_scorer(BlackboxScorer(metric_code=_SLOW_SCORER, timeout_seconds=0.05))
+
+    with pytest.raises(TimeoutError, match=r"exceeded the 0\.05s timeout"):
+        scorer("x", None)
