@@ -43,6 +43,7 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
     setSeedParts,
     objective,
     setObjective,
+    setObjectiveEditing,
     background,
     setBackground,
     targetKind,
@@ -76,18 +77,16 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
         ? msg("submit.blackbox.start.seed_label_code")
         : msg("submit.blackbox.start.seed_label");
   const seedPlaceholder =
-    recipe === "prompt"
-      ? msg("submit.blackbox.start.seed_placeholder_prompt")
-      : recipe === "code"
-        ? msg("submit.blackbox.start.seed_placeholder_code")
-        : msg("submit.blackbox.start.seed_placeholder");
+    codeAssistMode === "auto"
+      ? msg("submit.blackbox.start.seed_placeholder_auto")
+      : recipe === "prompt"
+        ? msg("submit.blackbox.start.seed_placeholder_prompt")
+        : recipe === "code"
+          ? msg("submit.blackbox.start.seed_placeholder_code")
+          : msg("submit.blackbox.start.seed_placeholder");
 
-  return (
-    <BlackboxAuthoringShell
-      w={w}
-      title={msg("submit.blackbox.start.title")}
-      description={msg("submit.blackbox.start.desc")}
-    >
+  const seedFields = (
+    <>
       <Segmented<SeedMode>
         value={seedMode}
         onChange={setSeedMode}
@@ -109,6 +108,11 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
           },
         ]}
       />
+      {codeAssistMode === "auto" && seedMode !== "text" && (
+        <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+          {msg("submit.blackbox.start.seed_mode_hint_auto")}
+        </p>
+      )}
 
       {seedMode === "text" && (
         <Field
@@ -183,16 +187,26 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
           </Button>
         </div>
       )}
+    </>
+  );
 
+  const objectiveFields = (
+    <>
       <Field
         label={msg("submit.blackbox.start.objective_label")}
         htmlFor="bb-objective"
-        hint={msg("submit.blackbox.start.objective_hint")}
+        hint={
+          codeAssistMode === "auto"
+            ? msg("submit.blackbox.start.objective_hint_auto")
+            : msg("submit.blackbox.start.objective_hint")
+        }
       >
         <textarea
           id="bb-objective"
           value={objective}
           onChange={(e) => setObjective(e.target.value)}
+          onFocus={() => setObjectiveEditing(true)}
+          onBlur={() => setObjectiveEditing(false)}
           placeholder={msg("submit.blackbox.start.objective_placeholder")}
           rows={3}
           dir="auto"
@@ -210,6 +224,28 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
           className={TEXTAREA_CLASS}
         />
       </Field>
+    </>
+  );
+
+  return (
+    <BlackboxAuthoringShell
+      w={w}
+      title={msg("submit.blackbox.start.title")}
+      description={msg("submit.blackbox.start.desc")}
+    >
+      {/* Agent-led authoring starts from the objective and the seed follows as
+          the agent's output; hand authoring leads with the seed itself. */}
+      {codeAssistMode === "auto" ? (
+        <>
+          {objectiveFields}
+          {seedFields}
+        </>
+      ) : (
+        <>
+          {seedFields}
+          {objectiveFields}
+        </>
+      )}
 
       <Separator />
 

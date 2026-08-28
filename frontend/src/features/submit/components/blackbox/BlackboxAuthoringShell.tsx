@@ -10,8 +10,8 @@ import { CodeInterviewPanel } from "../steps/CodeInterviewPanel";
 
 // The Starting point and Scorer steps share one authoring surface: the
 // agent (or its opening interview) on the start side, the step's own
-// fields on the end side. The agent needs an objective to work from and
-// cannot author a multi-part seed, so both cases disable it with a reason.
+// fields on the end side. The agent needs an objective to work from, so an
+// empty one disables it with a reason.
 export function BlackboxAuthoringShell({
   w,
   title,
@@ -23,21 +23,10 @@ export function BlackboxAuthoringShell({
   description?: ReactNode;
   children: ReactNode;
 }) {
-  const {
-    codeAssistMode,
-    setCodeAssistMode,
-    seedMode,
-    objective,
-    agent,
-    interview,
-    interviewEligible,
-  } = w;
-  const disabledReason =
-    seedMode === "parts"
-      ? msg("submit.blackbox.agent.parts_unsupported")
-      : objective.trim()
-        ? undefined
-        : msg("submit.blackbox.agent.objective_required");
+  const { codeAssistMode, setCodeAssistMode, objective, agent, interview, interviewEligible } = w;
+  const disabledReason = objective.trim()
+    ? undefined
+    : msg("submit.blackbox.agent.objective_required");
   // The interview owns the agent-panel slot until it resolves — but never
   // over an existing conversation.
   const interviewActive =

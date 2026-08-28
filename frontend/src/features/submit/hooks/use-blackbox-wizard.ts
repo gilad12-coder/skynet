@@ -200,14 +200,17 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
   );
   const [seedMode, setSeedMode] = useState<SeedMode>("text");
   const [seedText, setSeedText] = useState("");
-  // Hand-authored artifacts are never overwritten by the agent's seed pass;
-  // the flags also skip the interview, which only serves that pass.
+  // Hand-authored artifacts are never overwritten by the agent's unprompted
+  // passes; resolving the interview lifts the guard once (see below).
   const [seedManuallyEdited, setSeedManuallyEdited] = useState(false);
   const [scorerManuallyEdited, setScorerManuallyEdited] = useState(false);
   const [seedValidation, setSeedValidation] = useState<ValidateCodeResponse | null>(null);
   const [scorerValidation, setScorerValidation] = useState<ValidateCodeResponse | null>(null);
   const [seedParts, setSeedParts] = useState<SeedPart[]>([{ key: "", value: "" }]);
   const [objective, setObjective] = useState("");
+  // True while the objective field has focus: the interview opens once the
+  // objective is typed and then left, not on the first keystroke.
+  const [objectiveEditing, setObjectiveEditing] = useState(false);
   const [background, setBackground] = useState("");
   const [targetKind, setTargetKind] = useState<"text" | "agent">("text");
   const [harness, setHarness] = useState<BlackboxHarness>("pi");
@@ -383,14 +386,20 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     [recipe, objective, background, targetKind, scorerModel.name],
   );
 
-  // Key/value seeds have no single text for the agent to draft or edit.
-  const partsSeed = seedMode === "parts";
-  const interviewPossible =
-    codeAssistMode === "auto" && !partsSeed && !seedManuallyEdited && !scorerManuallyEdited;
-  // Pre-warms once the user has moved past the Starting point (the objective
-  // is settled by then), so the opening question is ready on the Scorer step.
-  const interviewEligible =
-    interviewPossible && furthestReachedStep >= 2 && objective.trim().length > 0;
+  // The interview is offered whatever the seed mode or hand edits: its brief
+  // always yields a text starting point, so a parts or from-scratch seed
+  // switches to Text when the draft lands (agentSetSeed below).
+  const interviewPossible = codeAssistMode === "auto";
+  // The interview opens on the Starting point itself, as soon as the objective
+  // is settled (typed, then left), and latches from there: re-editing the
+  // objective mid-interview must not swap the panel out from under the
+  // conversation. The seed pass runs when it resolves, so the user leaves the
+  // step with a drafted starting point instead of having to write one.
+  const [interviewArmed, setInterviewArmed] = useState(false);
+  useEffect(() => {
+    if (!objectiveEditing && objective.trim().length > 0) setInterviewArmed(true);
+  }, [objectiveEditing, objective]);
+  const interviewEligible = interviewPossible && interviewArmed;
   const interview = useCodeInterview({
     enabled: interviewEligible,
     parsedDataset: parsedCases,
@@ -399,6 +408,14 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     jobModel: targetKind === "agent" ? targetModel : reflectionModel.name,
     blackbox: authoringContext,
   });
+  // Resolving the interview (confirm or skip) is an explicit ask to draft, so
+  // it lifts the hand-edit guard: a starting point typed while the interview
+  // was open reaches the seed pass as the prior to build on.
+  useEffect(() => {
+    if (!interview.resolved) return;
+    setSeedManuallyEdited(false);
+    setScorerManuallyEdited(false);
+  }, [interview.resolved]);
 
   const agentSetSeed = useCallback((code: string) => {
     setSeedText(code);
@@ -426,7 +443,7 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     metricValidation: scorerValidation,
     runSignatureValidation: noSeedValidation,
     runMetricValidation: runDryRun,
-    seedEnabled: !partsSeed && (!interviewPossible || interview.resolved),
+    seedEnabled: interview.resolved,
     interviewBrief: interview.confirmedBrief,
     blackbox: authoringContext,
   });
@@ -670,6 +687,7 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     seedCandidate,
     objective,
     setObjective,
+    setObjectiveEditing,
     background,
     setBackground,
     targetKind,

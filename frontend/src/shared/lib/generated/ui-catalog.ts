@@ -2492,7 +2492,6 @@ export type MessageKey =
   | "submit.blackbox.agent.empty_hint"
   | "submit.blackbox.agent.fix_scorer"
   | "submit.blackbox.agent.objective_required"
-  | "submit.blackbox.agent.parts_unsupported"
   | "submit.blackbox.agent.reading"
   | "submit.blackbox.agent.seed_done"
   | "submit.blackbox.agent.seed_request"
@@ -2570,6 +2569,7 @@ export type MessageKey =
   | "submit.blackbox.start.harness_label"
   | "submit.blackbox.start.install_command"
   | "submit.blackbox.start.objective_hint"
+  | "submit.blackbox.start.objective_hint_auto"
   | "submit.blackbox.start.objective_label"
   | "submit.blackbox.start.objective_placeholder"
   | "submit.blackbox.start.part_key"
@@ -2586,7 +2586,9 @@ export type MessageKey =
   | "submit.blackbox.start.seed_mode.parts_desc"
   | "submit.blackbox.start.seed_mode.text"
   | "submit.blackbox.start.seed_mode.text_desc"
+  | "submit.blackbox.start.seed_mode_hint_auto"
   | "submit.blackbox.start.seed_placeholder"
+  | "submit.blackbox.start.seed_placeholder_auto"
   | "submit.blackbox.start.seed_placeholder_code"
   | "submit.blackbox.start.seed_placeholder_prompt"
   | "submit.blackbox.start.setup_command"
@@ -5714,8 +5716,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.basics.privacy.public_desc": "מופיע ב{term.exploreTitle}",
   "submit.blackbox.agent.empty_hint": "תארו את המטרה והסוכן ינסח נקודת התחלה ומדד ב-Python. אפשר לאשר כפי שהם, או לבקש שינויים.",
   "submit.blackbox.agent.fix_scorer": "אירעה שגיאה במדד. תקנו אותה.",
-  "submit.blackbox.agent.objective_required": "הוסיפו מטרה בשלב הפרטים הבסיסיים כדי להפעיל את הסוכן.",
-  "submit.blackbox.agent.parts_unsupported": "הסוכן מנסח טקסט יחיד; החליפו את נקודת ההתחלה ל״טקסט״ כדי להשתמש בו.",
+  "submit.blackbox.agent.objective_required": "הוסיפו מטרה בשלב נקודת ההתחלה כדי להפעיל את הסוכן.",
   "submit.blackbox.agent.reading": "הסוכן קורא את המטרה שלך…",
   "submit.blackbox.agent.seed_done": "ניסחתי נקודת התחלה ומדד על סמך המטרה שלך.",
   "submit.blackbox.agent.seed_request": "נסחו נקודת התחלה ומדד עבור המטרה שלי.",
@@ -5793,13 +5794,14 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.blackbox.start.harness_label": "מסגרת סוכן",
   "submit.blackbox.start.install_command": "פקודת התקנה",
   "submit.blackbox.start.objective_hint": "משפט או שניים על מה נחשב לתוצאה טובה.",
+  "submit.blackbox.start.objective_hint_auto": "משפט או שניים על מה נחשב לתוצאה טובה. כשיוצאים מהשדה, הסוכן פותח ראיון קצר ומנסח ממנו את נקודת ההתחלה.",
   "submit.blackbox.start.objective_label": "מטרה",
   "submit.blackbox.start.objective_placeholder": "למשל: תשובות קצרות ומדויקות שמצטטות את המקור",
   "submit.blackbox.start.part_key": "שם החלק",
   "submit.blackbox.start.part_value": "תוכן החלק",
   "submit.blackbox.start.remove_part": "הסרת חלק",
   "submit.blackbox.start.run_command": "פקודת הרצה",
-  "submit.blackbox.start.seed_hint_auto": "אפשר להשאיר ריק — הסוכן ינסח נקודת התחלה אחרי שהמקרים יוזנו.",
+  "submit.blackbox.start.seed_hint_auto": "הסוכן ינסח את זה מתוך הראיון שלצד — או שתדביקו גרסה משלכם.",
   "submit.blackbox.start.seed_label": "מועמד התחלתי",
   "submit.blackbox.start.seed_label_code": "קוד התחלתי",
   "submit.blackbox.start.seed_label_prompt": "פרומפט התחלתי",
@@ -5809,7 +5811,9 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.blackbox.start.seed_mode.parts_desc": "כמה חלקים בעלי שם שמשתפרים יחד",
   "submit.blackbox.start.seed_mode.text": "טקסט",
   "submit.blackbox.start.seed_mode.text_desc": "פרומפט, מסמך או כל טקסט אחר",
+  "submit.blackbox.start.seed_mode_hint_auto": "הראיון שלצד עדיין מנסח נקודת התחלה בטקסט; כשהיא מגיעה, הבחירה כאן עוברת לטקסט.",
   "submit.blackbox.start.seed_placeholder": "הדביקו כאן את הטקסט שרוצים לשפר…",
+  "submit.blackbox.start.seed_placeholder_auto": "הסוכן ימלא כאן את נקודת ההתחלה אחרי הראיון…",
   "submit.blackbox.start.seed_placeholder_code": "הדביקו כאן את הקוד שרוצים לשפר…",
   "submit.blackbox.start.seed_placeholder_prompt": "הדביקו כאן את הפרומפט שרוצים לשפר…",
   "submit.blackbox.start.setup_command": "פקודת הכנה",
@@ -15052,8 +15056,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.basics.privacy.public_desc": "Appears in public search",
   "submit.blackbox.agent.empty_hint": "Describe your objective and the agent will draft a starting point and a Python scorer. You can accept them as is, or request changes.",
   "submit.blackbox.agent.fix_scorer": "The scorer hit an error. Fix it.",
-  "submit.blackbox.agent.objective_required": "Add an objective on the Basics step to turn the agent on.",
-  "submit.blackbox.agent.parts_unsupported": "The agent drafts a single text; switch the starting point to Text to use it.",
+  "submit.blackbox.agent.objective_required": "Add an objective on the Starting point step to turn the agent on.",
   "submit.blackbox.agent.reading": "The agent is reading your objective…",
   "submit.blackbox.agent.seed_done": "I drafted a starting point and a scorer from your objective.",
   "submit.blackbox.agent.seed_request": "Draft a starting point and a scorer for my objective.",
@@ -15131,13 +15134,14 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.blackbox.start.harness_label": "Agent harness",
   "submit.blackbox.start.install_command": "Install command",
   "submit.blackbox.start.objective_hint": "A sentence or two on what a good result looks like.",
+  "submit.blackbox.start.objective_hint_auto": "A sentence or two on what a good result looks like. Once you leave this field, the agent opens a short interview and drafts the starting point from it.",
   "submit.blackbox.start.objective_label": "Objective",
   "submit.blackbox.start.objective_placeholder": "e.g. Short, accurate answers that cite the source",
   "submit.blackbox.start.part_key": "Part name",
   "submit.blackbox.start.part_value": "Part content",
   "submit.blackbox.start.remove_part": "Remove part",
   "submit.blackbox.start.run_command": "Run command",
-  "submit.blackbox.start.seed_hint_auto": "Leave this blank and the agent drafts one once your cases are in.",
+  "submit.blackbox.start.seed_hint_auto": "Drafted by the agent from the interview on the side — or paste your own.",
   "submit.blackbox.start.seed_label": "Starting candidate",
   "submit.blackbox.start.seed_label_code": "Starting code",
   "submit.blackbox.start.seed_label_prompt": "Starting prompt",
@@ -15147,7 +15151,9 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.blackbox.start.seed_mode.parts_desc": "Several named parts optimized together",
   "submit.blackbox.start.seed_mode.text": "Text",
   "submit.blackbox.start.seed_mode.text_desc": "A prompt, document or any other text",
+  "submit.blackbox.start.seed_mode_hint_auto": "The interview on the side still drafts a text starting point; when it lands, this switches to Text.",
   "submit.blackbox.start.seed_placeholder": "Paste the text you want to optimize…",
+  "submit.blackbox.start.seed_placeholder_auto": "The agent fills this in after the interview…",
   "submit.blackbox.start.seed_placeholder_code": "Paste the code you want to improve…",
   "submit.blackbox.start.seed_placeholder_prompt": "Paste the prompt you want to improve…",
   "submit.blackbox.start.setup_command": "Setup command",
