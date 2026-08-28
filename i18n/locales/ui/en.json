@@ -3107,7 +3107,7 @@
   "submit.blackbox.start.remove_part": "Remove part",
   "submit.blackbox.start.objective_label": "Objective",
   "submit.blackbox.start.objective_hint": "A sentence or two on what a good result looks like.",
-  "submit.blackbox.start.objective_hint_auto": "A sentence or two on what a good result looks like. Once you leave this field, the agent opens a short interview and drafts the starting point from it.",
+  "submit.blackbox.start.objective_hint_auto": "A sentence or two on what a good result looks like. Leave it blank and the interview on the side asks for it first — either way the agent drafts the starting point from it.",
   "submit.blackbox.start.objective_placeholder": "e.g. Short, accurate answers that cite the source",
   "submit.blackbox.start.background_label": "Background (optional)",
   "submit.blackbox.start.background_placeholder": "Context, constraints or examples that help the optimizer",

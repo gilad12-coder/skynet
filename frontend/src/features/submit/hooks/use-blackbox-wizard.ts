@@ -208,9 +208,6 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
   const [scorerValidation, setScorerValidation] = useState<ValidateCodeResponse | null>(null);
   const [seedParts, setSeedParts] = useState<SeedPart[]>([{ key: "", value: "" }]);
   const [objective, setObjective] = useState("");
-  // True while the objective field has focus: the interview opens once the
-  // objective is typed and then left, not on the first keystroke.
-  const [objectiveEditing, setObjectiveEditing] = useState(false);
   const [background, setBackground] = useState("");
   const [targetKind, setTargetKind] = useState<"text" | "agent">("text");
   const [harness, setHarness] = useState<BlackboxHarness>("pi");
@@ -390,16 +387,11 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
   // always yields a text starting point, so a parts or from-scratch seed
   // switches to Text when the draft lands (agentSetSeed below).
   const interviewPossible = codeAssistMode === "auto";
-  // The interview opens on the Starting point itself, as soon as the objective
-  // is settled (typed, then left), and latches from there: re-editing the
-  // objective mid-interview must not swap the panel out from under the
-  // conversation. The seed pass runs when it resolves, so the user leaves the
-  // step with a drafted starting point instead of having to write one.
-  const [interviewArmed, setInterviewArmed] = useState(false);
-  useEffect(() => {
-    if (!objectiveEditing && objective.trim().length > 0) setInterviewArmed(true);
-  }, [objectiveEditing, objective]);
-  const interviewEligible = interviewPossible && interviewArmed;
+  // The interview opens the moment the Starting point is reached — drafting
+  // the seed is its job, so it never waits for a typed objective. The seed
+  // pass runs when it resolves, so the user leaves the step with a drafted
+  // starting point instead of having to write one.
+  const interviewEligible = interviewPossible && step >= 1;
   const interview = useCodeInterview({
     enabled: interviewEligible,
     parsedDataset: parsedCases,
@@ -408,6 +400,13 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     jobModel: targetKind === "agent" ? targetModel : reflectionModel.name,
     blackbox: authoringContext,
   });
+  // Over a blank objective the interviewer asks for it first and reports the
+  // answer; the field takes it so the agent and submit validation see one.
+  // A typed objective always wins.
+  useEffect(() => {
+    if (!interview.objective) return;
+    setObjective((prev) => (prev.trim().length > 0 ? prev : interview.objective));
+  }, [interview.objective]);
   // Resolving the interview (confirm or skip) is an explicit ask to draft, so
   // it lifts the hand-edit guard: a starting point typed while the interview
   // was open reaches the seed pass as the prior to build on.
@@ -687,7 +686,6 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     seedCandidate,
     objective,
     setObjective,
-    setObjectiveEditing,
     background,
     setBackground,
     targetKind,

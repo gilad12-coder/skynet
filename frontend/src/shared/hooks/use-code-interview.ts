@@ -45,6 +45,7 @@ export interface CodeInterviewState {
   resolved: boolean;
   /** The user-confirmed directives; empty when the interview was skipped. */
   confirmedBrief: string[];
+  objective: string;
   send: (content: string) => void;
   editAndResend: (messageIndex: number, content: string) => void;
   stop: () => void;
@@ -102,6 +103,8 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
   const [brief, setBrief] = React.useState<string[]>([]);
   const [resolved, setResolved] = React.useState(false);
   const [confirmedBrief, setConfirmedBrief] = React.useState<string[]>([]);
+  // The objective a black-box interview captured over a blank field.
+  const [objective, setObjective] = React.useState("");
 
   const abortRef = React.useRef<AbortController | null>(null);
   const localeReloadingRef = React.useRef(false);
@@ -121,6 +124,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
     setBrief([]);
     setResolved(false);
     setConfirmedBrief([]);
+    setObjective("");
   }, []);
 
   React.useEffect(() => {
@@ -195,6 +199,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
               },
             ]);
             setOptions(turn.done ? [] : turn.options);
+            if (turn.objective) setObjective(turn.objective);
             if (turn.done) {
               setDone(true);
               setBrief(turn.brief);
@@ -283,6 +288,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
     setBrief([]);
     setResolved(false);
     setConfirmedBrief([]);
+    setObjective("");
   }, []);
 
   const messages: AgentMessage[] = React.useMemo(() => {
@@ -314,6 +320,7 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
     brief,
     resolved,
     confirmedBrief,
+    objective,
     send,
     editAndResend,
     stop,

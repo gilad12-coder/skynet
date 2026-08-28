@@ -421,8 +421,10 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         * ``message_reset`` — ``{}`` (a failed attempt is being retried; the
           client drops any partial reply streamed so far)
         * ``interview_done`` — ``{"message", "options", "brief", "done",
-          "model"}`` (terminal; ``options`` is a list of ``{label,
-          description}`` picks, ``brief`` is empty until ``done``)
+          "objective", "model"}`` (terminal; ``options`` is a list of
+          ``{label, description}`` picks, ``brief`` is empty until ``done``,
+          ``objective`` is the objective a black-box interview captured over
+          a blank field, else "")
         * ``error`` — ``{"error": "<message>"}``
 
         Args:
