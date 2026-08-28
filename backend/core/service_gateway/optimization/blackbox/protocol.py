@@ -140,7 +140,7 @@ class Result:
 class EngineContext:
     """Run-scoped resources every engine receives alongside the task."""
 
-    reflection_lm: Callable[[str], str]
+    reflection_lm: Callable[[str | list[dict[str, Any]]], str]
     run_dir: str
     seed: int = 0
     stop_at_score: float | None = None

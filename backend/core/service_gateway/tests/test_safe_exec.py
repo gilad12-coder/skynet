@@ -335,6 +335,28 @@ class TestProbeScorer:
         assert probe.score == 1.0
         assert isinstance(probe.side_info["when"], str)
 
+    def test_large_side_info_returns_before_the_timeout(self) -> None:
+        """A multi-megabyte result (rendered images) must not stall behind the parent's join."""
+        probe = probe_scorer(
+            scorer_code="def score(candidate, case=None):\n    return 1.0, {'blob': 'x' * 3_000_000}\n",
+            candidate="x",
+            timeout_seconds=20,
+        )
+
+        assert len(probe.side_info["blob"]) == 3_000_000
+
+    def test_image_side_info_crosses_as_a_data_url(self) -> None:
+        """An ``Image`` in side info reaches the dry-run caller as a data URL it can show."""
+        probe = probe_scorer(
+            scorer_code=(
+                "def score(candidate, case=None):\n"
+                "    return 1.0, {'render': Image(base64_data='aGk=', media_type='image/png')}\n"
+            ),
+            candidate="x",
+        )
+
+        assert probe.side_info == {"render": "data:image/png;base64,aGk="}
+
     def test_broken_code_surfaces_as_service_error(self) -> None:
         """A scorer that fails to load raises ``ServiceError`` from the probe entrypoint."""
         with pytest.raises(ServiceError, match="syntax error"):

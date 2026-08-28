@@ -239,6 +239,36 @@ def _progress_listener(progress_callback: ProgressCallback | None) -> Callable[[
     return on_eval
 
 
+def _reflection_caller(lm: dspy.LM) -> Callable[[str | list[dict[str, Any]]], str]:
+    """Wrap the reflection model in the callable the engines drive.
+
+    GEPA hands over chat messages instead of text when the scorer's side
+    information carries rendered images (``Image``), so a vision-capable
+    reflection model sees what it is improving.
+
+    Args:
+        lm: The reflection model.
+
+    Returns:
+        A callable returning the model's first completion as text.
+    """
+
+    def reflection_lm(prompt: str | list[dict[str, Any]]) -> str:
+        """Call the reflection model on ``prompt`` and return its first completion.
+
+        Args:
+            prompt: The engine's reflection prompt — text, or chat messages
+                with image parts.
+
+        Returns:
+            The completion text.
+        """
+        completions = lm(messages=prompt) if isinstance(prompt, list) else lm(prompt)
+        return str(completions[0])
+
+    return reflection_lm
+
+
 def run_blackbox_optimization(
     payload: BlackboxRunRequest,
     *,
@@ -290,17 +320,7 @@ def run_blackbox_optimization(
             progress_callback(PROGRESS_BASELINE, {DETAIL_BASELINE: baseline})
 
     lm = build_language_model(payload.reflection_model_settings, disable_cache=True)
-
-    def reflection_lm(prompt: str) -> str:
-        """Call the reflection model on ``prompt`` and return its first completion.
-
-        Args:
-            prompt: The engine's reflection prompt.
-
-        Returns:
-            The completion text.
-        """
-        return str(lm(prompt)[0])
+    reflection_lm = _reflection_caller(lm)
 
     server = EvalServer(scorer, max_evals=payload.budget.max_scorer_runs, on_eval=_progress_listener(progress_callback))
     task = Task(
