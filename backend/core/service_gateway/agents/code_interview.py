@@ -7,6 +7,11 @@ questions before the seed generation runs, then distills their answers into
 an authoring brief — short directives the Signature/metric seed authors must
 honor. The transcript is client-owned and re-sent on every turn; nothing
 here touches the database.
+
+A black-box authoring context (the "optimize anything" wizard) swaps the
+signature for :class:`BlackboxInterviewTurnSig`: same turn shape and event
+stream, but the questions are about the objective, the starting point and
+the python scorer instead of a dataset's Signature & Metric.
 """
 
 from __future__ import annotations
@@ -99,6 +104,76 @@ class CodeInterviewTurnSig(dspy.Signature):
     brief_json: str = dspy.OutputField(desc="JSON array of authoring-directive strings; [] until done.")
 
 
+class BlackboxInterviewTurnSig(dspy.Signature):
+    """Interview the owner of a black-box optimization job to distill an authoring brief.
+
+    You are an authoring copilot about to write the starting point and the
+    scorer for the user's optimization job. The starting point is what the
+    optimizer improves — per ``recipe`` a system prompt ('prompt'; each
+    case's input becomes the user message), a program ('code') or any text
+    ('anything'); with an 'agent' target it is the instructions file a
+    coding agent runs with. The scorer is one python function,
+    ``score(candidate, case=None)``, that reads a case's columns and
+    returns a higher number for a better version — it IS the objective, so
+    what it rewards matters most. Before writing anything, interview the
+    owner. Ask ONE short, concrete question at a time — grounded in the
+    objective, the background and the sample cases — about what a better
+    version looks like, what must never change, how a version should be
+    judged (exact match, graded similarity, a rubric, numeric targets,
+    length / format limits), which case columns hold the input and the
+    expected outcome, edge cases, and tone / language / format constraints.
+    Never ask a generic question the objective already answers, and never
+    ask which LLM to use — that is chosen elsewhere (``job_model`` tells
+    you the current choice when one exists; ``scorer_has_model`` tells you
+    whether the scorer may call a model at all, so never propose an LLM
+    judge when it cannot). After at most five questions total (or as soon
+    as the user asks to proceed, or their answers stop adding information),
+    stop asking: set ``done`` to true, write a one-sentence wrap-up in
+    ``message``, and emit the full brief — 4 to 10 crisp directives for the
+    authors. Directives state decisions ("The starting point must ...",
+    "Score X lower when ..."), not process. Whenever the question has a
+    small set of likely answers, offer 2-4 of them in ``options_json`` —
+    each a short pickable answer with a one-line description of what
+    choosing it means — so the owner can answer in one click. Every option
+    must be a concrete, self-contained answer. The composer under the
+    options is always the free-text path, so never spend an option on an
+    escape hatch — no "other", "something else", "none of these", or any
+    rewording whose real meaning is "I'll type it below"; when only escape
+    hatches would fill the list, offer fewer options or ask an open
+    question instead. Write ``message``, the options and the brief in
+    ``reply_language``.
+    """
+
+    objective: str = dspy.InputField(desc="What a better version achieves, in the user's words.")
+    background: str = dspy.InputField(desc="Free-form context from the user; may be empty.")
+    recipe: str = dspy.InputField(desc="'prompt' | 'code' | 'anything' — what is being optimized.")
+    target_kind: str = dspy.InputField(desc="'text' or 'agent' (an instructions file a coding agent runs with).")
+    case_columns: list[str] = dspy.InputField(desc="Column names of the case file; empty when there are no cases.")
+    sample_cases: str = dspy.InputField(desc="JSON array of up to 5 representative cases.")
+    scorer_has_model: str = dspy.InputField(desc="'true' when the scorer may call a model via llm(), else 'false'.")
+    job_model: str = dspy.InputField(
+        desc=(
+            "The LLM the optimized artifact will run on, e.g. "
+            "'openai/gpt-4o-mini'; 'not chosen yet' when the user has not "
+            "picked one."
+        ),
+    )
+    transcript_json: str = dspy.InputField(desc="JSON array of prior {role, content} turns.")
+    reply_language: str = dspy.InputField(desc="Language every output is written in.")
+    message: str = dspy.OutputField(desc="The next question, or a short wrap-up when done.")
+    # Same ordering constraint as ``CodeInterviewTurnSig``: ``done`` streams
+    # before the slow payload fields so the client can hint early.
+    done: str = dspy.OutputField(desc="'true' when the interview is finished, else 'false'.")
+    options_json: str = dspy.OutputField(
+        desc=(
+            'JSON array of 0-4 answer options for a closed question, each '
+            '{"label": <short pickable answer, <= 6 words>, "description": '
+            '<one-line note on what picking it means>}; [] for an open question.'
+        )
+    )
+    brief_json: str = dspy.OutputField(desc="JSON array of authoring-directive strings; [] until done.")
+
+
 def normalize_options(raw: Any) -> list[dict[str, str]]:
     """Coerce a model options field into ``[{label, description}]``.
 
@@ -158,6 +233,26 @@ def _interview_inputs(
         turns: Prior ``{role, content}`` turns, oldest first.
         locale: UI locale code; replies are written in that language.
     """
+    return {
+        "dataset_columns": dataset_columns,
+        "column_roles": json.dumps(column_roles, ensure_ascii=False),
+        "column_kinds": json.dumps(column_kinds, ensure_ascii=False),
+        "sample_rows": json.dumps(sample_rows, ensure_ascii=False),
+        "job_model": job_model.strip() or "not chosen yet",
+        "transcript_json": _transcript_json(turns),
+        "reply_language": _reply_language(locale),
+    }
+
+
+def _transcript_json(turns: list[dict[str, str]]) -> str:
+    """Encode the transcript, appending the question-count reminder once questions were asked.
+
+    Args:
+        turns: Prior ``{role, content}`` turns, oldest first.
+
+    Returns:
+        The JSON-encoded transcript the interview signatures read.
+    """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
     noted = list(turns)
     if asked:
@@ -170,14 +265,38 @@ def _interview_inputs(
                 ),
             }
         )
-    transcript = json.dumps(noted, ensure_ascii=False)
+    return json.dumps(noted, ensure_ascii=False)
+
+
+def _blackbox_interview_inputs(
+    blackbox: dict[str, Any],
+    case_columns: list[str],
+    sample_cases: list[dict[str, Any]],
+    job_model: str,
+    turns: list[dict[str, str]],
+    locale: str | None,
+) -> dict[str, Any]:
+    """Assemble the ``BlackboxInterviewTurnSig`` inputs for one turn.
+
+    Args:
+        blackbox: The wizard's authoring context (``recipe``, ``objective``,
+            ``background``, ``target_kind``, ``scorer_has_model``).
+        case_columns: Column names of the case file; empty without cases.
+        sample_cases: Up to 5 representative cases.
+        job_model: The job's target model id; empty when not chosen yet.
+        turns: Prior ``{role, content}`` turns, oldest first.
+        locale: UI locale code; replies are written in that language.
+    """
     return {
-        "dataset_columns": dataset_columns,
-        "column_roles": json.dumps(column_roles, ensure_ascii=False),
-        "column_kinds": json.dumps(column_kinds, ensure_ascii=False),
-        "sample_rows": json.dumps(sample_rows, ensure_ascii=False),
+        "objective": str(blackbox.get("objective", "")).strip(),
+        "background": str(blackbox.get("background", "") or "").strip(),
+        "recipe": str(blackbox.get("recipe", "anything")),
+        "target_kind": str(blackbox.get("target_kind", "text") or "text"),
+        "case_columns": case_columns,
+        "sample_cases": json.dumps(sample_cases, ensure_ascii=False, default=str),
+        "scorer_has_model": "true" if blackbox.get("scorer_has_model") else "false",
         "job_model": job_model.strip() or "not chosen yet",
-        "transcript_json": transcript,
+        "transcript_json": _transcript_json(turns),
         "reply_language": _reply_language(locale),
     }
 
@@ -317,6 +436,7 @@ async def interview_turn_stream(
     reasoning_effort: str | None = None,
     lm_extra_body: dict[str, Any] | None = None,
     usage_sink: list | None = None,
+    blackbox: dict[str, Any] | None = None,
 ) -> Any:
     """Run one interview turn, streaming it the way the generalist agent does.
 
@@ -349,15 +469,22 @@ async def interview_turn_stream(
             router's plugin dial when the composer picked an Auto tier).
         usage_sink: Optional list the built LM is appended to, so the caller
             can meter the turn's token usage on any exit path.
+        blackbox: The black-box wizard's authoring context; set, the turn
+            runs :class:`BlackboxInterviewTurnSig` with ``dataset_columns``
+            / ``sample_rows`` read as the case columns / sample cases.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
-    predict = dspy.Predict(CodeInterviewTurnSig)
     lm = _build_agent_lm(model, reasoning_effort, lm_extra_body)
     if usage_sink is not None:
         usage_sink.append(lm)
-    inputs = _interview_inputs(
-        dataset_columns, column_roles, column_kinds, sample_rows, job_model, turns, locale
-    )
+    if blackbox is not None:
+        predict = dspy.Predict(BlackboxInterviewTurnSig)
+        inputs = _blackbox_interview_inputs(blackbox, dataset_columns, sample_rows, job_model, turns, locale)
+    else:
+        predict = dspy.Predict(CodeInterviewTurnSig)
+        inputs = _interview_inputs(
+            dataset_columns, column_roles, column_kinds, sample_rows, job_model, turns, locale
+        )
 
     # Drive the streamify loop in its own task and relay its events off a queue:
     # yielding directly from inside the loop finalizes the dspy.context token and
