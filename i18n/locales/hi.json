@@ -2,6 +2,7 @@
   "$schema": "../schema.json",
   "locale": "hi",
   "terms": {
+    "optimizationTypeBlackbox": "ब्लैक-बॉक्स",
     "apiKey": "API कुंजी",
     "baseline": "आधाररेखा",
     "baselineScore": "आधाररेखा स्कोर",
