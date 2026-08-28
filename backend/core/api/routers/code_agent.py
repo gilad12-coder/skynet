@@ -42,7 +42,9 @@ class ChatTurn(BaseModel):
 # DSPy Signature + metric, and the interview asks about the objective.
 class BlackboxAuthoringContext(BaseModel):
     recipe: Literal["prompt", "code", "anything"] = Field(..., description="What is being optimized.")
-    objective: str = Field(..., min_length=1, description="What a better version achieves, in the user's words.")
+    # Blank while the interview is still asking for it: the interviewer reports
+    # what it captures, and the wizard withholds the agent until it has one.
+    objective: str = Field(default="", description="What a better version achieves, in the user's words; blank until known.")
     background: str = Field(default="", description="Free-form context: domain, constraints, examples.")
     target_kind: Literal["text", "agent"] = Field(
         default="text",
