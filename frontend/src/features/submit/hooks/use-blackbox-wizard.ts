@@ -166,7 +166,46 @@ def score(candidate, case=None):
         return 0.0
 `,
   },
+  {
+    id: "run_code",
+    needsModel: false,
+    code: `import os
+import subprocess
+import sys
+import tempfile
+
+
+def score(candidate, case=None):
+    """Run the candidate as a python program; the last number it prints is the score."""
+    TIMEOUT_SECONDS = 30
+    source = candidate if isinstance(candidate, str) else "\\n".join(candidate.values())
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as handle:
+        handle.write(source)
+    try:
+        run = subprocess.run([sys.executable, handle.name], capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return 0.0, {"error": f"timed out after {TIMEOUT_SECONDS}s"}
+    finally:
+        os.unlink(handle.name)
+    if run.returncode != 0:
+        return 0.0, {"error": run.stderr.strip()[-2000:]}
+    numbers = [token for token in run.stdout.split() if _is_number(token)]
+    if not numbers:
+        return 0.0, {"error": "the program printed no number", "stdout": run.stdout[-2000:]}
+    return float(numbers[-1]), {"stdout": run.stdout[-2000:]}
+
+
+def _is_number(token):
+    try:
+        float(token)
+    except ValueError:
+        return False
+    return True
+`,
+  },
 ];
+
+const RUN_CODE_SCORER_TEMPLATE = SCORER_PRESETS.find((p) => p.id === "run_code")!.code;
 
 const DEFAULT_MAX_SCORER_RUNS = 100;
 const DEFAULT_PATIENCE = 40;
@@ -225,7 +264,11 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
   const [libraryOpen, setLibraryOpen] = useState(false);
 
   const [scorerKind, setScorerKind] = useState<"python" | "remote">("python");
-  const [metricCode, setMetricCode] = useState(SCORER_TEMPLATE);
+  // A program's natural yardstick is running it, so the code recipe opens on
+  // the run-program scorer instead of the generic word-count template.
+  const [metricCode, setMetricCode] = useState(
+    recipe === "code" ? RUN_CODE_SCORER_TEMPLATE : SCORER_TEMPLATE,
+  );
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
   const [scorerTimeout, setScorerTimeout] = useState(60);

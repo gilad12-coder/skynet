@@ -2,7 +2,7 @@
 
 import { memo, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { ChatText, Gauge, Hourglass, Timer, TrendUp } from "@/shared/ui/icons";
+import { ChatText, Coins, Gauge, Hourglass, Timer, TrendUp } from "@/shared/ui/icons";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import {
   Table,
@@ -25,6 +25,7 @@ import { InfoCard } from "./ui-primitives";
 import { PipelineStages, computeStageTimestamps } from "./PipelineStages";
 import { TrajectoryPanel } from "@/features/trajectory";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { LaneBand } from "./LaneBand";
 import { deriveLanes, formatBlackboxDelta, formatBlackboxScore } from "../lib/blackbox";
 
@@ -158,6 +159,14 @@ function OverviewTabImpl({
   // Black-box runs persist their scores on `blackbox_result` (raw scorer
   // values, not percentages) — `job.result` stays null for them.
   const bbResult = isBlackbox ? job.blackbox_result : null;
+  const numberFormat = new Intl.NumberFormat(getActiveIntlLocale());
+  const modelUsage = (bbResult?.usage_by_model ?? []).flatMap((u) =>
+    typeof u.model === "string" &&
+    typeof u.input_tokens === "number" &&
+    typeof u.output_tokens === "number"
+      ? [{ model: u.model, input_tokens: u.input_tokens, output_tokens: u.output_tokens }]
+      : [],
+  );
   const baseline =
     runResult?.baseline_test_metric ?? bbResult?.baseline_test_metric ?? baselineFromEvents;
   const optimized =
@@ -336,7 +345,7 @@ function OverviewTabImpl({
 
       {bbResult && (
         <FadeIn delay={0.1}>
-          <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
             <InfoCard
               label={msg("optimization.blackbox.stats.scorer_runs")}
               value={String(bbResult.total_scorer_runs)}
@@ -352,7 +361,31 @@ function OverviewTabImpl({
               value={String(bbResult.num_lm_calls)}
               icon={<ChatText className="size-3.5" />}
             />
+            {bbResult.total_tokens != null && (
+              <InfoCard
+                label={msg("optimization.blackbox.stats.tokens")}
+                value={numberFormat.format(bbResult.total_tokens)}
+                icon={<Coins className="size-3.5" />}
+              />
+            )}
           </div>
+          {modelUsage.length > 0 && (
+            <ul
+              className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[0.6875rem] text-muted-foreground"
+              dir="ltr"
+            >
+              {modelUsage.map((u) => (
+                <li key={u.model} className="tabular-nums">
+                  <span className="font-medium text-foreground/80">{u.model}</span>
+                  {" · "}
+                  {formatMsg("usage.tokens.split", {
+                    input: numberFormat.format(u.input_tokens),
+                    output: numberFormat.format(u.output_tokens),
+                  })}
+                </li>
+              ))}
+            </ul>
+          )}
         </FadeIn>
       )}
 

@@ -30,11 +30,15 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
     seedText,
     seedParts,
     objective,
+    background,
     targetKind,
     harness,
     targetModel,
     parsedCases,
+    split,
+    shuffle,
     scorerKind,
+    scorerTimeout,
     scorerUrl,
     scorerModel,
     strategyMode,
@@ -75,18 +79,37 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
             <span className="line-clamp-3 whitespace-pre-wrap">{objective}</span>
           </Row>
         )}
+        {background.trim() && (
+          <Row label={msg("submit.blackbox.start.background_label")}>
+            <span className="line-clamp-3 whitespace-pre-wrap">{background}</span>
+          </Row>
+        )}
         <Row label={msg("submit.blackbox.start.target_label")}>
           {targetKind === "text"
             ? msg("submit.blackbox.start.target.text")
             : `${msg("submit.blackbox.start.target.agent")} · ${harness} · ${targetModel}`}
         </Row>
         <Row label={msg("submit.blackbox.cases.title")}>
-          {parsedCases
-            ? formatMsg("submit.blackbox.cases.loaded", {
+          {parsedCases ? (
+            <span>
+              {formatMsg("submit.blackbox.cases.loaded", {
                 rows: parsedCases.rowCount,
                 cols: parsedCases.columns.length,
-              })
-            : msg("submit.blackbox.review.cases_none")}
+              })}
+              <span className="ms-2 text-xs text-muted-foreground">
+                {split.val > 0 || split.test > 0
+                  ? formatMsg("submit.blackbox.review.cases_split", {
+                      train: Math.round(split.train * 100),
+                      val: Math.round(split.val * 100),
+                      test: Math.round(split.test * 100),
+                    })
+                  : msg("submit.blackbox.review.cases_all")}
+                {shuffle ? ` · ${msg("submit.blackbox.review.cases_shuffled")}` : ""}
+              </span>
+            </span>
+          ) : (
+            msg("submit.blackbox.review.cases_none")
+          )}
         </Row>
         <Row label={msg("submit.blackbox.scorer.title")}>
           {scorerKind === "python" ? (
@@ -105,6 +128,9 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
               {scorerUrl}
             </span>
           )}
+          <span className="ms-2 text-xs text-muted-foreground">
+            {formatMsg("submit.blackbox.review.scorer_timeout", { seconds: scorerTimeout })}
+          </span>
         </Row>
         <Row label={msg("submit.blackbox.review.strategy")}>
           {strategyMode === "auto"

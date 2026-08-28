@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
@@ -27,6 +28,10 @@ import {
   Segmented,
   TEXTAREA_CLASS,
 } from "./shared";
+
+const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
+  ssr: false,
+});
 
 export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
   const {
@@ -116,7 +121,13 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
         <Field
           label={seedLabel}
           htmlFor="bb-seed"
-          hint={codeAssistMode === "auto" ? msg("submit.blackbox.start.seed_hint_auto") : undefined}
+          hint={
+            codeAssistMode === "auto"
+              ? msg("submit.blackbox.start.seed_hint_auto")
+              : recipe === "code"
+                ? seedPlaceholder
+                : undefined
+          }
           trailing={
             codeAssistMode === "auto" ? (
               <>
@@ -126,18 +137,32 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
             ) : undefined
           }
         >
-          <textarea
-            id="bb-seed"
-            value={seedText}
-            onChange={(e) => {
-              setSeedText(e.target.value);
-              setSeedManuallyEdited(true);
-            }}
-            placeholder={seedPlaceholder}
-            rows={8}
-            dir="auto"
-            className={`${TEXTAREA_CLASS} font-mono text-sm`}
-          />
+          {recipe === "code" ? (
+            <CodeEditor
+              value={seedText}
+              onChange={(v) => {
+                setSeedText(v);
+                setSeedManuallyEdited(true);
+              }}
+              height="300px"
+              label={msg("submit.blackbox.start.seed_editor_label")}
+              streaming={codeAssistMode === "auto" && agent.signatureStatus === "writing"}
+              flashLines={codeAssistMode === "auto" ? agent.signatureFlashLines : undefined}
+            />
+          ) : (
+            <textarea
+              id="bb-seed"
+              value={seedText}
+              onChange={(e) => {
+                setSeedText(e.target.value);
+                setSeedManuallyEdited(true);
+              }}
+              placeholder={seedPlaceholder}
+              rows={8}
+              dir="auto"
+              className={`${TEXTAREA_CLASS} font-mono text-sm`}
+            />
+          )}
         </Field>
       )}
 

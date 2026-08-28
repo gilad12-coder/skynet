@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { Cube, DownloadSimple } from "@/shared/ui/icons";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import { Badge } from "@/shared/ui/primitives/badge";
@@ -9,6 +10,19 @@ import type { BlackboxCandidate, BlackboxRunResult } from "@/shared/types/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { CopyButton } from "./ui-primitives";
 import { formatBlackboxDelta, formatBlackboxScore } from "../lib/blackbox";
+import { countChanges, diffRows } from "../lib/blackbox-diff";
+import { cn } from "@/shared/lib/utils";
+
+// Same tints the trajectory drawer uses for accepted / rejected edits, so a
+// diff reads the same everywhere in the run view.
+const ADDED_BG = "rgba(138, 154, 91, 0.28)";
+const ADDED_EMPHASIS_BG = "rgba(138, 154, 91, 0.55)";
+const ADDED_FG = "#3f4d1f";
+const REMOVED_BG = "rgba(168, 90, 59, 0.22)";
+const REMOVED_EMPHASIS_BG = "rgba(168, 90, 59, 0.45)";
+const REMOVED_FG = "#6e2e16";
+
+type BestView = "best" | "diff";
 
 function candidateToText(candidate: BlackboxCandidate | null | undefined): string {
   if (candidate == null) return "";
@@ -40,6 +54,94 @@ function CandidateBlock({ candidate }: { candidate: BlackboxCandidate }) {
   );
 }
 
+function DiffBlock({ before, after }: { before: string; after: string }) {
+  const rows = useMemo(() => diffRows(before, after), [before, after]);
+  const { added, removed } = countChanges(rows);
+  if (added === 0 && removed === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {msg("optimization.blackbox.best.diff_identical")}
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-[0.6875rem] font-medium tabular-nums text-muted-foreground">
+        {formatMsg("optimization.blackbox.best.diff_legend", { added, removed })}
+      </p>
+      <div
+        className="max-h-[32rem] overflow-auto rounded-lg border border-border/50 bg-muted/30 py-2 font-mono text-[0.8125rem] leading-relaxed"
+        dir="ltr"
+      >
+        {rows.map((row, i) => {
+          const style =
+            row.kind === "added"
+              ? { background: ADDED_BG, color: ADDED_FG }
+              : row.kind === "removed"
+                ? { background: REMOVED_BG, color: REMOVED_FG }
+                : undefined;
+          const marker = row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " ";
+          return (
+            <div key={i} className="flex min-h-[1.5em] px-3" style={style}>
+              <span className="w-4 shrink-0 select-none opacity-70" aria-hidden="true">
+                {marker}
+              </span>
+              <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+                {row.segments.map((seg, j) =>
+                  seg.changed ? (
+                    <mark
+                      key={j}
+                      className="rounded-sm text-inherit"
+                      style={{
+                        background: row.kind === "added" ? ADDED_EMPHASIS_BG : REMOVED_EMPHASIS_BG,
+                      }}
+                    >
+                      {seg.text}
+                    </mark>
+                  ) : (
+                    <span key={j}>{seg.text}</span>
+                  ),
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ViewToggle({ value, onChange }: { value: BestView; onChange: (v: BestView) => void }) {
+  const options: Array<{ value: BestView; label: string }> = [
+    { value: "best", label: msg("optimization.blackbox.best.title") },
+    { value: "diff", label: msg("optimization.blackbox.best.view_diff") },
+  ];
+  return (
+    <div
+      role="tablist"
+      className="inline-flex items-center rounded-md border border-border/60 bg-background/70 p-0.5"
+    >
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="tab"
+          aria-selected={o.value === value}
+          onClick={() => onChange(o.value)}
+          className={cn(
+            "cursor-pointer rounded px-2 py-1 text-xs font-medium transition-colors",
+            o.value === value
+              ? "bg-primary/10 text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function downloadText(name: string, text: string) {
   const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -60,6 +162,9 @@ export function BestVersionTab({
   const bestText = candidateToText(result.best_candidate);
   const seedText = candidateToText(result.seed_candidate);
   const fileName = `${(jobName ?? "best-candidate").replace(/[^\w.-]+/g, "_")}.txt`;
+  const hasSeed = result.seed_candidate != null && seedText.length > 0;
+  const [view, setView] = useState<BestView>("best");
+  const showDiff = hasSeed && view === "diff";
 
   return (
     <div className="space-y-4">
@@ -73,6 +178,7 @@ export function BestVersionTab({
               </span>
             </CardTitle>
             <div className="flex flex-wrap items-center gap-2">
+              {hasSeed && <ViewToggle value={view} onChange={setView} />}
               <Badge variant="outline" size="sm" className="font-mono">
                 {result.engine_used}
               </Badge>
@@ -105,7 +211,11 @@ export function BestVersionTab({
                 {msg("optimization.blackbox.best.regression_guard")}
               </p>
             )}
-            <CandidateBlock candidate={result.best_candidate} />
+            {showDiff ? (
+              <DiffBlock before={seedText} after={bestText} />
+            ) : (
+              <CandidateBlock candidate={result.best_candidate} />
+            )}
           </CardContent>
         </Card>
       </FadeIn>

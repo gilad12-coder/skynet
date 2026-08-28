@@ -117,6 +117,21 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               onRemove={scorerModel.name ? () => setScorerModel(emptyModelConfig()) : undefined}
             />
           </div>
+          <Field
+            label={msg("submit.blackbox.scorer.timeout_label")}
+            htmlFor="bb-scorer-timeout"
+            hint={msg("submit.blackbox.scorer.timeout_hint")}
+          >
+            <NumberInput
+              id="bb-scorer-timeout"
+              value={scorerTimeout}
+              onChange={setScorerTimeout}
+              min={1}
+              max={600}
+              step={5}
+              className={`${MOBILE_NUMBER_INPUT_CLASS} sm:max-w-[14rem]`}
+            />
+          </Field>
           <div className="flex items-center justify-between gap-2">
             <Label>{msg("submit.blackbox.scorer.code_label")}</Label>
             {codeAssistMode === "auto" && (

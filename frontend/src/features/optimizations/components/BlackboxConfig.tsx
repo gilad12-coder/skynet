@@ -46,7 +46,15 @@ export function BlackboxConfigCard({
   } | null;
   const cases = Array.isArray(payload.cases) ? payload.cases.length : null;
   const objective = typeof payload.objective === "string" ? payload.objective : "";
+  const background = typeof payload.background === "string" ? payload.background : "";
   const engine = job.blackbox_result?.engine_used ?? strategy.engine;
+  const splitCounts = job.blackbox_result?.split_counts ?? null;
+  const timeout =
+    typeof scorer.timeout_seconds === "number"
+      ? formatMsg("optimization.blackbox.config.scorer_timeout", {
+          seconds: scorer.timeout_seconds,
+        })
+      : null;
 
   const budgetParts = [
     formatMsg("optimization.blackbox.config.budget_runs", { n: budget.max_scorer_runs ?? "—" }),
@@ -93,10 +101,14 @@ export function BlackboxConfigCard({
     },
     {
       label: msg("optimization.blackbox.config.scorer"),
-      value:
+      value: [
         scorer.kind === "remote"
           ? `${msg("submit.blackbox.scorer.kind.remote")} · ${scorer.url ?? "—"}`
           : msg("submit.blackbox.scorer.kind.python"),
+        timeout,
+      ]
+        .filter(Boolean)
+        .join(" · "),
       icon: <Wrench className="size-3.5" />,
     },
     {
@@ -116,8 +128,24 @@ export function BlackboxConfigCard({
       ? [
           {
             label: msg("optimization.blackbox.config.split"),
-            value: `${Math.round(split.train * 100)} / ${Math.round(split.val * 100)} / ${Math.round(split.test * 100)}`,
+            value:
+              split.val === 0 && split.test === 0
+                ? msg("optimization.blackbox.config.split_all")
+                : `${Math.round(split.train * 100)} / ${Math.round(split.val * 100)} / ${Math.round(split.test * 100)}`,
             icon: <Shuffle className="size-3.5" />,
+          },
+        ]
+      : []),
+    ...(splitCounts && (splitCounts.train ?? 0) > 0
+      ? [
+          {
+            label: msg("optimization.blackbox.config.split_counts"),
+            value: formatMsg("optimization.blackbox.config.split_counts_value", {
+              train: splitCounts.train ?? 0,
+              val: splitCounts.val ?? 0,
+              test: splitCounts.test ?? 0,
+            }),
+            icon: <Database className="size-3.5" />,
           },
         ]
       : []),
@@ -144,6 +172,16 @@ export function BlackboxConfigCard({
               {msg("submit.blackbox.start.objective_label")}
             </p>
             <p className="whitespace-pre-wrap text-sm">{objective}</p>
+          </div>
+        </FadeIn>
+      )}
+      {background && (
+        <FadeIn delay={0.15}>
+          <div className="mt-4 rounded-xl border border-border/50 bg-card/80 p-4">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {msg("submit.blackbox.start.background_label")}
+            </p>
+            <p className="whitespace-pre-wrap text-sm">{background}</p>
           </div>
         </FadeIn>
       )}
