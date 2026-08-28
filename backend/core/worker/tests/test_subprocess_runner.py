@@ -376,3 +376,69 @@ def test_run_service_in_subprocess_uses_fork_service_when_start_method_is_fork()
         fork_svc.run.assert_called_once()
     finally:
         set_fork_service(None)
+
+
+_BLACKBOX_PAYLOAD: dict = {
+    "name": "bb",
+    "username": "alice",
+    "seed_candidate": "hello world",
+    "objective": "more vowels",
+    "scorer": {"kind": "python", "metric_code": "def score(candidate, case=None): return 1.0"},
+    "reflection_model_config": {"name": "gpt-4o"},
+    "_optimization_type": "blackbox",
+    "_gepa_log_dir": "/tmp/bb-run",
+}
+
+
+def test_run_service_in_subprocess_blackbox_type_calls_run_blackbox_optimization() -> None:
+    """A ``blackbox`` payload bypasses the DSPy service and runs the black-box entry point."""
+    q: queue.Queue[dict] = queue.Queue()
+    svc = fake_dspy_service()
+    fake_result = MagicMock()
+    fake_result.model_dump.return_value = {"best_candidate": "aeiou", "optimized_test_metric": 1.0}
+
+    with (
+        patch("core.worker.subprocess_runner.DspyService", return_value=svc),
+        patch("core.worker.subprocess_runner.ServiceRegistry", return_value=fake_service_registry()),
+        patch("core.worker.subprocess_runner.run_blackbox_optimization", return_value=fake_result) as run_bb,
+    ):
+        run_service_in_subprocess(dict(_BLACKBOX_PAYLOAD), "art-9", q, "spawn")
+
+    run_bb.assert_called_once()
+    payload_arg = run_bb.call_args.args[0]
+    assert isinstance(payload_arg, sr.BlackboxRunRequest)
+    assert payload_arg.seed_candidate == "hello world"
+    assert run_bb.call_args.kwargs["artifact_id"] == "art-9"
+    assert run_bb.call_args.kwargs["gepa_log_dir_path"] == "/tmp/bb-run"
+    assert callable(run_bb.call_args.kwargs["progress_callback"])
+    svc.run.assert_not_called()
+    svc.run_grid_search.assert_not_called()
+
+    result_events = [e for e in _drain_queue(q) if e.get("type") == EVENT_RESULT]
+    assert result_events == [
+        {"type": EVENT_RESULT, "result": {"best_candidate": "aeiou", "optimized_test_metric": 1.0}}
+    ]
+
+
+def test_run_service_in_subprocess_blackbox_progress_is_forwarded() -> None:
+    """Lane events emitted by the black-box run reach the parent as ``EVENT_PROGRESS``."""
+    q: queue.Queue[dict] = queue.Queue()
+
+    def _fake_run(payload, *, artifact_id, progress_callback, gepa_log_dir_path=None):
+        """Stand-in for ``run_blackbox_optimization`` that emits one lane event."""
+        progress_callback("lane_started", {"engine": "gepa", "phase": "single", "budget": 5})
+        fake_result = MagicMock()
+        fake_result.model_dump.return_value = {}
+        return fake_result
+
+    with (
+        patch("core.worker.subprocess_runner.DspyService", return_value=fake_dspy_service()),
+        patch("core.worker.subprocess_runner.ServiceRegistry", return_value=fake_service_registry()),
+        patch("core.worker.subprocess_runner.run_blackbox_optimization", side_effect=_fake_run),
+    ):
+        run_service_in_subprocess(dict(_BLACKBOX_PAYLOAD), "art-10", q, "spawn")
+
+    progress_events = [e for e in _drain_queue(q) if e.get("type") == EVENT_PROGRESS]
+    assert len(progress_events) == 1
+    assert progress_events[0]["event"] == "lane_started"
+    assert progress_events[0]["metrics"] == {"engine": "gepa", "phase": "single", "budget": 5}

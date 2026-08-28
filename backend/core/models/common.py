@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-OptimizationType = Literal["run", "grid_search"]
+OptimizationType = Literal["run", "grid_search", "blackbox"]
 Composition = Literal["single", "workflow"]
 
 

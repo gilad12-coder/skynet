@@ -82,6 +82,11 @@ PROGRESS_MINIBATCH = "minibatch_feedback"
 PROGRESS_GRID_PAIR_STARTED = "grid_pair_started"
 PROGRESS_GRID_PAIR_COMPLETED = "grid_pair_completed"
 PROGRESS_GRID_PAIR_FAILED = "grid_pair_failed"
+# Black-box runs: one event per engine lane plus the explore → continue
+# hand-off, so the run page can render the Auto strategy's lane table.
+PROGRESS_LANE_STARTED = "lane_started"
+PROGRESS_LANE_COMPLETED = "lane_completed"
+PROGRESS_LANE_HANDOFF = "lane_handoff"
 
 # Phase-marker events the UI relies on to render pipeline stages and
 # per-pair status. They fire once per phase (not per step), so they're
@@ -103,12 +108,18 @@ STRUCTURAL_PROGRESS_EVENTS = frozenset(
         PROGRESS_GRID_PAIR_STARTED,
         PROGRESS_GRID_PAIR_COMPLETED,
         PROGRESS_GRID_PAIR_FAILED,
+        PROGRESS_LANE_STARTED,
+        PROGRESS_LANE_COMPLETED,
+        PROGRESS_LANE_HANDOFF,
     }
 )
 
 PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE = "optimization_type"
 OPTIMIZATION_TYPE_RUN = "run"
 OPTIMIZATION_TYPE_GRID_SEARCH = "grid_search"
+# Black-box text optimization: any text artifact + a scorer, no DSPy program.
+# Runs through the same worker/subprocess pipeline as ``run``.
+OPTIMIZATION_TYPE_BLACKBOX = "blackbox"
 
 # Composition classifier — orthogonal to optimization_type. Distinguishes a run
 # over a single atomic DSPy module from one over a workflow (a DAG of module

@@ -23,6 +23,7 @@ run inside their own subprocess and exec directly (see
 from __future__ import annotations
 
 import inspect
+import json
 import multiprocessing as mp
 import threading
 import traceback
@@ -33,6 +34,7 @@ from typing import Any
 import dspy
 
 from ..exceptions import ServiceError
+from .optimization.blackbox.scorer import build_python_scorer
 from .optimization.data import (
     extract_signature_fields,
     image_input_field_names,
@@ -57,6 +59,7 @@ _QUEUE_READ_SECONDS = 5.0
 _signature_cache: dict[str, SignatureIntrospection] = {}
 _metric_cache: dict[str, MetricIntrospection] = {}
 _transform_cache: dict[str, TransformIntrospection] = {}
+_scorer_cache: dict[str, bool] = {}
 _dogpile_locks: dict[str, threading.Lock] = {}
 _locks_mutex = threading.Lock()
 
@@ -565,4 +568,110 @@ def probe_metric_on_sample(
         error=result.get("error"),
         score=float(raw_score) if raw_score is not None else None,
         logged_metrics=dict(result.get("logged_metrics") or {}),
+    )
+
+
+@dataclass(frozen=True)
+class ScorerProbeResult:
+    """Outcome of invoking black-box scorer code on one candidate in a subprocess.
+
+    ``error`` is set when the scorer itself raised or returned an unusable
+    value; ``score`` and ``side_info`` are then empty.
+    """
+
+    score: float | None
+    side_info: dict[str, Any]
+    error: str | None
+
+
+def _scorer_worker(scorer_code: str, candidate: Any, case: Any, invoke: bool, queue: Any) -> None:
+    """Child-side entry point for ``validate_scorer_code`` and ``probe_scorer``.
+
+    Args:
+        scorer_code: User-authored scorer source.
+        candidate: The version to score when ``invoke`` is set.
+        case: The case to score it on, if any.
+        invoke: Whether to call the scorer after loading it.
+        queue: Multiprocessing queue used to return a result dict.
+    """
+    try:
+        scorer = build_python_scorer(scorer_code)
+        if not invoke:
+            queue.put({"ok": True, "score": None, "side_info": {}, "error": None})
+            return
+        try:
+            score, side_info = scorer(candidate, case)
+        except BaseException as call_exc:
+            message = str(call_exc) if isinstance(call_exc, ServiceError) else f"{type(call_exc).__name__}: {call_exc}"
+            queue.put({"ok": True, "score": None, "side_info": {}, "error": message})
+            return
+        queue.put(
+            {
+                "ok": True,
+                "score": score,
+                "side_info": json.loads(json.dumps(side_info, default=str)),
+                "error": None,
+            }
+        )
+    except BaseException as exc:  # user code is arbitrary — any failure is reported, not raised
+        queue.put(_error_payload(exc))
+
+
+def validate_scorer_code(code: str, *, timeout_seconds: float = _DEFAULT_PARSE_TIMEOUT_SECONDS) -> None:
+    """Load user-authored scorer code in a subprocess to prove it defines a scorer.
+
+    Memoized per-process like the metric validator, for the same dogpile reason.
+
+    Args:
+        code: User-authored scorer source.
+        timeout_seconds: Maximum time to wait for the child to finish.
+
+    Raises:
+        ServiceError: When the code fails to load, defines no scorer, or the
+            child errors out.
+    """
+    if _scorer_cache.get(code):
+        return
+    with _dogpile_lock(f"scr:{code}"):
+        if _scorer_cache.get(code):
+            return
+        result = _run_in_subprocess(_scorer_worker, (code, None, None, False), timeout_seconds=timeout_seconds)
+        if not result.get("ok"):
+            _raise_child_error(result)
+        _bounded_cache_put(_scorer_cache, code, True)
+
+
+def probe_scorer(
+    *,
+    scorer_code: str,
+    candidate: Any,
+    case: Any = None,
+    timeout_seconds: float = _DEFAULT_PROBE_TIMEOUT_SECONDS,
+) -> ScorerProbeResult:
+    """Invoke user-authored scorer code on one candidate inside a subprocess.
+
+    A scorer that raised on the candidate is reported via
+    ``ScorerProbeResult.error`` — not as an exception from this function.
+    Only ``ServiceError`` (load failure, subprocess crash, timeout) escapes.
+
+    Args:
+        scorer_code: User-authored scorer source.
+        candidate: The version to score.
+        case: The case to score it on, if any.
+        timeout_seconds: Maximum time to wait for the child to finish.
+
+    Returns:
+        The score and side information, or the scorer's error.
+
+    Raises:
+        ServiceError: When the scorer fails to load or the child errors out.
+    """
+    result = _run_in_subprocess(_scorer_worker, (scorer_code, candidate, case, True), timeout_seconds=timeout_seconds)
+    if not result.get("ok"):
+        _raise_child_error(result)
+    raw_score = result.get("score")
+    return ScorerProbeResult(
+        score=float(raw_score) if raw_score is not None else None,
+        side_info=dict(result.get("side_info") or {}),
+        error=result.get("error"),
     )

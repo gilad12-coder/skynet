@@ -21,6 +21,16 @@ from .analytics import (
     OptimizerStatsResponse,
 )
 from .artifacts import NodeArtifact, OptimizedDemo, OptimizedPredictor, ProgramArtifact, ReactOverlay
+from .blackbox import (
+    BlackboxBudget,
+    BlackboxLaneResult,
+    BlackboxRunRequest,
+    BlackboxRunResponse,
+    BlackboxScorer,
+    BlackboxStrategy,
+    ScorerDryRunRequest,
+    ScorerDryRunResponse,
+)
 from .common import (
     BulkDeleteByIdsRequest,
     BulkDeleteByIdsResponse,
@@ -91,6 +101,12 @@ __all__ = [
     "HEALTH_STATUS_OK",
     "WORKFLOW_MODULE_NAME",
     "AnalyticsSummaryResponse",
+    "BlackboxBudget",
+    "BlackboxLaneResult",
+    "BlackboxRunRequest",
+    "BlackboxRunResponse",
+    "BlackboxScorer",
+    "BlackboxStrategy",
     "BulkCancelRequest",
     "BulkCancelResponse",
     "BulkCancelSkipped",
@@ -141,6 +157,8 @@ __all__ = [
     "ReactOverlay",
     "RunRequest",
     "RunResponse",
+    "ScorerDryRunRequest",
+    "ScorerDryRunResponse",
     "ServeInfoResponse",
     "ServeRequest",
     "ServeResponse",
