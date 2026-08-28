@@ -2,6 +2,7 @@
 
 import dspy
 
+from core.api.routers.code_agent import BlackboxAuthoringContext
 from core.service_gateway.agents.code_interview import (
     BlackboxInterviewTurnSig,
     _parse_interview_prediction,
@@ -42,3 +43,10 @@ def test_blackbox_signature_declares_objective_output() -> None:
     """The black-box interviewer keeps ``objective`` as input and reports ``captured_objective``."""
     assert "objective" in BlackboxInterviewTurnSig.input_fields
     assert "captured_objective" in BlackboxInterviewTurnSig.output_fields
+
+
+def test_blackbox_context_accepts_blank_objective() -> None:
+    """Accept a blank objective: the interview opens before one exists and asks for it."""
+    context = BlackboxAuthoringContext(recipe="anything", objective="")
+
+    assert context.objective == ""
