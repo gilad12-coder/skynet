@@ -393,7 +393,9 @@ class _JudgeLM:
         self.history: list[dict[str, Any]] = []
         self.messages: list[list[dict[str, str]]] = []
 
-    def __call__(self, prompt: str | None = None, *, messages: list[dict[str, str]] | None = None, **_: Any) -> list[str]:
+    def __call__(
+        self, prompt: str | None = None, *, messages: list[dict[str, str]] | None = None, **_: Any
+    ) -> list[str]:
         """Record the call and answer a constant score.
 
         Args:
@@ -409,7 +411,9 @@ class _JudgeLM:
         return ["0.5"]
 
 
-_JUDGE_SCORER_CODE = "def score(candidate, case=None):\n    return float(llm(candidate, case['target'])), {'judge': 'fake'}\n"
+_JUDGE_SCORER_CODE = (
+    "def score(candidate, case=None):\n    return float(llm(candidate, case['target'])), {'judge': 'fake'}\n"
+)
 
 
 def test_plateau_run_relays_between_engines(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
@@ -460,7 +464,9 @@ def test_scorer_llm_usage_is_billed_with_the_run(
     assert chosen == ["fake/judge"]
     assert judge.messages
     assert judge.messages[0] == [{"role": "system", "content": "hello world"}, {"role": "user", "content": "aeiou"}]
-    assert all(chat[0]["role"] == "system" and chat[1] == {"role": "user", "content": "aeiou"} for chat in judge.messages)
+    assert all(
+        chat[0]["role"] == "system" and chat[1] == {"role": "user", "content": "aeiou"} for chat in judge.messages
+    )
     assert response.baseline_test_metric == 0.5
     usage = {u.model: (u.input_tokens, u.output_tokens) for u in response.usage_by_model}
     assert usage["fake/judge"] == (3 * len(judge.history), len(judge.history))
@@ -491,3 +497,18 @@ def test_dry_run_binds_the_scorer_model_and_returns_its_usage(monkeypatch: pytes
     assert response.ok is True
     assert response.score == 0.5
     assert response.usage_by_model == [ModelTokenUsage(model="fake/judge", input_tokens=12, output_tokens=3)]
+
+
+def test_reflection_caller_hands_chat_messages_to_the_model() -> None:
+    calls: list[tuple[Any, Any]] = []
+
+    class LM:
+        def __call__(self, prompt: Any = None, *, messages: Any = None) -> list[str]:
+            calls.append((prompt, messages))
+            return ["reflected"]
+
+    reflection_lm = service_mod._reflection_caller(LM())  # type: ignore[arg-type]
+    assert reflection_lm("plain text") == "reflected"
+    multimodal = [{"role": "user", "content": [{"type": "text", "text": "look"}]}]
+    assert reflection_lm(multimodal) == "reflected"
+    assert calls == [("plain text", None), (None, multimodal)]

@@ -24,6 +24,10 @@ const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m
   ssr: false,
 });
 
+function isDataImage(entry: [string, unknown]): entry is [string, string] {
+  return typeof entry[1] === "string" && entry[1].startsWith("data:image/");
+}
+
 export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
   const {
     codeAssistMode,
@@ -49,7 +53,9 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
   } = w;
 
   const result = dryRun.status === "done" ? dryRun.result : null;
-  const sideInfo = result?.ok && Object.keys(result.side_info).length > 0 ? result.side_info : null;
+  const sideEntries = result?.ok ? Object.entries(result.side_info) : [];
+  const sideImages = sideEntries.filter(isDataImage);
+  const sideText = Object.fromEntries(sideEntries.filter((entry) => !isDataImage(entry)));
 
   return (
     <BlackboxAuthoringShell
@@ -242,12 +248,27 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               })}
             </p>
           )}
-          {sideInfo && (
+          {sideImages.length > 0 && (
+            <div className="flex flex-wrap gap-2" dir="ltr">
+              {sideImages.map(([key, url]) => (
+                // Renders arrive as data URLs the scorer built; a plain <img>
+                // shows them without a next/image loader round-trip.
+                <img
+                  key={key}
+                  src={url}
+                  alt={key}
+                  title={key}
+                  className="h-24 w-auto rounded border border-border/60 bg-white object-contain"
+                />
+              ))}
+            </div>
+          )}
+          {Object.keys(sideText).length > 0 && (
             <pre
               className="max-h-40 overflow-auto rounded bg-background/60 p-2 text-[0.6875rem] text-foreground/80"
               dir="ltr"
             >
-              {JSON.stringify(sideInfo, null, 2)}
+              {JSON.stringify(sideText, null, 2)}
             </pre>
           )}
         </div>

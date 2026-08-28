@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 import httpx
+from gepa.image import Image
 
 from ....exceptions import ServiceError
 from ....models.blackbox import BlackboxScorer
@@ -20,22 +21,39 @@ from .protocol import Candidate, ScorerFn, SideInfo
 
 _ENTRYPOINT_NAMES = ("score", "metric")
 _SCORER_FILENAME = "<scorer_code>"
-# Name the scorer namespace binds the model helper to.
+# Names the scorer namespace binds the model helper and the image wrapper to.
 LLM_HELPER_NAME = "llm"
+IMAGE_HELPER_NAME = "Image"
 LLMHelper = Callable[..., str]
 
 
-def missing_llm(prompt: str, input: str | None = None) -> str:
+def missing_llm(prompt: Any = None, input: Any = None, **kwargs: Any) -> str:
     """Stand in for ``llm`` when the scorer was given no model.
 
     Args:
         prompt: Ignored.
         input: Ignored.
+        **kwargs: Ignored.
 
     Raises:
         ServiceError: Always, naming the step that fixes it.
     """
     raise ServiceError("This scorer calls llm() but no model was chosen in the Scorer step.")
+
+
+def side_info_json_default(value: Any) -> str:
+    """JSON fallback for side info: images become data URLs, anything else ``str()``.
+
+    Args:
+        value: A side-info value ``json.dumps`` cannot encode.
+
+    Returns:
+        Its string form.
+    """
+    to_part = getattr(value, "to_openai_content_part", None)
+    if callable(to_part):
+        return str(to_part()["image_url"]["url"])
+    return str(value)
 
 
 def normalize_score(raw: Any) -> tuple[float, SideInfo]:
@@ -132,7 +150,9 @@ def build_python_scorer(code: str, *, llm: LLMHelper | None = None) -> ScorerFn:
     Args:
         code: User-authored python source.
         llm: The model helper bound as ``llm``; without one, a scorer that
-            calls it fails with a message pointing at the Scorer step.
+            calls it fails with a message pointing at the Scorer step. The
+            namespace also sees ``Image``, the wrapper that puts rendered
+            output into side info for the optimizer to look at.
 
     Returns:
         A callable scoring ``(candidate, case)`` → ``(score, side_info)``.
@@ -140,7 +160,8 @@ def build_python_scorer(code: str, *, llm: LLMHelper | None = None) -> ScorerFn:
     Raises:
         ServiceError: When the code cannot be loaded.
     """
-    fn = load_scorer_from_code(code, helpers={LLM_HELPER_NAME: llm if llm is not None else missing_llm})
+    helpers = {LLM_HELPER_NAME: llm if llm is not None else missing_llm, IMAGE_HELPER_NAME: Image}
+    fn = load_scorer_from_code(code, helpers=helpers)
     takes_case = _accepts_case(fn)
 
     def scorer(candidate: Candidate, case: Any = None) -> tuple[float, SideInfo]:

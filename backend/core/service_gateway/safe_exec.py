@@ -26,9 +26,11 @@ import inspect
 import json
 import multiprocessing as mp
 import threading
+import time
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from queue import Empty as QueueEmpty
 from typing import Any
 
 import dspy
@@ -37,7 +39,7 @@ from ..exceptions import ServiceError
 from ..models.common import ModelConfig
 from .language_models import usage_by_model_from_history
 from .optimization.blackbox.llm_helper import build_scorer_llm
-from .optimization.blackbox.scorer import build_python_scorer
+from .optimization.blackbox.scorer import build_python_scorer, side_info_json_default
 from .optimization.data import (
     extract_signature_fields,
     image_input_field_names,
@@ -51,6 +53,8 @@ _DEFAULT_PARSE_TIMEOUT_SECONDS = 30.0
 _DEFAULT_PROBE_TIMEOUT_SECONDS = 45.0
 _TERMINATE_GRACE_SECONDS = 2.0
 _QUEUE_READ_SECONDS = 5.0
+_QUEUE_POLL_SECONDS = 0.25
+_NO_RESULT = object()
 
 # Dogpile-safe per-process caches: identical user code is validated once per
 # replica, and concurrent submissions of the same code share that one
@@ -187,20 +191,34 @@ def _run_in_subprocess(
     queue: Any = ctx.Queue()
     proc = ctx.Process(target=target, args=(*args, queue))
     proc.start()
-    proc.join(timeout_seconds)
 
-    if proc.is_alive():
-        proc.terminate()
-        proc.join(_TERMINATE_GRACE_SECONDS)
-        if proc.is_alive():
-            proc.kill()
-            proc.join(_TERMINATE_GRACE_SECONDS)
-        raise ServiceError(f"user code exceeded the {timeout_seconds:.0f}s validation timeout and was terminated.")
+    # Read while waiting rather than join-then-read: a child cannot exit until
+    # its result has left the pipe, so a large payload (rendered images in
+    # side info) would otherwise hang the join until the timeout.
+    deadline = time.monotonic() + timeout_seconds
+    result: Any = _NO_RESULT
+    while result is _NO_RESULT:
+        try:
+            result = queue.get(timeout=_QUEUE_POLL_SECONDS)
+        except QueueEmpty:
+            if not proc.is_alive():
+                break
+            if time.monotonic() >= deadline:
+                proc.terminate()
+                proc.join(_TERMINATE_GRACE_SECONDS)
+                if proc.is_alive():
+                    proc.kill()
+                    proc.join(_TERMINATE_GRACE_SECONDS)
+                raise ServiceError(
+                    f"user code exceeded the {timeout_seconds:.0f}s validation timeout and was terminated."
+                ) from None
+    proc.join(_TERMINATE_GRACE_SECONDS)
 
-    try:
-        result = queue.get(timeout=_QUEUE_READ_SECONDS)
-    except Exception as exc:  # queue.Empty or manager teardown: child died before emitting
-        raise ServiceError("validation subprocess exited without returning a result.") from exc
+    if result is _NO_RESULT:
+        try:
+            result = queue.get(timeout=_QUEUE_READ_SECONDS)
+        except Exception as exc:  # queue.Empty or manager teardown: child died before emitting
+            raise ServiceError("validation subprocess exited without returning a result.") from exc
     if not isinstance(result, dict):
         raise ServiceError("validation subprocess returned an unexpected value.")
     return result
@@ -619,7 +637,7 @@ def _scorer_worker(
             {
                 "ok": True,
                 "score": score,
-                "side_info": json.loads(json.dumps(side_info, default=str)),
+                "side_info": json.loads(json.dumps(side_info, default=side_info_json_default)),
                 "error": None,
                 "usage": _llm_usage(llm),
             }
@@ -705,5 +723,7 @@ def probe_scorer(
         score=float(raw_score) if raw_score is not None else None,
         side_info=dict(result.get("side_info") or {}),
         error=result.get("error"),
-        usage_by_model={str(model): (int(pair[0]), int(pair[1])) for model, pair in (result.get("usage") or {}).items()},
+        usage_by_model={
+            str(model): (int(pair[0]), int(pair[1])) for model, pair in (result.get("usage") or {}).items()
+        },
     )
