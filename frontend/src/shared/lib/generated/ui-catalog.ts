@@ -2706,12 +2706,19 @@ export type MessageKey =
   | "submit.react.tools_prev"
   | "submit.recipe.anything.desc"
   | "submit.recipe.anything.title"
+  | "submit.recipe.carousel_aria"
+  | "submit.recipe.change"
+  | "submit.recipe.choose"
   | "submit.recipe.code.desc"
   | "submit.recipe.code.title"
   | "submit.recipe.program.desc"
   | "submit.recipe.program.title"
   | "submit.recipe.prompt.desc"
   | "submit.recipe.prompt.title"
+  | "submit.recipe.tagline.anything"
+  | "submit.recipe.tagline.code"
+  | "submit.recipe.tagline.program"
+  | "submit.recipe.tagline.prompt"
   | "submit.recipe.title"
   | "submit.split.label_test"
   | "submit.split.label_train"
@@ -5922,12 +5929,19 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.react.tools_prev": "כלים קודמים",
   "submit.recipe.anything.desc": "טקסט, פרומפט או הגדרות סוכן — מביאים נקודת התחלה ופונקציית ציון, והמערכת משפרת.",
   "submit.recipe.anything.title": "כל דבר",
+  "submit.recipe.carousel_aria": "יעדי אופטימיזציה",
+  "submit.recipe.change": "שינוי",
+  "submit.recipe.choose": "אופטימיזציה של {p1}",
   "submit.recipe.code.desc": "כל סקריפט או הגדרה — מביאים נקודת התחלה ופונקציית ציון ב-Python, והמערכת משפרת.",
   "submit.recipe.code.title": "קוד",
   "submit.recipe.program.desc": "חתימה, מודול ומדד — אופטימיזציה של פרומפטים ודוגמאות לתוכנית.",
   "submit.recipe.program.title": "תוכנית DSPy",
   "submit.recipe.prompt.desc": "פרומפט מערכת יחיד — אופטימיזציה של ההנחיות שנותנים למודל.",
   "submit.recipe.prompt.title": "פרומפט",
+  "submit.recipe.tagline.anything": "כל טקסט או הגדרה, עם ציון מפונקציה משלכם",
+  "submit.recipe.tagline.code": "סקריפט או הגדרות, משתפרים מול פונקציית הציון שלכם",
+  "submit.recipe.tagline.program": "כוונון פרומפטים ודוגמאות לתוכנית DSPy",
+  "submit.recipe.tagline.prompt": "פרומפט המערכת שלכם, משוכתב לציון גבוה יותר",
   "submit.recipe.title": "מה רוצים לשפר?",
   "submit.split.label_test": "{term.splitTest}",
   "submit.split.label_train": "{term.splitTrain}",
@@ -15253,12 +15267,19 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.react.tools_prev": "Previous tools",
   "submit.recipe.anything.desc": "Any text, prompt or agent setup — bring a starting point and a scoring function, we improve it.",
   "submit.recipe.anything.title": "Anything",
+  "submit.recipe.carousel_aria": "Optimization targets",
+  "submit.recipe.change": "Change",
+  "submit.recipe.choose": "Optimize {p1}",
   "submit.recipe.code.desc": "Any script or config — bring a starting point and a Python scorer, and the system improves it.",
   "submit.recipe.code.title": "Code",
   "submit.recipe.program.desc": "Signature, module and metric — optimize a program's prompts and demos.",
   "submit.recipe.program.title": "DSPy program",
   "submit.recipe.prompt.desc": "A single system prompt — optimize the instructions you give a model.",
   "submit.recipe.prompt.title": "Prompt",
+  "submit.recipe.tagline.anything": "Any text or setup, scored by your own function",
+  "submit.recipe.tagline.code": "A script or config, improved against your scorer",
+  "submit.recipe.tagline.program": "Prompts and demos tuned for a DSPy program",
+  "submit.recipe.tagline.prompt": "Your system prompt, rewritten to score higher",
   "submit.recipe.title": "What do you want to optimize?",
   "submit.split.label_test": "Test",
   "submit.split.label_train": "Train",
