@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/shared/ui/primitives/select";
 import { NumberInput } from "@/shared/ui/number-input";
+import { BLACKBOX_HARNESSES, harnessLabel } from "@/shared/lib/blackbox-harness";
 import { msg } from "@/shared/lib/messages";
 import type { BlackboxHarness } from "@/shared/types/api";
 
@@ -26,8 +27,6 @@ import {
   Segmented,
   TEXTAREA_CLASS,
 } from "./shared";
-
-const HARNESSES: BlackboxHarness[] = ["pi", "codex", "opencode", "custom"];
 
 export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
   const {
@@ -277,9 +276,9 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {HARNESSES.map((h) => (
+                  {BLACKBOX_HARNESSES.map((h) => (
                     <SelectItem key={h} value={h}>
-                      {h}
+                      {harnessLabel(h)}
                     </SelectItem>
                   ))}
                 </SelectContent>

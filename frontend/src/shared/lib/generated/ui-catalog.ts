@@ -2566,6 +2566,11 @@ export type MessageKey =
   | "submit.blackbox.start.commands_optional"
   | "submit.blackbox.start.concurrency_label"
   | "submit.blackbox.start.desc"
+  | "submit.blackbox.start.harness.claude_code"
+  | "submit.blackbox.start.harness.codex"
+  | "submit.blackbox.start.harness.custom"
+  | "submit.blackbox.start.harness.opencode"
+  | "submit.blackbox.start.harness.pi"
   | "submit.blackbox.start.harness_label"
   | "submit.blackbox.start.install_command"
   | "submit.blackbox.start.objective_hint"
@@ -5791,6 +5796,11 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.blackbox.start.commands_optional": "פקודות sandbox (לא חובה)",
   "submit.blackbox.start.concurrency_label": "הרצות במקביל",
   "submit.blackbox.start.desc": "מה משפרים ואיך נראית הצלחה.",
+  "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.codex": "Codex",
+  "submit.blackbox.start.harness.custom": "פקודה מותאמת אישית",
+  "submit.blackbox.start.harness.opencode": "OpenCode",
+  "submit.blackbox.start.harness.pi": "Pi",
   "submit.blackbox.start.harness_label": "מסגרת סוכן",
   "submit.blackbox.start.install_command": "פקודת התקנה",
   "submit.blackbox.start.objective_hint": "משפט או שניים על מה נחשב לתוצאה טובה.",
@@ -15131,6 +15141,11 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.blackbox.start.commands_optional": "Sandbox commands (optional)",
   "submit.blackbox.start.concurrency_label": "Concurrent runs",
   "submit.blackbox.start.desc": "What gets optimized and what success looks like.",
+  "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.codex": "Codex",
+  "submit.blackbox.start.harness.custom": "Custom command",
+  "submit.blackbox.start.harness.opencode": "OpenCode",
+  "submit.blackbox.start.harness.pi": "Pi",
   "submit.blackbox.start.harness_label": "Agent harness",
   "submit.blackbox.start.install_command": "Install command",
   "submit.blackbox.start.objective_hint": "A sentence or two on what a good result looks like.",

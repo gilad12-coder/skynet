@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Cube, Database, Gauge, Gear, GitMerge, Shuffle, Target, Wrench } from "@/shared/ui/icons";
+import { harnessLabel } from "@/shared/lib/blackbox-harness";
 import { FadeIn } from "@/shared/ui/motion";
 import type {
   BlackboxBudget,
@@ -59,8 +60,9 @@ export function BlackboxConfigCard({
 
   const targetValue =
     target.kind === "agent"
-      ? [target.harness, target.model].filter(Boolean).join(" · ") ||
-        msg("optimization.blackbox.config.target_agent")
+      ? [target.harness ? harnessLabel(target.harness) : null, target.model]
+          .filter(Boolean)
+          .join(" · ") || msg("optimization.blackbox.config.target_agent")
       : msg("optimization.blackbox.config.target_text");
 
   const items: Array<{ label: ReactNode; value: string; icon: ReactNode }> = [
