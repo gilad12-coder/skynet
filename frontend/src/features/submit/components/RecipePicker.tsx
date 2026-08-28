@@ -107,24 +107,19 @@ function RecipeSlide({
 export function RecipeChip({ recipe, onChange }: { recipe: Recipe; onChange: () => void }) {
   const Icon = RECIPES.find((r) => r.id === recipe)?.Icon ?? Cube;
   return (
-    <div className="flex flex-wrap items-center gap-2.5" data-tutorial="submit-recipe">
-      <span className="text-xs font-medium text-muted-foreground">
-        {msg("submit.recipe.title")}
+    <button
+      type="button"
+      onClick={onChange}
+      data-tutorial="submit-recipe"
+      className="group flex min-h-[44px] w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background px-3 py-1.5 text-xs shadow-xs transition-colors hover:border-[#C8A882] lg:min-h-0"
+    >
+      <Icon className="size-3.5 text-[#3D2E22]" aria-hidden />
+      <span className="font-semibold text-foreground">{recipeTitle(recipe)}</span>
+      <span className="ms-auto flex items-center gap-1 font-medium text-muted-foreground transition-colors group-hover:text-foreground">
+        {msg("submit.recipe.change")}
+        <Repeat className="size-3" />
       </span>
-      <button
-        type="button"
-        onClick={onChange}
-        className="group inline-flex min-h-[44px] min-w-0 cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1 text-xs shadow-xs transition-colors hover:border-[#C8A882] lg:min-h-0"
-      >
-        <Icon className="size-3.5 text-[#3D2E22]" aria-hidden />
-        <span className="font-semibold text-foreground">{recipeTitle(recipe)}</span>
-        <span aria-hidden className="h-3 w-px bg-border/80" />
-        <span className="flex items-center gap-1 font-medium text-muted-foreground transition-colors group-hover:text-foreground">
-          {msg("submit.recipe.change")}
-          <Repeat className="size-3" />
-        </span>
-      </button>
-    </div>
+    </button>
   );
 }
 

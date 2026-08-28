@@ -1,6 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
+import { motion, useReducedMotion, type Transition } from "framer-motion";
 import {
   Card,
   CardContent,
@@ -76,6 +77,12 @@ export function Field({
   );
 }
 
+const SEGMENTED_TRANSITION: Transition = {
+  type: "tween",
+  duration: 0.2,
+  ease: [0.22, 1, 0.36, 1],
+};
+
 export interface SegmentedOption<T extends string> {
   value: T;
   label: string;
@@ -92,6 +99,8 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void;
   options: Array<SegmentedOption<T>>;
 }) {
+  const pillId = useId();
+  const prefersReducedMotion = useReducedMotion();
   return (
     <div
       className="grid w-full gap-1 rounded-lg bg-muted p-1"
@@ -108,23 +117,31 @@ export function Segmented<T extends string>({
             aria-checked={selected}
             onClick={() => onChange(o.value)}
             className={cn(
-              "min-h-[44px] cursor-pointer rounded-md px-2 py-2 text-center transition-colors duration-200 sm:px-3 lg:min-h-0",
-              selected
-                ? "bg-background text-foreground shadow-sm"
-                : "text-foreground/60 hover:text-foreground",
+              "relative min-h-[44px] cursor-pointer rounded-md px-2 py-2 text-center transition-colors duration-200 sm:px-3 lg:min-h-0",
+              selected ? "text-foreground" : "text-foreground/60 hover:text-foreground",
             )}
           >
-            <span className="text-sm font-medium">{o.label}</span>
-            {o.desc ? (
-              <span
-                className={cn(
-                  "mt-0.5 block text-[0.6875rem]",
-                  selected ? "text-muted-foreground" : "text-foreground/40",
-                )}
-              >
-                {o.desc}
-              </span>
-            ) : null}
+            {selected && (
+              <motion.span
+                layoutId={`segmented-pill-${pillId}`}
+                className="absolute inset-0 rounded-md bg-background shadow-sm"
+                transition={prefersReducedMotion ? { duration: 0 } : SEGMENTED_TRANSITION}
+                aria-hidden="true"
+              />
+            )}
+            <span className="relative z-10 block">
+              <span className="text-sm font-medium">{o.label}</span>
+              {o.desc ? (
+                <span
+                  className={cn(
+                    "mt-0.5 block text-[0.6875rem] transition-colors duration-200",
+                    selected ? "text-muted-foreground" : "text-foreground/40",
+                  )}
+                >
+                  {o.desc}
+                </span>
+              ) : null}
+            </span>
           </button>
         );
       })}
