@@ -19,6 +19,8 @@ import type { CodeInterviewState } from "@/shared/hooks/use-code-interview";
 
 interface Props {
   interview: CodeInterviewState;
+  /** Names what the interview leads to; defaults to the Signature & Metric wording. */
+  subtitle?: string;
   className?: string;
 }
 
@@ -29,7 +31,7 @@ interface Props {
  * interviewer. It ends in an editable authoring brief; confirming it hands
  * the directives to the seed generation.
  */
-export function CodeInterviewPanel({ interview, className }: Props) {
+export function CodeInterviewPanel({ interview, subtitle, className }: Props) {
   const [draft, setDraft] = React.useState("");
 
   const submit = () => {
@@ -47,7 +49,7 @@ export function CodeInterviewPanel({ interview, className }: Props) {
             {msg("submit.code.interview.title")}
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {msg("submit.code.interview.subtitle")}
+            {subtitle ?? msg("submit.code.interview.subtitle")}
           </p>
         </div>
         {/* The header spans both the chat and the brief card, so a re-run is
