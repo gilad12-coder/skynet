@@ -16,12 +16,14 @@ import { msg } from "@/shared/lib/messages";
 import type { BlackboxHarness } from "@/shared/types/api";
 
 import type { BlackboxWizardContext, SeedMode } from "../../hooks/use-blackbox-wizard";
+import { ArtifactStatusChip } from "../steps/AuthoringShell";
+import { VersionStepper } from "../steps/CodeAgentPanel";
+import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
 import {
   Field,
   MOBILE_INPUT_CLASS,
   MOBILE_NUMBER_INPUT_CLASS,
   Segmented,
-  StepCard,
   TEXTAREA_CLASS,
 } from "./shared";
 
@@ -29,6 +31,10 @@ const HARNESSES: BlackboxHarness[] = ["pi", "codex", "opencode", "custom"];
 
 export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
   const {
+    recipe,
+    codeAssistMode,
+    agent,
+    setSeedManuallyEdited,
     seedMode,
     setSeedMode,
     seedText,
@@ -61,8 +67,24 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
   const updatePart = (i: number, patch: { key?: string; value?: string }) =>
     setSeedParts(seedParts.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
 
+  // Each recipe names its starting point in its own words; "anything" keeps
+  // the generic copy.
+  const seedLabel =
+    recipe === "prompt"
+      ? msg("submit.blackbox.start.seed_label_prompt")
+      : recipe === "code"
+        ? msg("submit.blackbox.start.seed_label_code")
+        : msg("submit.blackbox.start.seed_label");
+  const seedPlaceholder =
+    recipe === "prompt"
+      ? msg("submit.blackbox.start.seed_placeholder_prompt")
+      : recipe === "code"
+        ? msg("submit.blackbox.start.seed_placeholder_code")
+        : msg("submit.blackbox.start.seed_placeholder");
+
   return (
-    <StepCard
+    <BlackboxAuthoringShell
+      w={w}
       title={msg("submit.blackbox.start.title")}
       description={msg("submit.blackbox.start.desc")}
     >
@@ -89,12 +111,27 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
       />
 
       {seedMode === "text" && (
-        <Field label={msg("submit.blackbox.start.seed_label")} htmlFor="bb-seed">
+        <Field
+          label={seedLabel}
+          htmlFor="bb-seed"
+          hint={codeAssistMode === "auto" ? msg("submit.blackbox.start.seed_hint_auto") : undefined}
+          trailing={
+            codeAssistMode === "auto" ? (
+              <>
+                <VersionStepper agent={agent} artifact="signature" />
+                <ArtifactStatusChip status={agent.signatureStatus} />
+              </>
+            ) : undefined
+          }
+        >
           <textarea
             id="bb-seed"
             value={seedText}
-            onChange={(e) => setSeedText(e.target.value)}
-            placeholder={msg("submit.blackbox.start.seed_placeholder")}
+            onChange={(e) => {
+              setSeedText(e.target.value);
+              setSeedManuallyEdited(true);
+            }}
+            placeholder={seedPlaceholder}
             rows={8}
             dir="auto"
             className={`${TEXTAREA_CLASS} font-mono text-sm`}
@@ -298,6 +335,6 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
           ))}
         </div>
       )}
-    </StepCard>
+    </BlackboxAuthoringShell>
   );
 }

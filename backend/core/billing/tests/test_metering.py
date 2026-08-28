@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from core.billing.metering import estimate_run_credits, meter_llm_run
+from core.billing.metering import estimate_run_credits, meter_llm_run, meter_llm_usage
 from core.storage.models import Base, BillingCustomerModel, CreditLedgerModel
 
 
@@ -170,3 +170,27 @@ def test_meter_llm_run_never_raises_on_billing_failure(engine: object) -> None:
     """A broken billing backend logs and returns 0 — the user's turn already succeeded."""
     lm = _FakeLm([{"usage": {"prompt_tokens": 10, "completion_tokens": 5}}])
     assert meter_llm_run(object(), "alice@x.io", [lm], description="x") == 0
+
+
+def test_meter_llm_usage_debits_a_token_breakdown(engine: object) -> None:
+    """A per-model breakdown (a scorer dry run's ``llm()`` calls) debits like a run, keyed by the bare model."""
+    _fund(engine, "alice@x.io")
+    credits = meter_llm_usage(
+        engine, "alice@x.io", {"litellm_proxy/openrouter/test/unpriced": (100_000, 40_000)}, description="Scorer dry run"
+    )
+    assert credits > 0
+    [row] = _ledger_rows(engine)
+    assert row.kind == "run"
+    assert row.description == "Scorer dry run"
+    assert row.model == "openrouter/test/unpriced"
+    assert row.delta_credits == -credits
+    assert row.input_tokens == 100_000
+    assert row.output_tokens == 40_000
+
+
+def test_meter_llm_usage_skips_empty_or_unbound(engine: object) -> None:
+    """Nothing is written without an engine, a user, or any usage."""
+    assert meter_llm_usage(engine, "alice@x.io", {}, description="Scorer dry run") == 0
+    assert meter_llm_usage(None, "alice@x.io", {"m": (1, 1)}, description="Scorer dry run") == 0
+    assert meter_llm_usage(engine, "", {"m": (1, 1)}, description="Scorer dry run") == 0
+    assert _ledger_rows(engine) == []

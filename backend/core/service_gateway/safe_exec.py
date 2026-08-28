@@ -34,6 +34,9 @@ from typing import Any
 import dspy
 
 from ..exceptions import ServiceError
+from ..models.common import ModelConfig
+from .language_models import usage_by_model_from_history
+from .optimization.blackbox.llm_helper import build_scorer_llm
 from .optimization.blackbox.scorer import build_python_scorer
 from .optimization.data import (
     extract_signature_fields,
@@ -576,15 +579,19 @@ class ScorerProbeResult:
     """Outcome of invoking black-box scorer code on one candidate in a subprocess.
 
     ``error`` is set when the scorer itself raised or returned an unusable
-    value; ``score`` and ``side_info`` are then empty.
+    value; ``score`` and ``side_info`` are then empty. ``usage_by_model``
+    is what the scorer's ``llm()`` calls consumed, for billing.
     """
 
     score: float | None
     side_info: dict[str, Any]
     error: str | None
+    usage_by_model: dict[str, tuple[int, int]] = field(default_factory=dict)
 
 
-def _scorer_worker(scorer_code: str, candidate: Any, case: Any, invoke: bool, queue: Any) -> None:
+def _scorer_worker(
+    scorer_code: str, candidate: Any, case: Any, invoke: bool, scorer_model: dict[str, Any] | None, queue: Any
+) -> None:
     """Child-side entry point for ``validate_scorer_code`` and ``probe_scorer``.
 
     Args:
@@ -592,10 +599,13 @@ def _scorer_worker(scorer_code: str, candidate: Any, case: Any, invoke: bool, qu
         candidate: The version to score when ``invoke`` is set.
         case: The case to score it on, if any.
         invoke: Whether to call the scorer after loading it.
+        scorer_model: Serialized ``ModelConfig`` bound to the scorer's
+            ``llm()`` helper, or ``None`` when no model was chosen.
         queue: Multiprocessing queue used to return a result dict.
     """
     try:
-        scorer = build_python_scorer(scorer_code)
+        llm = build_scorer_llm(ModelConfig.model_validate(scorer_model)) if scorer_model else None
+        scorer = build_python_scorer(scorer_code, llm=llm)
         if not invoke:
             queue.put({"ok": True, "score": None, "side_info": {}, "error": None})
             return
@@ -603,7 +613,7 @@ def _scorer_worker(scorer_code: str, candidate: Any, case: Any, invoke: bool, qu
             score, side_info = scorer(candidate, case)
         except BaseException as call_exc:
             message = str(call_exc) if isinstance(call_exc, ServiceError) else f"{type(call_exc).__name__}: {call_exc}"
-            queue.put({"ok": True, "score": None, "side_info": {}, "error": message})
+            queue.put({"ok": True, "score": None, "side_info": {}, "error": message, "usage": _llm_usage(llm)})
             return
         queue.put(
             {
@@ -611,10 +621,25 @@ def _scorer_worker(scorer_code: str, candidate: Any, case: Any, invoke: bool, qu
                 "score": score,
                 "side_info": json.loads(json.dumps(side_info, default=str)),
                 "error": None,
+                "usage": _llm_usage(llm),
             }
         )
     except BaseException as exc:  # user code is arbitrary — any failure is reported, not raised
         queue.put(_error_payload(exc))
+
+
+def _llm_usage(llm: Any) -> dict[str, tuple[int, int]]:
+    """Return the per-model token usage behind the scorer's ``llm()`` helper.
+
+    Args:
+        llm: The injected helper, or ``None`` when no model was chosen.
+
+    Returns:
+        ``model → (input_tokens, output_tokens)``; empty without a model.
+    """
+    if llm is None:
+        return {}
+    return dict(usage_by_model_from_history(llm.lm) or {})
 
 
 def validate_scorer_code(code: str, *, timeout_seconds: float = _DEFAULT_PARSE_TIMEOUT_SECONDS) -> None:
@@ -635,7 +660,7 @@ def validate_scorer_code(code: str, *, timeout_seconds: float = _DEFAULT_PARSE_T
     with _dogpile_lock(f"scr:{code}"):
         if _scorer_cache.get(code):
             return
-        result = _run_in_subprocess(_scorer_worker, (code, None, None, False), timeout_seconds=timeout_seconds)
+        result = _run_in_subprocess(_scorer_worker, (code, None, None, False, None), timeout_seconds=timeout_seconds)
         if not result.get("ok"):
             _raise_child_error(result)
         _bounded_cache_put(_scorer_cache, code, True)
@@ -646,6 +671,7 @@ def probe_scorer(
     scorer_code: str,
     candidate: Any,
     case: Any = None,
+    scorer_model: dict[str, Any] | None = None,
     timeout_seconds: float = _DEFAULT_PROBE_TIMEOUT_SECONDS,
 ) -> ScorerProbeResult:
     """Invoke user-authored scorer code on one candidate inside a subprocess.
@@ -658,15 +684,20 @@ def probe_scorer(
         scorer_code: User-authored scorer source.
         candidate: The version to score.
         case: The case to score it on, if any.
+        scorer_model: Serialized ``ModelConfig`` for the scorer's ``llm()``
+            helper, if a model was chosen.
         timeout_seconds: Maximum time to wait for the child to finish.
 
     Returns:
-        The score and side information, or the scorer's error.
+        The score and side information, or the scorer's error, plus what
+        its ``llm()`` calls consumed.
 
     Raises:
         ServiceError: When the scorer fails to load or the child errors out.
     """
-    result = _run_in_subprocess(_scorer_worker, (scorer_code, candidate, case, True), timeout_seconds=timeout_seconds)
+    result = _run_in_subprocess(
+        _scorer_worker, (scorer_code, candidate, case, True, scorer_model), timeout_seconds=timeout_seconds
+    )
     if not result.get("ok"):
         _raise_child_error(result)
     raw_score = result.get("score")
@@ -674,4 +705,5 @@ def probe_scorer(
         score=float(raw_score) if raw_score is not None else None,
         side_info=dict(result.get("side_info") or {}),
         error=result.get("error"),
+        usage_by_model={str(model): (int(pair[0]), int(pair[1])) for model, pair in (result.get("usage") or {}).items()},
     )

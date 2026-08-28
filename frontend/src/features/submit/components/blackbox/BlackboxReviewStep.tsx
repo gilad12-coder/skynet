@@ -36,8 +36,10 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
     parsedCases,
     scorerKind,
     scorerUrl,
+    scorerModel,
     strategyMode,
     selectedEngine,
+    patience,
     maxScorerRuns,
     maxIterations,
     stopAtScore,
@@ -88,7 +90,16 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
         </Row>
         <Row label={msg("submit.blackbox.scorer.title")}>
           {scorerKind === "python" ? (
-            msg("submit.blackbox.scorer.kind.python")
+            scorerModel.name.trim() ? (
+              <span>
+                {msg("submit.blackbox.scorer.kind.python")} ·{" "}
+                <span className="font-mono text-xs" dir="ltr">
+                  {scorerModel.name}
+                </span>
+              </span>
+            ) : (
+              msg("submit.blackbox.scorer.kind.python")
+            )
           ) : (
             <span className="font-mono text-xs" dir="ltr">
               {scorerUrl}
@@ -98,7 +109,9 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
         <Row label={msg("submit.blackbox.review.strategy")}>
           {strategyMode === "auto"
             ? msg("submit.blackbox.strategy.auto")
-            : (selectedEngine?.label ?? msg("submit.blackbox.strategy.single"))}
+            : strategyMode === "plateau"
+              ? formatMsg("submit.blackbox.review.strategy_plateau", { n: patience })
+              : (selectedEngine?.label ?? msg("submit.blackbox.strategy.single"))}
         </Row>
         <Row label={msg("submit.blackbox.review.budget")}>
           <span className="flex flex-wrap gap-1.5">

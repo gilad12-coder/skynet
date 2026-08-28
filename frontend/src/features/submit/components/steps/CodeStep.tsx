@@ -7,7 +7,6 @@ import {
   Robot,
   Brain,
   Check,
-  Repeat,
   Sparkle,
   FlowArrow,
   Lightning,
@@ -29,7 +28,7 @@ import { TERMS } from "@/shared/lib/terms";
 import { Carousel } from "@/features/agent-panel";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
-import type { ArtifactStatus } from "@/shared/hooks/use-code-agent";
+import { ArtifactStatusChip, AuthoringShell } from "./AuthoringShell";
 import { CodeAgentPanel, VersionStepper } from "./CodeAgentPanel";
 import { CodeInterviewPanel } from "./CodeInterviewPanel";
 import { ReactConfigSection } from "./ReactConfigSection";
@@ -118,7 +117,7 @@ const WorkflowCanvas = dynamic(
   { ssr: false, loading: () => <Skeleton height={480} borderRadius={8} /> },
 );
 
-export function CodeStep({ w }: { w: SubmitWizardContext }) {
+export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "start" | "scorer" }) {
   const {
     isWorkflow,
     isReact,
@@ -186,253 +185,197 @@ export function CodeStep({ w }: { w: SubmitWizardContext }) {
     onChangeModule: reopenModulePicker,
   };
 
-  // The step opens on the picker and stays there until a module is picked;
-  // afterwards the chip in the header reopens it to switch. The three views
-  // share one AnimatePresence so picking or switching a module cross-fades
-  // instead of hard-swapping the card.
-  const view = moduleSelectionRequired ? "picker" : isWorkflow ? "workflow" : "code";
+  const sidePanel = interviewActive ? (
+    <CodeInterviewPanel interview={interview} className="absolute inset-0" />
+  ) : (
+    <CodeAgentPanel
+      agent={agent}
+      disabled={!hasContext}
+      disabledReason={disabledReason}
+      className="absolute inset-0"
+    />
+  );
+  const shellProps = {
+    value: codeAssistMode,
+    onChange: setCodeAssistMode,
+    disabledReason,
+    sidePanel,
+  };
+
+  const metricEditor = (
+    <div
+      className={cn(
+        "space-y-2 transition-opacity duration-300",
+        codeAssistMode === "auto" && agent.signatureStatus === "writing" && "opacity-50",
+      )}
+      data-tutorial="metric-editor"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <HelpTip text={tip("code.metric")}>
+            {msg("auto.features.submit.components.steps.codestep.3")}
+          </HelpTip>
+        </Label>
+        <div className="flex items-center gap-2">
+          {codeAssistMode === "auto" && <VersionStepper agent={agent} artifact="metric" />}
+          {codeAssistMode === "auto" && <ArtifactStatusChip status={agent.metricStatus} />}
+        </div>
+      </div>
+      <MobileCodeEditorActions>
+        <CodeEditor
+          value={metricCode}
+          onChange={(v) => {
+            setMetricCode(v);
+            setMetricManuallyEdited(true);
+            setMetricValidation(null);
+          }}
+          height="260px"
+          onRun={runMetricValidation}
+          validationResult={metricValidation}
+          streaming={codeAssistMode === "auto" && agent.metricStatus === "writing"}
+          flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
+        />
+      </MobileCodeEditorActions>
+    </div>
+  );
+
+  // The start part opens on the picker and stays there until a module is
+  // picked; afterwards the chip in the header reopens it to switch. The
+  // scorer part is the metric editor for every module. The views share one
+  // AnimatePresence so picking or switching a module cross-fades instead of
+  // hard-swapping the card.
+  const view =
+    part === "scorer"
+      ? "scorer"
+      : moduleSelectionRequired
+        ? "picker"
+        : isWorkflow
+          ? "workflow"
+          : "code";
 
   let content: React.ReactNode;
   if (view === "picker") {
     content = <ModulePicker current={moduleName} onChoose={chooseModule} />;
   } else if (view === "workflow") {
     content = (
-      <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl shadow-lg">
-        <ModeToggle
-          value={codeAssistMode}
-          onChange={setCodeAssistMode}
-          disabledReason={disabledReason}
-          module={moduleChip}
-        />
-        <div
-          className={cn(
-            "grid grid-cols-1",
-            codeAssistMode === "auto" && "lg:grid-cols-[400px_minmax(0,1fr)]",
-          )}
-        >
-          {codeAssistMode === "auto" && (
-            <div className="relative h-[70svh] min-h-[30rem] max-h-[700px] self-stretch overflow-hidden border-b border-border/40 lg:h-auto lg:min-h-[700px] lg:max-h-none lg:border-b-0 lg:border-e">
-              {interviewActive ? (
-                <CodeInterviewPanel interview={interview} className="absolute inset-0" />
-              ) : (
-                <CodeAgentPanel
-                  agent={agent}
-                  disabled={!hasContext}
-                  disabledReason={disabledReason}
-                  className="absolute inset-0"
-                />
-              )}
-            </div>
-          )}
-          <div className="flex min-w-0 flex-col self-stretch">
-            <div className="border-b border-border/30 px-4 py-3 sm:px-6">
-              <h3 className="inline-flex text-lg font-semibold tracking-tight text-foreground">
-                <HelpTip text={tip("module.workflow")}>{msg("workflow.step.title")}</HelpTip>
-              </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {msg("workflow.step.subtitle")}
-              </p>
-            </div>
-            {workflowSpec && (
-              <WorkflowCanvas
-                spec={workflowSpec}
-                specRevision={workflowRevision}
-                onSpecChange={setWorkflowSpec}
-                pulseNodeId={agentPulseNodeId}
-                dryRun={{
-                  disabledReason: workflowDryRunDisabledReason,
-                  needsModel: workflowDryRunNeedsModel,
-                  pickModel: openDryRunModelPicker,
-                  modelName: modelConfig.name || null,
-                  sampleInputs: workflowSampleInputs,
-                  run: runWorkflowDryRun,
-                }}
-                agentPanel={
-                  codeAssistMode === "auto" ? (
-                    interviewActive ? (
-                      <CodeInterviewPanel interview={interview} />
-                    ) : (
-                      <CodeAgentPanel
-                        agent={agent}
-                        disabled={!hasContext}
-                        disabledReason={disabledReason}
-                      />
-                    )
-                  ) : undefined
-                }
-              />
-            )}
-            <div
-              className="space-y-2 border-t border-border/30 px-4 py-4 sm:px-6"
-              data-tutorial="metric-editor"
-            >
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <HelpTip text={tip("code.metric")}>{msg("workflow.step.metric_title")}</HelpTip>
-              </Label>
-              <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-                {msg("workflow.step.metric_hint")}
-              </p>
-              <MobileCodeEditorActions>
-                <CodeEditor
-                  value={metricCode}
-                  onChange={(v) => {
-                    setMetricCode(v);
-                    setMetricManuallyEdited(true);
-                    setMetricValidation(null);
-                  }}
-                  height="180px"
-                  onRun={runMetricValidation}
-                  validationResult={metricValidation}
-                  streaming={codeAssistMode === "auto" && agent.metricStatus === "writing"}
-                  flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
-                />
-              </MobileCodeEditorActions>
-            </div>
-            {workflowSpec && workflowUsesTools(workflowSpec) && (
-              <div className="border-t border-border/30 px-4 py-4 sm:px-6">
-                <ReactConfigSection w={w} />
-              </div>
-            )}
+      <AuthoringShell
+        {...shellProps}
+        module={moduleChip}
+        title={<HelpTip text={tip("module.workflow")}>{msg("workflow.step.title")}</HelpTip>}
+        description={msg("workflow.step.subtitle")}
+      >
+        {workflowSpec && (
+          <WorkflowCanvas
+            spec={workflowSpec}
+            specRevision={workflowRevision}
+            onSpecChange={setWorkflowSpec}
+            pulseNodeId={agentPulseNodeId}
+            dryRun={{
+              disabledReason: workflowDryRunDisabledReason,
+              needsModel: workflowDryRunNeedsModel,
+              pickModel: openDryRunModelPicker,
+              modelName: modelConfig.name || null,
+              sampleInputs: workflowSampleInputs,
+              run: runWorkflowDryRun,
+            }}
+            agentPanel={
+              codeAssistMode === "auto" ? (
+                interviewActive ? (
+                  <CodeInterviewPanel interview={interview} />
+                ) : (
+                  <CodeAgentPanel
+                    agent={agent}
+                    disabled={!hasContext}
+                    disabledReason={disabledReason}
+                  />
+                )
+              ) : undefined
+            }
+          />
+        )}
+        {workflowSpec && workflowUsesTools(workflowSpec) && (
+          <div className="border-t border-border/30 px-4 py-4 sm:px-6">
+            <ReactConfigSection w={w} />
           </div>
+        )}
+      </AuthoringShell>
+    );
+  } else if (view === "code") {
+    content = (
+      <AuthoringShell
+        {...shellProps}
+        module={moduleChip}
+        title={
+          <HelpTip
+            text={
+              codeAssistMode === "auto"
+                ? formatMsg("auto.features.submit.components.steps.codestep.template.2", {
+                    p1: TERMS.dataset,
+                  })
+                : formatMsg("auto.features.submit.components.steps.codestep.template.3", {
+                    p1: TERMS.signature,
+                    p2: TERMS.metric,
+                  })
+            }
+          >
+            {msg("submit.blackbox.step.start")}
+          </HelpTip>
+        }
+      >
+        <div className="space-y-4 px-4 py-4 sm:px-6">
+          <div
+            className={cn(
+              "space-y-2 transition-opacity duration-300",
+              codeAssistMode === "auto" && agent.metricStatus === "writing" && "opacity-50",
+            )}
+            data-tutorial="signature-editor"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <HelpTip text={tip("code.signature")}>
+                  {msg("auto.features.submit.components.steps.codestep.2")}
+                </HelpTip>
+              </Label>
+              <div className="flex items-center gap-2">
+                {codeAssistMode === "auto" && <VersionStepper agent={agent} artifact="signature" />}
+                {codeAssistMode === "auto" && <ArtifactStatusChip status={agent.signatureStatus} />}
+              </div>
+            </div>
+            <MobileCodeEditorActions>
+              <CodeEditor
+                value={signatureCode}
+                onChange={(v) => {
+                  setSignatureCode(v);
+                  setSignatureManuallyEdited(true);
+                  setSignatureValidation(null);
+                }}
+                height="260px"
+                onRun={runSignatureValidation}
+                validationResult={signatureValidation}
+                streaming={codeAssistMode === "auto" && agent.signatureStatus === "writing"}
+                flashLines={codeAssistMode === "auto" ? agent.signatureFlashLines : undefined}
+              />
+            </MobileCodeEditorActions>
+          </div>
+          {isReact && (
+            <>
+              <Separator />
+              <ReactConfigSection w={w} />
+            </>
+          )}
         </div>
-      </div>
+      </AuthoringShell>
     );
   } else {
     content = (
-      <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 backdrop-blur-xl shadow-lg">
-        <ModeToggle
-          value={codeAssistMode}
-          onChange={setCodeAssistMode}
-          disabledReason={disabledReason}
-          module={moduleChip}
-        />
-        <div
-          className={cn(
-            "grid grid-cols-1",
-            codeAssistMode === "auto" && "lg:grid-cols-[400px_minmax(0,1fr)]",
-          )}
-        >
-          {codeAssistMode === "auto" && (
-            <div className="relative h-[70svh] min-h-[30rem] max-h-[700px] self-stretch overflow-hidden border-b border-border/40 lg:h-auto lg:min-h-[700px] lg:max-h-none lg:border-b-0 lg:border-e">
-              {interviewActive ? (
-                <CodeInterviewPanel interview={interview} className="absolute inset-0" />
-              ) : (
-                <CodeAgentPanel
-                  agent={agent}
-                  disabled={!hasContext}
-                  disabledReason={disabledReason}
-                  className="absolute inset-0"
-                />
-              )}
-            </div>
-          )}
-          <div className="flex min-w-0 flex-col self-stretch">
-            <div className="shrink-0 border-b border-border/30 px-4 py-3 sm:px-6">
-              <h3 className="inline-flex text-lg font-semibold tracking-tight text-foreground">
-                <HelpTip
-                  text={
-                    codeAssistMode === "auto"
-                      ? formatMsg("auto.features.submit.components.steps.codestep.template.2", {
-                          p1: TERMS.dataset,
-                        })
-                      : formatMsg("auto.features.submit.components.steps.codestep.template.3", {
-                          p1: TERMS.signature,
-                          p2: TERMS.metric,
-                        })
-                  }
-                >
-                  {msg("auto.features.submit.components.steps.codestep.1")}
-                </HelpTip>
-              </h3>
-            </div>
-            <div className="space-y-4 px-4 py-4 sm:px-6">
-              <div
-                className={cn(
-                  "space-y-2 transition-opacity duration-300",
-                  codeAssistMode === "auto" && agent.metricStatus === "writing" && "opacity-50",
-                )}
-                data-tutorial="signature-editor"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    <HelpTip text={tip("code.signature")}>
-                      {msg("auto.features.submit.components.steps.codestep.2")}
-                    </HelpTip>
-                  </Label>
-                  <div className="flex items-center gap-2">
-                    {codeAssistMode === "auto" && (
-                      <VersionStepper agent={agent} artifact="signature" />
-                    )}
-                    {codeAssistMode === "auto" && (
-                      <ArtifactStatusChip status={agent.signatureStatus} />
-                    )}
-                  </div>
-                </div>
-                <MobileCodeEditorActions>
-                  <CodeEditor
-                    value={signatureCode}
-                    onChange={(v) => {
-                      setSignatureCode(v);
-                      setSignatureManuallyEdited(true);
-                      setSignatureValidation(null);
-                    }}
-                    height="260px"
-                    onRun={runSignatureValidation}
-                    validationResult={signatureValidation}
-                    streaming={codeAssistMode === "auto" && agent.signatureStatus === "writing"}
-                    flashLines={codeAssistMode === "auto" ? agent.signatureFlashLines : undefined}
-                  />
-                </MobileCodeEditorActions>
-              </div>
-              <Separator />
-              <div
-                className={cn(
-                  "space-y-2 transition-opacity duration-300",
-                  codeAssistMode === "auto" && agent.signatureStatus === "writing" && "opacity-50",
-                )}
-                data-tutorial="metric-editor"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    <HelpTip text={tip("code.metric")}>
-                      {msg("auto.features.submit.components.steps.codestep.3")}
-                    </HelpTip>
-                  </Label>
-                  <div className="flex items-center gap-2">
-                    {codeAssistMode === "auto" && (
-                      <VersionStepper agent={agent} artifact="metric" />
-                    )}
-                    {codeAssistMode === "auto" && (
-                      <ArtifactStatusChip status={agent.metricStatus} />
-                    )}
-                  </div>
-                </div>
-                <MobileCodeEditorActions>
-                  <CodeEditor
-                    value={metricCode}
-                    onChange={(v) => {
-                      setMetricCode(v);
-                      setMetricManuallyEdited(true);
-                      setMetricValidation(null);
-                    }}
-                    height="260px"
-                    onRun={runMetricValidation}
-                    validationResult={metricValidation}
-                    streaming={codeAssistMode === "auto" && agent.metricStatus === "writing"}
-                    flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
-                  />
-                </MobileCodeEditorActions>
-              </div>
-              {isReact && (
-                <>
-                  <Separator />
-                  <ReactConfigSection w={w} />
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+      <AuthoringShell
+        {...shellProps}
+        module={null}
+        title={<HelpTip text={tip("code.metric")}>{msg("submit.blackbox.step.scorer")}</HelpTip>}
+        description={isWorkflow ? msg("workflow.step.metric_hint") : undefined}
+      >
+        <div className="space-y-4 px-4 py-4 sm:px-6">{metricEditor}</div>
+      </AuthoringShell>
     );
   }
 
@@ -933,98 +876,5 @@ function WorkflowBanner() {
       <GBox x={196} y={33} w={30} h={22} />
       <GBar x={203} y={42} w={16} />
     </BannerFrame>
-  );
-}
-
-function ArtifactStatusChip({ status }: { status: ArtifactStatus }) {
-  if (status === "idle") return null;
-  if (status === "waiting") {
-    return (
-      <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-muted-foreground/70">
-        {msg("auto.features.submit.components.steps.codestep.4")}
-        <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-      </span>
-    );
-  }
-  if (status === "writing") {
-    return (
-      <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#3D2E22]">
-        {msg("auto.features.submit.components.steps.codestep.5")}
-        <span className="size-1.5 rounded-full bg-[#3D2E22] animate-pulse" />
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-[#5A7247]">
-      {msg("auto.features.submit.components.steps.codestep.6")}
-      <Check className="size-3" />
-    </span>
-  );
-}
-
-interface ModeToggleProps {
-  value: "auto" | "manual";
-  onChange: (mode: "auto" | "manual") => void;
-  disabledReason?: string;
-  // Chip showing the chosen module with a click-to-switch affordance.
-  module?: { label: string; onChangeModule: () => void } | null;
-}
-
-function ModeToggle({ value, onChange, disabledReason, module }: ModeToggleProps) {
-  const autoDisabled = !!disabledReason && value !== "auto";
-
-  return (
-    <div className="flex flex-col items-stretch gap-2.5 border-b border-border/40 bg-[#FAF8F5] px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-      <div className="flex min-w-0 items-center gap-2.5 sm:w-auto">
-        {module && (
-          <button
-            type="button"
-            onClick={module.onChangeModule}
-            data-tutorial="module-selector"
-            className="group inline-flex min-h-[44px] w-full min-w-0 shrink-0 cursor-pointer items-center justify-between gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1 text-xs shadow-xs transition-colors hover:border-[#C8A882] sm:w-auto lg:min-h-0"
-          >
-            <span className="font-semibold text-foreground">{module.label}</span>
-            <span aria-hidden className="h-3 w-px bg-border/80" />
-            <span className="flex items-center gap-1 font-medium text-muted-foreground transition-colors group-hover:text-foreground">
-              {msg("submit.module.change")}
-              <Repeat className="size-3" />
-            </span>
-          </button>
-        )}
-      </div>
-
-      <div className="relative inline-grid w-full [grid-template-columns:repeat(2,minmax(0,1fr))] gap-1 rounded-lg bg-muted p-1 sm:w-auto">
-        <div
-          aria-hidden
-          className="absolute top-1 bottom-1 w-[calc(50%-6px)] rounded-md bg-background shadow-sm transition-[inset-inline-start] duration-150 ease-out pointer-events-none"
-          style={{ insetInlineStart: value === "auto" ? 4 : "calc(50% + 2px)" }}
-        />
-        <button
-          type="button"
-          onClick={() => onChange("auto")}
-          disabled={autoDisabled}
-          title={autoDisabled ? disabledReason : undefined}
-          aria-pressed={value === "auto"}
-          className={cn(
-            "relative z-[1] min-h-[44px] cursor-pointer rounded-md px-3 py-1 text-center text-xs font-medium leading-none transition-colors sm:px-4 lg:min-h-0",
-            value === "auto" ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-            autoDisabled && "opacity-40 cursor-not-allowed hover:text-muted-foreground",
-          )}
-        >
-          {msg("auto.features.submit.components.steps.codestep.7")}
-        </button>
-        <button
-          type="button"
-          onClick={() => onChange("manual")}
-          aria-pressed={value === "manual"}
-          className={cn(
-            "relative z-[1] min-h-[44px] cursor-pointer rounded-md px-3 py-1 text-center text-xs font-medium leading-none transition-colors sm:px-4 lg:min-h-0",
-            value === "manual" ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {msg("auto.features.submit.components.steps.codestep.8")}
-        </button>
-      </div>
-    </div>
   );
 }

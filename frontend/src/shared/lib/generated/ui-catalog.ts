@@ -1968,11 +1968,13 @@ export type MessageKey =
   | "optimization.blackbox.lane.budget"
   | "optimization.blackbox.lane.phase_continue"
   | "optimization.blackbox.lane.phase_explore"
+  | "optimization.blackbox.lane.phase_relay"
   | "optimization.blackbox.lane.phase_single"
   | "optimization.blackbox.lane.runs"
   | "optimization.blackbox.lane.status_budget_exhausted"
   | "optimization.blackbox.lane.status_completed"
   | "optimization.blackbox.lane.status_failed"
+  | "optimization.blackbox.lane.status_plateaued"
   | "optimization.blackbox.lane.status_running"
   | "optimization.blackbox.lane.status_unavailable"
   | "optimization.blackbox.lane.title"
@@ -2487,6 +2489,17 @@ export type MessageKey =
   | "submit.basics.privacy.private_desc"
   | "submit.basics.privacy.public"
   | "submit.basics.privacy.public_desc"
+  | "submit.blackbox.agent.empty_hint"
+  | "submit.blackbox.agent.fix_scorer"
+  | "submit.blackbox.agent.objective_required"
+  | "submit.blackbox.agent.parts_unsupported"
+  | "submit.blackbox.agent.reading"
+  | "submit.blackbox.agent.seed_done"
+  | "submit.blackbox.agent.seed_request"
+  | "submit.blackbox.agent.tool.scorer"
+  | "submit.blackbox.agent.tool.seed"
+  | "submit.blackbox.agent.writing_scorer"
+  | "submit.blackbox.agent.writing_seed"
   | "submit.blackbox.budget.max_iterations"
   | "submit.blackbox.budget.max_runs"
   | "submit.blackbox.budget.stop_at"
@@ -2517,16 +2530,29 @@ export type MessageKey =
   | "submit.blackbox.review.start_parts"
   | "submit.blackbox.review.start_text"
   | "submit.blackbox.review.strategy"
+  | "submit.blackbox.review.strategy_plateau"
   | "submit.blackbox.scorer.code_hint"
+  | "submit.blackbox.scorer.code_label"
   | "submit.blackbox.scorer.desc"
   | "submit.blackbox.scorer.dry_run_failed"
   | "submit.blackbox.scorer.kind.python"
   | "submit.blackbox.scorer.kind.python_desc"
   | "submit.blackbox.scorer.kind.remote"
   | "submit.blackbox.scorer.kind.remote_desc"
+  | "submit.blackbox.scorer.model_explainer"
+  | "submit.blackbox.scorer.model_label"
+  | "submit.blackbox.scorer.preset.contains"
+  | "submit.blackbox.scorer.preset.exact"
+  | "submit.blackbox.scorer.preset.json_field"
+  | "submit.blackbox.scorer.preset.length"
+  | "submit.blackbox.scorer.preset.llm_judge"
+  | "submit.blackbox.scorer.preset.numeric"
+  | "submit.blackbox.scorer.preset_label"
   | "submit.blackbox.scorer.remote_hint"
   | "submit.blackbox.scorer.result_error"
   | "submit.blackbox.scorer.result_ok"
+  | "submit.blackbox.scorer.result_usage"
+  | "submit.blackbox.scorer.result_usage_item"
   | "submit.blackbox.scorer.secret_label"
   | "submit.blackbox.scorer.test"
   | "submit.blackbox.scorer.testing"
@@ -2550,7 +2576,10 @@ export type MessageKey =
   | "submit.blackbox.start.part_value"
   | "submit.blackbox.start.remove_part"
   | "submit.blackbox.start.run_command"
+  | "submit.blackbox.start.seed_hint_auto"
   | "submit.blackbox.start.seed_label"
+  | "submit.blackbox.start.seed_label_code"
+  | "submit.blackbox.start.seed_label_prompt"
   | "submit.blackbox.start.seed_mode.none"
   | "submit.blackbox.start.seed_mode.none_desc"
   | "submit.blackbox.start.seed_mode.parts"
@@ -2558,6 +2587,8 @@ export type MessageKey =
   | "submit.blackbox.start.seed_mode.text"
   | "submit.blackbox.start.seed_mode.text_desc"
   | "submit.blackbox.start.seed_placeholder"
+  | "submit.blackbox.start.seed_placeholder_code"
+  | "submit.blackbox.start.seed_placeholder_prompt"
   | "submit.blackbox.start.setup_command"
   | "submit.blackbox.start.target.agent"
   | "submit.blackbox.start.target.agent_desc"
@@ -2572,6 +2603,10 @@ export type MessageKey =
   | "submit.blackbox.step.start"
   | "submit.blackbox.strategy.auto"
   | "submit.blackbox.strategy.auto_desc"
+  | "submit.blackbox.strategy.patience_hint"
+  | "submit.blackbox.strategy.patience_label"
+  | "submit.blackbox.strategy.plateau"
+  | "submit.blackbox.strategy.plateau_desc"
   | "submit.blackbox.strategy.single"
   | "submit.blackbox.strategy.single_desc"
   | "submit.blackbox.validation.agent_model_required"
@@ -2584,6 +2619,7 @@ export type MessageKey =
   | "submit.blackbox.validation.reflection_model_required"
   | "submit.blackbox.validation.run_command_required"
   | "submit.blackbox.validation.scorer_code_required"
+  | "submit.blackbox.validation.scorer_model_required"
   | "submit.blackbox.validation.scorer_url_required"
   | "submit.blackbox.validation.seed_required"
   | "submit.blackbox.validation.split_sum"
@@ -2670,8 +2706,12 @@ export type MessageKey =
   | "submit.react.tools_prev"
   | "submit.recipe.anything.desc"
   | "submit.recipe.anything.title"
+  | "submit.recipe.code.desc"
+  | "submit.recipe.code.title"
   | "submit.recipe.program.desc"
   | "submit.recipe.program.title"
+  | "submit.recipe.prompt.desc"
+  | "submit.recipe.prompt.title"
   | "submit.recipe.title"
   | "submit.split.label_test"
   | "submit.split.label_train"
@@ -4204,7 +4244,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "auto.features.submit.components.steps.paramsstep.14": "מקסימום סבבי הערכה",
   "auto.features.submit.components.steps.paramsstep.15": "מיזוג מועמדים",
   "auto.features.submit.components.steps.paramsstep.16": "עצירה כשהציון באימות מגיע ל־",
-  "auto.features.submit.components.steps.paramsstep.2": "חלוקת הדאטאסט והגדרות החיפוש",
+  "auto.features.submit.components.steps.paramsstep.2": "הגדרות החיפוש",
   "auto.features.submit.components.steps.paramsstep.4": "חלוקת ",
   "auto.features.submit.components.steps.paramsstep.5": "סכום: ",
   "auto.features.submit.components.steps.paramsstep.6": "אימון",
@@ -5144,11 +5184,13 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "optimization.blackbox.lane.budget": "תקציב {n}",
   "optimization.blackbox.lane.phase_continue": "המשך",
   "optimization.blackbox.lane.phase_explore": "חקירה",
+  "optimization.blackbox.lane.phase_relay": "מסירה",
   "optimization.blackbox.lane.phase_single": "יחיד",
   "optimization.blackbox.lane.runs": "{n} הרצות",
   "optimization.blackbox.lane.status_budget_exhausted": "התקציב נוצל",
   "optimization.blackbox.lane.status_completed": "הושלם",
   "optimization.blackbox.lane.status_failed": "נכשל",
+  "optimization.blackbox.lane.status_plateaued": "נעצר בקיפאון",
   "optimization.blackbox.lane.status_running": "רץ",
   "optimization.blackbox.lane.status_unavailable": "לא זמין",
   "optimization.blackbox.lane.title": "מסלולי מנועים",
@@ -5663,6 +5705,17 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.basics.privacy.private_desc": "לא מופיע ב{term.exploreTitle}",
   "submit.basics.privacy.public": "ציבורי",
   "submit.basics.privacy.public_desc": "מופיע ב{term.exploreTitle}",
+  "submit.blackbox.agent.empty_hint": "תארו את המטרה והסוכן ינסח נקודת התחלה ומדד ב-Python. אפשר לאשר כפי שהם, או לבקש שינויים.",
+  "submit.blackbox.agent.fix_scorer": "אירעה שגיאה במדד. תקנו אותה.",
+  "submit.blackbox.agent.objective_required": "הוסיפו מטרה בשלב הפרטים הבסיסיים כדי להפעיל את הסוכן.",
+  "submit.blackbox.agent.parts_unsupported": "הסוכן מנסח טקסט יחיד; החליפו את נקודת ההתחלה ל״טקסט״ כדי להשתמש בו.",
+  "submit.blackbox.agent.reading": "הסוכן קורא את המטרה שלך…",
+  "submit.blackbox.agent.seed_done": "ניסחתי נקודת התחלה ומדד על סמך המטרה שלך.",
+  "submit.blackbox.agent.seed_request": "נסחו נקודת התחלה ומדד עבור המטרה שלי.",
+  "submit.blackbox.agent.tool.scorer": "מדד",
+  "submit.blackbox.agent.tool.seed": "נקודת התחלה",
+  "submit.blackbox.agent.writing_scorer": "כותב את המדד…",
+  "submit.blackbox.agent.writing_seed": "כותב את נקודת ההתחלה…",
   "submit.blackbox.budget.max_iterations": "מקסימום איטרציות (לא חובה)",
   "submit.blackbox.budget.max_runs": "מקסימום הרצות מדד",
   "submit.blackbox.budget.stop_at": "עצירה בציון (לא חובה)",
@@ -5693,16 +5746,29 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.blackbox.review.start_parts": "{n} חלקים",
   "submit.blackbox.review.start_text": "טקסט, {chars} תווים",
   "submit.blackbox.review.strategy": "אסטרטגיה",
+  "submit.blackbox.review.strategy_plateau": "מסירה בקיפאון · החלפה אחרי {n} ריצות ללא שיפור",
   "submit.blackbox.scorer.code_hint": "מחזירים מספר, או אובייקט עם שדה score ומידע נוסף. הריצו בדיקה לפני שממשיכים.",
+  "submit.blackbox.scorer.code_label": "קוד המדד",
   "submit.blackbox.scorer.desc": "פונקציה שמחזירה מספר — גבוה יותר עדיף. זה מה שהאופטימייזר ממקסם.",
   "submit.blackbox.scorer.dry_run_failed": "בדיקת המדד נכשלה",
   "submit.blackbox.scorer.kind.python": "קוד Python",
   "submit.blackbox.scorer.kind.python_desc": "score(candidate, case=None) שרץ בצד השרת",
   "submit.blackbox.scorer.kind.remote": "נקודת קצה",
   "submit.blackbox.scorer.kind.remote_desc": "POST של JSON לכתובת שלכם",
+  "submit.blackbox.scorer.model_explainer": "המדד קורא ל-llm(prompt, input) עם המודל הזה כדי להריץ כל מועמד על מקרה לפני מתן ציון.",
+  "submit.blackbox.scorer.model_label": "המודל שמריץ את הפרומפט",
+  "submit.blackbox.scorer.preset.contains": "מכיל",
+  "submit.blackbox.scorer.preset.exact": "התאמה מדויקת",
+  "submit.blackbox.scorer.preset.json_field": "שדה JSON",
+  "submit.blackbox.scorer.preset.length": "אורך",
+  "submit.blackbox.scorer.preset.llm_judge": "שופט LLM",
+  "submit.blackbox.scorer.preset.numeric": "סטייה מספרית",
+  "submit.blackbox.scorer.preset_label": "התחלה מתבנית",
   "submit.blackbox.scorer.remote_hint": "נשלח POST עם candidate ו-case; הכתובת מחזירה JSON עם score.",
   "submit.blackbox.scorer.result_error": "המדד נכשל",
   "submit.blackbox.scorer.result_ok": "המדד החזיר {score} תוך {ms} מ\"ש",
+  "submit.blackbox.scorer.result_usage": "שימוש במודלים: {usage}",
+  "submit.blackbox.scorer.result_usage_item": "{model}: {tokens} טוקנים",
   "submit.blackbox.scorer.secret_label": "סוד (לא חובה)",
   "submit.blackbox.scorer.test": "בדיקת המדד",
   "submit.blackbox.scorer.testing": "בודק…",
@@ -5726,7 +5792,10 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.blackbox.start.part_value": "תוכן החלק",
   "submit.blackbox.start.remove_part": "הסרת חלק",
   "submit.blackbox.start.run_command": "פקודת הרצה",
+  "submit.blackbox.start.seed_hint_auto": "אפשר להשאיר ריק — הסוכן ינסח נקודת התחלה אחרי שהמקרים יוזנו.",
   "submit.blackbox.start.seed_label": "מועמד התחלתי",
+  "submit.blackbox.start.seed_label_code": "קוד התחלתי",
+  "submit.blackbox.start.seed_label_prompt": "פרומפט התחלתי",
   "submit.blackbox.start.seed_mode.none": "מאפס",
   "submit.blackbox.start.seed_mode.none_desc": "המערכת תיצור נקודת התחלה מהמטרה",
   "submit.blackbox.start.seed_mode.parts": "חלקים",
@@ -5734,6 +5803,8 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.blackbox.start.seed_mode.text": "טקסט",
   "submit.blackbox.start.seed_mode.text_desc": "פרומפט, מסמך או כל טקסט אחר",
   "submit.blackbox.start.seed_placeholder": "הדביקו כאן את הטקסט שרוצים לשפר…",
+  "submit.blackbox.start.seed_placeholder_code": "הדביקו כאן את הקוד שרוצים לשפר…",
+  "submit.blackbox.start.seed_placeholder_prompt": "הדביקו כאן את הפרומפט שרוצים לשפר…",
   "submit.blackbox.start.setup_command": "פקודת הכנה",
   "submit.blackbox.start.target.agent": "סוכן",
   "submit.blackbox.start.target.agent_desc": "הטקסט מריץ סוכן בסביבת sandbox והמדד מעריך את התוצר",
@@ -5748,6 +5819,10 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.blackbox.step.start": "נקודת התחלה",
   "submit.blackbox.strategy.auto": "אוטומטי",
   "submit.blackbox.strategy.auto_desc": "כל המנועים מנסים, המוביל ממשיך",
+  "submit.blackbox.strategy.patience_hint": "מחליפים מנוע אחרי מספר זה של ריצות מדד ללא שיפור בציון.",
+  "submit.blackbox.strategy.patience_label": "סבלנות (ריצות ללא שיפור)",
+  "submit.blackbox.strategy.plateau": "מסירה בקיפאון",
+  "submit.blackbox.strategy.plateau_desc": "מנוע רץ עד שהוא נתקע, ואז מוסר לבא בתור",
   "submit.blackbox.strategy.single": "מנוע אחד",
   "submit.blackbox.strategy.single_desc": "כל התקציב למנוע שבוחרים",
   "submit.blackbox.validation.agent_model_required": "בחרו מודל לסוכן",
@@ -5760,6 +5835,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.blackbox.validation.reflection_model_required": "בחרו מודל רפלקציה",
   "submit.blackbox.validation.run_command_required": "מסגרת מותאמת דורשת פקודת הרצה",
   "submit.blackbox.validation.scorer_code_required": "כתבו את קוד המדד",
+  "submit.blackbox.validation.scorer_model_required": "המדד קורא ל-llm() — בחרו מודל שמריץ את הפרומפט",
   "submit.blackbox.validation.scorer_url_required": "הזינו כתובת למדד",
   "submit.blackbox.validation.seed_required": "הוסיפו נקודת התחלה או בחרו להתחיל מאפס",
   "submit.blackbox.validation.split_sum": "החלוקה צריכה להסתכם ב-100%",
@@ -5846,8 +5922,12 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.react.tools_prev": "כלים קודמים",
   "submit.recipe.anything.desc": "טקסט, פרומפט או הגדרות סוכן — מביאים נקודת התחלה ופונקציית ציון, והמערכת משפרת.",
   "submit.recipe.anything.title": "כל דבר",
+  "submit.recipe.code.desc": "כל סקריפט או הגדרה — מביאים נקודת התחלה ופונקציית ציון ב-Python, והמערכת משפרת.",
+  "submit.recipe.code.title": "קוד",
   "submit.recipe.program.desc": "חתימה, מודול ומדד — אופטימיזציה של פרומפטים ודוגמאות לתוכנית.",
   "submit.recipe.program.title": "תוכנית DSPy",
+  "submit.recipe.prompt.desc": "פרומפט מערכת יחיד — אופטימיזציה של ההנחיות שנותנים למודל.",
+  "submit.recipe.prompt.title": "פרומפט",
   "submit.recipe.title": "מה רוצים לשפר?",
   "submit.split.label_test": "{term.splitTest}",
   "submit.split.label_train": "{term.splitTrain}",
@@ -13495,7 +13575,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "auto.features.submit.components.steps.paramsstep.14": "Max evaluation rounds",
   "auto.features.submit.components.steps.paramsstep.15": "Candidate merging",
   "auto.features.submit.components.steps.paramsstep.16": "Stop when validation score reaches",
-  "auto.features.submit.components.steps.paramsstep.2": "Dataset split and search settings",
+  "auto.features.submit.components.steps.paramsstep.2": "Search settings",
   "auto.features.submit.components.steps.paramsstep.4": "Split of the ",
   "auto.features.submit.components.steps.paramsstep.5": "Sum: ",
   "auto.features.submit.components.steps.paramsstep.6": "Train",
@@ -14435,11 +14515,13 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "optimization.blackbox.lane.budget": "budget {n}",
   "optimization.blackbox.lane.phase_continue": "Continue",
   "optimization.blackbox.lane.phase_explore": "Explore",
+  "optimization.blackbox.lane.phase_relay": "Relay",
   "optimization.blackbox.lane.phase_single": "Single",
   "optimization.blackbox.lane.runs": "{n} runs",
   "optimization.blackbox.lane.status_budget_exhausted": "Budget exhausted",
   "optimization.blackbox.lane.status_completed": "Completed",
   "optimization.blackbox.lane.status_failed": "Failed",
+  "optimization.blackbox.lane.status_plateaued": "Plateaued",
   "optimization.blackbox.lane.status_running": "Running",
   "optimization.blackbox.lane.status_unavailable": "Unavailable",
   "optimization.blackbox.lane.title": "Engine lanes",
@@ -14954,6 +15036,17 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.basics.privacy.private_desc": "Doesn't appear in public search",
   "submit.basics.privacy.public": "Public",
   "submit.basics.privacy.public_desc": "Appears in public search",
+  "submit.blackbox.agent.empty_hint": "Describe your objective and the agent will draft a starting point and a Python scorer. You can accept them as is, or request changes.",
+  "submit.blackbox.agent.fix_scorer": "The scorer hit an error. Fix it.",
+  "submit.blackbox.agent.objective_required": "Add an objective on the Basics step to turn the agent on.",
+  "submit.blackbox.agent.parts_unsupported": "The agent drafts a single text; switch the starting point to Text to use it.",
+  "submit.blackbox.agent.reading": "The agent is reading your objective…",
+  "submit.blackbox.agent.seed_done": "I drafted a starting point and a scorer from your objective.",
+  "submit.blackbox.agent.seed_request": "Draft a starting point and a scorer for my objective.",
+  "submit.blackbox.agent.tool.scorer": "Scorer",
+  "submit.blackbox.agent.tool.seed": "Starting point",
+  "submit.blackbox.agent.writing_scorer": "Writing the scorer…",
+  "submit.blackbox.agent.writing_seed": "Writing the starting point…",
   "submit.blackbox.budget.max_iterations": "Max iterations (optional)",
   "submit.blackbox.budget.max_runs": "Max scorer runs",
   "submit.blackbox.budget.stop_at": "Stop at score (optional)",
@@ -14984,16 +15077,29 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.blackbox.review.start_parts": "{n} parts",
   "submit.blackbox.review.start_text": "Text, {chars} characters",
   "submit.blackbox.review.strategy": "Strategy",
+  "submit.blackbox.review.strategy_plateau": "Plateau relay · switch after {n} stalls",
   "submit.blackbox.scorer.code_hint": "Return a number, or an object with a `score` field plus extra info. Run a test before continuing.",
+  "submit.blackbox.scorer.code_label": "Scorer code",
   "submit.blackbox.scorer.desc": "A function that returns a number — higher is better. This is what the optimizer maximizes.",
   "submit.blackbox.scorer.dry_run_failed": "Scorer test failed",
   "submit.blackbox.scorer.kind.python": "Python code",
   "submit.blackbox.scorer.kind.python_desc": "score(candidate, case=None) run server-side",
   "submit.blackbox.scorer.kind.remote": "Remote endpoint",
   "submit.blackbox.scorer.kind.remote_desc": "POST JSON to your own URL",
+  "submit.blackbox.scorer.model_explainer": "The scorer calls llm(prompt, input) with this model to run each candidate on a case before scoring it.",
+  "submit.blackbox.scorer.model_label": "Model that runs your prompt",
+  "submit.blackbox.scorer.preset.contains": "Contains",
+  "submit.blackbox.scorer.preset.exact": "Exact match",
+  "submit.blackbox.scorer.preset.json_field": "JSON field",
+  "submit.blackbox.scorer.preset.length": "Length",
+  "submit.blackbox.scorer.preset.llm_judge": "LLM judge",
+  "submit.blackbox.scorer.preset.numeric": "Numeric tolerance",
+  "submit.blackbox.scorer.preset_label": "Start from a template",
   "submit.blackbox.scorer.remote_hint": "We POST candidate and case; the endpoint returns JSON with a score.",
   "submit.blackbox.scorer.result_error": "Scorer failed",
   "submit.blackbox.scorer.result_ok": "Scorer returned {score} in {ms} ms",
+  "submit.blackbox.scorer.result_usage": "Model usage: {usage}",
+  "submit.blackbox.scorer.result_usage_item": "{model}: {tokens} tokens",
   "submit.blackbox.scorer.secret_label": "Secret (optional)",
   "submit.blackbox.scorer.test": "Test scorer",
   "submit.blackbox.scorer.testing": "Testing…",
@@ -15017,7 +15123,10 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.blackbox.start.part_value": "Part content",
   "submit.blackbox.start.remove_part": "Remove part",
   "submit.blackbox.start.run_command": "Run command",
+  "submit.blackbox.start.seed_hint_auto": "Leave this blank and the agent drafts one once your cases are in.",
   "submit.blackbox.start.seed_label": "Starting candidate",
+  "submit.blackbox.start.seed_label_code": "Starting code",
+  "submit.blackbox.start.seed_label_prompt": "Starting prompt",
   "submit.blackbox.start.seed_mode.none": "From scratch",
   "submit.blackbox.start.seed_mode.none_desc": "We draft a starting point from the objective",
   "submit.blackbox.start.seed_mode.parts": "Parts",
@@ -15025,6 +15134,8 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.blackbox.start.seed_mode.text": "Text",
   "submit.blackbox.start.seed_mode.text_desc": "A prompt, document or any other text",
   "submit.blackbox.start.seed_placeholder": "Paste the text you want to optimize…",
+  "submit.blackbox.start.seed_placeholder_code": "Paste the code you want to improve…",
+  "submit.blackbox.start.seed_placeholder_prompt": "Paste the prompt you want to improve…",
   "submit.blackbox.start.setup_command": "Setup command",
   "submit.blackbox.start.target.agent": "Agent",
   "submit.blackbox.start.target.agent_desc": "The text drives an agent in a sandbox and the scorer grades the output",
@@ -15039,6 +15150,10 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.blackbox.step.start": "Starting point",
   "submit.blackbox.strategy.auto": "Auto",
   "submit.blackbox.strategy.auto_desc": "Every engine explores, the leader continues",
+  "submit.blackbox.strategy.patience_hint": "Switch engines after this many scorer runs with no better score.",
+  "submit.blackbox.strategy.patience_label": "Patience (runs without improvement)",
+  "submit.blackbox.strategy.plateau": "Plateau relay",
+  "submit.blackbox.strategy.plateau_desc": "One engine runs until it stalls, then hands off to the next",
   "submit.blackbox.strategy.single": "Single engine",
   "submit.blackbox.strategy.single_desc": "The whole budget goes to one engine",
   "submit.blackbox.validation.agent_model_required": "Choose a model for the agent",
@@ -15051,6 +15166,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.blackbox.validation.reflection_model_required": "Choose a reflection model",
   "submit.blackbox.validation.run_command_required": "A custom harness needs a run command",
   "submit.blackbox.validation.scorer_code_required": "Write the scorer code",
+  "submit.blackbox.validation.scorer_model_required": "Your scorer calls llm() — choose a model that runs your prompt",
   "submit.blackbox.validation.scorer_url_required": "Enter the scorer URL",
   "submit.blackbox.validation.seed_required": "Add a starting point or choose to start from scratch",
   "submit.blackbox.validation.split_sum": "The split must add up to 100%",
@@ -15137,8 +15253,12 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.react.tools_prev": "Previous tools",
   "submit.recipe.anything.desc": "Any text, prompt or agent setup — bring a starting point and a scoring function, we improve it.",
   "submit.recipe.anything.title": "Anything",
+  "submit.recipe.code.desc": "Any script or config — bring a starting point and a Python scorer, and the system improves it.",
+  "submit.recipe.code.title": "Code",
   "submit.recipe.program.desc": "Signature, module and metric — optimize a program's prompts and demos.",
   "submit.recipe.program.title": "DSPy program",
+  "submit.recipe.prompt.desc": "A single system prompt — optimize the instructions you give a model.",
+  "submit.recipe.prompt.title": "Prompt",
   "submit.recipe.title": "What do you want to optimize?",
   "submit.split.label_test": "Test",
   "submit.split.label_train": "Train",

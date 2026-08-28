@@ -1,19 +1,29 @@
 "use client";
 
-import { Cube, RocketLaunch } from "@/shared/ui/icons";
+import type { ComponentType } from "react";
+import { ChatText, Code, Cube, RocketLaunch } from "@/shared/ui/icons";
 import { cn } from "@/shared/lib/utils";
 import { msg } from "@/shared/lib/messages";
 
-export type Recipe = "program" | "anything";
+export type Recipe = "prompt" | "program" | "code" | "anything";
+
+const RECIPE_IDS: Recipe[] = ["prompt", "program", "code", "anything"];
 
 export function parseRecipe(value: string | null): Recipe {
-  return value === "anything" ? "anything" : "program";
+  return RECIPE_IDS.includes(value as Recipe) ? (value as Recipe) : "program";
 }
 
-const RECIPES = [
+/** Recipes other than the DSPy "program" flow all run on the black-box spine. */
+export function isBlackboxRecipe(recipe: Recipe): recipe is Exclude<Recipe, "program"> {
+  return recipe !== "program";
+}
+
+const RECIPES: Array<{ id: Recipe; Icon: ComponentType<{ className?: string }> }> = [
+  { id: "prompt", Icon: ChatText },
   { id: "program", Icon: RocketLaunch },
+  { id: "code", Icon: Code },
   { id: "anything", Icon: Cube },
-] as const;
+];
 
 /** Entry choice above the first wizard step: the DSPy program flow or the black-box one. */
 export function RecipeCards({ value, onChange }: { value: Recipe; onChange: (r: Recipe) => void }) {
@@ -45,16 +55,10 @@ export function RecipeCards({ value, onChange }: { value: Recipe; onChange: (r: 
               />
               <span className="min-w-0">
                 <span className="block text-sm font-medium">
-                  {msg(
-                    id === "program"
-                      ? "submit.recipe.program.title"
-                      : "submit.recipe.anything.title",
-                  )}
+                  {msg(`submit.recipe.${id}.title` as Parameters<typeof msg>[0])}
                 </span>
                 <span className="block text-[0.6875rem] leading-relaxed text-muted-foreground">
-                  {msg(
-                    id === "program" ? "submit.recipe.program.desc" : "submit.recipe.anything.desc",
-                  )}
+                  {msg(`submit.recipe.${id}.desc` as Parameters<typeof msg>[0])}
                 </span>
               </span>
             </button>

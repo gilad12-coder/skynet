@@ -211,3 +211,45 @@ def test_build_scorer_dispatches_on_kind() -> None:
 
     assert isinstance(remote, RemoteScorer)
     assert python("x", None) == (1.0, {})
+
+
+_LLM_SCORER = "def score(candidate, case=None):\n    return len(llm(candidate, case['input'])) / 10, {'asked': candidate}\n"
+
+
+def test_python_scorer_gets_the_injected_llm_helper() -> None:
+    """``llm`` is a name in the scorer's namespace, bound to whatever the caller passes in."""
+    seen: list[tuple[str, str | None]] = []
+
+    def fake_llm(prompt: str, input: str | None = None) -> str:
+        seen.append((prompt, input))
+        return "y" * 10
+
+    scorer = build_python_scorer(_LLM_SCORER, llm=fake_llm)
+
+    assert scorer("judge", {"input": "text"}) == (1.0, {"asked": "judge"})
+    assert seen == [("judge", "text")]
+
+
+def test_llm_helper_is_never_picked_as_the_scorer() -> None:
+    """Injecting ``llm`` does not confuse the single-function fallback."""
+    scorer = build_python_scorer("def grade(candidate): return 0.5", llm=lambda prompt, input=None: "")
+
+    assert scorer("x", None) == (0.5, {})
+
+
+def test_scorer_without_a_model_gets_a_clear_error_from_llm() -> None:
+    """Without a model, calling ``llm()`` explains which step to fix."""
+    scorer = build_python_scorer(_LLM_SCORER)
+
+    with pytest.raises(ServiceError, match="no model was chosen in the Scorer step"):
+        scorer("judge", {"input": "text"})
+
+
+def test_build_scorer_forwards_the_llm_helper() -> None:
+    """``build_scorer`` hands the helper to python scorers."""
+    scorer = build_scorer(
+        BlackboxScorer(metric_code="def score(c, case=None): return float(llm('p'))"),
+        llm=lambda prompt, input=None: "0.75",
+    )
+
+    assert scorer("x", None) == (0.75, {})

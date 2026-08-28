@@ -20,6 +20,22 @@ from .protocol import Candidate, ScorerFn, SideInfo
 
 _ENTRYPOINT_NAMES = ("score", "metric")
 _SCORER_FILENAME = "<scorer_code>"
+# Name the scorer namespace binds the model helper to.
+LLM_HELPER_NAME = "llm"
+LLMHelper = Callable[..., str]
+
+
+def missing_llm(prompt: str, input: str | None = None) -> str:
+    """Stand in for ``llm`` when the scorer was given no model.
+
+    Args:
+        prompt: Ignored.
+        input: Ignored.
+
+    Raises:
+        ServiceError: Always, naming the step that fixes it.
+    """
+    raise ServiceError("This scorer calls llm() but no model was chosen in the Scorer step.")
 
 
 def normalize_score(raw: Any) -> tuple[float, SideInfo]:
@@ -54,7 +70,7 @@ def normalize_score(raw: Any) -> tuple[float, SideInfo]:
     )
 
 
-def load_scorer_from_code(code: str) -> Callable[..., Any]:
+def load_scorer_from_code(code: str, *, helpers: dict[str, Any] | None = None) -> Callable[..., Any]:
     """Execute scorer source and return the callable it defines.
 
     Looks for ``score`` then ``metric``, then falls back to the single
@@ -62,6 +78,7 @@ def load_scorer_from_code(code: str) -> Callable[..., Any]:
 
     Args:
         code: User-authored python source.
+        helpers: Names bound in the scorer's namespace before it runs.
 
     Returns:
         The scorer callable.
@@ -70,7 +87,7 @@ def load_scorer_from_code(code: str) -> Callable[..., Any]:
         ServiceError: When the code fails to compile or load, or defines no
             unambiguous scorer function.
     """
-    namespace: dict[str, Any] = {}
+    namespace: dict[str, Any] = dict(helpers or {})
     try:
         # exec: user-supplied scorer code. Same security boundary as
         # load_metric_from_code — the job subprocess for runs, safe_exec's
@@ -109,11 +126,13 @@ def _accepts_case(fn: Callable[..., Any]) -> bool:
     return len(positional) >= 2 or any(p.kind == p.VAR_POSITIONAL for p in positional)
 
 
-def build_python_scorer(code: str) -> ScorerFn:
+def build_python_scorer(code: str, *, llm: LLMHelper | None = None) -> ScorerFn:
     """Load scorer source and wrap it in the engine-facing scorer contract.
 
     Args:
         code: User-authored python source.
+        llm: The model helper bound as ``llm``; without one, a scorer that
+            calls it fails with a message pointing at the Scorer step.
 
     Returns:
         A callable scoring ``(candidate, case)`` → ``(score, side_info)``.
@@ -121,7 +140,7 @@ def build_python_scorer(code: str) -> ScorerFn:
     Raises:
         ServiceError: When the code cannot be loaded.
     """
-    fn = load_scorer_from_code(code)
+    fn = load_scorer_from_code(code, helpers={LLM_HELPER_NAME: llm if llm is not None else missing_llm})
     takes_case = _accepts_case(fn)
 
     def scorer(candidate: Candidate, case: Any = None) -> tuple[float, SideInfo]:
@@ -186,11 +205,12 @@ class RemoteScorer:
         return normalize_score(body)
 
 
-def build_scorer(spec: BlackboxScorer) -> ScorerFn:
+def build_scorer(spec: BlackboxScorer, *, llm: LLMHelper | None = None) -> ScorerFn:
     """Build the engine-facing scorer for a request's scorer spec.
 
     Args:
         spec: The submitted scorer definition.
+        llm: The model helper a python scorer sees as ``llm``, if any.
 
     Returns:
         A callable scoring ``(candidate, case)`` → ``(score, side_info)``.
@@ -200,4 +220,4 @@ def build_scorer(spec: BlackboxScorer) -> ScorerFn:
     """
     if spec.kind == "remote":
         return RemoteScorer(str(spec.url), secret=spec.secret, timeout_seconds=spec.timeout_seconds)
-    return build_python_scorer(str(spec.metric_code))
+    return build_python_scorer(str(spec.metric_code), llm=llm)

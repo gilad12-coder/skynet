@@ -64,6 +64,10 @@ def _model_config_dicts(payload_dict: dict[str, Any]) -> list[dict[str, Any]]:
         cfg = payload_dict.get(key)
         if isinstance(cfg, dict):
             configs.append(cfg)
+    # A black-box scorer's ``llm()`` model lives under ``scorer``.
+    scorer = payload_dict.get("scorer")
+    if isinstance(scorer, dict) and isinstance(scorer.get("model"), dict):
+        configs.append(scorer["model"])
     for key in _GRID_MODEL_LIST_KEYS:
         entries = payload_dict.get(key)
         if isinstance(entries, list):

@@ -327,3 +327,87 @@ def test_all_lanes_failing_without_a_seed_is_an_error(tmp_path: Path, monkeypatc
             EvalServer(vowel_scorer, max_evals=5),
             make_ctx(str(tmp_path)),
         )
+
+
+def test_plateau_relays_over_the_engine_order_and_reseeds_from_the_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Plateau hands the whole remaining budget to each engine in turn and stops after a round without a record."""
+    alpha = ScriptedEngine("alpha", ["xxa", *["xxx"] * 5, "aaa"])
+    beta = ScriptedEngine("beta", ["aax", *["xxx"] * 5, "aaaa"])
+    _install_registry(monkeypatch, {"alpha": alpha, "beta": beta}, available=["alpha", "beta"])
+    sink: list[tuple[str, dict[str, Any]]] = []
+    server = EvalServer(vowel_scorer, max_evals=100)
+
+    result, lanes = run_strategy(
+        BlackboxStrategy(mode="plateau", patience=5),
+        Task(seed_candidate="seed"),
+        server,
+        make_ctx(str(tmp_path)),
+        lambda e, m: sink.append((e, m)),
+    )
+
+    # Each lane trips five runs after its last record; the third and fourth never set one.
+    assert _events(sink, PROGRESS_LANE_STARTED) == [
+        {"engine": "alpha", "phase": "relay", "budget": 100},
+        {"engine": "beta", "phase": "relay", "budget": 94},
+        {"engine": "alpha", "phase": "relay", "budget": 88},
+        {"engine": "beta", "phase": "relay", "budget": 83},
+    ]
+    assert _events(sink, PROGRESS_LANE_HANDOFF) == [
+        {"from_engine": "alpha", "to_engine": "beta", "best_score": pytest.approx(1 / 3), "reason": "plateaued"},
+        {"from_engine": "beta", "to_engine": "alpha", "best_score": pytest.approx(2 / 3), "reason": "plateaued"},
+        {"from_engine": "alpha", "to_engine": "beta", "best_score": pytest.approx(2 / 3), "reason": "plateaued"},
+    ]
+    assert [call.seed_candidate for call in alpha.calls] == ["seed", "aax"]
+    assert [call.seed_candidate for call in beta.calls] == ["xxa", "aax"]
+    assert result.best_candidate == "aax"
+    assert result.metadata == {"engine": "beta", "phase": "relay"}
+    assert [(lane.engine, lane.status, lane.scorer_runs) for lane in lanes] == [
+        ("alpha", "plateaued", 6),
+        ("beta", "plateaued", 6),
+        ("alpha", "plateaued", 5),
+        ("beta", "plateaued", 5),
+    ]
+    assert all(lane.error is None for lane in lanes)
+    assert result.total_evals == 22
+    assert server.remaining == 78
+
+
+def test_plateau_stops_at_the_target_score(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A lane that reaches ``stop_at_score`` ends the relay without a handoff."""
+    alpha = ScriptedEngine("alpha", ["aaa"])
+    beta = ScriptedEngine("beta", ["aaaa"])
+    _install_registry(monkeypatch, {"alpha": alpha, "beta": beta}, available=["alpha", "beta"])
+    sink: list[tuple[str, dict[str, Any]]] = []
+
+    result, lanes = run_strategy(
+        BlackboxStrategy(mode="plateau"),
+        Task(seed_candidate="seed"),
+        EvalServer(vowel_scorer, max_evals=50),
+        make_ctx(str(tmp_path), stop_at_score=1.0),
+        lambda e, m: sink.append((e, m)),
+    )
+
+    assert [(lane.engine, lane.phase, lane.status) for lane in lanes] == [("alpha", "relay", "completed")]
+    assert _events(sink, PROGRESS_LANE_HANDOFF) == []
+    assert beta.calls == []
+    assert result.best_candidate == "aaa"
+
+
+def test_plateau_ends_when_the_budget_runs_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An engine that spends the whole budget before plateauing ends the relay as ``budget_exhausted``."""
+    alpha = ScriptedEngine("alpha", ["xxa", "aaa", "aaaa", "one too many"])
+    _install_registry(monkeypatch, {"alpha": alpha}, available=["alpha"])
+
+    result, lanes = run_strategy(
+        BlackboxStrategy(mode="plateau"),
+        Task(seed_candidate="seed"),
+        EvalServer(vowel_scorer, max_evals=3),
+        make_ctx(str(tmp_path)),
+        None,
+    )
+
+    assert [(lane.engine, lane.status, lane.scorer_runs) for lane in lanes] == [("alpha", "budget_exhausted", 3)]
+    assert result.best_candidate == "aaa"
+    assert result.total_evals == 3

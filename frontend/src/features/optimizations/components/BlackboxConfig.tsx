@@ -69,7 +69,9 @@ export function BlackboxConfigCard({
       value:
         strategy.mode === "single"
           ? msg("submit.blackbox.strategy.single")
-          : msg("submit.blackbox.strategy.auto"),
+          : strategy.mode === "plateau"
+            ? msg("submit.blackbox.strategy.plateau")
+            : msg("submit.blackbox.strategy.auto"),
       icon: <GitMerge className="size-3.5" />,
     },
     {
