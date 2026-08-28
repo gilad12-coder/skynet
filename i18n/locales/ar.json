@@ -2,6 +2,7 @@
   "$schema": "../schema.json",
   "locale": "ar",
   "terms": {
+    "optimizationTypeBlackbox": "صندوق أسود",
     "apiKey": "مفتاح API",
     "baseline": "خط الأساس",
     "baselineScore": "نتيجة خط الأساس",

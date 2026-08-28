@@ -333,7 +333,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     beforeShow: async () => {
       await ensureSubmit();
       injectSampleDataset();
-      setWizardStep(1);
+      setWizardStep(2);
     },
     tracks: QUICK_ONLY,
     readingTimeSec: 7,
@@ -353,7 +353,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     beforeShow: async () => {
       await ensureSubmit();
       injectSampleDataset();
-      setWizardStep(3);
+      setWizardStep(1);
       callTutorialHook("setCodeAssistMode", "manual");
       callTutorialHook("chooseModule", "predict");
       callTutorialHook("setSignatureCode", DEMO_SIGNATURE_CODE);

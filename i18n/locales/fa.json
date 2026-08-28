@@ -2,6 +2,7 @@
   "$schema": "../schema.json",
   "locale": "fa",
   "terms": {
+    "optimizationTypeBlackbox": "جعبه سیاه",
     "apiKey": "کلید API",
     "baseline": "خط مبنا",
     "baselineScore": "امتیاز خط مبنا",

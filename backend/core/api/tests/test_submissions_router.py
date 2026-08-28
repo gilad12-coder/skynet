@@ -30,6 +30,7 @@ from ...constants import (
     PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL,
     PAYLOAD_OVERVIEW_TOTAL_PAIRS,
     PAYLOAD_OVERVIEW_USERNAME,
+    TOKEN_SOURCE_MANAGED,
 )
 from ...i18n_keys import I18nKey
 from ...models.blackbox import BLACKBOX_MODULE_NAME, ScorerDryRunResponse
@@ -1853,7 +1854,14 @@ def test_blackbox_scorer_dry_run_returns_the_probe_result(monkeypatch: pytest.Mo
     resp = client.post("/blackbox/scorer/dry-run", json=body)
 
     assert resp.status_code == 200
-    assert resp.json() == {"ok": True, "score": 0.75, "side_info": {"vowels": 3}, "error": None, "elapsed_ms": 4}
+    assert resp.json() == {
+        "ok": True,
+        "score": 0.75,
+        "side_info": {"vowels": 3},
+        "error": None,
+        "elapsed_ms": 4,
+        "usage_by_model": [],
+    }
     assert len(seen) == 1
     assert seen[0].candidate == "hello"
     assert seen[0].case == {"target": "aeiou"}
@@ -1948,3 +1956,103 @@ def test_blackbox_engine_catalog_rejects_unknown_targets(monkeypatch: pytest.Mon
     resp = client.get("/blackbox/engines", params={"target": "robot"})
 
     assert resp.status_code == 422
+
+
+def _alice_billing_engine(*, grant_remaining: int) -> object:
+    """Return an in-memory billing engine holding one ``alice`` account.
+
+    Args:
+        grant_remaining: Free-grant credits left on the account.
+
+    Returns:
+        The SQLAlchemy engine, shared across threads via ``StaticPool``.
+    """
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            BillingCustomerModel(
+                username="alice", stripe_customer_id="cus_alice", credit_balance=0, grant_remaining=grant_remaining
+            )
+        )
+        session.commit()
+    return engine
+
+
+_JUDGE_DRY_RUN_BODY = {
+    "scorer": {
+        "kind": "python",
+        "metric_code": "def score(candidate, case=None): return float(llm(candidate))",
+        "model": {"name": "openai/gpt-4o-mini"},
+    },
+    "candidate": "hello",
+}
+
+
+def test_blackbox_scorer_dry_run_gates_credits_only_when_a_model_is_chosen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scorer with a model needs spendable credits; a plain scorer never touches billing."""
+    store = _FakeJobStore()
+    store.engine = _alice_billing_engine(grant_remaining=0)
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(
+        _sub_mod,
+        "dry_run_scorer",
+        lambda request: ScorerDryRunResponse(ok=True, score=1.0, side_info={}, error=None, elapsed_ms=1),
+    )
+
+    blocked = client.post("/blackbox/scorer/dry-run", json=_JUDGE_DRY_RUN_BODY)
+    allowed = client.post(
+        "/blackbox/scorer/dry-run",
+        json={"scorer": {"kind": "python", "metric_code": "def score(c): return 1.0"}, "candidate": "hello"},
+    )
+
+    assert blocked.status_code == 402
+    assert blocked.json()["code"] == "billing.insufficient_credits"
+    assert allowed.status_code == 200
+
+
+def test_blackbox_scorer_dry_run_bills_what_llm_consumed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dry run's ``llm()`` tokens are debited to the caller under the scorer's token source."""
+    store = _FakeJobStore()
+    store.engine = _alice_billing_engine(grant_remaining=50)
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    usage = [{"model": "openai/gpt-4o-mini", "input_tokens": 12, "output_tokens": 3}]
+    monkeypatch.setattr(
+        _sub_mod,
+        "dry_run_scorer",
+        lambda request: ScorerDryRunResponse(
+            ok=True, score=1.0, side_info={}, error=None, elapsed_ms=1, usage_by_model=usage
+        ),
+    )
+    metered: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(_sub_mod, "meter_llm_usage", lambda *args, **kwargs: metered.append((args, kwargs)) or 1)
+
+    resp = client.post("/blackbox/scorer/dry-run", json=_JUDGE_DRY_RUN_BODY)
+
+    assert resp.status_code == 200
+    assert resp.json()["usage_by_model"] == usage
+    assert len(metered) == 1
+    (engine, username, breakdown), kwargs = metered[0]
+    assert engine is store.engine
+    assert username == "alice"
+    assert breakdown == {"openai/gpt-4o-mini": (12, 3)}
+    assert kwargs == {"description": "Scorer dry run", "token_source": TOKEN_SOURCE_MANAGED}
+
+
+def test_blackbox_scorer_dry_run_skips_billing_without_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scorer that never called ``llm()`` is not metered even with a model chosen."""
+    store = _FakeJobStore()
+    store.engine = _alice_billing_engine(grant_remaining=50)
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(
+        _sub_mod,
+        "dry_run_scorer",
+        lambda request: ScorerDryRunResponse(ok=True, score=1.0, side_info={}, error=None, elapsed_ms=1),
+    )
+    metered: list[Any] = []
+    monkeypatch.setattr(_sub_mod, "meter_llm_usage", lambda *args, **kwargs: metered.append(args) or 0)
+
+    resp = client.post("/blackbox/scorer/dry-run", json=_JUDGE_DRY_RUN_BODY)
+
+    assert resp.status_code == 200
+    assert metered == []

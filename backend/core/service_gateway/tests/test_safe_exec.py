@@ -7,6 +7,9 @@ its failure modes (syntax errors, timeouts, wrong return shapes).
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
 
 from core.exceptions import ServiceError
@@ -336,3 +339,72 @@ class TestProbeScorer:
         """A scorer that fails to load raises ``ServiceError`` from the probe entrypoint."""
         with pytest.raises(ServiceError, match="syntax error"):
             probe_scorer(scorer_code="def !!!", candidate="x")
+
+
+class _FakeScorerLLM:
+    """Stand-in for the injected ``llm()``: records calls, answers ``0.5`` and carries usage on ``lm``."""
+
+    def __init__(self) -> None:
+        """Create the helper with an empty history."""
+        self.calls: list[tuple[str, str | None]] = []
+        self.lm = SimpleNamespace(model="fake/judge", history=[])
+
+    def __call__(self, prompt: str, input: str | None = None) -> str:
+        """Record the call and answer a constant score."""
+        self.calls.append((prompt, input))
+        self.lm.history.append({"usage": {"prompt_tokens": 3, "completion_tokens": 1}})
+        return "0.5"
+
+
+class _Queue:
+    """List-backed stand-in for the worker's result queue."""
+
+    def __init__(self) -> None:
+        """Start empty."""
+        self.items: list[dict[str, Any]] = []
+
+    def put(self, item: dict[str, Any]) -> None:
+        """Append the worker's result."""
+        self.items.append(item)
+
+
+_LLM_SCORER = "def score(candidate, case=None):\n    return float(llm(candidate, case['input']))\n"
+
+
+class TestScorerWorkerLLM:
+    """Tests for the ``llm()`` helper the scorer child binds."""
+
+    def test_binds_llm_to_the_chosen_model_and_reports_usage(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With a model, ``llm`` is bound to it and its tokens come back with the score."""
+        helper = _FakeScorerLLM()
+        chosen: list[str] = []
+        monkeypatch.setattr(safe_exec, "build_scorer_llm", lambda config: chosen.append(config.name) or helper)
+        queue = _Queue()
+
+        safe_exec._scorer_worker(_LLM_SCORER, "judge this", {"input": "text"}, True, {"name": "fake/judge"}, queue)
+
+        assert chosen == ["fake/judge"]
+        assert helper.calls == [("judge this", "text")]
+        assert queue.items == [
+            {"ok": True, "score": 0.5, "side_info": {}, "error": None, "usage": {"fake/judge": (3, 1)}}
+        ]
+
+    def test_without_a_model_llm_explains_the_scorer_step(self) -> None:
+        """Without a model, calling ``llm`` is reported as the scorer's error with the fix."""
+        queue = _Queue()
+
+        safe_exec._scorer_worker(_LLM_SCORER, "x", {"input": "text"}, True, None, queue)
+
+        [payload] = queue.items
+        assert payload["score"] is None
+        assert "no model was chosen in the Scorer step" in payload["error"]
+        assert payload["usage"] == {}
+
+    def test_probe_scorer_crosses_the_process_boundary_without_usage(self) -> None:
+        """A modelless probe reports the ``llm`` hint and empty usage from the child."""
+        probe = probe_scorer(scorer_code=_LLM_SCORER, candidate="x", case={"input": "text"})
+
+        assert probe.score is None
+        assert probe.error is not None
+        assert "no model was chosen in the Scorer step" in probe.error
+        assert probe.usage_by_model == {}

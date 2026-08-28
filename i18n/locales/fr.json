@@ -2,6 +2,7 @@
   "$schema": "../schema.json",
   "locale": "fr",
   "terms": {
+    "optimizationTypeBlackbox": "boîte noire",
     "apiKey": "clé API",
     "baseline": "référence",
     "baselineScore": "score de référence",

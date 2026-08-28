@@ -11,6 +11,7 @@ best-effort: a metering failure logs and never breaks the user-facing turn.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 
 from ..constants import TOKEN_SOURCE_MANAGED
 from ..service_gateway.language_models import served_model_from, usage_by_model_from_history
@@ -69,6 +70,50 @@ def _harvest_usages(lms: list) -> tuple[list[ModelUsage], str | None]:
         prior = rekeyed.get(normalized, (0, 0))
         rekeyed[normalized] = (prior[0] + in_out[0], prior[1] + in_out[1])
     return usages_from_breakdown(rekeyed), next(iter(rekeyed))
+
+
+def meter_llm_usage(
+    engine,
+    username: str,
+    breakdown: Mapping[str, tuple[int, int]],
+    *,
+    description: str,
+    token_source: str = TOKEN_SOURCE_MANAGED,
+) -> int:
+    """Debit a per-model token breakdown that was harvested elsewhere.
+
+    The sandboxed scorer dry run reads its ``llm()`` usage inside the child
+    process and hands back only the numbers, so there is no LM object for
+    :func:`meter_llm_run` to harvest. Same best-effort contract: never raises.
+
+    Args:
+        engine: SQLAlchemy engine backing the billing tables; ``None`` skips.
+        username: Account the usage is billed to.
+        breakdown: ``model → (input_tokens, output_tokens)`` as the LM reports it.
+        description: Human label for the ledger row.
+        token_source: Billing source for the call.
+
+    Returns:
+        The credits charged, or ``0`` when nothing was billed.
+    """
+    if engine is None or not username or not breakdown:
+        return 0
+    try:
+        rekeyed: dict[str, tuple[int, int]] = {}
+        for key, in_out in breakdown.items():
+            normalized = _normalize_model_key(key)
+            prior = rekeyed.get(normalized, (0, 0))
+            rekeyed[normalized] = (prior[0] + in_out[0], prior[1] + in_out[1])
+        return StripeBillingService(engine=engine).debit_run(
+            username,
+            usages_from_breakdown(rekeyed),
+            model=next(iter(rekeyed)),
+            description=description,
+            token_source=token_source,
+        )
+    except Exception:
+        logger.exception("failed to debit LLM usage for %s (%s)", username, description)
+        return 0
 
 
 def estimate_run_credits(language_models, token_source: str = TOKEN_SOURCE_MANAGED) -> int:

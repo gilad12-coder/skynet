@@ -281,3 +281,72 @@ def test_seed_endpoint_rejects_unknown_model(monkeypatch) -> None:
     )
     assert resp.status_code == 422
     assert resp.json()["code"] == "models.unknown_model"
+
+
+_BLACKBOX_CONTEXT = {
+    "recipe": "prompt",
+    "objective": "Replies that resolve the ticket.",
+    "target_kind": "text",
+    "scorer_has_model": True,
+}
+
+
+def test_interview_forwards_blackbox_context_without_columns(monkeypatch) -> None:
+    """A black-box interview may omit the dataset; its context reaches the engine as a dict."""
+    seen: dict[str, Any] = {}
+
+    async def fake_stream(**kwargs: Any) -> Any:
+        """Record the forwarded kwargs and finish immediately."""
+        seen.update(kwargs)
+        yield {"event": "interview_done", "data": {"done": True}}
+
+    monkeypatch.setattr(code_agent_router, "interview_turn_stream", fake_stream)
+    resp = _client().post(
+        "/optimizations/code-interview",
+        json={
+            "dataset_columns": [],
+            "column_roles": {},
+            "sample_rows": [{"ticket": "hi"}],
+            "turns": [],
+            "job_model": "",
+            "blackbox": _BLACKBOX_CONTEXT,
+        },
+    )
+    assert resp.status_code == 200
+    assert seen["dataset_columns"] == []
+    assert seen["blackbox"] == {**_BLACKBOX_CONTEXT, "background": ""}
+
+
+def test_interview_without_columns_or_blackbox_is_rejected() -> None:
+    """The DSPy contract stays strict: no dataset and no black-box context is a 422."""
+    resp = _client().post(
+        "/optimizations/code-interview",
+        json={"dataset_columns": [], "column_roles": {}, "sample_rows": [], "turns": [], "job_model": ""},
+    )
+    assert resp.status_code == 422
+
+
+def test_seed_endpoint_forwards_blackbox_context(monkeypatch) -> None:
+    """The seed endpoint passes the black-box context through and ``None`` without it."""
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(code_agent_router, "run_code_agent", _fake_run(seen))
+    client = _client()
+    assert client.post("/optimizations/ai-generate-code", json=_SEED_BODY).status_code == 200
+    assert seen["blackbox"] is None
+
+    resp = client.post(
+        "/optimizations/ai-generate-code",
+        json={**_SEED_BODY, "dataset_columns": [], "column_roles": {}, "blackbox": _BLACKBOX_CONTEXT},
+    )
+    assert resp.status_code == 200
+    assert seen["dataset_columns"] == []
+    assert seen["blackbox"] == {**_BLACKBOX_CONTEXT, "background": ""}
+
+
+def test_seed_endpoint_without_columns_or_blackbox_is_rejected() -> None:
+    """An empty dataset without a black-box context is still a validation error."""
+    resp = _client().post(
+        "/optimizations/ai-generate-code",
+        json={**_SEED_BODY, "dataset_columns": [], "column_roles": {}},
+    )
+    assert resp.status_code == 422

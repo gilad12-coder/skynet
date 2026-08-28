@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { toast } from "react-toastify";
@@ -16,6 +16,7 @@ import type {
   ModelConfig,
   ScorerDryRunResponse,
   SplitFractions,
+  ValidateCodeResponse,
 } from "@/shared/types/api";
 import {
   dryRunScorer,
@@ -24,8 +25,12 @@ import {
   isInsufficientCreditsError,
   isStorageQuotaError,
   submitBlackboxRun,
+  type BlackboxAuthoringContext,
   type DatasetSummary,
 } from "@/shared/lib/api";
+import { readPref } from "@/features/settings";
+import { useCodeAgent } from "@/shared/hooks/use-code-agent";
+import { useCodeInterview } from "@/shared/hooks/use-code-interview";
 import { parseDatasetFile, type ParsedDataset } from "@/shared/lib/parse-dataset";
 import { msg } from "@/shared/lib/messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
@@ -42,6 +47,11 @@ import { prepareModelConfig } from "./use-submit-wizard";
 import { useModelCatalog, useRecentModelConfigs } from "./use-submit-wizard-data";
 
 export type SeedMode = "text" | "parts" | "none";
+export type BlackboxRecipe = BlackboxAuthoringContext["recipe"];
+
+// Black-box cases carry no column roles; the agent reads them as raw samples.
+const NO_ROLES: Record<string, string> = {};
+const NO_KINDS: Record<string, "text" | "image"> = {};
 export interface SeedPart {
   key: string;
   value: string;
@@ -59,7 +69,107 @@ export const SCORER_TEMPLATE = `def score(candidate, case=None):
     return float(len(text.split()))
 `;
 
+// Editable starting points inserted into the python scorer editor. Presets are
+// NOT a distinct scorer kind — the evaluator is always the user's own python.
+// Those that grade a model's answer call the injected \`llm(candidate, input)\`
+// helper: \`candidate\` is the version under optimization (the system prompt),
+// the case's input column is the user message. Rename "input"/"expected" to
+// your own column names.
+export interface ScorerPreset {
+  id: string;
+  needsModel: boolean;
+  code: string;
+}
+
+export const SCORER_PRESETS: ScorerPreset[] = [
+  { id: "length", needsModel: false, code: SCORER_TEMPLATE },
+  {
+    id: "exact",
+    needsModel: true,
+    code: `def score(candidate, case=None):
+    """1.0 when the model's answer exactly matches the expected column, else 0.0."""
+    if case is None:
+        return 0.0
+    answer = llm(candidate, case.get("input", "")).strip()
+    return 1.0 if answer == str(case.get("expected", "")).strip() else 0.0
+`,
+  },
+  {
+    id: "contains",
+    needsModel: true,
+    code: `def score(candidate, case=None):
+    """1.0 when the expected text appears in the model's answer, else 0.0."""
+    if case is None:
+        return 0.0
+    answer = llm(candidate, case.get("input", "")).lower()
+    return 1.0 if str(case.get("expected", "")).strip().lower() in answer else 0.0
+`,
+  },
+  {
+    id: "numeric",
+    needsModel: true,
+    code: `import re
+
+
+def score(candidate, case=None):
+    """1.0 when the answer's last number is within TOLERANCE of the expected number."""
+    if case is None:
+        return 0.0
+    TOLERANCE = 0.01
+    answer = llm(candidate, case.get("input", ""))
+    found = re.findall(r"-?\\d+(?:\\.\\d+)?", answer)
+    if not found:
+        return 0.0
+    return 1.0 if abs(float(found[-1]) - float(case.get("expected", 0))) <= TOLERANCE else 0.0
+`,
+  },
+  {
+    id: "json_field",
+    needsModel: true,
+    code: `import json
+
+
+def score(candidate, case=None):
+    """1.0 when FIELD from the model's JSON answer equals the expected column."""
+    if case is None:
+        return 0.0
+    FIELD = "answer"
+    reply = llm(candidate, case.get("input", ""))
+    try:
+        parsed = json.loads(reply)
+    except (ValueError, TypeError):
+        return 0.0
+    got = str(parsed.get(FIELD, "")).strip()
+    return 1.0 if got == str(case.get("expected", "")).strip() else 0.0
+`,
+  },
+  {
+    id: "llm_judge",
+    needsModel: true,
+    code: `def score(candidate, case=None):
+    """Ask the model to grade the answer 0-10, normalized to 0.0-1.0."""
+    if case is None:
+        return 0.0
+    answer = llm(candidate, case.get("input", ""))
+    rubric = (
+        "Score how well the RESPONSE answers the INPUT from 0 to 10. "
+        "Reply with only the number.\\n\\n"
+        f"INPUT: {case.get('input', '')}\\n"
+        f"EXPECTED: {case.get('expected', '')}\\n"
+        f"RESPONSE: {answer}"
+    )
+    verdict = llm(rubric)
+    digits = "".join(c for c in verdict if c.isdigit() or c == ".")
+    try:
+        return max(0.0, min(1.0, float(digits) / 10.0))
+    except ValueError:
+        return 0.0
+`,
+  },
+];
+
 const DEFAULT_MAX_SCORER_RUNS = 100;
+const DEFAULT_PATIENCE = 40;
 
 function parseOptionalNumber(value: string): number | undefined {
   const trimmed = value.trim();
@@ -68,7 +178,7 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function useBlackboxWizard() {
+export function useBlackboxWizard(recipe: BlackboxRecipe) {
   const router = useRouter();
   const { data: session } = useSession();
   const username = session?.user?.name ?? "";
@@ -85,10 +195,22 @@ export function useBlackboxWizard() {
   const [jobDescription, setJobDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(true);
 
+  const [codeAssistMode, setCodeAssistMode] = useState<"auto" | "manual">(() =>
+    readPref("wizardCodeAssist"),
+  );
   const [seedMode, setSeedMode] = useState<SeedMode>("text");
   const [seedText, setSeedText] = useState("");
+  // Hand-authored artifacts are never overwritten by the agent's unprompted
+  // passes; resolving the interview lifts the guard once (see below).
+  const [seedManuallyEdited, setSeedManuallyEdited] = useState(false);
+  const [scorerManuallyEdited, setScorerManuallyEdited] = useState(false);
+  const [seedValidation, setSeedValidation] = useState<ValidateCodeResponse | null>(null);
+  const [scorerValidation, setScorerValidation] = useState<ValidateCodeResponse | null>(null);
   const [seedParts, setSeedParts] = useState<SeedPart[]>([{ key: "", value: "" }]);
   const [objective, setObjective] = useState("");
+  // True while the objective field has focus: the interview opens once the
+  // objective is typed and then left, not on the first keystroke.
+  const [objectiveEditing, setObjectiveEditing] = useState(false);
   const [background, setBackground] = useState("");
   const [targetKind, setTargetKind] = useState<"text" | "agent">("text");
   const [harness, setHarness] = useState<BlackboxHarness>("pi");
@@ -110,10 +232,17 @@ export function useBlackboxWizard() {
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
   const [scorerTimeout, setScorerTimeout] = useState(60);
+  // The model injected into the python scorer as `llm()`. Empty until the user
+  // picks one; a scorer that calls `llm()` without it fails the dry run.
+  const [scorerModel, setScorerModel] = useState<ModelConfig>(emptyModelConfig());
   const [dryRun, setDryRun] = useState<DryRunState>({ status: "idle" });
+  // Scorer fingerprint the in-flight/last dry run belongs to, so the reset
+  // below doesn't wipe a run the agent kicked off for the code it just wrote.
+  const dryRunKeyRef = useRef<string | null>(null);
 
-  const [strategyMode, setStrategyMode] = useState<"auto" | "single">("auto");
+  const [strategyMode, setStrategyMode] = useState<"auto" | "single" | "plateau">("auto");
   const [engine, setEngine] = useState<BlackboxEngineId | null>(null);
+  const [patience, setPatience] = useState(DEFAULT_PATIENCE);
   const [engineCatalog, setEngineCatalog] = useState<BlackboxEngineCatalogResponse | null>(null);
   const [maxScorerRuns, setMaxScorerRuns] = useState(DEFAULT_MAX_SCORER_RUNS);
   const [maxIterations, setMaxIterations] = useState<number | "">("");
@@ -140,10 +269,22 @@ export function useBlackboxWizard() {
     };
   }, [targetKind]);
 
-  // A passed dry run only vouches for the scorer it ran against.
+  // A passed dry run only vouches for the scorer it ran against — including the
+  // model bound to `llm()`, whose answers change what the scorer returns.
+  const scorerKey = JSON.stringify([
+    scorerKind,
+    metricCode,
+    scorerUrl,
+    scorerSecret,
+    scorerTimeout,
+    scorerModel,
+  ]);
   useEffect(() => {
+    if (dryRunKeyRef.current === scorerKey) return;
+    dryRunKeyRef.current = null;
     setDryRun({ status: "idle" });
-  }, [scorerKind, metricCode, scorerUrl, scorerSecret, scorerTimeout]);
+    setScorerValidation(null);
+  }, [scorerKey]);
 
   const seedCandidate = useMemo<BlackboxCandidate | null>(() => {
     if (seedMode === "none") return null;
@@ -153,16 +294,21 @@ export function useBlackboxWizard() {
   }, [seedMode, seedText, seedParts]);
 
   const buildScorer = useCallback(
-    (): BlackboxScorer =>
+    (code: string = metricCode): BlackboxScorer =>
       scorerKind === "python"
-        ? { kind: "python", metric_code: metricCode, timeout_seconds: scorerTimeout }
+        ? {
+            kind: "python",
+            metric_code: code,
+            timeout_seconds: scorerTimeout,
+            model: scorerModel.name.trim() ? prepareModelConfig(scorerModel) : null,
+          }
         : {
             kind: "remote",
             url: scorerUrl.trim(),
             secret: scorerSecret.trim() || undefined,
             timeout_seconds: scorerTimeout,
           },
-    [scorerKind, metricCode, scorerTimeout, scorerUrl, scorerSecret],
+    [scorerKind, metricCode, scorerTimeout, scorerUrl, scorerSecret, scorerModel],
   );
 
   const buildTarget = (): BlackboxTarget =>
@@ -179,27 +325,128 @@ export function useBlackboxWizard() {
           run_command: runCommand.trim() || undefined,
         };
 
-  const runDryRun = useCallback(async (): Promise<ValidationResult | null> => {
-    setDryRun({ status: "running" });
-    try {
-      const result = await dryRunScorer({
-        scorer: buildScorer(),
-        candidate: seedCandidate ?? objective,
-        case: parsedCases?.rows[0] ?? null,
-      });
-      setDryRun({ status: "done", result });
-      return {
-        valid: result.ok,
-        errors: result.ok ? [] : [result.error ?? msg("submit.blackbox.scorer.dry_run_failed")],
-        warnings: [],
-      };
-    } catch (err) {
-      const error =
-        err instanceof Error ? err.message : msg("submit.blackbox.scorer.dry_run_failed");
-      setDryRun({ status: "done", result: { ok: false, error, side_info: {}, elapsed_ms: 0 } });
-      return { valid: false, errors: [error], warnings: [] };
-    }
-  }, [buildScorer, seedCandidate, objective, parsedCases]);
+  // Also the agent's metric validator: it passes the code it just wrote (the
+  // state update hasn't landed yet), the editor's Run button passes nothing.
+  const runDryRun = useCallback(
+    async (overrideCode?: string): Promise<ValidationResult | null> => {
+      const code = typeof overrideCode === "string" ? overrideCode : metricCode;
+      dryRunKeyRef.current = JSON.stringify([
+        scorerKind,
+        code,
+        scorerUrl,
+        scorerSecret,
+        scorerTimeout,
+        scorerModel,
+      ]);
+      setDryRun({ status: "running" });
+      let outcome: ValidationResult;
+      try {
+        const result = await dryRunScorer({
+          scorer: buildScorer(code),
+          candidate: seedCandidate ?? objective,
+          case: parsedCases?.rows[0] ?? null,
+        });
+        setDryRun({ status: "done", result });
+        outcome = {
+          valid: result.ok,
+          errors: result.ok ? [] : [result.error ?? msg("submit.blackbox.scorer.dry_run_failed")],
+          warnings: [],
+        };
+      } catch (err) {
+        const error =
+          err instanceof Error ? err.message : msg("submit.blackbox.scorer.dry_run_failed");
+        setDryRun({ status: "done", result: { ok: false, error, side_info: {}, elapsed_ms: 0 } });
+        outcome = { valid: false, errors: [error], warnings: [] };
+      }
+      setScorerValidation(outcome);
+      return outcome;
+    },
+    [
+      buildScorer,
+      seedCandidate,
+      objective,
+      parsedCases,
+      metricCode,
+      scorerKind,
+      scorerUrl,
+      scorerSecret,
+      scorerTimeout,
+      scorerModel,
+    ],
+  );
+
+  const authoringContext = useMemo<BlackboxAuthoringContext>(
+    () => ({
+      recipe,
+      objective,
+      background,
+      target_kind: targetKind,
+      scorer_has_model: scorerModel.name.trim().length > 0,
+    }),
+    [recipe, objective, background, targetKind, scorerModel.name],
+  );
+
+  // The interview is offered whatever the seed mode or hand edits: its brief
+  // always yields a text starting point, so a parts or from-scratch seed
+  // switches to Text when the draft lands (agentSetSeed below).
+  const interviewPossible = codeAssistMode === "auto";
+  // The interview opens on the Starting point itself, as soon as the objective
+  // is settled (typed, then left), and latches from there: re-editing the
+  // objective mid-interview must not swap the panel out from under the
+  // conversation. The seed pass runs when it resolves, so the user leaves the
+  // step with a drafted starting point instead of having to write one.
+  const [interviewArmed, setInterviewArmed] = useState(false);
+  useEffect(() => {
+    if (!objectiveEditing && objective.trim().length > 0) setInterviewArmed(true);
+  }, [objectiveEditing, objective]);
+  const interviewEligible = interviewPossible && interviewArmed;
+  const interview = useCodeInterview({
+    enabled: interviewEligible,
+    parsedDataset: parsedCases,
+    columnRoles: NO_ROLES,
+    columnKinds: NO_KINDS,
+    jobModel: targetKind === "agent" ? targetModel : reflectionModel.name,
+    blackbox: authoringContext,
+  });
+  // Resolving the interview (confirm or skip) is an explicit ask to draft, so
+  // it lifts the hand-edit guard: a starting point typed while the interview
+  // was open reaches the seed pass as the prior to build on.
+  useEffect(() => {
+    if (!interview.resolved) return;
+    setSeedManuallyEdited(false);
+    setScorerManuallyEdited(false);
+  }, [interview.resolved]);
+
+  const agentSetSeed = useCallback((code: string) => {
+    setSeedText(code);
+    setSeedMode("text");
+  }, []);
+  const noSeedValidation = useCallback(async () => null, []);
+  const agent = useCodeAgent({
+    codeAssistMode,
+    setCodeAssistMode,
+    columnRoles: NO_ROLES,
+    columnKinds: NO_KINDS,
+    parsedDataset: parsedCases,
+    moduleName: "",
+    signatureCode: seedText,
+    metricCode,
+    setSignatureCode: agentSetSeed,
+    setMetricCode,
+    signatureManuallyEdited: seedManuallyEdited,
+    metricManuallyEdited: scorerManuallyEdited,
+    setSignatureManuallyEdited: setSeedManuallyEdited,
+    setMetricManuallyEdited: setScorerManuallyEdited,
+    setSignatureValidation: setSeedValidation,
+    setMetricValidation: setScorerValidation,
+    signatureValidation: seedValidation,
+    metricValidation: scorerValidation,
+    runSignatureValidation: noSeedValidation,
+    runMetricValidation: runDryRun,
+    seedEnabled: interview.resolved,
+    interviewBrief: interview.confirmedBrief,
+    blackbox: authoringContext,
+  });
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -241,9 +488,12 @@ export function useBlackboxWizard() {
     };
     switch (s) {
       case 1: {
-        if (seedMode === "none" && !objective.trim())
+        // In auto mode the agent drafts the text seed from the objective, so
+        // the objective is the required input and the seed may stay blank.
+        const agentDrafts = codeAssistMode === "auto" && seedMode === "text";
+        if ((seedMode === "none" || agentDrafts) && !objective.trim())
           return fail("submit.blackbox.validation.objective_required");
-        if (seedMode !== "none" && seedCandidate == null)
+        if (seedMode !== "none" && !agentDrafts && seedCandidate == null)
           return fail("submit.blackbox.validation.seed_required");
         if (targetKind === "agent") {
           if (!targetModel.trim()) return fail("submit.blackbox.validation.agent_model_required");
@@ -262,6 +512,8 @@ export function useBlackboxWizard() {
       case 3: {
         if (scorerKind === "python" && !metricCode.trim())
           return fail("submit.blackbox.validation.scorer_code_required");
+        if (scorerKind === "python" && /\bllm\s*\(/.test(metricCode) && !scorerModel.name.trim())
+          return fail("submit.blackbox.validation.scorer_model_required");
         if (scorerKind === "remote" && !/^https?:\/\/\S+$/.test(scorerUrl.trim()))
           return fail("submit.blackbox.validation.scorer_url_required");
         if (dryRun.status !== "done" || !dryRun.result.ok)
@@ -354,7 +606,12 @@ export function useBlackboxWizard() {
           max_iterations: maxIterations === "" ? undefined : maxIterations,
           stop_at_score: parseOptionalNumber(stopAtScore),
         },
-        strategy: strategyMode === "single" ? { mode: "single", engine } : { mode: "auto" },
+        strategy:
+          strategyMode === "single"
+            ? { mode: "single", engine }
+            : strategyMode === "plateau"
+              ? { mode: "plateau", patience }
+              : { mode: "auto" },
         target: buildTarget(),
         reflection_model_config: reflection,
         token_source: tokenSource,
@@ -391,6 +648,7 @@ export function useBlackboxWizard() {
   };
 
   return {
+    recipe,
     step,
     direction,
     maxReachableStep: furthestReachedStep,
@@ -413,15 +671,23 @@ export function useBlackboxWizard() {
     setJobDescription,
     isPrivate,
     setIsPrivate,
+    codeAssistMode,
+    setCodeAssistMode,
     seedMode,
     setSeedMode,
     seedText,
     setSeedText,
+    setSeedManuallyEdited,
+    setScorerManuallyEdited,
+    agent,
+    interview,
+    interviewEligible,
     seedParts,
     setSeedParts,
     seedCandidate,
     objective,
     setObjective,
+    setObjectiveEditing,
     background,
     setBackground,
     targetKind,
@@ -461,12 +727,17 @@ export function useBlackboxWizard() {
     setScorerSecret,
     scorerTimeout,
     setScorerTimeout,
+    scorerModel,
+    setScorerModel,
+    scorerValidation,
     dryRun,
     runDryRun,
     strategyMode,
     setStrategyMode,
     engine,
     setEngine,
+    patience,
+    setPatience,
     engineCatalog,
     selectedEngine,
     maxScorerRuns,

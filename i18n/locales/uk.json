@@ -2,6 +2,7 @@
   "$schema": "../schema.json",
   "locale": "uk",
   "terms": {
+    "optimizationTypeBlackbox": "чорна скринька",
     "apiKey": "ключ API",
     "baseline": "базовий рівень",
     "baselineScore": "базова оцінка",

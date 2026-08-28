@@ -2,6 +2,7 @@
   "$schema": "../schema.json",
   "locale": "yue",
   "terms": {
+    "optimizationTypeBlackbox": "黑盒",
     "apiKey": "API 金鑰",
     "baseline": "基準",
     "baselineScore": "基準分數",

@@ -14,6 +14,7 @@ const PHASE_LABEL: Record<LaneView["phase"], () => string> = {
   explore: () => msg("optimization.blackbox.lane.phase_explore"),
   continue: () => msg("optimization.blackbox.lane.phase_continue"),
   single: () => msg("optimization.blackbox.lane.phase_single"),
+  relay: () => msg("optimization.blackbox.lane.phase_relay"),
 };
 
 const STATUS_LABEL: Record<LaneView["status"], () => string> = {
@@ -22,6 +23,7 @@ const STATUS_LABEL: Record<LaneView["status"], () => string> = {
   failed: () => msg("optimization.blackbox.lane.status_failed"),
   unavailable: () => msg("optimization.blackbox.lane.status_unavailable"),
   budget_exhausted: () => msg("optimization.blackbox.lane.status_budget_exhausted"),
+  plateaued: () => msg("optimization.blackbox.lane.status_plateaued"),
 };
 
 function StatusIcon({ status }: { status: LaneView["status"] }) {

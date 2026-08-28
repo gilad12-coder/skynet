@@ -4,7 +4,11 @@ import * as React from "react";
 import { toast } from "react-toastify";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
-import { streamCodeAgent, type CodeAgentToolName } from "@/shared/lib/api";
+import {
+  streamCodeAgent,
+  type BlackboxAuthoringContext,
+  type CodeAgentToolName,
+} from "@/shared/lib/api";
 import { getActiveLocale } from "@/shared/lib/runtime-locale";
 import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
 import { TERMS } from "@/shared/lib/terms";
@@ -17,6 +21,15 @@ export type ArtifactStatus = "idle" | "waiting" | "writing" | "done";
 
 type AgentToolName = CodeAgentToolName;
 type AgentToolStatus = "running" | "done" | "error";
+
+// Black-box runs drive the same two editor slots under their own tool names.
+function isSeedTool(tool: AgentToolName): boolean {
+  return tool === "edit_signature" || tool === "edit_seed";
+}
+
+function isScorerTool(tool: AgentToolName): boolean {
+  return tool === "edit_metric" || tool === "edit_scorer";
+}
 
 export interface AgentToolCall {
   id: string;
@@ -63,7 +76,8 @@ const MAX_AUTO_FIX = 2;
 // revise it via the edit pencil to steer the initial generation. Resolved on
 // call (not at module scope) so it can't capture a raw key before the message
 // shim has loaded.
-function seedUserMessage(): string {
+function seedUserMessage(blackbox: boolean): string {
+  if (blackbox) return msg("submit.blackbox.agent.seed_request");
   return formatMsg("auto.features.submit.hooks.use.code.agent.template.1", {
     p1: TERMS.dataset,
   });
@@ -208,6 +222,9 @@ export interface UseCodeAgentArgs {
   // When set, the conversation survives the locale-switch reload under this
   // stash key. Leave unset for surfaces that shouldn't persist.
   reloadPersistKey?: string;
+  /** Black-box authoring context; when set the agent drafts the starting
+   *  point + Python scorer and no dataset is required. */
+  blackbox?: BlackboxAuthoringContext | null;
   // Catalog model id + effort the code author runs on (the composer's model
   // menu). Absent/`null` routes automatically. The agent panel forwards the
   // conversation's chosen model so code authoring follows the composer.
@@ -246,6 +263,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
     reloadPersistKey,
     model,
     reasoningEffort,
+    blackbox = null,
   } = args;
 
   // Read the reload stash once at mount, before the initializers below
@@ -388,11 +406,12 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   }, [reloadPersistKey]);
 
   const hasRequiredContext = React.useMemo(() => {
+    if (blackbox) return blackbox.objective.trim().length > 0;
     if (!parsedDataset || parsedDataset.rowCount === 0) return false;
     const hasInput = Object.values(columnRoles).some((r) => r === "input");
     const hasOutput = Object.values(columnRoles).some((r) => r === "output");
     return hasInput && hasOutput;
-  }, [parsedDataset, columnRoles]);
+  }, [parsedDataset, columnRoles, blackbox]);
 
   const appendReply = React.useCallback((chunk: string) => {
     setMessages((prev) => {
@@ -433,7 +452,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   }, []);
 
   const attachCodeToLatestRunningToolCall = React.useCallback(
-    (tool: AgentToolName, prevCode: string, newCode: string) => {
+    (slot: "seed" | "scorer", prevCode: string, newCode: string) => {
       setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (!last || last.role !== "assistant" || !last.toolCalls?.length) return prev;
@@ -441,7 +460,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
         let targetIdx = -1;
         for (let i = calls.length - 1; i >= 0; i--) {
           const c = calls[i];
-          if (c && c.tool === tool && c.status === "running") {
+          if (
+            c &&
+            c.status === "running" &&
+            (slot === "seed" ? isSeedTool(c.tool) : isScorerTool(c.tool))
+          ) {
             targetIdx = i;
             break;
           }
@@ -461,7 +484,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
 
   const runAgent = React.useCallback(
     (userMessage: string, history: AgentMessage[]) => {
-      if (!parsedDataset || !hasRequiredContext) return;
+      if (!hasRequiredContext) return;
 
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -481,9 +504,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       setStatusLabel(
         isChat
           ? msg("auto.features.submit.hooks.use.code.agent.literal.1")
-          : formatMsg("auto.features.submit.hooks.use.code.agent.template.2", {
-              p1: TERMS.dataset,
-            }),
+          : blackbox
+            ? msg("submit.blackbox.agent.reading")
+            : formatMsg("auto.features.submit.hooks.use.code.agent.template.2", {
+                p1: TERMS.dataset,
+              }),
       );
       setSignatureStatus(isChat ? "idle" : "waiting");
       setMetricStatus(isChat ? "idle" : "waiting");
@@ -501,12 +526,12 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       } else {
         setMessages((m) => [
           ...m,
-          { role: "user", content: seedUserMessage() },
+          { role: "user", content: seedUserMessage(!!blackbox) },
           { role: "assistant", content: "", toolCalls: [] },
         ]);
       }
 
-      const sampleRows = parsedDataset.rows.slice(0, 5) as Array<Record<string, unknown>>;
+      const sampleRows = (parsedDataset?.rows.slice(0, 5) ?? []) as Array<Record<string, unknown>>;
       const snapshot = snapshotRef.current;
       const { signatureVersions: sigVers, metricVersions: metVers } = versionsRef.current;
       const initialSignature = sigVers[0]?.code ?? snapshot.signatureCode;
@@ -547,7 +572,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
 
       void streamCodeAgent(
         {
-          dataset_columns: parsedDataset.columns,
+          dataset_columns: parsedDataset?.columns ?? [],
           column_roles: columnRoles,
           column_kinds: imageColumnKinds,
           sample_rows: sampleRows,
@@ -571,6 +596,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             : {}),
           ...(model ? { model } : {}),
           ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+          ...(blackbox ? { blackbox } : {}),
         },
         {
           signal: controller.signal,
@@ -619,14 +645,22 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           onToolStart: (ev) => {
             markReasoningDone();
             setStatusLabel(
-              ev.tool === "edit_signature"
-                ? msg("auto.features.submit.hooks.use.code.agent.literal.5")
-                : ev.tool === "edit_metric"
-                  ? msg("auto.features.submit.hooks.use.code.agent.literal.6")
+              isSeedTool(ev.tool)
+                ? msg(
+                    blackbox
+                      ? "submit.blackbox.agent.writing_seed"
+                      : "auto.features.submit.hooks.use.code.agent.literal.5",
+                  )
+                : isScorerTool(ev.tool)
+                  ? msg(
+                      blackbox
+                        ? "submit.blackbox.agent.writing_scorer"
+                        : "auto.features.submit.hooks.use.code.agent.literal.6",
+                    )
                   : msg("workflow.agent.editing_graph"),
             );
-            if (ev.tool === "edit_signature") setSignatureStatus("writing");
-            else if (ev.tool === "edit_metric") setMetricStatus("writing");
+            if (isSeedTool(ev.tool)) setSignatureStatus("writing");
+            else if (isScorerTool(ev.tool)) setMetricStatus("writing");
             pushToolCall({
               id: ev.id,
               tool: ev.tool,
@@ -638,8 +672,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
           },
           onToolEnd: (ev) => {
             finishToolCall(ev.id, ev.status === "ok" ? "done" : "error");
-            if (ev.tool === "edit_signature") setSignatureStatus("done");
-            else if (ev.tool === "edit_metric") setMetricStatus("done");
+            if (isSeedTool(ev.tool)) setSignatureStatus("done");
+            else if (isScorerTool(ev.tool)) setMetricStatus("done");
           },
           onWorkflowReplace: (workflow, changedNodeId) => {
             markReasoningDone();
@@ -650,7 +684,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             lastSignatureCode = code;
             setSignatureCode(code);
             setSignatureManuallyEdited(false);
-            attachCodeToLatestRunningToolCall("edit_signature", prevCode, code);
+            attachCodeToLatestRunningToolCall("seed", prevCode, code);
             const changed = diffChangedLines(prevCode, code);
             setSignatureFlashLines(changed);
             if (flashClearRef.current) clearTimeout(flashClearRef.current);
@@ -672,7 +706,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
             lastMetricCode = code;
             setMetricCode(code);
             setMetricManuallyEdited(false);
-            attachCodeToLatestRunningToolCall("edit_metric", prevCode, code);
+            attachCodeToLatestRunningToolCall("scorer", prevCode, code);
             const changed = diffChangedLines(prevCode, code);
             setMetricFlashLines(changed);
             if (flashClearRef.current) clearTimeout(flashClearRef.current);
@@ -757,7 +791,9 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
               if (!last || last.role !== "assistant") return prev;
               const fallback = isChat
                 ? "Done."
-                : "I wrote a Signature and Metric based on your data.";
+                : blackbox
+                  ? msg("submit.blackbox.agent.seed_done")
+                  : "I wrote a Signature and Metric based on your data.";
               const finalContent = result.assistant_message || last.content || fallback;
               const next = prev.slice();
               next[next.length - 1] = {
@@ -825,9 +861,11 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
                 : metricHasError
                   ? "auto.features.submit.hooks.use.code.agent.template.5"
                   : "auto.features.submit.hooks.use.code.agent.template.4";
-            const fixMessage = formatMsg(fixKey, {
-              p1: TERMS.dataset,
-            });
+            const fixMessage = blackbox
+              ? msg("submit.blackbox.agent.fix_scorer")
+              : formatMsg(fixKey, {
+                  p1: TERMS.dataset,
+                });
             queueMicrotask(() => {
               runAgentRef.current?.(fixMessage, messagesRef.current);
             });
@@ -859,6 +897,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
       columnKinds,
       isWorkflow,
       interviewBrief,
+      blackbox,
       model,
       reasoningEffort,
       setSignatureCode,

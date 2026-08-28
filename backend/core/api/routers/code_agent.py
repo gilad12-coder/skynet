@@ -2,7 +2,8 @@
 
 All endpoints are hidden from the public Scalar reference (none are in
 ``_SCALAR_PUBLIC_PATHS``). Used by the wizard UI to author DSPy code
-interactively — not part of the dev integration surface.
+interactively — or, when a request carries ``blackbox``, a black-box job's
+starting point + python scorer — not part of the dev integration surface.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from starlette.responses import StreamingResponse
 
 from ...service_gateway.agents.code import run_code_agent
@@ -35,6 +36,38 @@ class ChatTurn(BaseModel):
     content: str = Field(..., description="Message text.")
 
 
+# Authoring context of the black-box ("optimize anything") wizard. Set on a
+# request it switches the code agent and the interview to their black-box
+# modes: the agent drafts the starting point + a python scorer instead of a
+# DSPy Signature + metric, and the interview asks about the objective.
+class BlackboxAuthoringContext(BaseModel):
+    recipe: Literal["prompt", "code", "anything"] = Field(..., description="What is being optimized.")
+    objective: str = Field(..., min_length=1, description="What a better version achieves, in the user's words.")
+    background: str = Field(default="", description="Free-form context: domain, constraints, examples.")
+    target_kind: Literal["text", "agent"] = Field(
+        default="text",
+        description="'text' when versions are used as-is; 'agent' when they are a coding agent's instructions.",
+    )
+    scorer_has_model: bool = Field(
+        default=False,
+        description="Whether the scorer step has a model, so scorer code may call the injected llm() helper.",
+    )
+
+
+def _require_columns_or_blackbox(dataset_columns: list[str], blackbox: BlackboxAuthoringContext | None) -> None:
+    """Keep the DSPy contract strict: only a black-box request may omit the dataset.
+
+    Args:
+        dataset_columns: The request's column list.
+        blackbox: The request's black-box context, when any.
+
+    Raises:
+        ValueError: When the columns are empty and no black-box context is set.
+    """
+    if not dataset_columns and blackbox is None:
+        raise ValueError("dataset_columns must not be empty unless blackbox is set.")
+
+
 class CodeAgentRequest(BaseModel):
     """Input for streaming code generation.
 
@@ -45,7 +78,10 @@ class CodeAgentRequest(BaseModel):
     and the current editor contents in ``prior_signature`` / ``prior_metric``).
     """
 
-    dataset_columns: list[str] = Field(..., min_length=1, description="All column names in the dataset.")
+    dataset_columns: list[str] = Field(
+        ...,
+        description="All column names in the dataset; may be empty only with ``blackbox`` set.",
+    )
     column_roles: dict[str, str] = Field(..., description="Column → 'input'|'output'|'ignore'.")
     column_kinds: dict[str, str] = Field(
         default_factory=dict,
@@ -131,6 +167,26 @@ class CodeAgentRequest(BaseModel):
             "keeps the model's default."
         ),
     )
+    blackbox: BlackboxAuthoringContext | None = Field(
+        default=None,
+        description=(
+            "Black-box authoring context. Set, the agent drafts/edits the "
+            "job's starting point (``prior_signature`` slot) and python "
+            "scorer (``prior_metric`` slot) with ``edit_seed`` / "
+            "``edit_scorer``; ``dataset_columns`` then holds the case "
+            "columns and may be empty."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _columns_or_blackbox(self) -> CodeAgentRequest:
+        """Reject an empty dataset unless the request is black-box.
+
+        Returns:
+            The validated request.
+        """
+        _require_columns_or_blackbox(self.dataset_columns, self.blackbox)
+        return self
 
 
 class CodeInterviewRequest(BaseModel):
@@ -142,7 +198,10 @@ class CodeInterviewRequest(BaseModel):
     full dataset).
     """
 
-    dataset_columns: list[str] = Field(..., min_length=1, description="All column names in the dataset.")
+    dataset_columns: list[str] = Field(
+        ...,
+        description="All column names in the dataset; may be empty only with ``blackbox`` set.",
+    )
     column_roles: dict[str, str] = Field(..., description="Column → 'input'|'output'|'ignore'.")
     column_kinds: dict[str, str] = Field(
         default_factory=dict,
@@ -181,6 +240,24 @@ class CodeInterviewRequest(BaseModel):
             "keeps the model's default."
         ),
     )
+    blackbox: BlackboxAuthoringContext | None = Field(
+        default=None,
+        description=(
+            "Black-box authoring context. Set, the interview is about the "
+            "objective, the starting point and the scorer; "
+            "``dataset_columns`` then holds the case columns and may be empty."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _columns_or_blackbox(self) -> CodeInterviewRequest:
+        """Reject an empty dataset unless the request is black-box.
+
+        Returns:
+            The validated request.
+        """
+        _require_columns_or_blackbox(self.dataset_columns, self.blackbox)
+        return self
 
 
 class EditCodeRequest(BaseModel):
@@ -263,8 +340,10 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         * ``reasoning_patch`` — ``{"chunk": "<token>", "source": "<stream>"}``
           (both modes; ``source`` separates the parallel seed authors:
           ``signature`` / ``metric`` / ``workflow`` / ``agent``)
-        * ``tool_start`` — ``{"id", "tool", "reason"}`` (chat mode)
-        * ``signature_replace`` / ``metric_replace`` — ``{"code"}``
+        * ``tool_start`` — ``{"id", "tool", "reason"}`` (chat mode; the
+          black-box tools are ``edit_seed`` / ``edit_scorer``)
+        * ``signature_replace`` / ``metric_replace`` — ``{"code"}`` (in
+          black-box mode these carry the starting point / the scorer)
         * ``workflow_replace`` — ``{"workflow", "changed_node_id"}``
           (workflow mode: seed snapshot + one per graph tool op)
         * ``tool_end`` — ``{"id", "tool", "status"}``
@@ -305,6 +384,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             reasoning_effort=req.reasoning_effort,
             lm_extra_body=lm_extra_body,
             usage_sink=usage_sink,
+            blackbox=req.blackbox.model_dump() if req.blackbox else None,
         )
         metered = stream_with_llm_metering(
             source,
@@ -346,7 +426,8 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         * ``error`` — ``{"error": "<message>"}``
 
         Args:
-            req: Dataset context, the client-owned transcript, and locale.
+            req: Dataset (or black-box) context, the client-owned transcript,
+                and locale.
             current_user: The authenticated caller (required; gates LLM spend).
 
         Returns:
@@ -371,6 +452,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
                     reasoning_effort=req.reasoning_effort,
                     lm_extra_body=lm_extra_body,
                     usage_sink=usage_sink,
+                    blackbox=req.blackbox.model_dump() if req.blackbox else None,
                 ):
                     yield event
             except Exception:

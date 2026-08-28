@@ -20,9 +20,11 @@ interface Props {
   disabled?: boolean;
   disabledReason?: string;
   className?: string;
+  /** Black-box wizard: the agent drafts a starting point + scorer, not DSPy code. */
+  blackbox?: boolean;
 }
 
-export function CodeAgentPanel({ agent, disabled, disabledReason, className }: Props) {
+export function CodeAgentPanel({ agent, disabled, disabledReason, className, blackbox }: Props) {
   const [draft, setDraft] = React.useState("");
 
   const streaming = agent.status === "streaming";
@@ -83,7 +85,9 @@ export function CodeAgentPanel({ agent, disabled, disabledReason, className }: P
       <AgentThread
         scrollDeps={[agent.messages, agent.status]}
         isEmpty={agent.messages.length === 0 && !streaming}
-        emptyState={<EmptyState disabled={disabled} disabledReason={disabledReason} />}
+        emptyState={
+          <EmptyState disabled={disabled} disabledReason={disabledReason} blackbox={blackbox} />
+        }
       >
         <ChatTranscript
           messages={agent.messages}
@@ -228,14 +232,19 @@ function computeLineDiff(oldText: string, newText: string): DiffLine[] {
 
 function ToolCallCard({ call, isRetry = false }: { call: SharedAgentToolCall; isRetry?: boolean }) {
   const codeCall = call as AgentToolCall;
-  const isSignature = codeCall.tool === "edit_signature";
-  const isMetric = codeCall.tool === "edit_metric";
+  const isSignature = codeCall.tool === "edit_signature" || codeCall.tool === "edit_seed";
+  const isMetric = codeCall.tool === "edit_metric" || codeCall.tool === "edit_scorer";
   const Icon = isSignature ? FileCode : isMetric ? Ruler : ShareNetwork;
-  const title = isSignature
-    ? msg("submit.code.agent.tool.signature.title")
-    : isMetric
-      ? msg("submit.code.agent.tool.metric.title")
-      : msg(`workflow.agent.tool.${codeCall.tool}` as Parameters<typeof msg>[0]);
+  const title =
+    codeCall.tool === "edit_seed"
+      ? msg("submit.blackbox.agent.tool.seed")
+      : codeCall.tool === "edit_scorer"
+        ? msg("submit.blackbox.agent.tool.scorer")
+        : isSignature
+          ? msg("submit.code.agent.tool.signature.title")
+          : isMetric
+            ? msg("submit.code.agent.tool.metric.title")
+            : msg(`workflow.agent.tool.${codeCall.tool}` as Parameters<typeof msg>[0]);
 
   const diff = React.useMemo<DiffLine[]>(() => {
     if (!codeCall.newCode) return [];
@@ -311,7 +320,15 @@ function DiffRow({ line }: { line: DiffLine }) {
   );
 }
 
-function EmptyState({ disabled, disabledReason }: { disabled?: boolean; disabledReason?: string }) {
+function EmptyState({
+  disabled,
+  disabledReason,
+  blackbox,
+}: {
+  disabled?: boolean;
+  disabledReason?: string;
+  blackbox?: boolean;
+}) {
   return (
     <SharedEmptyState
       icon={Robot}
@@ -325,11 +342,13 @@ function EmptyState({ disabled, disabledReason }: { disabled?: boolean; disabled
       description={
         disabled
           ? disabledReason || msg("auto.features.submit.components.steps.codeagentpanel.literal.16")
-          : formatMsg("auto.features.submit.components.steps.codeagentpanel.template.2", {
-              p1: TERMS.dataset,
-              p2: TERMS.signature,
-              p3: TERMS.metric,
-            })
+          : blackbox
+            ? msg("submit.blackbox.agent.empty_hint")
+            : formatMsg("auto.features.submit.components.steps.codeagentpanel.template.2", {
+                p1: TERMS.dataset,
+                p2: TERMS.signature,
+                p3: TERMS.metric,
+              })
       }
     />
   );

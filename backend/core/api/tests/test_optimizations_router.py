@@ -32,6 +32,7 @@ from ...storage.models import Base
 from ..errors import DomainError
 from ..routers.optimizations import create_optimizations_router
 from ..routers.optimizations._local import clone_payload
+from ..routers.optimizations_meta import _sanitize_payload
 from .conftest import bypass_auth
 from .mocks import _BaseFakeJobStore, real_grid_response_dict
 
@@ -1624,3 +1625,22 @@ def test_status_surfaces_blackbox_results_under_blackbox_result(
     assert body["blackbox_result"]["engine_used"] == "gepa"
     assert [lane["engine"] for lane in body["blackbox_result"]["lanes"]] == ["best_of_n", "gepa"]
     assert body["blackbox_result"]["optimized_test_metric"] == 0.9
+
+
+def test_sanitize_payload_scrubs_the_scorer_model_key() -> None:
+    """A black-box scorer's ``llm()`` model loses its inline key like every other model slot."""
+    payload = {
+        "reflection_model_settings": {"name": "m", "extra": {"api_key": "sk-2"}},
+        "scorer": {
+            "kind": "python",
+            "metric_code": "def score(c): return 1.0",
+            "model": {"name": "openai/gpt-4o", "extra": {"api_key": "sk-secret", "temperature": 0.1}},
+        },
+    }
+
+    sanitised = _sanitize_payload(payload)
+
+    assert sanitised["scorer"]["model"]["extra"] == {"temperature": 0.1}
+    assert sanitised["scorer"]["metric_code"] == "def score(c): return 1.0"
+    assert "api_key" not in sanitised["reflection_model_settings"]["extra"]
+    assert payload["scorer"]["model"]["extra"]["api_key"] == "sk-secret"

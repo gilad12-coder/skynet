@@ -2294,6 +2294,19 @@ export interface CodeAgentChatTurn {
   content: string;
 }
 
+/** Black-box authoring context. Present on "prompt" / "code" / "anything"
+ *  jobs: the agent then drafts the starting point (signature slot) and the
+ *  Python scorer (metric slot) instead of DSPy code, and works without a
+ *  dataset — cases are optional context. */
+export interface BlackboxAuthoringContext {
+  recipe: "prompt" | "code" | "anything";
+  objective: string;
+  background?: string;
+  target_kind?: "text" | "agent";
+  // True when a model is attached in the Scorer step, so the scorer may call llm().
+  scorer_has_model?: boolean;
+}
+
 export interface CodeAgentRequest {
   dataset_columns: string[];
   // Plain string roles (input/output/ignore); the code agent only consumes
@@ -2325,11 +2338,14 @@ export interface CodeAgentRequest {
   model?: string;
   // Explicit reasoning-effort level for the chosen model; absent keeps its default.
   reasoning_effort?: string;
+  blackbox?: BlackboxAuthoringContext;
 }
 
 export type CodeAgentToolName =
   | "edit_signature"
   | "edit_metric"
+  | "edit_seed"
+  | "edit_scorer"
   | "add_node"
   | "update_node"
   | "remove_node"
@@ -2339,6 +2355,8 @@ export type CodeAgentToolName =
 const CODE_AGENT_TOOLS = new Set<CodeAgentToolName>([
   "edit_signature",
   "edit_metric",
+  "edit_seed",
+  "edit_scorer",
   "add_node",
   "update_node",
   "remove_node",
@@ -2510,6 +2528,7 @@ export interface CodeInterviewRequest {
   model?: string;
   /** Reasoning-effort level for the chosen model; absent runs its default. */
   reasoning_effort?: string;
+  blackbox?: BlackboxAuthoringContext;
 }
 
 /**

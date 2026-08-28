@@ -2,6 +2,7 @@
   "$schema": "../schema.json",
   "locale": "tr",
   "terms": {
+    "optimizationTypeBlackbox": "kara kutu",
     "apiKey": "API anahtarı",
     "baseline": "temel referans",
     "baselineScore": "temel referans puanı",

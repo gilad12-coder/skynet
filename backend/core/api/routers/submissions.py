@@ -30,6 +30,7 @@ from ...billing import (
     cost_ceiling_budget,
     provider_slug_for_model,
 )
+from ...billing.metering import meter_llm_usage
 from ...config import settings
 from ...constants import (
     COMPOSITION_SINGLE,
@@ -103,7 +104,13 @@ from ..dataset_access import resolve_effective_role
 from ..errors import DomainError
 from ..model_catalog import get_catalog_cached
 from ..rate_limit import enforce_submission_rate
-from ._helpers import compute_task_fingerprint, enforce_storage_quota, stable_seed, strip_api_key
+from ._helpers import (
+    compute_task_fingerprint,
+    enforce_llm_credits,
+    enforce_storage_quota,
+    stable_seed,
+    strip_api_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -556,7 +563,9 @@ def _request_model_configs(payload: _OptimizationRequestBase | BlackboxRunReques
         Model configs in execution order.
     """
     if isinstance(payload, BlackboxRunRequest):
-        return [payload.reflection_model_settings]
+        return [
+            config for config in (payload.reflection_model_settings, payload.scorer.model) if config is not None
+        ]
     if isinstance(payload, RunRequest):
         return [
             config
@@ -1186,7 +1195,9 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
 
         Python scorers run in the metric sandbox; remote scorers get a single
         outbound request. Scorer failures come back as ``ok=False`` with the
-        error text rather than as an HTTP error.
+        error text rather than as an HTTP error. A scorer with a model
+        chosen may call ``llm()``; that usage is billed to the caller like an
+        agent turn.
 
         Args:
             payload: The scorer spec, one version and an optional case.
@@ -1196,9 +1207,22 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             The score and side information, or the error that stopped it.
 
         Raises:
-            DomainError: 429 when over the submission rate cap.
+            DomainError: 429 when over the submission rate cap; 402 when the
+                scorer has a model and the account has no credits.
         """
         enforce_submission_rate(current_user.username)
-        return dry_run_scorer(payload)
+        scorer_model = payload.scorer.model
+        if scorer_model is not None:
+            enforce_llm_credits(job_store, current_user.username)
+        response = dry_run_scorer(payload)
+        if scorer_model is not None and response.usage_by_model:
+            meter_llm_usage(
+                getattr(job_store, "engine", None),
+                current_user.username,
+                {usage.model: (usage.input_tokens, usage.output_tokens) for usage in response.usage_by_model},
+                description="Scorer dry run",
+                token_source=scorer_model.token_source or TOKEN_SOURCE_MANAGED,
+            )
+        return response
 
     return router

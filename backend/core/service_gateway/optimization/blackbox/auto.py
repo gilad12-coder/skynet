@@ -1,10 +1,13 @@
-"""Strategy layer: ``single`` runs one engine; ``auto`` explores, then continues.
+"""Strategy layer: ``single`` runs one engine; ``auto`` explores, then continues; ``plateau`` relays.
 
 Auto mirrors GEPA's *omni* recipe: every engine available to the job gets
 an equal slice of the explore budget, the best explore result is handed
-to GEPA, and GEPA spends what remains continuing from it. Which engines
-are available depends on :class:`EngineCapabilities` (agent sandboxes on
-the deployment, an agent target on the job). Each lane emits
+to GEPA, and GEPA spends what remains continuing from it. Plateau walks
+the same engine order but hands over on stagnation instead of on a fixed
+slice: a lane runs until ``patience`` scorer runs pass without beating the
+run's record, then the next engine picks up from the best version. Which
+engines are available depends on :class:`EngineCapabilities` (agent
+sandboxes on the deployment, an agent target on the job). Each lane emits
 ``lane_started`` / ``lane_completed`` events and the hand-off emits
 ``lane_handoff`` so the run page can render the lane table.
 """
@@ -21,7 +24,7 @@ from ....constants import PROGRESS_LANE_COMPLETED, PROGRESS_LANE_HANDOFF, PROGRE
 from ....exceptions import ServiceError
 from ....models.blackbox import BLACKBOX_ENGINE_GEPA, BlackboxStrategy
 from ..cost_ceiling import CostCeilingExceededError
-from .protocol import BudgetExhaustedError, Candidate, EngineContext, EvalServer, Result, Task
+from .protocol import BudgetExhaustedError, Candidate, EngineContext, EvalServer, PlateauWatch, Result, Task
 from .registry import NO_CAPABILITIES, EngineCapabilities, available_engine_ids, get_engine
 
 logger = logging.getLogger(__name__)
@@ -72,7 +75,7 @@ def run_lane(
 
     Args:
         engine_id: Catalog id of the engine.
-        phase: ``explore``, ``continue`` or ``single``.
+        phase: ``explore``, ``continue``, ``single`` or ``relay``.
         task: The task for this lane (the continue lane seeds from the winner).
         server: The lane's budget slice.
         ctx: Run context; the lane gets its own workspace under ``ctx.run_dir``.
@@ -105,6 +108,10 @@ def run_lane(
         else:
             outcome.best_candidate, outcome.best_score = result.best_candidate, result.best_score
             outcome.metadata = dict(result.metadata)
+        # A plateau ends a lane through the budget path (engines stop and
+        # hand back their best); it is a stop, not an error.
+        if server.plateaued and outcome.status in ("completed", "budget_exhausted"):
+            outcome.status, outcome.error = "plateaued", None
     outcome.scorer_runs = server.used
     _emit(
         progress_callback,
@@ -148,13 +155,13 @@ def run_strategy(
     """Run the requested strategy and return the best version plus every lane.
 
     Args:
-        strategy: ``single`` with an engine id, or ``auto``.
+        strategy: ``single`` with an engine id, ``auto`` or ``plateau``.
         task: The starting point, goal and cases.
         server: The run's full scorer budget.
         ctx: Reflection LM, workspace and stop settings.
         progress_callback: The job's progress sink, if any.
         caps: What the deployment and the job offer the engines; decides
-            which engines Auto explores.
+            which engines Auto explores and Plateau relays over.
 
     Returns:
         The winning result and the lane outcomes in execution order.
@@ -168,6 +175,8 @@ def run_strategy(
             str(strategy.engine), "single", task, server.lane(server.remaining), ctx, progress_callback, caps=caps
         )
         return _finalize(task, server, [lane], lane), [lane]
+    if strategy.mode == "plateau":
+        return _run_plateau(strategy, task, server, ctx, progress_callback, caps=caps)
 
     engine_ids = available_engine_ids(caps, parts=not task.str_mode)
     if len(engine_ids) == 1:
@@ -200,6 +209,73 @@ def run_strategy(
     lanes.append(continued)
     final = continued if (continued.best_score or float("-inf")) >= (winner.best_score or float("-inf")) else winner
     return _finalize(task, server, lanes, final), lanes
+
+
+def _run_plateau(
+    strategy: BlackboxStrategy,
+    task: Task,
+    server: EvalServer,
+    ctx: EngineContext,
+    progress_callback: ProgressCallback | None,
+    *,
+    caps: EngineCapabilities,
+) -> tuple[Result, list[LaneOutcome]]:
+    """Relay over the available engines, handing over whenever a lane stalls.
+
+    Each lane gets the whole remaining budget under a fresh
+    :class:`PlateauWatch`, seeded from the best version so far. The relay
+    stops when the budget is spent, the target score is reached, or a
+    full round of engines passes without a new record.
+
+    Args:
+        strategy: Carries ``patience``.
+        task: The starting point, goal and cases.
+        server: The run's full scorer budget.
+        ctx: Reflection LM, workspace and stop settings.
+        progress_callback: The job's progress sink, if any.
+        caps: What the deployment and the job offer the engines.
+
+    Returns:
+        The winning result and the lane outcomes in execution order.
+    """
+    engine_ids = available_engine_ids(caps, parts=not task.str_mode)
+    lanes: list[LaneOutcome] = []
+    best: LaneOutcome | None = None
+    current = task
+    lanes_since_record = 0
+    while server.remaining > 0:
+        engine_id = engine_ids[len(lanes) % len(engine_ids)]
+        if lanes:
+            _emit(
+                progress_callback,
+                PROGRESS_LANE_HANDOFF,
+                {
+                    "from_engine": lanes[-1].engine,
+                    "to_engine": engine_id,
+                    "best_score": None if best is None else best.best_score,
+                    "reason": lanes[-1].status,
+                },
+            )
+        watch = PlateauWatch(strategy.patience, best_score=server.best_score)
+        outcome = run_lane(
+            engine_id, "relay", current, server.lane(server.remaining, watch=watch), ctx, progress_callback, caps=caps
+        )
+        lanes.append(outcome)
+        record = best.best_score if best is not None else None
+        if (
+            outcome.best_candidate is not None
+            and outcome.best_score is not None
+            and (record is None or outcome.best_score > record)
+        ):
+            best, lanes_since_record = outcome, 0
+            current = replace(task, seed_candidate=outcome.best_candidate)
+        else:
+            lanes_since_record += 1
+        if best is not None and ctx.stop_at_score is not None and (best.best_score or float("-inf")) >= ctx.stop_at_score:
+            break
+        if lanes_since_record >= len(engine_ids):
+            break
+    return _finalize(task, server, lanes, best), lanes
 
 
 def _finalize(task: Task, server: EvalServer, lanes: list[LaneOutcome], chosen: LaneOutcome | None) -> Result:

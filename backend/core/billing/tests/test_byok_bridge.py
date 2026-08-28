@@ -212,3 +212,16 @@ def test_enforce_byok_connections_managed_is_noop(engine: object) -> None:
         "u@x.com",
         [ModelConfig(name="openai/gpt-4o", token_source="managed")],
     )
+
+
+def test_inject_stamps_the_blackbox_scorer_model(vault: ProviderKeyVault) -> None:
+    """A black-box payload's scorer ``llm()`` model gets the user's key like the reflection model."""
+    with patch("core.billing.byok_vault.httpx.get", return_value=_ok_response()):
+        vault.save_key("u@x.com", "openrouter", "sk-or-1111")
+    payload = {
+        "reflection_model_config": {"name": "openrouter/anthropic/claude-3-5-sonnet", "extra": {}},
+        "scorer": {"kind": "python", "metric_code": "def score(c): return 1.0", "model": {"name": "openrouter/openai/gpt-4o", "extra": {}}},
+    }
+    inject_byok_connections(payload, username="u@x.com", vault=vault)
+    assert payload["reflection_model_config"]["extra"]["api_key"] == "sk-or-1111"
+    assert payload["scorer"]["model"]["extra"]["api_key"] == "sk-or-1111"

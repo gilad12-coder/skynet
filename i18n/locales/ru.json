@@ -2,6 +2,7 @@
   "$schema": "../schema.json",
   "locale": "ru",
   "terms": {
+    "optimizationTypeBlackbox": "чёрный ящик",
     "apiKey": "API-ключ",
     "baseline": "базовый уровень",
     "baselineScore": "базовая оценка",

@@ -31,6 +31,8 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
     setStrategyMode,
     engine,
     setEngine,
+    patience,
+    setPatience,
     engineCatalog,
     seedMode,
     targetKind,
@@ -55,7 +57,7 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
       title={msg("submit.blackbox.optimizer.title")}
       description={msg("submit.blackbox.optimizer.desc")}
     >
-      <Segmented<"auto" | "single">
+      <Segmented<"auto" | "single" | "plateau">
         value={strategyMode}
         onChange={setStrategyMode}
         options={[
@@ -65,12 +67,35 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
             desc: msg("submit.blackbox.strategy.auto_desc"),
           },
           {
+            value: "plateau",
+            label: msg("submit.blackbox.strategy.plateau"),
+            desc: msg("submit.blackbox.strategy.plateau_desc"),
+          },
+          {
             value: "single",
             label: msg("submit.blackbox.strategy.single"),
             desc: msg("submit.blackbox.strategy.single_desc"),
           },
         ]}
       />
+
+      {strategyMode === "plateau" && (
+        <Field
+          label={msg("submit.blackbox.strategy.patience_label")}
+          htmlFor="bb-patience"
+          hint={msg("submit.blackbox.strategy.patience_hint")}
+        >
+          <NumberInput
+            id="bb-patience"
+            value={patience}
+            onChange={setPatience}
+            min={5}
+            max={10000}
+            step={5}
+            className={MOBILE_NUMBER_INPUT_CLASS}
+          />
+        </Field>
+      )}
 
       {targetKind === "agent" && engineCatalog && !engineCatalog.sandbox_available && (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[0.75rem] text-amber-700">

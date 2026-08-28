@@ -498,7 +498,7 @@ export interface GridSearchResult {
 export type BlackboxCandidate = string | Record<string, string>;
 
 export type BlackboxEngineId = "gepa" | "best_of_n" | "autoresearch" | "meta_harness";
-export type BlackboxHarness = "pi" | "codex" | "opencode" | "custom";
+export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "custom";
 
 export interface BlackboxScorer {
   kind: "python" | "remote";
@@ -506,6 +506,9 @@ export interface BlackboxScorer {
   url?: string | null;
   secret?: string | null;
   timeout_seconds?: number;
+  // The model injected into the python scorer as `llm()` — the "model that
+  // runs your prompt". Null when the scorer never calls a model.
+  model?: ModelConfig | null;
 }
 
 export interface BlackboxBudget {
@@ -526,8 +529,11 @@ export interface BlackboxTarget {
 }
 
 export interface BlackboxStrategy {
-  mode: "auto" | "single";
+  mode: "auto" | "single" | "plateau";
   engine?: BlackboxEngineId | null;
+  // Plateau patience: scorer runs without improvement before rotating to the
+  // next engine in the relay. Ignored unless mode is "plateau".
+  patience?: number;
 }
 
 export interface BlackboxRunRequest {
@@ -559,18 +565,26 @@ export interface ScorerDryRunRequest {
   case?: Record<string, unknown> | null;
 }
 
+export interface ModelTokenUsage {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+}
+
 export interface ScorerDryRunResponse {
   ok: boolean;
   score?: number | null;
   side_info: Record<string, unknown>;
   error?: string | null;
   elapsed_ms: number;
+  // Per-model token usage when the scorer called the injected `llm()` helper.
+  usage_by_model?: ModelTokenUsage[];
 }
 
 export interface BlackboxLaneResult {
   engine: BlackboxEngineId;
-  phase: "explore" | "continue" | "single";
-  status: "completed" | "failed" | "unavailable" | "budget_exhausted";
+  phase: "explore" | "continue" | "single" | "relay";
+  status: "completed" | "failed" | "unavailable" | "budget_exhausted" | "plateaued";
   best_score?: number | null;
   scorer_runs: number;
   error?: string | null;
@@ -578,7 +592,7 @@ export interface BlackboxLaneResult {
 
 export interface BlackboxRunResult {
   optimizer_name: string;
-  strategy_mode: "auto" | "single";
+  strategy_mode: "auto" | "single" | "plateau";
   engine_used: BlackboxEngineId;
   split_counts: Record<string, number>;
   baseline_test_metric?: number | null;

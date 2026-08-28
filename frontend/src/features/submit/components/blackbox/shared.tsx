@@ -48,16 +48,26 @@ export function Field({
   label,
   htmlFor,
   hint,
+  trailing,
   children,
 }: {
   label: ReactNode;
   htmlFor?: string;
   hint?: ReactNode;
+  // Rendered at the end of the label row (status chips, version steppers).
+  trailing?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="space-y-2">
-      <Label htmlFor={htmlFor}>{label}</Label>
+      {trailing ? (
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor={htmlFor}>{label}</Label>
+          <div className="flex items-center gap-2">{trailing}</div>
+        </div>
+      ) : (
+        <Label htmlFor={htmlFor}>{label}</Label>
+      )}
       {children}
       {hint ? (
         <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">{hint}</p>
