@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import base64
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
+from gepa.image import Image
 
 from core.exceptions import ServiceError
 from core.models.blackbox import BlackboxScorer
 
 from .. import scorer as scorer_mod
-from ..scorer import RemoteScorer, build_python_scorer, build_scorer, load_scorer_from_code, normalize_score
+from ..llm_helper import ScorerLLM, image_content_part, scorer_messages
+from ..scorer import (
+    RemoteScorer,
+    build_python_scorer,
+    build_scorer,
+    load_scorer_from_code,
+    normalize_score,
+    side_info_json_default,
+)
 
 
 class _WithScore:
@@ -234,7 +245,9 @@ def test_build_scorer_dispatches_on_kind() -> None:
     assert python("x", None) == (1.0, {})
 
 
-_LLM_SCORER = "def score(candidate, case=None):\n    return len(llm(candidate, case['input'])) / 10, {'asked': candidate}\n"
+_LLM_SCORER = (
+    "def score(candidate, case=None):\n    return len(llm(candidate, case['input'])) / 10, {'asked': candidate}\n"
+)
 
 
 def test_python_scorer_gets_the_injected_llm_helper() -> None:
@@ -282,3 +295,90 @@ def test_build_scorer_bounds_python_scorers_by_the_spec_timeout() -> None:
 
     with pytest.raises(TimeoutError, match=r"exceeded the 0\.05s timeout"):
         scorer("x", None)
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(PNG_BYTES).decode("ascii")
+
+
+class RecordingLM:
+    """A stand-in ``dspy.LM`` that records the messages it was called with."""
+
+    def __init__(self) -> None:
+        self.calls: list[list[dict[str, Any]]] = []
+
+    def __call__(self, prompt: str | None = None, *, messages: list[dict[str, Any]] | None = None) -> list[str]:
+        assert prompt is None
+        assert messages is not None
+        self.calls.append(messages)
+        return ["judged"]
+
+
+def test_image_content_part_reads_every_documented_shape(tmp_path: Path) -> None:
+    file_path = tmp_path / "view.jpg"
+    file_path.write_bytes(b"\xff\xd8\xff" + b"\x00" * 8)
+    part = {"type": "image_url", "image_url": {"url": "https://x/y.png"}}
+    assert image_content_part(part) is part
+    assert image_content_part(PNG_BYTES)["image_url"]["url"] == PNG_DATA_URL
+    assert image_content_part(bytearray(PNG_BYTES))["image_url"]["url"] == PNG_DATA_URL
+    assert image_content_part(PNG_DATA_URL)["image_url"]["url"] == PNG_DATA_URL
+    assert image_content_part("https://x/y.png")["image_url"]["url"] == "https://x/y.png"
+    assert image_content_part(str(file_path))["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert image_content_part(base64.b64encode(PNG_BYTES).decode("ascii"))["image_url"]["url"] == PNG_DATA_URL
+    assert image_content_part(Image(base64_data="aGk=", media_type="image/png"))["type"] == "image_url"
+
+
+def test_image_content_part_rejects_what_it_cannot_read() -> None:
+    with pytest.raises(ServiceError, match=r"llm\(images=\.\.\.\)"):
+        image_content_part(42)
+    with pytest.raises(ServiceError, match=r"llm\(images=\.\.\.\)"):
+        image_content_part("not base64 at all!!")
+
+
+def test_scorer_messages_attach_images_to_the_user_turn() -> None:
+    assert scorer_messages("hi") == [{"role": "user", "content": "hi"}]
+    assert scorer_messages("system", "case input") == [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "case input"},
+    ]
+    messages = scorer_messages("Rate this", images=PNG_BYTES)
+    assert messages == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Rate this"},
+                {"type": "image_url", "image_url": {"url": PNG_DATA_URL}},
+            ],
+        }
+    ]
+    with_input = scorer_messages("system", "case input", images=[PNG_BYTES, PNG_BYTES])
+    assert with_input[0] == {"role": "system", "content": "system"}
+    assert [part["type"] for part in with_input[1]["content"]] == ["text", "image_url", "image_url"]
+
+
+def test_scorer_llm_sends_images_and_raw_messages() -> None:
+    lm = RecordingLM()
+    llm = ScorerLLM(lm)  # type: ignore[arg-type]
+    assert llm("Rate this", images=[PNG_BYTES]) == "judged"
+    assert lm.calls[-1][0]["content"][1]["image_url"]["url"] == PNG_DATA_URL
+    raw = [{"role": "user", "content": "raw"}]
+    assert llm(messages=raw) == "judged"
+    assert lm.calls[-1] is raw
+    with pytest.raises(ServiceError, match="needs a prompt"):
+        llm()
+    with pytest.raises(ServiceError, match="list of chat messages"):
+        llm(messages="nope")  # type: ignore[arg-type]
+
+
+def test_python_scorer_can_put_images_into_side_info() -> None:
+    code = (
+        "def score(candidate, case):\n    return 1.0, {'render': Image(base64_data='aGk=', media_type='image/png')}\n"
+    )
+    score, side_info = build_python_scorer(code, llm=None)("c", {})
+    assert score == 1.0
+    assert side_info["render"].to_openai_content_part()["image_url"]["url"] == "data:image/png;base64,aGk="
+
+
+def test_side_info_json_default_inlines_images_as_data_urls() -> None:
+    assert side_info_json_default(Image(base64_data="aGk=", media_type="image/png")) == "data:image/png;base64,aGk="
+    assert side_info_json_default(object()).startswith("<object object")

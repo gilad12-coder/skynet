@@ -89,6 +89,17 @@ training = [
     "transformers>=4.44",
     "httpx>=0.25",
 ]
+render = [
+    # Black-box scorers that render what a candidate program builds (the
+    # optimize-anything 3D-unicorn case: build123d → STL → pyrender views a
+    # vision model judges). Headless Linux needs PYOPENGL_PLATFORM=egl with
+    # libegl1 (or =osmesa); macOS renders natively.
+    "build123d>=0.11",
+    "pyrender>=0.1.45",
+    "trimesh>=5.0",
+    "pillow>=12",
+    "networkx>=3",
+]
 
 [tool.uv]
 # dspy 3.3.0's metadata hard-pins gepa[dspy]==0.1.1 (dspy 3.2.1 pins ==0.0.27). Both

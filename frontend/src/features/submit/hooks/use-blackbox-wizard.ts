@@ -203,6 +203,58 @@ def _is_number(token):
     return True
 `,
   },
+  {
+    id: "vlm_judge",
+    needsModel: true,
+    code: `import base64
+import glob
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+
+def score(candidate, case=None):
+    """Run the candidate as a program, then have a vision model grade what it rendered."""
+    TIMEOUT_SECONDS = 120
+    criteria = (case or {}).get("criteria") or "Rate what you see from 0 to 100."
+    source = candidate if isinstance(candidate, str) else "\\n".join(candidate.values())
+    with tempfile.TemporaryDirectory() as workdir:
+        script = os.path.join(workdir, "candidate.py")
+        with open(script, "w") as handle:
+            handle.write(source)
+        try:
+            run = subprocess.run(
+                [sys.executable, script], cwd=workdir, capture_output=True, text=True, timeout=TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired:
+            return 0.0, {"error": f"timed out after {TIMEOUT_SECONDS}s"}
+        if run.returncode != 0:
+            return 0.0, {"error": run.stderr.strip()[-2000:]}
+        renders = sorted(glob.glob(os.path.join(workdir, "**", "*.png"), recursive=True))
+        images = [_read(path) for path in renders]
+    if not images:
+        return 0.0, {"error": "the program saved no .png renders", "stdout": run.stdout[-2000:]}
+    verdict = llm(
+        f"{criteria}\\n\\nJudge the attached renders: say what works and what does not, "
+        "then end with a line of the form 'SCORE: X/100'.",
+        images=images,
+    )
+    match = re.search(r"SCORE:\\s*(\\d+(?:\\.\\d+)?)\\s*/\\s*(100|10)\\b", verdict)
+    if not match:
+        return 0.0, {"error": "the judge gave no SCORE: X/100 line", "verdict": verdict[-2000:]}
+    side_info = {"feedback": verdict}
+    for index, image in enumerate(images):
+        side_info[f"render_{index + 1}"] = Image(base64_data=base64.b64encode(image).decode(), media_type="image/png")
+    return max(0.0, min(1.0, float(match.group(1)) / float(match.group(2)))), side_info
+
+
+def _read(path):
+    with open(path, "rb") as handle:
+        return handle.read()
+`,
+  },
 ];
 
 const RUN_CODE_SCORER_TEMPLATE = SCORER_PRESETS.find((p) => p.id === "run_code")!.code;
