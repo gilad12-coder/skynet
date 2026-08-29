@@ -11,6 +11,7 @@ submissions router.
 
 from __future__ import annotations
 
+import json
 import logging
 import tempfile
 import time
@@ -46,6 +47,7 @@ from ....models.blackbox import (
     BlackboxRunRequest,
     BlackboxRunResponse,
     BlackboxTarget,
+    BlackboxVersion,
     ScorerDryRunRequest,
     ScorerDryRunResponse,
 )
@@ -66,7 +68,7 @@ from .llm_helper import ScorerLLM, build_scorer_llm
 from .protocol import Candidate, EngineContext, EvalServer, ScorerFn, Task
 from .registry import ENGINES, EngineCapabilities, get_engine
 from .sandbox import sandbox_runtime_from_settings
-from .scorer import RemoteScorer, build_scorer
+from .scorer import RemoteScorer, build_scorer, side_info_json_default
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +204,74 @@ def _score_holdout(
         raise
     except Exception as exc:
         raise ServiceError(f"scorer failed on the {label}: {type(exc).__name__}: {exc}") from exc
+
+
+# Side info persisted with the version history is capped so a run whose scorer
+# returns renders for every version cannot bloat the job row; images are shed
+# from the weakest versions first and the best version always keeps its own.
+VERSION_SIDE_INFO_BYTE_CAP = 3_000_000
+
+
+def _is_data_image(value: Any) -> bool:
+    """Return True when ``value`` is a JSON-safe image, i.e. a data URL string.
+
+    Args:
+        value: One side-info value after JSON flattening.
+
+    Returns:
+        Whether it is an inline image.
+    """
+    return isinstance(value, str) and value.startswith("data:image/")
+
+
+def _without_images(side_info: dict[str, Any]) -> dict[str, Any]:
+    """Return ``side_info`` with its inline images (top-level or in lists) removed.
+
+    Args:
+        side_info: JSON-safe side info.
+
+    Returns:
+        The same mapping minus every data-URL image.
+    """
+    stripped: dict[str, Any] = {}
+    for key, value in side_info.items():
+        if _is_data_image(value):
+            continue
+        if isinstance(value, list):
+            value = [item for item in value if not _is_data_image(item)]
+        stripped[key] = value
+    return stripped
+
+
+def _version_history(server: EvalServer) -> list[BlackboxVersion]:
+    """Turn the eval server's records into the persisted version history.
+
+    Args:
+        server: The run's root eval server.
+
+    Returns:
+        One entry per distinct version in first-seen order, side info made
+        JSON-safe and trimmed to :data:`VERSION_SIDE_INFO_BYTE_CAP` in total.
+    """
+    versions = [
+        BlackboxVersion(
+            candidate=record.candidate,
+            score=record.mean_score,
+            evals=record.count,
+            first_run=record.first_eval,
+            side_info=json.loads(json.dumps(record.side_info, default=side_info_json_default)),
+        )
+        for record in server.history
+    ]
+    sizes = [len(json.dumps(version.side_info)) for version in versions]
+    total = sum(sizes)
+    weakest_first = sorted(range(len(versions)), key=lambda i: (versions[i].score or 0.0, versions[i].first_run))
+    for i in weakest_first[:-1]:
+        if total <= VERSION_SIDE_INFO_BYTE_CAP:
+            break
+        versions[i].side_info = _without_images(versions[i].side_info)
+        total -= sizes[i] - len(json.dumps(versions[i].side_info))
+    return versions
 
 
 def _progress_listener(progress_callback: ProgressCallback | None) -> Callable[[EvalServer, float], None]:
@@ -378,6 +448,7 @@ def run_blackbox_optimization(
             )
             for lane in lanes
         ],
+        versions=_version_history(server),
         total_scorer_runs=server.used,
         runtime_seconds=time.perf_counter() - started,
         num_lm_calls=sum(lm_call_count(model) or 0 for model in lms),

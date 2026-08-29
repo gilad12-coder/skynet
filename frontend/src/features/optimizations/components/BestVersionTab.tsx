@@ -1,17 +1,43 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
-import { Cube, DownloadSimple } from "@/shared/ui/icons";
+import { Cube, DownloadSimple, Trophy } from "@/shared/ui/icons";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Button } from "@/shared/ui/primitives/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/primitives/select";
 import { FadeIn } from "@/shared/ui/motion";
-import type { BlackboxCandidate, BlackboxRunResult } from "@/shared/types/api";
+import type { BlackboxRunResult } from "@/shared/types/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { CopyButton } from "./ui-primitives";
+import { CandidatePreview, isDrawable } from "./CandidatePreview";
+import { VersionRail } from "./VersionRail";
 import { formatBlackboxDelta, formatBlackboxScore } from "../lib/blackbox";
 import { countChanges, diffRows } from "../lib/blackbox-diff";
+import {
+  buildVersions,
+  defaultVersionIndex,
+  type CandidateVersion,
+} from "../lib/blackbox-versions";
+import {
+  detectRenderKind,
+  formatJson,
+  RENDER_KIND_EXTENSION,
+  sideInfoImages,
+  type RenderKind,
+} from "../lib/candidate-render";
 import { cn } from "@/shared/lib/utils";
+
+const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
+  ssr: false,
+});
 
 // Same tints the trajectory drawer uses for accepted / rejected edits, so a
 // diff reads the same everywhere in the run view.
@@ -22,32 +48,50 @@ const REMOVED_BG = "rgba(168, 90, 59, 0.22)";
 const REMOVED_EMPHASIS_BG = "rgba(168, 90, 59, 0.45)";
 const REMOVED_FG = "#6e2e16";
 
-type BestView = "best" | "diff";
+type View = "preview" | "code" | "diff";
 
-function candidateToText(candidate: BlackboxCandidate | null | undefined): string {
-  if (candidate == null) return "";
-  if (typeof candidate === "string") return candidate;
-  return Object.entries(candidate)
-    .map(([key, value]) => `## ${key}\n${value}`)
-    .join("\n\n");
+function editorHeight(text: string): string {
+  return `${Math.min(560, Math.max(160, text.split("\n").length * 22 + 48))}px`;
 }
 
-function CandidateBlock({ candidate }: { candidate: BlackboxCandidate }) {
-  if (typeof candidate === "string") {
-    return (
-      <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/50 bg-muted/30 p-4 font-mono text-[0.8125rem] leading-relaxed">
-        {candidate}
-      </pre>
-    );
+function LineNumbered({ text }: { text: string }) {
+  return (
+    <div
+      className="max-h-[32rem] overflow-auto rounded-lg border border-border/50 bg-muted/30 py-2 font-mono text-[0.8125rem] leading-relaxed"
+      dir="ltr"
+    >
+      {text.split("\n").map((line, i) => (
+        <div key={i} className="flex px-3">
+          <span
+            className="w-8 shrink-0 select-none pe-3 text-end tabular-nums text-muted-foreground/60"
+            aria-hidden="true"
+          >
+            {i + 1}
+          </span>
+          <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{line || " "}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CodePart({ text, kind }: { text: string; kind: RenderKind }) {
+  if (kind === "python") {
+    return <CodeEditor value={text} onChange={() => {}} height={editorHeight(text)} readOnly />;
+  }
+  return <LineNumbered text={kind === "json" ? formatJson(text) : text} />;
+}
+
+function CodeView({ version, kind }: { version: CandidateVersion; kind: RenderKind }) {
+  if (typeof version.candidate === "string") {
+    return <CodePart text={version.candidate} kind={kind} />;
   }
   return (
     <div className="space-y-3">
-      {Object.entries(candidate).map(([key, value]) => (
+      {Object.entries(version.candidate).map(([key, value]) => (
         <div key={key}>
           <p className="mb-1 font-mono text-xs font-semibold text-muted-foreground">{key}</p>
-          <pre className="max-h-[24rem] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/50 bg-muted/30 p-3 font-mono text-[0.8125rem] leading-relaxed">
-            {value}
-          </pre>
+          <CodePart text={value} kind={detectRenderKind(value)} />
         </div>
       ))}
     </div>
@@ -111,10 +155,61 @@ function DiffBlock({ before, after }: { before: string; after: string }) {
   );
 }
 
-function ViewToggle({ value, onChange }: { value: BestView; onChange: (v: BestView) => void }) {
-  const options: Array<{ value: BestView; label: string }> = [
-    { value: "best", label: msg("optimization.blackbox.best.title") },
-    { value: "diff", label: msg("optimization.blackbox.best.view_diff") },
+function ChangesView({ versions, index }: { versions: CandidateVersion[]; index: number }) {
+  // Default to the version right before this one — the edit that produced it.
+  const [base, setBase] = useState(index > 0 ? index - 1 : Math.min(1, versions.length - 1));
+  if (versions.length < 2) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {msg("optimization.blackbox.best.diff_identical")}
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span>{msg("optimization.blackbox.versions.compare_with")}</span>
+        <Select value={String(base)} onValueChange={(value) => setBase(Number(value))}>
+          <SelectTrigger
+            className="h-7 w-auto min-w-[9rem] text-xs"
+            aria-label={msg("optimization.blackbox.versions.compare_with")}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {versions
+              .filter((_, i) => i !== index)
+              .map((version) => (
+                <SelectItem key={version.number} value={String(version.number)} className="text-xs">
+                  {formatMsg("optimization.blackbox.versions.compare_option", {
+                    n: version.number,
+                    score: formatBlackboxScore(version.score),
+                  })}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <DiffBlock before={versions[base]?.text ?? ""} after={versions[index]?.text ?? ""} />
+    </div>
+  );
+}
+
+function ViewToggle({
+  value,
+  onChange,
+  canDiff,
+}: {
+  value: View;
+  onChange: (v: View) => void;
+  canDiff: boolean;
+}) {
+  const options: Array<{ value: View; label: string }> = [
+    { value: "preview", label: msg("optimization.blackbox.versions.view.preview") },
+    { value: "code", label: msg("optimization.blackbox.versions.view.code") },
+    ...(canDiff
+      ? [{ value: "diff" as const, label: msg("optimization.blackbox.best.view_diff") }]
+      : []),
   ];
   return (
     <div
@@ -126,7 +221,9 @@ function ViewToggle({ value, onChange }: { value: BestView; onChange: (v: BestVi
           key={o.value}
           type="button"
           role="tab"
+          id={`blackbox-view-${o.value}`}
           aria-selected={o.value === value}
+          aria-controls="blackbox-version-panel"
           onClick={() => onChange(o.value)}
           className={cn(
             "cursor-pointer rounded px-2 py-1 text-xs font-medium transition-colors",
@@ -152,6 +249,15 @@ function downloadText(name: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
+function hasVisual(version: CandidateVersion, kind: RenderKind): boolean {
+  return isDrawable(kind) || sideInfoImages(version.sideInfo).length > 0;
+}
+
+/**
+ * The run's output as a versioned artifact: v0 is the starting point, every
+ * distinct text the scorer saw is a version, and each one can be previewed,
+ * read as code, or diffed against any other.
+ */
 export function BestVersionTab({
   result,
   jobName,
@@ -159,93 +265,105 @@ export function BestVersionTab({
   result: BlackboxRunResult;
   jobName?: string | null;
 }) {
-  const bestText = candidateToText(result.best_candidate);
-  const seedText = candidateToText(result.seed_candidate);
-  const fileName = `${(jobName ?? "best-candidate").replace(/[^\w.-]+/g, "_")}.txt`;
-  const hasSeed = result.seed_candidate != null && seedText.length > 0;
-  const [view, setView] = useState<BestView>("best");
-  const showDiff = hasSeed && view === "diff";
+  const versions = useMemo(() => buildVersions(result), [result]);
+  const [index, setIndex] = useState(() => defaultVersionIndex(versions));
+  const current = versions[Math.min(index, versions.length - 1)];
+  const kind = detectRenderKind(current?.text ?? "");
+  const [view, setView] = useState<View>(() =>
+    current && hasVisual(current, kind) ? "preview" : "code",
+  );
+  if (!current) return null;
+  const canDiff = versions.length > 1;
+  const activeView: View = view === "diff" && !canDiff ? "code" : view;
+  const slug = (jobName ?? "candidate").replace(/[^\w.-]+/g, "_");
+  const fileName = `${slug}-v${current.number}.${RENDER_KIND_EXTENSION[kind]}`;
 
   return (
-    <div className="space-y-4">
-      <FadeIn>
-        <Card className="relative overflow-hidden border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Cube className="size-4 text-primary" aria-hidden="true" />
-              <span className="font-bold tracking-tight">
-                {msg("optimization.blackbox.best.title")}
-              </span>
-            </CardTitle>
-            <div className="flex flex-wrap items-center gap-2">
-              {hasSeed && <ViewToggle value={view} onChange={setView} />}
-              <Badge variant="outline" size="sm" className="font-mono">
-                {result.engine_used}
+    <FadeIn>
+      <Card className="relative overflow-hidden border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+          <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+            <Cube className="size-4 text-primary" aria-hidden="true" />
+            <span className="font-bold tracking-tight">
+              {msg("optimization.blackbox.versions.title")}
+            </span>
+            <Badge variant="secondary" size="sm" className="font-mono tabular-nums">
+              {formatMsg("optimization.blackbox.versions.label", { n: current.number })}
+            </Badge>
+            {current.isSeed && (
+              <Badge variant="outline" size="sm">
+                {msg("optimization.blackbox.best.seed_title")}
               </Badge>
-              {result.optimized_test_metric != null && (
-                <Badge variant="secondary" size="sm" className="tabular-nums">
-                  {formatMsg("optimization.blackbox.best.score", {
-                    score: formatBlackboxScore(result.optimized_test_metric),
-                    delta: formatBlackboxDelta(result.metric_improvement),
-                  })}
-                </Badge>
-              )}
-              <CopyButton text={bestText} />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => downloadText(fileName, bestText)}
-                aria-label={msg("optimization.blackbox.best.download")}
-              >
-                <DownloadSimple className="size-4" aria-hidden="true" />
-                <span className="hidden sm:inline">
-                  {msg("optimization.blackbox.best.download")}
-                </span>
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {result.regression_guard_applied && (
-              <p className="rounded-md border border-amber-300/50 bg-amber-50/60 px-3 py-2 text-xs text-amber-900">
-                {msg("optimization.blackbox.best.regression_guard")}
-              </p>
             )}
-            {showDiff ? (
-              <DiffBlock before={seedText} after={bestText} />
-            ) : (
-              <CandidateBlock candidate={result.best_candidate} />
+            {current.isBest && (
+              <Badge variant="default" size="sm" className="gap-1">
+                <Trophy className="size-3" aria-hidden="true" />
+                {msg("optimization.blackbox.versions.best")}
+              </Badge>
             )}
-          </CardContent>
-        </Card>
-      </FadeIn>
-
-      {result.seed_candidate != null && seedText.length > 0 && (
-        <FadeIn delay={0.05}>
-          <Card>
-            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-              <CardTitle className="text-base">
-                <span className="font-bold tracking-tight">
-                  {msg("optimization.blackbox.best.seed_title")}
-                </span>
-              </CardTitle>
-              <div className="flex items-center gap-2">
-                {result.baseline_test_metric != null && (
-                  <Badge variant="outline" size="sm" className="tabular-nums">
-                    {formatMsg("optimization.blackbox.best.seed_score", {
-                      score: formatBlackboxScore(result.baseline_test_metric),
-                    })}
-                  </Badge>
-                )}
-                <CopyButton text={seedText} />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <CandidateBlock candidate={result.seed_candidate} />
-            </CardContent>
-          </Card>
-        </FadeIn>
-      )}
-    </div>
+            <Badge variant="outline" size="sm" className="font-normal text-muted-foreground">
+              {msg(`optimization.blackbox.versions.kind.${kind}`)}
+            </Badge>
+          </CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <ViewToggle value={activeView} onChange={setView} canDiff={canDiff} />
+            <Badge variant="outline" size="sm" className="font-mono">
+              {result.engine_used}
+            </Badge>
+            {current.isBest && result.optimized_test_metric != null && (
+              <Badge variant="secondary" size="sm" className="tabular-nums">
+                {formatMsg("optimization.blackbox.best.score", {
+                  score: formatBlackboxScore(result.optimized_test_metric),
+                  delta: formatBlackboxDelta(result.metric_improvement),
+                })}
+              </Badge>
+            )}
+            {current.isSeed && result.baseline_test_metric != null && (
+              <Badge variant="outline" size="sm" className="tabular-nums">
+                {formatMsg("optimization.blackbox.best.seed_score", {
+                  score: formatBlackboxScore(result.baseline_test_metric),
+                })}
+              </Badge>
+            )}
+            <CopyButton text={current.text} />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => downloadText(fileName, current.text)}
+              aria-label={msg("optimization.blackbox.best.download")}
+            >
+              <DownloadSimple className="size-4" aria-hidden="true" />
+              <span className="hidden sm:inline">{msg("optimization.blackbox.best.download")}</span>
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {result.regression_guard_applied && (
+            <p className="rounded-md border border-amber-300/50 bg-amber-50/60 px-3 py-2 text-xs text-amber-900">
+              {msg("optimization.blackbox.best.regression_guard")}
+            </p>
+          )}
+          {!result.versions?.length && versions.length > 1 && (
+            <p className="text-xs text-muted-foreground">
+              {msg("optimization.blackbox.versions.history_missing")}
+            </p>
+          )}
+          <div
+            id="blackbox-version-panel"
+            role="tabpanel"
+            aria-labelledby={`blackbox-view-${activeView}`}
+            key={`${current.number}-${activeView}`}
+          >
+            {activeView === "preview" && (
+              <CandidatePreview version={current} kind={kind} onShowCode={() => setView("code")} />
+            )}
+            {activeView === "code" && <CodeView version={current} kind={kind} />}
+            {activeView === "diff" && <ChangesView versions={versions} index={index} />}
+          </div>
+          {canDiff && <VersionRail versions={versions} index={index} onSelect={setIndex} />}
+        </CardContent>
+      </Card>
+    </FadeIn>
   );
 }

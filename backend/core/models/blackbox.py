@@ -248,6 +248,17 @@ class BlackboxLaneResult(BaseModel):
     error: str | None = None
 
 
+# One distinct version the run scored, in the order versions first appeared.
+# ``score`` is the mean over the cases it was scored on inside the budget;
+# ``side_info`` is what the scorer returned for it last (images as data URLs).
+class BlackboxVersion(BaseModel):
+    candidate: BlackboxCandidate
+    score: float | None = None
+    evals: int = 0
+    first_run: int = 0
+    side_info: dict[str, Any] = Field(default_factory=dict)
+
+
 # Result persisted for a finished black-box job. ``baseline_test_metric`` /
 # ``optimized_test_metric`` keep the DSPy result names so the summary and
 # billing paths read them unchanged.
@@ -263,6 +274,7 @@ class BlackboxRunResponse(BaseModel):
     best_candidate: BlackboxCandidate
     regression_guard_applied: bool = False
     lanes: list[BlackboxLaneResult] = Field(default_factory=list)
+    versions: list[BlackboxVersion] = Field(default_factory=list)
     total_scorer_runs: int = 0
     runtime_seconds: float
     num_lm_calls: int = 0

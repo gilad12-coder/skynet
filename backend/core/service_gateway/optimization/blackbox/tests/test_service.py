@@ -549,3 +549,48 @@ def test_reflection_caller_hands_chat_messages_to_the_model() -> None:
     multimodal = [{"role": "user", "content": [{"type": "text", "text": "look"}]}]
     assert reflection_lm(multimodal) == "reflected"
     assert calls == [("plain text", None), (None, multimodal)]
+
+
+def test_run_persists_every_version_it_scored(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
+    """The result carries one entry per distinct version, in order, with scores and side info."""
+    response = run_blackbox_optimization(_payload(), artifact_id="job-v", gepa_log_dir_path=str(tmp_path))
+
+    assert response.versions
+    assert response.versions[0].candidate == "hello world"
+    assert {version.candidate for version in response.versions} >= {"hello world", "aeiou"}
+    assert [version.first_run for version in response.versions] == sorted(
+        version.first_run for version in response.versions
+    )
+    assert all(version.evals >= 1 and version.score is not None for version in response.versions)
+    assert response.versions[0].side_info == {"vowels": 3}
+    assert max(response.versions, key=lambda version: version.score or 0.0).candidate == "aeiou"
+
+
+def test_version_history_sheds_images_from_the_weakest_versions_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Over the byte cap, weak versions lose their renders but keep their text; the best keeps everything."""
+    image = "data:image/png;base64," + "A" * 400
+
+    def rendering_scorer(candidate: Any, case: Any = None) -> tuple[float, dict[str, Any]]:
+        """Score by length and attach a render plus feedback.
+
+        Args:
+            candidate: The version.
+            case: Ignored.
+
+        Returns:
+            The length score and side info with one image.
+        """
+        return float(len(candidate)), {"feedback": f"len {len(candidate)}", "render": image, "frames": [image]}
+
+    server = service_mod.EvalServer(rendering_scorer, max_evals=10)
+    for candidate in ("a", "ccc", "bb"):
+        server.evaluate(candidate)
+    monkeypatch.setattr(service_mod, "VERSION_SIDE_INFO_BYTE_CAP", 1_000)
+
+    versions = service_mod._version_history(server)
+
+    assert [version.candidate for version in versions] == ["a", "ccc", "bb"]
+    weakest, best, middle = versions
+    assert weakest.side_info == {"feedback": "len 1", "frames": []}
+    assert middle.side_info == {"feedback": "len 2", "frames": []}
+    assert best.side_info == {"feedback": "len 3", "render": image, "frames": [image]}

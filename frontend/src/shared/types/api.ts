@@ -590,6 +590,18 @@ export interface BlackboxLaneResult {
   error?: string | null;
 }
 
+/**
+ * One distinct version the run scored, in first-seen order. `side_info` is
+ * what the scorer returned for it last; images arrive as data URLs.
+ */
+export interface BlackboxVersion {
+  candidate: BlackboxCandidate;
+  score?: number | null;
+  evals: number;
+  first_run: number;
+  side_info: Record<string, unknown>;
+}
+
 export interface BlackboxRunResult {
   optimizer_name: string;
   strategy_mode: "auto" | "single" | "plateau";
@@ -602,6 +614,8 @@ export interface BlackboxRunResult {
   best_candidate: BlackboxCandidate;
   regression_guard_applied: boolean;
   lanes: BlackboxLaneResult[];
+  /** Absent on runs recorded before version tracking existed. */
+  versions?: BlackboxVersion[];
   total_scorer_runs: number;
   runtime_seconds: number;
   num_lm_calls: number;

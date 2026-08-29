@@ -137,6 +137,24 @@ class Result:
 
 
 @dataclass
+class CandidateRecord:
+    """One distinct version an eval server scored: its running mean and latest side info."""
+
+    candidate: Candidate
+    total: float
+    count: int
+    # Root-server call number that first scored this version, so the run's
+    # versions can be laid out in the order they appeared.
+    first_eval: int
+    side_info: SideInfo
+
+    @property
+    def mean_score(self) -> float:
+        """Return the mean score across every case this version was scored on."""
+        return self.total / self.count
+
+
+@dataclass
 class EngineContext:
     """Run-scoped resources every engine receives alongside the task."""
 
@@ -210,8 +228,7 @@ class EvalServer:
         self._on_eval = on_eval
         self._watch = watch
         self.used = 0
-        self._sums: dict[str, tuple[float, int]] = {}
-        self._candidates: dict[str, Candidate] = {}
+        self._records: dict[str, CandidateRecord] = {}
         # Locks are only ever taken child → parent, so lanes cannot deadlock.
         self._lock = threading.Lock()
 
@@ -269,7 +286,7 @@ class EvalServer:
         server: EvalServer | None = self
         while server is not None:
             with server._lock:
-                server._record(candidate, score)
+                server._record(candidate, score, side_info)
             if server._watch is not None:
                 server._watch.after_eval(server)
             server = server._parent
@@ -315,17 +332,27 @@ class EvalServer:
             logger.warning("scorer raised on a candidate: %s", exc)
             return 0.0, {"error": f"{type(exc).__name__}: {exc}"}
 
-    def _record(self, candidate: Candidate, score: float) -> None:
-        """Fold ``score`` into the candidate's running mean.
+    def _record(self, candidate: Candidate, score: float, side_info: SideInfo) -> None:
+        """Fold ``score`` into the candidate's running mean and keep its latest side info.
 
         Args:
             candidate: The scored version.
             score: Its score on the case just evaluated.
+            side_info: What the scorer said about it on that case.
         """
         key = candidate_key(candidate)
-        total, count = self._sums.get(key, (0.0, 0))
-        self._sums[key] = (total + score, count + 1)
-        self._candidates.setdefault(key, candidate)
+        record = self._records.get(key)
+        if record is None:
+            self._records[key] = CandidateRecord(candidate, score, 1, self._root.used, side_info)
+            return
+        record.total += score
+        record.count += 1
+        record.side_info = side_info
+
+    @property
+    def history(self) -> list[CandidateRecord]:
+        """Return every distinct version this server scored, in first-seen order."""
+        return list(self._records.values())
 
     def mean_score(self, candidate: Candidate) -> float | None:
         """Return the mean score recorded for ``candidate``, if any.
@@ -336,19 +363,15 @@ class EvalServer:
         Returns:
             Its mean score across the cases scored so far, or ``None``.
         """
-        entry = self._sums.get(candidate_key(candidate))
-        if entry is None:
-            return None
-        total, count = entry
-        return total / count
+        record = self._records.get(candidate_key(candidate))
+        return None if record is None else record.mean_score
 
     @property
     def best_candidate(self) -> Candidate | None:
         """Return the candidate with the highest mean score, if any was scored."""
-        if not self._sums:
+        if not self._records:
             return None
-        best_key = max(self._sums, key=lambda key: self._sums[key][0] / self._sums[key][1])
-        return self._candidates[best_key]
+        return max(self._records.values(), key=lambda record: record.mean_score).candidate
 
     @property
     def best_score(self) -> float | None:
