@@ -8,6 +8,7 @@ import { Label } from "@/shared/ui/primitives/label";
 import { NumberInput } from "@/shared/ui/number-input";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { formatElapsedMs, formatScore } from "@/shared/lib/formatters";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { SCORER_PRESETS } from "../../hooks/use-blackbox-wizard";
@@ -203,18 +204,35 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
       )}
 
       {result?.ok && (
-        <div className="space-y-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-800">
-          <div className="flex items-center gap-2">
-            <CheckCircle className="size-4 shrink-0" />
-            <span>
-              {formatMsg("submit.blackbox.scorer.result_ok", {
-                score: result.score ?? "—",
-                ms: result.elapsed_ms,
-              })}
-            </span>
+        <div className="space-y-2 border-t border-border/60 pt-3" role="status">
+          <div className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-[#5A7247]">
+            <CheckCircle className="size-3 shrink-0" />
+            <span>{msg("submit.blackbox.scorer.result_ok")}</span>
           </div>
+          <dl className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+            <div className="flex items-baseline gap-2">
+              <dt className="text-[0.625rem] font-medium uppercase tracking-wide text-[#8C7A6B]">
+                {msg("submit.blackbox.scorer.result_score")}
+              </dt>
+              <dd
+                className="font-mono text-xs font-semibold tabular-nums text-[#3D2E22]"
+                dir="ltr"
+                title={result.score == null ? undefined : String(result.score)}
+              >
+                {formatScore(result.score)}
+              </dd>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <dt className="text-[0.625rem] font-medium uppercase tracking-wide text-[#8C7A6B]">
+                {msg("submit.blackbox.scorer.result_time")}
+              </dt>
+              <dd className="font-mono text-xs font-semibold tabular-nums text-[#3D2E22]" dir="ltr">
+                {formatElapsedMs(result.elapsed_ms)}
+              </dd>
+            </div>
+          </dl>
           {result.usage_by_model && result.usage_by_model.length > 0 && (
-            <p className="text-[0.6875rem] text-emerald-800/80" dir="ltr">
+            <p className="text-[0.6875rem] text-[#8C7A6B]" dir="ltr">
               {formatMsg("submit.blackbox.scorer.result_usage", {
                 usage: result.usage_by_model
                   .map((u) =>
@@ -229,7 +247,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
           )}
           {sideInfo && (
             <pre
-              className="max-h-40 overflow-auto rounded bg-background/60 p-2 text-[0.6875rem] text-foreground/80"
+              className="max-h-40 overflow-auto rounded-md border border-[#E5DDD4]/60 bg-[#FAF6F0] p-2 font-mono text-[0.6875rem] leading-relaxed text-[#3D2E22]/80"
               dir="ltr"
             >
               {JSON.stringify(sideInfo, null, 2)}
@@ -238,11 +256,16 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
         </div>
       )}
       {result && !result.ok && scorerKind === "remote" && (
-        <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          <XCircle className="mt-0.5 size-4 shrink-0" />
-          <span className="break-words" dir="auto">
-            {result.error ?? msg("submit.blackbox.scorer.result_error")}
-          </span>
+        <div className="space-y-1 border-t border-border/60 pt-3" role="alert">
+          <div className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-[#A3512B]">
+            <XCircle className="size-3 shrink-0" />
+            <span>{msg("submit.blackbox.scorer.result_error")}</span>
+          </div>
+          {result.error && (
+            <p className="break-words text-xs text-foreground/80" dir="auto">
+              {result.error}
+            </p>
+          )}
         </div>
       )}
     </BlackboxAuthoringShell>
