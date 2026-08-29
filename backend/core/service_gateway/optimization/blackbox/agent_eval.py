@@ -18,7 +18,7 @@ import threading
 import time
 from typing import Any
 
-from ....config import Settings
+from ....config import Settings, settings
 from ....exceptions import ServiceError
 from ....models.blackbox import BlackboxTarget
 from .harness import ANSWER_FILE, PROMPT_FILE, GatewayConfig, HarnessLaunch, build_launch
@@ -39,8 +39,6 @@ FILES_KEY = "files"
 CHECK_KEY = "check_command"
 # Time allowed for installing the harness, the case's setup and its check, on top of the run timeout.
 _SETUP_ALLOWANCE_SECONDS = 600.0
-# Vercel's ceiling on a sandbox's lifetime (45 minutes).
-_MAX_LIFETIME_SECONDS = 2_700.0
 _OUTPUT_CHARS = 20_000
 _TRANSCRIPT_CHARS = 4_000
 _STEP_CHARS = 6_000
@@ -229,6 +227,7 @@ class SandboxAgentScorer:
         target: BlackboxTarget,
         gateway: GatewayConfig,
         job_id: str | None = None,
+        max_lifetime_seconds: float | None = None,
     ) -> None:
         """Bind the wrapper to a sandbox runtime and the job's target.
 
@@ -238,12 +237,16 @@ class SandboxAgentScorer:
             target: Harness, model, timeouts and commands.
             gateway: Where the harness sends its model calls.
             job_id: Tags the sandboxes with the job, when known.
+            max_lifetime_seconds: Ceiling on a box's lifetime; the configured one when unset.
         """
         self._scorer = scorer
         self._runtime = runtime
         self._target = target
         self._launch: HarnessLaunch = build_launch(target, gateway)
         self._job_id = job_id
+        self._max_lifetime_seconds = (
+            settings.vercel_sandbox_max_lifetime_seconds if max_lifetime_seconds is None else max_lifetime_seconds
+        )
         # Sandboxes run in parallel, but the user's scorer (a metric-sandbox
         # process or a remote call) is not promised to be thread-safe.
         self._scorer_lock = threading.Lock()
@@ -311,7 +314,7 @@ class SandboxAgentScorer:
             PROMPT_FILE: case_prompt(case),
         }
         spec = SandboxSpec(
-            lifetime_seconds=min(self._target.timeout_seconds + _SETUP_ALLOWANCE_SECONDS, _MAX_LIFETIME_SECONDS),
+            lifetime_seconds=min(self._target.timeout_seconds + _SETUP_ALLOWANCE_SECONDS, self._max_lifetime_seconds),
             env=launch.env,
             name=self._sandbox_name(),
             tags={"skynet_job": self._job_id} if self._job_id else {},

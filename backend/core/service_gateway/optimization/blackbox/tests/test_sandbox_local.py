@@ -178,3 +178,8 @@ def test_scorer_runtime_prefers_vercel_when_configured(monkeypatch: pytest.Monke
         scorer_runtime_from_settings(_settings(monkeypatch, blackbox_scorer_runtime="local", **creds)),
         LocalSubprocessRuntime,
     )
+
+
+def test_local_runtime_has_no_header_injecting_edge() -> None:
+    """The host runtime cannot inject headers, so callers hand secrets to their commands themselves."""
+    assert LocalSubprocessRuntime().injects_headers is False

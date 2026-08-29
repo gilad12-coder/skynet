@@ -38,10 +38,12 @@ from ....exceptions import ServiceError
 # fail to import the worker.
 try:
     from vercel import api as vercel_api
+    from vercel.sandbox import NetworkPolicy, NetworkPolicyRule, NetworkPolicyTransform
     from vercel.sandbox import sync as vercel_sync
 except ImportError:  # pragma: no cover
     vercel_api = None
     vercel_sync = None
+    NetworkPolicy = NetworkPolicyRule = NetworkPolicyTransform = None
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,9 @@ _CREDENTIALS_MISSING = "Agent sandboxes are not configured: set VERCEL_TOKEN, VE
 # so its HTTPS calls verify the same way — never the worker's secrets.
 _LOCAL_ENV_PASSTHROUGH = ("SSL_CERT_FILE", "SSL_CERT_DIR")
 _LOCAL_KILLED_EXIT_CODE = 137
+# A custom network policy denies every host it does not list; this entry keeps the
+# network open, so only the header injection distinguishes it from ``allow-all``.
+_ANY_HOST = "*"
 
 
 @dataclass(frozen=True)
@@ -68,6 +73,11 @@ class SandboxSpec:
     env: Mapping[str, str] = field(default_factory=dict)
     name: str | None = None
     tags: Mapping[str, str] = field(default_factory=dict)
+    # Container image; the runtime's default when unset.
+    image: str | None = None
+    # Host → headers the network edge adds to the box's requests to that host, so a
+    # secret reaches a service without ever entering the box.
+    inject_headers: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -130,11 +140,15 @@ class SandboxSession(Protocol):
 class SandboxRuntime(Protocol):
     """Creates sandboxes."""
 
+    # Whether ``SandboxSpec.inject_headers`` is honoured; without a network edge the
+    # caller has to hand the box its secrets some other way.
+    injects_headers: bool
+
     def open(self, spec: SandboxSpec) -> SandboxSession:
         """Create a sandbox per ``spec``.
 
         Args:
-            spec: Lifetime, environment and labels for the sandbox.
+            spec: Lifetime, environment, image, header injection and labels for the sandbox.
 
         Returns:
             The session over the new sandbox.
@@ -237,14 +251,35 @@ class VercelSandboxSession:
                 logger.exception("failed to close the Vercel API session")
 
 
+def _network_policy(inject_headers: Mapping[str, Mapping[str, str]]) -> Any:
+    """Build the policy that adds ``inject_headers`` at the network edge, or ``None`` for an open network.
+
+    Args:
+        inject_headers: Host → headers to add to the box's requests to that host.
+
+    Returns:
+        A custom ``NetworkPolicy`` that still allows every host, or ``None`` when nothing is injected.
+    """
+    if not inject_headers:
+        return None
+    rules = {
+        host: (NetworkPolicyRule(transform=(NetworkPolicyTransform(headers=dict(headers)),)),)
+        for host, headers in inject_headers.items()
+    }
+    return NetworkPolicy.custom(allow={_ANY_HOST: (), **rules})
+
+
 class VercelSandboxRuntime:
     """Sandbox runtime over the Vercel Sandbox SDK."""
 
-    def __init__(self, credentials: VercelCredentials) -> None:
+    injects_headers = True
+
+    def __init__(self, credentials: VercelCredentials, *, image: str) -> None:
         """Bind the runtime to explicit credentials.
 
         Args:
             credentials: Token, team and project the sandboxes are created under.
+            image: Image the boxes boot from unless their spec names one.
 
         Raises:
             ServiceError: When the SDK is not installed.
@@ -252,12 +287,13 @@ class VercelSandboxRuntime:
         if vercel_sync is None or vercel_api is None:
             raise ServiceError(_PACKAGE_MISSING)
         self._credentials = credentials
+        self._image = image
 
     def open(self, spec: SandboxSpec) -> SandboxSession:
         """Create a sandbox per ``spec``.
 
         Args:
-            spec: Lifetime, environment and labels for the sandbox.
+            spec: Lifetime, environment, image, header injection and labels for the sandbox.
 
         Returns:
             The session over the new sandbox.
@@ -276,8 +312,10 @@ class VercelSandboxRuntime:
         try:
             box = vercel_sync.create_sandbox(
                 name=spec.name,
+                image=spec.image or self._image,
                 execution_time_limit=spec.lifetime_seconds,
                 env=dict(spec.env) or None,
+                network_policy=_network_policy(spec.inject_headers),
                 tags={**SANDBOX_TAG, **spec.tags},
             )
         except BaseException:
@@ -410,6 +448,8 @@ def _kill_process_group(pid: int) -> None:
 class LocalSubprocessRuntime:
     """Sandbox runtime whose boxes are temp directories on the worker host."""
 
+    injects_headers = False
+
     def open(self, spec: SandboxSpec) -> SandboxSession:
         """Create a working directory per ``spec``.
 
@@ -454,7 +494,8 @@ def sandbox_runtime_from_settings(settings: Settings) -> VercelSandboxRuntime | 
             token=settings.vercel_token.get_secret_value(),
             team_id=str(settings.vercel_team_id),
             project_id=str(settings.vercel_project_id),
-        )
+        ),
+        image=settings.vercel_sandbox_image,
     )
 
 

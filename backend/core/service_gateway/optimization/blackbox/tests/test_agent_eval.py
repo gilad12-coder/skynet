@@ -160,6 +160,21 @@ def test_run_builds_a_tagged_named_spec_within_the_lifetime_ceiling() -> None:
     assert spec.tags == {"skynet_job": "job-1"}
 
 
+def test_run_caps_the_lifetime_at_the_configured_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``VERCEL_SANDBOX_MAX_LIFETIME_SECONDS`` bounds the box unless an explicit ceiling is given."""
+    monkeypatch.setattr(agent_eval_mod.settings, "vercel_sandbox_max_lifetime_seconds", 1000.0)
+    runtime = FakeSandboxRuntime()
+    target = _target(timeout_seconds=600)
+
+    _scorer_of(runtime, target).run("v", {"prompt": "p"})
+    explicit = SandboxAgentScorer(
+        lambda candidate, case: (0.0, {}), runtime=runtime, target=target, gateway=_GATEWAY, max_lifetime_seconds=700
+    )
+    explicit.run("v", {"prompt": "p"})
+
+    assert [spec.lifetime_seconds for spec in runtime.specs] == [1000, 700]
+
+
 def test_run_falls_back_to_parsed_stdout_when_no_answer_file() -> None:
     """With no answer file the parsed stdout is the output."""
     session = FakeSandboxSession(script=lambda command: CommandResult(exit_code=0, stdout="parsed answer"))

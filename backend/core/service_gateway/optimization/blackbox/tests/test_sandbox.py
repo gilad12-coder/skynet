@@ -33,6 +33,8 @@ _VERCEL_ENV = (
     "VERCEL_TOKEN",
     "VERCEL_TEAM_ID",
     "VERCEL_PROJECT_ID",
+    "VERCEL_SANDBOX_IMAGE",
+    "VERCEL_SANDBOX_MAX_LIFETIME_SECONDS",
     "BLACKBOX_AGENT_GATEWAY_URL",
     "BLACKBOX_AGENT_GATEWAY_API_KEY",
     "LITELLM_PROXY_URL",
@@ -215,10 +217,23 @@ class _FakeSync:
         return {"token": token, "team_id": team_id, "project_id": project_id}
 
     def create_sandbox(
-        self, name: str | None, execution_time_limit: float, env: dict[str, str] | None, tags: dict[str, str]
+        self,
+        name: str | None,
+        image: str | None,
+        execution_time_limit: float,
+        env: dict[str, str] | None,
+        network_policy: Any,
+        tags: dict[str, str],
     ) -> _FakeBox:
         """Record the sandbox request and return the box."""
-        self.created = {"name": name, "lifetime": execution_time_limit, "env": env, "tags": tags}
+        self.created = {
+            "name": name,
+            "image": image,
+            "lifetime": execution_time_limit,
+            "env": env,
+            "network_policy": network_policy,
+            "tags": tags,
+        }
         return self._box
 
 
@@ -243,7 +258,7 @@ def test_runtime_open_creates_a_tagged_sandbox(monkeypatch: pytest.MonkeyPatch) 
     fake_sync = _FakeSync(box)
     monkeypatch.setattr(sandbox_mod, "vercel_sync", fake_sync)
     monkeypatch.setattr(sandbox_mod, "vercel_api", _FakeApi(api_session))
-    runtime = VercelSandboxRuntime(VercelCredentials(token="t", team_id="team", project_id="proj"))
+    runtime = VercelSandboxRuntime(VercelCredentials(token="t", team_id="team", project_id="proj"), image="img")
 
     session = runtime.open(SandboxSpec(lifetime_seconds=630, env={"K": "v"}, name="job-1", tags={"skynet_job": "1"}))
 
@@ -252,8 +267,32 @@ def test_runtime_open_creates_a_tagged_sandbox(monkeypatch: pytest.MonkeyPatch) 
     assert fake_sync.created["env"] == {"K": "v"}
     assert fake_sync.created["name"] == "job-1"
     assert fake_sync.created["tags"] == {**SANDBOX_TAG, "skynet_job": "1"}
+    assert fake_sync.created["image"] == "img"
+    assert fake_sync.created["network_policy"] is None
     assert fake_sync.credentials == {"token": "t", "team_id": "team", "project_id": "proj"}
     assert isinstance(session, VercelSandboxSession)
+
+
+@_needs_sdk
+def test_runtime_open_pins_the_spec_image_and_injects_headers_at_the_edge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A spec's image wins over the runtime's, and header injection is a custom policy that still allows every host."""
+    fake_sync = _FakeSync(_FakeBox())
+    monkeypatch.setattr(sandbox_mod, "vercel_sync", fake_sync)
+    monkeypatch.setattr(sandbox_mod, "vercel_api", _FakeApi(_FakeApiSession()))
+    runtime = VercelSandboxRuntime(VercelCredentials(token="t", team_id="team", project_id="proj"), image="img")
+
+    assert runtime.injects_headers is True
+    runtime.open(
+        SandboxSpec(lifetime_seconds=1, image="custom", inject_headers={"gw.example": {"Authorization": "Bearer k"}})
+    )
+
+    assert fake_sync.created["image"] == "custom"
+    policy = fake_sync.created["network_policy"]
+    assert policy.mode == "custom"
+    assert list(policy.allow["*"]) == []
+    [rule] = policy.allow["gw.example"]
+    [transform] = rule.transform
+    assert transform.headers == {"Authorization": "Bearer k"}
 
 
 def test_runtime_open_closes_the_api_session_when_creation_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -269,7 +308,7 @@ def test_runtime_open_closes_the_api_session_when_creation_fails(monkeypatch: py
 
     monkeypatch.setattr(sandbox_mod, "vercel_sync", _BrokenSync(_FakeBox()))
     monkeypatch.setattr(sandbox_mod, "vercel_api", _FakeApi(api_session))
-    runtime = VercelSandboxRuntime(VercelCredentials(token="t", team_id="team", project_id="proj"))
+    runtime = VercelSandboxRuntime(VercelCredentials(token="t", team_id="team", project_id="proj"), image="img")
 
     with pytest.raises(RuntimeError, match="no capacity"):
         runtime.open(SandboxSpec(lifetime_seconds=10))
@@ -282,7 +321,7 @@ def test_runtime_construction_needs_the_sdk(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(sandbox_mod, "vercel_api", None)
 
     with pytest.raises(ServiceError, match=_PACKAGE_MISSING):
-        VercelSandboxRuntime(VercelCredentials(token="t", team_id="x", project_id="y"))
+        VercelSandboxRuntime(VercelCredentials(token="t", team_id="x", project_id="y"), image="img")
 
 
 def test_unavailable_reason_reports_missing_package(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -307,6 +346,22 @@ def test_configured_settings_yield_a_runtime(monkeypatch: pytest.MonkeyPatch) ->
     assert sandbox_unavailable_reason(configured) is None
     assert isinstance(sandbox_runtime_from_settings(configured), VercelSandboxRuntime)
     assert sandbox_runtime_from_settings(_settings(monkeypatch)) is None
+
+
+@_needs_sdk
+def test_configured_settings_pick_the_sandbox_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Boxes boot from ``VERCEL_SANDBOX_IMAGE``, a current python image by default."""
+    fake_sync = _FakeSync(_FakeBox())
+    monkeypatch.setattr(sandbox_mod, "vercel_sync", fake_sync)
+    monkeypatch.setattr(sandbox_mod, "vercel_api", _FakeApi(_FakeApiSession()))
+    creds = {"vercel_token": "t", "vercel_team_id": "team", "vercel_project_id": "proj"}
+
+    for image, expected in ((None, "vercel/sandbox/universal:latest"), ("my/img:1", "my/img:1")):
+        overrides = {"vercel_sandbox_image": image} if image else {}
+        runtime = sandbox_runtime_from_settings(_settings(monkeypatch, **creds, **overrides))
+        assert runtime is not None
+        runtime.open(SandboxSpec(lifetime_seconds=1))
+        assert fake_sync.created["image"] == expected
 
 
 def test_command_result_ok() -> None:
