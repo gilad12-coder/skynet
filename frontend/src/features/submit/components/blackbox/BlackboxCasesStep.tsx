@@ -12,7 +12,12 @@ import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
-import { MOBILE_NUMBER_INPUT_CLASS, StepCard } from "./shared";
+import { defaultSplit } from "../../constants";
+import { MOBILE_NUMBER_INPUT_CLASS, Segmented, StepCard } from "./shared";
+
+type HoldoutMode = "holdout" | "all";
+
+const ALL_CASES_SPLIT = { train: 1, val: 0, test: 0 };
 
 export function BlackboxCasesStep({ w }: { w: BlackboxWizardContext }) {
   const {
@@ -29,6 +34,9 @@ export function BlackboxCasesStep({ w }: { w: BlackboxWizardContext }) {
     setShuffle,
     targetKind,
   } = w;
+  // Train 100% means every case is both optimized on and reported on — the
+  // right shape for a fixed task set with nothing to hold out.
+  const holdout = split.val > 0 || split.test > 0;
 
   return (
     <StepCard
@@ -106,32 +114,53 @@ export function BlackboxCasesStep({ w }: { w: BlackboxWizardContext }) {
             </Button>
           </div>
           <div className="space-y-2">
-            <Label>{msg("submit.blackbox.cases.split_label")}</Label>
-            <div className="grid grid-cols-3 gap-3">
-              {(
-                [
-                  ["train", msg("submit.split.label_train")],
-                  ["val", msg("submit.split.label_val")],
-                  ["test", msg("submit.split.label_test")],
-                ] as const
-              ).map(([key, label]) => (
-                <div key={key} className="space-y-1">
-                  <Label htmlFor={`bb-split-${key}`} className="text-xs">
-                    {label}
-                  </Label>
-                  <NumberInput
-                    id={`bb-split-${key}`}
-                    step={0.05}
-                    min={0}
-                    max={1}
-                    value={split[key]}
-                    onChange={(v) => setSplit({ ...split, [key]: v })}
-                    className={MOBILE_NUMBER_INPUT_CLASS}
-                  />
-                </div>
-              ))}
-            </div>
+            <Label>{msg("submit.blackbox.cases.holdout_label")}</Label>
+            <Segmented<HoldoutMode>
+              value={holdout ? "holdout" : "all"}
+              onChange={(mode) => setSplit(mode === "all" ? ALL_CASES_SPLIT : defaultSplit)}
+              options={[
+                {
+                  value: "holdout",
+                  label: msg("submit.blackbox.cases.holdout.split"),
+                  desc: msg("submit.blackbox.cases.holdout.split_desc"),
+                },
+                {
+                  value: "all",
+                  label: msg("submit.blackbox.cases.holdout.all"),
+                  desc: msg("submit.blackbox.cases.holdout.all_desc"),
+                },
+              ]}
+            />
           </div>
+          {holdout && (
+            <div className="space-y-2">
+              <Label>{msg("submit.blackbox.cases.split_label")}</Label>
+              <div className="grid grid-cols-3 gap-3">
+                {(
+                  [
+                    ["train", msg("submit.split.label_train")],
+                    ["val", msg("submit.split.label_val")],
+                    ["test", msg("submit.split.label_test")],
+                  ] as const
+                ).map(([key, label]) => (
+                  <div key={key} className="space-y-1">
+                    <Label htmlFor={`bb-split-${key}`} className="text-xs">
+                      {label}
+                    </Label>
+                    <NumberInput
+                      id={`bb-split-${key}`}
+                      step={0.05}
+                      min={0}
+                      max={1}
+                      value={split[key]}
+                      onChange={(v) => setSplit({ ...split, [key]: v })}
+                      className={MOBILE_NUMBER_INPUT_CLASS}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex min-h-[44px] items-center justify-between lg:min-h-0">
             <Label htmlFor="bb-shuffle">{msg("submit.blackbox.cases.shuffle")}</Label>
             <Switch id="bb-shuffle" checked={shuffle} onCheckedChange={setShuffle} />
