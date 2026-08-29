@@ -405,6 +405,7 @@ def dry_run_scorer(request: ScorerDryRunRequest) -> ScorerDryRunResponse:
                 candidate=request.candidate,
                 case=request.case,
                 scorer_model=request.scorer.model.model_dump(mode="json") if request.scorer.model else None,
+                timeout_seconds=request.scorer.timeout_seconds,
             )
             score, side_info, error, usage = probe.score, probe.side_info, probe.error, probe.usage_by_model
     except ServiceError as exc:

@@ -262,6 +262,43 @@ def test_dry_run_reports_unloadable_code() -> None:
     assert "syntax error" in str(response.error)
 
 
+def test_dry_run_bounds_python_scorers_by_the_spec_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dry run probes with the scorer's own ``timeout_seconds``, not a fixed default."""
+    seen: dict[str, Any] = {}
+
+    def fake_probe(**kwargs: Any) -> ScorerProbeResult:
+        seen.update(kwargs)
+        return ScorerProbeResult(score=1.0, side_info={}, error=None)
+
+    monkeypatch.setattr(service_mod, "probe_scorer", fake_probe)
+    request = ScorerDryRunRequest(
+        scorer={"kind": "python", "metric_code": VOWEL_SCORER_CODE, "timeout_seconds": 12.5}, candidate="x"
+    )
+
+    response = dry_run_scorer(request)
+
+    assert response.ok is True
+    assert seen["timeout_seconds"] == 12.5
+
+
+def test_dry_run_reports_a_scorer_that_outruns_its_timeout() -> None:
+    """A python scorer slower than its timeout is stopped and reported, not left hanging."""
+    request = ScorerDryRunRequest(
+        scorer={
+            "kind": "python",
+            "metric_code": "import time\ndef score(c, case=None):\n    time.sleep(30)\n    return 1.0\n",
+            "timeout_seconds": 1,
+        },
+        candidate="x",
+    )
+
+    response = dry_run_scorer(request)
+
+    assert response.ok is False
+    assert response.score is None
+    assert "exceeded the 1s" in str(response.error)
+
+
 def test_dry_run_calls_remote_scorer(monkeypatch: pytest.MonkeyPatch) -> None:
     """A remote dry run makes one request through the remote adapter."""
     calls: list[tuple[Any, Any]] = []

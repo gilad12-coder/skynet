@@ -9,6 +9,7 @@ adapter POSTs to any URL with an optional shared secret (TODO-1).
 from __future__ import annotations
 
 import inspect
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -126,13 +127,51 @@ def _accepts_case(fn: Callable[..., Any]) -> bool:
     return len(positional) >= 2 or any(p.kind == p.VAR_POSITIONAL for p in positional)
 
 
-def build_python_scorer(code: str, *, llm: LLMHelper | None = None) -> ScorerFn:
+def _call_with_timeout(fn: Callable[[], Any], timeout_seconds: float) -> Any:
+    """Run ``fn`` on a daemon thread and stop waiting after ``timeout_seconds``.
+
+    A python thread cannot be killed, so an overrunning call keeps going in
+    the background while the run moves on; runs live in a per-job subprocess,
+    so a runaway scorer dies with the job.
+
+    Args:
+        fn: Zero-argument callable to run.
+        timeout_seconds: How long to wait for it.
+
+    Returns:
+        Whatever ``fn`` returned.
+
+    Raises:
+        TimeoutError: When ``fn`` did not finish in time.
+    """
+    outcome: dict[str, Any] = {}
+
+    def run() -> None:
+        """Capture the call's result or exception for the waiting thread."""
+        try:
+            outcome["value"] = fn()
+        except BaseException as exc:  # re-raised on the caller's thread below; also catches SystemExit
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, name="blackbox-scorer", daemon=True)
+    worker.start()
+    worker.join(timeout_seconds)
+    if worker.is_alive():
+        raise TimeoutError(f"scorer exceeded the {timeout_seconds:g}s timeout")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
+
+
+def build_python_scorer(code: str, *, llm: LLMHelper | None = None, timeout_seconds: float | None = None) -> ScorerFn:
     """Load scorer source and wrap it in the engine-facing scorer contract.
 
     Args:
         code: User-authored python source.
         llm: The model helper bound as ``llm``; without one, a scorer that
             calls it fails with a message pointing at the Scorer step.
+        timeout_seconds: Longest a single call may run; ``None`` leaves it
+            unbounded.
 
     Returns:
         A callable scoring ``(candidate, case)`` → ``(score, side_info)``.
@@ -152,8 +191,16 @@ def build_python_scorer(code: str, *, llm: LLMHelper | None = None) -> ScorerFn:
 
         Returns:
             The normalized score and side information.
+
+        Raises:
+            TimeoutError: When the call outruns ``timeout_seconds``.
         """
-        raw = fn(candidate, case) if takes_case else fn(candidate)
+
+        def call() -> Any:
+            """Invoke the user's function with the arity it declared."""
+            return fn(candidate, case) if takes_case else fn(candidate)
+
+        raw = call() if timeout_seconds is None else _call_with_timeout(call, timeout_seconds)
         return normalize_score(raw)
 
     return scorer
@@ -220,4 +267,4 @@ def build_scorer(spec: BlackboxScorer, *, llm: LLMHelper | None = None) -> Score
     """
     if spec.kind == "remote":
         return RemoteScorer(str(spec.url), secret=spec.secret, timeout_seconds=spec.timeout_seconds)
-    return build_python_scorer(str(spec.metric_code), llm=llm)
+    return build_python_scorer(str(spec.metric_code), llm=llm, timeout_seconds=spec.timeout_seconds)
