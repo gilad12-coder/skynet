@@ -156,6 +156,24 @@ def test_security_status_defaults(client: TestClient) -> None:
     }
 
 
+def test_provisioned_oauth_account_has_no_password_features(client: TestClient) -> None:
+    """A provider-provisioned row reports no password and cannot enroll in 2FA."""
+    oauth_email = "sso@example.com"
+    provisioned = client.post(
+        "/auth/oauth/provision", json={"email": oauth_email, "name": "SSO"}, headers=_AUTH_HEADER
+    )
+    assert provisioned.status_code == 200
+    client.app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser(
+        username=oauth_email, role="user", groups=()
+    )
+    status = client.get("/auth/security").json()
+    assert status["has_password"] is False
+    assert status["totp_enabled"] is False
+    setup = client.post("/auth/security/totp/setup")
+    assert setup.status_code == 422
+    assert setup.json()["code"] == "accounts.two_factor_unavailable"
+
+
 def test_totp_enable_requires_setup_and_valid_code(client: TestClient) -> None:
     """Enable without setup 422s; a wrong first code 401s and stays pending."""
     resp = client.post("/auth/security/totp/enable", json={"code": "000000"})
@@ -338,6 +356,8 @@ def test_passkey_signin_resolves_identity(
     )
     assert resp.status_code == 200
     assert resp.json()["email"] == _EMAIL
+    # The fixture only registers the account, so this passkey sign-in is its first.
+    assert resp.json()["first_login"] is True
 
     store: _Store = client.app.state.job_store
     with Session(store.engine) as session:

@@ -58,7 +58,14 @@ from ..two_factor import (
     totp_provisioning_uri,
     verify_totp,
 )
-from .accounts import AccountInfo, OkResponse, _normalise_email, _require_internal_auth, _role_for
+from .accounts import (
+    AccountInfo,
+    OkResponse,
+    _has_password,
+    _normalise_email,
+    _require_internal_auth,
+    _role_for,
+)
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
@@ -292,11 +299,12 @@ def create_account_security_router(*, job_store) -> APIRouter:
             The ``users`` row.
 
         Raises:
-            DomainError: 422 when the identity has no local account (OAuth
-                sign-ins delegate 2FA to their provider).
+            DomainError: 422 when the identity has no local password account
+                (OAuth/SSO sign-ins delegate 2FA to their provider, whether or
+                not a provisioned row exists).
         """
         row = session.get(UserModel, email)
-        if row is None:
+        if not _has_password(row):
             raise DomainError("accounts.two_factor_unavailable", status=422)
         return row
 
@@ -323,7 +331,7 @@ def create_account_security_router(*, job_store) -> APIRouter:
                 .order_by(WebAuthnCredentialModel.created_at)
             ).all()
             return SecurityStatus(
-                has_password=row is not None,
+                has_password=_has_password(row),
                 totp_enabled=bool(row is not None and row.totp_secret),
                 email_2fa_enabled=bool(row is not None and row.email_2fa_enabled),
                 email_2fa_available=email_configured(),
@@ -725,7 +733,9 @@ def create_account_security_router(*, job_store) -> APIRouter:
             email = str(row.user_email)
             user_row = session.get(UserModel, email)
             name = email
+            first_login = False
             if user_row is not None:
+                first_login = user_row.last_login_at is None
                 user_row.last_login_at = now
                 name = str(user_row.name)
             enforce_monthly_active_user_limit(
@@ -734,6 +744,6 @@ def create_account_security_router(*, job_store) -> APIRouter:
                 exempt=_role_for(email) == "admin",
             )
             session.commit()
-        return AccountInfo(email=email, name=name, role=_role_for(email))
+        return AccountInfo(email=email, name=name, role=_role_for(email), first_login=first_login)
 
     return router

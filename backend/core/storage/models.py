@@ -78,15 +78,16 @@ class AgentApprovalModel(Base):
 
 
 class UserModel(Base):
-    """A Skynet-native account for email/password sign-in.
+    """A Skynet account row, keyed by the cross-app identity.
 
-    Backs only the "create an account in Skynet" path — OAuth (Google/GitHub)
-    users authenticate against their provider and never get a row here. The
-    lowercased ``email`` is the primary key because it is also the cross-app
-    identity (the ``username`` every other table — jobs, datasets, shares —
-    keys ownership on), so a local account and the work it owns line up on a
-    single value. Only the scrypt ``password_hash`` is persisted; the plaintext
-    password is never stored.
+    Backs the "create an account in Skynet" path, and — since OAuth (Google/
+    GitHub) and SSO identities are mirrored here on sign-in — every identity
+    that has signed in. The lowercased ``email`` is the primary key because it
+    is also the cross-app identity (the ``username`` every other table — jobs,
+    datasets, shares — keys ownership on), so an account and the work it owns
+    line up on a single value. Only the scrypt ``password_hash`` is persisted;
+    the plaintext password is never stored, and a row provisioned for an
+    OAuth/SSO identity holds an empty hash that can never verify.
     """
 
     __tablename__ = "users"
@@ -104,8 +105,8 @@ class UserModel(Base):
     # register route flips it to False only when it actually sends a code, and
     # login refuses an unverified account while email delivery is configured.
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    # Optional profile captured on the rich sign-up form. Nullable because OAuth
-    # accounts (no ``users`` row) and rows created before these columns existed
+    # Optional profile captured on the rich sign-up form. Nullable because
+    # OAuth-provisioned rows and rows created before these columns existed
     # never set them, and ``job_role`` is optional even on the sign-up form.
     use_case: Mapped[str | None] = mapped_column(String(32), nullable=True)
     experience_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
