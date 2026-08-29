@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import threading
 from collections.abc import Callable, Mapping
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from ..protocol import Candidate, EngineContext, EvalServer, Result, SideInfo, Task
@@ -228,3 +231,92 @@ class FakeSandboxRuntime:
         session = self._factory()
         self.sessions.append(session)
         return session
+
+
+class FakeGateway:
+    """OpenAI-compatible chat endpoint on localhost: records every request, answers from a script.
+
+    Args:
+        reply: The completion text, or a function of the request body that returns it.
+        usage: ``(prompt_tokens, completion_tokens)`` reported with every success.
+        statuses: HTTP error statuses to answer with, in order, before succeeding.
+    """
+
+    def __init__(
+        self,
+        reply: str | Callable[[dict[str, Any]], str] = "0.5",
+        *,
+        usage: tuple[int, int] = (3, 1),
+        statuses: list[int] | None = None,
+    ) -> None:
+        """Bind a server to a free localhost port without starting it."""
+        self.requests: list[dict[str, Any]] = []
+        self._reply = reply
+        self._usage = usage
+        self._statuses = list(statuses or [])
+        self._lock = threading.Lock()
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeGatewayHandler)
+        self._server.gateway = self  # type: ignore[attr-defined]
+        # A short poll interval keeps shutdown() (and thus every test) from waiting out the default 0.5s.
+        self._thread = threading.Thread(target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+
+    @property
+    def url(self) -> str:
+        """The base URL a client is given (``/chat/completions`` is appended by the caller)."""
+        return f"http://127.0.0.1:{self._server.server_address[1]}/v1"
+
+    def __enter__(self) -> FakeGateway:
+        """Start serving."""
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        """Stop serving."""
+        self._server.shutdown()
+        self._server.server_close()
+
+    def answer(self, request: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Record ``request`` and pick the status and body to send back.
+
+        Args:
+            request: ``path``, ``authorization`` header and decoded ``body``.
+
+        Returns:
+            The HTTP status and JSON body.
+        """
+        with self._lock:
+            self.requests.append(request)
+            if self._statuses:
+                return self._statuses.pop(0), {"error": "try again"}
+        text = self._reply(request["body"]) if callable(self._reply) else self._reply
+        prompt_tokens, completion_tokens = self._usage
+        return 200, {
+            "choices": [{"message": {"role": "assistant", "content": text}}],
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+        }
+
+
+class _FakeGatewayHandler(BaseHTTPRequestHandler):
+    """Hands every POST to the owning :class:`FakeGateway`."""
+
+    def do_POST(self) -> None:
+        """Decode the JSON body and write the scripted answer."""
+        length = int(self.headers.get("Content-Length") or 0)
+        body = json.loads(self.rfile.read(length) or b"{}")
+        gateway: FakeGateway = self.server.gateway  # type: ignore[attr-defined]
+        status, payload = gateway.answer(
+            {"path": self.path, "authorization": self.headers.get("Authorization"), "body": body}
+        )
+        data = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        """Keep the test output free of access-log lines."""

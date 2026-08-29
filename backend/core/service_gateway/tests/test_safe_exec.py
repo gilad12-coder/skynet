@@ -7,9 +7,6 @@ its failure modes (syntax errors, timeouts, wrong return shapes).
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Any
-
 import pytest
 
 from core.exceptions import ServiceError
@@ -17,10 +14,8 @@ from core.service_gateway import safe_exec
 from core.service_gateway.safe_exec import (
     MetricIntrospection,
     MetricProbeResult,
-    ScorerProbeResult,
     SignatureIntrospection,
     probe_metric_on_sample,
-    probe_scorer,
     validate_metric_code,
     validate_scorer_code,
     validate_signature_code,
@@ -288,145 +283,8 @@ class TestValidateScorerCode:
         with pytest.raises(ServiceError, match="failed to load: RuntimeError: boom"):
             validate_scorer_code("raise RuntimeError('boom')\n")
 
+    def test_helpers_are_bound_while_loading(self) -> None:
+        """Module-level use of the sandbox helpers (``llm``, ``Image``) loads cleanly."""
+        code = "assert callable(llm)\nPLACEHOLDER = Image(base64_data='aGk=')\ndef score(candidate, case=None):\n    return 1.0\n"
 
-class TestProbeScorer:
-    """Tests for ``probe_scorer``."""
-
-    def test_returns_score_and_side_info(self) -> None:
-        """A well-behaved scorer's score and side info come back from the child."""
-        probe = probe_scorer(scorer_code=_VALID_SCORER, candidate="hello", case={"k": 1})
-
-        assert probe == ScorerProbeResult(score=0.5, side_info={"length": 5}, error=None)
-
-    def test_plain_number_return_is_normalized(self) -> None:
-        """A scorer returning a bare number gets empty side info."""
-        probe = probe_scorer(scorer_code="def score(candidate):\n    return 1\n", candidate="x")
-
-        assert probe.score == 1.0
-        assert probe.side_info == {}
-        assert probe.error is None
-
-    def test_scorer_exception_is_reported_not_raised(self) -> None:
-        """A scorer that raises on the candidate is reported via ``error``."""
-        probe = probe_scorer(
-            scorer_code="def score(candidate, case=None):\n    raise ValueError('bad candidate')\n",
-            candidate="x",
-        )
-
-        assert probe.score is None
-        assert probe.side_info == {}
-        assert probe.error == "ValueError: bad candidate"
-
-    def test_unusable_return_value_is_reported(self) -> None:
-        """A scorer returning something that is not a score is reported via ``error``."""
-        probe = probe_scorer(scorer_code="def score(candidate, case=None):\n    return 'high'\n", candidate="x")
-
-        assert probe.score is None
-        assert probe.error is not None
-        assert "scorer must return" in probe.error
-
-    def test_non_json_side_info_is_stringified(self) -> None:
-        """Side info that is not JSON-serializable crosses the process boundary as text."""
-        probe = probe_scorer(
-            scorer_code="def score(candidate, case=None):\n    return 1.0, {'when': object()}\n",
-            candidate="x",
-        )
-
-        assert probe.score == 1.0
-        assert isinstance(probe.side_info["when"], str)
-
-    def test_large_side_info_returns_before_the_timeout(self) -> None:
-        """A multi-megabyte result (rendered images) must not stall behind the parent's join."""
-        probe = probe_scorer(
-            scorer_code="def score(candidate, case=None):\n    return 1.0, {'blob': 'x' * 3_000_000}\n",
-            candidate="x",
-            timeout_seconds=20,
-        )
-
-        assert len(probe.side_info["blob"]) == 3_000_000
-
-    def test_image_side_info_crosses_as_a_data_url(self) -> None:
-        """An ``Image`` in side info reaches the dry-run caller as a data URL it can show."""
-        probe = probe_scorer(
-            scorer_code=(
-                "def score(candidate, case=None):\n"
-                "    return 1.0, {'render': Image(base64_data='aGk=', media_type='image/png')}\n"
-            ),
-            candidate="x",
-        )
-
-        assert probe.side_info == {"render": "data:image/png;base64,aGk="}
-
-    def test_broken_code_surfaces_as_service_error(self) -> None:
-        """A scorer that fails to load raises ``ServiceError`` from the probe entrypoint."""
-        with pytest.raises(ServiceError, match="syntax error"):
-            probe_scorer(scorer_code="def !!!", candidate="x")
-
-
-class _FakeScorerLLM:
-    """Stand-in for the injected ``llm()``: records calls, answers ``0.5`` and carries usage on ``lm``."""
-
-    def __init__(self) -> None:
-        """Create the helper with an empty history."""
-        self.calls: list[tuple[str, str | None]] = []
-        self.lm = SimpleNamespace(model="fake/judge", history=[])
-
-    def __call__(self, prompt: str, input: str | None = None) -> str:
-        """Record the call and answer a constant score."""
-        self.calls.append((prompt, input))
-        self.lm.history.append({"usage": {"prompt_tokens": 3, "completion_tokens": 1}})
-        return "0.5"
-
-
-class _Queue:
-    """List-backed stand-in for the worker's result queue."""
-
-    def __init__(self) -> None:
-        """Start empty."""
-        self.items: list[dict[str, Any]] = []
-
-    def put(self, item: dict[str, Any]) -> None:
-        """Append the worker's result."""
-        self.items.append(item)
-
-
-_LLM_SCORER = "def score(candidate, case=None):\n    return float(llm(candidate, case['input']))\n"
-
-
-class TestScorerWorkerLLM:
-    """Tests for the ``llm()`` helper the scorer child binds."""
-
-    def test_binds_llm_to_the_chosen_model_and_reports_usage(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """With a model, ``llm`` is bound to it and its tokens come back with the score."""
-        helper = _FakeScorerLLM()
-        chosen: list[str] = []
-        monkeypatch.setattr(safe_exec, "build_scorer_llm", lambda config: chosen.append(config.name) or helper)
-        queue = _Queue()
-
-        safe_exec._scorer_worker(_LLM_SCORER, "judge this", {"input": "text"}, True, {"name": "fake/judge"}, queue)
-
-        assert chosen == ["fake/judge"]
-        assert helper.calls == [("judge this", "text")]
-        assert queue.items == [
-            {"ok": True, "score": 0.5, "side_info": {}, "error": None, "usage": {"fake/judge": (3, 1)}}
-        ]
-
-    def test_without_a_model_llm_explains_the_scorer_step(self) -> None:
-        """Without a model, calling ``llm`` is reported as the scorer's error with the fix."""
-        queue = _Queue()
-
-        safe_exec._scorer_worker(_LLM_SCORER, "x", {"input": "text"}, True, None, queue)
-
-        [payload] = queue.items
-        assert payload["score"] is None
-        assert "no model was chosen in the Scorer step" in payload["error"]
-        assert payload["usage"] == {}
-
-    def test_probe_scorer_crosses_the_process_boundary_without_usage(self) -> None:
-        """A modelless probe reports the ``llm`` hint and empty usage from the child."""
-        probe = probe_scorer(scorer_code=_LLM_SCORER, candidate="x", case={"input": "text"})
-
-        assert probe.score is None
-        assert probe.error is not None
-        assert "no model was chosen in the Scorer step" in probe.error
-        assert probe.usage_by_model == {}
+        assert validate_scorer_code(code) is None
