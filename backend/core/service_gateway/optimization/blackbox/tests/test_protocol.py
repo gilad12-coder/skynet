@@ -167,3 +167,20 @@ def test_plateau_watch_is_per_lane() -> None:
     second.evaluate("aaaa")
     assert second.plateaued
     assert parent.best_candidate == "aaa"
+
+
+def test_history_lists_distinct_versions_in_first_seen_order() -> None:
+    """Every distinct version is recorded once, with its mean score and latest side info."""
+    server = EvalServer(vowel_scorer, max_evals=10)
+    lane = server.lane(10)
+
+    lane.evaluate("aaa", "case-1")
+    lane.evaluate("xyz", "case-1")
+    lane.evaluate("aaa", "case-2")
+
+    assert [record.candidate for record in server.history] == ["aaa", "xyz"]
+    first, second = server.history
+    assert (first.count, first.first_eval, first.mean_score) == (2, 1, 1.0)
+    assert first.side_info == {"vowels": 3}
+    assert (second.count, second.first_eval, second.mean_score) == (1, 2, 0.0)
+    assert [record.candidate for record in lane.history] == ["aaa", "xyz"]
