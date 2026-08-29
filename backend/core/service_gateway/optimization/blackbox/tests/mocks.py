@@ -208,10 +208,14 @@ class FakeSandboxRuntime:
     Args:
         session_factory: Builds a session per :meth:`open`; a default
             clean-exit session that answers ``done`` when unset.
+        injects_headers: Whether the runtime claims a header-injecting network edge.
     """
 
-    def __init__(self, session_factory: Callable[[], FakeSandboxSession] | None = None) -> None:
+    def __init__(
+        self, session_factory: Callable[[], FakeSandboxSession] | None = None, *, injects_headers: bool = False
+    ) -> None:
         """Create the runtime."""
+        self.injects_headers = injects_headers
         self.specs: list[SandboxSpec] = []
         self.sessions: list[FakeSandboxSession] = []
         self._factory = session_factory or (

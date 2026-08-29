@@ -82,16 +82,17 @@ class _RunnerSession(FakeSandboxSession):
         return CommandResult(exit_code=0)
 
 
-def _runtime(respond: Responder) -> FakeSandboxRuntime:
+def _runtime(respond: Responder, *, injects_headers: bool = False) -> FakeSandboxRuntime:
     """Runtime whose boxes answer through ``respond``.
 
     Args:
         respond: The responder.
+        injects_headers: Whether the runtime claims a header-injecting network edge.
 
     Returns:
         A fake runtime.
     """
-    return FakeSandboxRuntime(lambda: _RunnerSession(respond))
+    return FakeSandboxRuntime(lambda: _RunnerSession(respond), injects_headers=injects_headers)
 
 
 def _usage(*pairs: tuple[int, int]) -> list[dict[str, int]]:
@@ -121,6 +122,7 @@ def test_sandbox_scorer_installs_the_runner_once_and_runs_one_call_per_directory
     assert spec.name == "skynet-scorer-job-1"
     assert spec.tags == {"skynet_job": "job-1"}
     assert spec.lifetime_seconds == 2_700
+    assert spec.inject_headers == {}
     [box] = runtime.sessions
     assert box.files[RUNNER_FILE] == RUNNER_SOURCE
     assert box.commands == [f"python3 {RUNNER_FILE} {CALLS_DIR}/000001", f"python3 {RUNNER_FILE} {CALLS_DIR}/000002"]
@@ -460,3 +462,47 @@ def test_probe_scorer_calls_the_gateway_from_inside_the_box_and_bills_the_tokens
         {"role": "user", "content": "the text"},
     ]
     assert usage_by_model_from_history(scorer.usage) == {"fake/judge": (5, 2)}
+
+
+def test_sandbox_scorer_leaves_the_key_to_the_network_edge_when_the_runtime_injects_it() -> None:
+    """On a runtime with a header-injecting edge the key rides in the spec; the box's environment never sees it."""
+    runtime = _runtime(lambda payload: _OK, injects_headers=True)
+    scorer = SandboxPythonScorer("def score(c): return 1", runtime=runtime, gateway=_GATEWAY, timeout_seconds=5)
+
+    scorer("abc")
+    scorer.close()
+
+    [spec] = runtime.specs
+    assert spec.inject_headers == {"gw.example": {"Authorization": "Bearer k"}}
+    [box] = runtime.sessions
+    assert box.envs == [None]
+    assert "api_key" not in box.payloads[0]["gateway"]
+
+
+def test_sandbox_scorer_injects_nothing_without_a_key() -> None:
+    """A keyless gateway adds no injection rule and no environment."""
+    runtime = _runtime(lambda payload: _OK, injects_headers=True)
+    gateway = ScorerGateway(url="http://gw.example/v1", model="m", api_key=None, billing_model="b")
+    scorer = SandboxPythonScorer("def score(c): return 1", runtime=runtime, gateway=gateway, timeout_seconds=5)
+
+    scorer("abc")
+    scorer.close()
+
+    assert runtime.specs[0].inject_headers == {}
+    assert runtime.sessions[0].envs == [None]
+
+
+def test_sandbox_scorer_caps_the_lifetime_at_the_configured_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``VERCEL_SANDBOX_MAX_LIFETIME_SECONDS`` is the default lifetime and the cap on a requested one."""
+    monkeypatch.setattr(sandbox_scorer_mod.settings, "vercel_sandbox_max_lifetime_seconds", 100.0)
+    lifetimes = []
+    for requested in (None, 50.0, 500.0):
+        runtime = _runtime(lambda payload: _OK)
+        scorer = SandboxPythonScorer(
+            "def score(c): return 1", runtime=runtime, gateway=None, timeout_seconds=5, lifetime_seconds=requested
+        )
+        scorer("abc")
+        scorer.close()
+        lifetimes.append(runtime.specs[0].lifetime_seconds)
+
+    assert lifetimes == [100.0, 50.0, 100.0]

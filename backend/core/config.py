@@ -173,6 +173,17 @@ class Settings(BaseSettings):
     vercel_project_id: str | None = Field(
         default=None, alias="VERCEL_PROJECT_ID", description="Vercel project the agent sandboxes are created under."
     )
+    vercel_sandbox_image: str = Field(
+        default="vercel/sandbox/universal:latest",
+        alias="VERCEL_SANDBOX_IMAGE",
+        description="Container image the agent and scorer sandboxes boot from. The SDK's own default (Amazon Linux 2023 with Python 3.9) is too old for the scorer runner.",
+    )
+    vercel_sandbox_max_lifetime_seconds: float = Field(
+        default=2_700.0,
+        alias="VERCEL_SANDBOX_MAX_LIFETIME_SECONDS",
+        gt=0.0,
+        description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro teams can raise it to 18000 (5 hours). A job that outlives its box reopens one on its next call.",
+    )
     blackbox_agent_gateway_url: str | None = Field(
         default=None,
         alias="BLACKBOX_AGENT_GATEWAY_URL",
