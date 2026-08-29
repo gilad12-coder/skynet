@@ -19,10 +19,26 @@ import type { CodeInterviewState } from "@/shared/hooks/use-code-interview";
 
 interface Props {
   interview: CodeInterviewState;
-  /** Names what the interview leads to; defaults to the Signature & Metric wording. */
-  subtitle?: string;
+  /** Black-box recipes name the outcome a starting point & scorer, not Signature & Metric. */
+  blackbox?: boolean;
   className?: string;
 }
+
+const DSPY_COPY = {
+  subtitle: "submit.code.interview.subtitle",
+  reading: "submit.code.interview.reading",
+  briefDescription: "submit.code.interview.brief.description",
+  briefConfirm: "submit.code.interview.brief.confirm",
+} as const;
+
+const BLACKBOX_COPY = {
+  subtitle: "submit.blackbox.interview.subtitle",
+  reading: "submit.blackbox.interview.reading",
+  briefDescription: "submit.blackbox.interview.brief.description",
+  briefConfirm: "submit.blackbox.interview.brief.confirm",
+} as const;
+
+type InterviewCopy = typeof DSPY_COPY | typeof BLACKBOX_COPY;
 
 /**
  * The Signature & Metric interview: the same live chat experience as the
@@ -31,8 +47,9 @@ interface Props {
  * interviewer. It ends in an editable authoring brief; confirming it hands
  * the directives to the seed generation.
  */
-export function CodeInterviewPanel({ interview, subtitle, className }: Props) {
+export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
   const [draft, setDraft] = React.useState("");
+  const copy = blackbox ? BLACKBOX_COPY : DSPY_COPY;
 
   const submit = () => {
     const content = draft.trim();
@@ -48,9 +65,7 @@ export function CodeInterviewPanel({ interview, subtitle, className }: Props) {
           <h3 className="text-sm font-semibold text-foreground">
             {msg("submit.code.interview.title")}
           </h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {subtitle ?? msg("submit.code.interview.subtitle")}
-          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{msg(copy.subtitle)}</p>
         </div>
         {/* The header spans both the chat and the brief card, so a re-run is
             one click away from the brief too — mirroring the tagger. */}
@@ -67,7 +82,7 @@ export function CodeInterviewPanel({ interview, subtitle, className }: Props) {
       </div>
 
       {interview.done ? (
-        <BriefCard interview={interview} />
+        <BriefCard interview={interview} copy={copy} />
       ) : (
         <>
           <AgentThread
@@ -84,7 +99,7 @@ export function CodeInterviewPanel({ interview, subtitle, className }: Props) {
               interview.error ? null : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
                   <CircleNotch className="size-5 animate-spin" />
-                  <p className="text-sm">{msg("submit.code.interview.reading")}</p>
+                  <p className="text-sm">{msg(copy.reading)}</p>
                 </div>
               )
             }
@@ -159,7 +174,7 @@ export function CodeInterviewPanel({ interview, subtitle, className }: Props) {
  * written. Confirming it is the moment the user takes ownership of what the
  * seed authors will be told to honor.
  */
-function BriefCard({ interview }: { interview: CodeInterviewState }) {
+function BriefCard({ interview, copy }: { interview: CodeInterviewState; copy: InterviewCopy }) {
   const [directives, setDirectives] = React.useState<string[]>(interview.brief);
   React.useEffect(() => setDirectives(interview.brief), [interview.brief]);
 
@@ -174,9 +189,7 @@ function BriefCard({ interview }: { interview: CodeInterviewState }) {
         <h4 className="text-sm font-semibold text-foreground">
           {msg("submit.code.interview.brief.title")}
         </h4>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {msg("submit.code.interview.brief.description")}
-        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{msg(copy.briefDescription)}</p>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
         {directives.length === 0 && (
@@ -223,7 +236,7 @@ function BriefCard({ interview }: { interview: CodeInterviewState }) {
           onClick={() => interview.confirm(cleaned)}
           className="min-h-[44px] w-full lg:min-h-0"
         >
-          {msg("submit.code.interview.brief.confirm")}
+          {msg(copy.briefConfirm)}
         </Button>
       </div>
     </div>

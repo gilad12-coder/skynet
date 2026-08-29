@@ -108,6 +108,7 @@ export function CodeAgentPanel({ agent, disabled, disabledReason, className, bla
                   <ActivityBreadcrumb
                     signatureStatus={agent.signatureStatus}
                     metricStatus={agent.metricStatus}
+                    blackbox={blackbox}
                   />
                 </div>
               )}

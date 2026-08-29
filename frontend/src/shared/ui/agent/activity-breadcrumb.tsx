@@ -20,9 +20,12 @@ type StepState = "pending" | "active" | "done";
 export function ActivityBreadcrumb({
   signatureStatus,
   metricStatus,
+  blackbox,
 }: {
   signatureStatus: ArtifactStatus;
   metricStatus: ArtifactStatus;
+  /** Black-box recipes read an objective and draft a starting point & scorer. */
+  blackbox?: boolean;
 }) {
   const steps = React.useMemo<Array<{ label: string; state: StepState }>>(() => {
     const readingState: StepState =
@@ -31,6 +34,13 @@ export function ActivityBreadcrumb({
       signatureStatus === "writing" ? "active" : signatureStatus === "done" ? "done" : "pending";
     const metState: StepState =
       metricStatus === "writing" ? "active" : metricStatus === "done" ? "done" : "pending";
+    if (blackbox) {
+      return [
+        { label: msg("submit.blackbox.agent.step.reading"), state: readingState },
+        { label: msg("submit.blackbox.agent.tool.seed"), state: sigState },
+        { label: msg("submit.blackbox.agent.tool.scorer"), state: metState },
+      ];
+    }
     return [
       {
         label: formatMsg("auto.features.submit.components.steps.codeagentpanel.template.1", {
@@ -44,7 +54,7 @@ export function ActivityBreadcrumb({
       },
       { label: TERMS.metric, state: metState },
     ];
-  }, [signatureStatus, metricStatus]);
+  }, [signatureStatus, metricStatus, blackbox]);
 
   const lastReachedIdx = steps.reduce((acc, s, i) => (s.state === "pending" ? acc : i), -1);
   const fillPct = lastReachedIdx < 0 ? 0 : (lastReachedIdx / (steps.length - 1)) * 100;

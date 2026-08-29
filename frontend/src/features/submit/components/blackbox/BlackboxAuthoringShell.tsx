@@ -45,11 +45,7 @@ export function BlackboxAuthoringShell({
       description={description}
       sidePanel={
         interviewActive ? (
-          <CodeInterviewPanel
-            interview={interview}
-            subtitle={msg("submit.blackbox.interview.subtitle")}
-            className="absolute inset-0"
-          />
+          <CodeInterviewPanel interview={interview} blackbox className="absolute inset-0" />
         ) : (
           <CodeAgentPanel
             agent={agent}
