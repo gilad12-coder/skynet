@@ -117,6 +117,18 @@ class Settings(BaseSettings):
     smtp_password: SecretStr | None = Field(
         default=None, alias="SMTP_PASSWORD", description="SMTP auth password."
     )
+    blackbox_scorer_runtime: Literal["auto", "local", "vercel"] = Field(
+        default="auto",
+        alias="BLACKBOX_SCORER_RUNTIME",
+        description=(
+            "Where black-box python scorers run. 'vercel': one throwaway Vercel "
+            "sandbox per job (needs the VERCEL_* settings; the scorer's llm() calls "
+            "go to BLACKBOX_AGENT_GATEWAY_URL / LITELLM_PROXY_URL, which must be "
+            "reachable from Vercel's network). 'local': a subprocess on the worker "
+            "host with no isolation from it — development and tests only. 'auto' "
+            "(default): vercel when configured, else local."
+        ),
+    )
     smtp_from: str | None = Field(
         default=None,
         alias="SMTP_FROM",

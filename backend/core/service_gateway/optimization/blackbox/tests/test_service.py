@@ -24,14 +24,20 @@ from core.constants import (
 from core.exceptions import ServiceError
 from core.models.blackbox import BLACKBOX_ENGINE_BEST_OF_N, BlackboxRunRequest, BlackboxStrategy, ScorerDryRunRequest
 from core.models.results import ModelTokenUsage
-from core.service_gateway.safe_exec import ScorerProbeResult
 
+from .. import scorer as scorer_mod
 from .. import service as service_mod
 from ..harness import GatewayConfig
-from ..llm_helper import ScorerLLM
 from ..protocol import Result
+from ..sandbox_scorer import ScorerGateway, ScorerProbeResult
 from ..service import dry_run_scorer, run_blackbox_optimization, validate_blackbox_payload
-from .mocks import AGENT_OUTPUT_SCORER_CODE, VOWEL_SCORER_CODE, FakeReflectionLM, FakeSandboxRuntime
+from .mocks import (
+    AGENT_OUTPUT_SCORER_CODE,
+    VOWEL_SCORER_CODE,
+    FakeGateway,
+    FakeReflectionLM,
+    FakeSandboxRuntime,
+)
 
 _CASES = [{"target": "aeiou", "i": i} for i in range(10)]
 
@@ -421,33 +427,6 @@ def test_agent_target_runs_every_scorer_call_in_its_own_sandbox(
     assert target_meta["concurrency"] == 2
 
 
-class _JudgeLM:
-    """``dspy.LM`` double for the scorer's ``llm()``: records the messages and answers ``0.5``."""
-
-    def __init__(self) -> None:
-        """Create the double."""
-        self.model = "fake/judge"
-        self.history: list[dict[str, Any]] = []
-        self.messages: list[list[dict[str, str]]] = []
-
-    def __call__(
-        self, prompt: str | None = None, *, messages: list[dict[str, str]] | None = None, **_: Any
-    ) -> list[str]:
-        """Record the call and answer a constant score.
-
-        Args:
-            prompt: Unused; the helper always sends ``messages``.
-            messages: The chat the helper built.
-            **_: Ignored.
-
-        Returns:
-            A single-element completion list.
-        """
-        self.messages.append(messages or [])
-        self.history.append({"prompt": prompt, "usage": {"prompt_tokens": 3, "completion_tokens": 1}})
-        return ["0.5"]
-
-
 _JUDGE_SCORER_CODE = (
     "def score(candidate, case=None):\n    return float(llm(candidate, case['target'])), {'judge': 'fake'}\n"
 )
@@ -487,29 +466,35 @@ def test_strategy_patience_has_bounds() -> None:
 def test_scorer_llm_usage_is_billed_with_the_run(
     fake_lm: FakeReflectionLM, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A scorer that calls ``llm()`` gets the chosen model, and its tokens land in the run's usage."""
-    judge = _JudgeLM()
+    """A scorer's ``llm()`` reaches the chosen model through the gateway, and its tokens land in the run's usage."""
     chosen: list[str] = []
-    monkeypatch.setattr(service_mod, "build_scorer_llm", lambda config: chosen.append(config.name) or ScorerLLM(judge))
+    with FakeGateway(reply="0.5", usage=(3, 1)) as judge:
 
-    response = run_blackbox_optimization(
-        _payload(scorer={"kind": "python", "metric_code": _JUDGE_SCORER_CODE, "model": {"name": "fake/judge"}}),
-        artifact_id="job-judge",
-        gepa_log_dir_path=str(tmp_path),
-    )
+        def fake_gateway(config: Any, settings: Any) -> ScorerGateway:
+            """Point the scorer at the fake judge, remembering which model was asked for."""
+            chosen.append(config.name)
+            return ScorerGateway(url=judge.url, model="judge", api_key="k", billing_model=config.name)
+
+        monkeypatch.setattr(scorer_mod, "scorer_gateway", fake_gateway)
+        response = run_blackbox_optimization(
+            _payload(scorer={"kind": "python", "metric_code": _JUDGE_SCORER_CODE, "model": {"name": "fake/judge"}}),
+            artifact_id="job-judge",
+            gepa_log_dir_path=str(tmp_path),
+        )
 
     assert chosen == ["fake/judge"]
-    assert judge.messages
-    assert judge.messages[0] == [{"role": "system", "content": "hello world"}, {"role": "user", "content": "aeiou"}]
-    assert all(
-        chat[0]["role"] == "system" and chat[1] == {"role": "user", "content": "aeiou"} for chat in judge.messages
-    )
+    chats = [request["body"]["messages"] for request in judge.requests]
+    assert chats
+    assert chats[0] == [{"role": "system", "content": "hello world"}, {"role": "user", "content": "aeiou"}]
+    assert all(chat[0]["role"] == "system" and chat[1] == {"role": "user", "content": "aeiou"} for chat in chats)
+    assert all(r["authorization"] == "Bearer k" and r["body"]["model"] == "judge" for r in judge.requests)
     assert response.baseline_test_metric == 0.5
+    calls = len(judge.requests)
     usage = {u.model: (u.input_tokens, u.output_tokens) for u in response.usage_by_model}
-    assert usage["fake/judge"] == (3 * len(judge.history), len(judge.history))
+    assert usage["fake/judge"] == (3 * calls, calls)
     assert usage["fake/model"] == (10 * len(fake_lm.history), 5 * len(fake_lm.history))
-    assert response.num_lm_calls == len(fake_lm.history) + len(judge.history)
-    assert response.total_tokens == 15 * len(fake_lm.history) + 4 * len(judge.history)
+    assert response.num_lm_calls == len(fake_lm.history) + calls
+    assert response.total_tokens == 15 * len(fake_lm.history) + 4 * calls
 
 
 def test_dry_run_binds_the_scorer_model_and_returns_its_usage(monkeypatch: pytest.MonkeyPatch) -> None:

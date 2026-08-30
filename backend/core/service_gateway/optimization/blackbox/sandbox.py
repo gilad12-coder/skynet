@@ -5,17 +5,29 @@ fresh Vercel Sandbox, writes the harness under test and the case into it,
 runs the agent there, reads the result back and destroys the box — so
 versions cannot see each other or the worker's filesystem, and nothing
 survives a run. :class:`SandboxRuntime` / :class:`SandboxSession` are the
-seams the tests fake; :class:`VercelSandboxRuntime` is the real one.
+seams the tests fake; :class:`VercelSandboxRuntime` is the real one, and
+:class:`LocalSubprocessRuntime` is the development stand-in that runs the
+same commands in a temp directory on the worker host — with no isolation
+from it, which is why :func:`scorer_runtime_from_settings` only picks it
+when a deployment has no Vercel credentials or asks for it outright.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
+import os
 import posixpath
 import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 from ....config import Settings
@@ -41,6 +53,11 @@ _KILL_GRACE_SECONDS = 15.0
 SANDBOX_TAG = {"skynet": "blackbox"}
 _PACKAGE_MISSING = "The vercel-sandbox package is not installed."
 _CREDENTIALS_MISSING = "Agent sandboxes are not configured: set VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID."
+# The local runtime hands user code a bare environment: the interpreter that
+# runs the worker, a private HOME/TMPDIR, and the host's CA bundle overrides
+# so its HTTPS calls verify the same way — never the worker's secrets.
+_LOCAL_ENV_PASSTHROUGH = ("SSL_CERT_FILE", "SSL_CERT_DIR")
+_LOCAL_KILLED_EXIT_CODE = 137
 
 
 @dataclass(frozen=True)
@@ -269,6 +286,142 @@ class VercelSandboxRuntime:
         return VercelSandboxSession(box, api_session)
 
 
+class LocalSubprocessSession:
+    """Session over a temp directory on the worker host: a development stand-in, not a security boundary.
+
+    Commands run through ``bash -c`` as the worker's own user with a scrubbed
+    environment; the directory is removed on :meth:`close`.
+    """
+
+    def __init__(self, spec: SandboxSpec) -> None:
+        """Create the working directory and the environment commands inherit.
+
+        Args:
+            spec: Environment for the sandbox; lifetime and labels are ignored
+                because per-command timeouts already bound local work.
+        """
+        self._dir = Path(tempfile.mkdtemp(prefix="skynet-sandbox-")).resolve()
+        (self._dir / "tmp").mkdir()
+        interpreter_bin = str(Path(sys.executable).resolve().parent)
+        self._env: dict[str, str] = {
+            "PATH": os.pathsep.join([interpreter_bin, os.environ.get("PATH", "/usr/bin:/bin")]),
+            "HOME": str(self._dir),
+            "TMPDIR": str(self._dir / "tmp"),
+            "LANG": "C.UTF-8",
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            **{name: os.environ[name] for name in _LOCAL_ENV_PASSTHROUGH if name in os.environ},
+            **spec.env,
+        }
+
+    @property
+    def path(self) -> Path:
+        """Return the working directory."""
+        return self._dir
+
+    def _resolve(self, path: str) -> Path:
+        """Map a relative sandbox path onto the working directory.
+
+        Args:
+            path: Relative file path.
+
+        Returns:
+            The absolute path inside the working directory.
+
+        Raises:
+            ValueError: When ``path`` would escape the working directory.
+        """
+        target = (self._dir / path).resolve()
+        if not target.is_relative_to(self._dir):
+            raise ValueError(f"sandbox path escapes the working directory: {path!r}")
+        return target
+
+    def write_files(self, files: Mapping[str, str]) -> None:
+        """Write text files at paths relative to the working directory, creating parents.
+
+        Args:
+            files: Relative path → content.
+        """
+        for path, text in files.items():
+            target = self._resolve(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+
+    def run(
+        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+    ) -> CommandResult:
+        """Run ``command`` through ``bash -c`` in the working directory and wait for it.
+
+        Args:
+            command: Shell command line.
+            env: Extra environment for this command.
+            timeout_seconds: Kill the command (and everything it spawned) after this long.
+
+        Returns:
+            Exit code, captured output and whether the timeout fired.
+        """
+        process = subprocess.Popen(
+            ["bash", "-c", command],
+            cwd=self._dir,
+            env={**self._env, **(env or {})},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(process.pid)
+            stdout, stderr = process.communicate()
+            return CommandResult(exit_code=_LOCAL_KILLED_EXIT_CODE, stdout=stdout, stderr=stderr, timed_out=True)
+        return CommandResult(exit_code=process.returncode, stdout=stdout, stderr=stderr)
+
+    def read_file(self, path: str) -> str | None:
+        """Return the text of ``path`` (relative to the working directory), or ``None`` when absent.
+
+        Args:
+            path: Relative file path.
+
+        Returns:
+            The file's text, or ``None``.
+        """
+        target = self._resolve(path)
+        if not target.is_file():
+            return None
+        return target.read_text(encoding="utf-8")
+
+    def close(self) -> None:
+        """Remove the working directory. Never raises."""
+        shutil.rmtree(self._dir, ignore_errors=True)
+
+
+def _kill_process_group(pid: int) -> None:
+    """Kill the session ``pid`` leads, tolerating a group that already exited.
+
+    Args:
+        pid: The group leader started with ``start_new_session=True``.
+    """
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(pid, signal.SIGKILL)
+
+
+class LocalSubprocessRuntime:
+    """Sandbox runtime whose boxes are temp directories on the worker host."""
+
+    def open(self, spec: SandboxSpec) -> SandboxSession:
+        """Create a working directory per ``spec``.
+
+        Args:
+            spec: Environment for the sandbox; lifetime and labels are ignored.
+
+        Returns:
+            The session over the new directory.
+        """
+        return LocalSubprocessSession(spec)
+
+
 def sandbox_unavailable_reason(settings: Settings) -> str | None:
     """Explain why this deployment cannot create agent sandboxes, or return ``None``.
 
@@ -303,3 +456,29 @@ def sandbox_runtime_from_settings(settings: Settings) -> VercelSandboxRuntime | 
             project_id=str(settings.vercel_project_id),
         )
     )
+
+
+def scorer_runtime_from_settings(settings: Settings) -> SandboxRuntime:
+    """Pick where python scorers run, per ``BLACKBOX_SCORER_RUNTIME``.
+
+    ``vercel`` insists on Vercel sandboxes, ``local`` on the worker host, and
+    ``auto`` takes Vercel when it is configured and the host otherwise.
+
+    Args:
+        settings: The backend settings.
+
+    Returns:
+        The runtime scorers open their sandboxes with.
+
+    Raises:
+        ServiceError: When ``vercel`` is required but not configured.
+    """
+    mode = settings.blackbox_scorer_runtime
+    if mode == "local":
+        return LocalSubprocessRuntime()
+    runtime = sandbox_runtime_from_settings(settings)
+    if runtime is not None:
+        return runtime
+    if mode == "vercel":
+        raise ServiceError(sandbox_unavailable_reason(settings) or _CREDENTIALS_MISSING)
+    return LocalSubprocessRuntime()

@@ -59,16 +59,17 @@ from ...language_models import (
     total_tokens_from_history,
     usage_by_model_from_history,
 )
-from ...safe_exec import probe_scorer, validate_scorer_code
+from ...safe_exec import validate_scorer_code
 from ..cost_ceiling import CostCeilingCallback
 from ..data import split_examples
 from .agent_eval import SandboxAgentScorer, agent_target_unavailable_reason, gateway_from_settings
 from .auto import run_strategy
-from .llm_helper import ScorerLLM, build_scorer_llm
 from .protocol import Candidate, EngineContext, EvalServer, ScorerFn, Task
 from .registry import ENGINES, EngineCapabilities, get_engine
+from .runner import side_info_json_default
 from .sandbox import sandbox_runtime_from_settings
-from .scorer import RemoteScorer, build_scorer, side_info_json_default
+from .sandbox_scorer import probe_scorer
+from .scorer import JobScorer, RemoteScorer, build_scorer
 
 logger = logging.getLogger(__name__)
 
@@ -200,8 +201,8 @@ def _score_holdout(
             with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="holdout") as pool:
                 scores = [score for score, _ in pool.map(lambda case: scorer(candidate, case), holdout)]
         return sum(scores) / len(scores)
-    except ServiceError:
-        raise
+    except ServiceError as exc:
+        raise ServiceError(f"scorer failed on the {label}: {exc}") from exc
     except Exception as exc:
         raise ServiceError(f"scorer failed on the {label}: {type(exc).__name__}: {exc}") from exc
 
@@ -363,8 +364,43 @@ def run_blackbox_optimization(
             starting point, or no engine produced a version for a seedless job.
     """
     started = time.perf_counter()
-    scorer_llm: ScorerLLM | None = build_scorer_llm(payload.scorer.model) if payload.scorer.model else None
-    scorer = build_scorer(payload.scorer, llm=scorer_llm)
+    base_scorer = build_scorer(payload.scorer, job_id=artifact_id)
+    try:
+        return _run_job(
+            payload,
+            base_scorer,
+            artifact_id=artifact_id,
+            started=started,
+            progress_callback=progress_callback,
+            gepa_log_dir_path=gepa_log_dir_path,
+        )
+    finally:
+        base_scorer.close()
+
+
+def _run_job(
+    payload: BlackboxRunRequest,
+    base_scorer: JobScorer,
+    *,
+    artifact_id: str,
+    started: float,
+    progress_callback: ProgressCallback | None,
+    gepa_log_dir_path: str | None,
+) -> BlackboxRunResponse:
+    """Run the job over an already-built scorer; see :func:`run_blackbox_optimization`.
+
+    Args:
+        payload: The submitted job.
+        base_scorer: The job's scorer, closed by the caller.
+        artifact_id: Job id, used to name the workspace.
+        started: When the run began, for the elapsed time.
+        progress_callback: The job's progress sink, if any.
+        gepa_log_dir_path: Workspace for engine state; a temp dir when unset.
+
+    Returns:
+        The best version with baseline vs optimized held-out scores.
+    """
+    scorer: ScorerFn = base_scorer
     target = payload.target
     caps = engine_capabilities(target)
     if caps.agent_target:
@@ -411,7 +447,7 @@ def run_blackbox_optimization(
     )
     # The scorer's own model calls are part of the run: they count toward
     # the credit ceiling and the usage the worker bills.
-    lms = [lm] if scorer_llm is None else [lm, scorer_llm.lm]
+    lms = [lm] if base_scorer.usage is None else [lm, base_scorer.usage]
     callbacks = [CostCeilingCallback(payload.max_cost_credits, *lms)] if payload.max_cost_credits is not None else []
     with dspy.context(callbacks=callbacks):
         result, lanes = run_strategy(payload.strategy, task, server, ctx, progress_callback, caps=caps)

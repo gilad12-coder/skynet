@@ -1,0 +1,559 @@
+"""In-sandbox runner for python scorers: ``input.json`` → user code → ``output.json``.
+
+This file is shipped verbatim into every scorer sandbox as ``skynet_runner.py``
+and executed there by the box's own interpreter, so it depends on the standard
+library alone and stays valid Python 3.9 (the default sandbox image's
+version). The backend imports the same module for the pieces it shares with
+the box — score normalization, entry-point discovery, the image wrapper — so
+the two sides cannot drift apart.
+
+Contract: ``python3 skynet_runner.py <call_dir>`` reads ``<call_dir>/input.json``::
+
+    {"code": "...", "candidate": ..., "case": ..., "gateway": {...} | null}
+
+and writes ``<call_dir>/output.json``::
+
+    {"score": float | null, "side_info": {...}, "error": str | null, "usage": [...]}
+
+A scorer that raised, returned an unusable value or failed to load is
+reported through ``error``; the runner exits non-zero only when it is
+itself broken (unreadable input, unwritable output). ``gateway`` names the
+OpenAI-compatible endpoint the scorer's ``llm()`` helper talks to; its
+``api_key`` may be absent when the sandbox injects the credential at the
+network edge instead.
+"""
+
+from __future__ import annotations
+
+import base64
+import inspect
+import io
+import json
+import os
+import ssl
+import sys
+import time
+import urllib.error
+import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+INPUT_FILE = "input.json"
+OUTPUT_FILE = "output.json"
+SCORER_FILENAME = "<scorer_code>"
+# Names the scorer namespace binds the model helper and the image wrapper to.
+LLM_HELPER_NAME = "llm"
+# The gateway key rides in the environment so it never touches the box filesystem.
+ENV_API_KEY = "SKYNET_API_KEY"
+IMAGE_HELPER_NAME = "Image"
+# Where Vercel's egress proxy leaves its CA when a network policy rewrites headers.
+PROXY_CA_PATH = "/usr/local/share/ca-certificates/vercel-proxy-ca.crt"
+_ENTRYPOINT_NAMES = ("score", "metric")
+_NUMBER_TYPES = (bool, int, float)
+_RETRY_STATUSES = frozenset({408, 409, 429, 500, 502, 503, 504})
+_ATTEMPTS = 3
+_BACKOFF_SECONDS = 1.0
+_ERROR_BODY_CHARS = 500
+_MEDIA_TYPE_BY_EXTENSION = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+}
+_MEDIA_TYPE_BY_MAGIC = (
+    (b"\x89PNG", "image/png"),
+    (b"\xff\xd8", "image/jpeg"),
+    (b"GIF8", "image/gif"),
+    (b"RIFF", "image/webp"),
+    (b"BM", "image/bmp"),
+)
+_IMAGES_HELP = (
+    "llm(images=...) takes PNG/JPEG bytes, file paths, http(s) or data: URLs, "
+    "base64 strings, PIL images or Image objects."
+)
+
+SideInfo = dict[str, Any]
+
+
+class ScorerError(Exception):
+    """A mistake in the scorer or its use of the helpers, reported to the user verbatim."""
+
+
+@dataclass
+class Image:
+    """An image a scorer hands to ``llm()`` or puts in side info for the optimizer to look at.
+
+    Mirrors ``gepa.image.Image`` so a scorer written against the optimizer's
+    wrapper works unchanged inside the box.
+    """
+
+    url: str | None = None
+    path: str | None = None
+    base64_data: str | None = None
+    media_type: str = "image/png"
+
+    def to_openai_content_part(self) -> dict[str, Any]:
+        """Render the image as an OpenAI ``image_url`` content part.
+
+        Returns:
+            The content part, with file and base64 images inlined as data URLs.
+
+        Raises:
+            ScorerError: When the image has no source.
+        """
+        if self.base64_data:
+            url = _data_url_from_base64(self.base64_data, self.media_type)
+        elif self.path:
+            data = Path(self.path).read_bytes()
+            media_type = _MEDIA_TYPE_BY_EXTENSION.get(Path(self.path).suffix.lower()) or self.media_type
+            url = _data_url(data, media_type)
+        elif self.url:
+            url = self.url
+        else:
+            raise ScorerError("Image needs a url, a path or base64_data.")
+        return {"type": "image_url", "image_url": {"url": url}}
+
+
+def _data_url(data: bytes, media_type: str) -> str:
+    """Inline ``data`` as a base64 data URL.
+
+    Args:
+        data: Raw image bytes.
+        media_type: Their MIME type.
+
+    Returns:
+        The ``data:`` URL.
+    """
+    return _data_url_from_base64(base64.b64encode(data).decode("ascii"), media_type)
+
+
+def _data_url_from_base64(encoded: str, media_type: str) -> str:
+    """Wrap already-encoded image data as a data URL.
+
+    Args:
+        encoded: Base64 text.
+        media_type: The image's MIME type.
+
+    Returns:
+        The ``data:`` URL.
+    """
+    return f"data:{media_type};base64,{encoded}"
+
+
+def _sniff_media_type(data: bytes) -> str:
+    """Guess an image MIME type from its leading bytes, defaulting to PNG.
+
+    Args:
+        data: Raw image bytes.
+
+    Returns:
+        The MIME type.
+    """
+    for magic, media_type in _MEDIA_TYPE_BY_MAGIC:
+        if data.startswith(magic):
+            return media_type
+    return "image/png"
+
+
+def image_content_part(image: Any) -> dict[str, Any]:
+    """Turn one scorer-supplied image into an OpenAI ``image_url`` content part.
+
+    Args:
+        image: PNG/JPEG bytes, a file path, an http(s) or ``data:`` URL, a
+            base64 string, a PIL image, an ``Image`` (anything with
+            ``to_openai_content_part``) or an already-built content part.
+
+    Returns:
+        The content part to place in a chat message.
+
+    Raises:
+        ScorerError: When ``image`` is none of the accepted shapes.
+    """
+    if isinstance(image, dict) and image.get("type"):
+        return image
+    to_part = getattr(image, "to_openai_content_part", None)
+    if callable(to_part):
+        return dict(to_part())
+    if isinstance(image, (bytes, bytearray)):
+        data = bytes(image)
+        return {"type": "image_url", "image_url": {"url": _data_url(data, _sniff_media_type(data))}}
+    # PIL images are duck-typed so Pillow stays optional inside the box.
+    if hasattr(image, "save") and hasattr(image, "mode"):
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return {"type": "image_url", "image_url": {"url": _data_url(buffer.getvalue(), "image/png")}}
+    if isinstance(image, str):
+        if image.startswith(("data:", "http://", "https://")):
+            return {"type": "image_url", "image_url": {"url": image}}
+        path = Path(image)
+        if path.is_file():
+            data = path.read_bytes()
+            media_type = _MEDIA_TYPE_BY_EXTENSION.get(path.suffix.lower()) or _sniff_media_type(data)
+            return {"type": "image_url", "image_url": {"url": _data_url(data, media_type)}}
+        try:
+            data = base64.b64decode(image, validate=True)
+        except ValueError as exc:
+            raise ScorerError(_IMAGES_HELP) from exc
+        return {"type": "image_url", "image_url": {"url": _data_url(data, _sniff_media_type(data))}}
+    raise ScorerError(_IMAGES_HELP)
+
+
+def scorer_messages(prompt: Any, input: Any = None, images: Any = None) -> list[dict[str, Any]]:
+    """Build the chat messages one ``llm()`` call sends.
+
+    Args:
+        prompt: The text to run; with ``input`` it is the system message
+            (the prompt under optimization), alone it is the user message.
+        input: The case's input, sent as the user message when given.
+        images: Images attached to the user message, if any; a single image
+            or a list of them.
+
+    Returns:
+        OpenAI-style chat messages.
+    """
+    if images is not None and not isinstance(images, (list, tuple)):
+        images = [images]
+    user_text = str(prompt) if input is None else str(input)
+    content: Any = user_text
+    if images:
+        content = [{"type": "text", "text": user_text}] + [image_content_part(image) for image in images]
+    messages: list[dict[str, Any]] = [{"role": "user", "content": content}]
+    if input is not None:
+        messages.insert(0, {"role": "system", "content": str(prompt)})
+    return messages
+
+
+def missing_llm(prompt: Any = None, input: Any = None, **kwargs: Any) -> str:
+    """Stand in for ``llm`` when the scorer was given no model.
+
+    Args:
+        prompt: Ignored.
+        input: Ignored.
+        **kwargs: Ignored.
+
+    Raises:
+        ScorerError: Always, naming the step that fixes it.
+    """
+    raise ScorerError("This scorer calls llm() but no model was chosen in the Scorer step.")
+
+
+def side_info_json_default(value: Any) -> str:
+    """JSON fallback for side info: images become data URLs, anything else ``str()``.
+
+    Args:
+        value: A side-info value ``json.dumps`` cannot encode.
+
+    Returns:
+        Its string form.
+    """
+    to_part = getattr(value, "to_openai_content_part", None)
+    if callable(to_part):
+        return str(to_part()["image_url"]["url"])
+    return str(value)
+
+
+def normalize_score(raw: Any) -> tuple[float, SideInfo]:
+    """Coerce a scorer's return value into ``(score, side_info)``.
+
+    Accepted shapes: a number; ``(number, side_info)``; a mapping with a
+    ``score`` key (remaining keys become side info); an object with a
+    numeric ``score`` attribute.
+
+    Args:
+        raw: Whatever the scorer returned.
+
+    Returns:
+        The float score and a side-info mapping (empty when none was given).
+
+    Raises:
+        ScorerError: When the value has none of the accepted shapes.
+    """
+    if isinstance(raw, _NUMBER_TYPES):
+        return float(raw), {}
+    if isinstance(raw, (tuple, list)) and len(raw) == 2 and isinstance(raw[0], _NUMBER_TYPES):
+        side = raw[1]
+        return float(raw[0]), dict(side) if isinstance(side, dict) else {"feedback": side}
+    if isinstance(raw, dict) and isinstance(raw.get("score"), _NUMBER_TYPES):
+        return float(raw["score"]), {key: value for key, value in raw.items() if key != "score"}
+    score_attr = getattr(raw, "score", None)
+    if isinstance(score_attr, _NUMBER_TYPES):
+        return float(score_attr), {}
+    raise ScorerError(
+        "scorer must return a number, a (number, side_info) pair, or a mapping with a 'score' key; "
+        f"got {type(raw).__name__}."
+    )
+
+
+def load_scorer_from_code(code: str, *, helpers: dict[str, Any] | None = None) -> Callable[..., Any]:
+    """Execute scorer source and return the callable it defines.
+
+    Looks for ``score`` then ``metric``, then falls back to the single
+    function the code defines.
+
+    Args:
+        code: User-authored python source.
+        helpers: Names bound in the scorer's namespace before it runs.
+
+    Returns:
+        The scorer callable.
+
+    Raises:
+        ScorerError: When the code fails to compile or load, or defines no
+            unambiguous scorer function.
+    """
+    namespace: dict[str, Any] = dict(helpers or {})
+    try:
+        # exec: user-supplied scorer code. Inside the sandbox this is the
+        # whole point; on the backend only ``validate_scorer_code`` reaches
+        # here, from its spawn child.
+        exec(compile(code, SCORER_FILENAME, "exec", dont_inherit=True), namespace)
+    except SyntaxError as exc:
+        raise ScorerError(f"scorer code has a syntax error: {exc}") from exc
+    except Exception as exc:
+        raise ScorerError(f"scorer code failed to load: {type(exc).__name__}: {exc}") from exc
+    for name in _ENTRYPOINT_NAMES:
+        candidate = namespace.get(name)
+        if callable(candidate):
+            return candidate
+    defined = [
+        obj for obj in namespace.values() if inspect.isfunction(obj) and obj.__code__.co_filename == SCORER_FILENAME
+    ]
+    if len(defined) == 1:
+        return defined[0]
+    raise ScorerError("scorer code must define a function named 'score(candidate, case=None)'.")
+
+
+def accepts_case(fn: Callable[..., Any]) -> bool:
+    """Return True when ``fn`` takes a second positional argument for the case.
+
+    Args:
+        fn: The scorer callable.
+
+    Returns:
+        True for ``fn(candidate, case)`` shapes, False for ``fn(candidate)``.
+    """
+    try:
+        params = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return True
+    positional = [p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL)]
+    return len(positional) >= 2 or any(p.kind == p.VAR_POSITIONAL for p in positional)
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """Build the TLS context for gateway calls, trusting the sandbox's egress proxy when present.
+
+    Returns:
+        The context.
+    """
+    context = ssl.create_default_context()
+    if Path(PROXY_CA_PATH).is_file():
+        context.load_verify_locations(PROXY_CA_PATH)
+    return context
+
+
+def _completion_text(payload: Any) -> str:
+    """Pull the first completion's text out of a chat-completions response.
+
+    Args:
+        payload: The decoded response body.
+
+    Returns:
+        The text; empty when the response carried none.
+    """
+    choices = payload.get("choices") if isinstance(payload, dict) else None
+    if not choices:
+        return ""
+    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, list):
+        return "".join(str(part.get("text", "")) for part in content if isinstance(part, dict))
+    return "" if content is None else str(content)
+
+
+class GatewayClient:
+    """What the scorer sees as ``llm``: one chat completion per call, straight to the gateway."""
+
+    def __init__(
+        self,
+        url: str,
+        model: str,
+        *,
+        api_key: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: float = 120.0,
+    ) -> None:
+        """Bind the helper to one endpoint and model.
+
+        Args:
+            url: OpenAI-compatible base URL (``/chat/completions`` is appended).
+            model: Model id as the gateway knows it.
+            api_key: Bearer token, or ``None`` when the sandbox injects it.
+            temperature: Sampling temperature, when the Scorer step set one.
+            max_tokens: Completion cap, when the Scorer step set one.
+            timeout_seconds: Per-request timeout.
+        """
+        self._url = url.rstrip("/") + "/chat/completions"
+        self._model = model
+        self._api_key = api_key
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+        self._timeout_seconds = timeout_seconds
+        self._ssl = _ssl_context()
+        self.usage: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        prompt: Any = None,
+        input: Any = None,
+        *,
+        images: Any = None,
+        messages: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Complete ``prompt``, optionally over ``input`` and ``images``.
+
+        Args:
+            prompt: The text to run; with ``input`` it is the system message
+                (the prompt under optimization), alone it is the user message.
+            input: The case's input, sent as the user message when given.
+            images: Images for a vision model to look at — rendered output,
+                screenshots, plots — attached to the user message.
+            messages: Ready-made chat messages (OpenAI format, image parts
+                included); replaces ``prompt``/``input``/``images``.
+
+        Returns:
+            The model's first completion, as text.
+
+        Raises:
+            ScorerError: Without a prompt or messages, with an image the
+                helper cannot read, or when the gateway refuses the call.
+        """
+        if messages is None:
+            if prompt is None:
+                raise ScorerError("llm() needs a prompt, or messages=[...].")
+            messages = scorer_messages(prompt, input, images)
+        elif not isinstance(messages, list):
+            raise ScorerError("llm(messages=...) takes a list of chat messages.")
+        body: dict[str, Any] = {"model": self._model, "messages": messages}
+        if self._temperature is not None:
+            body["temperature"] = self._temperature
+        if self._max_tokens is not None:
+            body["max_tokens"] = self._max_tokens
+        payload = self._post(json.dumps(body).encode("utf-8"))
+        usage = payload.get("usage") if isinstance(payload, dict) else None
+        if isinstance(usage, dict):
+            self.usage.append(
+                {
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
+                }
+            )
+        return _completion_text(payload)
+
+    def _post(self, data: bytes) -> Any:
+        """Send one request, retrying transient failures a few times.
+
+        Args:
+            data: The JSON request body.
+
+        Returns:
+            The decoded response body.
+
+        Raises:
+            ScorerError: When the gateway keeps failing or answers with an error.
+        """
+        last_error = "llm() request failed."
+        for attempt in range(_ATTEMPTS):
+            request = urllib.request.Request(
+                self._url,
+                data=data,
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                method="POST",
+            )
+            if self._api_key:
+                request.add_header("Authorization", f"Bearer {self._api_key}")
+            try:
+                with urllib.request.urlopen(request, timeout=self._timeout_seconds, context=self._ssl) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")[:_ERROR_BODY_CHARS].strip()
+                last_error = "llm() request failed: HTTP {}{}".format(exc.code, ": " + detail if detail else "")
+                if exc.code not in _RETRY_STATUSES:
+                    raise ScorerError(last_error) from exc
+            except (urllib.error.URLError, OSError, ValueError) as exc:
+                last_error = f"llm() request failed: {exc}"
+            if attempt + 1 < _ATTEMPTS:
+                time.sleep(_BACKOFF_SECONDS * (2**attempt))
+        raise ScorerError(last_error)
+
+
+def run_call(payload: dict[str, Any]) -> dict[str, Any]:
+    """Load the scorer from ``payload`` and score its candidate once.
+
+    Args:
+        payload: The decoded ``input.json``.
+
+    Returns:
+        The ``output.json`` contents: score, side info, error and ``llm()`` usage.
+    """
+    gateway = payload.get("gateway")
+    llm: GatewayClient | None = None
+    if isinstance(gateway, dict):
+        llm = GatewayClient(
+            str(gateway["url"]),
+            str(gateway["model"]),
+            api_key=gateway.get("api_key") or os.environ.get(ENV_API_KEY),
+            temperature=gateway.get("temperature"),
+            max_tokens=gateway.get("max_tokens"),
+            timeout_seconds=float(gateway.get("timeout_seconds") or 120.0),
+        )
+    helpers = {LLM_HELPER_NAME: llm if llm is not None else missing_llm, IMAGE_HELPER_NAME: Image}
+    result: dict[str, Any] = {"score": None, "side_info": {}, "error": None, "usage": []}
+    try:
+        fn = load_scorer_from_code(str(payload.get("code") or ""), helpers=helpers)
+        candidate, case = payload.get("candidate"), payload.get("case")
+        raw = fn(candidate, case) if accepts_case(fn) else fn(candidate)
+        score, side_info = normalize_score(raw)
+    except ScorerError as exc:
+        result["error"] = str(exc)
+    except BaseException as exc:  # user code is arbitrary — any failure is reported, not raised
+        result["error"] = f"{type(exc).__name__}: {exc}"
+    else:
+        result["score"] = score
+        result["side_info"] = json.loads(json.dumps(side_info, default=side_info_json_default))
+    if llm is not None:
+        result["usage"] = llm.usage
+    return result
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run one scorer call from ``<call_dir>/input.json`` into ``<call_dir>/output.json``.
+
+    Args:
+        argv: Command-line arguments; ``sys.argv`` when unset.
+
+    Returns:
+        The process exit code: 0 whenever the output was written.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) != 1:
+        sys.stderr.write("usage: skynet_runner.py <call_dir>\n")
+        return 2
+    call_dir = Path(args[0])
+    payload = json.loads((call_dir / INPUT_FILE).read_text(encoding="utf-8"))
+    result = run_call(payload)
+    partial = call_dir / (OUTPUT_FILE + ".part")
+    partial.write_text(json.dumps(result), encoding="utf-8")
+    partial.replace(call_dir / OUTPUT_FILE)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
