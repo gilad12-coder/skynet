@@ -45,6 +45,9 @@ _VERCEL_ENV = (
 def _settings(monkeypatch: pytest.MonkeyPatch, **values: Any) -> Settings:
     """Build a Settings with the sandbox env cleared, then the given overrides.
 
+    Ignores the developer's ``.env`` file too, so a locally configured
+    Vercel token cannot leak into the assertions.
+
     Args:
         monkeypatch: Pytest fixture.
         **values: Field overrides.
@@ -54,7 +57,7 @@ def _settings(monkeypatch: pytest.MonkeyPatch, **values: Any) -> Settings:
     """
     for name in _VERCEL_ENV:
         monkeypatch.delenv(name, raising=False)
-    return Settings(**values)
+    return Settings(_env_file=None, **values)
 
 
 class _FakeCompleted:

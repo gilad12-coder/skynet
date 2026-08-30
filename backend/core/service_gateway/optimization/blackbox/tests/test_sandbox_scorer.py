@@ -107,8 +107,12 @@ def _usage(*pairs: tuple[int, int]) -> list[dict[str, int]]:
     return [{"prompt_tokens": p, "completion_tokens": c, "total_tokens": p + c} for p, c in pairs]
 
 
-def test_sandbox_scorer_installs_the_runner_once_and_runs_one_call_per_directory() -> None:
+def test_sandbox_scorer_installs_the_runner_once_and_runs_one_call_per_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The runner ships on first use, every call gets its own directory, and the gateway key travels only via env."""
+    # Pin the ceiling: a developer's .env may raise it above the 2700 default.
+    monkeypatch.setattr(sandbox_scorer_mod.settings, "vercel_sandbox_max_lifetime_seconds", 2_700)
     runtime = _runtime(lambda payload: {**_OK, "score": len(payload["candidate"]), "usage": _usage((3, 1))})
     scorer = SandboxPythonScorer(
         "def score(c): return 1", runtime=runtime, gateway=_GATEWAY, timeout_seconds=7.5, job_id="job-1"

@@ -37,6 +37,9 @@ _needs_sdk = pytest.mark.skipif(not _SDK_PRESENT, reason="vercel-sandbox SDK not
 def _settings(monkeypatch: pytest.MonkeyPatch, **values: Any) -> Settings:
     """Build settings with every Vercel variable cleared from the environment first.
 
+    Ignores the developer's ``.env`` file too, so a locally configured
+    Vercel token cannot leak into the assertions.
+
     Args:
         monkeypatch: Pytest fixture.
         **values: Settings fields to set.
@@ -46,7 +49,7 @@ def _settings(monkeypatch: pytest.MonkeyPatch, **values: Any) -> Settings:
     """
     for name in _VERCEL_ENV:
         monkeypatch.delenv(name, raising=False)
-    return Settings(**values)
+    return Settings(_env_file=None, **values)
 
 
 @pytest.fixture
