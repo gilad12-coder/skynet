@@ -26,8 +26,7 @@ import { PipelineStages, computeStageTimestamps } from "./PipelineStages";
 import { TrajectoryPanel } from "@/features/trajectory";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import { LaneBand } from "./LaneBand";
-import { deriveLanes, formatBlackboxDelta, formatBlackboxScore } from "../lib/blackbox";
+import { formatBlackboxDelta, formatBlackboxScore } from "../lib/blackbox";
 
 const ScoreChart = dynamic(() => import("@/shared/ui/score-chart").then((m) => m.ScoreChart), {
   ssr: false,
@@ -160,13 +159,6 @@ function OverviewTabImpl({
   // values, not percentages) — `job.result` stays null for them.
   const bbResult = isBlackbox ? job.blackbox_result : null;
   const numberFormat = new Intl.NumberFormat(getActiveIntlLocale());
-  const modelUsage = (bbResult?.usage_by_model ?? []).flatMap((u) =>
-    typeof u.model === "string" &&
-    typeof u.input_tokens === "number" &&
-    typeof u.output_tokens === "number"
-      ? [{ model: u.model, input_tokens: u.input_tokens, output_tokens: u.output_tokens }]
-      : [],
-  );
   const baseline =
     runResult?.baseline_test_metric ?? bbResult?.baseline_test_metric ?? baselineFromEvents;
   const optimized =
@@ -336,56 +328,48 @@ function OverviewTabImpl({
         </FadeIn>
       )}
 
-      {isBlackbox && (
-        <LaneBand
-          lanes={deriveLanes(job.progress_events ?? [], bbResult?.lanes)}
-          engineUsed={bbResult?.engine_used}
-        />
-      )}
-
       {bbResult && (
         <FadeIn delay={0.1}>
           <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
             <InfoCard
-              label={msg("optimization.blackbox.stats.scorer_runs")}
+              label={
+                <HelpTip text={tip("blackbox.stats.scorer_runs")}>
+                  {msg("optimization.blackbox.stats.scorer_runs")}
+                </HelpTip>
+              }
               value={String(bbResult.total_scorer_runs)}
               icon={<Gauge className="size-3.5" />}
             />
             <InfoCard
-              label={msg("optimization.blackbox.stats.runtime")}
+              label={
+                <HelpTip text={tip("blackbox.stats.runtime")}>
+                  {msg("optimization.blackbox.stats.runtime")}
+                </HelpTip>
+              }
               value={formatDuration(bbResult.runtime_seconds)}
               icon={<Timer className="size-3.5" />}
             />
             <InfoCard
-              label={msg("optimization.blackbox.stats.lm_calls")}
+              label={
+                <HelpTip text={tip("blackbox.stats.lm_calls")}>
+                  {msg("optimization.blackbox.stats.lm_calls")}
+                </HelpTip>
+              }
               value={String(bbResult.num_lm_calls)}
               icon={<ChatText className="size-3.5" />}
             />
             {bbResult.total_tokens != null && (
               <InfoCard
-                label={msg("optimization.blackbox.stats.tokens")}
+                label={
+                  <HelpTip text={tip("blackbox.stats.tokens")}>
+                    {msg("optimization.blackbox.stats.tokens")}
+                  </HelpTip>
+                }
                 value={numberFormat.format(bbResult.total_tokens)}
                 icon={<Coins className="size-3.5" />}
               />
             )}
           </div>
-          {modelUsage.length > 0 && (
-            <ul
-              className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[0.6875rem] text-muted-foreground"
-              dir="ltr"
-            >
-              {modelUsage.map((u) => (
-                <li key={u.model} className="tabular-nums">
-                  <span className="font-medium text-foreground/80">{u.model}</span>
-                  {" · "}
-                  {formatMsg("usage.tokens.split", {
-                    input: numberFormat.format(u.input_tokens),
-                    output: numberFormat.format(u.output_tokens),
-                  })}
-                </li>
-              ))}
-            </ul>
-          )}
         </FadeIn>
       )}
 
@@ -433,7 +417,9 @@ function OverviewTabImpl({
             <StaggerItem>
               <TiltCard className=" rounded-xl border border-border/50 bg-card p-6 text-center">
                 <p className="text-[0.6875rem] text-muted-foreground mb-2 font-medium tracking-wide">
-                  <HelpTip text={tip("score.baseline")}>{TERMS.baselineScore}</HelpTip>
+                  <HelpTip text={tip(isBlackbox ? "blackbox.score.baseline" : "score.baseline")}>
+                    {TERMS.baselineScore}
+                  </HelpTip>
                 </p>
                 <p className="text-3xl font-mono font-bold tabular-nums">{fmtScore(baseline)}</p>
               </TiltCard>
@@ -441,7 +427,9 @@ function OverviewTabImpl({
             <StaggerItem>
               <TiltCard className="rounded-xl border border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10 p-6 text-center shadow-[0_0_20px_rgba(var(--primary),0.08)]">
                 <p className="text-[0.6875rem] text-muted-foreground mb-2 font-medium tracking-wide">
-                  <HelpTip text={tip("score.optimized")}>{TERMS.optimizedScore}</HelpTip>
+                  <HelpTip text={tip(isBlackbox ? "blackbox.score.optimized" : "score.optimized")}>
+                    {TERMS.optimizedScore}
+                  </HelpTip>
                 </p>
                 <p className="text-3xl font-mono font-bold text-primary tabular-nums">
                   {fmtScore(optimized)}
@@ -453,7 +441,9 @@ function OverviewTabImpl({
                 className={`rounded-xl border p-6 text-center ${(displayImprovement ?? 0) >= 0 ? "border-stone-400/50 bg-gradient-to-br from-stone-100/50 to-stone-200/30" : "border-red-300/50 bg-gradient-to-br from-red-50/50 to-red-100/30"}`}
               >
                 <p className="text-[0.6875rem] text-muted-foreground mb-2 font-medium tracking-wide">
-                  <HelpTip text={tip("score.improvement")}>
+                  <HelpTip
+                    text={tip(isBlackbox ? "blackbox.score.improvement" : "score.improvement")}
+                  >
                     {msg("auto.features.optimizations.components.overviewtab.3")}
                   </HelpTip>
                 </p>
@@ -581,7 +571,9 @@ function OverviewTabImpl({
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <TrendUp className="size-4 text-[#7C6350]" aria-hidden="true" />
-                <HelpTip text={tip("score.progression")}>
+                <HelpTip
+                  text={tip(isBlackbox ? "blackbox.score.progression" : "score.progression")}
+                >
                   <span className="font-bold tracking-tight">
                     {msg("auto.features.optimizations.components.overviewtab.4")}
                   </span>

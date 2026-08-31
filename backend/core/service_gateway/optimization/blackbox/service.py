@@ -52,7 +52,7 @@ from ....models.blackbox import (
     ScorerDryRunResponse,
 )
 from ....models.common import SplitCounts
-from ....models.results import ModelTokenUsage
+from ....models.results import LMActivity, LMStageStats, ModelTokenUsage
 from ...language_models import (
     build_language_model,
     lm_call_count,
@@ -62,6 +62,7 @@ from ...language_models import (
 from ...safe_exec import validate_scorer_code
 from ..cost_ceiling import CostCeilingCallback
 from ..data import split_examples
+from ..timing import STAGE_TRAINING
 from .agent_eval import SandboxAgentScorer, agent_target_unavailable_reason, gateway_from_settings
 from .auto import run_strategy
 from .protocol import Candidate, EngineContext, EvalServer, ScorerFn, Task
@@ -310,19 +311,24 @@ def _progress_listener(progress_callback: ProgressCallback | None) -> Callable[[
     return on_eval
 
 
-def _reflection_caller(lm: dspy.LM) -> Callable[[str | list[dict[str, Any]]], str]:
+def _reflection_caller(lm: dspy.LM) -> tuple[Callable[[str | list[dict[str, Any]]], str], list[float]]:
     """Wrap the reflection model in the callable the engines drive.
 
     GEPA hands over chat messages instead of text when the scorer's side
     information carries rendered images (``Image``), so a vision-capable
-    reflection model sees what it is improving.
+    reflection model sees what it is improving. Every call is timed here —
+    the one choke point all engines go through — rather than via DSPy
+    callbacks, which would not fire for non-``dspy.LM`` doubles and depend
+    on context propagation into lane workers.
 
     Args:
         lm: The reflection model.
 
     Returns:
-        A callable returning the model's first completion as text.
+        A callable returning the model's first completion as text, and the
+        list its per-call wall-clock durations (ms) accumulate into.
     """
+    durations_ms: list[float] = []
 
     def reflection_lm(prompt: str | list[dict[str, Any]]) -> str:
         """Call the reflection model on ``prompt`` and return its first completion.
@@ -334,10 +340,37 @@ def _reflection_caller(lm: dspy.LM) -> Callable[[str | list[dict[str, Any]]], st
         Returns:
             The completion text.
         """
-        completions = lm(messages=prompt) if isinstance(prompt, list) else lm(prompt)
+        started = time.monotonic()
+        try:
+            completions = lm(messages=prompt) if isinstance(prompt, list) else lm(prompt)
+        finally:
+            durations_ms.append((time.monotonic() - started) * 1000.0)
         return str(completions[0])
 
-    return reflection_lm
+    return reflection_lm, durations_ms
+
+
+def _reflection_activity(durations_ms: list[float]) -> LMActivity | None:
+    """Fold reflection-call timings into the shared ``LMActivity`` shape.
+
+    Black-box engines only drive the reflection model inside the
+    optimization loop, so every call lands in the ``training`` stage and the
+    ``generation`` matrix stays empty; the run view renders the same stage
+    table as DSPy runs.
+
+    Args:
+        durations_ms: Wall-clock duration of each reflection call.
+
+    Returns:
+        A one-stage activity matrix, or ``None`` when the engine never
+        called the reflection model.
+    """
+    if not durations_ms:
+        return None
+    avg_ms = round(sum(durations_ms) / len(durations_ms), 1)
+    return LMActivity(
+        reflection={STAGE_TRAINING: LMStageStats(calls=len(durations_ms), avg_response_time_ms=avg_ms)}
+    )
 
 
 def run_blackbox_optimization(
@@ -426,7 +459,7 @@ def _run_job(
             progress_callback(PROGRESS_BASELINE, {DETAIL_BASELINE: baseline})
 
     lm = build_language_model(payload.reflection_model_settings, disable_cache=True)
-    reflection_lm = _reflection_caller(lm)
+    reflection_lm, reflection_durations_ms = _reflection_caller(lm)
 
     server = EvalServer(scorer, max_evals=payload.budget.max_scorer_runs, on_eval=_progress_listener(progress_callback))
     task = Task(
@@ -488,6 +521,7 @@ def _run_job(
         total_scorer_runs=server.used,
         runtime_seconds=time.perf_counter() - started,
         num_lm_calls=sum(lm_call_count(model) or 0 for model in lms),
+        lm_activity=_reflection_activity(reflection_durations_ms),
         total_tokens=total_tokens_from_history(*lms),
         usage_by_model=[
             ModelTokenUsage(model=model, input_tokens=in_out[0], output_tokens=in_out[1])

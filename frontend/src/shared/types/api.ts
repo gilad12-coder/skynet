@@ -621,6 +621,8 @@ export interface BlackboxRunResult {
   num_lm_calls: number;
   total_tokens?: number | null;
   usage_by_model: Array<Record<string, unknown>>;
+  /** Reflection-model stage timing; absent on runs recorded before it existed. */
+  lm_activity?: LMActivity | null;
   optimization_metadata: Record<string, unknown>;
   details: Record<string, unknown>;
 }
