@@ -21,6 +21,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from gepa.image import Image
 
@@ -40,8 +41,6 @@ RUNNER_FILE = "skynet_runner.py"
 RUNNER_SOURCE = Path(runner.__file__).read_text(encoding="utf-8")
 CALLS_DIR = "calls"
 _DEFAULT_PROBE_TIMEOUT_SECONDS = 45.0
-# Vercel caps a sandbox at 45 minutes; a job that outlives its box reopens one on the next call.
-_MAX_LIFETIME_SECONDS = 2_700.0
 # A probe's box only has to outlive one call plus interpreter start-up.
 _PROBE_LIFETIME_ALLOWANCE_SECONDS = 120.0
 _STDERR_TAIL_CHARS = 2_000
@@ -77,6 +76,13 @@ class ScorerGateway:
             "max_tokens": self.max_tokens,
             "timeout_seconds": self.timeout_seconds,
         }
+
+    def injected_headers(self) -> dict[str, dict[str, str]]:
+        """Return the headers a network edge adds to the box's requests to the gateway host, keyed by host."""
+        host = urlsplit(self.url).hostname
+        if not host or not self.api_key:
+            return {}
+        return {host: {"Authorization": f"Bearer {self.api_key}"}}
 
 
 def _without_provider(name: str) -> str:
@@ -238,7 +244,7 @@ class SandboxPythonScorer:
         runtime: SandboxRuntime,
         gateway: ScorerGateway | None,
         timeout_seconds: float,
-        lifetime_seconds: float = _MAX_LIFETIME_SECONDS,
+        lifetime_seconds: float | None = None,
         job_id: str | None = None,
     ) -> None:
         """Bind scorer code to a runtime without opening anything yet.
@@ -248,17 +254,23 @@ class SandboxPythonScorer:
             runtime: Where the box is opened.
             gateway: Where the scorer's ``llm()`` calls go; ``None`` when no model was chosen.
             timeout_seconds: Longest a single call may run.
-            lifetime_seconds: Requested box lifetime, capped at Vercel's ceiling.
+            lifetime_seconds: Requested box lifetime; the configured ceiling when unset, and never above it.
             job_id: Names and tags the box after the job, when known.
         """
         self._code = code
         self._runtime = runtime
         self._gateway = gateway
         self._timeout_seconds = timeout_seconds
+        ceiling = settings.vercel_sandbox_max_lifetime_seconds
+        # The network edge adds the key to the gateway calls when the runtime has one, so the
+        # box never holds it; otherwise it rides in the runner's environment, one call at a time.
+        injected = gateway.injected_headers() if gateway is not None and runtime.injects_headers else {}
+        self._env_key = gateway.api_key if gateway is not None and not injected else None
         self._spec = SandboxSpec(
-            lifetime_seconds=min(lifetime_seconds, _MAX_LIFETIME_SECONDS),
+            lifetime_seconds=ceiling if lifetime_seconds is None else min(lifetime_seconds, ceiling),
             name=_sandbox_name(job_id),
             tags={"skynet_job": job_id} if job_id else {},
+            inject_headers=injected,
         )
         self._session: SandboxSession | None = None
         self._calls = 0
@@ -351,10 +363,9 @@ class SandboxPythonScorer:
         session.write_files(
             {f"{call_dir}/{runner.INPUT_FILE}": json.dumps(payload, default=runner.side_info_json_default)}
         )
-        key = self._gateway.api_key if self._gateway is not None else None
         result = session.run(
             f"python3 {RUNNER_FILE} {shlex.quote(call_dir)}",
-            env={ENV_API_KEY: key} if key else None,
+            env={ENV_API_KEY: self._env_key} if self._env_key else None,
             timeout_seconds=self._timeout_seconds,
         )
         if result.timed_out:
