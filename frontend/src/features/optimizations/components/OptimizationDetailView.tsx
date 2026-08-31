@@ -99,7 +99,7 @@ import { OverviewTab } from "./OverviewTab";
 import { RunCreditsChip } from "./RunCreditsChip";
 import { BestVersionTab } from "./BestVersionTab";
 import { GridServeTab } from "./GridServeTab";
-import { LMActivityTab } from "./LMActivityTab";
+import { BlackboxLMActivityTab, LMActivityTab } from "./LMActivityTab";
 import { ReactServeChat } from "./ReactServeChat";
 import { ReactServeApi } from "./ReactServeApi";
 import { RunPlayground } from "./RunPlayground";
@@ -1015,7 +1015,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const showBestVersionTab = jobIsBlackbox && !!job.blackbox_result;
   // A remote-scorer black-box run has no code to show at all.
   const showCodeTab = !jobIsBlackbox || !!metricCode;
-  const showLmActivityTab = viewLmActivity != null;
+  const showLmActivityTab =
+    viewLmActivity != null || (job.blackbox_result?.usage_by_model?.length ?? 0) > 0;
 
   const pairCount = effectiveJob?.grid_result?.pair_results.length ?? 0;
   const isBestPair =
@@ -1579,9 +1580,13 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               </TabsContent>
             )}
 
-            {showLmActivityTab && viewLmActivity && !isPhone && (
+            {showLmActivityTab && !isPhone && (
               <TabsContent value="lm-activity" className="mt-4">
-                <LMActivityTab lmActivity={viewLmActivity} />
+                {viewLmActivity ? (
+                  <LMActivityTab lmActivity={viewLmActivity} />
+                ) : (
+                  job.blackbox_result && <BlackboxLMActivityTab result={job.blackbox_result} />
+                )}
               </TabsContent>
             )}
 

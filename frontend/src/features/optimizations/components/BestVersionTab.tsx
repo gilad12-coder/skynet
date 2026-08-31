@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import { Cube, DownloadSimple, Trophy } from "@/shared/ui/icons";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import { Badge } from "@/shared/ui/primitives/badge";
@@ -14,12 +15,13 @@ import {
   SelectValue,
 } from "@/shared/ui/primitives/select";
 import { FadeIn } from "@/shared/ui/motion";
+import { HelpTip } from "@/shared/ui/help-tip";
 import type { BlackboxRunResult } from "@/shared/types/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import { CopyButton } from "./ui-primitives";
+import { tip } from "@/shared/lib/tooltips";
 import { CandidatePreview, isDrawable } from "./CandidatePreview";
 import { VersionRail } from "./VersionRail";
-import { formatBlackboxDelta, formatBlackboxScore } from "../lib/blackbox";
+import { formatBlackboxScore } from "../lib/blackbox";
 import { countChanges, diffRows } from "../lib/blackbox-diff";
 import {
   buildVersions,
@@ -195,6 +197,8 @@ function ChangesView({ versions, index }: { versions: CandidateVersion[]; index:
   );
 }
 
+const PILL_TRANSITION = { type: "tween", duration: 0.16, ease: [0.22, 1, 0.36, 1] } as const;
+
 function ViewToggle({
   value,
   onChange,
@@ -226,13 +230,19 @@ function ViewToggle({
           aria-controls="blackbox-version-panel"
           onClick={() => onChange(o.value)}
           className={cn(
-            "cursor-pointer rounded px-2 py-1 text-xs font-medium transition-colors",
-            o.value === value
-              ? "bg-primary/10 text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
+            "relative cursor-pointer rounded px-2 py-1 text-xs font-medium transition-colors",
+            o.value === value ? "text-foreground" : "text-muted-foreground hover:text-foreground",
           )}
         >
-          {o.label}
+          {o.value === value && (
+            <motion.span
+              layoutId="blackbox-view-pill"
+              className="absolute inset-0 rounded bg-primary/10 shadow-sm"
+              transition={PILL_TRANSITION}
+              aria-hidden="true"
+            />
+          )}
+          <span className="relative z-10">{o.label}</span>
         </button>
       ))}
     </div>
@@ -284,40 +294,32 @@ export function BestVersionTab({
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
           <CardTitle className="flex flex-wrap items-center gap-2 text-base">
             <Cube className="size-4 text-primary" aria-hidden="true" />
-            <span className="font-bold tracking-tight">
-              {msg("optimization.blackbox.versions.title")}
-            </span>
+            <HelpTip text={tip("blackbox.versions.section")}>
+              <span className="font-bold tracking-tight">
+                {msg("optimization.blackbox.versions.title")}
+              </span>
+            </HelpTip>
             <Badge variant="secondary" size="sm" className="font-mono tabular-nums">
               {formatMsg("optimization.blackbox.versions.label", { n: current.number })}
             </Badge>
             {current.isSeed && (
-              <Badge variant="outline" size="sm">
-                {msg("optimization.blackbox.best.seed_title")}
-              </Badge>
+              <HelpTip text={tip("blackbox.versions.seed")}>
+                <Badge variant="outline" size="sm">
+                  {msg("optimization.blackbox.best.seed_title")}
+                </Badge>
+              </HelpTip>
             )}
             {current.isBest && (
-              <Badge variant="default" size="sm" className="gap-1">
-                <Trophy className="size-3" aria-hidden="true" />
-                {msg("optimization.blackbox.versions.best")}
-              </Badge>
+              <HelpTip text={tip("blackbox.versions.best")}>
+                <Badge variant="default" size="sm" className="gap-1">
+                  <Trophy className="size-3" aria-hidden="true" />
+                  {msg("optimization.blackbox.versions.best")}
+                </Badge>
+              </HelpTip>
             )}
-            <Badge variant="outline" size="sm" className="font-normal text-muted-foreground">
-              {msg(`optimization.blackbox.versions.kind.${kind}`)}
-            </Badge>
           </CardTitle>
           <div className="flex flex-wrap items-center gap-2">
             <ViewToggle value={activeView} onChange={setView} canDiff={canDiff} />
-            <Badge variant="outline" size="sm" className="font-mono">
-              {result.engine_used}
-            </Badge>
-            {current.isBest && result.optimized_test_metric != null && (
-              <Badge variant="secondary" size="sm" className="tabular-nums">
-                {formatMsg("optimization.blackbox.best.score", {
-                  score: formatBlackboxScore(result.optimized_test_metric),
-                  delta: formatBlackboxDelta(result.metric_improvement),
-                })}
-              </Badge>
-            )}
             {current.isSeed && result.baseline_test_metric != null && (
               <Badge variant="outline" size="sm" className="tabular-nums">
                 {formatMsg("optimization.blackbox.best.seed_score", {
@@ -325,7 +327,6 @@ export function BestVersionTab({
                 })}
               </Badge>
             )}
-            <CopyButton text={current.text} />
             <Button
               type="button"
               variant="ghost"

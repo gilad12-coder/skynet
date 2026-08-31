@@ -5,13 +5,8 @@ import { CaretLeft, CaretRight } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import { formatBlackboxDelta, formatBlackboxScore } from "../lib/blackbox";
+import { formatBlackboxScore } from "../lib/blackbox";
 import type { CandidateVersion } from "../lib/blackbox-versions";
-
-// Same tints the Changes view uses for added / removed lines, so a positive
-// delta reads as "gained" and a negative one as "lost".
-const GAIN_FG = "#3f4d1f";
-const LOSS_FG = "#6e2e16";
 
 function barHeight(score: number | null, min: number, span: number): number {
   if (score == null) return 6;
@@ -33,13 +28,10 @@ export function VersionRail({
   onSelect: (index: number) => void;
 }) {
   const current = versions[index];
-  const previous = index > 0 ? versions[index - 1] : null;
   if (!current) return null;
   const scores = versions.flatMap((v) => (v.score == null ? [] : [v.score]));
   const min = scores.length ? Math.min(...scores) : 0;
   const span = scores.length ? Math.max(...scores) - min || 1 : 1;
-  const delta =
-    current.score != null && previous?.score != null ? current.score - previous.score : null;
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "ArrowLeft" && index > 0) {
@@ -128,35 +120,6 @@ export function VersionRail({
             />
           );
         })}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
-        {current.score != null ? (
-          <span className="font-medium">
-            {formatMsg("optimization.blackbox.versions.score", {
-              score: formatBlackboxScore(current.score),
-            })}
-          </span>
-        ) : (
-          <span className="text-muted-foreground">
-            {msg("optimization.blackbox.versions.unscored")}
-          </span>
-        )}
-        {delta != null && (
-          <span style={{ color: delta >= 0 ? GAIN_FG : LOSS_FG }}>
-            {formatMsg("optimization.blackbox.versions.delta_prev", {
-              delta: formatBlackboxDelta(delta),
-            })}
-          </span>
-        )}
-        {current.firstRun != null && (
-          <span className="text-muted-foreground">
-            {formatMsg("optimization.blackbox.versions.first_seen", {
-              run: current.firstRun,
-              evals: current.evals,
-            })}
-          </span>
-        )}
       </div>
     </div>
   );

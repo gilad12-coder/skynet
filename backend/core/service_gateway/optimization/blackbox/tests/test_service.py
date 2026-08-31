@@ -81,7 +81,7 @@ def fake_lm(monkeypatch: pytest.MonkeyPatch) -> FakeReflectionLM:
 
 
 def test_run_scores_baseline_and_optimized_on_the_holdout(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
-    """A single best_of_n run improves the seed and reports the split, lanes and usage."""
+    """A single best_of_n run improves the seed and reports the split, lanes, usage and reflection timing."""
     sink: list[tuple[str, dict[str, Any]]] = []
 
     response = run_blackbox_optimization(
@@ -110,6 +110,11 @@ def test_run_scores_baseline_and_optimized_on_the_holdout(fake_lm: FakeReflectio
     assert [(u.model, u.input_tokens, u.output_tokens) for u in response.usage_by_model] == [
         ("fake/model", 10 * len(fake_lm.history), 5 * len(fake_lm.history))
     ]
+    assert response.lm_activity is not None
+    assert response.lm_activity.generation == {}
+    reflection_stats = response.lm_activity.reflection["training"]
+    assert reflection_stats.calls == len(fake_lm.history)
+    assert reflection_stats.avg_response_time_ms is not None
     assert response.optimization_metadata["budget"] == {
         "max_scorer_runs": 12,
         "stop_at_score": None,
@@ -522,6 +527,7 @@ def test_dry_run_binds_the_scorer_model_and_returns_its_usage(monkeypatch: pytes
 
 
 def test_reflection_caller_hands_chat_messages_to_the_model() -> None:
+    """Text prompts pass positionally, chat messages via ``messages=``, and every call is timed."""
     calls: list[tuple[Any, Any]] = []
 
     class LM:
@@ -529,11 +535,13 @@ def test_reflection_caller_hands_chat_messages_to_the_model() -> None:
             calls.append((prompt, messages))
             return ["reflected"]
 
-    reflection_lm = service_mod._reflection_caller(LM())  # type: ignore[arg-type]
+    reflection_lm, durations_ms = service_mod._reflection_caller(LM())  # type: ignore[arg-type]
     assert reflection_lm("plain text") == "reflected"
     multimodal = [{"role": "user", "content": [{"type": "text", "text": "look"}]}]
     assert reflection_lm(multimodal) == "reflected"
     assert calls == [("plain text", None), (None, multimodal)]
+    assert len(durations_ms) == 2
+    assert all(d >= 0 for d in durations_ms)
 
 
 def test_run_persists_every_version_it_scored(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:

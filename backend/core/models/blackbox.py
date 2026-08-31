@@ -18,7 +18,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .common import ModelConfig, SplitCounts, SplitFractions
-from .results import ModelTokenUsage
+from .results import LMActivity, ModelTokenUsage
 
 BLACKBOX_ENGINE_GEPA = "gepa"
 BLACKBOX_ENGINE_BEST_OF_N = "best_of_n"
@@ -280,6 +280,10 @@ class BlackboxRunResponse(BaseModel):
     num_lm_calls: int = 0
     total_tokens: int | None = None
     usage_by_model: list[ModelTokenUsage] = Field(default_factory=list)
+    # Reflection-LM timing on the shared LMActivity shape, so the run view
+    # renders the same stage matrix as DSPy runs. Only ``reflection`` is
+    # populated — black-box engines drive no generation LM.
+    lm_activity: LMActivity | None = None
     optimization_metadata: dict[str, Any] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)
 
