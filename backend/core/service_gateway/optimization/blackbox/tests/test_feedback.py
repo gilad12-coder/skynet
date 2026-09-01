@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from core.constants import PROGRESS_CANDIDATE, PROGRESS_MINIBATCH
+from core.constants import PROGRESS_CANDIDATE, PROGRESS_CASE_SCORED, PROGRESS_MINIBATCH
 from core.service_gateway.optimization import trajectory
 
-from ..feedback import candidate_parts, emit_candidate, emit_scorer_feedback, scorer_feedback_text, without_images
+from ..feedback import (
+    candidate_parts,
+    emit_candidate,
+    emit_case_scored,
+    emit_scorer_feedback,
+    scorer_feedback_text,
+    without_images,
+)
 
 PNG = "data:image/png;base64,iVBORw0KGgo="
 
@@ -102,6 +109,26 @@ def _explode(event: str, metrics: dict) -> None:
 def test_emit_survives_a_failing_callback() -> None:
     """A broken progress sink must not break the scorer call."""
     emit_scorer_feedback(_explode, example_id="1", score=1.0, side_info={"feedback": "hi"})
+
+
+def test_emit_case_scored_carries_the_version_and_its_case_count() -> None:
+    """A scored case names its version, the case, the score and how many cases the version has."""
+    sink: list[tuple[str, dict]] = []
+
+    emit_case_scored(lambda e, m: sink.append((e, m)), trial=2, example_id="1", score=0.5, total=3)
+
+    assert sink == [(PROGRESS_CASE_SCORED, {"trial": 2, "example_id": "1", "score": 0.5, "total": 3})]
+
+
+def test_emit_case_scored_without_a_sink_or_with_a_broken_one_is_harmless() -> None:
+    """No callback is a no-op and a raising callback never reaches the engine."""
+
+    def broken(event: str, metrics: dict) -> None:
+        """Fail like a sink that lost its job."""
+        raise RuntimeError("gone")
+
+    emit_case_scored(None, trial=0, example_id="0", score=1.0, total=1)
+    emit_case_scored(broken, trial=0, example_id="0", score=1.0, total=1)
 
 
 def test_candidate_parts_wraps_text_under_the_shared_key() -> None:

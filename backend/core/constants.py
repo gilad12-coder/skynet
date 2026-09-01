@@ -78,6 +78,9 @@ PROGRESS_REJECTED = "candidate_rejected"
 PROGRESS_VALSET = "valset_rows"
 PROGRESS_VALSET_OUTPUTS = "valset_outputs"
 PROGRESS_MINIBATCH = "minibatch_feedback"
+# One scorer call of a version that scores every case, so the run view can
+# fill the version in case by case before it is complete.
+PROGRESS_CASE_SCORED = "case_scored"
 
 PROGRESS_GRID_PAIR_STARTED = "grid_pair_started"
 PROGRESS_GRID_PAIR_COMPLETED = "grid_pair_completed"

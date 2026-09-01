@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +38,7 @@ from .. import scorer as scorer_mod
 from .. import service as service_mod
 from ..auto import LaneOutcome
 from ..harness import GatewayConfig
-from ..protocol import EvalServer, Result, candidate_key
+from ..protocol import Candidate, EvalServer, Result, candidate_key
 from ..sandbox_scorer import ScorerGateway, ScorerProbeResult
 from ..service import dry_run_scorer, run_blackbox_optimization, validate_blackbox_payload
 from .mocks import (
@@ -681,6 +683,28 @@ def test_score_holdout_logs_a_debug_heartbeat_per_case(caplog: pytest.LogCapture
         "optimized version holdout eval 1/2 score=0.250",
         "optimized version holdout eval 2/2 score=0.500",
     ]
+
+
+def test_score_holdout_stops_scheduling_cases_once_one_fails() -> None:
+    """A failing case fails the pass at once and the cases still queued are never scored."""
+    started: list[int] = []
+    lock = threading.Lock()
+
+    def scorer(candidate: Candidate, case: Any) -> tuple[float, dict[str, Any]]:
+        """Fail the first case quickly; every other case takes long enough for the cancel to land."""
+        with lock:
+            started.append(case["n"])
+        if case["n"] == 1:
+            time.sleep(0.01)
+            raise ValueError("boom")
+        time.sleep(0.2)
+        return 1.0, {}
+
+    cases = [{"n": n} for n in range(1, 7)]
+    with pytest.raises(ServiceError, match="scorer failed on the optimized version: ValueError: boom"):
+        service_mod._score_holdout(scorer, "v", cases, label="optimized version", concurrency=2)
+
+    assert set(started) <= {1, 2, 3}
 
 
 def test_score_holdout_logs_the_score_in_single_task_mode(caplog: pytest.LogCaptureFixture) -> None:

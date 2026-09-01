@@ -19,7 +19,7 @@ from typing import Any
 from ....exceptions import ServiceError
 from ....models.blackbox import BLACKBOX_ENGINE_META_HARNESS
 from .best_of_n import _strip_fences
-from .feedback import emit_candidate, emit_scorer_feedback
+from .feedback import emit_candidate, emit_case_scored, emit_scorer_feedback
 from .protocol import (
     BudgetExhaustedError,
     Candidate,
@@ -253,6 +253,9 @@ class MetaHarnessEngine:
                 return None
             emit_scorer_feedback(
                 ctx.progress_callback, example_id=str(position), score=score, side_info=side_info, iteration=index
+            )
+            emit_case_scored(
+                ctx.progress_callback, trial=index, example_id=str(position), score=score, total=len(cases)
             )
             return position, case, score, side_info
 

@@ -15,6 +15,7 @@ import {
 import { FadeIn, StaggerContainer, StaggerItem, TiltCard } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import type {
+  BlackboxStrategy,
   LMActivity,
   OptimizationPayloadResponse,
   OptimizationStatusResponse,
@@ -34,7 +35,7 @@ import { TERMS } from "@/shared/lib/terms";
 import type { ScorePoint } from "../lib/extract-scores";
 import { InfoCard } from "./ui-primitives";
 import { PipelineStages, computeStageTimestamps } from "./PipelineStages";
-import { TrajectoryPanel } from "@/features/trajectory";
+import { MetaHarnessPanel, TrajectoryPanel, isMetaHarnessRun } from "@/features/trajectory";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { buildBlackboxTrajectoryContext } from "../lib/blackbox-trajectory";
@@ -139,6 +140,17 @@ function OverviewTabImpl({
         : null,
     [isBlackbox, job.blackbox_result, payload],
   );
+  // A meta-harness lane hill-climbs instead of branching, so it gets the
+  // climb view; the lane that produced the newest versions decides.
+  const strategyEngine = (payload?.payload.strategy as Partial<BlackboxStrategy> | undefined)
+    ?.engine;
+  const showClimb =
+    isBlackbox &&
+    isMetaHarnessRun(
+      job.progress_events ?? [],
+      job.blackbox_result?.engine_used ?? null,
+      strategyEngine ?? null,
+    );
   const renderRunBlocks = job.optimization_type === "run" || isBlackbox || isPairContext;
   const renderGridAgg = job.optimization_type === "grid_search" && !isPairContext;
 
@@ -571,7 +583,9 @@ function OverviewTabImpl({
         </FadeIn>
       )}
 
-      {renderRunBlocks && (
+      {renderRunBlocks && showClimb && <MetaHarnessPanel job={job} blackbox={blackboxTrajectory} />}
+
+      {renderRunBlocks && !showClimb && (
         <TrajectoryPanel
           job={job}
           pairIndex={pairIndex}

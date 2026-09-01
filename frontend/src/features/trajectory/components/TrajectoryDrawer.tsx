@@ -3069,7 +3069,7 @@ function scorerNotesByCase(entries: MinibatchEntry[]): ReadonlyMap<string, Minib
 // Black-box scores live on the scorer's own scale, so a case cell shades from
 // the lowest score in the set to the highest instead of pass/fail — unless every
 // score already sits in [0, 1], which reads as a fraction as it is.
-function caseShade(
+export function caseShade(
   score: number,
   min: number,
   max: number,

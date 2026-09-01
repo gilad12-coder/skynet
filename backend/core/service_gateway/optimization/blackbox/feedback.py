@@ -16,7 +16,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from ....constants import PROGRESS_CANDIDATE, PROGRESS_MINIBATCH
+from ....constants import PROGRESS_CANDIDATE, PROGRESS_CASE_SCORED, PROGRESS_MINIBATCH
 from ..trajectory import MINIBATCH_FEEDBACK_CHAR_CAP, CandidateEvent, current_proposal_iteration
 from .protocol import Candidate, SideInfo
 from .runner import side_info_json_default
@@ -142,6 +142,37 @@ def emit_scorer_feedback(
         )
     except Exception:
         logger.exception("progress_callback raised for scorer feedback (example=%s)", example_id)
+
+
+def emit_case_scored(
+    progress_callback: Callable[[str, dict[str, Any]], None] | None,
+    *,
+    trial: int,
+    example_id: str,
+    score: float,
+    total: int,
+) -> None:
+    """Announce one scored case of a version that is scored on every case.
+
+    Feedback events fire only when the scorer had something to say, so an
+    engine that sweeps every case per version sends this alongside: the run
+    view fills the version in case by case while the rest are still running.
+
+    Args:
+        progress_callback: The job's progress sink, if any.
+        trial: Index of the version in the engine's history.
+        example_id: Display id of the case.
+        score: The score the scorer returned.
+        total: How many cases the version is scored on.
+    """
+    if progress_callback is None:
+        return
+    try:
+        progress_callback(
+            PROGRESS_CASE_SCORED, {"trial": trial, "example_id": example_id, "score": score, "total": total}
+        )
+    except Exception:
+        logger.exception("progress_callback raised for a scored case (trial=%s, example=%s)", trial, example_id)
 
 
 def candidate_parts(candidate: Candidate) -> dict[str, str]:

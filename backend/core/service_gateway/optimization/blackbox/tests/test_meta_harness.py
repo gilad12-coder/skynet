@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from core.constants import PROGRESS_CANDIDATE, PROGRESS_MINIBATCH
+from core.constants import PROGRESS_CANDIDATE, PROGRESS_CASE_SCORED, PROGRESS_MINIBATCH
 from core.exceptions import ServiceError
 
 from ..meta_harness import MetaHarnessEngine
@@ -248,6 +248,8 @@ def test_meta_harness_streams_from_worker_threads(tmp_path: Path) -> None:
     assert [c["candidate_id"] for e, c in sink if e == PROGRESS_CANDIDATE] == ["0", "1"]
     feedback = sorted((m["iteration"], m["example_id"]) for e, m in sink if e == PROGRESS_MINIBATCH)
     assert feedback == [(0, "0"), (0, "1"), (0, "2"), (1, "0"), (1, "1"), (1, "2")]
+    scored = sorted((m["trial"], m["example_id"], m["total"]) for e, m in sink if e == PROGRESS_CASE_SCORED)
+    assert scored == [(0, "0", 3), (0, "1", 3), (0, "2", 3), (1, "0", 3), (1, "1", 3), (1, "2", 3)]
 
 
 def test_meta_harness_announces_only_complete_trials(tmp_path: Path) -> None:
@@ -259,7 +261,7 @@ def test_meta_harness_announces_only_complete_trials(tmp_path: Path) -> None:
     trial = MetaHarnessEngine._evaluate("hello", [{"i": 0}, {"i": 1}], server, ctx, index=0, parent=None)
 
     assert not trial.complete
-    assert [e for e, _ in sink] == [PROGRESS_MINIBATCH]
+    assert [e for e, _ in sink] == [PROGRESS_MINIBATCH, PROGRESS_CASE_SCORED]
 
 
 def test_meta_harness_streams_multi_part_versions_as_their_parts(tmp_path: Path) -> None:
