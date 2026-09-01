@@ -66,7 +66,7 @@ function CopyValueRow({
       <span className="text-sm font-mono text-foreground" dir="ltr">
         {signedOut ? msg("settings.account.signed_out") : value}
       </span>
-      <CopyButton text={value} ariaLabel={label} variant="outline" disabled={signedOut} />
+      <CopyButton text={value} ariaLabel={label} disabled={signedOut} />
     </SettingsRow>
   );
 }

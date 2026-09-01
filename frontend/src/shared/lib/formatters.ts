@@ -212,3 +212,16 @@ export function modelDisplayName(id: string | null | undefined): string {
 export function sentenceCase(term: string): string {
   return term.charAt(0).toLocaleUpperCase(getActiveIntlLocale()) + term.slice(1);
 }
+
+// Black-box ("optimize anything") scores are raw scorer values — never a 0–100
+// percentage — so they format verbatim instead of through formatPercent.
+export function formatBlackboxScore(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return String(Number(value.toFixed(4)) + 0);
+}
+
+export function formatBlackboxDelta(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const rounded = Number(value.toFixed(4)) + 0;
+  return `${rounded >= 0 ? "+" : ""}${rounded}`;
+}

@@ -10,10 +10,10 @@ in-sandbox check — rather than the version text itself.
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import posixpath
-import re
 import threading
 import time
 from typing import Any
@@ -22,8 +22,18 @@ from ....config import Settings, settings
 from ....exceptions import ServiceError
 from ....models.blackbox import BlackboxTarget
 from .harness import ANSWER_FILE, PROMPT_FILE, GatewayConfig, HarnessLaunch, build_launch
-from .protocol import Candidate, ScorerFn, SideInfo
-from .sandbox import CommandResult, SandboxRuntime, SandboxSession, SandboxSpec, sandbox_unavailable_reason
+from .heartbeat import heartbeat
+from .protocol import Candidate, ScorerAbortError, ScorerFn, SideInfo
+from .sandbox import (
+    JOB_TAG,
+    KILL_GRACE_SECONDS,
+    CommandResult,
+    SandboxRuntime,
+    SandboxSession,
+    SandboxSpec,
+    sandbox_unavailable_reason,
+    unique_sandbox_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +49,14 @@ FILES_KEY = "files"
 CHECK_KEY = "check_command"
 # Time allowed for installing the harness, the case's setup and its check, on top of the run timeout.
 _SETUP_ALLOWANCE_SECONDS = 600.0
+# What a box needs beyond its commands: booting, the file writes and the answer read.
+_BOX_OVERHEAD_SECONDS = 60.0
 _OUTPUT_CHARS = 20_000
 _TRANSCRIPT_CHARS = 4_000
 _STEP_CHARS = 6_000
 _FEEDBACK_OUTPUT_CHARS = 2_000
 _FEEDBACK_TRANSCRIPT_CHARS = 1_500
 _CHECK_OUTPUT_CHARS = 2_000
-_NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
 
 
 def gateway_from_settings(settings: Settings) -> GatewayConfig | None:
@@ -211,6 +222,48 @@ def _format_step(label: str, result: CommandResult) -> str:
     return f"[{label}] {status}\n{_tail(body, _STEP_CHARS)}".rstrip()
 
 
+# Three dead runs cover both sandboxes in flight plus one more, so a single
+# flaky box never aborts a run.
+def _check_command(case: Any) -> str | None:
+    """Return the case's in-sandbox check command, when it ships a usable one.
+
+    Args:
+        case: The task.
+
+    Returns:
+        The command, or ``None``.
+    """
+    check = case.get(CHECK_KEY) if isinstance(case, dict) else None
+    return check if isinstance(check, str) and check.strip() else None
+
+
+def _usage_summary(usage: dict[str, Any]) -> str:
+    """Render a run's token usage for a log line.
+
+    Args:
+        usage: ``input_tokens``/``output_tokens`` counts, possibly empty.
+
+    Returns:
+        The counts, or a note that the harness reported none.
+    """
+    counts = [usage.get(key) for key in ("input_tokens", "output_tokens")]
+    if not any(isinstance(count, (int, float)) and count > 0 for count in counts):
+        return "no usage reported"
+    tokens_in, tokens_out = (int(count or 0) for count in counts)
+    return f"{tokens_in:,} in / {tokens_out:,} out tokens"
+
+
+_DEAD_RUNS_BEFORE_ABORT = 3
+
+
+class AgentHarnessError(ScorerAbortError, ServiceError):
+    """The harness died on every one of the first runs before the model did any work.
+
+    A run whose agent cannot even reach its model scores 0 everywhere and
+    burns the whole budget for no signal, so the scorer stops it instead.
+    """
+
+
 class SandboxAgentScorer:
     """Scorer wrapper for agent targets: one sandbox per ``(version, case)``.
 
@@ -250,6 +303,10 @@ class SandboxAgentScorer:
         # Sandboxes run in parallel, but the user's scorer (a metric-sandbox
         # process or a remote call) is not promised to be thread-safe.
         self._scorer_lock = threading.Lock()
+        self._pulse_lock = threading.Lock()
+        self._dead_runs = 0
+        self._alive = False
+        self._run_ids = itertools.count(1)
 
     def __call__(self, candidate: Candidate, case: Any = None) -> tuple[float, SideInfo]:
         """Run the agent on ``case`` with ``candidate`` as its harness, then score the record.
@@ -260,11 +317,47 @@ class SandboxAgentScorer:
 
         Returns:
             The score and the scorer's side information plus the run's feedback.
+
+        Raises:
+            AgentHarnessError: When the first runs all died before the model did any work.
         """
-        record = self.run(candidate, case)
+        label = self._next_label(case)
+        record = self._run(candidate, case, label)
+        self._check_pulse(record)
+        scoring_started = time.perf_counter()
         with self._scorer_lock:
             score, side_info = self._scorer(candidate, record)
+        logger.info("%s: scored %.3f (scorer took %.1fs)", label, score, time.perf_counter() - scoring_started)
         return score, {**side_info, **self.feedback(record)}
+
+    def _check_pulse(self, record: dict[str, Any]) -> None:
+        """Abort the run once the first runs have all died without any model usage.
+
+        One live run — a usage count above zero, or an answer — clears the
+        check for the rest of the run: a harness that works sometimes is a
+        flaky one, and flakiness is the run's business, not this guard's.
+
+        Args:
+            record: The run record just produced.
+
+        Raises:
+            AgentHarnessError: When ``_DEAD_RUNS_BEFORE_ABORT`` runs died before any run lived.
+        """
+        used = any(isinstance(count, (int, float)) and count > 0 for count in record["usage"].values())
+        with self._pulse_lock:
+            if used or record["error"] is None:
+                self._alive = True
+                return
+            if self._alive:
+                return
+            self._dead_runs += 1
+            if self._dead_runs < _DEAD_RUNS_BEFORE_ABORT:
+                return
+            dead = self._dead_runs
+        raise AgentHarnessError(
+            f"the agent harness failed on the first {dead} runs before the model did any work "
+            f"(last error: {record['error']}); check the harness, model and gateway settings"
+        )
 
     @staticmethod
     def feedback(record: dict[str, Any]) -> SideInfo:
@@ -302,9 +395,37 @@ class SandboxAgentScorer:
             ``elapsed_seconds``, ``check``, ``usage`` and ``error``.
 
         Raises:
-            ServiceError: When the version or case ships an unsafe path.
-            Exception: Whatever the sandbox runtime raises when the box cannot
-                be created or driven; the eval server turns that into a floor score.
+            ServiceError: When the version or case ships an unsafe path, or the
+                sandbox could not be created or driven twice in a row; the eval
+                server turns the latter into a floor score.
+        """
+        return self._run(candidate, case, self._next_label(case))
+
+    def _next_label(self, case: Any) -> str:
+        """Return the log label of the next run: its ordinal and, when the case names itself, the case.
+
+        Args:
+            case: The task the run works on.
+
+        Returns:
+            The label.
+        """
+        label = f"agent run {next(self._run_ids)}"
+        name = (case.get("id") or case.get("name")) if isinstance(case, dict) else None
+        if isinstance(name, (str, int)) and str(name).strip():
+            return f"{label} (case {str(name).strip()[:40]})"
+        return label
+
+    def _run(self, candidate: Candidate, case: Any, label: str) -> dict[str, Any]:
+        """Run the agent once, retrying in a fresh box when the first one dies; see :meth:`run`.
+
+        Args:
+            candidate: The harness version.
+            case: The task the agent works on.
+            label: Prefix of this run's log lines.
+
+        Returns:
+            The run record.
         """
         launch = self._launch
         files = {
@@ -313,11 +434,64 @@ class SandboxAgentScorer:
             **case_files(case),
             PROMPT_FILE: case_prompt(case),
         }
+        try:
+            return self._attempt(files, case, label)
+        except ServiceError as exc:
+            logger.warning("%s: %s", label, exc)
+            raise
+        except Exception:
+            # The box died under us (host recycled, transport stalled): one fresh box, one more try.
+            logger.warning("%s: sandbox failed; retrying in a fresh box", label, exc_info=True)
+        try:
+            return self._attempt(files, case, label)
+        except ServiceError as exc:
+            logger.warning("%s: %s", label, exc)
+            raise
+        except Exception as exc:
+            logger.warning("%s: sandbox failed twice; giving up", label, exc_info=True)
+            raise ServiceError(f"agent sandbox failed twice ({type(exc).__name__}): {exc}") from exc
+
+    def _lifetime_seconds(self, case: Any) -> float:
+        """Return a box lifetime that covers every step's own allowance.
+
+        Each step gets its timeout plus the KILL wrapper's grace, on top of
+        the box's own overhead, so a slow install can never eat into the
+        agent's run time. Only the lifetime ceiling can, and then
+        :meth:`_execute` shortens the run to what is left.
+
+        Args:
+            case: The task, for its optional ``check_command``.
+
+        Returns:
+            The lifetime, in seconds.
+        """
+        steps = [self._target.timeout_seconds]
+        steps += [
+            _SETUP_ALLOWANCE_SECONDS
+            for command in (self._launch.install_command, self._target.setup_command)
+            if command
+        ]
+        if _check_command(case) is not None:
+            steps.append(_SETUP_ALLOWANCE_SECONDS)
+        total = _BOX_OVERHEAD_SECONDS + sum(step + KILL_GRACE_SECONDS for step in steps)
+        return min(total, self._max_lifetime_seconds)
+
+    def _attempt(self, files: dict[str, str], case: Any, label: str) -> dict[str, Any]:
+        """Open one box under a fresh name, drive it and close it.
+
+        Args:
+            files: Everything to write before the first command.
+            case: The task the agent works on.
+            label: Prefix of this run's log lines.
+
+        Returns:
+            The run record.
+        """
         spec = SandboxSpec(
-            lifetime_seconds=min(self._target.timeout_seconds + _SETUP_ALLOWANCE_SECONDS, self._max_lifetime_seconds),
-            env=launch.env,
+            lifetime_seconds=self._lifetime_seconds(case),
+            env=self._launch.env,
             name=self._sandbox_name(),
-            tags={"skynet_job": self._job_id} if self._job_id else {},
+            tags={JOB_TAG: self._job_id} if self._job_id else {},
         )
         record: dict[str, Any] = {
             "case": case,
@@ -331,14 +505,19 @@ class SandboxAgentScorer:
             "error": None,
         }
         transcript: list[str] = []
+        logger.info("%s: opening sandbox %s (lifetime %.0fs)", label, spec.name, spec.lifetime_seconds)
         started = time.perf_counter()
         session = self._runtime.open(spec)
+        logger.info("%s: sandbox ready in %.1fs", label, time.perf_counter() - started)
         try:
-            self._execute(session, files, case, record, transcript)
+            self._execute(
+                session, files, case, record, transcript, label=label, deadline=started + spec.lifetime_seconds
+            )
         finally:
             session.close()
             record["transcript"] = _tail("\n".join(transcript), _TRANSCRIPT_CHARS)
             record["elapsed_seconds"] = round(time.perf_counter() - started, 3)
+            logger.debug("%s: sandbox closed after %.1fs", label, record["elapsed_seconds"])
         return record
 
     def _execute(
@@ -348,6 +527,9 @@ class SandboxAgentScorer:
         case: Any,
         record: dict[str, Any],
         transcript: list[str],
+        *,
+        label: str,
+        deadline: float,
     ) -> None:
         """Drive one open sandbox through install → setup → run → check.
 
@@ -357,18 +539,47 @@ class SandboxAgentScorer:
             case: The task, for its optional ``check_command``.
             record: Filled in place.
             transcript: Appended with one block per command.
+            label: Prefix of this run's log lines.
+            deadline: When the box's lifetime ends, on the monotonic clock.
         """
         session.write_files(files)
-        for label, command in (("install", self._launch.install_command), ("setup", self._target.setup_command)):
+        for step, command in (("install", self._launch.install_command), ("setup", self._target.setup_command)):
             if not command:
                 continue
-            result = session.run(command, timeout_seconds=_SETUP_ALLOWANCE_SECONDS)
-            transcript.append(_format_step(label, result))
+            logger.info("%s: %s running (allowance %.0fs)", label, step, _SETUP_ALLOWANCE_SECONDS)
+            step_started = time.perf_counter()
+            with heartbeat(logger, label, step, _SETUP_ALLOWANCE_SECONDS):
+                result = session.run(command, timeout_seconds=_SETUP_ALLOWANCE_SECONDS)
+            transcript.append(_format_step(step, result))
             if not result.ok:
+                logger.warning(
+                    "%s: %s failed (exit %s) after %.1fs",
+                    label,
+                    step,
+                    result.exit_code,
+                    time.perf_counter() - step_started,
+                )
                 record["exit_code"], record["timed_out"] = result.exit_code, result.timed_out
-                record["error"] = f"{label} command failed (exit {result.exit_code})"
+                record["error"] = f"{step} command failed (exit {result.exit_code})"
                 return
-        result = session.run(self._launch.run_command, timeout_seconds=self._target.timeout_seconds)
+            logger.info("%s: %s done in %.1fs", label, step, time.perf_counter() - step_started)
+        # The lifetime was sized for every step, so only the ceiling can leave
+        # the run short; a run cut to fit still ends in a clean timeout rather
+        # than the box dying under it.
+        run_timeout = self._target.timeout_seconds
+        remaining = deadline - time.perf_counter() - KILL_GRACE_SECONDS
+        if remaining < run_timeout:
+            run_timeout = max(remaining, 1.0)
+            logger.warning(
+                "%s: the box lifetime leaves %.0fs of the %gs run timeout",
+                label,
+                run_timeout,
+                self._target.timeout_seconds,
+            )
+        logger.info("%s: agent running (timeout %.0fs)", label, run_timeout)
+        run_started = time.perf_counter()
+        with heartbeat(logger, label, "agent", run_timeout):
+            result = session.run(self._launch.run_command, timeout_seconds=run_timeout)
         transcript.append(_format_step("run", result))
         record["exit_code"], record["timed_out"] = result.exit_code, result.timed_out
         answer = session.read_file(ANSWER_FILE)
@@ -377,14 +588,23 @@ class SandboxAgentScorer:
         output = answer if answer is not None and answer.strip() else parsed
         record["output"] = None if output is None else _clip(output, _OUTPUT_CHARS)
         if result.timed_out:
-            record["error"] = f"agent timed out after {self._target.timeout_seconds:g}s"
+            record["error"] = f"agent timed out after {run_timeout:g}s"
         elif not result.ok:
             record["error"] = f"agent exited with code {result.exit_code}"
         elif record["output"] is None:
             record["error"] = "agent produced no answer"
-        check = case.get(CHECK_KEY) if isinstance(case, dict) else None
-        if isinstance(check, str) and check.strip():
-            checked = session.run(check, timeout_seconds=_SETUP_ALLOWANCE_SECONDS)
+        run_elapsed = time.perf_counter() - run_started
+        if record["error"] is None:
+            logger.info(
+                "%s: agent finished in %.1fs (exit %s, %s)", label, run_elapsed, result.exit_code, _usage_summary(usage)
+            )
+        else:
+            logger.warning("%s: %s after %.1fs (%s)", label, record["error"], run_elapsed, _usage_summary(usage))
+        check = _check_command(case)
+        if check is not None:
+            check_started = time.perf_counter()
+            with heartbeat(logger, label, "check", _SETUP_ALLOWANCE_SECONDS):
+                checked = session.run(check, timeout_seconds=_SETUP_ALLOWANCE_SECONDS)
             transcript.append(_format_step("check", checked))
             record["check"] = {
                 "passed": checked.ok,
@@ -393,8 +613,9 @@ class SandboxAgentScorer:
                     "\n".join(part for part in (checked.stdout, checked.stderr) if part), _CHECK_OUTPUT_CHARS
                 ),
             }
+            verdict = "passed" if checked.ok else f"failed (exit {checked.exit_code})"
+            logger.info("%s: check %s in %.1fs", label, verdict, time.perf_counter() - check_started)
 
     def _sandbox_name(self) -> str:
-        """Return a sandbox name that carries the job id in a form Vercel accepts."""
-        raw = f"skynet-{self._job_id or 'blackbox'}".lower()
-        return _NAME_UNSAFE.sub("-", raw).strip("-")[:60]
+        """Return a fresh sandbox name that carries the job id."""
+        return unique_sandbox_name(f"skynet-{self._job_id or 'blackbox'}")

@@ -564,6 +564,22 @@ def usage_by_model_from_history(*language_models: object) -> dict[str, tuple[int
 _SERVED_MODEL_PATCH_FLAG = "_skynet_served_model_patch"
 
 
+def canonical_model_id(model: str) -> str:
+    """Strip the managed-gateway transport prefix off a model id.
+
+    LMs built for the proxy report ``litellm_proxy/<catalog id>`` while the
+    scorer ledger and the pricing table use the bare catalog id, so the same
+    model would otherwise surface under two spellings.
+
+    Args:
+        model: Model id as an LM reports it.
+
+    Returns:
+        The catalog-shaped id (``google/gemini-3-flash-preview``).
+    """
+    return model.removeprefix("litellm_proxy/")
+
+
 def install_openrouter_served_model_patch() -> None:
     """Make LiteLLM streams report the model OpenRouter actually served.
 

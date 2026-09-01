@@ -2,7 +2,16 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
-import { CaretRight, Code, GitDiff, Hash, TextAlignLeft, XCircle, type Icon } from "@/shared/ui/icons";
+import {
+  CaretRight,
+  Code,
+  Eye,
+  GitDiff,
+  Hash,
+  TextAlignLeft,
+  XCircle,
+  type Icon,
+} from "@/shared/ui/icons";
 import {
   createContext,
   useContext,
@@ -13,7 +22,11 @@ import {
   useState,
 } from "react";
 import {
+  BLACKBOX_STR_CANDIDATE_KEY,
+  blackboxCandidateKey,
   displayCandidateId,
+  displayCaseId,
+  type BlackboxTrajectoryContext,
   type MinibatchEntry,
   type PerExampleScore,
   type PredictionValue,
@@ -28,11 +41,19 @@ import {
   type FlexSignature,
 } from "../lib/flex-source";
 import { cn } from "@/shared/lib/utils";
+import { formatBlackboxScore } from "@/shared/lib";
+import {
+  detectRenderKind,
+  formatJson,
+  isDrawable,
+  type RenderKind,
+} from "@/shared/lib/candidate-render";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
-import { formatMsg, msg } from "@/shared/lib/messages";
+import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { Skeleton } from "@/shared/ui/skeleton";
+import { RenderedText } from "@/shared/ui/rendered-text";
 import { RecordedChatTranscript, type ChatMessage } from "./RecordedChat";
 import { UserBubble } from "@/shared/ui/agent/user-bubble";
 import { AgentBubble } from "@/shared/ui/agent/agent-bubble";
@@ -73,6 +94,7 @@ const ToolSeveritiesContext = createContext<Record<string, string>>({});
 // Stable fallback for the provider value — an inline `?? {}` would hand the
 // context a fresh identity every render and re-render all consumers.
 const EMPTY_SEVERITIES: Record<string, string> = {};
+const EMPTY_DESCRIPTIONS: Record<string, string> = {};
 
 // A Flex submodule's optimizable candidate value is its full Python source — one
 // dspy.Module subclass whose predictors carry their instructions inline — not an
@@ -102,6 +124,11 @@ export interface TrajectoryDrawerProps {
   // Tool name → approval severity from the run's persisted react_overlay, so the
   // drawer's tool cards show the same captured severity as the Code tab.
   toolSeverities?: Record<string, string>;
+  // Present for a black-box ("Optimize Anything") run: what the run was
+  // configured to optimize, so the drawer names a candidate by what it is,
+  // shows per-case scores only when cases exist and reads the scorer's notes
+  // as such.
+  blackbox?: BlackboxTrajectoryContext | null;
 }
 
 interface NodeView {
@@ -163,6 +190,7 @@ export function TrajectoryDrawer({
   minibatch,
   valsetOutputs,
   toolSeverities,
+  blackbox = null,
 }: TrajectoryDrawerProps) {
   const isRtl = getActiveDir() === "rtl";
   if (selection === null) {
@@ -194,6 +222,7 @@ export function TrajectoryDrawer({
           minibatch={minibatch}
           valsetOutputs={valsetOutputs}
           toolSeverities={toolSeverities}
+          blackbox={blackbox}
         />
       </SheetContent>
     </Sheet>
@@ -206,15 +235,18 @@ function NodeBody({
   minibatch,
   valsetOutputs,
   toolSeverities,
+  blackbox,
 }: {
   view: NodeView;
   valsetRows: ValsetRow[];
   minibatch: MinibatchEntry[];
   valsetOutputs: Map<string, Map<string, PredictionValue>>;
   toolSeverities?: Record<string, string>;
+  blackbox: BlackboxTrajectoryContext | null;
 }) {
   const [pinnedExampleId, setPinnedExampleId] = useState<string | null>(null);
   const [promptViewMode, setPromptViewMode] = usePromptView();
+  const isBlackbox = blackbox !== null;
 
   useEffect(() => {
     setPinnedExampleId(null);
@@ -223,14 +255,35 @@ function NodeBody({
   const promptEntries = useMemo(() => Object.entries(view.prompt), [view.prompt]);
   // A Flex candidate's prompt map holds module source, not instruction prose. When
   // every entry is module code, the whole section is a module — so its title, help
-  // text, and view toggle read "Module", not "Prompt".
+  // text, and view toggle read "Module", not "Prompt". A black-box candidate is
+  // whatever the user submitted, never a DSPy module.
   const isModuleSection = useMemo(
     () =>
+      !isBlackbox &&
       promptEntries.length > 0 &&
       promptEntries.every(([, p]) => parseReactOverlay(p) === null && looksLikeModuleCode(p)),
-    [promptEntries],
+    [isBlackbox, promptEntries],
   );
-  const toolDescriptions = useMemo(() => deriveToolDescriptions(view.prompt), [view.prompt]);
+  const toolDescriptions = useMemo(
+    () => (isBlackbox ? EMPTY_DESCRIPTIONS : deriveToolDescriptions(view.prompt)),
+    [isBlackbox, view.prompt],
+  );
+  const blackboxParts = useMemo(
+    () => (isBlackbox ? toBlackboxParts(promptEntries) : []),
+    [isBlackbox, promptEntries],
+  );
+  const blackboxRenders = useMemo(
+    () => blackbox?.rendersByText.get(blackboxCandidateKey(view.prompt)) ?? [],
+    [blackbox, view.prompt],
+  );
+  // Black-box feedback is scoped to the node here rather than by the panel's
+  // iteration filter, which would miss the untagged full sweep of an accepted
+  // version and show the seed the whole run's tail.
+  const scorerEntries = useMemo(
+    () => (isBlackbox ? scorerEntriesForNode(minibatch, view.iteration) : minibatch),
+    [isBlackbox, minibatch, view.iteration],
+  );
+  const scorerNotes = useMemo(() => scorerNotesByCase(scorerEntries), [scorerEntries]);
   const valsetById = useMemo(() => {
     const m = new Map<string, ValsetRow>();
     for (const row of valsetRows) m.set(row.id, row);
@@ -244,17 +297,67 @@ function NodeBody({
     [valsetOutputs, view.kind, view.rawId],
   );
 
+  // A black-box run scored against cases has a score per case to break down; a
+  // single-task run scores each version once and has nothing to break down.
+  const hasCases = blackbox !== null && (blackbox.hasCases || view.perExample.length > 1);
+  const canPreview =
+    isBlackbox &&
+    (blackboxParts.some((part) => isDrawable(part.kind)) || blackboxRenders.length > 0);
+  const hasParent = Object.keys(view.parentPrompt).length > 0;
+  // The stored view preference can name a view this node has nothing for — a
+  // preview of code, a diff of the seed — so it falls back to the raw view.
+  const effectiveView: View =
+    (promptViewMode === "preview" && !canPreview) || (promptViewMode === "diff" && !hasParent)
+      ? "prompt"
+      : promptViewMode;
+  const blackboxRaw: BlackboxRawView =
+    blackbox?.recipe === "prompt"
+      ? "prompt"
+      : blackboxParts.length > 0 && blackboxParts.every((part) => part.kind === "markdown")
+        ? "text"
+        : "code";
+
   const headerTitle =
     view.kind === "accepted"
       ? formatMsg("trajectory.node.header.accepted_title", { id: view.displayId })
       : msg("trajectory.node.header.rejected_title");
   const scoreLabel =
-    view.scoreMode === "valset"
-      ? msg("trajectory.node.header.label.score_valset")
-      : msg("trajectory.node.header.label.score_minibatch");
-  const examplesSub = formatMsg("trajectory.node.header.sub.examples", {
-    n: view.scoreN,
-  });
+    isBlackbox && !hasCases
+      ? msg("trajectory.blackbox.header.label.score")
+      : view.scoreMode === "valset"
+        ? msg("trajectory.node.header.label.score_valset")
+        : msg("trajectory.node.header.label.score_minibatch");
+  const scoreSub = isBlackbox
+    ? hasCases
+      ? formatMsg("trajectory.blackbox.header.sub.cases", { n: view.scoreN })
+      : undefined
+    : formatMsg("trajectory.node.header.sub.examples", { n: view.scoreN });
+  const formatScore = (value: number) =>
+    isBlackbox ? formatBlackboxScore(value) : value.toFixed(2);
+  const versionTitleKey: MessageKey =
+    view.kind === "rejected"
+      ? isBlackbox
+        ? "trajectory.blackbox.rejected.title"
+        : isModuleSection
+          ? "trajectory.drawer.rejected.module_title"
+          : "trajectory.drawer.rejected.prompt_title"
+      : blackbox !== null
+        ? blackboxSectionKey(blackbox.recipe, blackboxParts)
+        : isModuleSection
+          ? "trajectory.node.section.module"
+          : "trajectory.node.section.prompt";
+  const versionInfoKey: MessageKey =
+    view.kind === "rejected"
+      ? isBlackbox
+        ? "trajectory.blackbox.rejected.title.explain"
+        : isModuleSection
+          ? "trajectory.drawer.rejected.module_title.explain"
+          : "trajectory.drawer.rejected.prompt_title.explain"
+      : isBlackbox
+        ? "trajectory.blackbox.section.explain"
+        : isModuleSection
+          ? "trajectory.node.section.module.explain"
+          : "trajectory.node.section.prompt.explain";
 
   return (
     <ToolSeveritiesContext.Provider value={toolSeverities ?? EMPTY_SEVERITIES}>
@@ -277,15 +380,15 @@ function NodeBody({
               ) : null}
               <StatTile
                 label={scoreLabel}
-                value={view.score.toFixed(2)}
-                sub={examplesSub}
+                value={formatScore(view.score)}
+                sub={scoreSub}
                 tone={view.kind === "rejected" ? "rejected" : "accepted"}
                 emphasis
               />
               {view.parentScoreOnMinibatch !== null ? (
                 <StatTile
                   label={msg("trajectory.node.header.label.parent_score")}
-                  value={view.parentScoreOnMinibatch.toFixed(2)}
+                  value={formatScore(view.parentScoreOnMinibatch)}
                   tone="muted"
                 />
               ) : null}
@@ -294,53 +397,76 @@ function NodeBody({
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-5">
-          {view.kind === "accepted" && view.perExample.length > 0 ? (
+          {view.kind === "accepted" && view.perExample.length > 0 && (!isBlackbox || hasCases) ? (
             <Section
-              title={msg("trajectory.node.section.score_detail.valset")}
-              info={msg("trajectory.detail.pareto_title.explain")}
+              title={msg(
+                isBlackbox
+                  ? "trajectory.blackbox.section.cases"
+                  : "trajectory.node.section.score_detail.valset",
+              )}
+              info={msg(
+                isBlackbox
+                  ? "trajectory.blackbox.section.cases.explain"
+                  : "trajectory.detail.pareto_title.explain",
+              )}
             >
-              <ParetoGridSection
-                examples={view.perExample}
-                pinnedId={pinnedExampleId}
-                onPin={(id) => setPinnedExampleId((prev) => (prev === id ? null : id))}
-                valsetById={valsetById}
-                predictionsForCandidate={predictionsForView}
-              />
+              {isBlackbox ? (
+                <BlackboxCasesGrid
+                  examples={view.perExample}
+                  pinnedId={pinnedExampleId}
+                  onPin={(id) => setPinnedExampleId((prev) => (prev === id ? null : id))}
+                  notes={scorerNotes}
+                />
+              ) : (
+                <ParetoGridSection
+                  examples={view.perExample}
+                  pinnedId={pinnedExampleId}
+                  onPin={(id) => setPinnedExampleId((prev) => (prev === id ? null : id))}
+                  valsetById={valsetById}
+                  predictionsForCandidate={predictionsForView}
+                />
+              )}
             </Section>
           ) : null}
 
           {view.kind === "rejected" || promptEntries.length > 0 ? (
             <Section
-              title={
-                view.kind === "rejected"
-                  ? isModuleSection
-                    ? msg("trajectory.drawer.rejected.module_title")
-                    : msg("trajectory.drawer.rejected.prompt_title")
-                  : isModuleSection
-                    ? msg("trajectory.node.section.module")
-                    : msg("trajectory.node.section.prompt")
-              }
-              info={
-                view.kind === "rejected"
-                  ? isModuleSection
-                    ? msg("trajectory.drawer.rejected.module_title.explain")
-                    : msg("trajectory.drawer.rejected.prompt_title.explain")
-                  : isModuleSection
-                    ? msg("trajectory.node.section.module.explain")
-                    : msg("trajectory.node.section.prompt.explain")
-              }
+              title={msg(versionTitleKey)}
+              info={msg(versionInfoKey)}
               action={
-                promptEntries.length > 0 && Object.keys(view.parentPrompt).length > 0 ? (
+                promptEntries.length > 0 && (hasParent || canPreview) ? (
                   <PromptViewToggle
-                    view={promptViewMode}
+                    view={effectiveView}
                     onChange={setPromptViewMode}
                     isModule={isModuleSection}
+                    blackbox={isBlackbox ? { canPreview, hasParent, raw: blackboxRaw } : null}
                   />
                 ) : undefined
               }
             >
               {promptEntries.length === 0 ? (
-                <EmptyHint text={msg("trajectory.drawer.rejected.prompt_unavailable")} />
+                <EmptyHint
+                  text={msg(
+                    isBlackbox
+                      ? "trajectory.blackbox.rejected.unavailable"
+                      : "trajectory.drawer.rejected.prompt_unavailable",
+                  )}
+                />
+              ) : isBlackbox ? (
+                <div className="space-y-2">
+                  {blackboxParts.map((part) => (
+                    <BlackboxEntry
+                      key={part.key}
+                      part={part}
+                      parentText={view.parentPrompt[part.key] ?? ""}
+                      mode={effectiveView}
+                      hasParent={hasParent}
+                    />
+                  ))}
+                  {effectiveView === "preview" && blackboxRenders.length > 0 ? (
+                    <BlackboxRenders images={blackboxRenders} />
+                  ) : null}
+                </div>
               ) : (
                 <div className="space-y-2">
                   {promptEntries.map(([predictor, prompt]) => (
@@ -349,8 +475,8 @@ function NodeBody({
                       label={predictor}
                       prompt={prompt}
                       parentPrompt={view.parentPrompt[predictor] ?? ""}
-                      mode={promptViewMode}
-                      hasParent={Object.keys(view.parentPrompt).length > 0}
+                      mode={effectiveView}
+                      hasParent={hasParent}
                     />
                   ))}
                 </div>
@@ -359,13 +485,23 @@ function NodeBody({
           ) : null}
 
           <Section
-            title={msg("trajectory.drawer.section.minibatch")}
-            info={msg("trajectory.drawer.section.minibatch.explain")}
+            title={msg(
+              isBlackbox
+                ? "trajectory.blackbox.section.feedback"
+                : "trajectory.drawer.section.minibatch",
+            )}
+            info={msg(
+              isBlackbox
+                ? "trajectory.blackbox.section.feedback.explain"
+                : "trajectory.drawer.section.minibatch.explain",
+            )}
           >
             <MinibatchPanel
-              entries={minibatch}
+              entries={scorerEntries}
               valsetRows={valsetRows}
-              iteration={view.iteration}
+              iteration={isBlackbox ? null : view.iteration}
+              scorerFeedback={isBlackbox}
+              caseLabels={hasCases}
             />
           </Section>
         </div>
@@ -441,9 +577,15 @@ function MinibatchPanel({
   entries,
   valsetRows,
   iteration,
+  scorerFeedback,
+  caseLabels,
 }: {
   entries: MinibatchEntry[];
   valsetRows: ValsetRow[];
+  scorerFeedback: boolean;
+  // Whether a black-box entry's case is worth naming: a single-task run scores
+  // one thing, so its entries carry no case.
+  caseLabels: boolean;
   // GEPA iteration of the selected node. When set, the panel shows only the
   // feedback events emitted while that iteration's propose() was running —
   // the 3-ish entries that actually informed accepting / rejecting the node.
@@ -466,7 +608,9 @@ function MinibatchPanel({
   if (recent.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-border/50 bg-background/40 px-3 py-3 text-[11px] text-muted-foreground">
-        {msg("trajectory.minibatch.no_data")}
+        {msg(
+          scorerFeedback ? "trajectory.blackbox.feedback.no_data" : "trajectory.minibatch.no_data",
+        )}
       </div>
     );
   }
@@ -477,6 +621,8 @@ function MinibatchPanel({
           key={entry.sequence}
           entry={entry}
           valsetRow={valsetById.get(entry.example_id) ?? null}
+          scorerFeedback={scorerFeedback}
+          caseLabels={caseLabels}
         />
       ))}
     </ol>
@@ -486,11 +632,16 @@ function MinibatchPanel({
 function MinibatchEntryCard({
   entry,
   valsetRow,
+  scorerFeedback,
+  caseLabels,
 }: {
   entry: MinibatchEntry;
   valsetRow: ValsetRow | null;
+  scorerFeedback: boolean;
+  caseLabels: boolean;
 }) {
-  const passed = entry.score > 0;
+  // A scorer's score lives on its own scale, so it is neither passed nor failed.
+  const passed = !scorerFeedback && entry.score > 0;
   // Render the example exactly like a validation example (ValsetFieldGroups):
   // inputs with empty fields dropped, the candidate answer as a ReAct chat turn
   // with replay metadata folded into a disclosure, and the expected answer. The
@@ -505,12 +656,28 @@ function MinibatchEntryCard({
     <li className="overflow-hidden rounded-lg border border-[#DDD4C8]/60 bg-background/70 shadow-[0_1px_2px_rgba(28,22,18,0.02)]">
       <div className="flex items-center justify-between gap-2 border-b border-border/30 bg-[#F8F4EF]/60 px-3 py-2">
         <div className="flex items-center gap-2 text-[11px]">
-          <StatusChip passed={passed} />
-          <span className="font-mono text-[10px] text-muted-foreground" dir="ltr">
-            #{entry.example_id}
-          </span>
+          {scorerFeedback ? null : <StatusChip passed={passed} />}
+          {scorerFeedback ? (
+            caseLabels && entry.example_id !== "?" ? (
+              <span className="font-mono text-[10px] text-muted-foreground" dir="ltr">
+                {formatMsg("trajectory.blackbox.cases.case_label", {
+                  id: displayCaseId(entry.example_id),
+                })}
+              </span>
+            ) : null
+          ) : (
+            <span className="font-mono text-[10px] text-muted-foreground" dir="ltr">
+              #{entry.example_id}
+            </span>
+          )}
         </div>
-        <HelpTip text={msg("trajectory.minibatch.score_label.explain")}>
+        <HelpTip
+          text={msg(
+            scorerFeedback
+              ? "trajectory.blackbox.score_label.explain"
+              : "trajectory.minibatch.score_label.explain",
+          )}
+        >
           <span className="inline-flex items-baseline gap-1.5">
             <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
               {msg("trajectory.minibatch.score_label")}
@@ -518,10 +685,12 @@ function MinibatchEntryCard({
             <span
               className={cn(
                 "font-mono tabular-nums text-[11px]",
-                passed ? "font-semibold text-foreground" : "text-muted-foreground",
+                passed || scorerFeedback
+                  ? "font-semibold text-foreground"
+                  : "text-muted-foreground",
               )}
             >
-              {entry.score.toFixed(2)}
+              {scorerFeedback ? formatBlackboxScore(entry.score) : entry.score.toFixed(2)}
             </span>
           </span>
         </HelpTip>
@@ -538,7 +707,9 @@ function MinibatchEntryCard({
           />
         ) : null}
 
-        {entry.feedback.length > 0 ? <FeedbackBlock body={entry.feedback} /> : null}
+        {entry.feedback.length > 0 ? (
+          <FeedbackBlock body={entry.feedback} scorer={scorerFeedback} />
+        ) : null}
       </div>
     </li>
   );
@@ -1434,12 +1605,22 @@ function AgentTurnMeta({ entries }: { entries: Array<[string, string]> }) {
   );
 }
 
-function FeedbackBlock({ body }: { body: string }) {
+function FeedbackBlock({ body, scorer }: { body: string; scorer: boolean }) {
   return (
     <div className="space-y-1">
-      <HelpTip text={msg("trajectory.minibatch.feedback_label.explain")}>
+      <HelpTip
+        text={msg(
+          scorer
+            ? "trajectory.minibatch.scorer_feedback_label.explain"
+            : "trajectory.minibatch.feedback_label.explain",
+        )}
+      >
         <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {msg("trajectory.minibatch.feedback_label")}
+          {msg(
+            scorer
+              ? "trajectory.minibatch.scorer_feedback_label"
+              : "trajectory.minibatch.feedback_label",
+          )}
         </div>
       </HelpTip>
       <div
@@ -1640,17 +1821,22 @@ function PromptKindHeader({
   isCode,
   label,
   decomposed = false,
+  kindLabel,
 }: {
   isCode: boolean;
   label: string;
   decomposed?: boolean;
+  // Names the kind outright: a black-box part is whatever its content parses as.
+  kindLabel?: string;
 }) {
   const KindIcon = isCode ? Code : TextAlignLeft;
-  const kindText = decomposed
-    ? msg("trajectory.prompt.kind.module")
-    : isCode
-      ? msg("trajectory.prompt.kind.code")
-      : msg("trajectory.prompt.kind.instructions");
+  const kindText =
+    kindLabel ??
+    (decomposed
+      ? msg("trajectory.prompt.kind.module")
+      : isCode
+        ? msg("trajectory.prompt.kind.code")
+        : msg("trajectory.prompt.kind.instructions"));
   return (
     <div className="mb-2 flex items-center justify-between gap-2">
       <span className="inline-flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2074,7 +2260,11 @@ function ToolsViewToggle({
       onChange={onChange}
       ariaLabel={msg("trajectory.prompt.react.tools.view_aria")}
       options={[
-        { value: "plain", label: msg("trajectory.prompt.react.tools.view_plain"), icon: TextAlignLeft },
+        {
+          value: "plain",
+          label: msg("trajectory.prompt.react.tools.view_plain"),
+          icon: TextAlignLeft,
+        },
         {
           value: "compare",
           label: msg("trajectory.prompt.react.tools.view_compare"),
@@ -2411,7 +2601,17 @@ function Section({
   );
 }
 
-type View = "prompt" | "diff";
+type View = "prompt" | "diff" | "preview";
+
+// How a black-box version's raw view is named: the recipe's word when it has
+// one, else by what the content is.
+type BlackboxRawView = "prompt" | "text" | "code";
+
+interface BlackboxToggle {
+  canPreview: boolean;
+  hasParent: boolean;
+  raw: BlackboxRawView;
+}
 
 function usePromptView(): readonly [View, (v: View) => void] {
   const [view, setViewState] = useState<View>("diff");
@@ -2419,7 +2619,7 @@ function usePromptView(): readonly [View, (v: View) => void] {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stored = window.localStorage.getItem(DIFF_VIEW_KEY);
-    if (stored === "prompt" || stored === "diff") setViewState(stored);
+    if (stored === "prompt" || stored === "diff" || stored === "preview") setViewState(stored);
   }, []);
 
   const setView = (v: View) => {
@@ -2438,17 +2638,55 @@ function PromptViewToggle({
   view,
   onChange,
   isModule,
+  blackbox = null,
 }: {
   view: View;
   onChange: (v: View) => void;
   isModule: boolean;
+  blackbox?: BlackboxToggle | null;
 }) {
+  if (blackbox !== null) {
+    const options: Array<SegmentedOption<View>> = [];
+    if (blackbox.canPreview) {
+      options.push({
+        value: "preview",
+        label: msg("optimization.blackbox.versions.view.preview"),
+        icon: Eye,
+      });
+    }
+    options.push(
+      blackbox.raw === "code"
+        ? { value: "prompt", label: msg("optimization.blackbox.versions.view.code"), icon: Code }
+        : {
+            value: "prompt",
+            label: msg(
+              blackbox.raw === "prompt"
+                ? "trajectory.drawer.toggle.prompt"
+                : "trajectory.blackbox.section.text",
+            ),
+            icon: TextAlignLeft,
+          },
+    );
+    if (blackbox.hasParent) {
+      options.push({ value: "diff", label: msg("trajectory.drawer.toggle.diff"), icon: GitDiff });
+    }
+    return (
+      <SegmentedToggle
+        value={view}
+        onChange={onChange}
+        ariaLabel={msg("trajectory.blackbox.toggle.aria")}
+        options={options}
+      />
+    );
+  }
   return (
     <SegmentedToggle
       value={view}
       onChange={onChange}
       ariaLabel={
-        isModule ? msg("trajectory.drawer.toggle.module.aria") : msg("trajectory.drawer.toggle.aria")
+        isModule
+          ? msg("trajectory.drawer.toggle.module.aria")
+          : msg("trajectory.drawer.toggle.aria")
       }
       options={[
         {
@@ -2662,25 +2900,21 @@ function DiffRowView({ row }: { row: DiffRow }) {
         {prefix}
       </span>
       <span className="whitespace-pre-wrap" style={{ wordBreak: "break-word", flex: 1 }}>
-        {shown === null ? (
-          row.text.length === 0 ? (
-            "​"
-          ) : (
-            row.text
-          )
-        ) : shown.length === 0 ? (
-          "​"
-        ) : (
-          shown.map((s, idx) =>
-            (isAdded ? s.kind === "added" : s.kind === "removed") ? (
-              <span key={idx} style={{ background: emphasis, borderRadius: "2px" }}>
-                {s.text}
-              </span>
-            ) : (
-              <span key={idx}>{s.text}</span>
-            ),
-          )
-        )}
+        {shown === null
+          ? row.text.length === 0
+            ? "​"
+            : row.text
+          : shown.length === 0
+            ? "​"
+            : shown.map((s, idx) =>
+                (isAdded ? s.kind === "added" : s.kind === "removed") ? (
+                  <span key={idx} style={{ background: emphasis, borderRadius: "2px" }}>
+                    {s.text}
+                  </span>
+                ) : (
+                  <span key={idx}>{s.text}</span>
+                ),
+              )}
       </span>
     </div>
   );
@@ -2742,6 +2976,289 @@ function PromptDiff({
         </div>
       </div>
     </div>
+  );
+}
+
+interface BlackboxPart {
+  key: string;
+  label: string;
+  text: string;
+  kind: RenderKind;
+}
+
+function toBlackboxParts(entries: Array<[string, string]>): BlackboxPart[] {
+  return entries.map(([key, text]) => ({
+    key,
+    // GEPA's synthetic key for a plain-string candidate names nothing the user wrote.
+    label: key === BLACKBOX_STR_CANDIDATE_KEY ? "" : key,
+    text,
+    kind: detectRenderKind(text),
+  }));
+}
+
+const BLACKBOX_KIND_LABEL = {
+  markdown: "optimization.blackbox.versions.kind.markdown",
+  svg: "optimization.blackbox.versions.kind.svg",
+  html: "optimization.blackbox.versions.kind.html",
+  json: "optimization.blackbox.versions.kind.json",
+  python: "optimization.blackbox.versions.kind.python",
+  code: "optimization.blackbox.versions.kind.code",
+} as const satisfies Record<RenderKind, MessageKey>;
+
+const BLACKBOX_KIND_SECTION = {
+  markdown: "trajectory.blackbox.section.text",
+  svg: "optimization.blackbox.versions.kind.svg",
+  html: "optimization.blackbox.versions.kind.html",
+  json: "optimization.blackbox.versions.kind.json",
+  python: "trajectory.blackbox.section.code",
+  code: "trajectory.blackbox.section.code",
+} as const satisfies Record<RenderKind, MessageKey>;
+
+// What to call a black-box version: the recipe's word when the run has one,
+// else the one kind its content parses as, else just "version".
+function blackboxSectionKey(
+  recipe: BlackboxTrajectoryContext["recipe"],
+  parts: BlackboxPart[],
+): MessageKey {
+  if (recipe === "prompt") return "trajectory.blackbox.section.prompt";
+  if (recipe === "code") return "trajectory.blackbox.section.code";
+  const kinds = new Set(parts.map((part) => part.kind));
+  const [only] = kinds;
+  return kinds.size === 1 && only !== undefined
+    ? BLACKBOX_KIND_SECTION[only]
+    : "trajectory.blackbox.section.version";
+}
+
+// GEPA scores a black-box candidate in two passes: the reflection step's
+// mini-batch inside propose(), whose feedback carries that iteration, and —
+// once accepted — a full sweep over the validation cases, which runs outside
+// any iteration and arrives untagged straight after. The seed's sweep is
+// everything before the first tagged entry.
+function scorerEntriesForNode(
+  entries: MinibatchEntry[],
+  iteration: number | null,
+): MinibatchEntry[] {
+  const ordered = [...entries].sort((a, b) => a.sequence - b.sequence);
+  if (iteration === null) {
+    const firstTagged = ordered.findIndex((entry) => entry.iteration !== null);
+    return firstTagged === -1 ? ordered : ordered.slice(0, firstTagged);
+  }
+  let last = -1;
+  for (let i = ordered.length - 1; i >= 0; i -= 1) {
+    if (ordered[i]?.iteration === iteration) {
+      last = i;
+      break;
+    }
+  }
+  if (last === -1) return [];
+  const scoped = ordered.filter((entry) => entry.iteration === iteration);
+  for (const entry of ordered.slice(last + 1)) {
+    if (entry.iteration !== null) break;
+    scoped.push(entry);
+  }
+  return scoped;
+}
+
+// The latest note per case: a full sweep's note supersedes the mini-batch's.
+function scorerNotesByCase(entries: MinibatchEntry[]): ReadonlyMap<string, MinibatchEntry> {
+  const notes = new Map<string, MinibatchEntry>();
+  for (const entry of entries) notes.set(entry.example_id, entry);
+  return notes;
+}
+
+// Black-box scores live on the scorer's own scale, so a case cell shades from
+// the lowest score in the set to the highest instead of pass/fail — unless every
+// score already sits in [0, 1], which reads as a fraction as it is.
+function caseShade(
+  score: number,
+  min: number,
+  max: number,
+  unit: boolean,
+): { background: string; color: string } {
+  const t = unit ? score : max > min ? (score - min) / (max - min) : 0.5;
+  const clamped = Math.min(1, Math.max(0, t));
+  const mix = (from: number, to: number) => Math.round(from + (to - from) * clamped);
+  return {
+    background: `rgb(${mix(168, 138)}, ${mix(90, 154)}, ${mix(59, 91)})`,
+    color: clamped >= 0.5 ? "#2a3812" : "#4a1c0a",
+  };
+}
+
+function BlackboxCasesGrid({
+  examples,
+  pinnedId,
+  onPin,
+  notes,
+}: {
+  examples: PerExampleScore[];
+  pinnedId: string | null;
+  onPin: (id: string) => void;
+  notes: ReadonlyMap<string, MinibatchEntry>;
+}) {
+  const focused = pinnedId === null ? null : (examples.find((e) => e.id === pinnedId) ?? null);
+  const focusedIndex = focused === null ? -1 : examples.indexOf(focused);
+  const scores = examples.map((e) => e.score);
+  const min = Math.min(...scores);
+  const max = Math.max(...scores);
+  const unit = scores.every((score) => score >= 0 && score <= 1);
+  const note = focused === null ? null : (notes.get(focused.id) ?? null);
+
+  return (
+    <div className="space-y-2">
+      <div className="text-[10px] text-muted-foreground tabular-nums">
+        {formatMsg("trajectory.blackbox.cases.range", {
+          min: formatBlackboxScore(min),
+          max: formatBlackboxScore(max),
+        })}
+      </div>
+      <div
+        className="flex flex-wrap gap-1"
+        role="grid"
+        aria-label={msg("trajectory.blackbox.section.cases")}
+      >
+        {examples.map((ex, idx) => {
+          const isPinned = pinnedId === ex.id;
+          const shade = caseShade(ex.score, min, max, unit);
+          return (
+            <button
+              key={ex.id}
+              type="button"
+              onClick={() => onPin(ex.id)}
+              aria-label={formatMsg("trajectory.blackbox.cases.cell_label", {
+                id: idx + 1,
+                score: formatBlackboxScore(ex.score),
+              })}
+              aria-pressed={isPinned}
+              className="relative rounded-sm font-mono text-[9px] tabular-nums leading-none transition-transform hover:scale-110 focus:scale-110 focus:outline-none"
+              style={{
+                width: 24,
+                height: 24,
+                background: shade.background,
+                color: shade.color,
+                outline: isPinned ? "2px solid #1c1612" : "none",
+                outlineOffset: isPinned ? "1px" : undefined,
+                boxShadow: isPinned ? "inset 0 0 0 1px rgba(28, 22, 18, 0.45)" : undefined,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 flex items-center justify-center font-semibold opacity-70"
+              >
+                {idx + 1}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {focused !== null ? (
+        <div className="overflow-hidden rounded-lg border border-[#DDD4C8]/60 bg-background/70 shadow-[0_1px_2px_rgba(28,22,18,0.02)]">
+          <div className="flex items-center justify-between gap-2 border-b border-border/30 bg-[#F8F4EF]/60 px-3 py-2">
+            <span className="font-mono text-[10px] text-muted-foreground" dir="ltr">
+              {formatMsg("trajectory.blackbox.cases.case_label", { id: focusedIndex + 1 })}
+            </span>
+            <HelpTip text={msg("trajectory.blackbox.score_label.explain")}>
+              <span className="inline-flex items-baseline gap-1.5">
+                <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {msg("trajectory.minibatch.score_label")}
+                </span>
+                <span className="font-mono tabular-nums text-[11px] font-semibold text-foreground">
+                  {formatBlackboxScore(focused.score)}
+                </span>
+              </span>
+            </HelpTip>
+          </div>
+          <div className="space-y-2.5 px-3 pb-3 pt-2.5">
+            {note !== null && note.feedback.length > 0 ? (
+              <FeedbackBlock body={note.feedback} scorer />
+            ) : (
+              <div className="text-[11px] text-muted-foreground italic">
+                {msg("trajectory.blackbox.cases.no_feedback")}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// One part of a black-box version: a dict candidate's parts each carry their
+// key and kind; a plain-string candidate is one unlabeled part.
+function BlackboxEntry({
+  part,
+  parentText,
+  mode,
+  hasParent,
+}: {
+  part: BlackboxPart;
+  parentText: string;
+  mode: View;
+  hasParent: boolean;
+}) {
+  const kindLabel = msg(BLACKBOX_KIND_LABEL[part.kind]);
+  return (
+    <div className="overflow-hidden rounded-md border border-border/40 bg-background/60 p-3">
+      {part.label.length > 0 ? (
+        <PromptKindHeader
+          isCode={part.kind !== "markdown"}
+          label={part.label}
+          kindLabel={kindLabel}
+        />
+      ) : null}
+      {mode === "diff" && hasParent ? (
+        <PromptDiff before={parentText} after={part.text} />
+      ) : mode === "preview" && isDrawable(part.kind) ? (
+        <RenderedText
+          text={part.text}
+          kind={part.kind}
+          title={part.label.length > 0 ? part.label : kindLabel}
+        />
+      ) : (
+        <BlackboxPlainView part={part} />
+      )}
+    </div>
+  );
+}
+
+function BlackboxPlainView({ part }: { part: BlackboxPart }) {
+  if (part.kind === "python" || part.kind === "code") return <PromptCodeView value={part.text} />;
+  return (
+    <pre
+      className="text-xs whitespace-pre-wrap leading-relaxed font-mono text-foreground/90"
+      dir={part.kind === "markdown" ? "auto" : "ltr"}
+      style={{ wordBreak: "break-word" }}
+    >
+      {part.kind === "json" ? formatJson(part.text) : part.text}
+    </pre>
+  );
+}
+
+// Images the scorer attached to this version's evaluation (a rendered model, a
+// plot), shown under the version in preview mode. Several renders page through
+// the shared carousel; a single one is shown in place.
+function BlackboxRenders({ images }: { images: ReadonlyArray<{ key: string; src: string }> }) {
+  const only = images.length === 1 ? images[0] : null;
+  if (only) return <RenderFigure image={only} />;
+  return (
+    <Carousel
+      items={images}
+      itemKey={(image) => image.key}
+      renderItem={(image) => <RenderFigure image={image} />}
+      fluid
+      ariaLabel={msg("trajectory.blackbox.renders.carousel_aria")}
+    />
+  );
+}
+
+function RenderFigure({ image }: { image: { key: string; src: string } }) {
+  return (
+    <figure className="select-text overflow-hidden rounded-md border border-border/40 bg-background/60 p-3">
+      <img
+        src={image.src}
+        alt={image.key}
+        className="mx-auto max-h-[28rem] max-w-full object-contain"
+      />
+    </figure>
   );
 }
 

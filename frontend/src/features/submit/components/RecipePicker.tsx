@@ -2,24 +2,30 @@
 
 import type { ComponentType } from "react";
 
-import { ChatText, Code, Cube, Repeat, RocketLaunch } from "@/shared/ui/icons";
+import { Cube, Repeat, RocketLaunch } from "@/shared/ui/icons";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { Carousel } from "@/features/agent-panel";
 
+import { wizardRecipe, type BlackboxRecipe } from "../hooks/use-blackbox-wizard";
 import { BannerFrame, GArrow, GBar, GBox, GWire, PickerSlide } from "./steps/PickerSlide";
 
-export type Recipe = "prompt" | "program" | "code" | "anything";
+export type Recipe = "program" | "anything";
 
-const RECIPE_IDS: Recipe[] = ["prompt", "program", "code", "anything"];
-
-/** The recipe named by a `?recipe=` deep link, or null when absent or unknown. */
-export function parseRecipe(value: string | null): Recipe | null {
-  return RECIPE_IDS.includes(value as Recipe) ? (value as Recipe) : null;
-}
-
-/** Recipes other than the DSPy "program" flow all run on the black-box spine. */
-export function isBlackboxRecipe(recipe: Recipe): recipe is Exclude<Recipe, "program"> {
-  return recipe !== "program";
+/**
+ * What a `?recipe=` deep link or clone link names, or null when absent or
+ * unknown. A black-box link carries the kind of starting point the run
+ * persists — `code`, `anything`, or `prompt` from before prompts folded
+ * into text — which lands on the Anything slide and preselects that kind
+ * in the wizard's Starting point step.
+ */
+export function parseRecipeLink(
+  value: string | null,
+): { recipe: Recipe; kind: BlackboxRecipe } | null {
+  if (value === "program") return { recipe: "program", kind: "anything" };
+  if (value === "prompt" || value === "code" || value === "anything") {
+    return { recipe: "anything", kind: wizardRecipe(value) };
+  }
+  return null;
 }
 
 type MessageKey = Parameters<typeof msg>[0];
@@ -29,10 +35,8 @@ const RECIPES: Array<{
   Icon: ComponentType<{ className?: string }>;
   Banner: ComponentType;
 }> = [
-  { id: "prompt", Icon: ChatText, Banner: PromptBanner },
-  { id: "program", Icon: RocketLaunch, Banner: ProgramBanner },
-  { id: "code", Icon: Code, Banner: CodeBanner },
   { id: "anything", Icon: Cube, Banner: AnythingBanner },
+  { id: "program", Icon: RocketLaunch, Banner: ProgramBanner },
 ];
 
 function recipeTitle(id: Recipe): string {
@@ -63,7 +67,9 @@ export function RecipePicker({
       <Carousel
         items={RECIPES}
         itemKey={(r) => r.id}
-        renderItem={(r) => <RecipeSlide recipe={r} onChoose={onChoose} />}
+        renderItem={(r) => (
+          <RecipeSlide recipe={r} selected={r.id === current} onChoose={onChoose} />
+        )}
         // The question rides the carousel's own header row, opposite the
         // position counter, rather than sitting above it as a second block.
         title={
@@ -79,9 +85,11 @@ export function RecipePicker({
 
 function RecipeSlide({
   recipe,
+  selected,
   onChoose,
 }: {
   recipe: (typeof RECIPES)[number];
+  selected: boolean;
   onChoose: (recipe: Recipe) => void;
 }) {
   const { id, Icon, Banner } = recipe;
@@ -94,6 +102,7 @@ function RecipeSlide({
       tagline={msg(`submit.recipe.tagline.${id}` as MessageKey)}
       description={msg(`submit.recipe.${id}.desc` as MessageKey)}
       chooseName={formatMsg("submit.recipe.choose", { p1: title })}
+      selected={selected}
       onChoose={() => onChoose(id)}
     />
   );
@@ -129,27 +138,6 @@ export function RecipeChip({ recipe, onChange }: { recipe: Recipe; onChange: () 
   );
 }
 
-function PromptBanner() {
-  return (
-    <BannerFrame>
-      {/* The system prompt is what gets rewritten; the model and its answer
-          stay fixed. */}
-      <GWire d="M96 44 H124" />
-      <GWire d="M168 44 H190" />
-      <GBox x={26} y={16} w={70} h={56} accent />
-      <GBar x={38} y={29} w={44} />
-      <GBar x={38} y={37} w={32} />
-      <GBar x={38} y={45} w={46} />
-      <GBar x={38} y={53} w={26} />
-      <GBox x={124} y={29} w={44} h={30} />
-      <GBar x={136} y={43} w={20} />
-      <GBox x={190} y={33} w={32} h={22} />
-      <GBar x={197} y={40} w={18} />
-      <GBar x={197} y={46} w={12} />
-    </BannerFrame>
-  );
-}
-
 function ProgramBanner() {
   return (
     <BannerFrame>
@@ -169,36 +157,6 @@ function ProgramBanner() {
       <GBar x={197} y={32} w={18} />
       <GBox x={184} y={62} w={44} h={16} />
       <GBar x={194} y={69} w={24} />
-    </BannerFrame>
-  );
-}
-
-function CodeBanner() {
-  return (
-    <BannerFrame>
-      {/* A script, run through the user's Python scorer; the score steers the
-          next rewrite. */}
-      <GWire d="M104 44 H132" />
-      <GArrow x={136} y={44} dir="right" />
-      <GWire d="M180 44 H198" />
-      <GBox x={26} y={16} w={78} h={56} accent />
-      <GBar x={38} y={29} w={44} />
-      <GBar x={46} y={37} w={40} />
-      <GBar x={46} y={45} w={28} />
-      <GBar x={38} y={53} w={50} />
-      <GBox x={136} y={29} w={44} h={30} />
-      <path
-        d="M150 44 L156 50 L166 38"
-        fill="none"
-        stroke="#3D2E22"
-        strokeOpacity={0.35}
-        strokeWidth={1.75}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <GBox x={198} y={33} w={26} h={22} />
-      <GBar x={204} y={40} w={14} />
-      <GBar x={204} y={46} w={9} />
     </BannerFrame>
   );
 }

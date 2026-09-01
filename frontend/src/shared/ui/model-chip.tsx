@@ -19,6 +19,8 @@ import type { CatalogModel, ModelConfig } from "@/shared/types/api";
 import { msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
+import { ProviderLogo } from "@/shared/ui/provider-logo";
+import { modelProviderSlug } from "@/shared/lib/model-provider";
 
 interface ModelChipProps {
   config: ModelConfig;
@@ -176,6 +178,11 @@ export function ModelChip({
       )}
       onClick={onClick}
     >
+      {!isEmpty && (
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border/45 bg-background shadow-sm">
+          <ProviderLogo slug={modelProviderSlug(config.name)} size={20} />
+        </span>
+      )}
       {/* The explanation tooltip lives only on the Info button below — hovering
           the card body itself must stay quiet. */}
       {content}

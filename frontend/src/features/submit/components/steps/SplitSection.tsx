@@ -11,14 +11,17 @@ import { msg } from "@/shared/lib/messages";
 import { useUserPrefs } from "@/features/settings";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
-import { SplitRecommendationCard } from "../SplitRecommendationCard";
+import { SplitRecommendationCard, type SplitPlanControls } from "../SplitRecommendationCard";
+
+export type SplitControls = SplitPlanControls &
+  Pick<SubmitWizardContext, "split" | "updateSplit" | "splitSum">;
 
 const MOBILE_NUMBER_INPUT_CLASS =
   "h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm";
 
 // Simple mode leaves the split to the server recommendation (splitMode
 // defaults to auto) and hides the whole train/val/test surface.
-export function SplitSection({ w }: { w: SubmitWizardContext }) {
+export function SplitSection({ w }: { w: SplitControls }) {
   const { prefs } = useUserPrefs();
   const { split, updateSplit, splitSum, splitMode } = w;
   if (!prefs.advancedMode) return null;

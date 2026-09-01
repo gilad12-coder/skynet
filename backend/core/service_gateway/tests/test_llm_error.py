@@ -47,6 +47,13 @@ def test_classify_known_and_unknown() -> None:
     assert llm_error.classify_llm_error("some unrelated failure") is None
 
 
+def test_classify_leaves_sandbox_failures_alone() -> None:
+    """A sandbox that timed out is not a provider timeout, so no provider explanation is prepended."""
+    raw = "scorer failed on the baseline: agent sandbox failed twice (ReadTimeout): The read operation timed out"
+    assert llm_error.classify_llm_error(raw) is None
+    assert llm_error.enrich_error_message(raw) == raw
+
+
 def test_capture_handler_records_latest_dspy_error() -> None:
     """The capture handler surfaces the most recent ERROR record from the dspy logger."""
     dspy_logger = logging.getLogger("dspy")

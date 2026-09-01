@@ -8,7 +8,6 @@ import {
   Plus,
   ShieldCheck,
 } from "@/shared/ui/icons";
-import { Badge } from "@/shared/ui/primitives/badge";
 import { Button } from "@/shared/ui/primitives/button";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
 import {
@@ -174,12 +173,6 @@ export function JobsTab({
               {filteredItems.length}
               {msg("auto.features.dashboard.components.jobstab.3")}
             </span>
-          )}
-          {activeCount > 0 && (
-            <Badge variant="secondary" className="text-xs">
-              {activeCount}
-              {msg("auto.features.dashboard.components.jobstab.1")}
-            </Badge>
           )}
           <ResetFiltersButton filters={{ activeCount, clearAll: clearAllFilters }} />
           <ResetColumnsButton resize={colResize} />

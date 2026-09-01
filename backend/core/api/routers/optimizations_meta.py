@@ -46,6 +46,11 @@ _PAYLOAD_MODEL_CONFIG_FIELDS = (
     "model_settings",
     "reflection_model_settings",
     "task_model_settings",
+    # Submissions persist ``model_dump(by_alias=True)``, so the stored job row
+    # carries the wire aliases rather than the field names above.
+    "model_config",
+    "reflection_model_config",
+    "task_model_config",
 )
 _PAYLOAD_MODEL_CONFIG_LISTS = (
     "generation_models",
@@ -61,7 +66,8 @@ def _sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     intended to surface back through the read API. This sanitiser walks every
     well-known ``ModelConfig`` slot — single-run model fields, grid-search
     model lists and a black-box scorer's ``llm()`` model — and runs each one
-    through :func:`strip_api_key`.
+    through :func:`strip_api_key`. A remote scorer's shared ``secret`` is
+    dropped for the same reason.
 
     Args:
         payload: Raw payload dict pulled off the job row.
@@ -79,8 +85,11 @@ def _sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, list):
             sanitised[field] = [strip_api_key(item) if isinstance(item, dict) else item for item in value]
     scorer = sanitised.get("scorer")
-    if isinstance(scorer, dict) and isinstance(scorer.get("model"), dict):
-        sanitised["scorer"] = {**scorer, "model": strip_api_key(scorer["model"])}
+    if isinstance(scorer, dict):
+        scorer = {key: value for key, value in scorer.items() if key != "secret"}
+        if isinstance(scorer.get("model"), dict):
+            scorer["model"] = strip_api_key(scorer["model"])
+        sanitised["scorer"] = scorer
     return sanitised
 
 

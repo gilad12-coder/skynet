@@ -1,9 +1,4 @@
-/**
- * Black-box ("optimize anything") run helpers.
- *
- * Black-box scores are raw scorer values — never a 0–100 percentage — so the
- * run page formats them verbatim instead of routing through `formatPercent`.
- */
+/** Black-box ("optimize anything") run helpers. */
 
 import type { ProgressEvent } from "@/shared/types/api";
 import type { ScorePoint } from "./extract-scores";
@@ -22,15 +17,4 @@ export function extractBlackboxScorePoints(events: ProgressEvent[]): ScorePoint[
     points.push({ trial, score, best: bestSoFar });
   }
   return points;
-}
-
-export function formatBlackboxScore(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  return String(Number(value.toFixed(4)) + 0);
-}
-
-export function formatBlackboxDelta(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  const rounded = Number(value.toFixed(4)) + 0;
-  return `${rounded >= 0 ? "+" : ""}${rounded}`;
 }

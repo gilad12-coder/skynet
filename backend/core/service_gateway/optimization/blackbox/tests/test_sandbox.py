@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import contextvars
+import logging
+import threading
 from typing import Any
 
+import httpx
 import pytest
 
 from core.config import Settings
@@ -12,8 +16,8 @@ from core.exceptions import ServiceError
 from .. import sandbox as sandbox_mod
 from ..sandbox import (
     _CREDENTIALS_MISSING,
-    _KILL_GRACE_SECONDS,
     _PACKAGE_MISSING,
+    KILL_GRACE_SECONDS,
     SANDBOX_TAG,
     CommandResult,
     SandboxSpec,
@@ -22,6 +26,7 @@ from ..sandbox import (
     VercelSandboxSession,
     sandbox_runtime_from_settings,
     sandbox_unavailable_reason,
+    unique_sandbox_name,
 )
 
 # The Vercel SDK is a declared dependency; skip the settings-availability
@@ -60,14 +65,61 @@ def _settings(monkeypatch: pytest.MonkeyPatch, **values: Any) -> Settings:
     return Settings(_env_file=None, **values)
 
 
-class _FakeCompleted:
-    """Stands in for the SDK's completed-process object."""
+class _FakeReader:
+    """One-shot text reader over a captured stream."""
 
-    def __init__(self, returncode: int, stdout: str = "", stderr: str = "") -> None:
-        """Record the process outcome."""
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
+    def __init__(self, text: str) -> None:
+        """Hold the stream's full text."""
+        self._text = text
+
+    def read(self) -> str:
+        """Return the whole stream."""
+        return self._text
+
+
+class _FakeProcess:
+    """Fake detached SDK process that finishes after a set number of refreshes."""
+
+    def __init__(self, returncode: int, stdout: str = "", stderr: str = "", polls_to_finish: int = 0) -> None:
+        """Configure the outcome and how many refreshes it takes to appear."""
+        self._final = returncode
+        self._left = polls_to_finish
+        self.returncode: int | None = returncode if polls_to_finish == 0 else None
+        self.stdout = _FakeReader(stdout)
+        self.stderr = _FakeReader(stderr)
+        self.refreshes = 0
+        self.killed = False
+
+    def refresh(self) -> None:
+        """Advance one poll, revealing the exit code once due."""
+        self.refreshes += 1
+        self._left -= 1
+        if self._left <= 0 and not self.killed:
+            self.returncode = self._final
+
+    def kill(self) -> None:
+        """Record the kill."""
+        self.killed = True
+
+
+class _FakeTime:
+    """Deterministic stand-in for the sandbox module's ``time``."""
+
+    def __init__(self, step: float = 0.0) -> None:
+        """Start the clock at zero, advancing ``step`` per ``monotonic`` call."""
+        self.now = 0.0
+        self._step = step
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        """Return the current time, then advance it."""
+        value = self.now
+        self.now += self._step
+        return value
+
+    def sleep(self, seconds: float) -> None:
+        """Record the requested delay without waiting."""
+        self.sleeps.append(seconds)
 
 
 class _FakeFs:
@@ -98,29 +150,33 @@ class _FakeFs:
 class _FakeBox:
     """Fake managed sandbox handle."""
 
-    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "") -> None:
+    def __init__(
+        self, returncode: int = 0, stdout: str = "", stderr: str = "", polls_to_finish: int = 0
+    ) -> None:
         """Configure the process result the box returns."""
         self.cwd = "/work"
         self.fs = _FakeFs()
         self.name = "box"
         self.runs: list[dict[str, Any]] = []
         self.exited = False
+        self.process: _FakeProcess | None = None
         self._returncode = returncode
         self._stdout = stdout
         self._stderr = stderr
+        self._polls_to_finish = polls_to_finish
 
-    def run_process(
+    def create_process(
         self,
         program: str,
         args: list[str],
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         kill_after: float | None = None,
-        capture_output: bool = False,
-    ) -> _FakeCompleted:
-        """Record the invocation and return the configured result."""
+    ) -> _FakeProcess:
+        """Record the invocation and hand back a detached fake process."""
         self.runs.append({"program": program, "args": args, "env": env, "kill_after": kill_after})
-        return _FakeCompleted(self._returncode, self._stdout, self._stderr)
+        self.process = _FakeProcess(self._returncode, self._stdout, self._stderr, self._polls_to_finish)
+        return self.process
 
     def __exit__(self, *args: Any) -> None:
         """Mark the box destroyed."""
@@ -149,16 +205,34 @@ class _FakeApiSession:
         return False
 
 
+_ACTIVE = contextvars.ContextVar("fake_vercel_active_session", default=None)
+
+
+class _TokenApiSession(_FakeApiSession):
+    """Fake session that binds and resets a real context variable, as the SDK does."""
+
+    def __enter__(self) -> _TokenApiSession:
+        """Bind the variable and remember the token."""
+        self._token = _ACTIVE.set(self)
+        super().__enter__()
+        return self
+
+    def __exit__(self, *args: Any) -> bool:
+        """Reset the variable, which only works in the context that set it."""
+        _ACTIVE.reset(self._token)
+        return super().__exit__(*args)
+
+
 def test_run_wraps_in_timeout_and_flags_timeouts() -> None:
     """A timed command is wrapped in ``timeout --signal=KILL`` and 124 reads as a timeout."""
     box = _FakeBox(returncode=124)
-    session = VercelSandboxSession(box, _FakeApiSession())
+    session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
 
     result = session.run("sleep 99", timeout_seconds=5)
 
     assert box.runs[0]["args"][0] == "-lc"
     assert box.runs[0]["args"][1].startswith("timeout --signal=KILL 5s bash -lc ")
-    assert box.runs[0]["kill_after"] == 5 + _KILL_GRACE_SECONDS
+    assert box.runs[0]["kill_after"] == 5 + KILL_GRACE_SECONDS
     assert result.timed_out is True
     assert result.exit_code == 124
 
@@ -166,7 +240,7 @@ def test_run_wraps_in_timeout_and_flags_timeouts() -> None:
 def test_run_without_timeout_is_not_wrapped() -> None:
     """A command with no timeout runs bare and a 124 exit is not called a timeout."""
     box = _FakeBox(returncode=124, stdout="hi")
-    session = VercelSandboxSession(box, _FakeApiSession())
+    session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
 
     result = session.run("echo hi")
 
@@ -176,10 +250,40 @@ def test_run_without_timeout_is_not_wrapped() -> None:
     assert result.stdout == "hi"
 
 
+def test_run_polls_a_slow_process_with_growing_delays(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A process that takes a while is watched with doubling sleeps, then its logs are read."""
+    box = _FakeBox(returncode=0, stdout="out", stderr="err", polls_to_finish=3)
+    session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
+    clock = _FakeTime()
+    monkeypatch.setattr(sandbox_mod, "time", clock)
+
+    result = session.run("make things")
+
+    assert box.process is not None
+    assert box.process.refreshes == 3
+    assert clock.sleeps == [1.0, 2.0, 4.0]
+    assert result.exit_code == 0
+    assert result.stdout == "out"
+    assert result.stderr == "err"
+
+
+def test_run_kills_a_process_that_outlives_its_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A process still running past kill_after plus slack is killed and reported as lost."""
+    box = _FakeBox(returncode=0, polls_to_finish=10**9)
+    session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
+    monkeypatch.setattr(sandbox_mod, "time", _FakeTime(step=30.0))
+
+    with pytest.raises(ServiceError, match="outlived"):
+        session.run("sleep forever", timeout_seconds=5)
+
+    assert box.process is not None
+    assert box.process.killed is True
+
+
 def test_write_files_creates_parents_and_read_file_round_trips() -> None:
     """Writing a nested path makes its parent; reading a missing path returns None."""
     box = _FakeBox()
-    session = VercelSandboxSession(box, _FakeApiSession())
+    session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
 
     session.write_files({"a/b/c.txt": "content", "top.txt": "x"})
 
@@ -193,7 +297,7 @@ def test_close_destroys_the_box_and_never_raises() -> None:
     """Close exits the box and the API session even when teardown throws."""
     box = _FakeBox()
     api_session = _FakeApiSession(fail_on_exit=True)
-    session = VercelSandboxSession(box, api_session)
+    session = VercelSandboxSession(box, api_session, contextvars.copy_context())
 
     session.close()
 
@@ -247,10 +351,12 @@ class _FakeApi:
         """Hold the session to hand back."""
         self._session = session
         self.service_options: Any = None
+        self.httpx_client_factory: Any = None
 
-    def session(self, service_options: Any = None) -> _FakeApiSession:
-        """Return the fake session, recording the options."""
+    def session(self, service_options: Any = None, httpx_client_factory: Any = None) -> _FakeApiSession:
+        """Return the fake session, recording the options and client factory."""
         self.service_options = service_options
+        self.httpx_client_factory = httpx_client_factory
         return self._session
 
 
@@ -259,12 +365,18 @@ def test_runtime_open_creates_a_tagged_sandbox(monkeypatch: pytest.MonkeyPatch) 
     box = _FakeBox()
     api_session = _FakeApiSession()
     fake_sync = _FakeSync(box)
+    fake_api = _FakeApi(api_session)
     monkeypatch.setattr(sandbox_mod, "vercel_sync", fake_sync)
-    monkeypatch.setattr(sandbox_mod, "vercel_api", _FakeApi(api_session))
+    monkeypatch.setattr(sandbox_mod, "vercel_api", fake_api)
     runtime = VercelSandboxRuntime(VercelCredentials(token="t", team_id="team", project_id="proj"), image="img")
 
     session = runtime.open(SandboxSpec(lifetime_seconds=630, env={"K": "v"}, name="job-1", tags={"skynet_job": "1"}))
 
+    client = fake_api.httpx_client_factory()
+    assert isinstance(client, httpx.Client)
+    assert client.timeout.read == 630
+    assert client.timeout.connect == 60.0
+    client.close()
     assert api_session.entered is True
     assert fake_sync.created["lifetime"] == 630
     assert fake_sync.created["env"] == {"K": "v"}
@@ -316,6 +428,53 @@ def test_runtime_open_closes_the_api_session_when_creation_fails(monkeypatch: py
     with pytest.raises(RuntimeError, match="no capacity"):
         runtime.open(SandboxSpec(lifetime_seconds=10))
     assert api_session.exited is True
+
+
+def test_runtime_open_keeps_the_api_session_in_a_private_context(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A box opened on a worker thread closes cleanly from another thread, and the worker's context stays clean."""
+    api_session = _TokenApiSession()
+    monkeypatch.setattr(sandbox_mod, "vercel_sync", _FakeSync(_FakeBox()))
+    monkeypatch.setattr(sandbox_mod, "vercel_api", _FakeApi(api_session))
+    runtime = VercelSandboxRuntime(VercelCredentials(token="t", team_id="team", project_id="proj"), image="img")
+    opened: dict[str, Any] = {}
+
+    def open_box() -> None:
+        """Open the box and note what the worker sees bound afterwards."""
+        opened["session"] = runtime.open(SandboxSpec(lifetime_seconds=10))
+        opened["active_after_open"] = _ACTIVE.get()
+
+    worker = threading.Thread(target=open_box)
+    worker.start()
+    worker.join()
+
+    assert api_session.entered is True
+    assert opened["active_after_open"] is None
+    with caplog.at_level(logging.ERROR, logger=sandbox_mod.logger.name):
+        opened["session"].close()
+    assert api_session.exited is True
+    assert caplog.records == []
+
+
+def test_unique_sandbox_name_sanitizes_the_stem_and_keeps_the_suffix_under_the_cap() -> None:
+    """The stem is lower-cased and reduced to ``[a-z0-9-]``; a long stem is trimmed, the suffix never."""
+    name = unique_sandbox_name("Skynet_Job.1")
+
+    assert name.startswith("skynet-job-1-")
+    assert len(name) == len("skynet-job-1-") + 8
+
+    long = unique_sandbox_name("skynet-" + "x" * 80)
+
+    assert len(long) == 60
+    assert long[:51] == ("skynet-" + "x" * 80)[:51]
+    assert long[51] == "-"
+    assert len(long[52:]) == 8
+
+
+def test_unique_sandbox_name_differs_per_call() -> None:
+    """Two boxes for one job never share a name, so parallel opens cannot collide on Vercel."""
+    assert unique_sandbox_name("skynet-job-1") != unique_sandbox_name("skynet-job-1")
 
 
 def test_runtime_construction_needs_the_sdk(monkeypatch: pytest.MonkeyPatch) -> None:

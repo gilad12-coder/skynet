@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
 
-from ..protocol import BudgetExhaustedError, EvalServer, PlateauReachedError, PlateauWatch, Task, candidate_key
+from ..protocol import (
+    BudgetExhaustedError,
+    EvalServer,
+    PlateauReachedError,
+    PlateauWatch,
+    ScorerAbortError,
+    Task,
+    candidate_key,
+)
 from .mocks import vowel_scorer
 
 
@@ -103,6 +112,27 @@ def test_scorer_crash_becomes_floor_score_with_feedback() -> None:
     assert server.used == 1
 
 
+def test_scorer_abort_is_not_floored() -> None:
+    """A scorer that asks to stop the run passes through instead of becoming a zero."""
+
+    def aborting(candidate: Any, case: Any = None) -> tuple[float, dict[str, Any]]:
+        """Abort on every version.
+
+        Args:
+            candidate: Ignored.
+            case: Ignored.
+
+        Raises:
+            ScorerAbortError: Always.
+        """
+        raise ScorerAbortError("harness is dead")
+
+    server = EvalServer(aborting, max_evals=5)
+
+    with pytest.raises(ScorerAbortError, match="harness is dead"):
+        server.evaluate("anything")
+
+
 def test_on_eval_fires_only_at_the_root() -> None:
     """The listener sees every evaluation once, whichever lane made it."""
     seen: list[tuple[int, float]] = []
@@ -184,3 +214,19 @@ def test_history_lists_distinct_versions_in_first_seen_order() -> None:
     assert first.side_info == {"vowels": 3}
     assert (second.count, second.first_eval, second.mean_score) == (1, 2, 0.0)
     assert [record.candidate for record in lane.history] == ["aaa", "xyz"]
+
+
+def test_evaluate_logs_a_debug_heartbeat_per_scorer_call(caplog: pytest.LogCaptureFixture) -> None:
+    """Each scorer call leaves a DEBUG line with its budget position and score for the verbose log view."""
+    server = EvalServer(lambda candidate, example: (0.25 * len(candidate), {}), max_evals=5)
+    lane = server.lane(3)
+
+    with caplog.at_level(logging.DEBUG, logger="core.service_gateway.optimization.blackbox.protocol"):
+        server.evaluate("aa")
+        lane.evaluate("aaa")
+
+    heartbeats = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert [r.getMessage() for r in heartbeats] == [
+        "scorer eval 1/5 score=0.500",
+        "scorer eval 2/5 score=0.750",
+    ]

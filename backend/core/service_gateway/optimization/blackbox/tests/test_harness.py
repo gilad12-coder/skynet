@@ -53,11 +53,34 @@ def test_pi_launch_wires_the_gateway_provider_and_json_stream() -> None:
     provider = models["providers"]["skynet"]
     assert provider["baseUrl"] == _GATEWAY.url
     assert provider["api"] == "openai-completions"
-    assert provider["apiKey"] == "SKYNET_API_KEY"
+    assert provider["apiKey"] == "!printenv SKYNET_API_KEY"
     assert provider["models"][0]["id"] == "target-model"
     assert 'cp .skynet/pi/models.json "$HOME/.pi/agent/models.json"' in launch.run_command
     assert "pi --mode json --no-session --provider skynet --model" in launch.run_command
     assert launch.parse_output is _parse_pi_output
+
+
+def test_pi_launch_pins_the_harness_version_ahead_of_the_image_copy() -> None:
+    """The install pins pi, prefers the pinned copy on PATH and logs the version that runs."""
+    launch = build_launch(_target(BLACKBOX_HARNESS_PI), _GATEWAY)
+
+    assert launch.install_command is not None
+    assert "@earendil-works/pi-coding-agent@0.84.1" in launch.install_command
+    assert '[ "$(pi --version 2>/dev/null)" = "0.84.1" ]' in launch.install_command
+    assert launch.install_command.endswith("&& pi --version")
+    for command in (launch.install_command, launch.run_command):
+        assert command.startswith('export PATH="$HOME/.skynet/pi/bin:$PATH";')
+
+
+def test_build_launch_drops_the_openrouter_routing_prefix() -> None:
+    """The gateway fronts OpenRouter itself, so the model id it sees has no ``openrouter/`` prefix."""
+    target = BlackboxTarget(kind=BLACKBOX_TARGET_AGENT, harness=BLACKBOX_HARNESS_PI, model="openrouter/acme/agent-1")
+
+    launch = build_launch(target, _GATEWAY)
+
+    models = json.loads(launch.files[".skynet/pi/models.json"])
+    assert models["providers"]["skynet"]["models"][0]["id"] == "acme/agent-1"
+    assert launch.env["SKYNET_MODEL"] == "acme/agent-1"
 
 
 def test_pi_launch_carries_the_base_environment() -> None:

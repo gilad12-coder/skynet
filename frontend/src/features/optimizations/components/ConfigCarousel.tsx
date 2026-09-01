@@ -11,7 +11,9 @@ import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { cn } from "@/shared/lib/utils";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
+import { arrowPageStep } from "@/shared/lib/arrow-paging";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
+import { modelProviderSlug } from "@/shared/lib/model-provider";
 import { ReasoningPill } from "./ui-primitives";
 
 export type ConfigSlide = {
@@ -192,16 +194,12 @@ export function ConfigCarousel({
       aria-label={currentSlide.label}
       tabIndex={0}
       onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        const forwardKey = isRtl ? "ArrowLeft" : "ArrowRight";
-        const backKey = isRtl ? "ArrowRight" : "ArrowLeft";
-        if (event.key === forwardKey) {
-          event.preventDefault();
-          goToSlide(activeSlide + 1);
-        } else if (event.key === backKey) {
-          event.preventDefault();
-          goToSlide(activeSlide - 1);
-        }
+        // Arrows page from anywhere in the shell — the step rail and footer
+        // buttons keep focus after a click — not only from the region itself.
+        const step = arrowPageStep(event, isRtl);
+        if (step === 0) return;
+        event.preventDefault();
+        goToSlide(activeSlide + step);
       }}
     >
       <div className="flex items-center justify-between gap-5 border-b border-border/60 bg-secondary/35 px-5 py-4 sm:px-6 sm:py-5 lg:px-8">
@@ -370,13 +368,6 @@ function resolveModelParameter(cfg: Record<string, unknown>, key: ModelParameter
         : Number.NaN;
 
   return Number.isFinite(value) ? value : MODEL_PARAMETER_DEFAULTS[key];
-}
-
-/** Resolve a routed model id to the provider mark used by the config card. */
-function modelProviderSlug(id: string): string {
-  const parts = id.split("/");
-  const slug = (parts[0] === "openrouter" && parts.length > 2 ? parts[1] : parts[0]) ?? id;
-  return slug === "x-ai" ? "xai" : slug;
 }
 
 /**

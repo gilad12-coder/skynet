@@ -69,30 +69,6 @@ export function sideInfoImages(sideInfo: Record<string, unknown> | null | undefi
   return images;
 }
 
-/** Everything else the scorer said, flattened to display strings. */
-export function sideInfoNotes(
-  sideInfo: Record<string, unknown> | null | undefined,
-): Array<[string, string]> {
-  const notes: Array<[string, string]> = [];
-  for (const [key, value] of Object.entries(sideInfo ?? {})) {
-    if (isDataImage(value)) continue;
-    if (Array.isArray(value)) {
-      const rest = value.filter((item) => !isDataImage(item));
-      if (rest.length === 0) continue;
-      notes.push([
-        key,
-        rest.every((item) => typeof item === "string")
-          ? rest.join("\n")
-          : JSON.stringify(rest, null, 2),
-      ]);
-      continue;
-    }
-    if (value == null) continue;
-    notes.push([key, typeof value === "string" ? value : JSON.stringify(value, null, 2)]);
-  }
-  return notes;
-}
-
 /** Wrap an SVG so it centres and scales inside the sandboxed frame. */
 export function svgDocument(svg: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#fff}body{display:grid;place-items:center}svg{max-width:100%;max-height:100vh}</style></head><body>${svg}</body></html>`;
@@ -104,4 +80,9 @@ export function formatJson(text: string): string {
   } catch {
     return text;
   }
+}
+
+/** Whether a kind draws as something other than its source; code only has a source view. */
+export function isDrawable(kind: RenderKind): boolean {
+  return kind !== "python" && kind !== "code";
 }

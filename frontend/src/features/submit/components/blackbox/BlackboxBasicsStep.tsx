@@ -2,7 +2,9 @@
 
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
+import { HelpTip } from "@/shared/ui/help-tip";
 import { cn } from "@/shared/lib/utils";
+import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
@@ -30,6 +32,7 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
             {TERMS.optimization}
           </>
         }
+        tip="submit.name"
       >
         <Input
           placeholder={msg("auto.features.submit.components.steps.basicsstep.literal.1")}
@@ -40,7 +43,11 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
       </Field>
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label>{msg("auto.features.submit.components.steps.basicsstep.4")}</Label>
+          <Label>
+            <HelpTip text={tip("submit.description")}>
+              {msg("auto.features.submit.components.steps.basicsstep.4")}
+            </HelpTip>
+          </Label>
           <span
             className={cn(
               "text-[0.625rem] tabular-nums transition-colors",
@@ -65,7 +72,7 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
           className={TEXTAREA_CLASS}
         />
       </div>
-      <Field label={msg("submit.basics.privacy.label")}>
+      <Field label={msg("submit.basics.privacy.label")} tip="submit.privacy">
         <Segmented
           value={isPrivate ? "private" : "public"}
           onChange={(v) => setIsPrivate(v === "private")}

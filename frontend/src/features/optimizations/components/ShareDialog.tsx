@@ -139,7 +139,8 @@ export function ShareDialog({
     setSavingAccess(true);
     try {
       setState(await putSharing(optimizationId, { general_access: value }));
-      if (value !== "restricted") track(TelemetryEvent.ShareCreated, { kind: "optimization", mode: "link" });
+      if (value !== "restricted")
+        track(TelemetryEvent.ShareCreated, { kind: "optimization", mode: "link" });
       toast.success(msg("share.access_updated"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : msg("share.save_failed"));
@@ -488,7 +489,7 @@ export function ShareDialog({
                           ariaLabel={msg("share.copy_link")}
                           onCopied={() => toast.success(msg("share.link_copied"))}
                           onCopyError={() => toast.error(msg("clipboard.copy_failed"))}
-                          className="size-[44px] shrink-0 text-muted-foreground hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-0 sm:size-7 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                          className="shrink-0 focus-visible:bg-accent focus-visible:ring-0"
                         />
                       </TooltipButton>
                     </div>

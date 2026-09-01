@@ -61,6 +61,7 @@ from ..notifications import notify_job_completed
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.embedding_pipeline import embed_finished_job
+from ..service_gateway.optimization.blackbox.sandbox import sandbox_runtime_from_settings
 from ..service_gateway.optimization.blackbox.service import validate_blackbox_payload
 from ..service_gateway.optimization.core import _merge_usage_rows
 from ..service_gateway.optimization.trajectory import GEPA_STATE_FILENAME, GRID_PAIR_RESULT_FILENAME
@@ -937,6 +938,8 @@ class BackgroundWorker:
                         self._persist_gepa_checkpoint(optimization_id, gepa_dir, checkpoint_tracker, is_grid=is_grid)
                 if run_process is not None and run_process.is_alive():
                     self._terminate_run_process(run_process, optimization_id)
+                    if optimization_type == OPTIMIZATION_TYPE_BLACKBOX:
+                        self._stop_blackbox_sandboxes(optimization_id)
                 raise
             finally:
                 # The DB holds the checkpoint bytes for a resumable failure; the
@@ -1403,6 +1406,35 @@ class BackgroundWorker:
             logger.error("Optimization %s subprocess did not terminate cleanly", optimization_id)
         else:
             logger.info("Optimization %s subprocess terminated", optimization_id)
+
+    def _stop_blackbox_sandboxes(self, optimization_id: str) -> None:
+        """Stop the sandboxes a killed black-box job left running on Vercel.
+
+        The child closes its boxes on a normal exit, but a cancel, a stall or
+        a shutdown kills it before its ``finally`` blocks run, and a scorer
+        box would otherwise stay up until the lifetime ceiling. Never raises.
+
+        Args:
+            optimization_id: The job whose boxes to stop.
+        """
+        runtime = sandbox_runtime_from_settings(settings)
+        if runtime is None:
+            return
+        try:
+            stopped = runtime.stop_job_sandboxes(optimization_id)
+        except Exception as exc:  # isolation boundary: a failed sweep must not mask the job's outcome
+            logger.warning("Optimization %s: sandbox sweep failed: %s", optimization_id, exc)
+            return
+        if stopped == 0:
+            return
+        logger.info("Optimization %s: stopped %d sandbox(es) the job left running", optimization_id, stopped)
+        with contextlib.suppress(Exception):
+            self._job_store.append_log(
+                optimization_id,
+                level="INFO",
+                logger_name="core.worker",
+                message=f"Stopped {stopped} sandbox(es) the job left running",
+            )
 
     def _drain_subprocess_events(
         self,

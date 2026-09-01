@@ -6,8 +6,10 @@ import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import { Separator } from "@/shared/ui/primitives/separator";
 import { NumberInput } from "@/shared/ui/number-input";
+import { HelpTip } from "@/shared/ui/help-tip";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { cn } from "@/shared/lib/utils";
+import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
@@ -82,6 +84,7 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
       {strategyMode === "plateau" && (
         <Field
           label={msg("submit.blackbox.strategy.patience_label")}
+          tip="submit.blackbox.patience"
           htmlFor="bb-patience"
           hint={msg("submit.blackbox.strategy.patience_hint")}
         >
@@ -108,61 +111,69 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
         </div>
       )}
 
-      <div className="space-y-2">
-        <Label>{msg("submit.blackbox.engines.label")}</Label>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {engines.map((e) => {
-            const partsBlocked = seedMode === "parts" && !e.supports_parts;
-            const selectable = single && e.available && !partsBlocked;
-            const selected = single && engine === e.id;
-            const dimmed = !e.available || partsBlocked;
-            return (
-              <button
-                key={e.id}
-                type="button"
-                role={single ? "radio" : undefined}
-                aria-checked={single ? selected : undefined}
-                disabled={single ? !selectable : true}
-                onClick={() => setEngine(e.id)}
-                className={cn(
-                  "flex min-h-[44px] flex-col items-start gap-1 rounded-lg border p-3 text-start transition-colors",
-                  selected ? "border-primary bg-primary/5" : "border-border/50 bg-background/60",
-                  single && selectable && !selected && "cursor-pointer hover:border-primary/50",
-                  dimmed && "opacity-60",
-                  !single && "cursor-default",
-                )}
-              >
-                <span className="flex w-full items-center gap-2">
-                  <span className="text-sm font-medium">{e.label}</span>
-                  <span className="ms-auto flex gap-1">
-                    {e.supports_parts && (
-                      <Badge variant="outline" size="sm">
-                        {msg("submit.blackbox.engines.parts")}
-                      </Badge>
-                    )}
-                    {!e.available && (
-                      <Badge variant="secondary" size="sm">
-                        {msg("submit.blackbox.engines.unavailable")}
-                      </Badge>
-                    )}
+      {single && (
+        <div className="space-y-2">
+          <Label>
+            <HelpTip text={tip("submit.blackbox.engines")}>
+              {msg("submit.blackbox.engines.label")}
+            </HelpTip>
+          </Label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {engines.map((e) => {
+              const partsBlocked = seedMode === "parts" && !e.supports_parts;
+              const selectable = e.available && !partsBlocked;
+              const selected = engine === e.id;
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  disabled={!selectable}
+                  onClick={() => setEngine(e.id)}
+                  className={cn(
+                    "flex min-h-[44px] flex-col items-start gap-1 rounded-lg border p-3 text-start transition-colors",
+                    selected ? "border-primary bg-primary/5" : "border-border/50 bg-background/60",
+                    selectable && !selected && "cursor-pointer hover:border-primary/50",
+                    !selectable && "opacity-60",
+                  )}
+                >
+                  <span className="flex w-full items-center gap-2">
+                    <span className="text-sm font-medium">{e.label}</span>
+                    <span className="ms-auto flex gap-1">
+                      {e.supports_parts && (
+                        <Badge variant="outline" size="sm">
+                          {msg("submit.blackbox.engines.parts")}
+                        </Badge>
+                      )}
+                      {!e.available && (
+                        <Badge variant="secondary" size="sm">
+                          {msg("submit.blackbox.engines.unavailable")}
+                        </Badge>
+                      )}
+                    </span>
                   </span>
-                </span>
-                <span className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-                  {e.unavailable_reason ?? e.description}
-                </span>
-              </button>
-            );
-          })}
-          {engineCatalog && engines.length === 0 && (
-            <p className="text-xs text-muted-foreground">{msg("submit.blackbox.engines.none")}</p>
-          )}
+                  <span className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                    {e.unavailable_reason ?? e.description}
+                  </span>
+                </button>
+              );
+            })}
+            {engineCatalog && engines.length === 0 && (
+              <p className="text-xs text-muted-foreground">{msg("submit.blackbox.engines.none")}</p>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <Separator />
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <Field label={msg("submit.blackbox.budget.max_runs")} htmlFor="bb-max-runs">
+        <Field
+          label={msg("submit.blackbox.budget.max_runs")}
+          htmlFor="bb-max-runs"
+          tip="blackbox.config.budget_runs"
+        >
           <NumberInput
             id="bb-max-runs"
             value={maxScorerRuns}
@@ -173,7 +184,11 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
             className={MOBILE_NUMBER_INPUT_CLASS}
           />
         </Field>
-        <Field label={msg("submit.blackbox.budget.max_iterations")} htmlFor="bb-max-iterations">
+        <Field
+          label={msg("submit.blackbox.budget.max_iterations")}
+          htmlFor="bb-max-iterations"
+          tip="blackbox.config.budget_iterations"
+        >
           <NumberInput
             id="bb-max-iterations"
             value={maxIterations}
@@ -183,7 +198,11 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
             className={MOBILE_NUMBER_INPUT_CLASS}
           />
         </Field>
-        <Field label={msg("submit.blackbox.budget.stop_at")} htmlFor="bb-stop-at">
+        <Field
+          label={msg("submit.blackbox.budget.stop_at")}
+          htmlFor="bb-stop-at"
+          tip="blackbox.config.budget_stop"
+        >
           <Input
             id="bb-stop-at"
             inputMode="decimal"
@@ -198,7 +217,9 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
       <Separator />
 
       <div className="space-y-2">
-        <Label className="text-sm font-semibold">{TERMS.reflectionModel}</Label>
+        <Label className="text-sm font-semibold">
+          <HelpTip text={tip("blackbox.config.reflection_model")}>{TERMS.reflectionModel}</HelpTip>
+        </Label>
         <ModelChip
           config={reflectionModel}
           className={MOBILE_MODEL_CHIP_CLASS}

@@ -15,20 +15,26 @@ when a deployment has no Vercel credentials or asks for it outright.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import logging
 import math
 import os
 import posixpath
+import re
 import shlex
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import time
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
+
+import httpx
 
 from ....config import Settings
 from ....exceptions import ServiceError
@@ -50,9 +56,20 @@ logger = logging.getLogger(__name__)
 # ``timeout --signal=KILL`` exits 124 when it fired; 137 is the shell dying of the KILL itself.
 _TIMEOUT_EXIT_CODES = frozenset({124, 137})
 # Slack past the in-sandbox timeout before the service kills the wrapper as well.
-_KILL_GRACE_SECONDS = 15.0
+KILL_GRACE_SECONDS = 15.0
+# Detached processes are watched with short status polls; the delay doubles from
+# the floor to the cap so quick commands return fast and long runs poll gently.
+_POLL_FLOOR_SECONDS = 1.0
+_POLL_CAP_SECONDS = 8.0
+# Client-side last resort past ``kill_after`` before declaring the process lost.
+_POLL_DEADLINE_SLACK_SECONDS = 60.0
 # Every sandbox carries this tag so stragglers from a crashed worker can be found and destroyed.
 SANDBOX_TAG = {"skynet": "blackbox"}
+JOB_TAG = "skynet_job"
+_STOPPABLE_STATUSES = frozenset({"pending", "running"})
+_NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
+_NAME_MAX_CHARS = 60
+_NAME_SUFFIX_CHARS = 8
 _PACKAGE_MISSING = "The vercel-sandbox package is not installed."
 _CREDENTIALS_MISSING = "Agent sandboxes are not configured: set VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID."
 # The local runtime hands user code a bare environment: the interpreter that
@@ -165,18 +182,40 @@ class VercelCredentials:
     project_id: str
 
 
+def unique_sandbox_name(stem: str) -> str:
+    """Return ``stem`` in a form Vercel accepts, with a random suffix that keeps every open apart.
+
+    Vercel refuses to create a sandbox whose name is still taken in the
+    project, and a job opens boxes from several holdout threads at once (one
+    per case) and again on every retry, so a name derived from the job id
+    alone collides. The suffix survives the length cap: trimming falls on the
+    stem, never on the part that makes the name unique.
+
+    Args:
+        stem: The readable part, normally carrying the job id.
+
+    Returns:
+        ``<stem>-<8 hex chars>``: lower-case, ``[a-z0-9-]`` only, at most 60 characters.
+    """
+    safe = _NAME_UNSAFE.sub("-", stem.lower()).strip("-")
+    head = safe[: _NAME_MAX_CHARS - _NAME_SUFFIX_CHARS - 1].rstrip("-")
+    return f"{head}-{uuid.uuid4().hex[:_NAME_SUFFIX_CHARS]}"
+
+
 class VercelSandboxSession:
     """Session over one Vercel sandbox, bound to the SDK session that created it."""
 
-    def __init__(self, box: Any, api_session: Any) -> None:
+    def __init__(self, box: Any, api_session: Any, context: contextvars.Context) -> None:
         """Wrap an open sandbox.
 
         Args:
             box: The SDK's managed sandbox handle.
             api_session: The entered ``vercel.api.session`` context that owns it.
+            context: The ``contextvars`` context ``api_session`` was entered in.
         """
         self._box = box
         self._api_session = api_session
+        self._context = context
         self._cwd = box.cwd
 
     def write_files(self, files: Mapping[str, str]) -> None:
@@ -196,6 +235,12 @@ class VercelSandboxSession:
     ) -> CommandResult:
         """Run ``command`` through ``bash -lc`` in the working directory and wait for it.
 
+        The process runs detached and is watched with short status polls
+        instead of one streamed response: Vercel's edge drops a response that
+        stays open and silent for minutes, which killed long agent runs midway
+        with "missing final metadata". Output is read only after exit, when the
+        log replay is a short buffered response.
+
         Args:
             command: Shell command line.
             env: Extra environment for this command.
@@ -203,26 +248,41 @@ class VercelSandboxSession:
 
         Returns:
             Exit code, captured output and whether the timeout fired.
+
+        Raises:
+            ServiceError: If the process outlives its kill deadline.
         """
         wrapped = command
         kill_after = None
+        deadline = None
         if timeout_seconds is not None:
             seconds = max(1, math.ceil(timeout_seconds))
             wrapped = f"timeout --signal=KILL {seconds}s bash -lc {shlex.quote(command)}"
-            kill_after = seconds + _KILL_GRACE_SECONDS
-        completed = self._box.run_process(
+            kill_after = seconds + KILL_GRACE_SECONDS
+            deadline = time.monotonic() + kill_after + _POLL_DEADLINE_SLACK_SECONDS
+        process = self._box.create_process(
             "bash",
             ["-lc", wrapped],
             cwd=self._cwd,
             env=dict(env) if env else None,
             kill_after=kill_after,
-            capture_output=True,
         )
+        delay = _POLL_FLOOR_SECONDS
+        while process.returncode is None:
+            if deadline is not None and time.monotonic() > deadline:
+                with contextlib.suppress(Exception):
+                    process.kill()
+                raise ServiceError("sandbox process outlived its kill deadline")
+            time.sleep(delay)
+            delay = min(delay * 2, _POLL_CAP_SECONDS)
+            process.refresh()
+        stdout = process.stdout.read() if process.stdout is not None else ""
+        stderr = process.stderr.read() if process.stderr is not None else ""
         return CommandResult(
-            exit_code=completed.returncode,
-            stdout=completed.stdout or "",
-            stderr=completed.stderr or "",
-            timed_out=timeout_seconds is not None and completed.returncode in _TIMEOUT_EXIT_CODES,
+            exit_code=process.returncode,
+            stdout=stdout or "",
+            stderr=stderr or "",
+            timed_out=timeout_seconds is not None and process.returncode in _TIMEOUT_EXIT_CODES,
         )
 
     def read_file(self, path: str) -> str | None:
@@ -246,7 +306,7 @@ class VercelSandboxSession:
             logger.exception("failed to destroy sandbox %s", getattr(self._box, "name", "?"))
         finally:
             try:
-                self._api_session.__exit__(None, None, None)
+                self._context.run(self._api_session.__exit__, None, None, None)
             except Exception:
                 logger.exception("failed to close the Vercel API session")
 
@@ -305,12 +365,26 @@ class VercelSandboxRuntime:
             )
         )
         # The SDK finds its credentials through a context variable bound by
-        # ``session()``, so the context is entered here and left in ``close()``;
-        # everything in between happens on the calling thread.
-        api_session = vercel_api.session(service_options=[options])
-        api_session.__enter__()
+        # ``session()``. The bind and its reset must happen in one ``Context``,
+        # yet a box is routinely opened on a holdout worker thread and closed
+        # from the job's main thread, so each box gets a private copy of the
+        # caller's context that ``close()`` re-enters. The box itself keeps a
+        # reference to its service, so nothing after creation needs the
+        # variable, and the copy leaves the caller's own context untouched.
+        context = contextvars.copy_context()
+        # The SDK's default HTTP client gives any read 60 seconds. Commands are
+        # watched with short polls rather than one long stream, but the
+        # post-exit log replay of a chatty command can still take longer, so
+        # reads get the box lifetime — nothing in a box outlives the box.
+        read_ceiling = max(spec.lifetime_seconds, 60.0)
+        api_session = vercel_api.session(
+            service_options=[options],
+            httpx_client_factory=lambda: httpx.Client(timeout=httpx.Timeout(60.0, read=read_ceiling)),
+        )
+        context.run(api_session.__enter__)
         try:
-            box = vercel_sync.create_sandbox(
+            box = context.run(
+                vercel_sync.create_sandbox,
                 name=spec.name,
                 image=spec.image or self._image,
                 execution_time_limit=spec.lifetime_seconds,
@@ -319,9 +393,44 @@ class VercelSandboxRuntime:
                 tags={**SANDBOX_TAG, **spec.tags},
             )
         except BaseException:
-            api_session.__exit__(None, None, None)
+            context.run(api_session.__exit__, None, None, None)
             raise
-        return VercelSandboxSession(box, api_session)
+        return VercelSandboxSession(box, api_session, context)
+
+    def stop_job_sandboxes(self, job_id: str) -> int:
+        """Stop every box still up under ``job_id``'s tag.
+
+        A job's child process closes its own boxes on the way out, but a
+        cancel or a stall kills that process before its ``finally`` blocks
+        run, so the worker sweeps the job's boxes by tag once the child is
+        gone. Boxes already stopping or stopped are left alone.
+
+        Args:
+            job_id: The job whose boxes to stop.
+
+        Returns:
+            How many boxes were stopped.
+        """
+        creds = self._credentials
+        options = vercel_sync.SandboxServiceOptions(
+            credentials_factory=lambda: vercel_sync.SandboxCredentials(
+                token=creds.token, team_id=creds.team_id, project_id=creds.project_id
+            )
+        )
+        query = vercel_sync.SandboxQueryByCreatedAt(tag=vercel_sync.TagFilter(key=JOB_TAG, value=job_id))
+        stopped = 0
+        with vercel_api.session(service_options=[options]):
+            for box in vercel_sync.query_sandboxes(query=query, project_id=creds.project_id):
+                if box.status not in _STOPPABLE_STATUSES:
+                    continue
+                try:
+                    box.stop()
+                except Exception as exc:  # isolation boundary: one box's failure must not end the sweep
+                    logger.warning("could not stop sandbox %s of job %s: %s", box.name, job_id, exc)
+                    continue
+                logger.info("stopped sandbox %s of job %s", box.name, job_id)
+                stopped += 1
+        return stopped
 
 
 class LocalSubprocessSession:
@@ -340,7 +449,9 @@ class LocalSubprocessSession:
         """
         self._dir = Path(tempfile.mkdtemp(prefix="skynet-sandbox-")).resolve()
         (self._dir / "tmp").mkdir()
-        interpreter_bin = str(Path(sys.executable).resolve().parent)
+        # Not .resolve(): in a venv that follows the symlink to the base
+        # interpreter, putting a python3 without the venv's packages on PATH.
+        interpreter_bin = str(Path(sys.executable).parent)
         self._env: dict[str, str] = {
             "PATH": os.pathsep.join([interpreter_bin, os.environ.get("PATH", "/usr/bin:/bin")]),
             "HOME": str(self._dir),

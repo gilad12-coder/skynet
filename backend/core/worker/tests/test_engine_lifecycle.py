@@ -615,3 +615,62 @@ def test_stop_sets_all_cancel_events(store: FakeJobStore) -> None:
     except Exception:
         w.stop(timeout=1.0)
         raise
+
+
+class _SweepRuntime:
+    """Fake sandbox runtime whose sweep returns a fixed count or raises."""
+
+    def __init__(self, stopped: int, *, error: Exception | None = None) -> None:
+        """Remember what the sweep should report."""
+        self._stopped = stopped
+        self._error = error
+        self.swept: list[str] = []
+
+    def stop_job_sandboxes(self, job_id: str) -> int:
+        """Record the job and report the fixed outcome."""
+        self.swept.append(job_id)
+        if self._error is not None:
+            raise self._error
+        return self._stopped
+
+
+def test_stop_blackbox_sandboxes_logs_the_boxes_it_stopped(
+    worker: BackgroundWorker, store: FakeJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sweep that stopped boxes leaves one job log line saying so."""
+    runtime = _SweepRuntime(2)
+    monkeypatch.setattr(engine_module, "sandbox_runtime_from_settings", lambda settings: runtime)
+    store.seed_job("opt-1")
+
+    worker._stop_blackbox_sandboxes("opt-1")
+
+    assert runtime.swept == ["opt-1"]
+    assert [entry["message"] for entry in store.append_log_calls] == ["Stopped 2 sandbox(es) the job left running"]
+
+
+def test_stop_blackbox_sandboxes_stays_quiet_without_a_runtime_or_boxes(
+    worker: BackgroundWorker, store: FakeJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No sandbox runtime, or nothing left running, adds no log line."""
+    monkeypatch.setattr(engine_module, "sandbox_runtime_from_settings", lambda settings: None)
+    worker._stop_blackbox_sandboxes("opt-1")
+
+    runtime = _SweepRuntime(0)
+    monkeypatch.setattr(engine_module, "sandbox_runtime_from_settings", lambda settings: runtime)
+    worker._stop_blackbox_sandboxes("opt-2")
+
+    assert runtime.swept == ["opt-2"]
+    assert store.append_log_calls == []
+
+
+def test_stop_blackbox_sandboxes_swallows_a_failed_sweep(
+    worker: BackgroundWorker, store: FakeJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sweep the API refuses never surfaces past the job's own outcome."""
+    runtime = _SweepRuntime(0, error=RuntimeError("vercel down"))
+    monkeypatch.setattr(engine_module, "sandbox_runtime_from_settings", lambda settings: runtime)
+
+    worker._stop_blackbox_sandboxes("opt-1")
+
+    assert runtime.swept == ["opt-1"]
+    assert store.append_log_calls == []

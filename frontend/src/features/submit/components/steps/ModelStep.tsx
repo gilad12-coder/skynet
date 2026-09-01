@@ -11,7 +11,9 @@ import {
 } from "@/shared/ui/primitives/card";
 import { Label } from "@/shared/ui/primitives/label";
 import { Separator } from "@/shared/ui/primitives/separator";
+import { HelpTip } from "@/shared/ui/help-tip";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip, AddModelButton } from "@/shared/ui/model-chip";
 import { useUserPrefs } from "@/features/settings";
@@ -67,7 +69,9 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
         {jobType === "run" || !advanced ? (
           <div className="space-y-3" data-tutorial="model-catalog">
             <Label className="text-sm font-semibold">
-              {msg("auto.features.submit.components.steps.modelstep.13")}
+              <HelpTip text={tip("submit.models")}>
+                {msg("auto.features.submit.components.steps.modelstep.13")}
+              </HelpTip>
             </Label>
             <div className="space-y-2">
               <ModelChip
@@ -114,7 +118,9 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
             )}
             <div className="space-y-2">
               <Label className="text-sm font-semibold">
-                {msg("model.generation.label_plural")}
+                <HelpTip text={tip("submit.generation_models")}>
+                  {msg("model.generation.label_plural")}
+                </HelpTip>
               </Label>
               <div className="flex flex-wrap gap-2">
                 {generationModels.map((m, i) => (
@@ -165,7 +171,9 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
             <Separator />
             <div className="space-y-2">
               <Label className="text-sm font-semibold">
-                {msg("auto.features.submit.components.steps.modelstep.15")}
+                <HelpTip text={tip("submit.reflection_models")}>
+                  {msg("auto.features.submit.components.steps.modelstep.15")}
+                </HelpTip>
               </Label>
               <div className="flex flex-wrap gap-2">
                 {reflectionModels.map((m, i) => (

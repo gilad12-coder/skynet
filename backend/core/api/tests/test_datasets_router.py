@@ -229,3 +229,37 @@ def test_profile_inline_dataset_ignores_staged_id(
 
     assert resp.status_code == 200
     assert resp.json()["profile"]["row_count"] == 40
+
+
+def test_profile_engine_hint_reshapes_plan_and_is_echoed(datasets_client: TestClient) -> None:
+    """A black-box engine hint sizes the split for that engine and rides back on the plan."""
+    payload = {
+        "dataset": [{"q": "q1", "a": "yes"}, {"q": "q2", "a": "no"}] * 50,
+        "column_mapping": {"inputs": {"question": "q"}, "outputs": {"answer": "a"}},
+        "seed": 42,
+        "engine": "best_of_n",
+    }
+
+    resp = datasets_client.post("/datasets/profile", json=payload)
+
+    assert resp.status_code == 200
+    plan = resp.json()["plan"]
+    assert plan["engine"] == "best_of_n"
+    assert plan["counts"] == {"train": 0, "val": 80, "test": 20}
+
+
+def test_profile_without_engine_hint_reports_no_engine(datasets_client: TestClient) -> None:
+    """Omitting the hint keeps the GEPA-tuned default and a ``None`` engine on the plan."""
+    payload = {
+        "dataset": [{"q": "q1", "a": "yes"}, {"q": "q2", "a": "no"}] * 50,
+        "column_mapping": {"inputs": {"question": "q"}, "outputs": {"answer": "a"}},
+        "seed": 42,
+    }
+
+    resp = datasets_client.post("/datasets/profile", json=payload)
+
+    assert resp.status_code == 200
+    plan = resp.json()["plan"]
+    assert plan["engine"] is None
+    assert plan["counts"]["train"] > 0
+

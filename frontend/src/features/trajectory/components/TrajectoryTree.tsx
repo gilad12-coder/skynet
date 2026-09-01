@@ -32,6 +32,8 @@ const NODE_CORE_STROKE_SELECTED = "#1c1612";
 const DONUT_PASS_FILL = "#7C8B5A";
 const DONUT_FAIL_FILL = "#B26B4A";
 const DONUT_RING_THICKNESS = 8;
+// Track under the black-box score arc — same brown as the lineage edges.
+const SCORE_TRACK_STROKE = "rgba(124, 99, 80, 0.14)";
 const GHOST_FILL = "#E8E0D3";
 const GHOST_STROKE = "rgba(124, 99, 80, 0.5)";
 const WINNER_INDICATOR = "#9C7A3F";
@@ -71,9 +73,12 @@ interface View {
 
 // Which visual layers of the tree are currently shown; every legend entry
 // doubles as the toggle for its layer.
+type RingMode = "pass_fail" | "score";
+
 interface LayerVisibility {
   pass: boolean;
   fail: boolean;
+  score: boolean;
   winner: boolean;
   rejected: boolean;
 }
@@ -89,6 +94,10 @@ export interface TrajectoryTreeProps {
   // extent — useful in scripted demos where the final size is known up
   // front and we want viewers to see the full graph before nodes stream in.
   previewLayout?: { width: number; height: number };
+  // Black-box scorers grade each case on their own scale rather than
+  // pass/fail, so those runs swap the per-example split for a single arc
+  // that fills with the candidate's aggregate score.
+  ringMode?: RingMode;
 }
 
 function clampScale(k: number): number {
@@ -179,6 +188,30 @@ function renderRing(
   );
 }
 
+// A black-box scorer has no pass/fail verdict, so the ring is one arc on a
+// faint track that fills to the candidate's aggregate score.
+function renderScoreRing(
+  node: TrajectoryNode,
+  fraction: number,
+  show: boolean,
+  reduceMotion: boolean,
+): React.ReactNode {
+  const clamped = Math.max(0, Math.min(1, fraction));
+  return (
+    <LayerFade show={show} reduceMotion={reduceMotion}>
+      <circle
+        cx={node.x}
+        cy={node.y}
+        r={RING_R}
+        fill="none"
+        stroke={SCORE_TRACK_STROKE}
+        strokeWidth={DONUT_RING_THICKNESS}
+      />
+      {clamped > 0 ? ringSegment(node, "score", DONUT_PASS_FILL, 0, clamped, 1) : null}
+    </LayerFade>
+  );
+}
+
 function fitView(size: { w: number; h: number }, layoutW: number, layoutH: number): View {
   if (size.w < 2 || size.h < 2 || layoutW <= 0 || layoutH <= 0) {
     return { k: 1, tx: 0, ty: 0 };
@@ -197,6 +230,7 @@ export function TrajectoryTree({
   onSelectCandidate,
   onSelectRejected,
   previewLayout,
+  ringMode = "pass_fail",
 }: TrajectoryTreeProps) {
   const reduceMotion = useReducedMotion();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -208,6 +242,7 @@ export function TrajectoryTree({
   const [layers, setLayers] = useState<LayerVisibility>({
     pass: true,
     fail: true,
+    score: true,
     winner: true,
     rejected: true,
   });
@@ -483,8 +518,10 @@ export function TrajectoryTree({
             selectedId={selectedId}
             hoveredId={hoveredId}
             newestId={newestId}
+            ringMode={ringMode}
             showPass={layers.pass}
             showFail={layers.fail}
+            showScore={layers.score}
             showWinner={layers.winner}
             showRejected={layers.rejected}
             reduceMotion={!!reduceMotion}
@@ -541,30 +578,44 @@ export function TrajectoryTree({
 
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
         <div className="pointer-events-auto inline-flex flex-wrap items-center gap-x-1 gap-y-1 rounded-lg border border-[#DDD4C8]/70 bg-background/85 px-2 py-1 text-[11px] font-medium text-muted-foreground/90 backdrop-blur-sm">
-          <LegendToggle
-            pressed={layers.pass}
-            onToggle={() => toggleLayer("pass")}
-            swatch={
-              <span
-                className="inline-block size-2.5 rounded-full"
-                style={{ background: DONUT_PASS_FILL }}
+          {ringMode === "pass_fail" ? (
+            <>
+              <LegendToggle
+                pressed={layers.pass}
+                onToggle={() => toggleLayer("pass")}
+                swatch={
+                  <span
+                    className="inline-block size-2.5 rounded-full"
+                    style={{ background: DONUT_PASS_FILL }}
+                  />
+                }
+                label={msg("trajectory.minibatch.pass_label")}
               />
-            }
-            label={msg("trajectory.minibatch.pass_label")}
-          />
-          <LegendDivider />
-          <LegendToggle
-            pressed={layers.fail}
-            onToggle={() => toggleLayer("fail")}
-            swatch={
-              <span
-                className="inline-block size-2.5 rounded-full"
-                style={{ background: DONUT_FAIL_FILL }}
+              <LegendDivider />
+              <LegendToggle
+                pressed={layers.fail}
+                onToggle={() => toggleLayer("fail")}
+                swatch={
+                  <span
+                    className="inline-block size-2.5 rounded-full"
+                    style={{ background: DONUT_FAIL_FILL }}
+                  />
+                }
+                label={msg("trajectory.minibatch.fail_label")}
               />
-            }
-            label={msg("trajectory.minibatch.fail_label")}
-          />
-          <LegendDivider />
+              <LegendDivider />
+            </>
+          ) : (
+            <>
+              <LegendToggle
+                pressed={layers.score}
+                onToggle={() => toggleLayer("score")}
+                swatch={<ScoreSwatch />}
+                label={msg("trajectory.blackbox.legend.score")}
+              />
+              <LegendDivider />
+            </>
+          )}
           <LegendToggle
             pressed={layers.winner}
             onToggle={() => toggleLayer("winner")}
@@ -630,8 +681,10 @@ interface TreeContentProps {
   selectedId: string | null;
   hoveredId: string | null;
   newestId: string | null;
+  ringMode: RingMode;
   showPass: boolean;
   showFail: boolean;
+  showScore: boolean;
   showWinner: boolean;
   showRejected: boolean;
   reduceMotion: boolean;
@@ -653,8 +706,10 @@ const TreeContent = memo(function TreeContent({
   selectedId,
   hoveredId,
   newestId,
+  ringMode,
   showPass,
   showFail,
+  showScore,
   showWinner,
   showRejected,
   reduceMotion,
@@ -662,6 +717,9 @@ const TreeContent = memo(function TreeContent({
   onGhostClick,
   onHover,
 }: TreeContentProps) {
+  // A 0–1 scorer fills the arc with the raw score; anything on a larger
+  // scale is measured against the tree's best candidate instead.
+  const scoreScale = useMemo(() => Math.max(1, ...nodes.map((n) => n.score)), [nodes]);
   return (
     <>
       <g>
@@ -746,7 +804,7 @@ const TreeContent = memo(function TreeContent({
             : isHovered
               ? NODE_CORE_STROKE_HOVER
               : NODE_CORE_STROKE;
-          const hasRing = node.per_example.length > 0;
+          const hasRing = ringMode === "score" || node.per_example.length > 0;
           const innerRadius = hasRing
             ? TRAJECTORY_LAYOUT.nodeRadius - DONUT_RING_THICKNESS
             : TRAJECTORY_LAYOUT.nodeRadius;
@@ -847,7 +905,11 @@ const TreeContent = memo(function TreeContent({
                   />
                 </LayerFade>
               ) : null}
-              {hasRing ? renderRing(node, showPass, showFail, reduceMotion) : null}
+              {!hasRing
+                ? null
+                : ringMode === "score"
+                  ? renderScoreRing(node, node.score / scoreScale, showScore, reduceMotion)
+                  : renderRing(node, showPass, showFail, reduceMotion)}
               <circle
                 cx={node.x}
                 cy={node.y}
@@ -958,6 +1020,25 @@ function LegendToggle({
       {swatch}
       <span>{label}</span>
     </button>
+  );
+}
+
+function ScoreSwatch() {
+  return (
+    <svg className="size-2.5" viewBox="0 0 10 10" aria-hidden="true">
+      <circle cx="5" cy="5" r="3.5" fill="none" stroke={SCORE_TRACK_STROKE} strokeWidth="3" />
+      <circle
+        cx="5"
+        cy="5"
+        r="3.5"
+        fill="none"
+        stroke={DONUT_PASS_FILL}
+        strokeWidth="3"
+        pathLength={1}
+        strokeDasharray="0.65 0.35"
+        strokeDashoffset={-0.75}
+      />
+    </svg>
   );
 }
 

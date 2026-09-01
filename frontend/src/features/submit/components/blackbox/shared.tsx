@@ -10,7 +10,9 @@ import {
   CardTitle,
 } from "@/shared/ui/primitives/card";
 import { Label } from "@/shared/ui/primitives/label";
+import { HelpTip } from "@/shared/ui/help-tip";
 import { cn } from "@/shared/lib/utils";
+import { tip as tipText, type TooltipKey } from "@/shared/lib/tooltips";
 
 export const TEXTAREA_CLASS =
   "flex min-h-[44px] w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 lg:text-sm";
@@ -49,25 +51,29 @@ export function Field({
   label,
   htmlFor,
   hint,
+  tip,
   trailing,
   children,
 }: {
   label: ReactNode;
   htmlFor?: string;
   hint?: ReactNode;
+  // Tooltip catalog key; hovering the label explains what the field controls.
+  tip?: TooltipKey;
   // Rendered at the end of the label row (status chips, version steppers).
   trailing?: ReactNode;
   children: ReactNode;
 }) {
+  const labelNode = tip ? <HelpTip text={tipText(tip)}>{label}</HelpTip> : label;
   return (
     <div className="space-y-2">
       {trailing ? (
         <div className="flex items-center justify-between gap-2">
-          <Label htmlFor={htmlFor}>{label}</Label>
+          <Label htmlFor={htmlFor}>{labelNode}</Label>
           <div className="flex items-center gap-2">{trailing}</div>
         </div>
       ) : (
-        <Label htmlFor={htmlFor}>{label}</Label>
+        <Label htmlFor={htmlFor}>{labelNode}</Label>
       )}
       {children}
       {hint ? (
@@ -94,16 +100,22 @@ export function Segmented<T extends string>({
   value,
   onChange,
   options,
+  compact = false,
 }: {
   value: T;
   onChange: (v: T) => void;
   options: Array<SegmentedOption<T>>;
+  // Sized to sit inside a label row instead of spanning the field.
+  compact?: boolean;
 }) {
   const pillId = useId();
   const prefersReducedMotion = useReducedMotion();
   return (
     <div
-      className="grid w-full gap-1 rounded-lg bg-muted p-1"
+      className={cn(
+        "grid rounded-lg bg-muted",
+        compact ? "w-auto gap-0.5 p-0.5" : "w-full gap-1 p-1",
+      )}
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
       role="radiogroup"
     >
@@ -117,7 +129,8 @@ export function Segmented<T extends string>({
             aria-checked={selected}
             onClick={() => onChange(o.value)}
             className={cn(
-              "relative min-h-[44px] cursor-pointer rounded-md px-2 py-2 text-center transition-colors duration-200 sm:px-3 lg:min-h-0",
+              "relative cursor-pointer rounded-md text-center transition-colors duration-200 lg:min-h-0",
+              compact ? "min-h-[36px] px-2.5 py-0.5" : "min-h-[44px] px-2 py-2 sm:px-3",
               selected ? "text-foreground" : "text-foreground/60 hover:text-foreground",
             )}
           >
@@ -130,7 +143,7 @@ export function Segmented<T extends string>({
               />
             )}
             <span className="relative z-10 block">
-              <span className="text-sm font-medium">{o.label}</span>
+              <span className={cn("font-medium", compact ? "text-xs" : "text-sm")}>{o.label}</span>
               {o.desc ? (
                 <span
                   className={cn(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -22,13 +23,20 @@ from core.constants import (
     TQDM_TOTAL_KEY,
 )
 from core.exceptions import ServiceError
-from core.models.blackbox import BLACKBOX_ENGINE_BEST_OF_N, BlackboxRunRequest, BlackboxStrategy, ScorerDryRunRequest
+from core.models.blackbox import (
+    BLACKBOX_ENGINE_BEST_OF_N,
+    BLACKBOX_ENGINE_GEPA,
+    BlackboxRunRequest,
+    BlackboxStrategy,
+    ScorerDryRunRequest,
+)
 from core.models.results import ModelTokenUsage
 
 from .. import scorer as scorer_mod
 from .. import service as service_mod
+from ..auto import LaneOutcome
 from ..harness import GatewayConfig
-from ..protocol import Result
+from ..protocol import EvalServer, Result, candidate_key
 from ..sandbox_scorer import ScorerGateway, ScorerProbeResult
 from ..service import dry_run_scorer, run_blackbox_optimization, validate_blackbox_payload
 from .mocks import (
@@ -37,6 +45,7 @@ from .mocks import (
     FakeGateway,
     FakeReflectionLM,
     FakeSandboxRuntime,
+    vowel_scorer,
 )
 
 _CASES = [{"target": "aeiou", "i": i} for i in range(10)]
@@ -411,13 +420,14 @@ def test_agent_target_runs_every_scorer_call_in_its_own_sandbox(
     assert all(session.closed for session in runtime.sessions)
     assert all(session.commands == ["run-agent"] for session in runtime.sessions)
 
+    assert len({spec.name for spec in runtime.specs}) == len(runtime.specs)
     spec = runtime.specs[0]
-    assert spec.name == "skynet-agent-1"
+    assert spec.name.startswith("skynet-agent-1-")
     assert spec.tags == {"skynet_job": "agent-1"}
     assert spec.env["SKYNET_MODEL"] == "m"
     assert spec.env["SKYNET_GATEWAY_URL"] == "https://gw.example/v1"
     assert spec.env["SKYNET_API_KEY"] == "secret-key"
-    assert spec.lifetime_seconds == 1200
+    assert spec.lifetime_seconds == 60 + 600 + 15
 
     # The default fake answers ``done`` (two vowels of four) for every run, so
     # the scorer that reads the answer file scores every version at 0.5.
@@ -502,6 +512,34 @@ def test_scorer_llm_usage_is_billed_with_the_run(
     assert response.total_tokens == 15 * len(fake_lm.history) + 4 * calls
 
 
+def test_gateway_prefixed_reflection_usage_merges_with_the_scorer_row(
+    fake_lm: FakeReflectionLM, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reflection LM on the managed gateway and a scorer on the same model report one usage row."""
+    fake_lm.model = "litellm_proxy/fake/judge"
+    with FakeGateway(reply="0.5", usage=(3, 1)) as judge:
+        monkeypatch.setattr(
+            scorer_mod,
+            "scorer_gateway",
+            lambda config, settings: ScorerGateway(
+                url=judge.url, model="judge", api_key="k", billing_model=config.name
+            ),
+        )
+        response = run_blackbox_optimization(
+            _payload(scorer={"kind": "python", "metric_code": _JUDGE_SCORER_CODE, "model": {"name": "fake/judge"}}),
+            artifact_id="job-judge-merged",
+            gepa_log_dir_path=str(tmp_path),
+        )
+    calls = len(judge.requests)
+    assert response.usage_by_model == [
+        ModelTokenUsage(
+            model="fake/judge",
+            input_tokens=10 * len(fake_lm.history) + 3 * calls,
+            output_tokens=5 * len(fake_lm.history) + calls,
+        )
+    ]
+
+
 def test_dry_run_binds_the_scorer_model_and_returns_its_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     """A dry run hands the scorer's model to the sandbox and reports what ``llm()`` consumed."""
     seen: dict[str, Any] = {}
@@ -559,6 +597,23 @@ def test_run_persists_every_version_it_scored(fake_lm: FakeReflectionLM, tmp_pat
     assert max(response.versions, key=lambda version: version.score or 0.0).candidate == "aeiou"
 
 
+def test_run_carries_gepa_lineage_as_a_candidate_tree(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
+    """A GEPA run's parent lineage arrives as a tree rooted at the seed, kept out of ``details``."""
+    payload = _payload(strategy={"mode": "single", "engine": BLACKBOX_ENGINE_GEPA})
+    response = run_blackbox_optimization(payload, artifact_id="job-tree", gepa_log_dir_path=str(tmp_path))
+
+    assert response.candidate_tree
+    assert response.candidate_tree[0].candidate == "hello world"
+    assert response.candidate_tree[0].parents == [None]
+    assert all(
+        parent is None or 0 <= parent < index
+        for index, node in enumerate(response.candidate_tree)
+        for parent in node.parents
+    )
+    assert any(node.candidate == response.best_candidate for node in response.candidate_tree)
+    assert "candidate_tree" not in response.details
+
+
 def test_version_history_sheds_images_from_the_weakest_versions_first(monkeypatch: pytest.MonkeyPatch) -> None:
     """Over the byte cap, weak versions lose their renders but keep their text; the best keeps everything."""
     image = "data:image/png;base64," + "A" * 400
@@ -587,3 +642,112 @@ def test_version_history_sheds_images_from_the_weakest_versions_first(monkeypatc
     assert weakest.side_info == {"feedback": "len 1", "frames": []}
     assert middle.side_info == {"feedback": "len 2", "frames": []}
     assert best.side_info == {"feedback": "len 3", "render": image, "frames": [image]}
+
+
+def test_service_hands_the_progress_sink_to_the_engine_context(
+    fake_lm: FakeReflectionLM, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The job's progress sink rides into the engine context so trajectory events stream live."""
+    captured: dict[str, Any] = {}
+
+    def fake_run_strategy(strategy: Any, task: Any, server: Any, ctx: Any, cb: Any = None, *, caps: Any = None) -> Any:
+        """Capture the engine context and finish immediately."""
+        captured["ctx"] = ctx
+        return Result(best_candidate="hello world", best_score=1.0, total_evals=0), []
+
+    monkeypatch.setattr(service_mod, "run_strategy", fake_run_strategy)
+
+    def sink(event: str, metrics: dict[str, Any]) -> None:
+        """Discard events."""
+
+    run_blackbox_optimization(_payload(), artifact_id="job-cb", progress_callback=sink, gepa_log_dir_path=str(tmp_path))
+
+    assert captured["ctx"].progress_callback is sink
+
+
+@pytest.mark.parametrize("concurrency", [1, 2])
+def test_score_holdout_logs_a_debug_heartbeat_per_case(caplog: pytest.LogCaptureFixture, concurrency: int) -> None:
+    """Held-out passes log one DEBUG line per case for the verbose log view, whichever pool serves them."""
+    cases = [{"n": 1}, {"n": 2}]
+
+    with caplog.at_level(logging.DEBUG, logger="core.service_gateway.optimization.blackbox.service"):
+        mean = service_mod._score_holdout(
+            lambda candidate, case: (case["n"] / 4, {}), "v", cases, label="optimized version", concurrency=concurrency
+        )
+
+    assert mean == pytest.approx(0.375)
+    heartbeats = sorted(r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG)
+    assert heartbeats == [
+        "optimized version holdout eval 1/2 score=0.250",
+        "optimized version holdout eval 2/2 score=0.500",
+    ]
+
+
+def test_score_holdout_logs_the_score_in_single_task_mode(caplog: pytest.LogCaptureFixture) -> None:
+    """Without cases the held-out pass still says what it scores and what it scored."""
+    with caplog.at_level(logging.INFO, logger="core.service_gateway.optimization.blackbox.service"):
+        score = service_mod._score_holdout(lambda candidate, case: (0.8, {}), "v", None, label="starting point")
+
+    assert score == 0.8
+    assert [r.getMessage() for r in caplog.records if r.levelno == logging.INFO] == [
+        "scoring the starting point",
+        "starting point scored 0.800 in 0s",
+    ]
+
+
+def test_version_history_shows_the_validation_score_and_keeps_the_running_mean() -> None:
+    """A version the engine scored on the validation set shows that score; the running mean rides along."""
+    server = EvalServer(vowel_scorer, max_evals=4)
+    server.evaluate("aaa")
+    server.evaluate("aaa")
+    server.evaluate("bcd")
+
+    versions = service_mod._version_history(server, {"aaa": 0.75})
+
+    assert [(v.candidate, v.score, v.mean_score, v.evals) for v in versions] == [
+        ("aaa", 0.75, server.mean_score("aaa"), 2),
+        ("bcd", server.mean_score("bcd"), server.mean_score("bcd"), 1),
+    ]
+
+
+def test_validation_scores_come_from_every_lane_with_the_later_lane_winning() -> None:
+    """Lineage from every lane feeds the map; a candidate seen again takes the later lane's score."""
+    explore = LaneOutcome(
+        engine="gepa",
+        phase="explore",
+        status="completed",
+        metadata={
+            "candidate_tree": [
+                {"candidate": "seed", "val_score": 0.2},
+                {"candidate": {"system": "x"}, "val_score": 0.5},
+                {"candidate": "never swept", "val_score": None},
+            ]
+        },
+    )
+    bare = LaneOutcome(engine="best_of_n", phase="explore", status="completed")
+    continued = LaneOutcome(
+        engine="gepa",
+        phase="continue",
+        status="completed",
+        metadata={"candidate_tree": [{"candidate": "seed", "val_score": 0.4}]},
+    )
+
+    assert service_mod._validation_scores([explore, bare, continued]) == {
+        "seed": 0.4,
+        candidate_key({"system": "x"}): 0.5,
+    }
+
+
+def test_run_versions_show_the_tree_score_as_their_headline(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
+    """Every version the candidate tree knows shows the tree's validation score, with its running mean alongside."""
+    payload = _payload(strategy={"mode": "single", "engine": BLACKBOX_ENGINE_GEPA})
+    response = run_blackbox_optimization(payload, artifact_id="job-headline", gepa_log_dir_path=str(tmp_path))
+
+    by_candidate = {version.candidate: version for version in response.versions}
+    swept = [node for node in response.candidate_tree if node.val_score is not None]
+    assert swept
+    for node in swept:
+        version = by_candidate[node.candidate]
+        assert version.score == node.val_score
+        assert version.mean_score is not None
+        assert version.evals >= 1

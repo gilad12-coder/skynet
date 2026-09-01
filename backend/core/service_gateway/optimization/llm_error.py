@@ -65,6 +65,9 @@ _LLM_ERROR_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
 )
 
+# Sandbox failures mention timeouts and connections too, but the language-model
+# provider had no part in them.
+_SANDBOX_FAILURE = re.compile(r"\bsandbox\b", re.IGNORECASE)
 _TRACEBACK_HINT = re.compile(r"\.?\s*Set `provide_traceback=True` for traceback\.?\s*$")
 _ERROR_HEAD = re.compile(r":\s+((?:litellm|openai)\.[\w.]*\w|[A-Za-z_]+(?:Error|Exception))")
 
@@ -124,8 +127,10 @@ def classify_llm_error(text: str) -> str | None:
 
     Returns:
         A short explanation when the text matches a known LLM failure mode,
-        otherwise ``None``.
+        otherwise ``None`` — always ``None`` for sandbox failures.
     """
+    if _SANDBOX_FAILURE.search(text):
+        return None
     for pattern, explanation in _LLM_ERROR_PATTERNS:
         if pattern.search(text):
             return explanation

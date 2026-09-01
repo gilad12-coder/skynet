@@ -213,6 +213,16 @@ _current_proposal_iteration: contextvars.ContextVar[int | None] = contextvars.Co
 )
 
 
+def current_proposal_iteration() -> int | None:
+    """Return the GEPA iteration whose reflective ``propose()`` is running, if any.
+
+    Returns:
+        The iteration index, or ``None`` outside a proposal (valset sweeps,
+        the seed evaluation) — the frontend then treats the event as run-wide.
+    """
+    return _current_proposal_iteration.get()
+
+
 def _extract_feedback(result: Any) -> str:
     """Return the feedback string GEPA attaches to a ``dspy.Prediction`` result.
 

@@ -169,4 +169,5 @@ def build_scorer(
         gateway=scorer_gateway(spec.model, settings) if spec.model is not None else None,
         timeout_seconds=spec.timeout_seconds,
         job_id=job_id,
+        install_command=spec.install_command,
     )

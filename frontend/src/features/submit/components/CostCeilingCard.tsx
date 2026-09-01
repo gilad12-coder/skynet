@@ -4,8 +4,10 @@ import * as React from "react";
 import { Gauge } from "@/shared/ui/icons";
 import { Switch } from "@/shared/ui/primitives/switch";
 import { NumberInput } from "@/shared/ui/number-input";
+import { HelpTip } from "@/shared/ui/help-tip";
 import { formatCredits, type TokenSourceMode } from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { tip } from "@/shared/lib/tooltips";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 import { chargeableBracket } from "../lib/cost-bracket";
@@ -52,9 +54,11 @@ export function CostCeilingCard({ w, mode }: { w: CostContext; mode: TokenSource
               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
                 <Gauge className="h-3 w-3" />
               </span>
-              <span className="text-[13px] font-semibold tracking-tight">
-                {msg("submit.cost_ceiling.label")}
-              </span>
+              <HelpTip text={tip("submit.cost_ceiling")}>
+                <span className="text-[13px] font-semibold tracking-tight">
+                  {msg("submit.cost_ceiling.label")}
+                </span>
+              </HelpTip>
             </div>
 
             <p className="mt-2 text-[12px] leading-relaxed text-[#3D2E22]" dir="auto">

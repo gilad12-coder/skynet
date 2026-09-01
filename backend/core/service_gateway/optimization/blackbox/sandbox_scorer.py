@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import shlex
 import threading
+import time
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -32,8 +32,16 @@ from ...language_models import usage_by_model_from_history
 from . import runner
 from .agent_eval import gateway_from_settings
 from .harness import ENV_API_KEY
+from .heartbeat import heartbeat
 from .protocol import Candidate, SideInfo
-from .sandbox import SandboxRuntime, SandboxSession, SandboxSpec, scorer_runtime_from_settings
+from .sandbox import (
+    JOB_TAG,
+    SandboxRuntime,
+    SandboxSession,
+    SandboxSpec,
+    scorer_runtime_from_settings,
+    unique_sandbox_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +51,12 @@ CALLS_DIR = "calls"
 _DEFAULT_PROBE_TIMEOUT_SECONDS = 45.0
 # A probe's box only has to outlive one call plus interpreter start-up.
 _PROBE_LIFETIME_ALLOWANCE_SECONDS = 120.0
+# apt plus a few wheels finish in about a minute; a stalled mirror must not eat the box's lifetime.
+_INSTALL_TIMEOUT_SECONDS = 600.0
 _STDERR_TAIL_CHARS = 2_000
 _OPENROUTER_PREFIX = "openrouter/"
 _OPENROUTER_URL = "https://openrouter.ai/api/v1"
 _DATA_IMAGE_PREFIX = "data:image/"
-_NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
 _USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens")
 _GATEWAY_MISSING = (
     "Scorer models need a gateway the sandboxes can reach: set LITELLM_PROXY_URL and "
@@ -216,7 +225,7 @@ def _tail(text: str) -> str:
 
 
 def _sandbox_name(job_id: str | None) -> str | None:
-    """Return a sandbox name that carries the job id in a form Vercel accepts.
+    """Return a fresh sandbox name that carries the job id.
 
     Args:
         job_id: The job the scorer belongs to, if any.
@@ -226,7 +235,7 @@ def _sandbox_name(job_id: str | None) -> str | None:
     """
     if not job_id:
         return None
-    return _NAME_UNSAFE.sub("-", f"skynet-scorer-{job_id}".lower()).strip("-")[:60]
+    return unique_sandbox_name(f"skynet-scorer-{job_id}")
 
 
 class SandboxPythonScorer:
@@ -246,6 +255,7 @@ class SandboxPythonScorer:
         timeout_seconds: float,
         lifetime_seconds: float | None = None,
         job_id: str | None = None,
+        install_command: str | None = None,
     ) -> None:
         """Bind scorer code to a runtime without opening anything yet.
 
@@ -256,8 +266,10 @@ class SandboxPythonScorer:
             timeout_seconds: Longest a single call may run.
             lifetime_seconds: Requested box lifetime; the configured ceiling when unset, and never above it.
             job_id: Names and tags the box after the job, when known.
+            install_command: Shell command run once in every fresh box before the first call.
         """
         self._code = code
+        self._install_command = (install_command or "").strip() or None
         self._runtime = runtime
         self._gateway = gateway
         self._timeout_seconds = timeout_seconds
@@ -266,10 +278,10 @@ class SandboxPythonScorer:
         # box never holds it; otherwise it rides in the runner's environment, one call at a time.
         injected = gateway.injected_headers() if gateway is not None and runtime.injects_headers else {}
         self._env_key = gateway.api_key if gateway is not None and not injected else None
+        self._job_id = job_id
         self._spec = SandboxSpec(
             lifetime_seconds=ceiling if lifetime_seconds is None else min(lifetime_seconds, ceiling),
-            name=_sandbox_name(job_id),
-            tags={"skynet_job": job_id} if job_id else {},
+            tags={JOB_TAG: job_id} if job_id else {},
             inject_headers=injected,
         )
         self._session: SandboxSession | None = None
@@ -360,6 +372,7 @@ class SandboxPythonScorer:
         session = self._open()
         self._calls += 1
         call_dir = f"{CALLS_DIR}/{self._calls:06d}"
+        started = time.perf_counter()
         session.write_files(
             {f"{call_dir}/{runner.INPUT_FILE}": json.dumps(payload, default=runner.side_info_json_default)}
         )
@@ -367,6 +380,9 @@ class SandboxPythonScorer:
             f"python3 {RUNNER_FILE} {shlex.quote(call_dir)}",
             env={ENV_API_KEY: self._env_key} if self._env_key else None,
             timeout_seconds=self._timeout_seconds,
+        )
+        logger.debug(
+            "scorer call %d finished in %.1fs (exit %s)", self._calls, time.perf_counter() - started, result.exit_code
         )
         if result.timed_out:
             return {
@@ -385,20 +401,51 @@ class SandboxPythonScorer:
     def _open(self) -> SandboxSession:
         """Return the job's box, opening it and installing the runner on first use."""
         if self._session is None:
-            session = self._runtime.open(self._spec)
+            # Named per open: a box discarded after a failure may still hold its
+            # name while Vercel tears it down, so the replacement never reuses it.
+            name = _sandbox_name(self._job_id)
+            logger.info("scorer sandbox: opening %s (lifetime %.0fs)", name or "a box", self._spec.lifetime_seconds)
+            opened = time.perf_counter()
+            session = self._runtime.open(replace(self._spec, name=name))
+            logger.info("scorer sandbox: ready in %.1fs", time.perf_counter() - opened)
             try:
                 session.write_files({RUNNER_FILE: RUNNER_SOURCE})
+                self._install(session)
             except BaseException:
                 session.close()
                 raise
             self._session = session
         return self._session
 
+    def _install(self, session: SandboxSession) -> None:
+        """Run the scorer's install command in a box that just opened.
+
+        Args:
+            session: The fresh box.
+
+        Raises:
+            ServiceError: When the command fails or outruns its allowance.
+        """
+        if self._install_command is None:
+            return
+        logger.info("scorer sandbox: install running (allowance %.0fs)", _INSTALL_TIMEOUT_SECONDS)
+        started = time.perf_counter()
+        with heartbeat(logger, "scorer sandbox", "install", _INSTALL_TIMEOUT_SECONDS):
+            result = session.run(self._install_command, timeout_seconds=_INSTALL_TIMEOUT_SECONDS)
+        if result.timed_out:
+            raise ServiceError(f"scorer install command exceeded the {_INSTALL_TIMEOUT_SECONDS:g}s allowance")
+        if not result.ok:
+            raise ServiceError(
+                f"scorer install command failed (exit {result.exit_code}): {_tail(result.stderr or result.stdout)}"
+            )
+        logger.info("scorer sandbox: install done in %.1fs", time.perf_counter() - started)
+
     def _discard(self) -> None:
         """Close the box, if any, so the next call opens a fresh one."""
         if self._session is not None:
             self._session.close()
             self._session = None
+            logger.info("scorer sandbox: closed after %d call(s)", self._calls)
 
 
 def probe_scorer(
@@ -409,6 +456,7 @@ def probe_scorer(
     scorer_model: dict[str, Any] | None = None,
     timeout_seconds: float = _DEFAULT_PROBE_TIMEOUT_SECONDS,
     runtime: SandboxRuntime | None = None,
+    install_command: str | None = None,
 ) -> ScorerProbeResult:
     """Score one candidate with python scorer code in a throwaway sandbox.
 
@@ -424,6 +472,7 @@ def probe_scorer(
             helper, if a model was chosen.
         timeout_seconds: Longest the call may run.
         runtime: Where the box is opened; the configured runtime when unset.
+        install_command: Shell command run once in the box before the call.
 
     Returns:
         The score and side information, or the scorer's error, plus what
@@ -438,8 +487,11 @@ def probe_scorer(
         runtime=runtime or scorer_runtime_from_settings(settings),
         gateway=gateway,
         timeout_seconds=timeout_seconds,
-        lifetime_seconds=timeout_seconds + _PROBE_LIFETIME_ALLOWANCE_SECONDS,
+        lifetime_seconds=timeout_seconds
+        + _PROBE_LIFETIME_ALLOWANCE_SECONDS
+        + (_INSTALL_TIMEOUT_SECONDS if (install_command or "").strip() else 0.0),
         job_id="probe",
+        install_command=install_command,
     )
     try:
         return scorer.run(candidate, case)

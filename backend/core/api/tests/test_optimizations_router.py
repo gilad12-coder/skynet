@@ -1644,3 +1644,22 @@ def test_sanitize_payload_scrubs_the_scorer_model_key() -> None:
     assert sanitised["scorer"]["metric_code"] == "def score(c): return 1.0"
     assert "api_key" not in sanitised["reflection_model_settings"]["extra"]
     assert payload["scorer"]["model"]["extra"]["api_key"] == "sk-secret"
+
+
+def test_sanitize_payload_scrubs_alias_model_keys_and_scorer_secret() -> None:
+    """Persisted payloads carry the wire aliases and a remote scorer's secret; both are scrubbed."""
+    payload = {
+        "model_config": {"name": "m", "extra": {"api_key": "sk-1"}},
+        "reflection_model_config": {"name": "r", "extra": {"api_key": "sk-2", "reasoning_effort": "high"}},
+        "task_model_config": {"name": "t", "extra": {"api_key": "sk-3"}},
+        "scorer": {"kind": "remote", "url": "https://scorer.example", "secret": "shh", "timeout_seconds": 5},
+    }
+
+    sanitised = _sanitize_payload(payload)
+
+    assert "api_key" not in sanitised["model_config"]["extra"]
+    assert sanitised["reflection_model_config"]["extra"] == {"reasoning_effort": "high"}
+    assert "api_key" not in sanitised["task_model_config"]["extra"]
+    assert "secret" not in sanitised["scorer"]
+    assert sanitised["scorer"]["url"] == "https://scorer.example"
+    assert payload["scorer"]["secret"] == "shh"

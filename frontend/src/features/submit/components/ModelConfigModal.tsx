@@ -14,6 +14,8 @@ import { Label } from "@/shared/ui/primitives/label";
 import { Switch } from "@/shared/ui/primitives/switch";
 import { Separator } from "@/shared/ui/primitives/separator";
 import { ModelPicker, modelSupportsThinking } from "./ModelPicker";
+import { ProviderLogo } from "@/shared/ui/provider-logo";
+import { modelProviderSlug } from "@/shared/lib/model-provider";
 import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
 import { NumberInput } from "@/shared/ui/number-input";
 import { cn } from "@/shared/lib/utils";
@@ -193,6 +195,7 @@ export function ModelConfigModal({
                         }}
                         className="flex min-h-[44px] items-center gap-1.5 cursor-pointer outline-none lg:min-h-0"
                       >
+                        <ProviderLogo slug={modelProviderSlug(rc.name)} size={14} />
                         <span className="truncate max-w-[120px]">{rc.name.split("/").pop()}</span>
                         <span className="text-[9px] opacity-60">{rc.temperature?.toFixed(1)}</span>
                       </button>

@@ -506,6 +506,9 @@ export interface BlackboxScorer {
   url?: string | null;
   secret?: string | null;
   timeout_seconds?: number;
+  // Runs once when a python scorer's sandbox opens — apt-get or pip for what
+  // the scorer imports. Null when the stock box already has everything.
+  install_command?: string | null;
   // The model injected into the python scorer as `llm()` — the "model that
   // runs your prompt". Null when the scorer never calls a model.
   model?: ModelConfig | null;
@@ -542,6 +545,8 @@ export interface BlackboxRunRequest {
   username?: string;
   objective?: string | null;
   background?: string | null;
+  // Wizard recipe that authored the run; cloning preselects the picker with it.
+  recipe?: "prompt" | "code" | "anything" | null;
   seed_candidate?: BlackboxCandidate | null;
   scorer: BlackboxScorer;
   cases?: Array<Record<string, unknown>> | null;
@@ -596,10 +601,24 @@ export interface BlackboxLaneResult {
  */
 export interface BlackboxVersion {
   candidate: BlackboxCandidate;
+  /** The score the run ranked it by: the validation-set aggregate when the engine recorded one, else the running mean. */
   score?: number | null;
+  /** Running mean over its `evals` scorer calls; absent on runs recorded before it existed. */
+  mean_score?: number | null;
   evals: number;
   first_run: number;
   side_info: Record<string, unknown>;
+}
+
+/**
+ * One candidate in the engine's lineage: `parents` are indices into the same
+ * list (`null` marks the seed). Only the GEPA engine records lineage today.
+ */
+export interface BlackboxCandidateNode {
+  candidate: BlackboxCandidate;
+  parents: Array<number | null>;
+  val_score?: number | null;
+  discovery_evals: number;
 }
 
 export interface BlackboxRunResult {
@@ -616,6 +635,8 @@ export interface BlackboxRunResult {
   lanes: BlackboxLaneResult[];
   /** Absent on runs recorded before version tracking existed. */
   versions?: BlackboxVersion[];
+  /** GEPA's evolutionary lineage; absent or empty for other engines and older runs. */
+  candidate_tree?: BlackboxCandidateNode[];
   total_scorer_runs: number;
   runtime_seconds: number;
   num_lm_calls: number;
@@ -793,6 +814,8 @@ export interface SplitPlan {
   shuffle: boolean;
   seed: number;
   counts: SplitCounts;
+  // Black-box engine the fractions were sized for; null/absent is the GEPA-tuned default.
+  engine?: BlackboxEngineId | null;
   rationale: string[];
 }
 
@@ -800,6 +823,7 @@ export interface ProfileDatasetRequest {
   dataset: Array<Record<string, unknown>>;
   column_mapping: ColumnMapping;
   seed?: number | null;
+  engine?: BlackboxEngineId | null;
 }
 
 export interface ProfileDatasetResponse {

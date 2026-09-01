@@ -35,6 +35,15 @@ class PlateauReachedError(BudgetExhaustedError):
     """
 
 
+class ScorerAbortError(RuntimeError):
+    """Raised by a scorer to stop the whole run.
+
+    :class:`EvalServer` floors every other scorer failure to keep one bad
+    version from killing a run; this one passes through untouched because the
+    scorer has established that no version can be scored.
+    """
+
+
 class PlateauWatch:
     """Counts scorer runs since the last improvement and trips at ``patience``.
 
@@ -170,6 +179,9 @@ class EngineContext:
     concurrency: int = 1
     # "harness · model" the proposer is told it writes for, on agent targets.
     target_label: str | None = None
+    # Job-level progress sink. Engines that can narrate their run (GEPA via
+    # the trajectory watcher) stream candidate events through it live.
+    progress_callback: Callable[[str, dict[str, Any]], None] | None = None
 
 
 class Engine(Protocol):
@@ -283,6 +295,11 @@ class EvalServer:
         self._reserve()
         root = self._root
         score, side_info = root._score(candidate, example)
+        # Per-call heartbeat at DEBUG so it surfaces only in the Logs tab's
+        # verbose view — the black-box counterpart of the DSPy per-example eval
+        # heartbeat, so every run type gets the same normal=aggregates /
+        # verbose=per-call split. Counted against the run-wide budget.
+        logger.debug("scorer eval %d/%d score=%.3f", root.used, root.max_evals, score)
         server: EvalServer | None = self
         while server is not None:
             with server._lock:
@@ -325,9 +342,14 @@ class EvalServer:
 
         Returns:
             The score and side information, or ``(0.0, {"error": ...})``.
+
+        Raises:
+            ScorerAbortError: When the scorer asks to stop the run.
         """
         try:
             return self._scorer(candidate, example)
+        except ScorerAbortError:
+            raise
         except Exception as exc:
             logger.warning("scorer raised on a candidate: %s", exc)
             return 0.0, {"error": f"{type(exc).__name__}: {exc}"}

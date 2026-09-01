@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from core.constants import PROGRESS_CANDIDATE, PROGRESS_MINIBATCH
 from core.exceptions import ServiceError
 
 from ..meta_harness import MetaHarnessEngine
@@ -191,3 +192,82 @@ def test_meta_harness_scores_cases_concurrently(tmp_path: Path) -> None:
 
     assert server.used == 4
     assert any(name.startswith("meta-harness") for name in names)
+
+
+def test_meta_harness_streams_each_trial_as_a_candidate(tmp_path: Path) -> None:
+    """Every scorer call goes out as feedback and every complete trial as a tree node, while the loop runs."""
+    sink: list[tuple[str, dict[str, Any]]] = []
+    server = EvalServer(vowel_scorer, max_evals=100)
+    task = Task(seed_candidate="hello", objective="more vowels", val_set=[{"i": 0}, {"i": 1}])
+    ctx = make_ctx(str(tmp_path), max_iterations=2, progress_callback=lambda e, m: sink.append((e, m)))
+
+    MetaHarnessEngine().run(task, server, ctx)
+
+    candidates = [m for e, m in sink if e == PROGRESS_CANDIDATE]
+    assert [c["candidate_id"] for c in candidates] == ["0", "1", "2"]
+    assert [c["parent_id"] for c in candidates] == [None, "0", "1"]
+    assert [c["generation"] for c in candidates] == [0, 1, 2]
+    assert [c["iteration"] for c in candidates] == [0, 1, 2]
+    assert [c["discovered_at_evals"] for c in candidates] == [2, 4, 6]
+    assert candidates[0]["prompt"] == {"current_candidate": "hello"}
+    assert candidates[0]["per_example"] == [{"id": "0", "score": 0.4}, {"id": "1", "score": 0.4}]
+    assert candidates[1]["score"] == 1.0
+    assert candidates[2]["prompt"] == {"current_candidate": "aeiou aeiou"}
+    assert [(m["iteration"], m["example_id"], m["feedback"]) for e, m in sink if e == PROGRESS_MINIBATCH] == [
+        (0, "0", "vowels: 2"),
+        (0, "1", "vowels: 2"),
+        (1, "0", "vowels: 5"),
+        (1, "1", "vowels: 5"),
+        (2, "0", "vowels: 10"),
+        (2, "1", "vowels: 10"),
+    ]
+    assert all(m["prediction"] == "" for e, m in sink if e == PROGRESS_MINIBATCH)
+
+
+def test_meta_harness_streams_from_worker_threads(tmp_path: Path) -> None:
+    """Scoring in parallel keeps the events tagged with their trial (nothing leans on thread-local context)."""
+    sink: list[tuple[str, dict[str, Any]]] = []
+    lock = threading.Lock()
+
+    def collect(event: str, metrics: dict[str, Any]) -> None:
+        """Append an event under a lock, since worker threads emit concurrently.
+
+        Args:
+            event: The event name.
+            metrics: Its payload.
+        """
+        with lock:
+            sink.append((event, metrics))
+
+    server = EvalServer(vowel_scorer, max_evals=100)
+    task = Task(seed_candidate="hello", val_set=[{"i": 0}, {"i": 1}, {"i": 2}])
+    ctx = make_ctx(str(tmp_path), max_iterations=1, concurrency=3, progress_callback=collect)
+
+    MetaHarnessEngine().run(task, server, ctx)
+
+    assert [c["candidate_id"] for e, c in sink if e == PROGRESS_CANDIDATE] == ["0", "1"]
+    feedback = sorted((m["iteration"], m["example_id"]) for e, m in sink if e == PROGRESS_MINIBATCH)
+    assert feedback == [(0, "0"), (0, "1"), (0, "2"), (1, "0"), (1, "1"), (1, "2")]
+
+
+def test_meta_harness_announces_only_complete_trials(tmp_path: Path) -> None:
+    """A trial the budget cuts short streams its scorer calls but never becomes a node."""
+    sink: list[tuple[str, dict[str, Any]]] = []
+    ctx = make_ctx(str(tmp_path), progress_callback=lambda e, m: sink.append((e, m)))
+    server = EvalServer(vowel_scorer, max_evals=1)
+
+    trial = MetaHarnessEngine._evaluate("hello", [{"i": 0}, {"i": 1}], server, ctx, index=0, parent=None)
+
+    assert not trial.complete
+    assert [e for e, _ in sink] == [PROGRESS_MINIBATCH]
+
+
+def test_meta_harness_streams_multi_part_versions_as_their_parts(tmp_path: Path) -> None:
+    """A harness made of files is announced with one prompt entry per file."""
+    sink: list[tuple[str, dict[str, Any]]] = []
+    ctx = make_ctx(str(tmp_path), progress_callback=lambda e, m: sink.append((e, m)))
+    candidate = {"AGENTS.md": "hello", "README.md": "xyz"}
+
+    MetaHarnessEngine._evaluate(candidate, [{"i": 0}], EvalServer(vowel_scorer, max_evals=5), ctx, index=0, parent=None)
+
+    assert [m["prompt"] for e, m in sink if e == PROGRESS_CANDIDATE] == [candidate]

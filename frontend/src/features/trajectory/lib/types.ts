@@ -89,3 +89,37 @@ export interface RejectedNode extends RejectedMetrics {
   x: number;
   y: number;
 }
+
+// Run configuration a black-box ("Optimize Anything") run hands the drawer, so
+// it can name what a candidate is and decide which sections apply.
+export interface BlackboxTrajectoryContext {
+  recipe: "prompt" | "code" | "anything" | null;
+  // Whether candidates were scored against cases (per-case scores and notes
+  // exist) or in single-task mode, where each version has one score.
+  hasCases: boolean;
+  // Scorer-attached renders keyed by candidate (see blackboxCandidateKey),
+  // from the run's version history — present once the run has finished.
+  rendersByText: ReadonlyMap<string, ReadonlyArray<{ key: string; src: string }>>;
+}
+
+// GEPA stores a plain-string black-box candidate under this one synthetic key.
+export const BLACKBOX_STR_CANDIDATE_KEY = "current_candidate";
+
+// Identity of a black-box candidate shared by the tree, which sees the GEPA
+// candidate map, and the run's version history, which sees the raw candidate.
+export function blackboxCandidateKey(candidate: string | Record<string, string>): string {
+  if (typeof candidate === "string") return candidate;
+  const keys = Object.keys(candidate);
+  const [only] = keys;
+  if (keys.length === 1 && only === BLACKBOX_STR_CANDIDATE_KEY) return candidate[only] ?? "";
+  return keys
+    .sort()
+    .map((key) => `${key}\u0000${candidate[key]}`)
+    .join("\u0001");
+}
+
+// Black-box cases are keyed by validation index the way candidates are keyed
+// by list index, and read 1-based for the same reason.
+export function displayCaseId(id: string): string {
+  return displayCandidateId(id);
+}

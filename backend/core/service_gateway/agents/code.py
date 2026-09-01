@@ -967,15 +967,26 @@ _SCORER_CONTRACT = """The scorer is one python function, def score(candidate, ca
 - candidate (str) is the version under optimization: the full text of the starting point as the optimizer rewrote it.
 - case is one row of the case file as a dict keyed by the case columns; None when the job has no cases (still return a score).
 - Return a float, higher is better, 0.0 to 1.0 by convention, or a (score, side_info) tuple where side_info is a dict with a short "feedback" string. The optimizer reads that feedback to learn WHY a version scored low, so name the expected value or the failed check whenever you can.
-- Standard library only (re, json, math, difflib, statistics, ...): no third-party imports, no network, no files.
+- Standard library only (re, json, math, difflib, statistics, subprocess, tempfile, ...): no third-party imports and no network of your own. The scorer runs in a throwaway sandbox, so temp files and subprocesses are fine.
 - Never raise: catch failures and return 0.0 with the error in feedback.
 - Read case columns by their exact names; never invent columns."""
 
 _SCORER_AGENT_CONTRACT = """The target is an AGENT: candidate is the instructions file a coding agent runs with, and the agent has ALREADY run on the case when the scorer is called, so case is the run record, not the raw case. case["case"] is the original case dict; case["output"] is the agent's answer (the answer file, else its final message; None when it produced nothing); case["exit_code"], case["timed_out"], case["error"] and case["transcript"] describe the run. Score case["output"] against case["case"]; never try to run the agent yourself."""
 
-_SCORER_LLM_CONTRACT = """A helper llm(prompt, input=None) -> str is injected at run time: do not import or define it. llm(candidate, case["<input column>"]) runs the candidate as the system message with the case's input column as the user message and returns the reply; that is how a prompt is exercised. With a single argument, llm(rubric_text) asks the model a free-form question, e.g. to grade a reply against a rubric: parse the answer defensively (look for a number or a verdict word, default to 0.0)."""
+_SCORER_LLM_CONTRACT = """A helper llm(prompt, input=None, images=None) -> str is injected at run time: do not import or define it. llm(candidate, case["<input column>"]) runs the candidate as the system message with the case's input column as the user message and returns the reply; that is how a prompt is exercised. With a single argument, llm(rubric_text) asks the model a free-form question, e.g. to grade a reply against a rubric: parse the answer defensively (look for a number or a verdict word, default to 0.0). images= attaches PNG/JPEG bytes, file paths or data: URLs for a vision model to look at; an Image(path=..., base64_data=..., media_type=...) wrapper is injected next to llm for putting renders into side_info."""
 
 _SCORER_NO_LLM_CONTRACT = """No model is attached to the scorer, so there is NO llm helper: never call llm(). Score the candidate text itself with deterministic checks (structure, required content, length, regexes, numeric fields, similarity to the expected column)."""
+
+_SCORER_PATTERNS = """Scorer shapes that work well; pick the one the objective calls for, or combine several into a weighted score. "The answer" below means llm(candidate, case["<input column>"]) when the candidate is a prompt and the llm helper exists, case["output"] for an agent target, and the candidate text itself otherwise.
+- Length / shape: deterministic checks on the text (word or character budget, required sections, forbidden phrases, regex structure), graded by distance from the target rather than pass/fail.
+- Exact match: 1.0 when the answer, stripped and case-normalized, equals the expected column.
+- Contains: the expected text, or each of several required phrases, appears in the answer; partial credit per phrase found.
+- Numeric tolerance: pull the last number out of the answer with a regex and accept it within a tolerance of the expected number; 0.0 with feedback when no number is found.
+- JSON field: json.loads the answer (strip code fences first) and compare one field to the expected column; 0.0 with the parse error in feedback.
+- Run program: when the candidate is code, write it to a temp file and run it with subprocess.run([sys.executable, path], capture_output=True, text=True, timeout=...); a non-zero exit or a timeout scores 0.0 with the stderr tail in feedback, otherwise read the score off stdout (the last number printed, or the pass ratio of test inputs you drive through it)."""
+
+_SCORER_MODEL_PATTERNS = """- LLM judge: put the input, the expected value and the answer into a rubric, ask llm(rubric) for a 0-10 number or a verdict word, normalize to 0.0-1.0 and default to 0.0 when the reply does not parse.
+- Vision judge: run the candidate program as above, collect the .png files it wrote, send them with llm(rubric, images=[...]) and parse a "SCORE: X/100" line; put the renders into side_info as Image(base64_data=..., media_type="image/png") so the optimizer's reflection model sees them too."""
 
 
 def _scorer_contract(target_kind: str, scorer_has_model: bool) -> str:
@@ -987,12 +998,14 @@ def _scorer_contract(target_kind: str, scorer_has_model: bool) -> str:
             the ``llm`` helper is injected at run time.
 
     Returns:
-        The contract text handed to the scorer author and the chat agent.
+        The contract text handed to the scorer author and the chat agent,
+        closing with the scorer shapes this job can use.
     """
     parts = [_SCORER_CONTRACT]
     if target_kind == "agent":
         parts.append(_SCORER_AGENT_CONTRACT)
     parts.append(_SCORER_LLM_CONTRACT if scorer_has_model else _SCORER_NO_LLM_CONTRACT)
+    parts.append(_SCORER_PATTERNS + ("\n" + _SCORER_MODEL_PATTERNS if scorer_has_model else ""))
     return "\n\n".join(parts)
 
 

@@ -31,9 +31,11 @@ import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { perLocale } from "@/shared/lib/per-locale";
 import { moduleLabel } from "@/shared/lib/formatters";
+import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { Skeleton } from "@/shared/ui/skeleton";
+import { HelpTip } from "@/shared/ui/help-tip";
 import { formatCredits } from "@/features/billing";
 import { useUserPrefs } from "@/features/settings";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
@@ -166,19 +168,23 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
               {summaryTab === 0 && (
                 <div className="space-y-0 [&>div]:min-w-0 [&>div]:gap-3 [&>div>span:first-child]:min-w-0 [&>div>span:last-child]:max-w-[55%] [&>div>span:last-child]:break-words [&>div>span:last-child]:text-end">
                   <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Tag className="size-3.5" />
-                      {msg("auto.features.submit.components.steps.summarystep.3")}
-                      {TERMS.optimization}
-                    </span>
+                    <HelpTip text={tip("submit.name")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Tag className="size-3.5" />
+                        {msg("auto.features.submit.components.steps.summarystep.3")}
+                        {TERMS.optimization}
+                      </span>
+                    </HelpTip>
                     <span className="text-sm font-medium">{jobName || "—"}</span>
                   </div>
                   <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Stack className="size-3.5" />
-                      {msg("auto.features.submit.components.steps.summarystep.4")}
-                      {TERMS.optimization}
-                    </span>
+                    <HelpTip text={tip("submit.optimization_type")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Stack className="size-3.5" />
+                        {msg("auto.features.submit.components.steps.summarystep.4")}
+                        {TERMS.optimization}
+                      </span>
+                    </HelpTip>
                     <span className="text-sm font-medium">
                       {jobType === "run"
                         ? msg("auto.features.submit.components.steps.summarystep.literal.4")
@@ -186,19 +192,23 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                     </span>
                   </div>
                   <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Cube className="size-3.5" />
-                      {msg("auto.features.submit.components.steps.summarystep.5")}
-                    </span>
+                    <HelpTip text={tip("module.choice")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Cube className="size-3.5" />
+                        {msg("auto.features.submit.components.steps.summarystep.5")}
+                      </span>
+                    </HelpTip>
                     <span className="text-sm font-medium font-mono" dir="ltr">
                       {moduleLabel(moduleName)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Target className="size-3.5" />
-                      {TERMS.optimizer}
-                    </span>
+                    <HelpTip text={tip("optimizer.choice")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Target className="size-3.5" />
+                        {TERMS.optimizer}
+                      </span>
+                    </HelpTip>
                     <span className="text-sm font-medium font-mono" dir="ltr">
                       {msg("auto.features.submit.components.steps.summarystep.6")}
                     </span>
@@ -209,10 +219,12 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
               {summaryTab === 1 && (
                 <div className="space-y-4 [&>div.flex]:min-w-0 [&>div.flex]:gap-3 [&>div.flex>span:first-child]:min-w-0 [&>div.flex>span:last-child]:max-w-[55%] [&>div.flex>span:last-child]:break-words [&>div.flex>span:last-child]:text-end">
                   <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <FileText className="size-3.5" />
-                      {msg("auto.features.submit.components.steps.summarystep.7")}
-                    </span>
+                    <HelpTip text={tip("submit.dataset_file")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <FileText className="size-3.5" />
+                        {msg("auto.features.submit.components.steps.summarystep.7")}
+                      </span>
+                    </HelpTip>
                     <span
                       className="text-sm font-medium truncate max-w-[60%]"
                       title={datasetFileName ?? undefined}
@@ -222,10 +234,12 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                   </div>
                   {parsedDataset && (
                     <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Database className="size-3.5" />
-                        {msg("auto.features.submit.components.steps.summarystep.8")}
-                      </span>
+                      <HelpTip text={tip("submit.dataset_size")}>
+                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Database className="size-3.5" />
+                          {msg("auto.features.submit.components.steps.summarystep.8")}
+                        </span>
+                      </HelpTip>
                       <span className="text-sm font-medium">
                         {parsedDataset.rowCount}
                         {msg("auto.features.submit.components.steps.summarystep.9")}
@@ -236,10 +250,12 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                   )}
                   {parsedDataset && parsedDataset.columns.length > 0 && (
                     <div className="space-y-2 pt-1">
-                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Columns className="size-3.5" />
-                        {msg("auto.features.submit.components.steps.summarystep.11")}
-                      </span>
+                      <HelpTip text={tip("submit.column_roles")}>
+                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Columns className="size-3.5" />
+                          {msg("auto.features.submit.components.steps.summarystep.11")}
+                        </span>
+                      </HelpTip>
                       <div className="space-y-1.5">
                         {parsedDataset.columns.map((col) => {
                           const role = columnRoles[col];
@@ -282,11 +298,13 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                     <>
                       <Separator />
                       <div className="space-y-3">
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Stack className="size-3.5" />
-                          {msg("auto.features.submit.components.steps.summarystep.12")}
-                          {TERMS.dataset}
-                        </span>
+                        <HelpTip text={tip("data.split_explanation")}>
+                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Stack className="size-3.5" />
+                            {msg("auto.features.submit.components.steps.summarystep.12")}
+                            {TERMS.dataset}
+                          </span>
+                        </HelpTip>
                         <div className="flex h-3 rounded-full overflow-hidden">
                           <div
                             className="bg-[#3D2E22]"
@@ -297,19 +315,28 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                         </div>
                         <div className="grid grid-cols-3 gap-4">
                           <div className="flex items-center gap-1.5 text-xs">
-                            <span className="inline-block w-2 h-2 rounded-full bg-[#3D2E22]" />
-                            {msg("auto.features.submit.components.steps.summarystep.13")}
-                            {split.train}
+                            <HelpTip
+                              text={tip("data.split.train")}
+                              className="items-center gap-1.5"
+                            >
+                              <span className="inline-block w-2 h-2 rounded-full bg-[#3D2E22]" />
+                              {msg("auto.features.submit.components.steps.summarystep.13")}
+                              {split.train}
+                            </HelpTip>
                           </div>
                           <div className="flex items-center gap-1.5 text-xs">
-                            <span className="inline-block w-2 h-2 rounded-full bg-[#C8A882]" />
-                            {msg("auto.features.submit.components.steps.summarystep.14")}
-                            {split.val}
+                            <HelpTip text={tip("data.split.val")} className="items-center gap-1.5">
+                              <span className="inline-block w-2 h-2 rounded-full bg-[#C8A882]" />
+                              {msg("auto.features.submit.components.steps.summarystep.14")}
+                              {split.val}
+                            </HelpTip>
                           </div>
                           <div className="flex items-center gap-1.5 text-xs">
-                            <span className="inline-block w-2 h-2 rounded-full bg-[#8C7A6B]" />
-                            {msg("auto.features.submit.components.steps.summarystep.15")}
-                            {split.test}
+                            <HelpTip text={tip("data.split.test")} className="items-center gap-1.5">
+                              <span className="inline-block w-2 h-2 rounded-full bg-[#8C7A6B]" />
+                              {msg("auto.features.submit.components.steps.summarystep.15")}
+                              {split.test}
+                            </HelpTip>
                           </div>
                         </div>
                       </div>
@@ -317,10 +344,12 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                   )}
                   {advanced && (
                     <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Shuffle className="size-3.5" />
-                        {msg("auto.features.submit.components.steps.summarystep.16")}
-                      </span>
+                      <HelpTip text={tip("data.shuffle_explanation")}>
+                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Shuffle className="size-3.5" />
+                          {msg("auto.features.submit.components.steps.summarystep.16")}
+                        </span>
+                      </HelpTip>
                       <span className="text-sm font-medium">
                         {shuffle
                           ? msg("auto.features.submit.components.steps.summarystep.literal.9")
@@ -356,17 +385,27 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                       return (
                         <div className="space-y-2">
                           <div className="flex items-center justify-between rounded-lg border border-border/40 bg-muted/20 px-3 py-2">
-                            <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
-                              {msg("auto.features.submit.components.steps.summarystep.17")}
-                            </span>
+                            <HelpTip
+                              text={tip("submit.total_pairs")}
+                              className="pointer-events-auto"
+                            >
+                              <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                                {msg("auto.features.submit.components.steps.summarystep.17")}
+                              </span>
+                            </HelpTip>
                             <span className="font-mono text-sm text-foreground" dir="ltr">
                               {genCount} × {refCount} ={" "}
                               <span className="font-medium">{totalPairs}</span>
                             </span>
                           </div>
-                          <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
-                            {msg("model.generation.label_plural")}
-                          </span>
+                          <HelpTip
+                            text={tip("submit.generation_models")}
+                            className="pointer-events-auto"
+                          >
+                            <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                              {msg("model.generation.label_plural")}
+                            </span>
+                          </HelpTip>
                           <div className="space-y-1.5">
                             {generationModels
                               .filter((m) => m.name)
@@ -374,9 +413,14 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                                 <ModelChip key={i} config={m} onClick={() => {}} />
                               ))}
                           </div>
-                          <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
-                            {msg("auto.features.submit.components.steps.summarystep.18")}
-                          </span>
+                          <HelpTip
+                            text={tip("submit.reflection_models")}
+                            className="pointer-events-auto"
+                          >
+                            <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                              {msg("auto.features.submit.components.steps.summarystep.18")}
+                            </span>
+                          </HelpTip>
                           <div className="space-y-1.5">
                             {reflectionModels
                               .filter((m) => m.name)
@@ -395,10 +439,12 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                 <div className="space-y-0 [&>div]:min-w-0 [&>div]:gap-3 [&>div>span:first-child]:min-w-0 [&>div>span:last-child]:max-w-[55%] [&>div>span:last-child]:break-words [&>div>span:last-child]:text-end">
                   {isReact && (
                     <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Stack className="size-3.5" />
-                        {msg("submit.react.mcp_url_label")}
-                      </span>
+                      <HelpTip text={tip("react.mcp_url")}>
+                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Stack className="size-3.5" />
+                          {msg("submit.react.mcp_url_label")}
+                        </span>
+                      </HelpTip>
                       <span
                         className="text-sm font-medium font-mono truncate max-w-[60%]"
                         dir="ltr"
@@ -409,10 +455,12 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                     </div>
                   )}
                   <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <MagnifyingGlass className="size-3.5" />
-                      {msg("auto.features.submit.components.steps.summarystep.19")}
-                    </span>
+                    <HelpTip text={tip("submit.depth")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <MagnifyingGlass className="size-3.5" />
+                        {msg("auto.features.submit.components.steps.summarystep.19")}
+                      </span>
+                    </HelpTip>
                     <span className="text-sm font-medium">
                       {autoLevel === "light"
                         ? msg("auto.features.submit.components.steps.summarystep.literal.11")
@@ -424,44 +472,54 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                   {advanced && (
                     <>
                       <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Target className="size-3.5" />
-                          {msg("auto.features.submit.components.steps.summarystep.25")}
-                        </span>
+                        <HelpTip text={tip("submit.target_score")}>
+                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Target className="size-3.5" />
+                            {msg("auto.features.submit.components.steps.summarystep.25")}
+                          </span>
+                        </HelpTip>
                         <span className="text-sm font-medium font-mono" dir="ltr">
                           {targetScore ? `${targetScore}%` : "—"}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Database className="size-3.5" />
-                          {msg("auto.features.submit.components.steps.summarystep.20")}
-                        </span>
+                        <HelpTip text={tip("submit.reflection_minibatch")}>
+                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Database className="size-3.5" />
+                            {msg("auto.features.submit.components.steps.summarystep.20")}
+                          </span>
+                        </HelpTip>
                         <span className="text-sm font-medium font-mono">
                           {reflectionMinibatchSize || "—"}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Stack className="size-3.5" />
-                          {msg("auto.features.submit.components.steps.summarystep.21")}
-                        </span>
+                        <HelpTip text={tip("submit.eval_rounds")}>
+                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Stack className="size-3.5" />
+                            {msg("auto.features.submit.components.steps.summarystep.21")}
+                          </span>
+                        </HelpTip>
                         <span className="text-sm font-medium font-mono">{maxFullEvals || "—"}</span>
                       </div>
                       <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Gauge className="size-3.5" />
-                          {msg("submit.metric_calls")}
-                        </span>
+                        <HelpTip text={tip("submit.metric_calls")}>
+                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Gauge className="size-3.5" />
+                            {msg("submit.metric_calls")}
+                          </span>
+                        </HelpTip>
                         <span className="text-sm font-medium font-mono">
                           {maxMetricCalls || "—"}
                         </span>
                       </div>
                       <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Shuffle className="size-3.5" />
-                          {msg("auto.features.submit.components.steps.summarystep.22")}
-                        </span>
+                        <HelpTip text={tip("submit.merge")}>
+                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Shuffle className="size-3.5" />
+                            {msg("auto.features.submit.components.steps.summarystep.22")}
+                          </span>
+                        </HelpTip>
                         <span className="text-sm font-medium">
                           {useMerge
                             ? msg("auto.features.submit.components.steps.summarystep.literal.14")
@@ -499,12 +557,16 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                     )}
                     {displaySignatureCode && (
                       <TabsTrigger value="signature" className={SLIDING_PILL_TABS_TRIGGER_CLASS}>
-                        {msg("auto.features.submit.components.steps.summarystep.23")}
+                        <HelpTip text={tip("code.signature")}>
+                          {msg("auto.features.submit.components.steps.summarystep.23")}
+                        </HelpTip>
                       </TabsTrigger>
                     )}
                     {metricCode && (
                       <TabsTrigger value="metric" className={SLIDING_PILL_TABS_TRIGGER_CLASS}>
-                        {msg("auto.features.submit.components.steps.summarystep.24")}
+                        <HelpTip text={tip("code.metric")}>
+                          {msg("auto.features.submit.components.steps.summarystep.24")}
+                        </HelpTip>
                       </TabsTrigger>
                     )}
                   </TabsList>
@@ -537,12 +599,14 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
 
       <div className="rounded-xl border border-[#C8B9A8]/50 bg-[#FAF8F5] px-3.5 py-3 shadow-[0_1px_2px_rgba(61,46,34,0.04)]">
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3D2E22]">
-            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
-              <Gauge className="h-3 w-3" />
+          <HelpTip text={tip("submit.estimate")}>
+            <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3D2E22]">
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
+                <Gauge className="h-3 w-3" />
+              </span>
+              {byok ? msg("submit.summary.estimate_fee") : msg("submit.summary.estimate_cost")}
             </span>
-            {byok ? msg("submit.summary.estimate_fee") : msg("submit.summary.estimate_cost")}
-          </span>
+          </HelpTip>
           <span className="text-[13px] font-medium text-[#3D2E22] sm:text-end" dir="auto">
             {/* Isolate "low–high" as one LTR run (U+2066…U+2069) so the en-dash
                 between the two number groups doesn't flip them under RTL. */}

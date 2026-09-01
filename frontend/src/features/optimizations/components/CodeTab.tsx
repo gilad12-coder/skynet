@@ -46,6 +46,8 @@ export function CodeTab({
   metricLabel?: string;
 }) {
   const metricTabLabel = metricLabel ?? msg("auto.features.optimizations.components.codetab.4");
+  // A black-box run has no program to show, only the scorer that graded it.
+  const scorerOnly = !workflowSpec && !signatureCode && !!metricLabel;
   const workflowCode = useMemo(
     () => (workflowSpec ? compileWorkflowToCode(workflowSpec) : null),
     [workflowSpec],
@@ -79,23 +81,33 @@ export function CodeTab({
         <p className="text-sm text-muted-foreground">
           {workflowSpec
             ? msg("optimization.code.workflow_intro")
-            : msg("auto.features.optimizations.components.codetab.1")}
+            : scorerOnly
+              ? msg("optimization.blackbox.scorer_intro")
+              : msg("auto.features.optimizations.components.codetab.1")}
         </p>
       </FadeIn>
       {(signatureCode || metricCode || workflowSpec) && (
         <Card data-tutorial="code-sources">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <Code className="size-4" />
-              <HelpTip text={workflowSpec ? tip("code.workflow") : tip("code.signature_metric")}>
+              <Code className="size-4" aria-hidden="true" />
+              <HelpTip
+                text={tip(
+                  workflowSpec
+                    ? "code.workflow"
+                    : scorerOnly
+                      ? "blackbox.scorer_code"
+                      : "code.signature_metric",
+                )}
+              >
                 {msg("auto.features.optimizations.components.codetab.2")}
               </HelpTip>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <Tabs value={activeCodeTab} dir="ltr" onValueChange={setActiveCodeTab}>
-              <TabsList className={SLIDING_PILL_TABS_LIST_CLASS}>
-                {tabs.length > 1 && (
+              {tabs.length > 1 && (
+                <TabsList className={SLIDING_PILL_TABS_LIST_CLASS}>
                   <div
                     className={SLIDING_PILL_TABS_INDICATOR_CLASS}
                     style={{
@@ -104,17 +116,17 @@ export function CodeTab({
                         activeIndex === 0 ? 4 : `calc(${share * activeIndex}% + 2px)`,
                     }}
                   />
-                )}
-                {tabs.map((t) => (
-                  <TabsTrigger
-                    key={t.value}
-                    value={t.value}
-                    className={SLIDING_PILL_TABS_TRIGGER_CLASS}
-                  >
-                    {t.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
+                  {tabs.map((t) => (
+                    <TabsTrigger
+                      key={t.value}
+                      value={t.value}
+                      className={SLIDING_PILL_TABS_TRIGGER_CLASS}
+                    >
+                      {t.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              )}
               {workflowCode && (
                 <TabsContent value="code">
                   <CodeEditor

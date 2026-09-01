@@ -57,12 +57,15 @@ BlackboxCandidate = str | dict[str, str]
 # ``model`` is the model a python scorer may call through the injected
 # ``llm(prompt, input=None)`` helper (e.g. to run the prompt under
 # optimization on a case); its usage is billed with the run.
+# ``install_command`` runs once when a python scorer's sandbox opens, for
+# whatever the scorer imports beyond the stock image (apt-get, pip).
 class BlackboxScorer(BaseModel):
     kind: Literal["python", "remote"] = "python"
     metric_code: str | None = None
     url: str | None = None
     secret: str | None = None
     timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    install_command: str | None = None
     model: ModelConfig | None = None
 
     @model_validator(mode="after")
@@ -171,6 +174,9 @@ class BlackboxRunRequest(BaseModel):
     username: str | None = None
     objective: str | None = None
     background: str | None = None
+    # Which wizard recipe authored the run ("prompt" / "code" / "anything").
+    # Engines ignore it; cloning reads it back to preselect the recipe picker.
+    recipe: Literal["prompt", "code", "anything"] | None = None
     seed_candidate: BlackboxCandidate | None = None
     scorer: BlackboxScorer
     cases: list[dict[str, Any]] | None = Field(default=None, max_length=200_000)
@@ -249,14 +255,29 @@ class BlackboxLaneResult(BaseModel):
 
 
 # One distinct version the run scored, in the order versions first appeared.
-# ``score`` is the mean over the cases it was scored on inside the budget;
-# ``side_info`` is what the scorer returned for it last (images as data URLs).
+# ``score`` is the number the run ranked it by: the engine's validation-set
+# aggregate when it recorded one (the figure the candidate tree shows), else
+# the running mean over its ``evals`` scorer calls, which ``mean_score``
+# always carries (``None`` on runs recorded before it existed). ``side_info``
+# is what the scorer returned for it last (images as data URLs).
 class BlackboxVersion(BaseModel):
     candidate: BlackboxCandidate
     score: float | None = None
+    mean_score: float | None = None
     evals: int = 0
     first_run: int = 0
     side_info: dict[str, Any] = Field(default_factory=dict)
+
+
+# One candidate in the engine's lineage: ``parents`` are indices into the
+# same list (``None`` marks the seed), ``val_score`` is the mean validation
+# score and ``discovery_evals`` the metric-call count when it appeared.
+# Only the GEPA engine records lineage today.
+class BlackboxCandidateNode(BaseModel):
+    candidate: BlackboxCandidate
+    parents: list[int | None] = Field(default_factory=list)
+    val_score: float | None = None
+    discovery_evals: int = 0
 
 
 # Result persisted for a finished black-box job. ``baseline_test_metric`` /
@@ -275,6 +296,8 @@ class BlackboxRunResponse(BaseModel):
     regression_guard_applied: bool = False
     lanes: list[BlackboxLaneResult] = Field(default_factory=list)
     versions: list[BlackboxVersion] = Field(default_factory=list)
+    # GEPA's evolutionary lineage; empty for engines that record none.
+    candidate_tree: list[BlackboxCandidateNode] = Field(default_factory=list)
     total_scorer_runs: int = 0
     runtime_seconds: float
     num_lm_calls: int = 0

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { detectRenderKind, formatJson, sideInfoImages, sideInfoNotes } from "./candidate-render.ts";
+import { detectRenderKind, formatJson, sideInfoImages } from "./candidate-render.ts";
 
 const PNG = "data:image/png;base64,iVBORw0KGgo=";
 
@@ -27,7 +27,7 @@ describe("detectRenderKind", () => {
 });
 
 describe("side info helpers", () => {
-  it("splits images from notes and keeps list order", () => {
+  it("picks images out of side info and keeps list order", () => {
     const sideInfo = {
       feedback: "tight",
       render: PNG,
@@ -39,11 +39,6 @@ describe("side info helpers", () => {
       sideInfoImages(sideInfo).map((i) => i.key),
       ["render", "frames[0]", "frames[2]"],
     );
-    assert.deepEqual(sideInfoNotes(sideInfo), [
-      ["feedback", "tight"],
-      ["frames", "note"],
-      ["score_parts", '{\n  "a": 1\n}'],
-    ]);
   });
 
   it("formats json and leaves invalid text alone", () => {

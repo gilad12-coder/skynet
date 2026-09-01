@@ -1367,7 +1367,6 @@ function ApiTab() {
                   text={revealed ?? ""}
                   ariaLabel={msg("settings.api.copy")}
                   copiedAriaLabel={msg("settings.api.copied")}
-                  variant="outline"
                   className="shrink-0"
                 />
               </TooltipTrigger>

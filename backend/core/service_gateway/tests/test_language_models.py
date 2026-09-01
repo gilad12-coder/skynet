@@ -20,6 +20,7 @@ from core.service_gateway.language_models import (
     apply_model_reasoning_config,
     apply_reasoning_effort,
     build_language_model,
+    canonical_model_id,
     install_openrouter_served_model_patch,
     served_model_from,
     total_tokens_from_history,
@@ -592,3 +593,10 @@ def test_openrouter_patch_adopts_provider_chunk_model() -> None:
     with contextlib.suppress(Exception):
         handler(other, chunk)
     assert other.model == "openai/gpt-4o-mini"
+
+
+def test_canonical_model_id_strips_only_the_gateway_prefix() -> None:
+    """The managed-gateway transport prefix goes; provider prefixes stay."""
+    assert canonical_model_id("litellm_proxy/google/gemini-3-flash-preview") == "google/gemini-3-flash-preview"
+    assert canonical_model_id("google/gemini-3-flash-preview") == "google/gemini-3-flash-preview"
+    assert canonical_model_id("openrouter/anthropic/claude-sonnet-4") == "openrouter/anthropic/claude-sonnet-4"

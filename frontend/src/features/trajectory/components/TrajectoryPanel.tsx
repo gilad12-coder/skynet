@@ -16,15 +16,25 @@ import {
   extractCandidates,
   extractMinibatch,
   extractRejected,
+  scopeToLatestLane,
   extractValset,
   extractValsetOutputs,
 } from "../lib/extract-events";
 import { layoutTrajectory } from "../lib/layout";
+import type { BlackboxTrajectoryContext } from "../lib/types";
 import { TrajectoryTree } from "./TrajectoryTree";
 import { TrajectoryOutline } from "./TrajectoryOutline";
 import { TrajectoryDrawer, type DrawerSelection } from "./TrajectoryDrawer";
 
 const NEWEST_HIGHLIGHT_MS = 2200;
+
+// A black-box run rendered with nothing but the job in hand still gets
+// black-box terminology — just no recipe, cases or renders to go on.
+const BLACKBOX_FALLBACK: BlackboxTrajectoryContext = {
+  recipe: null,
+  hasCases: false,
+  rendersByText: new Map(),
+};
 
 type Selected = { kind: "candidate" | "rejected"; id: string };
 
@@ -43,6 +53,9 @@ export interface TrajectoryPanelProps {
   // Tool name → approval severity from the run's persisted react_overlay,
   // forwarded to the drawer so its tool cards match the Code tab.
   toolSeverities?: Record<string, string>;
+  // Run configuration of a black-box run, forwarded to the drawer so it names
+  // candidates by kind and shows per-case scores only when cases exist.
+  blackbox?: BlackboxTrajectoryContext | null;
 }
 
 export function TrajectoryPanel({
@@ -50,15 +63,16 @@ export function TrajectoryPanel({
   pairIndex,
   previewLayout,
   toolSeverities,
+  blackbox,
 }: TrajectoryPanelProps) {
   const live = isLive(job);
   const lite = useLiteMode();
+  const blackboxCtx = blackbox ?? (job.optimization_type === "blackbox" ? BLACKBOX_FALLBACK : null);
   const { candidates, rejected, valsetRows, minibatch, valsetOutputs } = useMemo(() => {
     const events = job.progress_events ?? [];
-    const scoped =
-      pairIndex === undefined
-        ? events
-        : events.filter((e) => e.metrics?.pair_index === pairIndex);
+    const scoped = scopeToLatestLane(
+      pairIndex === undefined ? events : events.filter((e) => e.metrics?.pair_index === pairIndex),
+    );
     return {
       candidates: extractCandidates(scoped),
       rejected: extractRejected(scoped),
@@ -156,8 +170,7 @@ export function TrajectoryPanel({
     return { kind: "rejected", ghost, parent };
   }, [layout.nodes, layout.ghosts, selected]);
 
-  const selectedTreeId =
-    selected !== null && selected.kind === "candidate" ? selected.id : null;
+  const selectedTreeId = selected !== null && selected.kind === "candidate" ? selected.id : null;
 
   const handleSelectCandidate = useCallback((id: string) => {
     setSelected({ kind: "candidate", id });
@@ -240,6 +253,7 @@ export function TrajectoryPanel({
               onSelectCandidate={handleSelectCandidate}
               onSelectRejected={handleSelectRejected}
               previewLayout={previewLayout}
+              ringMode={blackboxCtx === null ? "pass_fail" : "score"}
             />
           )}
           <TrajectoryDrawer
@@ -248,15 +262,11 @@ export function TrajectoryPanel({
             onOpenChange={setDrawerOpen}
             valsetRows={valsetRows}
             minibatch={minibatch}
+            blackbox={blackboxCtx}
             valsetOutputs={valsetOutputs}
             toolSeverities={toolSeverities}
           />
-          <div
-            ref={liveRegionRef}
-            role="status"
-            aria-live="polite"
-            className="sr-only"
-          />
+          <div ref={liveRegionRef} role="status" aria-live="polite" className="sr-only" />
         </CardContent>
       </Card>
     </FadeIn>
@@ -432,9 +442,7 @@ function GenerationTimeline({
           <div
             className={cn(
               "relative block h-4 w-4 rounded-full border-[1.5px] shadow-[0_1px_2px_rgba(28,22,18,0.18)] transition-transform",
-              isAtLive
-                ? "border-[#1c1612] bg-[#1c1612]"
-                : "border-[#1c1612] bg-[#fbf8f3]",
+              isAtLive ? "border-[#1c1612] bg-[#1c1612]" : "border-[#1c1612] bg-[#fbf8f3]",
               dragging && "scale-110",
             )}
           />

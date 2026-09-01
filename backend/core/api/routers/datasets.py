@@ -195,7 +195,7 @@ def create_datasets_router(*, job_store) -> APIRouter:
             if not rows:
                 raise DomainError("dataset.staged.not_found", status=404)
         dataset_profile = profile_dataset(rows, payload.column_mapping)
-        plan = recommend_split(dataset_profile, seed=payload.seed)
+        plan = recommend_split(dataset_profile, seed=payload.seed, engine=payload.engine)
         return ProfileDatasetResponse(profile=dataset_profile, plan=plan)
 
     @router.post(

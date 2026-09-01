@@ -9,8 +9,8 @@ import {
   CardDescription,
 } from "@/shared/ui/primitives/card";
 import { Label } from "@/shared/ui/primitives/label";
-import { Separator } from "@/shared/ui/primitives/separator";
 import { Switch } from "@/shared/ui/primitives/switch";
+import { Separator } from "@/shared/ui/primitives/separator";
 import { NumberInput } from "@/shared/ui/number-input";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { cn } from "@/shared/lib/utils";
@@ -28,8 +28,6 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
   const { prefs } = useUserPrefs();
   const advanced = prefs.advancedMode;
   const {
-    shuffle,
-    setShuffle,
     autoLevel,
     setAutoLevel,
     reflectionMinibatchSize,
@@ -74,23 +72,10 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
         <div className="space-y-4">
           {advanced && (
             <Label className="font-semibold">
-              {msg("auto.features.submit.components.steps.paramsstep.9")}
+              <HelpTip text={tip("submit.advanced_settings")}>
+                {msg("auto.features.submit.components.steps.paramsstep.9")}
+              </HelpTip>
             </Label>
-          )}
-          {advanced && (
-            <div className="flex items-center justify-between">
-              <Label htmlFor="shuffle" className="cursor-pointer text-sm">
-                <HelpTip text={tip("data.shuffle_explanation")}>
-                  {msg("auto.features.submit.components.steps.paramsstep.10")}
-                </HelpTip>
-              </Label>
-              <Switch
-                id="shuffle"
-                checked={shuffle}
-                onCheckedChange={setShuffle}
-                className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
-              />
-            </div>
           )}
           <div className="space-y-2" data-tutorial="auto-level">
             <Label className="text-sm">
@@ -142,10 +127,12 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                   aria-expanded={optimizerSettingsOpen}
                   className="flex min-h-[44px] w-full cursor-pointer items-center justify-between gap-2 lg:min-h-0"
                 >
-                  <span className="text-sm leading-none font-medium">
-                    {msg("auto.features.submit.components.steps.paramsstep.11")}
-                    {TERMS.optimizer}
-                  </span>
+                  <HelpTip text={tip("submit.optimizer_params")}>
+                    <span className="text-sm leading-none font-medium">
+                      {msg("auto.features.submit.components.steps.paramsstep.11")}
+                      {TERMS.optimizer}
+                    </span>
+                  </HelpTip>
                   <CaretDown
                     className={cn(
                       "size-4 shrink-0 text-muted-foreground transition-transform duration-150",

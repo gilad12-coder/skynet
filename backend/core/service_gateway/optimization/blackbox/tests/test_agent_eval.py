@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Mapping
 from typing import Any
 
 import pytest
@@ -13,6 +15,7 @@ from core.models.blackbox import BLACKBOX_HARNESS_CUSTOM, BLACKBOX_TARGET_AGENT,
 from .. import agent_eval as agent_eval_mod
 from ..agent_eval import (
     _GATEWAY_MISSING,
+    AgentHarnessError,
     SandboxAgentScorer,
     agent_target_unavailable_reason,
     candidate_files,
@@ -154,17 +157,127 @@ def test_run_builds_a_tagged_named_spec_within_the_lifetime_ceiling() -> None:
     scorer.run("v", {"prompt": "p"})
 
     spec = runtime.specs[0]
-    assert spec.lifetime_seconds == 1200
+    assert spec.lifetime_seconds == 60 + 600 + 15
     assert spec.env["SKYNET_MODEL"] == "m"
-    assert spec.name == "skynet-job-1"
+    assert spec.name.startswith("skynet-job-1-")
+    assert len(spec.name) <= 60
     assert spec.tags == {"skynet_job": "job-1"}
+
+
+def test_each_run_opens_a_box_under_its_own_name() -> None:
+    """Holdout cases run in parallel, so two runs of one job never ask Vercel for the same sandbox name."""
+    runtime = FakeSandboxRuntime()
+    scorer = _scorer_of(runtime, _target(), job_id="job-1")
+
+    scorer.run("v", {"prompt": "p"})
+    scorer.run("v", {"prompt": "q"})
+
+    names = [spec.name for spec in runtime.specs]
+    assert len(set(names)) == 2
+    assert all(name.startswith("skynet-job-1-") for name in names)
+
+
+class _DyingSession(FakeSandboxSession):
+    """Box whose transport fails on the first command, the way a stalled SDK call does."""
+
+    def run(
+        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+    ) -> CommandResult:
+        """Raise a transport error instead of running anything.
+
+        Args:
+            command: The command line.
+            env: Ignored.
+            timeout_seconds: Ignored.
+
+        Raises:
+            TimeoutError: Always.
+        """
+        self.commands.append(command)
+        raise TimeoutError("The read operation timed out")
+
+
+def test_run_retries_once_in_a_fresh_box_when_the_sandbox_transport_fails() -> None:
+    """A box that dies mid-run is closed and the run repeated in a fresh one under a new name."""
+    boxes: list[FakeSandboxSession] = []
+
+    def factory() -> FakeSandboxSession:
+        """Hand out a dying box first, then a healthy one."""
+        session = (
+            _DyingSession()
+            if not boxes
+            else FakeSandboxSession(produces={"run-agent": {"output/answer.txt": "done"}})
+        )
+        boxes.append(session)
+        return session
+
+    runtime = FakeSandboxRuntime(session_factory=factory)
+    scorer = _scorer_of(runtime, _target(), job_id="job-1")
+
+    record = scorer.run("v", {"prompt": "p"})
+
+    assert record["output"] == "done"
+    assert record["error"] is None
+    first, second = runtime.sessions
+    assert first.closed is True
+    assert second.closed is True
+    assert second.files[PROMPT_FILE].startswith("p")
+    assert len({spec.name for spec in runtime.specs}) == 2
+
+
+def test_run_reports_a_sandbox_that_dies_twice_as_a_sandbox_failure() -> None:
+    """Two dead boxes in a row surface as a sandbox error, not as the raw transport exception."""
+    runtime = FakeSandboxRuntime(session_factory=_DyingSession)
+    scorer = _scorer_of(runtime, _target())
+
+    with pytest.raises(ServiceError, match=r"agent sandbox failed twice \(TimeoutError\): The read operation timed out"):
+        scorer.run("v", {"prompt": "p"})
+
+    assert len(runtime.sessions) == 2
+    assert all(session.closed for session in runtime.sessions)
+
+
+class _StuckSession(FakeSandboxSession):
+    """Box whose runtime gives up on a command that outlives its timeout, the way the real one does."""
+
+    def run(
+        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+    ) -> CommandResult:
+        """Raise the runtime's own error instead of running anything.
+
+        Args:
+            command: The command line.
+            env: Ignored.
+            timeout_seconds: Ignored.
+
+        Raises:
+            ServiceError: Always.
+        """
+        raise ServiceError(f"command still running 60s past its {timeout_seconds:g}s timeout: {command}")
+
+
+def test_run_logs_a_runtime_failure_before_raising_it(caplog: pytest.LogCaptureFixture) -> None:
+    """A runtime error ends the run at once, and the job log says so under the run's label."""
+    runtime = FakeSandboxRuntime(session_factory=_StuckSession)
+    scorer = _scorer_of(runtime, _target())
+
+    with (
+        caplog.at_level(logging.WARNING, logger=agent_eval_mod.logger.name),
+        pytest.raises(ServiceError, match="still running 60s past its 600s timeout"),
+    ):
+        scorer.run("v", {"prompt": "p"})
+
+    assert len(runtime.sessions) == 1
+    assert [record.getMessage() for record in caplog.records] == [
+        "agent run 1: command still running 60s past its 600s timeout: run-agent"
+    ]
 
 
 def test_run_caps_the_lifetime_at_the_configured_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:
     """``VERCEL_SANDBOX_MAX_LIFETIME_SECONDS`` bounds the box unless an explicit ceiling is given."""
     monkeypatch.setattr(agent_eval_mod.settings, "vercel_sandbox_max_lifetime_seconds", 1000.0)
     runtime = FakeSandboxRuntime()
-    target = _target(timeout_seconds=600)
+    target = _target(timeout_seconds=2000)
 
     _scorer_of(runtime, target).run("v", {"prompt": "p"})
     explicit = SandboxAgentScorer(
@@ -173,6 +286,49 @@ def test_run_caps_the_lifetime_at_the_configured_ceiling(monkeypatch: pytest.Mon
     explicit.run("v", {"prompt": "p"})
 
     assert [spec.lifetime_seconds for spec in runtime.specs] == [1000, 700]
+
+
+def test_lifetime_covers_each_step_with_its_own_allowance() -> None:
+    """Setup and check each add their allowance plus the kill grace on top of the run's."""
+    runtime = FakeSandboxRuntime()
+    scorer = _scorer_of(runtime, _target(timeout_seconds=600, setup_command="make setup"))
+
+    scorer.run("v", {"prompt": "p", "check_command": "test -f out"})
+
+    assert runtime.specs[0].lifetime_seconds == 60 + 3 * (600 + 15)
+    assert runtime.sessions[0].commands == ["make setup", "run-agent", "test -f out"]
+
+
+class _TimeoutRecorder(FakeSandboxSession):
+    """Fake session that also remembers the timeout each command ran under."""
+
+    def __init__(self) -> None:
+        """Start with a clean-exit script that answers ``done`` and no recorded timeouts."""
+        super().__init__(produces={"run-agent": {ANSWER_FILE: "done"}})
+        self.timeouts: list[float | None] = []
+
+    def run(
+        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+    ) -> CommandResult:
+        """Record the timeout, then behave like the base fake."""
+        self.timeouts.append(timeout_seconds)
+        return super().run(command, env=env, timeout_seconds=timeout_seconds)
+
+
+def test_run_timeout_is_shortened_only_when_the_ceiling_bites(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A ceiling below the run's own allowance cuts the run to what is left and says so."""
+    monkeypatch.setattr(agent_eval_mod.settings, "vercel_sandbox_max_lifetime_seconds", 1000.0)
+    caplog.set_level(logging.WARNING, logger="core.service_gateway.optimization")
+    session = _TimeoutRecorder()
+    scorer = _scorer_of(_runtime_of(session), _target(timeout_seconds=2000))
+
+    record = scorer.run("v", {"prompt": "p"})
+
+    assert record["error"] is None
+    assert 900 <= (session.timeouts[-1] or 0) <= 1000 - 15
+    assert "leaves" in caplog.text
 
 
 def test_run_falls_back_to_parsed_stdout_when_no_answer_file() -> None:
@@ -293,6 +449,30 @@ def test_call_scores_the_record_and_merges_feedback() -> None:
     assert set(side_info) >= {"note", "agent_output", "transcript_tail", "exit_code", "elapsed_seconds", "usage"}
     assert seen["record"]["case"] == {"prompt": "p"}
     assert seen["record"]["output"] == "done"
+
+
+def test_call_aborts_once_the_first_runs_all_died_without_model_usage() -> None:
+    """Three answerless runs in a row with no model usage stop the run with a typed error."""
+    session = FakeSandboxSession(script=lambda command: CommandResult(exit_code=0, stdout=""))
+    scorer = _scorer_of(_runtime_of(session), _target())
+
+    for _ in range(2):
+        score, side_info = scorer("v", {"prompt": "p"})
+        assert (score, side_info["error"]) == (0.0, "agent produced no answer")
+    with pytest.raises(AgentHarnessError, match=r"failed on the first 3 runs .*agent produced no answer"):
+        scorer("v", {"prompt": "p"})
+
+
+def test_one_live_run_disarms_the_dead_run_guard() -> None:
+    """After a run produced an answer, later dead runs score 0 instead of aborting the run."""
+    outputs = ["done", "", "", ""]
+    session = FakeSandboxSession(script=lambda command: CommandResult(exit_code=0, stdout=outputs.pop(0)))
+    scorer = _scorer_of(_runtime_of(session), _target())
+
+    scores = [scorer("v", {"prompt": "p"})[0] for _ in range(4)]
+
+    assert scores == [0.0, 0.0, 0.0, 0.0]
+    assert scorer._dead_runs == 0
 
 
 def test_feedback_clips_output_and_tails_transcript() -> None:
