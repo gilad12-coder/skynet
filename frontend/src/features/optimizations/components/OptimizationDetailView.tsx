@@ -72,7 +72,7 @@ import {
 import { OptimizationDetailSkeleton } from "./OptimizationDetailSkeleton";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { formatBytes } from "@/shared/lib/formatters";
-import { TERMS } from "@/shared/lib/terms";
+import { localizeStoredReason, TERMS } from "@/shared/lib/terms";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
@@ -1371,10 +1371,11 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 {msg("auto.app.optimizations.id.page.8")}
               </p>
               <p className="text-xs text-stone-500 mt-0.5">
-                {job.message ||
-                  formatMsg("auto.app.optimizations.id.page.template.4", {
-                    p1: TERMS.optimization,
-                  })}
+                {job.message
+                  ? localizeStoredReason(job.message)
+                  : formatMsg("auto.app.optimizations.id.page.template.4", {
+                      p1: TERMS.optimization,
+                    })}
               </p>
             </div>
           </div>
