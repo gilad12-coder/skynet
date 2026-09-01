@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import re
 import threading
 from typing import Any
 
@@ -78,24 +79,13 @@ class _FakeReader:
 
 
 class _FakeProcess:
-    """Fake detached SDK process that finishes after a set number of refreshes."""
+    """Fake detached SDK process: only its output replay and kill switch matter."""
 
-    def __init__(self, returncode: int, stdout: str = "", stderr: str = "", polls_to_finish: int = 0) -> None:
-        """Configure the outcome and how many refreshes it takes to appear."""
-        self._final = returncode
-        self._left = polls_to_finish
-        self.returncode: int | None = returncode if polls_to_finish == 0 else None
+    def __init__(self, stdout: str = "", stderr: str = "") -> None:
+        """Hold the captured output."""
         self.stdout = _FakeReader(stdout)
         self.stderr = _FakeReader(stderr)
-        self.refreshes = 0
         self.killed = False
-
-    def refresh(self) -> None:
-        """Advance one poll, revealing the exit code once due."""
-        self.refreshes += 1
-        self._left -= 1
-        if self._left <= 0 and not self.killed:
-            self.returncode = self._final
 
     def kill(self) -> None:
         """Record the kill."""
@@ -122,6 +112,13 @@ class _FakeTime:
         self.sleeps.append(seconds)
 
 
+def _exit_file(wrapped: str) -> str:
+    """Return the exit-file path a wrapped command line records its code in."""
+    match = re.search(r"> (\S+)$", wrapped)
+    assert match is not None, wrapped
+    return match.group(1)
+
+
 class _FakeFs:
     """In-memory filesystem for a fake sandbox."""
 
@@ -129,6 +126,12 @@ class _FakeFs:
         """Start empty."""
         self.files: dict[str, str] = {}
         self.made: list[str] = []
+        self.polls = 0
+        self._pending: tuple[str, str, int] | None = None
+
+    def land_after(self, path: str, text: str, polls: int) -> None:
+        """Make ``path`` hold ``text`` once it has been looked for ``polls`` times."""
+        self._pending = (path, text, polls)
 
     def mkdir(self, path: str, cwd: str | None = None, recursive: bool = False) -> None:
         """Record a created directory."""
@@ -139,7 +142,11 @@ class _FakeFs:
         self.files[path] = text
 
     def exists(self, path: str, cwd: str | None = None) -> bool:
-        """Report whether a file was stored."""
+        """Report whether a file was stored, landing a pending one when its poll is due."""
+        if self._pending is not None and path == self._pending[0]:
+            self.polls += 1
+            if self.polls >= self._pending[2]:
+                self.files[path] = self._pending[1]
         return path in self.files
 
     def read_text(self, path: str, cwd: str | None = None) -> str:
@@ -150,9 +157,7 @@ class _FakeFs:
 class _FakeBox:
     """Fake managed sandbox handle."""
 
-    def __init__(
-        self, returncode: int = 0, stdout: str = "", stderr: str = "", polls_to_finish: int = 0
-    ) -> None:
+    def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "", polls_to_finish: int = 0) -> None:
         """Configure the process result the box returns."""
         self.cwd = "/work"
         self.fs = _FakeFs()
@@ -173,9 +178,10 @@ class _FakeBox:
         env: dict[str, str] | None = None,
         kill_after: float | None = None,
     ) -> _FakeProcess:
-        """Record the invocation and hand back a detached fake process."""
+        """Record the invocation, hand back a detached fake process and schedule its exit file."""
         self.runs.append({"program": program, "args": args, "env": env, "kill_after": kill_after})
-        self.process = _FakeProcess(self._returncode, self._stdout, self._stderr, self._polls_to_finish)
+        self.fs.land_after(_exit_file(args[1]), f"{self._returncode}\n", self._polls_to_finish)
+        self.process = _FakeProcess(self._stdout, self._stderr)
         return self.process
 
     def __exit__(self, *args: Any) -> None:
@@ -230,28 +236,41 @@ def test_run_wraps_in_timeout_and_flags_timeouts() -> None:
 
     result = session.run("sleep 99", timeout_seconds=5)
 
+    wrapped = box.runs[0]["args"][1]
     assert box.runs[0]["args"][0] == "-lc"
-    assert box.runs[0]["args"][1].startswith("timeout --signal=KILL 5s bash -lc ")
+    assert wrapped.startswith("timeout --signal=KILL 5s bash -lc 'sleep 99'; echo $? > /tmp/.skynet-exit-")
     assert box.runs[0]["kill_after"] == 5 + KILL_GRACE_SECONDS
     assert result.timed_out is True
     assert result.exit_code == 124
 
 
-def test_run_without_timeout_is_not_wrapped() -> None:
-    """A command with no timeout runs bare and a 124 exit is not called a timeout."""
+def test_run_without_timeout_has_no_kill_timer() -> None:
+    """A command with no timeout still records its exit code, and a 124 exit is not a timeout."""
     box = _FakeBox(returncode=124, stdout="hi")
     session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
 
     result = session.run("echo hi")
 
-    assert box.runs[0]["args"] == ["-lc", "echo hi"]
+    assert box.runs[0]["args"][1].startswith("bash -lc 'echo hi'; echo $? > /tmp/.skynet-exit-")
     assert box.runs[0]["kill_after"] is None
     assert result.timed_out is False
+    assert result.exit_code == 124
     assert result.stdout == "hi"
 
 
-def test_run_polls_a_slow_process_with_growing_delays(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A process that takes a while is watched with doubling sleeps, then its logs are read."""
+def test_run_uses_a_fresh_exit_file_per_command() -> None:
+    """Two commands in one box never share an exit file."""
+    box = _FakeBox(returncode=0)
+    session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
+
+    session.run("true")
+    session.run("true")
+
+    assert _exit_file(box.runs[0]["args"][1]) != _exit_file(box.runs[1]["args"][1])
+
+
+def test_run_polls_the_exit_file_with_growing_delays(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A slow command is watched with doubling sleeps until its exit file lands, then its logs are read."""
     box = _FakeBox(returncode=0, stdout="out", stderr="err", polls_to_finish=3)
     session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
     clock = _FakeTime()
@@ -259,21 +278,34 @@ def test_run_polls_a_slow_process_with_growing_delays(monkeypatch: pytest.Monkey
 
     result = session.run("make things")
 
-    assert box.process is not None
-    assert box.process.refreshes == 3
+    assert box.fs.polls == 3
     assert clock.sleeps == [1.0, 2.0, 4.0]
     assert result.exit_code == 0
     assert result.stdout == "out"
     assert result.stderr == "err"
 
 
+def test_run_waits_for_the_exit_code_to_be_written(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An exit file that exists but is still empty is polled again rather than read as a code."""
+    box = _FakeBox(returncode=3)
+    session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
+    monkeypatch.setattr(sandbox_mod, "time", _FakeTime())
+    reads: list[str] = ["", "3\n"]
+    monkeypatch.setattr(box.fs, "read_text", lambda path, cwd=None: reads.pop(0))
+
+    result = session.run("exit 3")
+
+    assert result.exit_code == 3
+    assert reads == []
+
+
 def test_run_kills_a_process_that_outlives_its_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A process still running past kill_after plus slack is killed and reported as lost."""
+    """A command still running past kill_after plus slack is killed and the error names it."""
     box = _FakeBox(returncode=0, polls_to_finish=10**9)
     session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
     monkeypatch.setattr(sandbox_mod, "time", _FakeTime(step=30.0))
 
-    with pytest.raises(ServiceError, match="outlived"):
+    with pytest.raises(ServiceError, match=r"still running \d+s past its 5s timeout: sleep forever"):
         session.run("sleep forever", timeout_seconds=5)
 
     assert box.process is not None

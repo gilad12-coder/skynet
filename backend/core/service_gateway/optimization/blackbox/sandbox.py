@@ -63,6 +63,9 @@ _POLL_FLOOR_SECONDS = 1.0
 _POLL_CAP_SECONDS = 8.0
 # Client-side last resort past ``kill_after`` before declaring the process lost.
 _POLL_DEADLINE_SLACK_SECONDS = 60.0
+# Where a command's wrapper records its exit code for the poll to find.
+_EXIT_FILE_PREFIX = "/tmp/.skynet-exit-"
+_BRIEF_COMMAND_CHARS = 80
 # Every sandbox carries this tag so stragglers from a crashed worker can be found and destroyed.
 SANDBOX_TAG = {"skynet": "blackbox"}
 JOB_TAG = "skynet_job"
@@ -202,6 +205,19 @@ def unique_sandbox_name(stem: str) -> str:
     return f"{head}-{uuid.uuid4().hex[:_NAME_SUFFIX_CHARS]}"
 
 
+def _brief(command: str) -> str:
+    """Shorten ``command`` for an error message.
+
+    Args:
+        command: The shell command line.
+
+    Returns:
+        Its first line, cut to a readable length.
+    """
+    head = command.strip().splitlines()[0] if command.strip() else ""
+    return head if len(head) <= _BRIEF_COMMAND_CHARS else head[: _BRIEF_COMMAND_CHARS - 1] + "…"
+
+
 class VercelSandboxSession:
     """Session over one Vercel sandbox, bound to the SDK session that created it."""
 
@@ -235,11 +251,14 @@ class VercelSandboxSession:
     ) -> CommandResult:
         """Run ``command`` through ``bash -lc`` in the working directory and wait for it.
 
-        The process runs detached and is watched with short status polls
-        instead of one streamed response: Vercel's edge drops a response that
-        stays open and silent for minutes, which killed long agent runs midway
-        with "missing final metadata". Output is read only after exit, when the
-        log replay is a short buffered response.
+        The process runs detached and is watched with short polls instead of
+        one streamed response: Vercel's edge drops a response that stays open
+        and silent for minutes, which killed long agent runs midway with
+        "missing final metadata". A plain status read never carries a detached
+        process's exit code either (the runtime only settles it on a blocking
+        wait, which the edge cuts off the same way), so the wrapper records the
+        code in a file and the poll watches for that file. Output is read only
+        after exit, when the log replay is a short buffered response.
 
         Args:
             command: Shell command line.
@@ -252,38 +271,60 @@ class VercelSandboxSession:
         Raises:
             ServiceError: If the process outlives its kill deadline.
         """
-        wrapped = command
+        inner = f"bash -lc {shlex.quote(command)}"
         kill_after = None
         deadline = None
+        seconds = None
         if timeout_seconds is not None:
             seconds = max(1, math.ceil(timeout_seconds))
-            wrapped = f"timeout --signal=KILL {seconds}s bash -lc {shlex.quote(command)}"
+            inner = f"timeout --signal=KILL {seconds}s {inner}"
             kill_after = seconds + KILL_GRACE_SECONDS
             deadline = time.monotonic() + kill_after + _POLL_DEADLINE_SLACK_SECONDS
+        sentinel = f"{_EXIT_FILE_PREFIX}{uuid.uuid4().hex}"
+        started = time.monotonic()
         process = self._box.create_process(
             "bash",
-            ["-lc", wrapped],
+            ["-lc", f"{inner}; echo $? > {sentinel}"],
             cwd=self._cwd,
             env=dict(env) if env else None,
             kill_after=kill_after,
         )
         delay = _POLL_FLOOR_SECONDS
-        while process.returncode is None:
+        exit_code = None
+        while exit_code is None:
             if deadline is not None and time.monotonic() > deadline:
                 with contextlib.suppress(Exception):
                     process.kill()
-                raise ServiceError("sandbox process outlived its kill deadline")
+                overrun = time.monotonic() - started - seconds
+                raise ServiceError(
+                    f"command still running {overrun:.0f}s past its {seconds}s timeout: {_brief(command)}"
+                )
             time.sleep(delay)
             delay = min(delay * 2, _POLL_CAP_SECONDS)
-            process.refresh()
+            exit_code = self._recorded_exit_code(sentinel)
         stdout = process.stdout.read() if process.stdout is not None else ""
         stderr = process.stderr.read() if process.stderr is not None else ""
         return CommandResult(
-            exit_code=process.returncode,
+            exit_code=exit_code,
             stdout=stdout or "",
             stderr=stderr or "",
-            timed_out=timeout_seconds is not None and process.returncode in _TIMEOUT_EXIT_CODES,
+            timed_out=timeout_seconds is not None and exit_code in _TIMEOUT_EXIT_CODES,
         )
+
+    def _recorded_exit_code(self, sentinel: str) -> int | None:
+        """Return the exit code the wrapper wrote to ``sentinel``, or ``None`` while the command runs.
+
+        Args:
+            sentinel: Absolute path of the wrapper's exit-code file.
+
+        Returns:
+            The exit code once it has landed, else ``None``.
+        """
+        if not self._box.fs.exists(sentinel):
+            return None
+        # The shell creates the file before it writes the code, so an empty read is "not yet".
+        text = self._box.fs.read_text(sentinel).strip()
+        return int(text) if text.isdigit() else None
 
     def read_file(self, path: str) -> str | None:
         """Return the text of ``path`` (relative to the working directory), or ``None`` when absent.
