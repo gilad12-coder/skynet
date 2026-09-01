@@ -67,6 +67,7 @@ class HarnessLaunch:
 
 PI_PACKAGE = "@earendil-works/pi-coding-agent"
 PI_VERSION = "0.84.1"
+PI_THINKING_LEVEL = "low"
 # The LiteLLM-style routing prefix; the gateway fronts OpenRouter itself and
 # rejects model ids that still carry it.
 _OPENROUTER_PREFIX = "openrouter/"
@@ -267,6 +268,22 @@ def _pi_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     Returns:
         The launch.
     """
+    openrouter = "openrouter.ai" in gateway.url
+    entry: dict[str, object] = {
+        "id": model,
+        "name": model,
+        # OpenRouter models such as DeepSeek reason by default and, left to that default, think until
+        # they hit ``maxTokens`` without a single tool call or answer. Pi's OpenRouter thinking format
+        # makes every request carry an explicit effort instead; other gateways may reject that field.
+        "reasoning": openrouter,
+        "input": ["text"],
+        "contextWindow": 200_000,
+        "maxTokens": 32_000,
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+    }
+    if openrouter:
+        entry["compat"] = {"thinkingFormat": "openrouter"}
+    model_arg = f'"${ENV_MODEL}:{PI_THINKING_LEVEL}"' if openrouter else f'"${ENV_MODEL}"'
     models_json = {
         "providers": {
             PROVIDER: {
@@ -274,17 +291,7 @@ def _pi_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
                 "api": "openai-completions",
                 # Pi reads a bare env-var name as the literal key; the shell form is honoured.
                 "apiKey": f"!printenv {ENV_API_KEY}",
-                "models": [
-                    {
-                        "id": model,
-                        "name": model,
-                        "reasoning": False,
-                        "input": ["text"],
-                        "contextWindow": 200_000,
-                        "maxTokens": 32_000,
-                        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    }
-                ],
+                "models": [entry],
             }
         }
     }
@@ -294,7 +301,7 @@ def _pi_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
         files={".skynet/pi/models.json": json.dumps(models_json, indent=2)},
         run_command=(
             f'{_PI_PATH}; mkdir -p "$HOME/.pi/agent" && cp .skynet/pi/models.json "$HOME/.pi/agent/models.json" && '
-            f'pi --mode json --no-session --provider {PROVIDER} --model "${ENV_MODEL}" {_PROMPT_ARG}'
+            f"pi --mode json --no-session --provider {PROVIDER} --model {model_arg} {_PROMPT_ARG}"
         ),
         env=_base_env(model, gateway),
         parse_output=_parse_pi_output,

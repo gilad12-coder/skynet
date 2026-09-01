@@ -60,6 +60,28 @@ def test_pi_launch_wires_the_gateway_provider_and_json_stream() -> None:
     assert launch.parse_output is _parse_pi_output
 
 
+def test_pi_launch_bounds_reasoning_behind_openrouter() -> None:
+    """Behind OpenRouter the model is declared reasoning-capable and every call carries an explicit low effort."""
+    gateway = GatewayConfig(url="https://openrouter.ai/api/v1", api_key="secret-key")
+
+    launch = build_launch(_target(BLACKBOX_HARNESS_PI), gateway)
+
+    entry = json.loads(launch.files[".skynet/pi/models.json"])["providers"]["skynet"]["models"][0]
+    assert entry["reasoning"] is True
+    assert entry["compat"] == {"thinkingFormat": "openrouter"}
+    assert '--model "$SKYNET_MODEL:low"' in launch.run_command
+
+
+def test_pi_launch_leaves_reasoning_alone_behind_other_gateways() -> None:
+    """A generic OpenAI-compatible gateway may reject OpenRouter's reasoning field, so pi never sends it."""
+    launch = build_launch(_target(BLACKBOX_HARNESS_PI), _GATEWAY)
+
+    entry = json.loads(launch.files[".skynet/pi/models.json"])["providers"]["skynet"]["models"][0]
+    assert entry["reasoning"] is False
+    assert "compat" not in entry
+    assert '--model "$SKYNET_MODEL" ' in launch.run_command
+
+
 def test_pi_launch_pins_the_harness_version_ahead_of_the_image_copy() -> None:
     """The install pins pi, prefers the pinned copy on PATH and logs the version that runs."""
     launch = build_launch(_target(BLACKBOX_HARNESS_PI), _GATEWAY)
