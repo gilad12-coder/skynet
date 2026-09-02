@@ -51,6 +51,10 @@ const AXIS_INK = "rgba(28, 22, 18, 0.55)";
 const SURFACE_GRADIENT = "radial-gradient(ellipse at 50% 0%, var(--muted), var(--background) 70%)";
 // Room under the plot for the legend that floats over the chart's bottom edge.
 const LEGEND_ROOM_PX = 48;
+// Inline the chart is as tall as the climb's natural layout plus that room;
+// maximized, the climb stretches to the screen instead.
+const CHART_HEIGHT_PX =
+  CLIMB_LAYOUT.padTop + CLIMB_LAYOUT.plotHeight + CLIMB_LAYOUT.padBottom + LEGEND_ROOM_PX;
 
 // The map controls mirror TrajectoryTree, except that zooming out stops where
 // the whole climb is in view rather than at a fixed floor.
@@ -233,10 +237,14 @@ export function MetaHarnessClimb({
   }, [isMaximized]);
 
   const layout = useMemo(
-    () => layoutClimb(model, { availableWidth: size.w, showPending: live }),
-    [model, size.w, live],
+    () =>
+      layoutClimb(model, {
+        availableWidth: size.w,
+        availableHeight: isMaximized ? size.h - LEGEND_ROOM_PX : undefined,
+        showPending: live,
+      }),
+    [model, size.w, size.h, isMaximized, live],
   );
-  const chartHeight = layout.height + LEGEND_ROOM_PX;
   const bestPoint = useMemo(
     () => layout.points.find((point) => point.id === model.bestId) ?? null,
     [layout, model.bestId],
@@ -385,7 +393,7 @@ export function MetaHarnessClimb({
       style={
         isMaximized
           ? { background: SURFACE_GRADIENT }
-          : { height: chartHeight, background: SURFACE_GRADIENT }
+          : { height: CHART_HEIGHT_PX, background: SURFACE_GRADIENT }
       }
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -556,7 +564,7 @@ export function MetaHarnessClimb({
         <div
           aria-hidden
           className="w-full rounded-xl border border-[#DDD4C8]/60 opacity-40"
-          style={{ height: chartHeight, background: SURFACE_GRADIENT }}
+          style={{ height: CHART_HEIGHT_PX, background: SURFACE_GRADIENT }}
         />
         {createPortal(body, document.body)}
       </>

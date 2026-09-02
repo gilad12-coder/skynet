@@ -373,13 +373,18 @@ function scoreDomain(scores: number[]): ClimbLayout["domain"] {
  * Place the climb on a version-by-score plane.
  *
  * Versions sit left to right in the order they were scored; the column pitch
- * stretches to fill the width on hand between ``stepMin`` and ``stepMax``.
+ * stretches to fill the width on hand between ``stepMin`` and ``stepMax``,
+ * and the plot grows past ``plotHeight`` to fill the height on hand.
  */
 export function layoutClimb(
   model: ClimbModel,
-  options: { availableWidth?: number; showPending?: boolean } = {},
+  options: { availableWidth?: number; availableHeight?: number; showPending?: boolean } = {},
 ): ClimbLayout {
   const L = CLIMB_LAYOUT;
+  const plotHeight = Math.max(
+    L.plotHeight,
+    (options.availableHeight ?? 0) - L.padTop - L.padBottom,
+  );
   const pendingMean = model.pending === null ? null : meanOf(model.pending.scores.values());
   const showPending = options.showPending === true && model.pending !== null;
   const scores = model.versions.map((v) => v.score);
@@ -387,7 +392,7 @@ export function layoutClimb(
   const domain = scoreDomain(scores);
   const span = domain.max - domain.min;
   const yOf = (score: number): number =>
-    L.padTop + L.plotHeight - ((score - domain.min) / span) * L.plotHeight;
+    L.padTop + plotHeight - ((score - domain.min) / span) * plotHeight;
 
   const columns = model.versions.length + (showPending ? 1 : 0);
   const available = options.availableWidth ?? 0;
@@ -446,6 +451,6 @@ export function layoutClimb(
     ticks,
     domain,
     width: L.padStart + Math.max(0, columns - 1) * step + L.padEnd,
-    height: L.padTop + L.plotHeight + L.padBottom,
+    height: L.padTop + plotHeight + L.padBottom,
   };
 }
