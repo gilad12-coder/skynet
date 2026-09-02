@@ -172,6 +172,7 @@
   "submit.blackbox.start.harness.custom": "أمر مخصّص",
   "submit.blackbox.start.harness.opencode": "OpenCode",
   "submit.blackbox.start.harness.pi": "Pi",
+  "submit.blackbox.start.harness.prime": "Prime Agent",
   "submit.blackbox.start.harness_label": "بيئة تشغيل الوكيل",
   "submit.blackbox.start.objective_hint_auto": "إن تركته فارغًا، تسألك المقابلة الجانبية عنه أولًا.",
   "submit.blackbox.start.objective_label": "الهدف",

@@ -172,6 +172,7 @@
   "submit.blackbox.start.harness.custom": "Commande personnalisée",
   "submit.blackbox.start.harness.opencode": "OpenCode",
   "submit.blackbox.start.harness.pi": "Pi",
+  "submit.blackbox.start.harness.prime": "Prime Agent",
   "submit.blackbox.start.harness_label": "Harnais de l'agent",
   "submit.blackbox.start.objective_hint_auto": "Laissez le champ vide et l'entretien sur le côté vous le demandera d'abord.",
   "submit.blackbox.start.objective_label": "Objectif",

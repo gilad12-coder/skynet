@@ -172,6 +172,7 @@
   "submit.blackbox.start.harness.custom": "Власна команда",
   "submit.blackbox.start.harness.opencode": "OpenCode",
   "submit.blackbox.start.harness.pi": "Pi",
+  "submit.blackbox.start.harness.prime": "Prime Agent",
   "submit.blackbox.start.harness_label": "Оболонка агента",
   "submit.blackbox.start.objective_hint_auto": "Залиште поле порожнім — і опитування збоку спершу запитає про це.",
   "submit.blackbox.start.objective_label": "Мета",

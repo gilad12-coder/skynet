@@ -172,6 +172,7 @@
   "submit.blackbox.start.harness.custom": "カスタムコマンド",
   "submit.blackbox.start.harness.opencode": "OpenCode",
   "submit.blackbox.start.harness.pi": "Pi",
+  "submit.blackbox.start.harness.prime": "Prime Agent",
   "submit.blackbox.start.harness_label": "エージェントハーネス",
   "submit.blackbox.start.objective_hint_auto": "空欄のままにすると、横のインタビューが最初にそれを尋ねます。",
   "submit.blackbox.start.objective_label": "目的",

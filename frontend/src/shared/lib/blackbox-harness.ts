@@ -8,6 +8,7 @@ export const BLACKBOX_HARNESSES: readonly BlackboxHarness[] = [
   "codex",
   "claude_code",
   "opencode",
+  "prime",
 ];
 
 export function harnessLabel(harness: BlackboxHarness): string {

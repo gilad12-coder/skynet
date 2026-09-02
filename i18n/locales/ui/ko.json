@@ -172,6 +172,7 @@
   "submit.blackbox.start.harness.custom": "사용자 지정 명령",
   "submit.blackbox.start.harness.opencode": "OpenCode",
   "submit.blackbox.start.harness.pi": "Pi",
+  "submit.blackbox.start.harness.prime": "Prime Agent",
   "submit.blackbox.start.harness_label": "에이전트 하네스",
   "submit.blackbox.start.objective_hint_auto": "비워 두면 옆의 인터뷰가 먼저 물어봅니다.",
   "submit.blackbox.start.objective_label": "목표",
