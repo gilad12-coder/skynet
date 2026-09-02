@@ -52,8 +52,8 @@ const SURFACE_GRADIENT = "radial-gradient(ellipse at 50% 0%, var(--muted), var(-
 // Room under the plot for the legend that floats over the chart's bottom edge.
 const LEGEND_ROOM_PX = 48;
 
-// The map controls mirror TrajectoryTree so both charts pan and zoom alike.
-const ZOOM_MIN = 0.4;
+// The map controls mirror TrajectoryTree, except that zooming out stops where
+// the whole climb is in view rather than at a fixed floor.
 const ZOOM_MAX = 6;
 const ZOOM_WHEEL_FACTOR = 0.0015;
 const ZOOM_BUTTON_IN = 1.25;
@@ -93,35 +93,37 @@ export interface MetaHarnessClimbProps {
   onSelect: (id: string) => void;
 }
 
-function clampScale(k: number): number {
-  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, k));
-}
-
 // At rest the climb sits at its natural size against the start edge, shrunk
-// only when it would not fit; the viewer zooms and pans from there.
+// only when it would not fit; the viewer zooms in and pans from there.
 function fitView(size: { w: number; h: number }, layoutW: number, layoutH: number): View {
   if (size.w < 2 || size.h < 2 || layoutW <= 0 || layoutH <= 0) {
     return { k: 1, tx: 0, ty: 0 };
   }
   const plotH = size.h - LEGEND_ROOM_PX;
-  const k = clampScale(Math.min(1, size.w / layoutW, plotH / layoutH));
+  const k = Math.min(1, size.w / layoutW, plotH / layoutH);
   return { k, tx: 0, ty: Math.max(0, (plotH - layoutH * k) / 2) };
 }
 
-// Panning and zooming stop where the drawing stops: the climb either fills
-// the viewport or sits inside it, never leaving bare canvas beside it.
+// The resting frame is the zoom floor: the climb never shrinks below the size
+// at which all of it is in view, and at that size the frame is fully decided.
+// Above it, a side that overflows the viewport pans within its overflow while
+// a side that fits stays where the resting frame puts it, so bare canvas never
+// opens up beside the drawing.
 function clampView(
   view: View,
   size: { w: number; h: number },
   layoutW: number,
   layoutH: number,
 ): View {
-  const slackX = size.w - layoutW * view.k;
-  const slackY = size.h - LEGEND_ROOM_PX - layoutH * view.k;
+  const rest = fitView(size, layoutW, layoutH);
+  if (view.k <= rest.k) return rest;
+  const k = Math.min(ZOOM_MAX, view.k);
+  const slackX = size.w - layoutW * k;
+  const slackY = size.h - LEGEND_ROOM_PX - layoutH * k;
   return {
-    k: view.k,
-    tx: Math.max(Math.min(0, slackX), Math.min(Math.max(0, slackX), view.tx)),
-    ty: Math.max(Math.min(0, slackY), Math.min(Math.max(0, slackY), view.ty)),
+    k,
+    tx: slackX >= 0 ? 0 : Math.max(slackX, Math.min(0, view.tx)),
+    ty: slackY >= 0 ? slackY / 2 : Math.max(slackY, Math.min(0, view.ty)),
   };
 }
 
@@ -252,8 +254,15 @@ export function MetaHarnessClimb({
   const zoomAt = useCallback(
     (cx: number, cy: number, factor: number) => {
       setView((v) => {
-        const nextK = clampScale(v.k * factor);
+        const rest = fitView(size, layout.width, layout.height);
+        const nextK = Math.max(rest.k, Math.min(ZOOM_MAX, v.k * factor));
         if (nextK === v.k) return v;
+        // Zooming all the way out lands on the resting frame, which then keeps
+        // following new versions as if the view had been reset.
+        if (nextK === rest.k) {
+          userInteractedRef.current = false;
+          return rest;
+        }
         userInteractedRef.current = true;
         const wx = (cx - v.tx) / v.k;
         const wy = (cy - v.ty) / v.k;
@@ -350,14 +359,16 @@ export function MetaHarnessClimb({
     (factor: number) => zoomAt(size.w / 2, size.h / 2, factor),
     [size.w, size.h, zoomAt],
   );
+  const restView = useMemo(
+    () => fitView(size, layout.width, layout.height),
+    [size, layout.width, layout.height],
+  );
   const resetView = useCallback(() => {
     userInteractedRef.current = false;
-    setView(fitView(size, layout.width, layout.height));
-  }, [size, layout.width, layout.height]);
-  const isTransformed = useMemo(() => {
-    const rest = fitView(size, layout.width, layout.height);
-    return view.k !== rest.k || view.tx !== rest.tx || view.ty !== rest.ty;
-  }, [view, size, layout.width, layout.height]);
+    setView(restView);
+  }, [restView]);
+  const isTransformed = view.k !== restView.k || view.tx !== restView.tx || view.ty !== restView.ty;
+  const atZoomFloor = view.k <= restView.k;
 
   const transform = `translate(${view.tx}, ${view.ty}) scale(${view.k})`;
   // Gridlines run past the last version to the edge of whatever is in view.
@@ -468,6 +479,7 @@ export function MetaHarnessClimb({
         <MapControlButton
           label={msg("trajectory.controls.zoom_out")}
           onClick={() => zoomFromCenter(ZOOM_BUTTON_OUT)}
+          disabled={atZoomFloor}
         >
           <Minus className="size-3.5" />
         </MapControlButton>
@@ -1009,10 +1021,12 @@ function LegendDivider() {
 function MapControlButton({
   label,
   onClick,
+  disabled,
   children,
 }: {
   label: string;
   onClick: () => void;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -1021,8 +1035,9 @@ function MapControlButton({
         <button
           type="button"
           onClick={onClick}
+          disabled={disabled}
           aria-label={label}
-          className="inline-flex size-[44px] items-center justify-center text-foreground transition-[background-color,color] hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45 lg:size-9 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+          className="inline-flex size-[44px] items-center justify-center text-foreground transition-[background-color,color,opacity] hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45 disabled:pointer-events-none disabled:opacity-50 lg:size-9 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
         >
           {children}
         </button>
