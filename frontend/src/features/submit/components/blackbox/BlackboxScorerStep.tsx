@@ -17,6 +17,8 @@ import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
 import { emptyModelConfig } from "../../constants";
+import { EvidenceChip } from "./EvidenceChip";
+import { ModelRoleRow } from "./ModelRoleRow";
 import { Field, MOBILE_INPUT_CLASS, Segmented } from "./shared";
 
 const MOBILE_MODEL_CHIP_CLASS =
@@ -48,10 +50,17 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
     setScorerInstall,
     scorerModel,
     setScorerModel,
+    scorerModelMode,
+    setScorerModelMode,
+    resolvedScorerModel,
+    scoringModelPending,
+    reflectionModel,
     scorerModelDeclared,
     setScorerModelDeclared,
     scorerCodeCallsModel,
     scorerUsesModel,
+    evaluatorEvidence,
+    evaluatorStatus,
     setEditingModel,
     catalog,
     dryRun,
@@ -111,57 +120,114 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
             />
           </div>
           {scorerUsesModel && (
-            <div className="space-y-2">
-              <Label>
-                <HelpTip text={tip("submit.blackbox.scorer_model")}>
-                  {msg("submit.blackbox.scorer.model_label")}
-                </HelpTip>
-              </Label>
-              <ModelChip
-                config={scorerModel}
-                className={MOBILE_MODEL_CHIP_CLASS}
-                roleLabel={msg("submit.blackbox.scorer.model_label")}
-                tooltip={msg("submit.blackbox.scorer.model_explainer")}
-                required
-                catalogModels={catalog?.models}
-                onClick={() =>
-                  setEditingModel({
-                    config: scorerModel,
-                    onSave: setScorerModel,
-                    label: msg("submit.blackbox.scorer.model_label"),
-                  })
-                }
-                onRemove={scorerModel.name ? () => setScorerModel(emptyModelConfig()) : undefined}
-              />
-            </div>
+            <ModelRoleRow
+              id="bb-scoring-model"
+              role={msg("submit.blackbox.roles.scoring.label")}
+              modelName={resolvedScorerModel?.name.trim() || null}
+              binding={msg(
+                scorerModelMode === "inherit"
+                  ? "submit.blackbox.roles.scoring.inherited"
+                  : "submit.blackbox.roles.scoring.custom",
+              )}
+              description={msg(
+                scorerModelMode === "explicit"
+                  ? "submit.blackbox.roles.scoring.custom_desc"
+                  : scoringModelPending
+                    ? "submit.blackbox.roles.scoring.pending_desc"
+                    : "submit.blackbox.roles.scoring.inherited_desc",
+              )}
+              tip={tip("submit.blackbox.scorer_model")}
+              actions={
+                scorerModelMode === "inherit" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-[44px] lg:min-h-0"
+                    onClick={() =>
+                      setEditingModel({
+                        // Seeded from the model it replaces so a different
+                        // scoring model starts one field away, not from blank.
+                        config: scorerModel.name ? scorerModel : { ...reflectionModel },
+                        onSave: (config) => {
+                          setScorerModel(config);
+                          setScorerModelMode("explicit");
+                        },
+                        label: msg("submit.blackbox.roles.scoring.label"),
+                      })
+                    }
+                  >
+                    {msg("submit.blackbox.roles.scoring.use_different")}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="min-h-[44px] lg:min-h-0"
+                    onClick={() => setScorerModelMode("inherit")}
+                  >
+                    {msg("submit.blackbox.roles.scoring.use_optimization")}
+                  </Button>
+                )
+              }
+            >
+              {scorerModelMode === "explicit" && (
+                <ModelChip
+                  config={scorerModel}
+                  className={MOBILE_MODEL_CHIP_CLASS}
+                  roleLabel={msg("submit.blackbox.roles.scoring.label")}
+                  tooltip={msg("submit.blackbox.scorer.model_explainer")}
+                  required
+                  catalogModels={catalog?.models}
+                  onClick={() =>
+                    setEditingModel({
+                      config: scorerModel,
+                      onSave: setScorerModel,
+                      label: msg("submit.blackbox.roles.scoring.label"),
+                    })
+                  }
+                  onRemove={scorerModel.name ? () => setScorerModel(emptyModelConfig()) : undefined}
+                />
+              )}
+            </ModelRoleRow>
           )}
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <Label>
               <HelpTip text={tip("submit.blackbox.scorer_code")}>
                 {msg("submit.blackbox.scorer.code_label")}
               </HelpTip>
             </Label>
-            {codeAssistMode === "auto" && (
-              <div className="flex items-center gap-2">
-                <VersionStepper agent={agent} artifact="metric" />
-                <ArtifactStatusChip status={agent.metricStatus} />
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              <EvidenceChip
+                status={evaluatorStatus}
+                pending={scoringModelPending}
+                modelName={evaluatorEvidence?.modelName}
+              />
+              {codeAssistMode === "auto" && (
+                <div className="flex items-center gap-2">
+                  <VersionStepper agent={agent} artifact="metric" />
+                  <ArtifactStatusChip status={agent.metricStatus} />
+                </div>
+              )}
+            </div>
           </div>
-          <CodeEditor
-            value={metricCode}
-            onChange={(v) => {
-              setMetricCode(v);
-              setScorerManuallyEdited(true);
-            }}
-            height="260px"
-            onRun={runDryRun}
-            runLabel={msg("submit.blackbox.scorer.test")}
-            runningLabel={msg("submit.blackbox.scorer.testing")}
-            validationResult={scorerValidation}
-            streaming={codeAssistMode === "auto" && agent.metricStatus === "writing"}
-            flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
-          />
+          <div id="bb-scorer-code" tabIndex={-1} className="outline-none">
+            <CodeEditor
+              value={metricCode}
+              onChange={(v) => {
+                setMetricCode(v);
+                setScorerManuallyEdited(true);
+              }}
+              height="260px"
+              onRun={runDryRun}
+              runLabel={msg("submit.blackbox.scorer.test")}
+              runningLabel={msg("submit.blackbox.scorer.testing")}
+              validationResult={scorerValidation}
+              streaming={codeAssistMode === "auto" && agent.metricStatus === "writing"}
+              flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
+            />
+          </div>
           <Field
             label={msg("submit.blackbox.scorer.install_label")}
             htmlFor="bb-scorer-install"
@@ -214,24 +280,27 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               />
             </Field>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void runDryRun()}
-            disabled={dryRun.status === "running"}
-            className="min-h-[44px] gap-2 lg:min-h-0"
-          >
-            {dryRun.status === "running" ? (
-              <CircleNotch className="size-4 animate-spin" />
-            ) : (
-              <Play className="size-4" />
-            )}
-            {msg(
-              dryRun.status === "running"
-                ? "submit.blackbox.scorer.testing"
-                : "submit.blackbox.scorer.test",
-            )}
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void runDryRun()}
+              disabled={dryRun.status === "running"}
+              className="min-h-[44px] gap-2 lg:min-h-0"
+            >
+              {dryRun.status === "running" ? (
+                <CircleNotch className="size-4 animate-spin" />
+              ) : (
+                <Play className="size-4" />
+              )}
+              {msg(
+                dryRun.status === "running"
+                  ? "submit.blackbox.scorer.testing"
+                  : "submit.blackbox.scorer.test",
+              )}
+            </Button>
+            <EvidenceChip status={evaluatorStatus} pending={false} />
+          </div>
         </div>
       )}
 

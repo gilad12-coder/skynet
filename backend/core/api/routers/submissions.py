@@ -1216,7 +1216,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
             enforce_llm_credits(job_store, current_user.username)
         response = dry_run_scorer(payload)
         if scorer_model is not None and response.usage_by_model:
-            meter_llm_usage(
+            response.credits_charged = meter_llm_usage(
                 getattr(job_store, "engine", None),
                 current_user.username,
                 {usage.model: (usage.input_tokens, usage.output_tokens) for usage in response.usage_by_model},

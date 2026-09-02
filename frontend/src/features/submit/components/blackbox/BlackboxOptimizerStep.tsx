@@ -1,6 +1,7 @@
 "use client";
 
-import { Warning } from "@/shared/ui/icons";
+import { useState } from "react";
+import { CaretDown, Warning } from "@/shared/ui/icons";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
@@ -10,18 +11,20 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
-import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig } from "../../constants";
-import { CostCeilingCard } from "../CostCeilingCard";
+import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
+import { TotalBudgetCard } from "../TotalBudgetCard";
+import { ModelRoleRow } from "./ModelRoleRow";
 import {
   Field,
   MOBILE_INPUT_CLASS,
   MOBILE_NUMBER_INPUT_CLASS,
   Segmented,
   StepCard,
+  cnGrid,
 } from "./shared";
 
 const MOBILE_MODEL_CHIP_CLASS =
@@ -36,6 +39,7 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
     patience,
     setPatience,
     engineCatalog,
+    autoEngineLabels,
     seedMode,
     targetKind,
     maxScorerRuns,
@@ -46,8 +50,9 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
     setStopAtScore,
     reflectionModel,
     setReflectionModel,
-    scorerModel,
+    optimizationFamily,
     scorerUsesModel,
+    scorerModelMode,
     setEditingModel,
     catalog,
     tokenSource,
@@ -55,6 +60,12 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
 
   const engines = engineCatalog?.engines ?? [];
   const single = strategyMode === "single";
+  // Opens by itself when a limit is already set (a clone, a returning draft)
+  // so nothing that shapes the run hides behind a closed panel.
+  const [advancedOpen, setAdvancedOpen] = useState(
+    () => maxIterations !== "" || stopAtScore.trim() !== "",
+  );
+  const optimizationLabel = msg("submit.blackbox.roles.optimization.label");
 
   return (
     <StepCard
@@ -82,6 +93,21 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
           },
         ]}
       />
+
+      {!single && engineCatalog && (
+        <p
+          className={cn(
+            "text-xs leading-relaxed",
+            autoEngineLabels.length > 0 ? "text-muted-foreground" : "text-amber-700",
+          )}
+        >
+          {autoEngineLabels.length > 0
+            ? formatMsg("submit.blackbox.engines.auto_can_run", {
+                engines: autoEngineLabels.join(" · "),
+              })
+            : msg("submit.blackbox.engines.auto_none")}
+        </p>
+      )}
 
       {strategyMode === "plateau" && (
         <Field
@@ -114,16 +140,18 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
       )}
 
       {single && (
-        <div className="space-y-2">
+        <div id="bb-engines" tabIndex={-1} className="space-y-2 outline-none">
           <Label>
             <HelpTip text={tip("submit.blackbox.engines")}>
               {msg("submit.blackbox.engines.label")}
             </HelpTip>
           </Label>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-2" role="radiogroup">
             {engines.map((e) => {
+              // Only a seed shape the engine cannot take blocks the choice.
+              // An engine that cannot run yet stays selectable and
+              // configurable; Run is what waits for it.
               const partsBlocked = seedMode === "parts" && !e.supports_parts;
-              const selectable = e.available && !partsBlocked;
               const selected = engine === e.id;
               return (
                 <button
@@ -131,13 +159,13 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
                   type="button"
                   role="radio"
                   aria-checked={selected}
-                  disabled={!selectable}
+                  disabled={partsBlocked}
                   onClick={() => setEngine(e.id)}
                   className={cn(
                     "flex min-h-[44px] flex-col items-start gap-1 rounded-lg border p-3 text-start transition-colors",
                     selected ? "border-primary bg-primary/5" : "border-border/50 bg-background/60",
-                    selectable && !selected && "cursor-pointer hover:border-primary/50",
-                    !selectable && "opacity-60",
+                    !partsBlocked && !selected && "cursor-pointer hover:border-primary/50",
+                    partsBlocked && "opacity-60",
                   )}
                 >
                   <span className="flex w-full items-center gap-2">
@@ -150,14 +178,19 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
                       )}
                       {!e.available && (
                         <Badge variant="secondary" size="sm">
-                          {msg("submit.blackbox.engines.unavailable")}
+                          {msg("submit.blackbox.engines.not_runnable")}
                         </Badge>
                       )}
                     </span>
                   </span>
                   <span className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-                    {e.unavailable_reason ?? e.description}
+                    {e.description}
                   </span>
+                  {!e.available && e.unavailable_reason && (
+                    <span className="text-[0.6875rem] leading-relaxed text-amber-700" dir="auto">
+                      {e.unavailable_reason}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -170,7 +203,41 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
 
       <Separator />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <ModelRoleRow
+        id="bb-optimization-model"
+        role={optimizationLabel}
+        modelName={reflectionModel.name.trim() || null}
+        description={
+          <>
+            {msg(OPTIMIZATION_MODEL_DESCRIPTION[optimizationFamily])}
+            {scorerUsesModel && scorerModelMode === "inherit" && (
+              <> {msg("submit.blackbox.roles.optimization.also_scoring")}</>
+            )}
+          </>
+        }
+        tip={tip("blackbox.config.reflection_model")}
+      >
+        <ModelChip
+          config={reflectionModel}
+          className={MOBILE_MODEL_CHIP_CLASS}
+          roleLabel={optimizationLabel}
+          tooltip={msg("model.reflection.explainer")}
+          required
+          catalogModels={catalog?.models}
+          onClick={() =>
+            setEditingModel({
+              config: reflectionModel,
+              onSave: setReflectionModel,
+              label: optimizationLabel,
+            })
+          }
+          onRemove={reflectionModel.name ? () => setReflectionModel(emptyModelConfig()) : undefined}
+        />
+      </ModelRoleRow>
+
+      <Separator />
+
+      <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label={msg("submit.blackbox.budget.max_runs")}
           htmlFor="bb-max-runs"
@@ -186,67 +253,64 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
             className={MOBILE_NUMBER_INPUT_CLASS}
           />
         </Field>
-        <Field
-          label={msg("submit.blackbox.budget.max_iterations")}
-          htmlFor="bb-max-iterations"
-          tip="blackbox.config.budget_iterations"
-        >
-          <NumberInput
-            id="bb-max-iterations"
-            value={maxIterations}
-            onChange={setMaxIterations}
-            min={1}
-            max={1000}
-            className={MOBILE_NUMBER_INPUT_CLASS}
-          />
-        </Field>
-        <Field
-          label={msg("submit.blackbox.budget.stop_at")}
-          htmlFor="bb-stop-at"
-          tip="blackbox.config.budget_stop"
-        >
-          <Input
-            id="bb-stop-at"
-            inputMode="decimal"
-            value={stopAtScore}
-            onChange={(e) => setStopAtScore(e.target.value)}
-            dir="ltr"
-            className={MOBILE_INPUT_CLASS}
-          />
-        </Field>
       </div>
-
-      <Separator />
 
       <div className="space-y-2">
-        <Label className="text-sm font-semibold">
-          <HelpTip text={tip("blackbox.config.reflection_model")}>{TERMS.reflectionModel}</HelpTip>
-        </Label>
-        <ModelChip
-          config={reflectionModel}
-          className={MOBILE_MODEL_CHIP_CLASS}
-          roleLabel={TERMS.reflectionModel}
-          tooltip={msg("model.reflection.explainer")}
-          required
-          catalogModels={catalog?.models}
-          onClick={() =>
-            setEditingModel({
-              config: reflectionModel,
-              onSave: setReflectionModel,
-              label: TERMS.reflectionModel,
-            })
-          }
-          onRemove={reflectionModel.name ? () => setReflectionModel(emptyModelConfig()) : undefined}
-          copyFromLabel={
-            scorerUsesModel && scorerModel.name
-              ? msg("submit.blackbox.optimizer.copy_scorer_model")
-              : undefined
-          }
-          onCopyFrom={() => setReflectionModel(scorerModel)}
-        />
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((open) => !open)}
+          aria-expanded={advancedOpen}
+          aria-controls="bb-advanced"
+          className="flex min-h-[44px] w-full items-center gap-2 text-start text-sm font-medium lg:min-h-0"
+        >
+          <CaretDown
+            className={cn("size-4 transition-transform", advancedOpen && "rotate-180")}
+            aria-hidden="true"
+          />
+          <span>{msg("submit.blackbox.optimizer.advanced")}</span>
+          <span className="text-xs font-normal text-muted-foreground">
+            {msg("submit.blackbox.optimizer.advanced_hint")}
+          </span>
+        </button>
+        <div id="bb-advanced" className={cnGrid(advancedOpen)}>
+          <div className="overflow-hidden">
+            <div className="grid gap-4 pt-1 sm:grid-cols-2">
+              <Field
+                label={msg("submit.blackbox.budget.max_iterations")}
+                htmlFor="bb-max-iterations"
+                tip="blackbox.config.budget_iterations"
+              >
+                <NumberInput
+                  id="bb-max-iterations"
+                  value={maxIterations}
+                  onChange={setMaxIterations}
+                  min={1}
+                  max={1000}
+                  className={MOBILE_NUMBER_INPUT_CLASS}
+                  disabled={!advancedOpen}
+                />
+              </Field>
+              <Field
+                label={msg("submit.blackbox.budget.stop_at")}
+                htmlFor="bb-stop-at"
+                tip="blackbox.config.budget_stop"
+              >
+                <Input
+                  id="bb-stop-at"
+                  inputMode="decimal"
+                  value={stopAtScore}
+                  onChange={(e) => setStopAtScore(e.target.value)}
+                  dir="ltr"
+                  className={MOBILE_INPUT_CLASS}
+                  disabled={!advancedOpen}
+                />
+              </Field>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <CostCeilingCard w={w} mode={tokenSource} />
+      <TotalBudgetCard w={w} mode={tokenSource} />
     </StepCard>
   );
 }

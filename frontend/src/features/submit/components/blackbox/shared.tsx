@@ -161,3 +161,11 @@ export function Segmented<T extends string>({
     </div>
   );
 }
+
+/** Collapse/expand a block with the grid-rows transition the split card uses. */
+export function cnGrid(open: boolean): string {
+  return cn(
+    "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
+    open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+  );
+}

@@ -31,18 +31,35 @@ import {
   type BlackboxAuthoringContext,
   type DatasetSummary,
 } from "@/shared/lib/api";
+import { formatCredits } from "@/features/billing";
 import { readPref, useUserPrefs } from "@/features/settings";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
 import { BLACKBOX_HARNESSES } from "@/shared/lib/blackbox-harness";
 import { parseDatasetFile, type ParsedDataset } from "@/shared/lib/parse-dataset";
-import { msg } from "@/shared/lib/messages";
+import { formatMsg, msg } from "@/shared/lib/messages";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
+import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import type { ValidationResult } from "@/shared/ui/code-editor";
 
 import { defaultSplit, emptyModelConfig, type ColumnRole } from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE } from "../lib/wizard-steps";
+import { availableBudget, suggestedRunName } from "../lib/budget";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
+import { focusField } from "../lib/focus-field";
+import {
+  modelIdentity,
+  optimizationModelFamily,
+  resolveScoringModel,
+  type ScoringModelMode,
+} from "../lib/model-roles";
+import {
+  evaluatorIdentity,
+  evidenceStatus,
+  type ValidationEvidence,
+} from "../lib/validation-evidence";
+import { beginValidationToast } from "../lib/validation-toast";
 import {
   chargeableBracket,
   defaultCeilingForBracket,
@@ -274,12 +291,25 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // `llm()` answers for itself.
   const [scorerModel, setScorerModel] = useState<ModelConfig>(emptyModelConfig());
   const [scorerModelDeclared, setScorerModelDeclared] = useState(false);
+  // The scoring model inherits the optimization model until the user picks
+  // one of its own; `scorerModel` only speaks when the mode is explicit.
+  const [scorerModelMode, setScorerModelMode] = useState<ScoringModelMode>("inherit");
   const scorerCodeCallsModel = scorerCallsModel(metricCode);
   const scorerUsesModel = scorerKind === "python" && (scorerModelDeclared || scorerCodeCallsModel);
   const [dryRun, setDryRun] = useState<DryRunState>({ status: "idle" });
-  // Scorer fingerprint the in-flight/last dry run belongs to, so the reset
-  // below doesn't wipe a run the agent kicked off for the code it just wrote.
-  const dryRunKeyRef = useRef<string | null>(null);
+  // The remote secret enters the validation identity as a revision, never as
+  // its value; a passed check for one secret does not vouch for the next.
+  const [secretRevision, setSecretRevision] = useState(0);
+  const updateScorerSecret = useCallback((value: string) => {
+    setScorerSecret(value);
+    setSecretRevision((n) => n + 1);
+  }, []);
+  const [evaluatorEvidence, setEvaluatorEvidence] = useState<ValidationEvidence | null>(null);
+  const [runningIdentity, setRunningIdentity] = useState<string | null>(null);
+  // Credits the evaluator checks debited so far, shown against the total
+  // budget until the server-side accounting record takes over.
+  const [setupSpent, setSetupSpent] = useState(0);
+  const validationAttemptRef = useRef(0);
 
   const [strategyMode, setStrategyMode] = useState<"auto" | "single" | "plateau">("auto");
   const [engine, setEngine] = useState<BlackboxEngineId | null>(null);
@@ -406,9 +436,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             if (scorer.url) setScorerUrl(scorer.url);
             if (scorer.kind === "python" && scorer.install_command)
               setScorerInstall(scorer.install_command);
+            // A stored scorer model is an explicit choice even when it matches
+            // the optimization model: the field alone cannot say it was inherited.
             if (scorer.kind === "python" && scorer.model?.name) {
               setScorerModel({ ...emptyModelConfig(), ...scorer.model });
               setScorerModelDeclared(true);
+              setScorerModelMode("explicit");
             }
           }
 
@@ -439,29 +472,70 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       });
   }, [searchParams]);
 
-  // A passed dry run only vouches for the scorer it ran against — including the
-  // model bound to `llm()`, whose answers change what the scorer returns.
-  const scorerKey = JSON.stringify([
-    scorerKind,
-    metricCode,
-    scorerUrl,
-    scorerSecret,
-    scorerInstall,
-    scorerUsesModel ? scorerModel : null,
-  ]);
-  useEffect(() => {
-    if (dryRunKeyRef.current === scorerKey) return;
-    dryRunKeyRef.current = null;
-    setDryRun({ status: "idle" });
-    setScorerValidation(null);
-  }, [scorerKey]);
-
   const seedCandidate = useMemo<BlackboxCandidate | null>(() => {
     if (seedMode === "none") return null;
     if (seedMode === "text") return seedText.trim() ? seedText : null;
     const parts = seedParts.filter((p) => p.key.trim() && p.value.trim());
     return parts.length ? Object.fromEntries(parts.map((p) => [p.key.trim(), p.value])) : null;
   }, [seedMode, seedText, seedParts]);
+
+  const scoringBinding = useMemo(
+    () =>
+      resolveScoringModel({
+        usesModel: scorerUsesModel,
+        mode: scorerModelMode,
+        explicit: scorerModel,
+        optimization: reflectionModel,
+      }),
+    [scorerUsesModel, scorerModelMode, scorerModel, reflectionModel],
+  );
+  const resolvedScorerModel = scoringBinding?.resolved ?? null;
+  // Inherited from an optimization model not chosen yet: the evaluator check
+  // waits until the user leaves Optimization instead of failing here.
+  const scoringModelPending = scoringBinding?.pending ?? false;
+
+  const describeEvaluator = useCallback(
+    (code: string) =>
+      evaluatorIdentity({
+        candidate: seedCandidate ?? objective,
+        example: parsedCases?.rows[0] ?? null,
+        scorer: { kind: scorerKind, code, url: scorerUrl, install: scorerInstall, secretRevision },
+        scoringModel:
+          scorerKind === "python" && (scorerModelDeclared || scorerCallsModel(code))
+            ? modelIdentity(resolvedScorerModel)
+            : null,
+      }),
+    [
+      seedCandidate,
+      objective,
+      parsedCases,
+      scorerKind,
+      scorerUrl,
+      scorerInstall,
+      secretRevision,
+      scorerModelDeclared,
+      resolvedScorerModel,
+    ],
+  );
+  // A passed check only vouches for the inputs it ran against; the identity
+  // decides whether the evidence still applies. The ref lets an awaited check
+  // see edits that landed while it ran.
+  const currentEvaluatorIdentity = useMemo(
+    () => describeEvaluator(metricCode),
+    [describeEvaluator, metricCode],
+  );
+  const identityRef = useRef(currentEvaluatorIdentity);
+  useEffect(() => {
+    identityRef.current = currentEvaluatorIdentity;
+  }, [currentEvaluatorIdentity]);
+  const evaluatorStatus = evidenceStatus(
+    evaluatorEvidence,
+    runningIdentity,
+    currentEvaluatorIdentity,
+  );
+  useEffect(() => {
+    if (evaluatorStatus === "stale") setScorerValidation(null);
+  }, [evaluatorStatus]);
 
   const buildScorer = useCallback(
     (code: string = metricCode): BlackboxScorer =>
@@ -472,8 +546,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
             install_command: scorerInstall.trim() || null,
             model:
-              (scorerModelDeclared || scorerCallsModel(code)) && scorerModel.name.trim()
-                ? prepareModelConfig(scorerModel)
+              (scorerModelDeclared || scorerCallsModel(code)) && resolvedScorerModel?.name.trim()
+                ? prepareModelConfig(resolvedScorerModel)
                 : null,
           }
         : {
@@ -482,7 +556,15 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             secret: scorerSecret.trim() || undefined,
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
           },
-    [scorerKind, metricCode, scorerUrl, scorerSecret, scorerInstall, scorerModel],
+    [
+      scorerKind,
+      metricCode,
+      scorerUrl,
+      scorerSecret,
+      scorerInstall,
+      scorerModelDeclared,
+      resolvedScorerModel,
+    ],
   );
 
   const buildTarget = (): BlackboxTarget =>
@@ -496,23 +578,23 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           concurrency: targetConcurrency,
         };
 
+  // One evaluator check, recorded as evidence for the inputs it ran against.
   // Also the agent's metric validator: it passes the code it just wrote (the
   // state update hasn't landed yet), the editor's Run button passes nothing.
-  const runDryRun = useCallback(
-    async (overrideCode?: string): Promise<ValidationResult | null> => {
+  const performDryRun = useCallback(
+    async (
+      overrideCode?: string,
+    ): Promise<{ outcome: ValidationResult; evidence: ValidationEvidence }> => {
       const code = typeof overrideCode === "string" ? overrideCode : metricCode;
-      dryRunKeyRef.current = JSON.stringify([
-        scorerKind,
-        code,
-        scorerUrl,
-        scorerSecret,
-        scorerInstall,
+      const identity = describeEvaluator(code);
+      const modelName =
         scorerKind === "python" && (scorerModelDeclared || scorerCallsModel(code))
-          ? scorerModel
-          : null,
-      ]);
+          ? resolvedScorerModel?.name.trim() || null
+          : null;
+      setRunningIdentity(identity);
       setDryRun({ status: "running" });
       let outcome: ValidationResult;
+      let evidence: ValidationEvidence;
       try {
         const result = await dryRunScorer({
           scorer: buildScorer(code),
@@ -520,32 +602,55 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           case: parsedCases?.rows[0] ?? null,
         });
         setDryRun({ status: "done", result });
-        outcome = {
-          valid: result.ok,
-          errors: result.ok ? [] : [result.error ?? msg("submit.blackbox.scorer.dry_run_failed")],
-          warnings: [],
+        const creditsCharged = result.credits_charged ?? 0;
+        if (creditsCharged > 0) setSetupSpent((spent) => spent + creditsCharged);
+        const error = result.ok
+          ? null
+          : (result.error ?? msg("submit.blackbox.scorer.dry_run_failed"));
+        outcome = { valid: result.ok, errors: error ? [error] : [], warnings: [] };
+        evidence = {
+          identity,
+          ok: result.ok,
+          error,
+          checkedAt: Date.now(),
+          modelName,
+          creditsCharged,
         };
       } catch (err) {
         const error =
           err instanceof Error ? err.message : msg("submit.blackbox.scorer.dry_run_failed");
         setDryRun({ status: "done", result: { ok: false, error, side_info: {}, elapsed_ms: 0 } });
         outcome = { valid: false, errors: [error], warnings: [] };
+        evidence = {
+          identity,
+          ok: false,
+          error,
+          checkedAt: Date.now(),
+          modelName,
+          creditsCharged: 0,
+        };
       }
+      setRunningIdentity((current) => (current === identity ? null : current));
+      setEvaluatorEvidence(evidence);
       setScorerValidation(outcome);
-      return outcome;
+      return { outcome, evidence };
     },
     [
       buildScorer,
+      describeEvaluator,
       seedCandidate,
       objective,
       parsedCases,
       metricCode,
       scorerKind,
-      scorerUrl,
-      scorerSecret,
-      scorerInstall,
-      scorerModel,
+      scorerModelDeclared,
+      resolvedScorerModel,
     ],
+  );
+  const runDryRun = useCallback(
+    async (overrideCode?: string): Promise<ValidationResult | null> =>
+      (await performDryRun(overrideCode)).outcome,
+    [performDryRun],
   );
 
   const authoringContext = useMemo<BlackboxAuthoringContext>(
@@ -554,9 +659,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       objective,
       background,
       target_kind: targetKind,
-      scorer_has_model: scorerUsesModel && scorerModel.name.trim().length > 0,
+      scorer_has_model: scorerUsesModel && (resolvedScorerModel?.name.trim().length ?? 0) > 0,
     }),
-    [recipe, objective, background, targetKind, scorerUsesModel, scorerModel.name],
+    [recipe, objective, background, targetKind, scorerUsesModel, resolvedScorerModel],
   );
 
   // The interview is offered whatever the seed mode or hand edits: its brief
@@ -657,10 +762,41 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   };
 
   const selectedEngine = engineCatalog?.engines.find((e) => e.id === engine) ?? null;
+  const autoEngineLabels = useMemo<string[]>(
+    () =>
+      (engineCatalog?.auto_engines ?? []).map(
+        (id) => engineCatalog?.engines.find((e) => e.id === id)?.label ?? id,
+      ),
+    [engineCatalog],
+  );
+  // An engine that cannot run here stays selectable and configurable; only
+  // Run is held back, with the backend's reason. Auto and Plateau need at
+  // least one engine their recipe may invoke.
+  const runDisabledReason = useMemo<string | null>(() => {
+    if (!engineCatalog) return null;
+    if (strategyMode === "single") {
+      if (selectedEngine && !selectedEngine.available) {
+        return selectedEngine.unavailable_reason?.trim()
+          ? formatMsg("submit.blackbox.run_disabled.engine_reason", {
+              engine: selectedEngine.label,
+              reason: selectedEngine.unavailable_reason,
+            })
+          : formatMsg("submit.blackbox.run_disabled.engine", { engine: selectedEngine.label });
+      }
+      return null;
+    }
+    if ((engineCatalog.auto_engines ?? []).length === 0)
+      return msg("submit.blackbox.run_disabled.no_engines");
+    return null;
+  }, [engineCatalog, strategyMode, selectedEngine]);
+  const optimizationFamily = optimizationModelFamily(strategyMode, engine);
 
   const validateStep = (s: number, showToast = false): boolean => {
-    const fail = (key: Parameters<typeof msg>[0]) => {
-      if (showToast) toast.error(msg(key));
+    const fail = (key: MessageKey, fieldId?: string) => {
+      if (showToast) {
+        toast.error(msg(key));
+        if (fieldId) focusField(fieldId);
+      }
       return false;
     };
     switch (s) {
@@ -669,39 +805,46 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         // the objective is the required input and the seed may stay blank.
         const agentDrafts = codeAssistMode === "auto" && seedMode === "text";
         if ((seedMode === "none" || agentDrafts) && !objective.trim())
-          return fail("submit.blackbox.validation.objective_required");
+          return fail("submit.blackbox.validation.objective_required", "bb-objective");
         if (seedMode !== "none" && !agentDrafts && seedCandidate == null)
-          return fail("submit.blackbox.validation.seed_required");
-        if (targetKind === "agent") {
-          if (!targetModel.name.trim())
-            return fail("submit.blackbox.validation.agent_model_required");
-        }
+          return fail("submit.blackbox.validation.seed_required", "bb-seed");
         return true;
       }
       case WIZARD_STAGE.evaluation: {
-        if (targetKind === "agent" && !parsedCases?.rowCount)
-          return fail("submit.blackbox.validation.cases_required");
+        if (targetKind === "agent") {
+          if (!parsedCases?.rowCount)
+            return fail("submit.blackbox.validation.cases_required", "bb-cases");
+          if (!targetModel.name.trim())
+            return fail("submit.blackbox.validation.agent_model_required", "bb-task-model");
+        }
         if (scorerKind === "python" && !metricCode.trim())
-          return fail("submit.blackbox.validation.scorer_code_required");
-        if (scorerUsesModel && !scorerModel.name.trim())
-          return fail("submit.blackbox.validation.scorer_model_required");
+          return fail("submit.blackbox.validation.scorer_code_required", "bb-scorer-code");
+        if (scorerUsesModel && scorerModelMode === "explicit" && !scorerModel.name.trim())
+          return fail("submit.blackbox.validation.scorer_model_required", "bb-scoring-model");
         if (scorerKind === "python" && scorerModelDeclared && !scorerCodeCallsModel)
-          return fail("submit.blackbox.validation.scorer_llm_unused");
+          return fail("submit.blackbox.validation.scorer_llm_unused", "bb-scorer-uses-model");
         if (scorerKind === "remote" && !/^https?:\/\/\S+$/.test(scorerUrl.trim()))
-          return fail("submit.blackbox.validation.scorer_url_required");
+          return fail("submit.blackbox.validation.scorer_url_required", "bb-scorer-url");
         if (parsedCases && Math.abs(split.train + split.val + split.test - 1) > 0.001)
-          return fail("submit.blackbox.validation.split_sum");
+          return fail("submit.blackbox.validation.split_sum", "bb-split");
         return true;
       }
       case WIZARD_STAGE.optimization: {
+        // Availability is not a validation failure: an unavailable engine is a
+        // configuration state that holds Run back with its reason.
         if (strategyMode === "single") {
-          if (!selectedEngine?.available) return fail("submit.blackbox.validation.engine_required");
-          if (seedMode === "parts" && !selectedEngine.supports_parts)
-            return fail("submit.blackbox.validation.engine_parts");
+          if (!engine || (engineCatalog && !selectedEngine))
+            return fail("submit.blackbox.validation.engine_required", "bb-engines");
+          if (seedMode === "parts" && selectedEngine && !selectedEngine.supports_parts)
+            return fail("submit.blackbox.validation.engine_parts", "bb-engines");
         }
         if (!reflectionModel.name.trim())
-          return fail("submit.blackbox.validation.reflection_model_required");
-        if (maxScorerRuns < 1) return fail("submit.blackbox.validation.budget_required");
+          return fail(
+            "submit.blackbox.validation.reflection_model_required",
+            "bb-optimization-model",
+          );
+        if (maxScorerRuns < 1)
+          return fail("submit.blackbox.validation.budget_required", "bb-max-runs");
         return true;
       }
       default:
@@ -717,21 +860,65 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const goPrev = () => {
     if (step > 0) goTo(step - 1);
   };
-  // Leaving the Evaluation stage proves the scorer the way the DSPy wizard proves
-  // its code on Next: a missing or stale test is run, not demanded. The dry-run
-  // state resets whenever a scorer input changes, so a passed test is current.
-  const ensureScorerTested = async (): Promise<boolean> => {
-    if (dryRun.status === "done" && dryRun.result.ok) return true;
-    const outcome = await runDryRun();
-    if (outcome?.valid) return true;
-    if (step !== WIZARD_STAGE.evaluation) {
-      toast.error(msg("submit.blackbox.scorer.dry_run_failed"));
-      goTo(WIZARD_STAGE.evaluation);
+  const budgetLedger = useMemo(
+    () => ({ total: maxCostCredits, setupSpent, runSpent: 0, reserved: 0 }),
+    [maxCostCredits, setupSpent],
+  );
+  const availableCredits = availableBudget(budgetLedger);
+
+  // Continue runs the evaluator check unless current evidence already passed.
+  // One toast per attempt, and it always ends: success, a concise error, or
+  // "setup changed" when the inputs moved under the check.
+  const ensureEvaluatorChecked = async (): Promise<boolean> => {
+    if (evaluatorStatus === "passed") return true;
+    const attempt = ++validationAttemptRef.current;
+    const t = beginValidationToast(
+      toast,
+      `wizard-validate-${attempt}`,
+      msg("submit.validation.toast.running"),
+    );
+    const modelName = scorerUsesModel ? resolvedScorerModel?.name.trim() : "";
+    t.phase(
+      modelName
+        ? formatMsg("submit.validation.toast.testing_evaluator", {
+            model: `\u2066${modelName}\u2069`,
+          })
+        : msg("submit.validation.toast.testing_evaluator_plain"),
+    );
+    const { evidence } = await performDryRun();
+    if (identityRef.current !== evidence.identity) {
+      t.obsolete(msg("submit.validation.toast.obsolete"));
+      return false;
     }
+    if (evidence.ok) {
+      const locale = getActiveIntlLocale();
+      const spentLine =
+        evidence.creditsCharged > 0 && maxCostCredits != null
+          ? formatMsg("submit.validation.toast.setup_used", {
+              amount: formatCredits(evidence.creditsCharged, locale),
+              remaining: formatCredits(
+                Math.max(0, maxCostCredits - setupSpent - evidence.creditsCharged),
+                locale,
+              ),
+            })
+          : "";
+      t.succeed(
+        spentLine
+          ? `${msg("submit.validation.toast.passed")} · ${spentLine}`
+          : msg("submit.validation.toast.passed"),
+      );
+      return true;
+    }
+    t.fail(evidence.error ?? msg("submit.blackbox.scorer.dry_run_failed"));
+    if (step !== WIZARD_STAGE.evaluation) goTo(WIZARD_STAGE.evaluation);
+    focusField(scorerKind === "python" ? "bb-scorer-code" : "bb-scorer-url");
     return false;
   };
-  const crossesScorer = (from: number, to: number) =>
-    from <= WIZARD_STAGE.evaluation && to > WIZARD_STAGE.evaluation;
+  // Leaving Evaluation checks the evaluator when its inputs are complete; a
+  // scoring model still inherited from an unchosen optimization model defers
+  // the check to leaving Optimization.
+  const needsEvaluatorCheck = (from: number, to: number) =>
+    from <= WIZARD_STAGE.optimization && to > WIZARD_STAGE.evaluation && !scoringModelPending;
   const advance = async (target: number) => {
     if (advancingRef.current) return;
     advancingRef.current = true;
@@ -743,7 +930,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return;
         }
       }
-      if (crossesScorer(step, target) && !(await ensureScorerTested())) return;
+      if (needsEvaluatorCheck(step, target) && !(await ensureEvaluatorChecked())) return;
       goTo(target);
     } finally {
       advancingRef.current = false;
@@ -778,21 +965,37 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const suggestedCeiling = useMemo(() => defaultCeilingForBracket(costBracket), [costBracket]);
   const tokenSource = reflectionModel.token_source ?? "managed";
 
+  // Suggested from the objective without a paid call; a typed or cloned name
+  // always wins.
+  const suggestedName = useMemo(() => suggestedRunName(objective), [objective]);
+
   const handleSubmit = async () => {
+    if (advancingRef.current) return;
     for (let i = 0; i < LAST_WIZARD_STAGE; i++) {
       if (!validateStep(i, true)) {
         goTo(i);
         return;
       }
     }
-    if (!(await ensureScorerTested())) return;
+    if (runDisabledReason) {
+      toast.error(runDisabledReason);
+      return;
+    }
+    advancingRef.current = true;
+    setAdvancing(true);
+    try {
+      if (!(await ensureEvaluatorChecked())) return;
+    } finally {
+      advancingRef.current = false;
+      setAdvancing(false);
+    }
     setSubmitting(true);
     setSubmitPhase("sending");
     try {
       const reflection = prepareModelConfig(reflectionModel);
       const estimate = chargeableBracket(costBracket, tokenSource);
       const payload: BlackboxRunRequest = {
-        name: jobName.trim() || undefined,
+        name: jobName.trim() || suggestedName || undefined,
         description: jobDescription.trim() || undefined,
         username,
         objective: objective.trim() || undefined,
@@ -927,7 +1130,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     scorerUrl,
     setScorerUrl,
     scorerSecret,
-    setScorerSecret,
+    setScorerSecret: updateScorerSecret,
     scorerInstall,
     setScorerInstall,
     scorerModel,
@@ -936,9 +1139,15 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerModelDeclared,
     scorerCodeCallsModel,
     scorerUsesModel,
+    scorerModelMode,
+    setScorerModelMode,
+    resolvedScorerModel,
+    scoringModelPending,
     scorerValidation,
     dryRun,
     runDryRun,
+    evaluatorEvidence,
+    evaluatorStatus,
     strategyMode,
     setStrategyMode,
     engine,
@@ -947,6 +1156,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setPatience,
     engineCatalog,
     selectedEngine,
+    autoEngineLabels,
+    runDisabledReason,
+    optimizationFamily,
     maxScorerRuns,
     setMaxScorerRuns,
     maxIterations,
@@ -962,6 +1174,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     tokenSource,
     maxCostCredits,
     setMaxCostCredits,
+    setupSpent,
+    availableCredits,
+    suggestedName,
   };
 }
 

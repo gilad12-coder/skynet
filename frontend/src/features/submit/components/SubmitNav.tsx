@@ -14,10 +14,15 @@ import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 type NavContext = Pick<
   SubmitWizardContext,
   "step" | "goPrev" | "handleNext" | "handleSubmit" | "submitting" | "advancing" | "maxCostCredits"
->;
+> & {
+  // Why the run cannot start right now (an engine that cannot run here yet);
+  // the button stays visible so the reason stays visible with it.
+  runDisabledReason?: string | null;
+};
 
 export function SubmitNav({ w }: { w: NavContext }) {
   const { step, goPrev, handleNext, handleSubmit, submitting, advancing, maxCostCredits } = w;
+  const runDisabledReason = w.runDisabledReason ?? null;
 
   // Back points toward the start, Next toward the end — the physical direction
   // of each flips with the locale (left/right swap in RTL).
@@ -64,10 +69,12 @@ export function SubmitNav({ w }: { w: NavContext }) {
     <motion.button
       type="button"
       onClick={handleSubmit}
-      disabled={submitting}
+      disabled={submitting || runDisabledReason !== null}
+      aria-disabled={runDisabledReason !== null || undefined}
+      title={runDisabledReason ?? undefined}
       data-tutorial="submit-button"
       data-telemetry="submit-run"
-      animate={{ scale: [1, 1.01, 1] }}
+      animate={runDisabledReason ? { scale: 1 } : { scale: [1, 1.01, 1] }}
       transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
       className="group relative w-full rounded-2xl bg-primary text-primary-foreground font-semibold text-base pt-5 pb-7 cursor-pointer transition-all duration-300 hover:shadow-[0_0_30px_rgba(61,46,34,0.35)] hover:scale-[1.01] active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
     >
@@ -88,6 +95,11 @@ export function SubmitNav({ w }: { w: NavContext }) {
                 {formatMsg("submit.nav.run_cap", {
                   credits: formatCredits(maxCostCredits, getActiveIntlLocale()),
                 })}
+              </span>
+            )}
+            {runDisabledReason && (
+              <span className="text-xs font-normal text-primary-foreground/90" dir="auto">
+                {runDisabledReason}
               </span>
             )}
           </span>

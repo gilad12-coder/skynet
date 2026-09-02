@@ -45,6 +45,7 @@ import { readPref, useUserPrefs } from "@/features/settings";
 import { emptyModelConfig, defaultSplit, defaultReactConfig } from "../constants";
 import type { ReactConfig, ColumnRole } from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
+import { beginValidationToast } from "../lib/validation-toast";
 import { cloneBasics, cloneColumnRoles, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import { buildSignatureTemplate } from "../lib/build-signature";
 import { buildMetricTemplate } from "../lib/build-metric";
@@ -414,6 +415,7 @@ export function useSubmitWizard() {
   // sequential `setStep((s) => s + 1)` calls advance the wizard twice.
   const [advancing, setAdvancing] = useState(false);
   const advancingRef = useRef(false);
+  const validationAttemptRef = useRef(0);
 
   // Memoise validation results per (kind, code, mapping, sample_row,
   // optimizer) tuple. Storing the in-flight promise itself also dedupes
@@ -1738,9 +1740,11 @@ export function useSubmitWizard() {
     }
   };
 
-  const handleValidateCode = async (): Promise<boolean> => {
+  const handleValidateCode = async (
+    report: (text: string) => void = (text) => toast.error(text),
+  ): Promise<boolean> => {
     if (!parsedDataset || parsedDataset.rowCount === 0) {
-      toast.error(msg("submit.validation.dataset_before_code"));
+      report(msg("submit.validation.dataset_before_code"));
       return false;
     }
     try {
@@ -1751,24 +1755,26 @@ export function useSubmitWizard() {
       const sigOk = !sigRes || sigRes.errors.length === 0;
       const metOk = !metRes || metRes.errors.length === 0;
       if (sigOk && metOk) return true;
-      toast.error(msg("submit.validation.code_has_errors"));
+      report(msg("submit.validation.code_has_errors"));
       return false;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("submit.code_validation_failed"));
+      report(err instanceof Error ? err.message : msg("submit.code_validation_failed"));
       return false;
     }
   };
 
-  const handleValidateDataset = async (): Promise<boolean> => {
+  const handleValidateDataset = async (
+    report: (text: string) => void = (text) => toast.error(text),
+  ): Promise<boolean> => {
     if (!parsedDataset || parsedDataset.rowCount === 0) {
-      toast.error(msg("submit.validation.dataset_required"));
+      report(msg("submit.validation.dataset_required"));
       return false;
     }
     const effectiveFractions =
       splitModeRef.current === "auto" && splitPlan ? splitPlan.fractions : split;
     const sum = effectiveFractions.train + effectiveFractions.val + effectiveFractions.test;
     if (Math.abs(sum - 1) > 0.001) {
-      toast.error(msg("submit.validation.split_must_sum_to_one"));
+      report(msg("submit.validation.split_must_sum_to_one"));
       return false;
     }
     try {
@@ -1778,10 +1784,10 @@ export function useSubmitWizard() {
       });
       setDatasetValidation(result);
       if (result.errors.length === 0) return true;
-      toast.error(msg("submit.validation.split_too_small"));
+      report(msg("submit.validation.split_too_small"));
       return false;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("submit.validation.split_too_small"));
+      report(err instanceof Error ? err.message : msg("submit.validation.split_too_small"));
       return false;
     }
   };
@@ -1791,19 +1797,39 @@ export function useSubmitWizard() {
     advancingRef.current = true;
     setAdvancing(true);
     try {
-      if (step === WIZARD_STAGE.evaluation && parsedDataset && parsedDataset.rowCount > 0) {
-        const passed = await handleValidateDataset();
-        if (!passed) return;
-      }
-      if (
+      const checkDataset =
+        step === WIZARD_STAGE.evaluation && !!parsedDataset && parsedDataset.rowCount > 0;
+      const checkCode =
         step === WIZARD_STAGE.evaluation &&
         !moduleSelectionRequired &&
-        (isWorkflow || signatureCode.trim()) &&
-        parsedDataset &&
-        metricCode.trim()
-      ) {
-        const passed = await handleValidateCode();
-        if (!passed) return;
+        (isWorkflow || !!signatureCode.trim()) &&
+        !!parsedDataset &&
+        !!metricCode.trim();
+      if (checkDataset || checkCode) {
+        // One toast per attempt carries every phase and always ends in a
+        // terminal state; a Continue with nothing to test shows nothing.
+        const t = beginValidationToast(
+          toast,
+          `wizard-validate-${++validationAttemptRef.current}`,
+          msg("submit.validation.toast.running"),
+        );
+        if (checkDataset) {
+          t.phase(msg("submit.validation.toast.checking_split"));
+          if (!(await handleValidateDataset(t.fail))) return;
+        }
+        if (checkCode) {
+          t.phase(msg("submit.validation.toast.checking_code"));
+          if (!(await handleValidateCode(t.fail))) return;
+        }
+        // The stage check reads the results those calls stored and reports
+        // its own message, so the loading line just closes.
+        if (!validateStep(step, true)) {
+          t.dismiss();
+          return;
+        }
+        t.succeed(msg("submit.validation.toast.passed"));
+        goNext();
+        return;
       }
       if (validateStep(step, true)) goNext();
     } finally {

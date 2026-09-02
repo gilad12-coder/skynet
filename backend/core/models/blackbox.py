@@ -240,6 +240,8 @@ class ScorerDryRunResponse(BaseModel):
     error: str | None = None
     elapsed_ms: float
     usage_by_model: list[ModelTokenUsage] = Field(default_factory=list)
+    # What this one check debited, so the wizard can show setup spend against the total budget.
+    credits_charged: int = 0
 
 
 # One engine lane of a run. ``explore`` lanes share the budget; the
@@ -354,3 +356,6 @@ class BlackboxEngineCatalogResponse(BaseModel):
     sandbox_available: bool
     sandbox_reason: str | None = None
     engines: list[BlackboxEngineInfo] = Field(default_factory=list)
+    # The engines Auto's execution recipe can actually invoke here: a visible
+    # catalog entry is not the same as one Auto may run.
+    auto_engines: list[str] = Field(default_factory=list)

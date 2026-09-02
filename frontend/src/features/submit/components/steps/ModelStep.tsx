@@ -17,7 +17,7 @@ import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip, AddModelButton } from "@/shared/ui/model-chip";
 import { useUserPrefs } from "@/features/settings";
-import { CostCeilingCard } from "../CostCeilingCard";
+import { TotalBudgetCard } from "../TotalBudgetCard";
 import { aggregateTokenSource } from "../../lib/cost-bracket";
 
 import { emptyModelConfig } from "../../constants";
@@ -226,10 +226,10 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
             </div>
           </div>
         )}
-        {/* Pre-run cost bracket + Max Cost Ceiling [FG-1]. Shown in both modes:
-            managed displays the full per-model credit cost, BYOK the platform fee
-            (the provider key absorbs the model cost, but credits still meter it). */}
-        <CostCeilingCard w={w} mode={tokenSource} />
+        {/* Pre-run usage bracket + total budget. Shown in both modes: managed
+            displays the full per-model credit cost, BYOK the platform fee (the
+            provider key absorbs the model cost, but credits still meter it). */}
+        <TotalBudgetCard w={w} mode={tokenSource} />
       </CardContent>
     </Card>
   );
