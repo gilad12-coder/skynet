@@ -7,8 +7,8 @@ import { SubmitSplashOverlay } from "@/shared/ui/submit-splash-overlay";
 import { TERMS } from "@/shared/lib/terms";
 
 import { useBlackboxWizard, type BlackboxRecipe } from "../../hooks/use-blackbox-wizard";
-import { BLACKBOX_STEPS, emptyModelConfig, slideVariants } from "../../constants";
-import { ANYTHING_STEP, ANYTHING_STEP_ORDER, type WizardStepId } from "../../lib/wizard-steps";
+import { emptyModelConfig, slideVariants } from "../../constants";
+import { WIZARD_STAGE, stageAt, type WizardStageId } from "../../lib/wizard-steps";
 import { SubmitStepper } from "../SubmitStepper";
 import { SubmitNav } from "../SubmitNav";
 import { ModelConfigModal } from "../ModelConfigModal";
@@ -29,33 +29,43 @@ export function BlackboxWizard({
 }) {
   const w = useBlackboxWizard(initialRecipe);
 
-  const stepViews: Record<WizardStepId, ReactNode> = {
-    basics: <BlackboxBasicsStep w={w} />,
-    start: <BlackboxStartStep w={w} />,
-    cases: <BlackboxCasesStep w={w} />,
-    scorer: <BlackboxScorerStep w={w} />,
-    optimizer: <BlackboxOptimizerStep w={w} />,
-    split: <SplitSection w={w} />,
-    review: <BlackboxReviewStep w={w} />,
+  // Goal and Evaluation widen for the two-pane authoring surface in auto mode;
+  // the Evaluation stage's other sections keep the regular column.
+  const stageViews: Record<WizardStageId, ReactNode> = {
+    goal: <BlackboxStartStep w={w} />,
+    evaluation: (
+      <div className="space-y-4 md:space-y-6">
+        <div className="mx-auto w-full max-w-2xl">
+          <BlackboxCasesStep w={w} />
+        </div>
+        <BlackboxScorerStep w={w} />
+        <div className="mx-auto w-full max-w-2xl">
+          <SplitSection w={w} />
+        </div>
+      </div>
+    ),
+    optimization: <BlackboxOptimizerStep w={w} />,
+    review: (
+      <div className="space-y-4 md:space-y-6">
+        <BlackboxBasicsStep w={w} />
+        <BlackboxReviewStep w={w} />
+      </div>
+    ),
   };
 
-  // The Starting point and Scorer steps render the two-pane authoring surface
-  // with the agent side-panel in auto mode, so they need more horizontal room
-  // than the other steps.
-  const isAuthoringStep = w.step === ANYTHING_STEP.start || w.step === ANYTHING_STEP.scorer;
-  const stepId = ANYTHING_STEP_ORDER[w.step];
+  const isAuthoringStage = w.step === WIZARD_STAGE.goal || w.step === WIZARD_STAGE.evaluation;
   const containerWidthClass =
-    isAuthoringStep && w.codeAssistMode === "auto" ? "max-w-5xl" : "max-w-2xl";
+    isAuthoringStage && w.codeAssistMode === "auto" ? "max-w-5xl" : "max-w-2xl";
 
   return (
     <div
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
-      <SubmitStepper w={w} steps={BLACKBOX_STEPS} />
+      <SubmitStepper w={w} />
 
       {/* The chip belongs to the card beneath it, so it sits closer than the
           column rhythm; the container's shadow padding makes up the rest. */}
-      {w.step === ANYTHING_STEP.basics && header && <div className="mb-2">{header}</div>}
+      {w.step === WIZARD_STAGE.goal && header && <div className="mb-2">{header}</div>}
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">
         <AnimatePresence mode="wait" custom={w.direction}>
@@ -68,12 +78,12 @@ export function BlackboxWizard({
             exit="exit"
             transition={{ duration: 0.1 }}
           >
-            {stepId && stepViews[stepId]}
+            {stageViews[stageAt(w.step)]}
           </motion.div>
         </AnimatePresence>
       </div>
 
-      <SubmitNav w={w} steps={BLACKBOX_STEPS} />
+      <SubmitNav w={w} />
 
       <ModelConfigModal
         open={!!w.editingModel}

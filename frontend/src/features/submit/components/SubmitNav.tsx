@@ -8,7 +8,7 @@ import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
-import { STEPS, type WizardStep } from "../constants";
+import { LAST_WIZARD_STAGE } from "../lib/wizard-steps";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 
 type NavContext = Pick<
@@ -16,7 +16,7 @@ type NavContext = Pick<
   "step" | "goPrev" | "handleNext" | "handleSubmit" | "submitting" | "advancing" | "maxCostCredits"
 >;
 
-export function SubmitNav({ w, steps = STEPS }: { w: NavContext; steps?: readonly WizardStep[] }) {
+export function SubmitNav({ w }: { w: NavContext }) {
   const { step, goPrev, handleNext, handleSubmit, submitting, advancing, maxCostCredits } = w;
 
   // Back points toward the start, Next toward the end — the physical direction
@@ -25,7 +25,7 @@ export function SubmitNav({ w, steps = STEPS }: { w: NavContext; steps?: readonl
   const BackChevron = rtl ? CaretRight : CaretLeft;
   const NextChevron = rtl ? CaretLeft : CaretRight;
 
-  if (step < steps.length - 1) {
+  if (step < LAST_WIZARD_STAGE) {
     return (
       <div className="flex items-stretch justify-between gap-3">
         <Button

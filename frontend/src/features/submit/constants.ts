@@ -1,7 +1,7 @@
 import type { ModelConfig, SplitFractions } from "@/shared/types/api";
 import { msg } from "@/shared/lib/messages";
 
-import { ANYTHING_STEP_ORDER, PROGRAM_STEP_ORDER, type WizardStepId } from "./lib/wizard-steps";
+import { WIZARD_STAGE_ORDER, type WizardStageId } from "./lib/wizard-steps";
 
 export const emptyModelConfig = (): ModelConfig => ({
   name: "",
@@ -38,25 +38,16 @@ export const defaultReactConfig = (): ReactConfig => ({
 // server (frozen process-wide to the raw key) but populated in the browser —
 // resolving eagerly here would hydrate-mismatch. Resolving per render keeps both
 // sides inside the request, where the catalog is pinned.
-// Every recipe walks the same spine; each wizard's order lives in
-// ./lib/wizard-steps.
-const STEP_LABELS: Record<WizardStepId, () => string> = {
-  basics: () => msg("auto.features.submit.constants.literal.1"),
-  start: () => msg("submit.blackbox.step.start"),
-  cases: () => msg("submit.blackbox.step.cases"),
-  scorer: () => msg("submit.blackbox.step.scorer"),
-  optimizer: () => msg("submit.blackbox.step.optimizer"),
-  split: () => msg("submit.blackbox.step.split"),
-  review: () => msg("auto.features.submit.constants.literal.4"),
+// Every recipe walks the same four stages (see ./lib/wizard-steps).
+const STAGE_LABELS: Record<WizardStageId, () => string> = {
+  goal: () => msg("submit.stage.goal"),
+  evaluation: () => msg("submit.stage.evaluation"),
+  optimization: () => msg("submit.stage.optimization"),
+  review: () => msg("submit.stage.review"),
 };
 
-export type WizardStep = { id: WizardStepId; label: () => string };
-
-const stepsFor = (order: readonly WizardStepId[]): readonly WizardStep[] =>
-  order.map((id) => ({ id, label: STEP_LABELS[id] }));
-
-export const STEPS = stepsFor(PROGRAM_STEP_ORDER);
-export const BLACKBOX_STEPS = stepsFor(ANYTHING_STEP_ORDER);
+export const WIZARD_STAGES: ReadonlyArray<{ id: WizardStageId; label: () => string }> =
+  WIZARD_STAGE_ORDER.map((id) => ({ id, label: STAGE_LABELS[id] }));
 
 export const RECENT_KEY = "skynet:recent-model-configs";
 export const MAX_RECENT = 5;

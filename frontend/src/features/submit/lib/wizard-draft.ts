@@ -1,7 +1,18 @@
-import type { ModelConfig, SplitFractions, WorkflowSpec } from "@/shared/types/api";
+import type {
+  ModelConfig,
+  SplitFractions,
+  ValidateCodeResponse,
+  WorkflowSpec,
+} from "@/shared/types/api";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
 import type { ReactConfig, ColumnRole } from "../constants";
+import {
+  isWizardStageId,
+  migrateLegacyProgramFurthest,
+  migrateLegacyProgramStep,
+  type WizardStageId,
+} from "./wizard-steps";
 
 /**
  * In-memory draft of the new-optimization wizard.
@@ -17,8 +28,8 @@ import type { ReactConfig, ColumnRole } from "../constants";
  * sessionStorage for that single hop (see LOCALE_RELOAD_EVENT below).
  */
 export interface WizardDraftData {
-  step: number;
-  furthestReachedStep: number;
+  stage: WizardStageId;
+  furthestStage: WizardStageId;
   summaryTab: number;
   summaryCodeTab: string;
   jobType: "run" | "grid_search";
@@ -34,6 +45,10 @@ export interface WizardDraftData {
   metricCode: string;
   signatureManuallyEdited: boolean;
   metricManuallyEdited: boolean;
+  // Optional: drafts saved before the validation evidence travelled with the
+  // code. Without it a restore lands back on Evaluation to re-validate.
+  signatureValidation?: ValidateCodeResponse | null;
+  metricValidation?: ValidateCodeResponse | null;
   parsedDataset: ParsedDataset | null;
   datasetFileName: string | null;
   columnRoles: Record<string, ColumnRole>;
@@ -56,6 +71,30 @@ export interface WizardDraftData {
   pxnProposals?: string;
   shuffle: boolean;
   maxCostCredits: number | null;
+}
+
+// What the stash may hold: a current draft, or one written by the seven-step
+// layout that positioned the wizard by numeric step.
+type StoredDraft = Omit<WizardDraftData, "stage" | "furthestStage"> &
+  Partial<Pick<WizardDraftData, "stage" | "furthestStage">> & {
+    step?: number;
+    furthestReachedStep?: number;
+  };
+
+/** Adopt a stashed draft from either layout, mapping legacy step indices onto stages. */
+function normalizeDraft(raw: StoredDraft): WizardDraftData | null {
+  const { step, furthestReachedStep, stage, furthestStage, ...rest } = raw;
+  if (isWizardStageId(stage) && isWizardStageId(furthestStage)) {
+    return { ...rest, stage, furthestStage };
+  }
+  if (typeof step === "number") {
+    return {
+      ...rest,
+      stage: migrateLegacyProgramStep(step),
+      furthestStage: migrateLegacyProgramFurthest(furthestReachedStep ?? step),
+    };
+  }
+  return null;
 }
 
 // A half-filled draft survives sidebar navigation for this long, then self-expires
@@ -93,8 +132,11 @@ if (typeof window !== "undefined") {
     const raw = window.sessionStorage.getItem(RELOAD_STASH_KEY);
     if (raw) {
       window.sessionStorage.removeItem(RELOAD_STASH_KEY);
-      const parsed = JSON.parse(raw) as { savedAt: number; data: WizardDraftData };
-      if (parsed?.data && typeof parsed.savedAt === "number") draft = parsed;
+      const parsed = JSON.parse(raw) as { savedAt: number; data: StoredDraft };
+      if (parsed?.data && typeof parsed.savedAt === "number") {
+        const data = normalizeDraft(parsed.data);
+        if (data) draft = { savedAt: parsed.savedAt, data };
+      }
     }
   } catch {
     // Corrupt or inaccessible stash — start clean.

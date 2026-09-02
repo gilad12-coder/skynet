@@ -23,6 +23,7 @@ import { CodeInterviewPanel } from "./CodeInterviewPanel";
 import { ReactConfigSection } from "./ReactConfigSection";
 import { BannerFrame, GArrow, GBar, GBox, GWire, PickerSlide } from "./PickerSlide";
 import { workflowUsesTools } from "../../workflow/model";
+import { WIZARD_STAGE } from "../../lib/wizard-steps";
 
 // The atomic DSPy modules offered on the picker's "single module" tier. Names
 // are technical terms kept in English; descriptions reuse the localized tooltip
@@ -107,14 +108,14 @@ const WorkflowCanvas = dynamic(
   { ssr: false, loading: () => <Skeleton height={480} borderRadius={8} /> },
 );
 
-export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "start" | "scorer" }) {
+export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "module" | "code" }) {
   const {
     isWorkflow,
     isReact,
     moduleName,
     moduleSelectionRequired,
     chooseModule,
-    reopenModulePicker,
+    goTo,
     workflowSpec,
     setWorkflowSpec,
     workflowRevision,
@@ -170,9 +171,11 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "start" | 
         })
     : undefined;
 
+  // The picker lives on the Goal stage now, so switching modules is a hop back
+  // rather than an in-place swap.
   const moduleChip = {
     label: moduleLabel(moduleName),
-    onChangeModule: reopenModulePicker,
+    onChangeModule: () => goTo(WIZARD_STAGE.goal),
   };
 
   const sidePanel = interviewActive ? (
@@ -229,19 +232,14 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "start" | 
     </div>
   );
 
-  // The start part opens on the picker and stays there until a module is
-  // picked; afterwards the chip in the header reopens it to switch. The
-  // scorer part is the metric editor for every module. The views share one
-  // AnimatePresence so picking or switching a module cross-fades instead of
+  // The module part is the Goal stage: the picker stays up so the current
+  // choice is visible and switchable. The code part is the Evaluation stage's
+  // authoring section — the workflow canvas or the signature editor, plus the
+  // metric — and falls back to the picker if no module was ever chosen. The
+  // views share one AnimatePresence so switching cross-fades instead of
   // hard-swapping the card.
   const view =
-    part === "scorer"
-      ? "scorer"
-      : moduleSelectionRequired
-        ? "picker"
-        : isWorkflow
-          ? "workflow"
-          : "code";
+    part === "module" || moduleSelectionRequired ? "picker" : isWorkflow ? "workflow" : "code";
 
   let content: React.ReactNode;
   if (view === "picker") {
@@ -288,9 +286,13 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "start" | 
             <ReactConfigSection w={w} />
           </div>
         )}
+        <div className="space-y-3 border-t border-border/30 px-4 py-4 sm:px-6">
+          <p className="text-sm text-muted-foreground">{msg("workflow.step.metric_hint")}</p>
+          {metricEditor}
+        </div>
       </AuthoringShell>
     );
-  } else if (view === "code") {
+  } else {
     content = (
       <AuthoringShell
         {...shellProps}
@@ -308,7 +310,7 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "start" | 
                   })
             }
           >
-            {msg("submit.blackbox.step.start")}
+            {msg("auto.features.submit.constants.literal.3")}
           </HelpTip>
         }
       >
@@ -347,6 +349,8 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "start" | 
               />
             </MobileCodeEditorActions>
           </div>
+          <Separator />
+          {metricEditor}
           {isReact && (
             <>
               <Separator />
@@ -354,17 +358,6 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "start" | 
             </>
           )}
         </div>
-      </AuthoringShell>
-    );
-  } else {
-    content = (
-      <AuthoringShell
-        {...shellProps}
-        module={null}
-        title={<HelpTip text={tip("code.metric")}>{msg("submit.blackbox.step.scorer")}</HelpTip>}
-        description={isWorkflow ? msg("workflow.step.metric_hint") : undefined}
-      >
-        <div className="space-y-4 px-4 py-4 sm:px-6">{metricEditor}</div>
       </AuthoringShell>
     );
   }
