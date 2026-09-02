@@ -4,7 +4,7 @@ import { Check } from "@/shared/ui/icons";
 import { motion } from "framer-motion";
 import { cn } from "@/shared/lib/utils";
 
-import { STEPS, type WizardStep } from "../constants";
+import { WIZARD_STAGES } from "../constants";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 
 type StepperContext = Pick<
@@ -12,14 +12,9 @@ type StepperContext = Pick<
   "step" | "maxReachableStep" | "validateStep" | "handleTabClick"
 >;
 
-export function SubmitStepper({
-  w,
-  steps = STEPS,
-}: {
-  w: StepperContext;
-  steps?: readonly WizardStep[];
-}) {
+export function SubmitStepper({ w }: { w: StepperContext }) {
   const { step, maxReachableStep, validateStep, handleTabClick } = w;
+  const steps = WIZARD_STAGES;
 
   return (
     <div className="relative" data-tutorial="wizard-stepper">

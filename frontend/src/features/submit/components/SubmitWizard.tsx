@@ -7,7 +7,7 @@ import { msg } from "@/shared/lib/messages";
 
 import { useSubmitWizard } from "../hooks/use-submit-wizard";
 import { slideVariants, emptyModelConfig } from "../constants";
-import { PROGRAM_STEP, PROGRAM_STEP_ORDER, type WizardStepId } from "../lib/wizard-steps";
+import { WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { SubmitStepper } from "./SubmitStepper";
 import { SubmitNav } from "./SubmitNav";
 import { SubmitSplash } from "./SubmitSplash";
@@ -23,27 +23,37 @@ import { SplitSection } from "./steps/SplitSection";
 export function SubmitWizard({ header }: { header?: ReactNode }) {
   const w = useSubmitWizard();
 
-  const stepViews: Record<WizardStepId, ReactNode> = {
-    basics: <BasicsStep w={w} />,
-    cases: <DatasetStep w={w} />,
-    start: <CodeStep w={w} part="start" />,
-    scorer: <CodeStep w={w} part="scorer" />,
-    optimizer: (
+  // The Evaluation stage widens for the two-pane code section in auto mode;
+  // its other sections keep the regular column so they don't stretch with it.
+  const stageViews: Record<WizardStageId, ReactNode> = {
+    goal: <CodeStep w={w} part="module" />,
+    evaluation: (
+      <div className="space-y-4 md:space-y-6">
+        <div className="mx-auto w-full max-w-2xl">
+          <DatasetStep w={w} />
+        </div>
+        <CodeStep w={w} part="code" />
+        <div className="mx-auto w-full max-w-2xl">
+          <SplitSection w={w} />
+        </div>
+      </div>
+    ),
+    optimization: (
       <div className="space-y-4 md:space-y-6">
         <ParamsStep w={w} />
         <ModelStep w={w} />
       </div>
     ),
-    split: <SplitSection w={w} />,
-    review: <SummaryStep w={w} />,
+    review: (
+      <div className="space-y-4 md:space-y-6">
+        <BasicsStep w={w} />
+        <SummaryStep w={w} />
+      </div>
+    ),
   };
 
-  // The Starting point and Scorer steps render a two-pane layout with an agent
-  // side-panel in auto mode, so they need more horizontal room than the other
-  // steps.
-  const isCodeStep = w.step === PROGRAM_STEP.start || w.step === PROGRAM_STEP.scorer;
-  const stepId = PROGRAM_STEP_ORDER[w.step];
-  const containerWidthClass = isCodeStep && w.codeAssistMode === "auto" ? "max-w-5xl" : "max-w-2xl";
+  const containerWidthClass =
+    w.step === WIZARD_STAGE.evaluation && w.codeAssistMode === "auto" ? "max-w-5xl" : "max-w-2xl";
 
   return (
     <div
@@ -53,7 +63,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
 
       {/* The chip belongs to the card beneath it, so it sits closer than the
           column rhythm; the container's shadow padding makes up the rest. */}
-      {w.step === PROGRAM_STEP.basics && header && <div className="mb-2">{header}</div>}
+      {w.step === WIZARD_STAGE.goal && header && <div className="mb-2">{header}</div>}
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">
         <AnimatePresence mode="wait" custom={w.direction}>
@@ -66,7 +76,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
             exit="exit"
             transition={{ duration: 0.1 }}
           >
-            {stepId && stepViews[stepId]}
+            {stageViews[stageAt(w.step)]}
           </motion.div>
         </AnimatePresence>
       </div>
