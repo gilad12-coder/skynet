@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { ChatText, Coins, Gauge, Hourglass, Timer, TrendUp } from "@/shared/ui/icons";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
@@ -14,19 +14,32 @@ import {
 } from "@/shared/ui/primitives/table";
 import { FadeIn, StaggerContainer, StaggerItem, TiltCard } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
-import type { LMActivity, OptimizationStatusResponse, PairResult } from "@/shared/types/api";
-import { type PipelineStage } from "../constants";
+import type {
+  BlackboxStrategy,
+  LMActivity,
+  OptimizationPayloadResponse,
+  OptimizationStatusResponse,
+  PairResult,
+} from "@/shared/types/api";
+import { PIPELINE_STAGES, type PipelineStage } from "../constants";
 import { detectPairStage, detectStage } from "../lib/detect-stage";
-import { formatDuration, formatImprovement, formatPercent } from "@/shared/lib";
+import {
+  formatBlackboxDelta,
+  formatBlackboxScore,
+  formatDuration,
+  formatImprovement,
+  formatPercent,
+} from "@/shared/lib";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import type { ScorePoint } from "../lib/extract-scores";
 import { InfoCard } from "./ui-primitives";
 import { PipelineStages, computeStageTimestamps } from "./PipelineStages";
-import { TrajectoryPanel } from "@/features/trajectory";
+import { MetaHarnessPanel, TrajectoryPanel, isMetaHarnessRun } from "@/features/trajectory";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import { formatBlackboxDelta, formatBlackboxScore } from "../lib/blackbox";
+import { buildBlackboxTrajectoryContext } from "../lib/blackbox-trajectory";
+import { describeBlackboxArtifact } from "../lib/blackbox-artifact";
 
 const ScoreChart = dynamic(() => import("@/shared/ui/score-chart").then((m) => m.ScoreChart), {
   ssr: false,
@@ -100,6 +113,7 @@ function OverviewTabImpl({
   onPairSelect,
   onPairDeleted,
   trajectoryPreviewLayout,
+  payload,
 }: {
   job: OptimizationStatusResponse;
   isActive: boolean;
@@ -110,6 +124,9 @@ function OverviewTabImpl({
   onPairSelect: (pairIndex: number) => void;
   onPairDeleted?: (pairIndex: number) => void;
   trajectoryPreviewLayout?: { width: number; height: number };
+  // The submitted payload: a black-box run's recipe and cases tell the
+  // candidate tree what a candidate is and whether per-case scores exist.
+  payload?: OptimizationPayloadResponse | null;
 }) {
   const metrics = job.latest_metrics ?? {};
   const isPairContext = activePair != null;
@@ -117,6 +134,31 @@ function OverviewTabImpl({
   // grid-search pair view — the goal is "exactly identical components", so a
   // pair is just a run scoped by pair_index plus aggregation around it.
   const isBlackbox = job.optimization_type === "blackbox";
+  const blackboxTrajectory = useMemo(
+    () =>
+      isBlackbox
+        ? buildBlackboxTrajectoryContext(job.blackbox_result ?? null, payload ?? null)
+        : null,
+    [isBlackbox, job.blackbox_result, payload],
+  );
+  const scoreChartArtifact = useMemo(
+    () =>
+      isBlackbox
+        ? describeBlackboxArtifact(job.blackbox_result ?? null, payload ?? null)
+        : undefined,
+    [isBlackbox, job.blackbox_result, payload],
+  );
+  // A meta-harness lane hill-climbs instead of branching, so it gets the
+  // climb view; the lane that produced the newest versions decides.
+  const strategyEngine = (payload?.payload.strategy as Partial<BlackboxStrategy> | undefined)
+    ?.engine;
+  const showClimb =
+    isBlackbox &&
+    isMetaHarnessRun(
+      job.progress_events ?? [],
+      job.blackbox_result?.engine_used ?? null,
+      strategyEngine ?? null,
+    );
   const renderRunBlocks = job.optimization_type === "run" || isBlackbox || isPairContext;
   const renderGridAgg = job.optimization_type === "grid_search" && !isPairContext;
 
@@ -167,6 +209,16 @@ function OverviewTabImpl({
     runResult?.metric_improvement ??
     bbResult?.metric_improvement ??
     (baseline != null && optimized != null ? optimized - baseline : undefined);
+  // A stage the flow never ran (DSPy runs measure no baseline or final score
+  // without a test split; black-box runs measure no baseline without a
+  // starting point) must not read as completed once the run is past it.
+  const stageIndex = (stage: PipelineStage | "done") =>
+    stage === "done" ? PIPELINE_STAGES.length : PIPELINE_STAGES.findIndex((s) => s.key === stage);
+  const skippedStages: PipelineStage[] = [];
+  if (baseline == null && stageIndex(currentStage) > stageIndex("baseline"))
+    skippedStages.push("baseline");
+  if (optimized == null && currentStage === "done" && !stagesFailed)
+    skippedStages.push("evaluating");
   const scoresReady =
     (runResult != null || bbResult != null) &&
     baseline != null &&
@@ -322,6 +374,7 @@ function OverviewTabImpl({
             stageTs={stageTs}
             isActive={stagesActive}
             isFailed={stagesFailed}
+            skippedStages={skippedStages}
             onStageClick={onStageClick}
             dataTutorial={isPairContext ? undefined : "pipeline-stages"}
           />
@@ -466,7 +519,7 @@ function OverviewTabImpl({
                 follows the page direction — baseline stays on the reading
                 side in RTL — while every number keeps an inner dir="ltr" so
                 a leading minus never migrates to the wrong side. */}
-            <Table className="caption-top text-xs">
+            <Table className="no-copy-underline caption-top text-xs">
               <caption className="pb-2 text-start text-[0.6875rem] font-medium tracking-wide text-muted-foreground">
                 <HelpTip text={tip("score.logged_metrics")}>
                   {msg("optimization.logged_metrics.title")}
@@ -549,12 +602,15 @@ function OverviewTabImpl({
         </FadeIn>
       )}
 
-      {renderRunBlocks && (
+      {renderRunBlocks && showClimb && <MetaHarnessPanel job={job} blackbox={blackboxTrajectory} />}
+
+      {renderRunBlocks && !showClimb && (
         <TrajectoryPanel
           job={job}
           pairIndex={pairIndex}
           previewLayout={trajectoryPreviewLayout}
           toolSeverities={runResult?.program_artifact?.react_overlay?.tool_severities}
+          blackbox={blackboxTrajectory}
         />
       )}
 
@@ -582,7 +638,7 @@ function OverviewTabImpl({
             </CardHeader>
             <CardContent>
               <div className="h-[220px] min-w-0">
-                <ScoreChart data={scorePoints} />
+                <ScoreChart data={scorePoints} artifact={scoreChartArtifact} />
               </div>
             </CardContent>
           </Card>

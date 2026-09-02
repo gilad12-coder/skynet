@@ -107,7 +107,8 @@ export function DatasetShareDialog({ datasetId }: { datasetId: string }) {
     setSavingAccess(true);
     try {
       setState(await putDatasetSharing(datasetId, { general_access: value }));
-      if (value !== "restricted") track(TelemetryEvent.ShareCreated, { kind: "dataset", mode: "link" });
+      if (value !== "restricted")
+        track(TelemetryEvent.ShareCreated, { kind: "dataset", mode: "link" });
       toast.success(msg("share.access_updated"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : msg("share.save_failed"));
@@ -397,7 +398,7 @@ export function DatasetShareDialog({ datasetId }: { datasetId: string }) {
                           ariaLabel={msg("share.copy_link")}
                           onCopied={() => toast.success(msg("share.link_copied"))}
                           onCopyError={() => toast.error(msg("clipboard.copy_failed"))}
-                          className="size-7 shrink-0 text-muted-foreground hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-0"
+                          className="shrink-0 focus-visible:bg-accent focus-visible:ring-0"
                         />
                       </TooltipButton>
                     </div>

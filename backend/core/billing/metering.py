@@ -14,13 +14,11 @@ import logging
 from collections.abc import Mapping
 
 from ..constants import TOKEN_SOURCE_MANAGED
-from ..service_gateway.language_models import served_model_from, usage_by_model_from_history
+from ..service_gateway.language_models import canonical_model_id, served_model_from, usage_by_model_from_history
 from .pricing import ModelUsage, usages_from_breakdown
 from .service import StripeBillingService, run_cost_credits
 
 logger = logging.getLogger("skynet.billing.metering")
-
-_PROXY_PREFIX = "litellm_proxy/"
 
 
 def _normalize_model_key(model: str) -> str:
@@ -33,7 +31,7 @@ def _normalize_model_key(model: str) -> str:
     Returns:
         The catalog-shaped id the ledger and pricing table understand.
     """
-    return model.removeprefix(_PROXY_PREFIX)
+    return canonical_model_id(model)
 
 
 def _coerce_lms(language_models) -> list:

@@ -220,7 +220,7 @@ def test_build_scorer_opens_the_configured_runtime_named_after_the_job(monkeypat
     scorer = build_scorer(BlackboxScorer(metric_code="def score(c, case=None): return 0.5"), job_id="job-7")
 
     assert scorer("x", None) == (0.5, {"k": 1})
-    assert runtime.specs[0].name == "skynet-scorer-job-7"
+    assert runtime.specs[0].name.startswith("skynet-scorer-job-7-")
     assert runtime.specs[0].tags == {"skynet_job": "job-7"}
 
 

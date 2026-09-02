@@ -46,11 +46,11 @@ describe("buildVersions", () => {
       }),
     );
     assert.deepEqual(
-      versions.map((v) => [v.number, v.text, v.score, v.isSeed, v.isBest, v.isImprovement]),
+      versions.map((v) => [v.number, v.text, v.score, v.isSeed, v.isBest]),
       [
-        [0, "seed", 0.1, true, false, false],
-        [1, "worse", 0.05, false, false, false],
-        [2, "best", 0.9, false, true, true],
+        [0, "seed", 0.1, true, false],
+        [1, "worse", 0.05, false, false],
+        [2, "best", 0.9, false, true],
       ],
     );
     assert.equal(versions[0].firstRun, 1);
@@ -103,6 +103,34 @@ describe("buildVersions", () => {
     assert.deepEqual(
       versions.map((v) => v.text),
       ["## system\na", "## system\nb"],
+    );
+  });
+});
+
+describe("buildVersions mean score", () => {
+  it("carries the running mean beside the headline score", () => {
+    const versions = buildVersions(
+      runResult({
+        versions: [
+          {
+            candidate: "seed",
+            score: 0.2,
+            mean_score: 0.15,
+            evals: 3,
+            first_run: 1,
+            side_info: {},
+          },
+          { candidate: "best", score: 0.9, evals: 2, first_run: 2, side_info: {} },
+        ],
+      }),
+    );
+
+    assert.deepEqual(
+      versions.map((v) => [v.text, v.score, v.meanScore]),
+      [
+        ["seed", 0.2, 0.15],
+        ["best", 0.9, null],
+      ],
     );
   });
 });

@@ -65,6 +65,34 @@ class HarnessLaunch:
     env: dict[str, str] = field(default_factory=dict)
 
 
+PI_PACKAGE = "@earendil-works/pi-coding-agent"
+PI_VERSION = "0.84.1"
+PI_THINKING_LEVEL = "low"
+# The LiteLLM-style routing prefix; the gateway fronts OpenRouter itself and
+# rejects model ids that still carry it.
+_OPENROUTER_PREFIX = "openrouter/"
+# The sandbox image ships its own pi in /usr/local/bin. A pinned copy lives in
+# a private prefix put ahead of it on PATH, so the version the transcript logs
+# is the one that ran.
+_PI_PREFIX = '"$HOME/.skynet/pi"'
+_PI_PATH = 'export PATH="$HOME/.skynet/pi/bin:$PATH"'
+
+
+def _pi_install() -> str:
+    """Return the command that pins pi to :data:`PI_VERSION` and logs the version that will run.
+
+    The image's own pi is kept when it already is the pinned version, so the
+    install is free on the common path.
+
+    Returns:
+        The shell command.
+    """
+    return (
+        f'{_PI_PATH}; [ "$(pi --version 2>/dev/null)" = "{PI_VERSION}" ] '
+        f"|| npm install -g --prefix {_PI_PREFIX} {PI_PACKAGE}@{PI_VERSION} >/dev/null && pi --version"
+    )
+
+
 def _npm_install(binary: str, package: str) -> str:
     """Return a command that installs ``package`` globally unless ``binary`` is already on PATH.
 
@@ -231,7 +259,7 @@ def _parse_claude_output(stdout: str) -> tuple[str | None, Usage]:
 
 
 def _pi_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
-    """Build the launch for Pi (``@mariozechner/pi-coding-agent``).
+    """Build the launch for Pi (:data:`PI_PACKAGE`, pinned to :data:`PI_VERSION`).
 
     Args:
         model: Target model id.
@@ -240,33 +268,40 @@ def _pi_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     Returns:
         The launch.
     """
+    openrouter = "openrouter.ai" in gateway.url
+    entry: dict[str, object] = {
+        "id": model,
+        "name": model,
+        # OpenRouter models such as DeepSeek reason by default and, left to that default, think until
+        # they hit ``maxTokens`` without a single tool call or answer. Pi's OpenRouter thinking format
+        # makes every request carry an explicit effort instead; other gateways may reject that field.
+        "reasoning": openrouter,
+        "input": ["text"],
+        "contextWindow": 200_000,
+        "maxTokens": 32_000,
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+    }
+    if openrouter:
+        entry["compat"] = {"thinkingFormat": "openrouter"}
+    model_arg = f'"${ENV_MODEL}:{PI_THINKING_LEVEL}"' if openrouter else f'"${ENV_MODEL}"'
     models_json = {
         "providers": {
             PROVIDER: {
                 "baseUrl": gateway.url,
                 "api": "openai-completions",
-                "apiKey": ENV_API_KEY,
-                "models": [
-                    {
-                        "id": model,
-                        "name": model,
-                        "reasoning": False,
-                        "input": ["text"],
-                        "contextWindow": 200_000,
-                        "maxTokens": 32_000,
-                        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
-                    }
-                ],
+                # Pi reads a bare env-var name as the literal key; the shell form is honoured.
+                "apiKey": f"!printenv {ENV_API_KEY}",
+                "models": [entry],
             }
         }
     }
     return HarnessLaunch(
         instructions_file="AGENTS.md",
-        install_command=_npm_install("pi", "@mariozechner/pi-coding-agent"),
+        install_command=_pi_install(),
         files={".skynet/pi/models.json": json.dumps(models_json, indent=2)},
         run_command=(
-            'mkdir -p "$HOME/.pi/agent" && cp .skynet/pi/models.json "$HOME/.pi/agent/models.json" && '
-            f'pi --mode json --no-session --provider {PROVIDER} --model "${ENV_MODEL}" {_PROMPT_ARG}'
+            f'{_PI_PATH}; mkdir -p "$HOME/.pi/agent" && cp .skynet/pi/models.json "$HOME/.pi/agent/models.json" && '
+            f"pi --mode json --no-session --provider {PROVIDER} --model {model_arg} {_PROMPT_ARG}"
         ),
         env=_base_env(model, gateway),
         parse_output=_parse_pi_output,
@@ -421,7 +456,7 @@ def build_launch(target: BlackboxTarget, gateway: GatewayConfig) -> HarnessLaunc
     Raises:
         ServiceError: When the harness id is unknown.
     """
-    model = str(target.model)
+    model = str(target.model).removeprefix(_OPENROUTER_PREFIX)
     if target.harness == BLACKBOX_HARNESS_CUSTOM:
         run_command = _fill(target.run_command, model, gateway)
         if run_command is None:

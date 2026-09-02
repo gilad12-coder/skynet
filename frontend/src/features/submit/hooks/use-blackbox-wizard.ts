@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { toast } from "react-toastify";
 
@@ -16,27 +16,33 @@ import type {
   ModelConfig,
   ScorerDryRunResponse,
   SplitFractions,
+  SplitPlan,
   ValidateCodeResponse,
 } from "@/shared/types/api";
 import {
   dryRunScorer,
   getBlackboxEngines,
   getDatasetRows,
+  getJob,
+  getOptimizationPayload,
   isInsufficientCreditsError,
   isStorageQuotaError,
   submitBlackboxRun,
   type BlackboxAuthoringContext,
   type DatasetSummary,
 } from "@/shared/lib/api";
-import { readPref } from "@/features/settings";
+import { readPref, useUserPrefs } from "@/features/settings";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
+import { BLACKBOX_HARNESSES } from "@/shared/lib/blackbox-harness";
 import { parseDatasetFile, type ParsedDataset } from "@/shared/lib/parse-dataset";
 import { msg } from "@/shared/lib/messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import type { ValidationResult } from "@/shared/ui/code-editor";
 
-import { BLACKBOX_STEPS, defaultSplit, emptyModelConfig } from "../constants";
+import { BLACKBOX_STEPS, defaultSplit, emptyModelConfig, type ColumnRole } from "../constants";
+import { ANYTHING_STEP } from "../lib/wizard-steps";
+import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import {
   chargeableBracket,
   defaultCeilingForBracket,
@@ -44,10 +50,21 @@ import {
   type CostBracket,
 } from "../lib/cost-bracket";
 import { prepareModelConfig } from "./use-submit-wizard";
-import { useModelCatalog, useRecentModelConfigs } from "./use-submit-wizard-data";
+import {
+  useDatasetProfiling,
+  useModelCatalog,
+  useRecentModelConfigs,
+} from "./use-submit-wizard-data";
 
 export type SeedMode = "text" | "parts" | "none";
-export type BlackboxRecipe = BlackboxAuthoringContext["recipe"];
+// The wizard offers two kinds of starting point. Runs saved before the
+// prompt kind folded into text still carry "prompt"; they land on text.
+export type BlackboxRecipe = "code" | "anything";
+
+/** Maps a stored or linked recipe onto the kinds the wizard offers. */
+export function wizardRecipe(value: string | null | undefined): BlackboxRecipe {
+  return value === "code" ? "code" : "anything";
+}
 
 // Black-box cases carry no column roles; the agent reads them as raw samples.
 const NO_ROLES: Record<string, string> = {};
@@ -63,113 +80,16 @@ export type DryRunState =
 
 // The backend looks for a `score` (or `metric`) entrypoint and accepts either a
 // bare number or `{"score": ..., ...side_info}` (see blackbox/scorer.py).
-export const SCORER_TEMPLATE = `def score(candidate, case=None):
+export const SCORER_TEMPLATE = `from skynet import llm, Image  # llm(prompt, input=None, images=None) asks the scorer model
+
+
+def score(candidate, case=None):
     """Return a number — higher is better. \`case\` is one row of your cases (or None)."""
     text = candidate if isinstance(candidate, str) else "\\n".join(candidate.values())
     return float(len(text.split()))
 `;
 
-// Editable starting points inserted into the python scorer editor. Presets are
-// NOT a distinct scorer kind — the evaluator is always the user's own python.
-// Those that grade a model's answer call the injected \`llm(candidate, input)\`
-// helper: \`candidate\` is the version under optimization (the system prompt),
-// the case's input column is the user message. Rename "input"/"expected" to
-// your own column names.
-export interface ScorerPreset {
-  id: string;
-  needsModel: boolean;
-  code: string;
-}
-
-export const SCORER_PRESETS: ScorerPreset[] = [
-  { id: "length", needsModel: false, code: SCORER_TEMPLATE },
-  {
-    id: "exact",
-    needsModel: true,
-    code: `def score(candidate, case=None):
-    """1.0 when the model's answer exactly matches the expected column, else 0.0."""
-    if case is None:
-        return 0.0
-    answer = llm(candidate, case.get("input", "")).strip()
-    return 1.0 if answer == str(case.get("expected", "")).strip() else 0.0
-`,
-  },
-  {
-    id: "contains",
-    needsModel: true,
-    code: `def score(candidate, case=None):
-    """1.0 when the expected text appears in the model's answer, else 0.0."""
-    if case is None:
-        return 0.0
-    answer = llm(candidate, case.get("input", "")).lower()
-    return 1.0 if str(case.get("expected", "")).strip().lower() in answer else 0.0
-`,
-  },
-  {
-    id: "numeric",
-    needsModel: true,
-    code: `import re
-
-
-def score(candidate, case=None):
-    """1.0 when the answer's last number is within TOLERANCE of the expected number."""
-    if case is None:
-        return 0.0
-    TOLERANCE = 0.01
-    answer = llm(candidate, case.get("input", ""))
-    found = re.findall(r"-?\\d+(?:\\.\\d+)?", answer)
-    if not found:
-        return 0.0
-    return 1.0 if abs(float(found[-1]) - float(case.get("expected", 0))) <= TOLERANCE else 0.0
-`,
-  },
-  {
-    id: "json_field",
-    needsModel: true,
-    code: `import json
-
-
-def score(candidate, case=None):
-    """1.0 when FIELD from the model's JSON answer equals the expected column."""
-    if case is None:
-        return 0.0
-    FIELD = "answer"
-    reply = llm(candidate, case.get("input", ""))
-    try:
-        parsed = json.loads(reply)
-    except (ValueError, TypeError):
-        return 0.0
-    got = str(parsed.get(FIELD, "")).strip()
-    return 1.0 if got == str(case.get("expected", "")).strip() else 0.0
-`,
-  },
-  {
-    id: "llm_judge",
-    needsModel: true,
-    code: `def score(candidate, case=None):
-    """Ask the model to grade the answer 0-10, normalized to 0.0-1.0."""
-    if case is None:
-        return 0.0
-    answer = llm(candidate, case.get("input", ""))
-    rubric = (
-        "Score how well the RESPONSE answers the INPUT from 0 to 10. "
-        "Reply with only the number.\\n\\n"
-        f"INPUT: {case.get('input', '')}\\n"
-        f"EXPECTED: {case.get('expected', '')}\\n"
-        f"RESPONSE: {answer}"
-    )
-    verdict = llm(rubric)
-    digits = "".join(c for c in verdict if c.isdigit() or c == ".")
-    try:
-        return max(0.0, min(1.0, float(digits) / 10.0))
-    except ValueError:
-        return 0.0
-`,
-  },
-  {
-    id: "run_code",
-    needsModel: false,
-    code: `import os
+const RUN_CODE_SCORER_TEMPLATE = `import os
 import subprocess
 import sys
 import tempfile
@@ -201,64 +121,17 @@ def _is_number(token):
     except ValueError:
         return False
     return True
-`,
-  },
-  {
-    id: "vlm_judge",
-    needsModel: true,
-    code: `import base64
-import glob
-import os
-import re
-import subprocess
-import sys
-import tempfile
+`;
 
+// A program's natural yardstick is running it, so the code recipe opens on
+// the run-program scorer instead of the generic word-count template.
+function scorerTemplateFor(recipe: BlackboxRecipe): string {
+  return recipe === "code" ? RUN_CODE_SCORER_TEMPLATE : SCORER_TEMPLATE;
+}
 
-def score(candidate, case=None):
-    """Run the candidate as a program, then have a vision model grade what it rendered."""
-    TIMEOUT_SECONDS = 120
-    criteria = (case or {}).get("criteria") or "Rate what you see from 0 to 100."
-    source = candidate if isinstance(candidate, str) else "\\n".join(candidate.values())
-    with tempfile.TemporaryDirectory() as workdir:
-        script = os.path.join(workdir, "candidate.py")
-        with open(script, "w") as handle:
-            handle.write(source)
-        try:
-            run = subprocess.run(
-                [sys.executable, script], cwd=workdir, capture_output=True, text=True, timeout=TIMEOUT_SECONDS
-            )
-        except subprocess.TimeoutExpired:
-            return 0.0, {"error": f"timed out after {TIMEOUT_SECONDS}s"}
-        if run.returncode != 0:
-            return 0.0, {"error": run.stderr.strip()[-2000:]}
-        renders = sorted(glob.glob(os.path.join(workdir, "**", "*.png"), recursive=True))
-        images = [_read(path) for path in renders]
-    if not images:
-        return 0.0, {"error": "the program saved no .png renders", "stdout": run.stdout[-2000:]}
-    verdict = llm(
-        f"{criteria}\\n\\nJudge the attached renders: say what works and what does not, "
-        "then end with a line of the form 'SCORE: X/100'.",
-        images=images,
-    )
-    match = re.search(r"SCORE:\\s*(\\d+(?:\\.\\d+)?)\\s*/\\s*(100|10)\\b", verdict)
-    if not match:
-        return 0.0, {"error": "the judge gave no SCORE: X/100 line", "verdict": verdict[-2000:]}
-    side_info = {"feedback": verdict}
-    for index, image in enumerate(images):
-        side_info[f"render_{index + 1}"] = Image(base64_data=base64.b64encode(image).decode(), media_type="image/png")
-    return max(0.0, min(1.0, float(match.group(1)) / float(match.group(2)))), side_info
-
-
-def _read(path):
-    with open(path, "rb") as handle:
-        return handle.read()
-`,
-  },
-];
-
-const RUN_CODE_SCORER_TEMPLATE = SCORER_PRESETS.find((p) => p.id === "run_code")!.code;
-
+// Not a wizard field: 300s covers every scorer shape the agent writes, and the
+// backend caps the value at 600.
+const SCORER_TIMEOUT_SECONDS = 300;
 const DEFAULT_MAX_SCORER_RUNS = 100;
 const DEFAULT_PATIENCE = 40;
 
@@ -269,8 +142,18 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function useBlackboxWizard(recipe: BlackboxRecipe) {
+/**
+ * Whether a python scorer reaches for a model at all: only then does its
+ * model matter. Comments are dropped first, since the template documents
+ * `llm()` in one without ever calling it.
+ */
+function scorerCallsModel(code: string): boolean {
+  return /\bllm\s*\(/.test(code.replace(/#.*$/gm, ""));
+}
+
+export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: session } = useSession();
   const username = session?.user?.name ?? "";
   const catalog = useModelCatalog();
@@ -280,11 +163,17 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
   const [direction, setDirection] = useState(0);
   const [furthestReachedStep, setFurthestReachedStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
+  const advancingRef = useRef(false);
   const [submitPhase, setSubmitPhase] = useState<"idle" | "sending" | "splash" | "done">("idle");
 
   const [jobName, setJobName] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(true);
+
+  // The kind of starting point — a prompt, code or any other text. Chosen in
+  // the Starting point step; the picker's link only seeds it.
+  const [recipe, setRecipeState] = useState<BlackboxRecipe>(initialRecipe);
 
   const [codeAssistMode, setCodeAssistMode] = useState<"auto" | "manual">(() =>
     readPref("wizardCodeAssist"),
@@ -302,31 +191,91 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
   const [background, setBackground] = useState("");
   const [targetKind, setTargetKind] = useState<"text" | "agent">("text");
   const [harness, setHarness] = useState<BlackboxHarness>("pi");
-  const [targetModel, setTargetModel] = useState("");
+  // The model the agent harness runs on: what the run optimizes for, and no
+  // part of the scorer. It carries only a name — the sandbox reaches it
+  // through the platform gateway, so the rest of the config would be dead
+  // weight.
+  const [targetModel, setTargetModel] = useState<ModelConfig>({ name: "" });
   const [targetTimeout, setTargetTimeout] = useState(600);
   const [targetConcurrency, setTargetConcurrency] = useState(2);
-  const [setupCommand, setSetupCommand] = useState("");
-  const [installCommand, setInstallCommand] = useState("");
-  const [runCommand, setRunCommand] = useState("");
 
   const [parsedCases, setParsedCases] = useState<ParsedDataset | null>(null);
   const [casesName, setCasesName] = useState("");
   const [split, setSplit] = useState<SplitFractions>(defaultSplit);
   const [shuffle, setShuffle] = useState(true);
+  const [seed, setSeed] = useState<number | undefined>(undefined);
   const [libraryOpen, setLibraryOpen] = useState(false);
 
-  const [scorerKind, setScorerKind] = useState<"python" | "remote">("python");
-  // A program's natural yardstick is running it, so the code recipe opens on
-  // the run-program scorer instead of the generic word-count template.
-  const [metricCode, setMetricCode] = useState(
-    recipe === "code" ? RUN_CODE_SCORER_TEMPLATE : SCORER_TEMPLATE,
+  // Same split UX as the standard wizard: the server recommends a plan from
+  // the cases, auto mode follows it and manual mode keeps the user's numbers.
+  // The ref lets the profiling effect read the mode without re-running.
+  const [splitPlan, setSplitPlan] = useState<SplitPlan | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [splitMode, setSplitModeState] = useState<"auto" | "manual">(() =>
+    readPref("wizardSplitMode"),
   );
+  const splitModeRef = useRef<"auto" | "manual">(readPref("wizardSplitMode"));
+  const { prefs } = useUserPrefs();
+
+  // Skip the first run: UserPrefsProvider boots with DEFAULT_PREFS and only
+  // hydrates from localStorage in an effect, so the first `prefs.*` value
+  // would clobber what readPref() read synchronously above.
+  const splitModeFirstRunRef = useRef(true);
+  useEffect(() => {
+    if (splitModeFirstRunRef.current) {
+      splitModeFirstRunRef.current = false;
+      return;
+    }
+    splitModeRef.current = prefs.wizardSplitMode;
+    setSplitModeState(prefs.wizardSplitMode);
+  }, [prefs.wizardSplitMode]);
+
+  // Every case column feeds the black box, so the whole row is the profiler's
+  // duplicate key — there are no output columns to map.
+  const caseColumnRoles = useMemo<Record<string, ColumnRole>>(
+    () =>
+      Object.fromEntries((parsedCases?.columns ?? []).map((column) => [column, "input"] as const)),
+    [parsedCases],
+  );
+  const setSplitMode = useCallback(
+    (mode: "auto" | "manual") => {
+      splitModeRef.current = mode;
+      setSplitModeState(mode);
+      if (mode === "auto" && splitPlan) {
+        setSplit(splitPlan.fractions);
+        setShuffle(splitPlan.shuffle);
+        setSeed(splitPlan.seed);
+      }
+    },
+    [splitPlan],
+  );
+  const updateSplit = (field: keyof SplitFractions, value: string) => {
+    if (splitModeRef.current === "auto") return;
+    const num = parseFloat(value);
+    if (isNaN(num) || num < 0 || num > 1) return;
+    setSplit((prev) => ({ ...prev, [field]: num }));
+  };
+  const splitSum = +(split.train + split.val + split.test).toFixed(4);
+
+  const [scorerKind, setScorerKind] = useState<"python" | "remote">("python");
+  const [metricCode, setMetricCode] = useState(scorerTemplateFor(initialRecipe));
+  // The kind only seeds the scorer: a scorer still on the outgoing kind's
+  // template follows the switch, while anything the user or the agent wrote
+  // stays put.
+  const setRecipe = (next: BlackboxRecipe) => {
+    if (metricCode === scorerTemplateFor(recipe)) setMetricCode(scorerTemplateFor(next));
+    setRecipeState(next);
+  };
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
-  const [scorerTimeout, setScorerTimeout] = useState(60);
-  // The model injected into the python scorer as `llm()`. Empty until the user
-  // picks one; a scorer that calls `llm()` without it fails the dry run.
+  const [scorerInstall, setScorerInstall] = useState("");
+  // A metric is any function; only one that calls `llm()` needs a model.
+  // The Scorer step asks whether it does, and code that already calls
+  // `llm()` answers for itself.
   const [scorerModel, setScorerModel] = useState<ModelConfig>(emptyModelConfig());
+  const [scorerModelDeclared, setScorerModelDeclared] = useState(false);
+  const scorerCodeCallsModel = scorerCallsModel(metricCode);
+  const scorerUsesModel = scorerKind === "python" && (scorerModelDeclared || scorerCodeCallsModel);
   const [dryRun, setDryRun] = useState<DryRunState>({ status: "idle" });
   // Scorer fingerprint the in-flight/last dry run belongs to, so the reset
   // below doesn't wipe a run the agent kicked off for the code it just wrote.
@@ -344,8 +293,23 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     config: ModelConfig;
     onSave: (c: ModelConfig) => void;
     label: string;
+    nameOnly?: boolean;
   } | null>(null);
   const [maxCostCredits, setMaxCostCredits] = useState<number | null>(null);
+
+  // Auto and Plateau relay pick engines themselves, so only a hand-picked engine
+  // shapes the recommended split.
+  useDatasetProfiling({
+    parsedDataset: parsedCases,
+    columnRoles: caseColumnRoles,
+    splitModeRef,
+    setSplitPlan,
+    setProfileLoading,
+    setSplit,
+    setShuffle,
+    setSeed,
+    engine: strategyMode === "single" ? engine : null,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -361,6 +325,120 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     };
   }, [targetKind]);
 
+  // A `?clone=` link hydrates the wizard from the source run's stored payload
+  // (server-scrubbed: no model api_key, no remote-scorer secret). The clone
+  // link only preselects the picker; the recipe kind, seed, cases, scorer and
+  // optimizer all come from the payload.
+  const cloneRan = useRef(false);
+  const [cloned, setCloned] = useState(false);
+  useEffect(() => {
+    const cloneId = searchParams.get("clone");
+    if (!cloneId || cloneRan.current) return;
+    cloneRan.current = true;
+    Promise.all([getOptimizationPayload(cloneId), getJob(cloneId).catch(() => null)])
+      .then(([{ optimization_type, payload }, jobData]) => {
+        // A Program run cloned into this wizard (the picker lets the user
+        // switch recipe) brings its basics and rows as cases; the seed,
+        // target, scorer and optimizer only exist on an Anything run.
+        const stored = payload as Record<string, unknown>;
+        const source =
+          cloneSourceRecipe(optimization_type) === "anything"
+            ? (payload as Partial<BlackboxRunRequest>)
+            : null;
+        const basics = cloneBasics(stored, jobData?.name);
+        if (basics.name) setJobName(basics.name);
+        if (basics.description) setJobDescription(basics.description);
+        if (basics.isPrivate != null) setIsPrivate(basics.isPrivate);
+
+        if (source) {
+          if (source.recipe) setRecipeState(wizardRecipe(source.recipe));
+          if (source.objective) setObjective(source.objective);
+          if (source.background) setBackground(source.background);
+
+          const seed = source.seed_candidate;
+          if (typeof seed === "string") {
+            setSeedMode("text");
+            setSeedText(seed);
+          } else if (seed && typeof seed === "object") {
+            setSeedMode("parts");
+            setSeedParts(Object.entries(seed).map(([key, value]) => ({ key, value })));
+          } else {
+            setSeedMode("none");
+          }
+          // Cloned artifacts are decided: the agent's unprompted passes must not
+          // redraft them.
+          setSeedManuallyEdited(true);
+          setScorerManuallyEdited(true);
+
+          const target = source.target;
+          if (target) {
+            setTargetKind(target.kind);
+            // A cloned job may name a harness the wizard no longer offers
+            // ("custom"); the select can't show it, so the default stays.
+            if (target.harness && BLACKBOX_HARNESSES.includes(target.harness))
+              setHarness(target.harness);
+            if (target.model) setTargetModel({ name: target.model });
+            if (target.timeout_seconds != null) setTargetTimeout(target.timeout_seconds);
+            if (target.concurrency != null) setTargetConcurrency(target.concurrency);
+          }
+        }
+
+        const rows = cloneRows(stored);
+        if (rows) {
+          setParsedCases(rows);
+          setCasesName(String(basics.name || cloneId));
+        }
+        if (basics.split) {
+          setSplit({ ...defaultSplit, ...basics.split });
+          // Cloned splits are intentional — pin the wizard to manual so the
+          // profiling effect doesn't clobber them when the cases reload.
+          splitModeRef.current = "manual";
+          setSplitModeState("manual");
+        }
+        if (basics.shuffle != null) setShuffle(basics.shuffle);
+        if (basics.seed != null) setSeed(basics.seed);
+
+        if (source) {
+          const scorer = source.scorer;
+          if (scorer) {
+            setScorerKind(scorer.kind);
+            if (scorer.metric_code) setMetricCode(scorer.metric_code);
+            if (scorer.url) setScorerUrl(scorer.url);
+            if (scorer.kind === "python" && scorer.install_command)
+              setScorerInstall(scorer.install_command);
+            if (scorer.kind === "python" && scorer.model?.name) {
+              setScorerModel({ ...emptyModelConfig(), ...scorer.model });
+              setScorerModelDeclared(true);
+            }
+          }
+
+          const strategy = source.strategy;
+          if (strategy) {
+            setStrategyMode(strategy.mode);
+            setEngine(strategy.engine ?? null);
+            if (strategy.patience != null) setPatience(strategy.patience);
+          }
+          const budget = source.budget;
+          if (budget) {
+            if (budget.max_scorer_runs != null) setMaxScorerRuns(budget.max_scorer_runs);
+            setMaxIterations(budget.max_iterations ?? "");
+            setStopAtScore(budget.stop_at_score == null ? "" : String(budget.stop_at_score));
+          }
+          if (source.max_cost_credits != null) setMaxCostCredits(source.max_cost_credits);
+        }
+        // Both recipes store the reflection model the same way.
+        const reflection = stored.reflection_model_config as ModelConfig | undefined;
+        if (reflection?.name) setReflectionModel({ ...emptyModelConfig(), ...reflection });
+        // A Program run's seed still has to be drafted here, so only an
+        // Anything clone rules the interview out.
+        setCloned(source != null);
+        toast.success(msg("submit.clone.success"));
+      })
+      .catch(() => {
+        toast.error(msg("submit.clone.failed"));
+      });
+  }, [searchParams]);
+
   // A passed dry run only vouches for the scorer it ran against — including the
   // model bound to `llm()`, whose answers change what the scorer returns.
   const scorerKey = JSON.stringify([
@@ -368,8 +446,8 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     metricCode,
     scorerUrl,
     scorerSecret,
-    scorerTimeout,
-    scorerModel,
+    scorerInstall,
+    scorerUsesModel ? scorerModel : null,
   ]);
   useEffect(() => {
     if (dryRunKeyRef.current === scorerKey) return;
@@ -391,16 +469,20 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
         ? {
             kind: "python",
             metric_code: code,
-            timeout_seconds: scorerTimeout,
-            model: scorerModel.name.trim() ? prepareModelConfig(scorerModel) : null,
+            timeout_seconds: SCORER_TIMEOUT_SECONDS,
+            install_command: scorerInstall.trim() || null,
+            model:
+              (scorerModelDeclared || scorerCallsModel(code)) && scorerModel.name.trim()
+                ? prepareModelConfig(scorerModel)
+                : null,
           }
         : {
             kind: "remote",
             url: scorerUrl.trim(),
             secret: scorerSecret.trim() || undefined,
-            timeout_seconds: scorerTimeout,
+            timeout_seconds: SCORER_TIMEOUT_SECONDS,
           },
-    [scorerKind, metricCode, scorerTimeout, scorerUrl, scorerSecret, scorerModel],
+    [scorerKind, metricCode, scorerUrl, scorerSecret, scorerInstall, scorerModel],
   );
 
   const buildTarget = (): BlackboxTarget =>
@@ -409,12 +491,9 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
       : {
           kind: "agent",
           harness,
-          model: targetModel.trim(),
+          model: targetModel.name.trim(),
           timeout_seconds: targetTimeout,
           concurrency: targetConcurrency,
-          setup_command: setupCommand.trim() || undefined,
-          install_command: installCommand.trim() || undefined,
-          run_command: runCommand.trim() || undefined,
         };
 
   // Also the agent's metric validator: it passes the code it just wrote (the
@@ -427,8 +506,10 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
         code,
         scorerUrl,
         scorerSecret,
-        scorerTimeout,
-        scorerModel,
+        scorerInstall,
+        scorerKind === "python" && (scorerModelDeclared || scorerCallsModel(code))
+          ? scorerModel
+          : null,
       ]);
       setDryRun({ status: "running" });
       let outcome: ValidationResult;
@@ -462,7 +543,7 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
       scorerKind,
       scorerUrl,
       scorerSecret,
-      scorerTimeout,
+      scorerInstall,
       scorerModel,
     ],
   );
@@ -473,26 +554,28 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
       objective,
       background,
       target_kind: targetKind,
-      scorer_has_model: scorerModel.name.trim().length > 0,
+      scorer_has_model: scorerUsesModel && scorerModel.name.trim().length > 0,
     }),
-    [recipe, objective, background, targetKind, scorerModel.name],
+    [recipe, objective, background, targetKind, scorerUsesModel, scorerModel.name],
   );
 
   // The interview is offered whatever the seed mode or hand edits: its brief
   // always yields a text starting point, so a parts or from-scratch seed
   // switches to Text when the draft lands (agentSetSeed below).
-  const interviewPossible = codeAssistMode === "auto";
+  // A clone is a complete prior submission — its seed is decided, so the
+  // interview (which would redraft it on resolve) is never offered.
+  const interviewPossible = codeAssistMode === "auto" && !cloned;
   // The interview opens the moment the Starting point is reached — drafting
   // the seed is its job, so it never waits for a typed objective. The seed
   // pass runs when it resolves, so the user leaves the step with a drafted
   // starting point instead of having to write one.
-  const interviewEligible = interviewPossible && step >= 1;
+  const interviewEligible = interviewPossible && step >= ANYTHING_STEP.start;
   const interview = useCodeInterview({
     enabled: interviewEligible,
     parsedDataset: parsedCases,
     columnRoles: NO_ROLES,
     columnKinds: NO_KINDS,
-    jobModel: targetKind === "agent" ? targetModel : reflectionModel.name,
+    jobModel: targetKind === "agent" ? targetModel.name : reflectionModel.name,
     blackbox: authoringContext,
   });
   // Over a blank objective the interviewer asks for it first and reports the
@@ -581,7 +664,7 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
       return false;
     };
     switch (s) {
-      case 1: {
+      case ANYTHING_STEP.start: {
         // In auto mode the agent drafts the text seed from the objective, so
         // the objective is the required input and the seed may stay blank.
         const agentDrafts = codeAssistMode === "auto" && seedMode === "text";
@@ -590,31 +673,30 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
         if (seedMode !== "none" && !agentDrafts && seedCandidate == null)
           return fail("submit.blackbox.validation.seed_required");
         if (targetKind === "agent") {
-          if (!targetModel.trim()) return fail("submit.blackbox.validation.agent_model_required");
-          if (harness === "custom" && !runCommand.trim())
-            return fail("submit.blackbox.validation.run_command_required");
+          if (!targetModel.name.trim())
+            return fail("submit.blackbox.validation.agent_model_required");
         }
         return true;
       }
-      case 2: {
+      case ANYTHING_STEP.cases: {
         if (targetKind === "agent" && !parsedCases?.rowCount)
           return fail("submit.blackbox.validation.cases_required");
         if (parsedCases && Math.abs(split.train + split.val + split.test - 1) > 0.001)
           return fail("submit.blackbox.validation.split_sum");
         return true;
       }
-      case 3: {
+      case ANYTHING_STEP.scorer: {
         if (scorerKind === "python" && !metricCode.trim())
           return fail("submit.blackbox.validation.scorer_code_required");
-        if (scorerKind === "python" && /\bllm\s*\(/.test(metricCode) && !scorerModel.name.trim())
+        if (scorerUsesModel && !scorerModel.name.trim())
           return fail("submit.blackbox.validation.scorer_model_required");
+        if (scorerKind === "python" && scorerModelDeclared && !scorerCodeCallsModel)
+          return fail("submit.blackbox.validation.scorer_llm_unused");
         if (scorerKind === "remote" && !/^https?:\/\/\S+$/.test(scorerUrl.trim()))
           return fail("submit.blackbox.validation.scorer_url_required");
-        if (dryRun.status !== "done" || !dryRun.result.ok)
-          return fail("submit.blackbox.validation.dry_run_required");
         return true;
       }
-      case 4: {
+      case ANYTHING_STEP.optimizer: {
         if (strategyMode === "single") {
           if (!selectedEngine?.available) return fail("submit.blackbox.validation.engine_required");
           if (seedMode === "parts" && !selectedEngine.supports_parts)
@@ -638,21 +720,48 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
   const goPrev = () => {
     if (step > 0) goTo(step - 1);
   };
-  const handleNext = async () => {
-    if (validateStep(step, true)) goTo(step + 1);
+  // Leaving the scorer step proves the scorer the way the DSPy wizard proves
+  // its code on Next: a missing or stale test is run, not demanded. The dry-run
+  // state resets whenever a scorer input changes, so a passed test is current.
+  const ensureScorerTested = async (): Promise<boolean> => {
+    if (dryRun.status === "done" && dryRun.result.ok) return true;
+    const outcome = await runDryRun();
+    if (outcome?.valid) return true;
+    if (step !== ANYTHING_STEP.scorer) {
+      toast.error(msg("submit.blackbox.scorer.dry_run_failed"));
+      goTo(ANYTHING_STEP.scorer);
+    }
+    return false;
   };
-  const handleTabClick = (idx: number) => {
+  const crossesScorer = (from: number, to: number) =>
+    from <= ANYTHING_STEP.scorer && to > ANYTHING_STEP.scorer;
+  const advance = async (target: number) => {
+    if (advancingRef.current) return;
+    advancingRef.current = true;
+    setAdvancing(true);
+    try {
+      for (let i = step; i < target; i++) {
+        if (!validateStep(i, true)) {
+          goTo(i);
+          return;
+        }
+      }
+      if (crossesScorer(step, target) && !(await ensureScorerTested())) return;
+      goTo(target);
+    } finally {
+      advancingRef.current = false;
+      setAdvancing(false);
+    }
+  };
+  const handleNext = async () => {
+    await advance(step + 1);
+  };
+  const handleTabClick = async (idx: number) => {
     if (idx <= step) {
       goTo(idx);
       return;
     }
-    for (let i = step; i < idx; i++) {
-      if (!validateStep(i, true)) {
-        goTo(i);
-        return;
-      }
-    }
-    goTo(idx);
+    await advance(idx);
   };
 
   const costBracket: CostBracket = useMemo(() => {
@@ -679,6 +788,7 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
         return;
       }
     }
+    if (!(await ensureScorerTested())) return;
     setSubmitting(true);
     setSubmitPhase("sending");
     try {
@@ -690,11 +800,13 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
         username,
         objective: objective.trim() || undefined,
         background: background.trim() || undefined,
+        recipe,
         seed_candidate: seedCandidate ?? undefined,
         scorer: buildScorer(),
         cases: parsedCases?.rows,
         split_fractions: split,
         shuffle,
+        seed,
         budget: {
           max_scorer_runs: maxScorerRuns,
           max_iterations: maxIterations === "" ? undefined : maxIterations,
@@ -743,10 +855,11 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
 
   return {
     recipe,
+    setRecipe,
     step,
     direction,
     maxReachableStep: furthestReachedStep,
-    advancing: false,
+    advancing,
     submitting,
     submitPhase,
     validateStep,
@@ -793,12 +906,6 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     setTargetTimeout,
     targetConcurrency,
     setTargetConcurrency,
-    setupCommand,
-    setSetupCommand,
-    installCommand,
-    setInstallCommand,
-    runCommand,
-    setRunCommand,
     parsedCases,
     casesName,
     handleFileUpload,
@@ -808,6 +915,12 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     setLibraryOpen,
     split,
     setSplit,
+    updateSplit,
+    splitSum,
+    splitMode,
+    setSplitMode,
+    splitPlan,
+    profileLoading,
     shuffle,
     setShuffle,
     scorerKind,
@@ -818,10 +931,14 @@ export function useBlackboxWizard(recipe: BlackboxRecipe) {
     setScorerUrl,
     scorerSecret,
     setScorerSecret,
-    scorerTimeout,
-    setScorerTimeout,
+    scorerInstall,
+    setScorerInstall,
     scorerModel,
     setScorerModel,
+    scorerModelDeclared,
+    setScorerModelDeclared,
+    scorerCodeCallsModel,
+    scorerUsesModel,
     scorerValidation,
     dryRun,
     runDryRun,

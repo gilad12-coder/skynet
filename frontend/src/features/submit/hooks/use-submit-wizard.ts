@@ -44,6 +44,8 @@ import { readPref, useUserPrefs } from "@/features/settings";
 
 import { STEPS, emptyModelConfig, defaultSplit, defaultReactConfig } from "../constants";
 import type { ReactConfig, ColumnRole } from "../constants";
+import { PROGRAM_STEP } from "../lib/wizard-steps";
+import { cloneBasics, cloneColumnRoles, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import { buildSignatureTemplate } from "../lib/build-signature";
 import { buildMetricTemplate } from "../lib/build-metric";
 import { buildOptimizerKwargs } from "../lib/build-kwargs";
@@ -1271,83 +1273,47 @@ export function useSubmitWizard() {
             : "run",
       );
 
-      const displayName = jobData?.name || payload.name;
-      if (displayName) setJobName(String(displayName));
-      if (payload.description) setJobDescription(String(payload.description));
-      if (payload.module_name) setModuleName(String(payload.module_name));
-      // A clone is a complete prior submission — its module (absent = the
-      // predict default) is already decided, so the picker never reopens.
-      setModuleChosen(true);
-      if (payload.optimizer_name) setOptimizerName(String(payload.optimizer_name));
-      if (payload.signature_code) {
-        setSignatureCode(String(payload.signature_code));
-        setSignatureManuallyEdited(true);
-      }
-      if (payload.metric_code) {
-        setMetricCode(String(payload.metric_code));
-        setMetricManuallyEdited(true);
-      }
-
-      let cloneColumns: string[] = [];
-      if (Array.isArray(payload.dataset) && payload.dataset.length > 0) {
-        const rows = payload.dataset as Array<Record<string, unknown>>;
-        const rowKeys = Object.keys(rows[0] ?? {});
-        // Restore the submitted column order from the persisted array (the
-        // rows' own key order is scrambled by JSONB). Fall back to row keys,
-        // and append any columns the saved order didn't cover.
-        const savedOrder = Array.isArray(payload.column_order)
-          ? (payload.column_order as string[]).filter((c) => rowKeys.includes(c))
-          : [];
-        const columns =
-          savedOrder.length > 0
-            ? [...savedOrder, ...rowKeys.filter((c) => !savedOrder.includes(c))]
-            : rowKeys;
-        cloneColumns = columns;
-        setParsedDataset({ columns, rows, rowCount: rows.length });
-        setDatasetFileName(
-          String(
-            (payload as Record<string, unknown>).dataset_filename || displayName || cloneId || "",
-          ),
-        );
+      // Only a Program run carries a module, signature and metric. An Anything
+      // run cloned into this recipe (the picker lets the user switch) brings
+      // its basics and rows; the Start step drafts the rest from them.
+      const fromProgram = cloneSourceRecipe(optimization_type) === "program";
+      const basics = cloneBasics(payload, jobData?.name);
+      if (basics.name) setJobName(basics.name);
+      if (basics.description) setJobDescription(basics.description);
+      if (basics.isPrivate != null) setIsPrivate(basics.isPrivate);
+      if (fromProgram) {
+        if (payload.module_name) setModuleName(String(payload.module_name));
+        // A clone is a complete prior submission — its module (absent = the
+        // predict default) is already decided, so the picker never reopens.
+        setModuleChosen(true);
+        if (payload.optimizer_name) setOptimizerName(String(payload.optimizer_name));
+        if (payload.signature_code) {
+          setSignatureCode(String(payload.signature_code));
+          setSignatureManuallyEdited(true);
+        }
+        if (payload.metric_code) {
+          setMetricCode(String(payload.metric_code));
+          setMetricManuallyEdited(true);
+        }
       }
 
-      const cm = payload.column_mapping as
-        | { inputs?: Record<string, string>; outputs?: Record<string, string> }
-        | undefined;
-      if (cm) {
-        // column_mapping persists only inputs/outputs — "ignore" is implicit.
-        // Seed every column to ignore and overlay the mapped roles (mirrors
-        // the upload / library-pick paths); a column left without a role
-        // would render as input in the role selector.
-        const roles: Record<string, "input" | "output" | "ignore"> = {};
-        cloneColumns.forEach((k) => {
-          roles[k] = "ignore";
-        });
-        if (cm.inputs)
-          Object.keys(cm.inputs).forEach((k) => {
-            roles[k] = "input";
-          });
-        if (cm.outputs)
-          Object.keys(cm.outputs).forEach((k) => {
-            roles[k] = "output";
-          });
-        setColumnRoles(roles);
+      const rows = cloneRows(payload);
+      if (rows) {
+        setParsedDataset(rows);
+        setDatasetFileName(String(payload.dataset_filename || basics.name || cloneId));
+        setColumnRoles(cloneColumnRoles(payload, rows.columns));
       }
 
-      const sf = payload.split_fractions as
-        | { train?: number; val?: number; test?: number }
-        | undefined;
-      if (sf) {
-        setSplit({ train: sf.train ?? 0.7, val: sf.val ?? 0.15, test: sf.test ?? 0.15 });
+      if (basics.split) {
+        setSplit({ ...defaultSplit, ...basics.split });
         // Cloned splits are intentional — pin the wizard to manual so the
         // auto-profile effect doesn't clobber them when the dataset reloads.
         splitModeRef.current = "manual";
         setSplitModeState("manual");
       }
 
-      if (payload.shuffle != null) setShuffle(Boolean(payload.shuffle));
-      if (payload.seed != null) setSeed(Number(payload.seed));
-      if (payload.is_private != null) setIsPrivate(Boolean(payload.is_private));
+      if (basics.shuffle != null) setShuffle(basics.shuffle);
+      if (basics.seed != null) setSeed(basics.seed);
 
       if (clonePair) {
         const findPairModel = (
@@ -1546,7 +1512,7 @@ export function useSubmitWizard() {
   /** Validates a wizard step; optionally surfaces toast errors. */
   const validateStep = (s: number, showToast = false): boolean => {
     switch (s) {
-      case 0:
+      case PROGRAM_STEP.basics:
         if (!username.trim()) {
           if (showToast) toast.error(msg("submit.validation.username_required"));
           return false;
@@ -1556,7 +1522,7 @@ export function useSubmitWizard() {
           return false;
         }
         return true;
-      case 1: {
+      case PROGRAM_STEP.start: {
         if (moduleSelectionRequired) {
           if (showToast) toast.error(msg("submit.validation.module_required"));
           return false;
@@ -1577,16 +1543,17 @@ export function useSubmitWizard() {
             return false;
           }
         } else if (codeAssistMode !== "auto" && !signatureCode.trim()) {
-          // In auto mode the agent drafts the signature once the cases exist
-          // (next step), so a blank editor is not an error yet.
+          // In auto mode the agent drafts the signature on this step, so a
+          // blank editor while it works is not an error yet — the scorer step
+          // re-checks before the code is validated.
           if (showToast) toast.error(msg("submit.validation.signature_required"));
           return false;
         }
-        // Server-side signature validation needs a sample row, so it runs on
-        // the scorer step once the cases are in.
+        // Server-side validation covers the signature and the metric together,
+        // so it runs once, on the scorer step.
         return true;
       }
-      case 2: {
+      case PROGRAM_STEP.cases: {
         if (!parsedDataset || parsedDataset.rowCount === 0) {
           if (showToast) toast.error(msg("submit.validation.dataset_required"));
           return false;
@@ -1606,7 +1573,7 @@ export function useSubmitWizard() {
         }
         return true;
       }
-      case 3: {
+      case PROGRAM_STEP.scorer: {
         if (!isWorkflow) {
           if (!signatureCode.trim()) {
             if (showToast) toast.error(msg("submit.validation.signature_required"));
@@ -1625,7 +1592,7 @@ export function useSubmitWizard() {
         }
         return true;
       }
-      case 4: {
+      case PROGRAM_STEP.optimizer: {
         if (!validateTargetScore(showToast)) return false;
         if (effectiveJobType === "run") {
           if (!modelConfig.name.trim()) {
@@ -1802,12 +1769,12 @@ export function useSubmitWizard() {
     advancingRef.current = true;
     setAdvancing(true);
     try {
-      if (step === 2 && parsedDataset && parsedDataset.rowCount > 0) {
+      if (step === PROGRAM_STEP.cases && parsedDataset && parsedDataset.rowCount > 0) {
         const passed = await handleValidateDataset();
         if (!passed) return;
       }
       if (
-        step === 3 &&
+        step === PROGRAM_STEP.scorer &&
         !moduleSelectionRequired &&
         (isWorkflow || signatureCode.trim()) &&
         parsedDataset &&
@@ -1937,32 +1904,32 @@ export function useSubmitWizard() {
   const handleSubmit = async () => {
     if (!username.trim()) {
       toast.error(msg("submit.validation.username_required"));
-      goTo(0);
+      goTo(PROGRAM_STEP.basics);
       return;
     }
     if (!parsedDataset || parsedDataset.rowCount === 0) {
       toast.error(msg("submit.validation.dataset_required_short"));
-      goTo(2);
+      goTo(PROGRAM_STEP.cases);
       return;
     }
     if (isWorkflow) {
       if (!workflowSpec || validateWorkflowSpec(workflowSpec, workflowIssueText).length > 0) {
         toast.error(msg("submit.validation.workflow_invalid"));
-        goTo(1);
+        goTo(PROGRAM_STEP.start);
         return;
       }
     } else if (!signatureCode.trim()) {
       toast.error(msg("submit.validation.signature_required"));
-      goTo(1);
+      goTo(PROGRAM_STEP.start);
       return;
     }
     if (!metricCode.trim()) {
       toast.error(msg("submit.validation.metric_required"));
-      goTo(3);
+      goTo(PROGRAM_STEP.scorer);
       return;
     }
     if (!validateTargetScore(true)) {
-      goTo(4);
+      goTo(PROGRAM_STEP.optimizer);
       return;
     }
     const needsToolSource =
@@ -1971,19 +1938,19 @@ export function useSubmitWizard() {
       toast.error(msg("submit.validation.mcp_url_required"));
       // The tool-source config lives on the starting-point step (it appears
       // once the module choice reveals a tool-using run).
-      goTo(1);
+      goTo(PROGRAM_STEP.start);
       return;
     }
 
     const columnMapping = currentColumnMapping();
     if (Object.keys(columnMapping.inputs).length === 0) {
       toast.error(msg("submit.validation.input_column_required"));
-      goTo(2);
+      goTo(PROGRAM_STEP.cases);
       return;
     }
     if (Object.keys(columnMapping.outputs).length === 0) {
       toast.error(msg("submit.validation.output_column_required"));
-      goTo(2);
+      goTo(PROGRAM_STEP.cases);
       return;
     }
 
@@ -2073,7 +2040,7 @@ export function useSubmitWizard() {
       if (effectiveJobType === "run") {
         if (!modelConfig.name.trim()) {
           toast.error(msg("submit.validation.model_required"));
-          goTo(4);
+          goTo(PROGRAM_STEP.optimizer);
           setSubmitting(false);
           setSubmitPhase("idle");
           return;
@@ -2097,14 +2064,14 @@ export function useSubmitWizard() {
         const validRef = reflectionModels.filter((m) => m.name.trim()).map(prepareModelConfig);
         if (validGen.length === 0) {
           toast.error(msg("submit.validation.generation_model_required"));
-          goTo(4);
+          goTo(PROGRAM_STEP.optimizer);
           setSubmitting(false);
           setSubmitPhase("idle");
           return;
         }
         if (validRef.length === 0) {
           toast.error(msg("submit.validation.reflection_models_required"));
-          goTo(4);
+          goTo(PROGRAM_STEP.optimizer);
           setSubmitting(false);
           setSubmitPhase("idle");
           return;
@@ -2208,7 +2175,7 @@ export function useSubmitWizard() {
   // interview could still happen — otherwise the pre-warm seed (which fires
   // from earlier steps) would generate code before the user ever saw a
   // question. ``interviewEligible`` additionally requires a role-mapped
-  // dataset and that the user has moved past the cases step (``step >= 3``),
+  // dataset and that the user has moved past the cases step (``PROGRAM_STEP.start``),
   // so the opening question — which costs an LLM call — never fires against
   // column roles the user is still editing. Pre-existing code work (clone pre-fill, manual edits, a
   // touched canvas) rules the interview out.
@@ -2220,7 +2187,7 @@ export function useSubmitWizard() {
   const interviewEligible =
     interviewPossible &&
     !moduleSelectionRequired &&
-    step >= 3 &&
+    step >= PROGRAM_STEP.start &&
     !!parsedDataset &&
     parsedDataset.rowCount > 0 &&
     Object.values(columnRoles).some((r) => r === "input") &&

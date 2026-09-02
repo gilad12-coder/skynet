@@ -15,20 +15,27 @@ when a deployment has no Vercel credentials or asks for it outright.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import logging
 import math
 import os
 import posixpath
+import re
 import shlex
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
-from collections.abc import Mapping
+import threading
+import time
+import uuid
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
+
+import httpx
 
 from ....config import Settings
 from ....exceptions import ServiceError
@@ -50,9 +57,27 @@ logger = logging.getLogger(__name__)
 # ``timeout --signal=KILL`` exits 124 when it fired; 137 is the shell dying of the KILL itself.
 _TIMEOUT_EXIT_CODES = frozenset({124, 137})
 # Slack past the in-sandbox timeout before the service kills the wrapper as well.
-_KILL_GRACE_SECONDS = 15.0
+KILL_GRACE_SECONDS = 15.0
+# Detached processes are watched with short status polls; the delay doubles from
+# the floor to the cap so quick commands return fast and long runs poll gently.
+_POLL_FLOOR_SECONDS = 1.0
+_POLL_CAP_SECONDS = 8.0
+# Client-side last resort past ``kill_after`` before declaring the process lost.
+_POLL_DEADLINE_SLACK_SECONDS = 60.0
+# Where a command's wrapper records its exit code for the poll to find.
+_EXIT_FILE_PREFIX = "/tmp/.skynet-exit-"
+# A detached command's output is redirected here and read back while it runs.
+_OUTPUT_FILE_PREFIX = "/tmp/.skynet-output-"
+# Called with the stream name (``stdout``/``stderr``) and each new piece of output.
+OutputSink = Callable[[str, str], None]
+_BRIEF_COMMAND_CHARS = 80
 # Every sandbox carries this tag so stragglers from a crashed worker can be found and destroyed.
 SANDBOX_TAG = {"skynet": "blackbox"}
+JOB_TAG = "skynet_job"
+_STOPPABLE_STATUSES = frozenset({"pending", "running"})
+_NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
+_NAME_MAX_CHARS = 60
+_NAME_SUFFIX_CHARS = 8
 _PACKAGE_MISSING = "The vercel-sandbox package is not installed."
 _CREDENTIALS_MISSING = "Agent sandboxes are not configured: set VERCEL_TOKEN, VERCEL_TEAM_ID and VERCEL_PROJECT_ID."
 # The local runtime hands user code a bare environment: the interpreter that
@@ -107,7 +132,12 @@ class SandboxSession(Protocol):
         ...
 
     def run(
-        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
     ) -> CommandResult:
         """Run ``command`` through ``bash -lc`` in the working directory and wait for it.
 
@@ -115,6 +145,7 @@ class SandboxSession(Protocol):
             command: Shell command line.
             env: Extra environment for this command.
             timeout_seconds: Kill the command after this long.
+            on_output: Receives each new piece of output while the command runs.
 
         Returns:
             Exit code, captured output and whether the timeout fired.
@@ -165,18 +196,61 @@ class VercelCredentials:
     project_id: str
 
 
+def unique_sandbox_name(stem: str) -> str:
+    """Return ``stem`` in a form Vercel accepts, with a random suffix that keeps every open apart.
+
+    Vercel refuses to create a sandbox whose name is still taken in the
+    project, and a job opens boxes from several holdout threads at once (one
+    per case) and again on every retry, so a name derived from the job id
+    alone collides. The suffix survives the length cap: trimming falls on the
+    stem, never on the part that makes the name unique.
+
+    Args:
+        stem: The readable part, normally carrying the job id.
+
+    Returns:
+        ``<stem>-<8 hex chars>``: lower-case, ``[a-z0-9-]`` only, at most 60 characters.
+    """
+    safe = _NAME_UNSAFE.sub("-", stem.lower()).strip("-")
+    head = safe[: _NAME_MAX_CHARS - _NAME_SUFFIX_CHARS - 1].rstrip("-")
+    return f"{head}-{uuid.uuid4().hex[:_NAME_SUFFIX_CHARS]}"
+
+
+def _brief(command: str) -> str:
+    """Shorten ``command`` for an error message.
+
+    Args:
+        command: The shell command line.
+
+    Returns:
+        Its first line, cut to a readable length.
+    """
+    head = command.strip().splitlines()[0] if command.strip() else ""
+    return head if len(head) <= _BRIEF_COMMAND_CHARS else head[: _BRIEF_COMMAND_CHARS - 1] + "…"
+
+
+@dataclass
+class _OutputFile:
+    """One output stream of a detached command: the file it goes to and the text read so far."""
+
+    path: str
+    text: str = ""
+
+
 class VercelSandboxSession:
     """Session over one Vercel sandbox, bound to the SDK session that created it."""
 
-    def __init__(self, box: Any, api_session: Any) -> None:
+    def __init__(self, box: Any, api_session: Any, context: contextvars.Context) -> None:
         """Wrap an open sandbox.
 
         Args:
             box: The SDK's managed sandbox handle.
             api_session: The entered ``vercel.api.session`` context that owns it.
+            context: The ``contextvars`` context ``api_session`` was entered in.
         """
         self._box = box
         self._api_session = api_session
+        self._context = context
         self._cwd = box.cwd
 
     def write_files(self, files: Mapping[str, str]) -> None:
@@ -192,38 +266,115 @@ class VercelSandboxSession:
             self._box.fs.write_text(path, text, cwd=self._cwd)
 
     def run(
-        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
     ) -> CommandResult:
         """Run ``command`` through ``bash -lc`` in the working directory and wait for it.
+
+        The process runs detached and is watched with short polls instead of
+        one streamed response: Vercel's edge drops a response that stays open
+        and silent for minutes, which killed long agent runs midway with
+        "missing final metadata". A plain status read never carries a detached
+        process's exit code either (the runtime only settles it on a blocking
+        wait, which the edge cuts off the same way), so the wrapper records the
+        code in a file and the poll watches for that file. Output goes to files
+        in the box for the same reason: each poll reads what has landed since
+        the last one and hands the new part to ``on_output``, and the files are
+        the command's captured output once it exits.
 
         Args:
             command: Shell command line.
             env: Extra environment for this command.
             timeout_seconds: Kill the command after this long.
+            on_output: Receives each new piece of output at every poll.
 
         Returns:
             Exit code, captured output and whether the timeout fired.
+
+        Raises:
+            ServiceError: If the process outlives its kill deadline.
         """
-        wrapped = command
+        inner = f"bash -lc {shlex.quote(command)}"
         kill_after = None
+        deadline = None
+        seconds = None
         if timeout_seconds is not None:
             seconds = max(1, math.ceil(timeout_seconds))
-            wrapped = f"timeout --signal=KILL {seconds}s bash -lc {shlex.quote(command)}"
-            kill_after = seconds + _KILL_GRACE_SECONDS
-        completed = self._box.run_process(
+            inner = f"timeout --signal=KILL {seconds}s {inner}"
+            kill_after = seconds + KILL_GRACE_SECONDS
+            deadline = time.monotonic() + kill_after + _POLL_DEADLINE_SLACK_SECONDS
+        token = uuid.uuid4().hex
+        sentinel = f"{_EXIT_FILE_PREFIX}{token}"
+        streams = {name: _OutputFile(f"{_OUTPUT_FILE_PREFIX}{token}.{name}") for name in ("stdout", "stderr")}
+        started = time.monotonic()
+        process = self._box.create_process(
             "bash",
-            ["-lc", wrapped],
+            ["-lc", f"{inner} > {streams['stdout'].path} 2> {streams['stderr'].path}; echo $? > {sentinel}"],
             cwd=self._cwd,
             env=dict(env) if env else None,
             kill_after=kill_after,
-            capture_output=True,
         )
+        delay = _POLL_FLOOR_SECONDS
+        exit_code = None
+        while exit_code is None:
+            if deadline is not None and time.monotonic() > deadline:
+                with contextlib.suppress(Exception):
+                    process.kill()
+                overrun = time.monotonic() - started - seconds
+                raise ServiceError(
+                    f"command still running {overrun:.0f}s past its {seconds}s timeout: {_brief(command)}"
+                )
+            time.sleep(delay)
+            delay = min(delay * 2, _POLL_CAP_SECONDS)
+            exit_code = self._recorded_exit_code(sentinel)
+            if on_output is not None:
+                self._forward_output(streams, on_output)
+        self._forward_output(streams, on_output)
         return CommandResult(
-            exit_code=completed.returncode,
-            stdout=completed.stdout or "",
-            stderr=completed.stderr or "",
-            timed_out=timeout_seconds is not None and completed.returncode in _TIMEOUT_EXIT_CODES,
+            exit_code=exit_code,
+            stdout=streams["stdout"].text,
+            stderr=streams["stderr"].text,
+            timed_out=timeout_seconds is not None and exit_code in _TIMEOUT_EXIT_CODES,
         )
+
+    def _forward_output(self, streams: Mapping[str, _OutputFile], on_output: OutputSink | None) -> None:
+        """Re-read the command's output files and hand anything new to ``on_output``.
+
+        Args:
+            streams: The output files, by stream name.
+            on_output: The sink, or ``None`` to only refresh the captured text.
+        """
+        for name, stream in streams.items():
+            text = stream.text
+            with contextlib.suppress(Exception):
+                if self._box.fs.exists(stream.path):
+                    text = self._box.fs.read_text(stream.path) or ""
+            # A shorter read is a stale replica or a race with the shell; keep what was seen.
+            if len(text) <= len(stream.text):
+                continue
+            new = text[len(stream.text) :]
+            stream.text = text
+            if on_output is not None:
+                on_output(name, new)
+
+    def _recorded_exit_code(self, sentinel: str) -> int | None:
+        """Return the exit code the wrapper wrote to ``sentinel``, or ``None`` while the command runs.
+
+        Args:
+            sentinel: Absolute path of the wrapper's exit-code file.
+
+        Returns:
+            The exit code once it has landed, else ``None``.
+        """
+        if not self._box.fs.exists(sentinel):
+            return None
+        # The shell creates the file before it writes the code, so an empty read is "not yet".
+        text = self._box.fs.read_text(sentinel).strip()
+        return int(text) if text.isdigit() else None
 
     def read_file(self, path: str) -> str | None:
         """Return the text of ``path`` (relative to the working directory), or ``None`` when absent.
@@ -246,7 +397,7 @@ class VercelSandboxSession:
             logger.exception("failed to destroy sandbox %s", getattr(self._box, "name", "?"))
         finally:
             try:
-                self._api_session.__exit__(None, None, None)
+                self._context.run(self._api_session.__exit__, None, None, None)
             except Exception:
                 logger.exception("failed to close the Vercel API session")
 
@@ -305,12 +456,26 @@ class VercelSandboxRuntime:
             )
         )
         # The SDK finds its credentials through a context variable bound by
-        # ``session()``, so the context is entered here and left in ``close()``;
-        # everything in between happens on the calling thread.
-        api_session = vercel_api.session(service_options=[options])
-        api_session.__enter__()
+        # ``session()``. The bind and its reset must happen in one ``Context``,
+        # yet a box is routinely opened on a holdout worker thread and closed
+        # from the job's main thread, so each box gets a private copy of the
+        # caller's context that ``close()`` re-enters. The box itself keeps a
+        # reference to its service, so nothing after creation needs the
+        # variable, and the copy leaves the caller's own context untouched.
+        context = contextvars.copy_context()
+        # The SDK's default HTTP client gives any read 60 seconds. Commands are
+        # watched with short polls rather than one long stream, but the
+        # post-exit log replay of a chatty command can still take longer, so
+        # reads get the box lifetime — nothing in a box outlives the box.
+        read_ceiling = max(spec.lifetime_seconds, 60.0)
+        api_session = vercel_api.session(
+            service_options=[options],
+            httpx_client_factory=lambda: httpx.Client(timeout=httpx.Timeout(60.0, read=read_ceiling)),
+        )
+        context.run(api_session.__enter__)
         try:
-            box = vercel_sync.create_sandbox(
+            box = context.run(
+                vercel_sync.create_sandbox,
                 name=spec.name,
                 image=spec.image or self._image,
                 execution_time_limit=spec.lifetime_seconds,
@@ -319,9 +484,44 @@ class VercelSandboxRuntime:
                 tags={**SANDBOX_TAG, **spec.tags},
             )
         except BaseException:
-            api_session.__exit__(None, None, None)
+            context.run(api_session.__exit__, None, None, None)
             raise
-        return VercelSandboxSession(box, api_session)
+        return VercelSandboxSession(box, api_session, context)
+
+    def stop_job_sandboxes(self, job_id: str) -> int:
+        """Stop every box still up under ``job_id``'s tag.
+
+        A job's child process closes its own boxes on the way out, but a
+        cancel or a stall kills that process before its ``finally`` blocks
+        run, so the worker sweeps the job's boxes by tag once the child is
+        gone. Boxes already stopping or stopped are left alone.
+
+        Args:
+            job_id: The job whose boxes to stop.
+
+        Returns:
+            How many boxes were stopped.
+        """
+        creds = self._credentials
+        options = vercel_sync.SandboxServiceOptions(
+            credentials_factory=lambda: vercel_sync.SandboxCredentials(
+                token=creds.token, team_id=creds.team_id, project_id=creds.project_id
+            )
+        )
+        query = vercel_sync.SandboxQueryByCreatedAt(tag=vercel_sync.TagFilter(key=JOB_TAG, value=job_id))
+        stopped = 0
+        with vercel_api.session(service_options=[options]):
+            for box in vercel_sync.query_sandboxes(query=query, project_id=creds.project_id):
+                if box.status not in _STOPPABLE_STATUSES:
+                    continue
+                try:
+                    box.stop()
+                except Exception as exc:  # isolation boundary: one box's failure must not end the sweep
+                    logger.warning("could not stop sandbox %s of job %s: %s", box.name, job_id, exc)
+                    continue
+                logger.info("stopped sandbox %s of job %s", box.name, job_id)
+                stopped += 1
+        return stopped
 
 
 class LocalSubprocessSession:
@@ -340,7 +540,9 @@ class LocalSubprocessSession:
         """
         self._dir = Path(tempfile.mkdtemp(prefix="skynet-sandbox-")).resolve()
         (self._dir / "tmp").mkdir()
-        interpreter_bin = str(Path(sys.executable).resolve().parent)
+        # Not .resolve(): in a venv that follows the symlink to the base
+        # interpreter, putting a python3 without the venv's packages on PATH.
+        interpreter_bin = str(Path(sys.executable).parent)
         self._env: dict[str, str] = {
             "PATH": os.pathsep.join([interpreter_bin, os.environ.get("PATH", "/usr/bin:/bin")]),
             "HOME": str(self._dir),
@@ -386,7 +588,12 @@ class LocalSubprocessSession:
             target.write_text(text, encoding="utf-8")
 
     def run(
-        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
     ) -> CommandResult:
         """Run ``command`` through ``bash -c`` in the working directory and wait for it.
 
@@ -394,6 +601,7 @@ class LocalSubprocessSession:
             command: Shell command line.
             env: Extra environment for this command.
             timeout_seconds: Kill the command (and everything it spawned) after this long.
+            on_output: Receives each line of output as it is written.
 
         Returns:
             Exit code, captured output and whether the timeout fired.
@@ -408,11 +616,27 @@ class LocalSubprocessSession:
             errors="replace",
             start_new_session=True,
         )
+        # One reader per pipe: waiting on the process with both pipes idle
+        # would deadlock once a pipe buffer fills, and the readers are what
+        # hands output to the caller while the command still runs.
+        captured: dict[str, list[str]] = {"stdout": [], "stderr": []}
+        readers = [
+            threading.Thread(target=_pump, args=(name, pipe, captured[name], on_output), daemon=True)
+            for name, pipe in (("stdout", process.stdout), ("stderr", process.stderr))
+        ]
+        for reader in readers:
+            reader.start()
+        timed_out = False
         try:
-            stdout, stderr = process.communicate(timeout=timeout_seconds)
+            process.wait(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
             _kill_process_group(process.pid)
-            stdout, stderr = process.communicate()
+            process.wait()
+            timed_out = True
+        for reader in readers:
+            reader.join()
+        stdout, stderr = "".join(captured["stdout"]), "".join(captured["stderr"])
+        if timed_out:
             return CommandResult(exit_code=_LOCAL_KILLED_EXIT_CODE, stdout=stdout, stderr=stderr, timed_out=True)
         return CommandResult(exit_code=process.returncode, stdout=stdout, stderr=stderr)
 
@@ -433,6 +657,22 @@ class LocalSubprocessSession:
     def close(self) -> None:
         """Remove the working directory. Never raises."""
         shutil.rmtree(self._dir, ignore_errors=True)
+
+
+def _pump(name: str, pipe: Any, captured: list[str], on_output: OutputSink | None) -> None:
+    """Read ``pipe`` line by line until it closes, keeping every line and forwarding it.
+
+    Args:
+        name: The stream name handed to ``on_output``.
+        pipe: The text pipe to drain.
+        captured: Receives every line, for the command's captured output.
+        on_output: Receives each line as it arrives, when set.
+    """
+    with pipe:
+        for line in iter(pipe.readline, ""):
+            captured.append(line)
+            if on_output is not None:
+                on_output(name, line)
 
 
 def _kill_process_group(pid: int) -> None:

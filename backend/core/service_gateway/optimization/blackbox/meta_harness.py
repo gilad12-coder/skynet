@@ -18,7 +18,9 @@ from typing import Any
 
 from ....exceptions import ServiceError
 from ....models.blackbox import BLACKBOX_ENGINE_META_HARNESS
+from .agent_runs import PHASE_VERSION, run_scope
 from .best_of_n import _strip_fences
+from .feedback import emit_candidate, emit_case_scored, emit_scorer_feedback
 from .protocol import (
     BudgetExhaustedError,
     Candidate,
@@ -37,6 +39,9 @@ _HISTORY_TRIALS = 6
 _CANDIDATE_CHARS = 6_000
 _FEEDBACK_CASES = 8
 _FEEDBACK_CHARS = 600
+# Each side-information part keeps its head and its tail: a traceback names the failure on its last line.
+_FEEDBACK_PART_CHARS = 400
+_FEEDBACK_TAIL_CHARS = 200
 _CASE_LABEL_CHARS = 80
 # Proposals that repeat a version already tried are retried this many times.
 _DUPLICATE_RETRIES = 2
@@ -50,6 +55,8 @@ class Trial:
 
     index: int
     candidate: Candidate
+    parent_index: int | None = None
+    generation: int = 0
     outcomes: list[tuple[Any, float, SideInfo]] = field(default_factory=list)
     complete: bool = True
 
@@ -77,18 +84,23 @@ def _render_candidate(candidate: Candidate) -> str:
     )
 
 
-def _clip(text: str, limit: int) -> str:
-    """Keep the head of ``text``.
+def _clip(text: str, limit: int, tail: int = 0) -> str:
+    """Keep the head of ``text``, and optionally its tail.
 
     Args:
         text: Any text.
-        limit: Maximum characters.
+        limit: Maximum characters kept.
+        tail: How many of the kept characters come from the end of ``text``.
 
     Returns:
-        ``text`` or its first ``limit`` characters with an ellipsis.
+        ``text`` when it fits, else its head, an ellipsis and — when ``tail`` is set — its tail.
     """
     text = str(text)
-    return text if len(text) <= limit else text[:limit] + "…"
+    if len(text) <= limit:
+        return text
+    if tail <= 0:
+        return text[:limit] + "…"
+    return text[: limit - tail] + " … " + text[-tail:]
 
 
 def _case_label(case: Any) -> str:
@@ -117,7 +129,11 @@ def _feedback(side_info: SideInfo) -> str:
     Returns:
         A bounded ``key: value`` summary.
     """
-    parts = [f"{key}: {' '.join(str(side_info[key]).split())}" for key in _FEEDBACK_KEYS if side_info.get(key)]
+    parts = [
+        f"{key}: {_clip(' '.join(str(side_info[key]).split()), _FEEDBACK_PART_CHARS, tail=_FEEDBACK_TAIL_CHARS)}"
+        for key in _FEEDBACK_KEYS
+        if side_info.get(key)
+    ]
     return _clip(" | ".join(parts), _FEEDBACK_CHARS) or "no feedback"
 
 
@@ -155,7 +171,7 @@ class MetaHarnessEngine:
         stopped = "budget_exhausted"
         while True:
             seen.add(candidate_key(candidate))
-            trial = self._evaluate(candidate, cases, server, ctx, index=len(trials))
+            trial = self._evaluate(candidate, cases, server, ctx, index=len(trials), parent=self._best(trials))
             trials.append(trial)
             logger.info("meta-harness trial %d: score=%s complete=%s", trial.index, trial.score, trial.complete)
             if not trial.complete:
@@ -208,38 +224,76 @@ class MetaHarnessEngine:
 
     @staticmethod
     def _evaluate(
-        candidate: Candidate, cases: list[Any], server: EvalServer, ctx: EngineContext, *, index: int
+        candidate: Candidate,
+        cases: list[Any],
+        server: EvalServer,
+        ctx: EngineContext,
+        *,
+        index: int,
+        parent: Trial | None,
     ) -> Trial:
-        """Score ``candidate`` on every case, ``ctx.concurrency`` at a time.
+        """Score ``candidate`` on every case, ``ctx.concurrency`` at a time, streaming what it learns.
+
+        Every scorer call goes out as feedback the moment it returns, and the
+        trial itself as a candidate-tree node once every case is in, so the
+        run view moves while the sandboxes are still busy. A trial cut short
+        by the budget is not announced: its mean covers only part of the cases.
 
         Args:
             candidate: The version.
             cases: The cases.
             server: The budgeted scorer.
-            ctx: For ``concurrency``.
+            ctx: For ``concurrency`` and the progress sink.
             index: The trial's position in the history.
+            parent: The best trial when this version was proposed; ``None`` for the first.
 
         Returns:
             The trial; ``complete`` is False when the budget ran out midway.
         """
-        trial = Trial(index=index, candidate=candidate)
+        trial = Trial(
+            index=index,
+            candidate=candidate,
+            parent_index=None if parent is None else parent.index,
+            generation=0 if parent is None else parent.generation + 1,
+        )
 
-        def score_case(case: Any) -> tuple[Any, float, SideInfo] | None:
+        def score_case(item: tuple[int, Any]) -> tuple[int, Any, float, SideInfo] | None:
             """Score one case, or ``None`` once the budget is gone."""
+            position, case = item
             try:
-                score, side_info = server.evaluate(candidate, case)
+                with run_scope(PHASE_VERSION, str(position), trial=index):
+                    score, side_info = server.evaluate(candidate, case)
             except BudgetExhaustedError:
                 return None
-            return case, score, side_info
+            emit_scorer_feedback(
+                ctx.progress_callback, example_id=str(position), score=score, side_info=side_info, iteration=index
+            )
+            emit_case_scored(
+                ctx.progress_callback, trial=index, example_id=str(position), score=score, total=len(cases)
+            )
+            return position, case, score, side_info
 
         workers = max(1, min(ctx.concurrency, len(cases)))
         if workers == 1:
-            results = [score_case(case) for case in cases]
+            results = [score_case(item) for item in enumerate(cases)]
         else:
             with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="meta-harness") as pool:
-                results = list(pool.map(score_case, cases))
-        trial.outcomes = [result for result in results if result is not None]
-        trial.complete = len(trial.outcomes) == len(cases)
+                results = list(pool.map(score_case, enumerate(cases)))
+        scored = [result for result in results if result is not None]
+        trial.outcomes = [(case, score, side_info) for _, case, score, side_info in scored]
+        trial.complete = len(scored) == len(cases)
+        if trial.complete and trial.score is not None:
+            emit_candidate(
+                ctx.progress_callback,
+                candidate_id=str(index),
+                parent_id=None if trial.parent_index is None else str(trial.parent_index),
+                generation=trial.generation,
+                score=trial.score,
+                per_example=[(str(position), score) for position, _, score, _ in scored],
+                candidate=candidate,
+                discovered_at_evals=server.used,
+                iteration=index,
+            )
         return trial
 
     def _propose(self, task: Task, trials: list[Trial], ctx: EngineContext) -> Candidate | None:

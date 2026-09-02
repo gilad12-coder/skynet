@@ -23,6 +23,7 @@ export function PickerSlide({
   description,
   chooseName,
   onChoose,
+  selected,
 }: {
   Banner: ComponentType;
   icon: ComponentType<{ className?: string }>;
@@ -35,6 +36,9 @@ export function PickerSlide({
   // "Use <Option>": the tooltip and the accessible name of the commit button.
   chooseName: string;
   onChoose: () => void;
+  // The slide is the option already in use — a clone link's recipe, or the one
+  // the picker was reopened on — so its check renders filled.
+  selected?: boolean;
 }) {
   return (
     <div className="overflow-hidden rounded-xl border border-border/50 bg-background/60 @3xl:flex @3xl:min-h-64 @3xl:items-stretch">
@@ -55,7 +59,7 @@ export function PickerSlide({
         <p className="min-h-[4rem] max-w-md text-[0.8125rem] leading-relaxed text-muted-foreground">
           {description}
         </p>
-        <ChooseButton name={chooseName} onClick={onChoose} />
+        <ChooseButton name={chooseName} selected={selected} onClick={onChoose} />
       </div>
     </div>
   );
@@ -68,14 +72,23 @@ export function PickerSlide({
  * accessible name — the same string in both, which is what keeps the hover
  * label and the screen-reader label from drifting apart.
  */
-function ChooseButton({ name, onClick }: { name: string; onClick: () => void }) {
+function ChooseButton({
+  name,
+  selected = false,
+  onClick,
+}: {
+  name: string;
+  selected?: boolean;
+  onClick: () => void;
+}) {
   return (
     <TooltipButton tooltip={name} side="top" dir={getActiveDir()}>
       <Button
-        variant="outline"
+        variant={selected ? "default" : "outline"}
         size="icon-lg"
         className="mt-2 size-[44px] rounded-full lg:size-10"
         aria-label={name}
+        aria-pressed={selected}
         onClick={onClick}
       >
         <Check />

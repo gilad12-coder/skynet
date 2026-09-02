@@ -31,7 +31,7 @@ from ..service_gateway.optimization.llm_error import (
     reset_llm_error,
 )
 from ..service_gateway.react_compat import configure_native_tool_calling
-from .constants import EVENT_ERROR, EVENT_LOG, EVENT_PROGRESS, EVENT_RESULT
+from .constants import EVENT_AGENT_RUN, EVENT_ERROR, EVENT_LOG, EVENT_PROGRESS, EVENT_RESULT
 from .log_handler import get_current_pair_index
 
 # Populated by the parent via ``set_fork_service`` before forking so
@@ -58,6 +58,16 @@ def safe_queue_put(event_queue: Any, event: dict[str, Any]) -> None:
     """
     with contextlib.suppress(Exception):
         event_queue.put(event)
+
+
+def _emit_agent_run_event(event_queue: Any, run: dict[str, Any]) -> None:
+    """Forward one sandboxed agent run's record, or a piece of its live transcript, to the parent.
+
+    Args:
+        event_queue: The shared queue used to talk to the parent.
+        run: A full record keyed by ``run_id``, or ``{"run_id", "transcript_delta"}``.
+    """
+    safe_queue_put(event_queue, {"type": EVENT_AGENT_RUN, "run": run})
 
 
 def _emit_progress_event(event_queue: Any, message: str, metrics: dict[str, Any]) -> None:
@@ -235,6 +245,7 @@ def run_service_in_subprocess(
                 artifact_id=artifact_id,
                 progress_callback=progress_callback,
                 gepa_log_dir_path=gepa_log_dir_path,
+                agent_run_sink=partial(_emit_agent_run_event, event_queue),
             )
         else:
             run_payload = RunRequest.model_validate(payload_dict)

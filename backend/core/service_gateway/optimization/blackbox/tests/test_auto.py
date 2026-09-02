@@ -14,7 +14,7 @@ from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededEr
 
 from .. import auto as auto_mod
 from ..auto import run_lane, run_strategy
-from ..protocol import EvalServer, Task
+from ..protocol import EvalServer, Result, ScorerAbortError, Task
 from ..registry import NO_CAPABILITIES, EngineCapabilities
 from .mocks import ScriptedEngine, make_ctx, vowel_scorer
 
@@ -236,6 +236,20 @@ def test_cost_ceiling_stops_the_whole_run(tmp_path: Path, monkeypatch: pytest.Mo
         )
 
 
+def test_scorer_abort_stops_the_whole_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scorer abort is a run-level stop, not a lane failure to tolerate."""
+    engine = ScriptedEngine("alpha", ["aaa"], error=ScorerAbortError("harness is dead"))
+    _install_registry(monkeypatch, {"alpha": engine}, available=["alpha"])
+
+    with pytest.raises(ScorerAbortError):
+        run_strategy(
+            BlackboxStrategy(mode="auto"),
+            Task(seed_candidate="seed"),
+            EvalServer(vowel_scorer, max_evals=5),
+            make_ctx(str(tmp_path)),
+        )
+
+
 def test_auto_narrows_to_multi_part_engines_for_multi_part_seeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -411,3 +425,25 @@ def test_plateau_ends_when_the_budget_runs_out(tmp_path: Path, monkeypatch: pyte
     assert [(lane.engine, lane.status, lane.scorer_runs) for lane in lanes] == [("alpha", "budget_exhausted", 3)]
     assert result.best_candidate == "aaa"
     assert result.total_evals == 3
+
+
+def test_run_lane_stamps_the_lane_index_on_engine_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Trajectory events an engine emits through its context carry the lane's index."""
+
+    class NarratingEngine:
+        """Engine that reports one candidate through the context sink."""
+
+        name = "alpha"
+
+        def run(self, task: Task, server: EvalServer, ctx: Any) -> Result:
+            """Emit a candidate event and return a fixed result."""
+            ctx.progress_callback("candidate", {"candidate_id": "0"})
+            return Result(best_candidate="aaa", best_score=1.0, total_evals=0)
+
+    _install_registry(monkeypatch, {"alpha": NarratingEngine()}, available=["alpha"])
+    sink: list[tuple[str, dict[str, Any]]] = []
+    ctx = make_ctx(str(tmp_path), progress_callback=lambda event, metrics: sink.append((event, metrics)))
+
+    run_lane("alpha", "explore", Task(seed_candidate="seed"), EvalServer(vowel_scorer, max_evals=2), ctx, lane_index=2)
+
+    assert sink == [("candidate", {"candidate_id": "0", "lane_index": 2})]

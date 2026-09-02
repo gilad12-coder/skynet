@@ -12,6 +12,8 @@ import {
   cachedByokCatalog,
 } from "@/shared/lib/model-catalog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
+import { ProviderLogo } from "@/shared/ui/provider-logo";
+import { modelProviderSlug } from "@/shared/lib/model-provider";
 import type { CatalogModel, CatalogProvider } from "@/shared/types/api";
 
 interface ModelPickerProps {
@@ -228,6 +230,7 @@ export function ModelPicker({
         >
           {value ? (
             <span className="flex min-w-0 flex-1 items-center gap-2" dir="ltr">
+              <ProviderLogo slug={modelProviderSlug(value)} size={16} />
               <span className="truncate font-mono text-[0.8125rem]">
                 {selectedModel?.label ?? value}
               </span>

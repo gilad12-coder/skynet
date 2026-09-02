@@ -193,3 +193,13 @@ def test_validate_scorer_code(code: str, fragment: str) -> None:
         assert fragment in err
     else:
         assert err == ""
+
+
+@pytest.mark.parametrize("scorer_has_model", [True, False])
+def test_scorer_contract_offers_model_judges_only_with_a_model(scorer_has_model: bool) -> None:
+    """The prompt lists the judge shapes that need llm() only when a model is attached."""
+    contract = code_module._scorer_contract("text", scorer_has_model)
+
+    assert "- Run program:" in contract
+    assert ("- Vision judge:" in contract) is scorer_has_model
+    assert ("- LLM judge:" in contract) is scorer_has_model

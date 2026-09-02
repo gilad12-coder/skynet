@@ -17,7 +17,7 @@ from core.service_gateway.language_models import lm_call_count, total_tokens_fro
 
 from .. import sandbox_scorer as sandbox_scorer_mod
 from ..harness import GatewayConfig
-from ..sandbox import CommandResult, LocalSubprocessRuntime
+from ..sandbox import CommandResult, LocalSubprocessRuntime, OutputSink
 from ..sandbox_scorer import (
     CALLS_DIR,
     RUNNER_FILE,
@@ -57,7 +57,12 @@ class _RunnerSession(FakeSandboxSession):
         self.payloads: list[dict[str, Any]] = []
 
     def run(
-        self, command: str, *, env: dict[str, str] | None = None, timeout_seconds: float | None = None
+        self,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
     ) -> CommandResult:
         """Execute a runner invocation against the callback.
 
@@ -80,6 +85,44 @@ class _RunnerSession(FakeSandboxSession):
             return answer
         self.files[f"{call_dir}/output.json"] = json.dumps(answer)
         return CommandResult(exit_code=0)
+
+
+class _InstallSession(_RunnerSession):
+    """Runner session that also answers a non-runner install command from a fixed result."""
+
+    def __init__(self, respond: Responder, install: CommandResult) -> None:
+        """Remember the install outcome.
+
+        Args:
+            respond: Turns the call payload into an output document.
+            install: What the install command returns.
+        """
+        super().__init__(respond)
+        self._install = install
+
+    def run(
+        self,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
+    ) -> CommandResult:
+        """Answer the install command from the fixed result, runner calls as usual.
+
+        Args:
+            command: The command line.
+            env: Per-call environment.
+            timeout_seconds: Per-call timeout.
+
+        Returns:
+            The command result.
+        """
+        if not command.startswith("python3 "):
+            self.commands.append(command)
+            self.timeouts.append(timeout_seconds)
+            return self._install
+        return super().run(command, env=env, timeout_seconds=timeout_seconds, on_output=on_output)
 
 
 def _runtime(respond: Responder, *, injects_headers: bool = False) -> FakeSandboxRuntime:
@@ -123,7 +166,7 @@ def test_sandbox_scorer_installs_the_runner_once_and_runs_one_call_per_directory
     scorer.close()
 
     [spec] = runtime.specs
-    assert spec.name == "skynet-scorer-job-1"
+    assert spec.name.startswith("skynet-scorer-job-1-")
     assert spec.tags == {"skynet_job": "job-1"}
     assert spec.lifetime_seconds == 2_700
     assert spec.inject_headers == {}
@@ -140,6 +183,7 @@ def test_sandbox_scorer_installs_the_runner_once_and_runs_one_call_per_directory
         "model": "judge",
         "temperature": None,
         "max_tokens": None,
+        "reasoning_effort": None,
         "timeout_seconds": 9.0,
     }
     assert "api_key" not in box.payloads[1]["gateway"]
@@ -259,6 +303,63 @@ def test_sandbox_scorer_gives_up_after_one_reopen() -> None:
         scorer("x")
 
 
+def test_sandbox_scorer_runs_the_install_command_once_per_box_before_the_runner() -> None:
+    """The install command runs right after the runner ships, once per box, never per call."""
+    runtime = FakeSandboxRuntime(lambda: _InstallSession(lambda payload: _OK, CommandResult(exit_code=0)))
+    scorer = SandboxPythonScorer(
+        "def score(c): return 1",
+        runtime=runtime,
+        gateway=None,
+        timeout_seconds=5,
+        install_command="  pip install numpy  ",
+    )
+
+    assert scorer("x") == (0.5, {})
+    assert scorer("y") == (0.5, {})
+
+    [box] = runtime.sessions
+    assert box.commands == [
+        "pip install numpy",
+        f"python3 {RUNNER_FILE} {CALLS_DIR}/000001",
+        f"python3 {RUNNER_FILE} {CALLS_DIR}/000002",
+    ]
+    assert box.timeouts[0] == sandbox_scorer_mod._INSTALL_TIMEOUT_SECONDS
+
+
+def test_sandbox_scorer_fails_clearly_when_the_install_command_fails() -> None:
+    """A failed install closes the box and surfaces the exit code with the tail of stderr, without a retry."""
+    install = CommandResult(exit_code=1, stderr="E: Unable to locate package libfoo\n")
+    runtime = FakeSandboxRuntime(lambda: _InstallSession(lambda payload: _OK, install))
+    scorer = SandboxPythonScorer(
+        "def score(c): return 1",
+        runtime=runtime,
+        gateway=None,
+        timeout_seconds=5,
+        install_command="apt-get install libfoo",
+    )
+
+    with pytest.raises(
+        ServiceError, match=r"scorer install command failed \(exit 1\): E: Unable to locate package libfoo"
+    ):
+        scorer("x")
+
+    [box] = runtime.sessions
+    assert box.closed is True
+    assert box.commands == ["apt-get install libfoo"]
+
+
+def test_sandbox_scorer_treats_an_install_timeout_as_a_failure() -> None:
+    """An install that outruns its allowance fails the box instead of leaving a half-built one."""
+    install = CommandResult(exit_code=137, timed_out=True)
+    runtime = FakeSandboxRuntime(lambda: _InstallSession(lambda payload: _OK, install))
+    scorer = SandboxPythonScorer(
+        "def score(c): return 1", runtime=runtime, gateway=None, timeout_seconds=5, install_command="pip install torch"
+    )
+
+    with pytest.raises(ServiceError, match=r"scorer install command exceeded the 600s allowance"):
+        scorer("x")
+
+
 def test_sandbox_scorer_close_is_safe_before_and_after_use() -> None:
     """Closing an unopened or already-closed scorer does nothing."""
     runtime = _runtime(lambda payload: _OK)
@@ -294,7 +395,9 @@ def test_scorer_gateway_for_managed_models_uses_the_shared_gateway(monkeypatch: 
         "gateway_from_settings",
         lambda settings: GatewayConfig(url="http://gw/v1", api_key="gw-key"),
     )
-    config = ModelConfig(name="openrouter/openai/gpt-4o", temperature=0.3, max_tokens=50)
+    config = ModelConfig(
+        name="openrouter/openai/gpt-4o", temperature=0.3, max_tokens=50, extra={"reasoning_effort": "high"}
+    )
 
     gateway = scorer_gateway(config, SimpleNamespace(lm_request_timeout_seconds=33.0))
 
@@ -305,6 +408,7 @@ def test_scorer_gateway_for_managed_models_uses_the_shared_gateway(monkeypatch: 
         billing_model="openrouter/openai/gpt-4o",
         temperature=0.3,
         max_tokens=50,
+        reasoning_effort="high",
         timeout_seconds=33.0,
     )
     assert gateway.runner_payload() == {
@@ -312,6 +416,7 @@ def test_scorer_gateway_for_managed_models_uses_the_shared_gateway(monkeypatch: 
         "model": "openai/gpt-4o",
         "temperature": 0.3,
         "max_tokens": 50,
+        "reasoning_effort": "high",
         "timeout_seconds": 33.0,
     }
 

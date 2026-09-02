@@ -1,6 +1,8 @@
 import type { ModelConfig, SplitFractions } from "@/shared/types/api";
 import { msg } from "@/shared/lib/messages";
 
+import { ANYTHING_STEP_ORDER, PROGRAM_STEP_ORDER, type WizardStepId } from "./lib/wizard-steps";
+
 export const emptyModelConfig = (): ModelConfig => ({
   name: "",
   token_source: "managed",
@@ -36,20 +38,24 @@ export const defaultReactConfig = (): ReactConfig => ({
 // server (frozen process-wide to the raw key) but populated in the browser —
 // resolving eagerly here would hydrate-mismatch. Resolving per render keeps both
 // sides inside the request, where the catalog is pinned.
-// Every recipe walks the same spine: what you start from, the cases it is
-// judged on, how it is scored, how hard to search, then review.
-export const STEPS = [
-  { id: "basics", label: () => msg("auto.features.submit.constants.literal.1") },
-  { id: "start", label: () => msg("submit.blackbox.step.start") },
-  { id: "cases", label: () => msg("submit.blackbox.step.cases") },
-  { id: "scorer", label: () => msg("submit.blackbox.step.scorer") },
-  { id: "optimizer", label: () => msg("submit.blackbox.step.optimizer") },
-  { id: "review", label: () => msg("auto.features.submit.constants.literal.4") },
-] as const;
+// Every recipe walks the same spine; each wizard's order lives in
+// ./lib/wizard-steps.
+const STEP_LABELS: Record<WizardStepId, () => string> = {
+  basics: () => msg("auto.features.submit.constants.literal.1"),
+  start: () => msg("submit.blackbox.step.start"),
+  cases: () => msg("submit.blackbox.step.cases"),
+  scorer: () => msg("submit.blackbox.step.scorer"),
+  optimizer: () => msg("submit.blackbox.step.optimizer"),
+  review: () => msg("auto.features.submit.constants.literal.4"),
+};
 
-export type WizardStep = { id: string; label: () => string };
+export type WizardStep = { id: WizardStepId; label: () => string };
 
-export const BLACKBOX_STEPS: readonly WizardStep[] = STEPS;
+const stepsFor = (order: readonly WizardStepId[]): readonly WizardStep[] =>
+  order.map((id) => ({ id, label: STEP_LABELS[id] }));
+
+export const STEPS = stepsFor(PROGRAM_STEP_ORDER);
+export const BLACKBOX_STEPS = stepsFor(ANYTHING_STEP_ORDER);
 
 export const RECENT_KEY = "skynet:recent-model-configs";
 export const MAX_RECENT = 5;

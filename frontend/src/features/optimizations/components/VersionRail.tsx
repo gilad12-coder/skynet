@@ -1,22 +1,98 @@
 "use client";
 
-import type { KeyboardEvent } from "react";
-import { CaretLeft, CaretRight } from "@/shared/ui/icons";
+import { CaretDown, CaretLeft, CaretRight, Check, Trophy } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/shared/ui/primitives/dropdown-menu";
+import { HelpTip } from "@/shared/ui/help-tip";
 import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import { formatBlackboxScore } from "../lib/blackbox";
+import { tip } from "@/shared/lib/tooltips";
+import { formatBlackboxDelta, formatBlackboxScore } from "@/shared/lib";
 import type { CandidateVersion } from "../lib/blackbox-versions";
 
-function barHeight(score: number | null, min: number, span: number): number {
-  if (score == null) return 6;
-  return 8 + Math.round(20 * ((score - min) / span));
+function deltaFromPrevious(versions: CandidateVersion[], index: number): number | null {
+  const current = versions[index]?.score;
+  const previous = versions[index - 1]?.score;
+  if (current == null || previous == null) return null;
+  return current - previous;
+}
+
+/** What the headline score is made of — the validation sweep with the running mean beside it, or the mean alone. */
+function scoreTip(version: CandidateVersion): string | null {
+  if (version.meanScore == null || version.evals === 0) return null;
+  if (version.score != null && version.score !== version.meanScore) {
+    return formatMsg("optimization.blackbox.versions.score_tip.validation", {
+      evals: version.evals,
+      mean: formatBlackboxScore(version.meanScore),
+    });
+  }
+  return formatMsg("optimization.blackbox.versions.score_tip.mean", { evals: version.evals });
+}
+
+function BestMark({ className }: { className?: string }) {
+  return (
+    <HelpTip text={tip("blackbox.versions.best")}>
+      <span className={cn("inline-flex items-center gap-1 font-medium text-amber-700", className)}>
+        <Trophy className="size-3 shrink-0" aria-hidden="true" />
+        {msg("optimization.blackbox.versions.best")}
+      </span>
+    </HelpTip>
+  );
+}
+
+function VersionRow({
+  versions,
+  index,
+  selected,
+  onSelect,
+}: {
+  versions: CandidateVersion[];
+  index: number;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const version = versions[index];
+  if (!version) return null;
+  const delta = deltaFromPrevious(versions, index);
+  const isLatest = versions.length > 1 && index === versions.length - 1;
+  return (
+    <DropdownMenuItem
+      onSelect={onSelect}
+      aria-current={selected ? "true" : undefined}
+      className="gap-2 py-1.5 text-xs tabular-nums"
+    >
+      <Check
+        className={cn("size-3.5 shrink-0 text-primary", !selected && "invisible")}
+        aria-hidden="true"
+      />
+      <span className={cn("w-8 shrink-0 font-mono", selected && "font-semibold")}>
+        {formatMsg("optimization.blackbox.versions.label", { n: version.number })}
+      </span>
+      <span className={version.score == null ? "text-muted-foreground/60" : undefined}>
+        {formatBlackboxScore(version.score)}
+      </span>
+      {delta != null && (
+        <span className="text-muted-foreground/80">{formatBlackboxDelta(delta)}</span>
+      )}
+      <span className="ms-auto flex shrink-0 items-center gap-1.5 text-[0.6875rem] text-muted-foreground">
+        {version.isBest && <BestMark />}
+        {isLatest && <span>{msg("optimization.blackbox.versions.latest")}</span>}
+        {version.isSeed && <span>{msg("optimization.blackbox.versions.starting_point")}</span>}
+      </span>
+    </DropdownMenuItem>
+  );
 }
 
 /**
- * Stepper plus timeline for the run's versions. The rail always runs
- * left-to-right — older on the left — so ← and → mean the same thing in
- * every locale, and the diff and code views are laid out the same way.
+ * The window's version control: a ‹ v4 · 0.65 › stepper whose label opens
+ * the full list (newest first), plus a "Best" mark when the shown version is
+ * the winner. Always laid out left-to-right — older on the left — so ← and →
+ * mean the same thing in every locale.
  */
 export function VersionRail({
   versions,
@@ -29,98 +105,87 @@ export function VersionRail({
 }) {
   const current = versions[index];
   if (!current) return null;
-  const scores = versions.flatMap((v) => (v.score == null ? [] : [v.score]));
-  const min = scores.length ? Math.min(...scores) : 0;
-  const span = scores.length ? Math.max(...scores) - min || 1 : 1;
+  const newestFirst = versions.map((_, i) => versions.length - 1 - i);
+  const tipText = scoreTip(current);
+  const scoreLabel = (
+    <span className="text-muted-foreground">
+      {"· "}
+      {formatBlackboxScore(current.score)}
+    </span>
+  );
 
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "ArrowLeft" && index > 0) {
-      event.preventDefault();
-      onSelect(index - 1);
-    } else if (event.key === "ArrowRight" && index < versions.length - 1) {
-      event.preventDefault();
-      onSelect(index + 1);
-    }
-  };
-
+  // The end buttons stay focusable when there is nothing further to step to:
+  // a `disabled` button drops focus to the page and the arrow keys stop working
+  // right after the reader reaches either end.
   return (
-    <div
-      className="flex flex-col gap-3 border-t border-border/50 pt-3 lg:flex-row lg:items-center lg:gap-4"
-      dir="ltr"
-      onKeyDown={onKeyDown}
-    >
-      <div className="flex items-center gap-1">
+    <div className="flex min-w-0 flex-1 items-center gap-2" dir="ltr">
+      <div className="flex shrink-0 items-center gap-0.5">
         <Button
-          type="button"
           variant="ghost"
-          size="xs"
-          onClick={() => onSelect(index - 1)}
-          disabled={index === 0}
+          size="icon-xs"
+          onClick={() => index > 0 && onSelect(index - 1)}
+          aria-disabled={index === 0}
+          className={cn(index === 0 && "pointer-events-none opacity-50")}
           aria-label={msg("optimization.blackbox.versions.prev")}
         >
-          <CaretLeft className="size-4" aria-hidden="true" />
+          <CaretLeft aria-hidden="true" />
         </Button>
-        <span className="min-w-[6rem] text-center text-xs tabular-nums text-muted-foreground">
-          <span className="font-semibold text-foreground">
-            {formatMsg("optimization.blackbox.versions.label", { n: current.number })}
-          </span>
-          {" · "}
-          {formatMsg("optimization.blackbox.versions.position", {
-            index: index + 1,
-            total: versions.length,
-          })}
-        </span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              id="blackbox-version-trigger"
+              variant="ghost"
+              size="xs"
+              className="px-1.5 font-normal tabular-nums"
+            >
+              <span className="font-semibold text-foreground">
+                {formatMsg("optimization.blackbox.versions.label", { n: current.number })}
+              </span>
+              {tipText ? (
+                <HelpTip text={tipText} className="cursor-pointer">
+                  {scoreLabel}
+                </HelpTip>
+              ) : (
+                scoreLabel
+              )}
+              <span className="sr-only">
+                {msg("optimization.blackbox.versions.pick")}
+                {" · "}
+                {formatMsg("optimization.blackbox.versions.position", {
+                  index: index + 1,
+                  total: versions.length,
+                })}
+              </span>
+              <CaretDown className="size-3 text-muted-foreground" aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-72 overflow-hidden p-0">
+            <div className="max-h-72 overflow-y-auto py-1" dir="ltr">
+              {newestFirst.map((i) => (
+                <VersionRow
+                  key={versions[i]?.number ?? i}
+                  versions={versions}
+                  index={i}
+                  selected={i === index}
+                  onSelect={() => onSelect(i)}
+                />
+              ))}
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
-          type="button"
           variant="ghost"
-          size="xs"
-          onClick={() => onSelect(index + 1)}
-          disabled={index === versions.length - 1}
+          size="icon-xs"
+          onClick={() => index < versions.length - 1 && onSelect(index + 1)}
+          aria-disabled={index === versions.length - 1}
+          className={cn(index === versions.length - 1 && "pointer-events-none opacity-50")}
           aria-label={msg("optimization.blackbox.versions.next")}
         >
-          <CaretRight className="size-4" aria-hidden="true" />
+          <CaretRight aria-hidden="true" />
         </Button>
       </div>
 
-      <div
-        className="flex h-9 min-w-0 flex-1 items-end gap-[3px] overflow-x-auto px-1"
-        role="group"
-        aria-label={msg("optimization.blackbox.versions.rail")}
-        title={msg("optimization.blackbox.versions.rail")}
-      >
-        {versions.map((version, i) => {
-          const label = formatMsg("optimization.blackbox.versions.rail_item", {
-            n: version.number,
-            score: formatBlackboxScore(version.score),
-          });
-          return (
-            <button
-              key={version.number}
-              type="button"
-              onClick={() => onSelect(i)}
-              aria-label={label}
-              aria-current={i === index ? "true" : undefined}
-              title={
-                version.isBest ? `${label} · ${msg("optimization.blackbox.versions.best")}` : label
-              }
-              className={cn(
-                "shrink-0 cursor-pointer rounded-sm transition-[height,background-color] hover:bg-primary/70",
-                versions.length > 120 ? "w-1" : "w-1.5",
-                i === index
-                  ? "bg-primary ring-2 ring-primary/30"
-                  : version.isBest
-                    ? "bg-amber-500"
-                    : version.isImprovement
-                      ? "bg-primary/55"
-                      : version.score == null
-                        ? "bg-muted-foreground/20"
-                        : "bg-muted-foreground/35",
-              )}
-              style={{ height: barHeight(version.score, min, span) }}
-            />
-          );
-        })}
-      </div>
+      {current.isBest && <BestMark className="hidden text-[0.6875rem] sm:inline-flex" />}
     </div>
   );
 }

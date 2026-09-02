@@ -92,6 +92,31 @@ def test_load_scorer_ignores_imported_and_injected_functions() -> None:
     assert load_scorer_from_code(code, helpers={"llm": lambda *a, **k: ""})("x") == 1.0
 
 
+def test_load_scorer_lets_the_code_import_its_helpers() -> None:
+    """``from skynet import llm, Image`` binds the same helpers as the injected names."""
+    code = "from skynet import llm, Image\n\ndef score(c, x=None):\n    return (llm(c), Image.__name__)\n"
+
+    fn = load_scorer_from_code(code, helpers={"llm": lambda *a, **k: "ok", "Image": Image})
+
+    assert fn("x") == ("ok", "Image")
+
+
+def test_load_scorer_ignores_helpers_imported_from_skynet() -> None:
+    """A helper pulled in through the import is no more the user's function than an injected one."""
+    code = "from skynet import llm\ndef judge(c, x=None): return llm(c)\n"
+
+    assert load_scorer_from_code(code, helpers={"llm": lambda *a, **k: 1.0})("x") == 1.0
+
+
+def test_skynet_module_follows_the_helpers_of_the_latest_load() -> None:
+    """Each load rebuilds the module, so a scorer importing lazily sees the helpers of its own run."""
+    code = "def score(c, x=None):\n    from skynet import llm\n    return llm(c)\n"
+
+    load_scorer_from_code(code, helpers={"llm": lambda *a, **k: 0.25})
+
+    assert load_scorer_from_code(code, helpers={"llm": lambda *a, **k: 0.5})("x") == 0.5
+
+
 @pytest.mark.parametrize(
     ("code", "message"),
     [
@@ -176,7 +201,15 @@ def test_side_info_json_default_inlines_images_as_data_urls() -> None:
 def test_gateway_client_posts_chat_completions_and_records_usage() -> None:
     """One call is one bearer-authenticated POST carrying the model, sampling options and chat."""
     with FakeGateway(reply="judged", usage=(7, 2)) as gateway:
-        llm = GatewayClient(gateway.url + "/", "gpt-x", api_key="k", temperature=0.2, max_tokens=64, timeout_seconds=5)
+        llm = GatewayClient(
+            gateway.url + "/",
+            "gpt-x",
+            api_key="k",
+            temperature=0.2,
+            max_tokens=64,
+            reasoning_effort="high",
+            timeout_seconds=5,
+        )
 
         assert llm("system", "user text") == "judged"
 
@@ -188,6 +221,7 @@ def test_gateway_client_posts_chat_completions_and_records_usage() -> None:
         "messages": [{"role": "system", "content": "system"}, {"role": "user", "content": "user text"}],
         "temperature": 0.2,
         "max_tokens": 64,
+        "reasoning_effort": "high",
     }
     assert llm.usage == [{"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9}]
 
@@ -309,6 +343,7 @@ def test_run_call_binds_llm_to_the_gateway_with_the_key_from_the_environment(
                 "model": "m",
                 "temperature": None,
                 "max_tokens": None,
+                "reasoning_effort": None,
                 "timeout_seconds": 5,
             },
         }

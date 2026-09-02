@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from ..protocol import Candidate, EngineContext, EvalServer, Result, SideInfo, Task
-from ..sandbox import CommandResult, SandboxSpec
+from ..sandbox import CommandResult, OutputSink, SandboxSpec
 
 VOWELS = "aeiou"
 
@@ -170,7 +170,12 @@ class FakeSandboxSession:
         self.files.update(files)
 
     def run(
-        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
     ) -> CommandResult:
         """Record ``command``, drop any files it produces, and return its scripted result.
 

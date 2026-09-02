@@ -1,11 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
 import { motion } from "framer-motion";
-import { Cube, DownloadSimple, Trophy } from "@/shared/ui/icons";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
-import { Badge } from "@/shared/ui/primitives/badge";
+import { Code, Cube, DownloadSimple, Eye, GitDiff, Warning } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import {
   Select,
@@ -14,14 +12,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/primitives/select";
+import { CopyButton } from "@/shared/ui/copy-button";
 import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { Skeleton } from "@/shared/ui/skeleton";
 import type { BlackboxRunResult } from "@/shared/types/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
-import { CandidatePreview, isDrawable } from "./CandidatePreview";
+import { getActiveDir } from "@/shared/lib/runtime-locale";
+import { arrowPageStep, isEditableTarget } from "@/shared/lib/arrow-paging";
+import { cn } from "@/shared/lib/utils";
+import { CandidatePreview } from "./CandidatePreview";
 import { VersionRail } from "./VersionRail";
-import { formatBlackboxScore } from "../lib/blackbox";
+import { formatBlackboxScore } from "@/shared/lib";
 import { countChanges, diffRows } from "../lib/blackbox-diff";
 import {
   buildVersions,
@@ -32,13 +35,15 @@ import {
   detectRenderKind,
   formatJson,
   RENDER_KIND_EXTENSION,
+  RENDER_KIND_LABEL,
   sideInfoImages,
   type RenderKind,
-} from "../lib/candidate-render";
-import { cn } from "@/shared/lib/utils";
+  isDrawable,
+} from "@/shared/lib/candidate-render";
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
   ssr: false,
+  loading: () => <Skeleton height={180} borderRadius={8} />,
 });
 
 // Same tints the trajectory drawer uses for accepted / rejected edits, so a
@@ -51,6 +56,8 @@ const REMOVED_EMPHASIS_BG = "rgba(168, 90, 59, 0.45)";
 const REMOVED_FG = "#6e2e16";
 
 type View = "preview" | "code" | "diff";
+
+const VIEW_ICON = { preview: Eye, code: Code, diff: GitDiff } as const;
 
 function editorHeight(text: string): string {
   return `${Math.min(560, Math.max(160, text.split("\n").length * 22 + 48))}px`;
@@ -199,6 +206,11 @@ function ChangesView({ versions, index }: { versions: CandidateVersion[]; index:
 
 const PILL_TRANSITION = { type: "tween", duration: 0.16, ease: [0.22, 1, 0.36, 1] } as const;
 
+/**
+ * Preview / Code / Changes as a proper tab list: one tab stop, ← and → move
+ * between the views (mirrored in RTL) and never leak out to the version
+ * stepper behind them.
+ */
 function ViewToggle({
   value,
   onChange,
@@ -215,36 +227,55 @@ function ViewToggle({
       ? [{ value: "diff" as const, label: msg("optimization.blackbox.best.view_diff") }]
       : []),
   ];
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = arrowPageStep(event, getActiveDir() === "rtl");
+    if (step === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const at = options.findIndex((o) => o.value === value);
+    const next = options[(at + step + options.length) % options.length];
+    if (!next) return;
+    onChange(next.value);
+    document.getElementById(`blackbox-view-${next.value}`)?.focus();
+  };
   return (
     <div
       role="tablist"
-      className="inline-flex items-center rounded-md border border-border/60 bg-background/70 p-0.5"
+      onKeyDown={onKeyDown}
+      className="inline-flex h-7 items-center rounded-md border border-border/60 bg-background/70 p-0.5"
     >
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          role="tab"
-          id={`blackbox-view-${o.value}`}
-          aria-selected={o.value === value}
-          aria-controls="blackbox-version-panel"
-          onClick={() => onChange(o.value)}
-          className={cn(
-            "relative cursor-pointer rounded px-2 py-1 text-xs font-medium transition-colors",
-            o.value === value ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {o.value === value && (
-            <motion.span
-              layoutId="blackbox-view-pill"
-              className="absolute inset-0 rounded bg-primary/10 shadow-sm"
-              transition={PILL_TRANSITION}
-              aria-hidden="true"
-            />
-          )}
-          <span className="relative z-10">{o.label}</span>
-        </button>
-      ))}
+      {options.map((o) => {
+        const Icon = VIEW_ICON[o.value];
+        const active = o.value === value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="tab"
+            id={`blackbox-view-${o.value}`}
+            aria-selected={active}
+            aria-controls="blackbox-version-panel"
+            aria-label={o.label}
+            tabIndex={active ? 0 : -1}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              "relative inline-flex h-full cursor-pointer items-center gap-1 rounded px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {active && (
+              <motion.span
+                layoutId="blackbox-view-pill"
+                className="absolute inset-0 rounded bg-primary/10 shadow-sm"
+                transition={PILL_TRANSITION}
+                aria-hidden="true"
+              />
+            )}
+            <Icon className="relative z-10 size-3.5" aria-hidden="true" />
+            <span className="relative z-10 hidden sm:inline">{o.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -263,10 +294,21 @@ function hasVisual(version: CandidateVersion, kind: RenderKind): boolean {
   return isDrawable(kind) || sideInfoImages(version.sideInfo).length > 0;
 }
 
+/** True inside an open menu, listbox or select trigger, where the arrow keys belong to Radix. */
+function isWithin(target: EventTarget | null, selector: string): boolean {
+  const el = target as { closest?: (selector: string) => Element | null } | null;
+  return el?.closest?.(selector) != null;
+}
+
+function insidePopup(target: EventTarget | null): boolean {
+  return isWithin(target, '[role="menu"],[role="listbox"],[role="combobox"]');
+}
+
 /**
- * The run's output as a versioned artifact: v0 is the starting point, every
- * distinct text the scorer saw is a version, and each one can be previewed,
- * read as code, or diffed against any other.
+ * The run's output as an artifact window: the header names it, the body
+ * shows the selected version (rendered, as code, or as a diff), and the
+ * footer holds the version stepper on one side and the view / copy /
+ * download controls — all acting on that version — on the other.
  */
 export function BestVersionTab({
   result,
@@ -277,7 +319,12 @@ export function BestVersionTab({
 }) {
   const versions = useMemo(() => buildVersions(result), [result]);
   const [index, setIndex] = useState(() => defaultVersionIndex(versions));
-  const current = versions[Math.min(index, versions.length - 1)];
+  const last = versions.length - 1;
+  const at = Math.min(index, last);
+  const current = versions[at];
+  // An agent run that never produced an answer scores 0 with the reason in
+  // its side info; without this line the reader only sees the bare score.
+  const runError = typeof current?.sideInfo.error === "string" ? current.sideInfo.error : null;
   const kind = detectRenderKind(current?.text ?? "");
   const [view, setView] = useState<View>(() =>
     current && hasVisual(current, kind) ? "preview" : "code",
@@ -285,61 +332,53 @@ export function BestVersionTab({
   if (!current) return null;
   const canDiff = versions.length > 1;
   const activeView: View = view === "diff" && !canDiff ? "code" : view;
+  const title = msg("optimization.blackbox.versions.title");
   const slug = (jobName ?? "candidate").replace(/[^\w.-]+/g, "_");
   const fileName = `${slug}-v${current.number}.${RENDER_KIND_EXTENSION[kind]}`;
 
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    // An inner pager that already took the arrow (the preview carousel, an
+    // open menu) marks it default-prevented; stepping the version on top of
+    // that would remount the panel under it and drop keyboard focus.
+    if (event.defaultPrevented || isEditableTarget(event.target) || insidePopup(event.target)) {
+      return;
+    }
+    // The stepper is pinned left-to-right, so ← is always the older version.
+    const step = arrowPageStep(event, false);
+    const next =
+      step !== 0 ? at + step : event.key === "Home" ? 0 : event.key === "End" ? last : null;
+    if (next == null || next === at || next < 0 || next > last) return;
+    event.preventDefault();
+    setIndex(next);
+    // Stepping remounts the panel, so focus held inside it would fall to the
+    // body and the next arrow press would go nowhere: hand it to the stepper
+    // trigger, which stays mounted and keeps ← → live.
+    if (isWithin(event.target, "#blackbox-version-panel")) {
+      document.getElementById("blackbox-version-trigger")?.focus();
+    }
+  };
+
   return (
     <FadeIn>
-      <Card className="relative overflow-hidden border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10">
-        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-          <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-            <Cube className="size-4 text-primary" aria-hidden="true" />
-            <HelpTip text={tip("blackbox.versions.section")}>
-              <span className="font-bold tracking-tight">
-                {msg("optimization.blackbox.versions.title")}
-              </span>
-            </HelpTip>
-            <Badge variant="secondary" size="sm" className="font-mono tabular-nums">
-              {formatMsg("optimization.blackbox.versions.label", { n: current.number })}
-            </Badge>
-            {current.isSeed && (
-              <HelpTip text={tip("blackbox.versions.seed")}>
-                <Badge variant="outline" size="sm">
-                  {msg("optimization.blackbox.best.seed_title")}
-                </Badge>
-              </HelpTip>
-            )}
-            {current.isBest && (
-              <HelpTip text={tip("blackbox.versions.best")}>
-                <Badge variant="default" size="sm" className="gap-1">
-                  <Trophy className="size-3" aria-hidden="true" />
-                  {msg("optimization.blackbox.versions.best")}
-                </Badge>
-              </HelpTip>
-            )}
-          </CardTitle>
-          <div className="flex flex-wrap items-center gap-2">
-            <ViewToggle value={activeView} onChange={setView} canDiff={canDiff} />
-            {current.isSeed && result.baseline_test_metric != null && (
-              <Badge variant="outline" size="sm" className="tabular-nums">
-                {formatMsg("optimization.blackbox.best.seed_score", {
-                  score: formatBlackboxScore(result.baseline_test_metric),
-                })}
-              </Badge>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => downloadText(fileName, current.text)}
-              aria-label={msg("optimization.blackbox.best.download")}
-            >
-              <DownloadSimple className="size-4" aria-hidden="true" />
-              <span className="hidden sm:inline">{msg("optimization.blackbox.best.download")}</span>
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <section
+        className="overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm"
+        aria-label={title}
+        aria-keyshortcuts="ArrowLeft ArrowRight Home End"
+        onKeyDown={onKeyDown}
+      >
+        <header className="flex min-h-10 items-center gap-2 border-b border-border/50 bg-muted/30 px-3 py-1.5">
+          <Cube className="size-4 shrink-0 text-primary" aria-hidden="true" />
+          <HelpTip text={tip("blackbox.versions.section")} className="min-w-0">
+            <h3 className="truncate text-sm font-semibold tracking-tight" dir="auto">
+              {title}
+            </h3>
+          </HelpTip>
+          <span className="ms-auto shrink-0 text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
+            {msg(RENDER_KIND_LABEL[kind])}
+          </span>
+        </header>
+
+        <div className="space-y-3 p-3 sm:p-4">
           {result.regression_guard_applied && (
             <p className="rounded-md border border-amber-300/50 bg-amber-50/60 px-3 py-2 text-xs text-amber-900">
               {msg("optimization.blackbox.best.regression_guard")}
@@ -360,11 +399,47 @@ export function BestVersionTab({
               <CandidatePreview version={current} kind={kind} onShowCode={() => setView("code")} />
             )}
             {activeView === "code" && <CodeView version={current} kind={kind} />}
-            {activeView === "diff" && <ChangesView versions={versions} index={index} />}
+            {activeView === "diff" && <ChangesView versions={versions} index={at} />}
           </div>
-          {canDiff && <VersionRail versions={versions} index={index} onSelect={setIndex} />}
-        </CardContent>
-      </Card>
+        </div>
+
+        <footer className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border/50 bg-muted/20 px-2 py-1.5">
+          <VersionRail versions={versions} index={at} onSelect={setIndex} />
+          <div className="ms-auto flex shrink-0 items-center gap-0.5">
+            <ViewToggle value={activeView} onChange={setView} canDiff={canDiff} />
+            <span className="mx-1 h-4 w-px bg-border/70" aria-hidden="true" />
+            <CopyButton
+              text={current.text}
+              size="icon-xs"
+              ariaLabel={formatMsg("optimization.blackbox.versions.copy", { n: current.number })}
+              copiedAriaLabel={msg("clipboard.copied_short")}
+            />
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => downloadText(fileName, current.text)}
+              aria-label={formatMsg("optimization.blackbox.versions.download", {
+                n: current.number,
+              })}
+            >
+              <DownloadSimple aria-hidden="true" />
+            </Button>
+          </div>
+        </footer>
+        {runError && (
+          <p
+            role="status"
+            className="mt-2 flex items-start gap-1.5 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive"
+          >
+            <Warning className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 break-words">
+              <span className="font-medium">{msg("optimization.blackbox.versions.run_error")}</span>
+              {" · "}
+              {runError}
+            </span>
+          </p>
+        )}
+      </section>
     </FadeIn>
   );
 }

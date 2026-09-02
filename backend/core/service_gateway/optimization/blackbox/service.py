@@ -29,6 +29,7 @@ from ....constants import (
     DETAIL_TRAIN,
     DETAIL_VAL,
     PROGRESS_BASELINE,
+    PROGRESS_EVALUATION_STARTED,
     PROGRESS_OPTIMIZED,
     PROGRESS_OPTIMIZER,
     PROGRESS_SPLITS_READY,
@@ -41,6 +42,7 @@ from ....exceptions import ServiceError
 from ....models.blackbox import (
     BLACKBOX_STRATEGY_AUTO,
     BLACKBOX_TARGET_AGENT,
+    BlackboxCandidateNode,
     BlackboxEngineCatalogResponse,
     BlackboxEngineInfo,
     BlackboxLaneResult,
@@ -55,6 +57,7 @@ from ....models.common import SplitCounts
 from ....models.results import LMActivity, LMStageStats, ModelTokenUsage
 from ...language_models import (
     build_language_model,
+    canonical_model_id,
     lm_call_count,
     total_tokens_from_history,
     usage_by_model_from_history,
@@ -64,8 +67,10 @@ from ..cost_ceiling import CostCeilingCallback
 from ..data import split_examples
 from ..timing import STAGE_TRAINING
 from .agent_eval import SandboxAgentScorer, agent_target_unavailable_reason, gateway_from_settings
-from .auto import run_strategy
-from .protocol import Candidate, EngineContext, EvalServer, ScorerFn, Task
+from .agent_runs import PHASE_BASELINE, PHASE_FINAL, AgentRunRecorder, AgentRunSink, run_scope
+from .auto import LaneOutcome, run_strategy
+from .feedback import without_images
+from .protocol import Candidate, EngineContext, EvalServer, ScorerFn, Task, candidate_key
 from .registry import ENGINES, EngineCapabilities, get_engine
 from .runner import side_info_json_default
 from .sandbox import sandbox_runtime_from_settings
@@ -150,13 +155,22 @@ def validate_blackbox_payload(payload: BlackboxRunRequest) -> None:
         validate_scorer_code(str(payload.scorer.metric_code))
 
 
-def _agent_scorer(scorer: ScorerFn, target: BlackboxTarget, *, job_id: str) -> SandboxAgentScorer:
+def _agent_scorer(
+    scorer: ScorerFn,
+    target: BlackboxTarget,
+    *,
+    job_id: str,
+    progress_callback: ProgressCallback | None,
+    agent_run_sink: AgentRunSink | None,
+) -> SandboxAgentScorer:
     """Wrap ``scorer`` so every call runs the harness in a fresh sandbox first.
 
     Args:
         scorer: The user's scorer.
         target: The job's agent target.
         job_id: Tags the sandboxes with the job.
+        progress_callback: The job's progress sink, told when each run starts and ends.
+        agent_run_sink: Receives each run's full record and live transcript.
 
     Returns:
         The wrapped scorer.
@@ -168,11 +182,21 @@ def _agent_scorer(scorer: ScorerFn, target: BlackboxTarget, *, job_id: str) -> S
     gateway = gateway_from_settings(settings)
     if runtime is None or gateway is None:
         raise ServiceError(f"Agent targets cannot run on this deployment: {agent_target_unavailable_reason(settings)}")
-    return SandboxAgentScorer(scorer, runtime=runtime, target=target, gateway=gateway, job_id=job_id)
+    recorder = AgentRunRecorder(
+        progress_callback=progress_callback, run_sink=agent_run_sink, secrets=(gateway.api_key,)
+    )
+    return SandboxAgentScorer(scorer, runtime=runtime, target=target, gateway=gateway, job_id=job_id, recorder=recorder)
 
 
 def _score_holdout(
-    scorer: ScorerFn, candidate: Candidate, holdout: list[Any] | None, *, label: str, concurrency: int = 1
+    scorer: ScorerFn,
+    candidate: Candidate,
+    holdout: list[Any] | None,
+    *,
+    label: str,
+    phase: str,
+    concurrency: int = 1,
+    server: EvalServer | None = None,
 ) -> float | None:
     """Score ``candidate`` on the held-out cases, outside the optimization budget.
 
@@ -181,8 +205,13 @@ def _score_holdout(
         candidate: The version to score.
         holdout: Held-out cases, or ``None`` in single-task mode.
         label: What the candidate is, for the error message.
+        phase: Which pass this is, for the agent run records: ``PHASE_BASELINE`` or ``PHASE_FINAL``.
         concurrency: How many cases to score at once (agent targets run one
             sandbox per case, so this is the number of sandboxes in flight).
+        server: The run's eval server, when the held-out cases overlap the
+            engine's own. A pair it already measured is reused rather than
+            scored again, and a pair scored here is handed to it so the
+            engine's first look at that pair costs no budget.
 
     Returns:
         The mean held-out score, or ``None`` when there are no held-out cases.
@@ -190,18 +219,73 @@ def _score_holdout(
     Raises:
         ServiceError: When the scorer fails on the candidate.
     """
+
+    def score_one(case: Any, position: int = 0) -> tuple[float, bool]:
+        """Score ``candidate`` on one case, or reuse the engine's measurement.
+
+        Args:
+            case: The held-out case, or ``None`` in single-task mode.
+            position: The case's 0-based position, naming it in the agent run records.
+
+        Returns:
+            The score and whether it was reused from the eval server.
+        """
+        known = None if server is None else server.recorded(candidate, case)
+        if known is not None:
+            return known, True
+        with run_scope(phase, str(position)):
+            score, side_info = scorer(candidate, case)
+        if server is not None:
+            server.prime(candidate, case, score, side_info)
+        return score, False
+
+    # Per-case heartbeats at DEBUG so they surface only in the Logs tab's
+    # verbose view: these passes sit outside the eval server, so its own
+    # heartbeat never fires for them. Normal mode keeps the single aggregate
+    # metric; verbose adds the live per-case progress, as for DSPy test evals.
+    def score_case(numbered: tuple[int, Any]) -> tuple[float, bool]:
+        """Score ``candidate`` on one held-out case and log the result.
+
+        Args:
+            numbered: The case's 1-based position and the case itself.
+
+        Returns:
+            The score for that case and whether it was reused.
+        """
+        position, case = numbered
+        score, reused = score_one(case, position - 1)
+        origin = " (reused)" if reused else ""
+        logger.debug("%s holdout eval %d/%d score=%.3f%s", label, position, len(holdout or ()), score, origin)
+        return score, reused
+
+    started = time.perf_counter()
     try:
         if holdout is None:
-            return scorer(candidate, None)[0]
+            logger.info("scoring the %s", label)
+            score, _ = score_one(None)
+            logger.info("%s scored %.3f in %.0fs", label, score, time.perf_counter() - started)
+            return score
         if not holdout:
             return None
         workers = max(1, min(concurrency, len(holdout)))
+        logger.info("scoring the %s on %d held-out case(s), %d at a time", label, len(holdout), workers)
         if workers == 1:
-            scores = [scorer(candidate, case)[0] for case in holdout]
+            scored = [score_case(numbered) for numbered in enumerate(holdout, start=1)]
         else:
             with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="holdout") as pool:
-                scores = [score for score, _ in pool.map(lambda case: scorer(candidate, case), holdout)]
-        return sum(scores) / len(scores)
+                scored = list(pool.map(score_case, enumerate(holdout, start=1)))
+        scores = [score for score, _ in scored]
+        reused = sum(1 for _, was_reused in scored if was_reused)
+        mean = sum(scores) / len(scores)
+        logger.info(
+            "%s scored %.3f over %d case(s) (%d reused from the run) in %.0fs",
+            label,
+            mean,
+            len(scores),
+            reused,
+            time.perf_counter() - started,
+        )
+        return mean
     except ServiceError as exc:
         raise ServiceError(f"scorer failed on the {label}: {exc}") from exc
     except Exception as exc:
@@ -214,51 +298,46 @@ def _score_holdout(
 VERSION_SIDE_INFO_BYTE_CAP = 3_000_000
 
 
-def _is_data_image(value: Any) -> bool:
-    """Return True when ``value`` is a JSON-safe image, i.e. a data URL string.
+def _validation_scores(lanes: list[LaneOutcome]) -> dict[str, float]:
+    """Collect each candidate's validation-set score from the lanes that recorded lineage.
+
+    A candidate seen by more than one lane (the continue lane re-scores the
+    winner's best as its seed) takes the later lane's score, matching the
+    lane the Overview tree shows.
 
     Args:
-        value: One side-info value after JSON flattening.
+        lanes: Every lane the strategy ran, in execution order.
 
     Returns:
-        Whether it is an inline image.
+        Validation score per :func:`candidate_key`; empty when no lane kept lineage.
     """
-    return isinstance(value, str) and value.startswith("data:image/")
+    scores: dict[str, float] = {}
+    for lane in lanes:
+        for node in lane.metadata.get("candidate_tree", []):
+            if node.get("val_score") is not None:
+                scores[candidate_key(node["candidate"])] = float(node["val_score"])
+    return scores
 
 
-def _without_images(side_info: dict[str, Any]) -> dict[str, Any]:
-    """Return ``side_info`` with its inline images (top-level or in lists) removed.
-
-    Args:
-        side_info: JSON-safe side info.
-
-    Returns:
-        The same mapping minus every data-URL image.
-    """
-    stripped: dict[str, Any] = {}
-    for key, value in side_info.items():
-        if _is_data_image(value):
-            continue
-        if isinstance(value, list):
-            value = [item for item in value if not _is_data_image(item)]
-        stripped[key] = value
-    return stripped
-
-
-def _version_history(server: EvalServer) -> list[BlackboxVersion]:
+def _version_history(server: EvalServer, val_scores: dict[str, float] | None = None) -> list[BlackboxVersion]:
     """Turn the eval server's records into the persisted version history.
 
     Args:
         server: The run's root eval server.
+        val_scores: Validation-set score per :func:`candidate_key` from the
+            engines that recorded lineage; a version with one shows it as its
+            ``score`` instead of the running mean.
 
     Returns:
         One entry per distinct version in first-seen order, side info made
         JSON-safe and trimmed to :data:`VERSION_SIDE_INFO_BYTE_CAP` in total.
     """
+    val_scores = val_scores or {}
     versions = [
         BlackboxVersion(
             candidate=record.candidate,
-            score=record.mean_score,
+            score=val_scores.get(candidate_key(record.candidate), record.mean_score),
+            mean_score=record.mean_score,
             evals=record.count,
             first_run=record.first_eval,
             side_info=json.loads(json.dumps(record.side_info, default=side_info_json_default)),
@@ -271,7 +350,7 @@ def _version_history(server: EvalServer) -> list[BlackboxVersion]:
     for i in weakest_first[:-1]:
         if total <= VERSION_SIDE_INFO_BYTE_CAP:
             break
-        versions[i].side_info = _without_images(versions[i].side_info)
+        versions[i].side_info = without_images(versions[i].side_info)
         total -= sizes[i] - len(json.dumps(versions[i].side_info))
     return versions
 
@@ -368,9 +447,7 @@ def _reflection_activity(durations_ms: list[float]) -> LMActivity | None:
     if not durations_ms:
         return None
     avg_ms = round(sum(durations_ms) / len(durations_ms), 1)
-    return LMActivity(
-        reflection={STAGE_TRAINING: LMStageStats(calls=len(durations_ms), avg_response_time_ms=avg_ms)}
-    )
+    return LMActivity(reflection={STAGE_TRAINING: LMStageStats(calls=len(durations_ms), avg_response_time_ms=avg_ms)})
 
 
 def run_blackbox_optimization(
@@ -379,6 +456,7 @@ def run_blackbox_optimization(
     artifact_id: str,
     progress_callback: ProgressCallback | None = None,
     gepa_log_dir_path: str | None = None,
+    agent_run_sink: AgentRunSink | None = None,
 ) -> BlackboxRunResponse:
     """Run one black-box job end to end.
 
@@ -387,6 +465,7 @@ def run_blackbox_optimization(
         artifact_id: Job id, used to name the workspace.
         progress_callback: The job's progress sink, if any.
         gepa_log_dir_path: Workspace for engine state; a temp dir when unset.
+        agent_run_sink: Receives each sandboxed agent run's record and live transcript, if any.
 
     Returns:
         The best version with baseline vs optimized held-out scores.
@@ -406,6 +485,7 @@ def run_blackbox_optimization(
             started=started,
             progress_callback=progress_callback,
             gepa_log_dir_path=gepa_log_dir_path,
+            agent_run_sink=agent_run_sink,
         )
     finally:
         base_scorer.close()
@@ -419,6 +499,7 @@ def _run_job(
     started: float,
     progress_callback: ProgressCallback | None,
     gepa_log_dir_path: str | None,
+    agent_run_sink: AgentRunSink | None,
 ) -> BlackboxRunResponse:
     """Run the job over an already-built scorer; see :func:`run_blackbox_optimization`.
 
@@ -429,6 +510,7 @@ def _run_job(
         started: When the run began, for the elapsed time.
         progress_callback: The job's progress sink, if any.
         gepa_log_dir_path: Workspace for engine state; a temp dir when unset.
+        agent_run_sink: Receives each sandboxed agent run's record and live transcript, if any.
 
     Returns:
         The best version with baseline vs optimized held-out scores.
@@ -437,11 +519,21 @@ def _run_job(
     target = payload.target
     caps = engine_capabilities(target)
     if caps.agent_target:
-        scorer = _agent_scorer(scorer, target, job_id=artifact_id)
+        scorer = _agent_scorer(
+            scorer, target, job_id=artifact_id, progress_callback=progress_callback, agent_run_sink=agent_run_sink
+        )
     concurrency = target.concurrency if caps.agent_target else 1
     cases = list(payload.cases or [])
     splits = split_examples(cases, payload.split_fractions, shuffle=payload.shuffle, seed=payload.seed)
     split_counts = SplitCounts(train=len(splits.train), val=len(splits.val), test=len(splits.test))
+    if cases:
+        logger.info(
+            "%d case(s) split into %d train / %d val / %d test",
+            len(cases),
+            split_counts.train,
+            split_counts.val,
+            split_counts.test,
+        )
     if progress_callback is not None:
         progress_callback(
             PROGRESS_SPLITS_READY,
@@ -449,19 +541,31 @@ def _run_job(
         )
     # Without cases the scorer judges the version on its own; with cases the
     # held-out split is the yardstick, falling back to val/train for tiny sets.
+    # Those fallbacks are the engine's own cases, so the held-out passes share
+    # measurements with the eval server: the baseline feeds the engine's first
+    # look at the seed, and the final pass reuses the engine's scores of the
+    # winner instead of measuring the same pairs a second time.
     holdout: list[Any] | None = (splits.test or splits.val or splits.train) if cases else None
+    server = EvalServer(scorer, max_evals=payload.budget.max_scorer_runs, on_eval=_progress_listener(progress_callback))
 
     seed_candidate = payload.seed_candidate
     baseline = None
     if seed_candidate is not None:
-        baseline = _score_holdout(scorer, seed_candidate, holdout, label="starting point", concurrency=concurrency)
+        baseline = _score_holdout(
+            scorer,
+            seed_candidate,
+            holdout,
+            label="starting point",
+            phase=PHASE_BASELINE,
+            concurrency=concurrency,
+            server=server,
+        )
         if progress_callback is not None:
             progress_callback(PROGRESS_BASELINE, {DETAIL_BASELINE: baseline})
 
     lm = build_language_model(payload.reflection_model_settings, disable_cache=True)
     reflection_lm, reflection_durations_ms = _reflection_caller(lm)
 
-    server = EvalServer(scorer, max_evals=payload.budget.max_scorer_runs, on_eval=_progress_listener(progress_callback))
     task = Task(
         seed_candidate=seed_candidate,
         objective=payload.objective,
@@ -477,24 +581,52 @@ def _run_job(
         max_iterations=payload.budget.max_iterations,
         concurrency=concurrency,
         target_label=f"{target.harness} · {target.model}" if caps.agent_target else None,
+        progress_callback=progress_callback,
     )
     # The scorer's own model calls are part of the run: they count toward
     # the credit ceiling and the usage the worker bills.
     lms = [lm] if base_scorer.usage is None else [lm, base_scorer.usage]
     callbacks = [CostCeilingCallback(payload.max_cost_credits, *lms)] if payload.max_cost_credits is not None else []
+    iterations = f", up to {payload.budget.max_iterations} iteration(s)" if payload.budget.max_iterations else ""
+    logger.info(
+        "optimizing: mode=%s engine=%s, budget %d scorer run(s)%s",
+        payload.strategy.mode,
+        payload.strategy.engine or BLACKBOX_STRATEGY_AUTO,
+        payload.budget.max_scorer_runs,
+        iterations,
+    )
     with dspy.context(callbacks=callbacks):
         result, lanes = run_strategy(payload.strategy, task, server, ctx, progress_callback, caps=caps)
 
     best_candidate = result.best_candidate
-    optimized = _score_holdout(scorer, best_candidate, holdout, label="optimized version", concurrency=concurrency)
+    logger.info("optimization finished after %d scorer run(s): best score %s", server.used, server.best_score)
+    if progress_callback is not None:
+        progress_callback(PROGRESS_EVALUATION_STARTED, {})
+    optimized = _score_holdout(
+        scorer,
+        best_candidate,
+        holdout,
+        label="optimized version",
+        phase=PHASE_FINAL,
+        concurrency=concurrency,
+        server=server,
+    )
     regression_guard_applied = False
     if seed_candidate is not None and baseline is not None and optimized is not None and optimized < baseline:
+        logger.info("the optimized version scored below the starting point; keeping the starting point")
         best_candidate, optimized, regression_guard_applied = seed_candidate, baseline, True
     if progress_callback is not None:
         progress_callback(PROGRESS_OPTIMIZED, {DETAIL_OPTIMIZED: optimized})
 
-    usage = usage_by_model_from_history(*lms) or {}
+    # The reflection LM reports the gateway transport id (``litellm_proxy/…``)
+    # while the scorer ledger keys by catalog id; fold them so one model is one row.
+    usage: dict[str, tuple[int, int]] = {}
+    for model, in_out in (usage_by_model_from_history(*lms) or {}).items():
+        key = canonical_model_id(model)
+        prior = usage.get(key, (0, 0))
+        usage[key] = (prior[0] + in_out[0], prior[1] + in_out[1])
     engine_used = str(result.metadata.get("engine") or payload.strategy.engine or BLACKBOX_STRATEGY_AUTO)
+    candidate_tree = [BlackboxCandidateNode(**node) for node in result.metadata.pop("candidate_tree", [])]
     return BlackboxRunResponse(
         optimizer_name=payload.strategy.engine or payload.strategy.mode,
         strategy_mode=payload.strategy.mode,
@@ -517,7 +649,8 @@ def _run_job(
             )
             for lane in lanes
         ],
-        versions=_version_history(server),
+        versions=_version_history(server, _validation_scores(lanes)),
+        candidate_tree=candidate_tree,
         total_scorer_runs=server.used,
         runtime_seconds=time.perf_counter() - started,
         num_lm_calls=sum(lm_call_count(model) or 0 for model in lms),
@@ -567,6 +700,7 @@ def dry_run_scorer(request: ScorerDryRunRequest) -> ScorerDryRunResponse:
                 case=request.case,
                 scorer_model=request.scorer.model.model_dump(mode="json") if request.scorer.model else None,
                 timeout_seconds=request.scorer.timeout_seconds,
+                install_command=request.scorer.install_command,
             )
             score, side_info, error, usage = probe.score, probe.side_info, probe.error, probe.usage_by_model
     except ServiceError as exc:

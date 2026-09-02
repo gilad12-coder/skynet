@@ -8,6 +8,7 @@ import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
+import { modelProviderSlug } from "@/shared/lib/model-provider";
 import type { ModelCatalogResponse } from "@/shared/types/api";
 import {
   DropdownMenu,
@@ -46,13 +47,6 @@ function displayName(value: string | null): string {
   return shortName(value);
 }
 
-/** Company slug for a LiteLLM id — the OpenRouter prefix is transport, not brand. */
-function providerSlug(id: string): string {
-  const parts = id.split("/");
-  const slug = (parts[0] === "openrouter" && parts.length > 2 ? parts[1] : parts[0]) ?? id;
-  return slug === "x-ai" ? "xai" : slug;
-}
-
 /** Leading icon for the current choice: both auto tiers run OpenRouter's
  * Auto Router, so they wear the OpenRouter mark; explicit picks wear the
  * model company's mark. */
@@ -60,7 +54,7 @@ function choiceIcon(value: string | null, size: number): React.ReactNode {
   if (!value || value === AUTO_INTELLIGENT_MODEL) {
     return <ProviderLogo slug="openrouter" size={size} />;
   }
-  return <ProviderLogo slug={providerSlug(value)} size={size} />;
+  return <ProviderLogo slug={modelProviderSlug(value)} size={size} />;
 }
 
 // Display curation only. The composer picks a conversation partner, not a
@@ -281,7 +275,7 @@ export function ComposerModelMenu({
                   selected
                   label={shortName(currentExtra.value)}
                   description={modelDescription(currentExtra.value)}
-                  icon={<ProviderLogo slug={providerSlug(currentExtra.value)} size={18} />}
+                  icon={<ProviderLogo slug={modelProviderSlug(currentExtra.value)} size={18} />}
                   onSelect={() => pick(currentExtra.value)}
                 />
               )}
@@ -291,7 +285,7 @@ export function ComposerModelMenu({
                   selected={value === m.value}
                   label={shortName(m.value)}
                   description={modelDescription(m.value)}
-                  icon={<ProviderLogo slug={providerSlug(m.value)} size={18} />}
+                  icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={18} />}
                   onSelect={() => pick(m.value)}
                 />
               ))}

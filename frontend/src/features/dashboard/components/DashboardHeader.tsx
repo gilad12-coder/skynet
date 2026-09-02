@@ -77,6 +77,10 @@ export function DashboardHeader({ stats }: DashboardHeaderProps) {
       value: stats.failed,
       accent: stats.failed > 0 ? "danger" : "default",
     },
+    {
+      label: msg("dashboard.stat.cancelled"),
+      value: stats.cancelled,
+    },
   ];
   if (stats.shared > 0) {
     cells.push({

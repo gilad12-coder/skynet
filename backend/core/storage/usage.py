@@ -29,6 +29,7 @@ from .models import (
     AgentConversationModel,
     AgentMessageModel,
     AgentStagedDatasetModel,
+    BlackboxAgentRunModel,
     ConversationEmbeddingModel,
     DatasetModel,
     GepaCheckpointModel,
@@ -145,9 +146,7 @@ def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
     dialect = engine.dialect.name
     with Session(engine) as session:
         user_job_ids = select(JobModel.optimization_id).where(JobModel.username == normalized)
-        user_conversation_ids = select(AgentConversationModel.id).where(
-            AgentConversationModel.username == normalized
-        )
+        user_conversation_ids = select(AgentConversationModel.id).where(AgentConversationModel.username == normalized)
 
         def scalar(statement) -> int:
             """Execute a single-aggregate select and coerce the result to int."""
@@ -157,9 +156,7 @@ def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
             select(func.coalesce(func.sum(JobModel.stored_bytes), 0)).where(JobModel.username == normalized)
         )
         datasets = scalar(
-            select(func.coalesce(func.sum(DatasetModel.byte_size), 0)).where(
-                DatasetModel.owner_username == normalized
-            )
+            select(func.coalesce(func.sum(DatasetModel.byte_size), 0)).where(DatasetModel.owner_username == normalized)
         )
         logs = scalar(
             select(func.coalesce(func.sum(_byte_size(LogEntryModel.message, dialect)), 0)).where(
@@ -179,6 +176,11 @@ def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
         grid_pairs = scalar(
             select(func.coalesce(func.sum(GridPairResultModel.stored_bytes), 0)).where(
                 GridPairResultModel.optimization_id.in_(user_job_ids)
+            )
+        )
+        agent_runs = scalar(
+            select(func.coalesce(func.sum(BlackboxAgentRunModel.stored_bytes), 0)).where(
+                BlackboxAgentRunModel.optimization_id.in_(user_job_ids)
             )
         )
         agent_chats = scalar(
@@ -201,9 +203,7 @@ def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
         # backend; on SEARCH_BACKEND=lexical the tables are never created, so
         # there is nothing to count and the query would hit a missing relation.
         job_embedding_rows = (
-            scalar(
-                select(func.count(JobEmbeddingModel.optimization_id)).where(JobEmbeddingModel.user_id == normalized)
-            )
+            scalar(select(func.count(JobEmbeddingModel.optimization_id)).where(JobEmbeddingModel.user_id == normalized))
             if settings.embeddings_enabled
             else 0
         )
@@ -225,6 +225,7 @@ def compute_user_storage(engine: Engine, username: str) -> StorageUsage:
         + progress_events
         + checkpoints
         + grid_pairs
+        + agent_runs
         + optimization_embeddings,
         "datasets": datasets,
         "agent_chats": agent_chats + chat_embeddings,
@@ -396,12 +397,18 @@ def compute_user_storage_category_items(
                 .where(GridPairResultModel.optimization_id == JobModel.optimization_id)
                 .scalar_subquery()
             )
+            agent_run_bytes = (
+                select(func.coalesce(func.sum(BlackboxAgentRunModel.stored_bytes), 0))
+                .where(BlackboxAgentRunModel.optimization_id == JobModel.optimization_id)
+                .scalar_subquery()
+            )
             footprint = (
                 JobModel.stored_bytes
                 + logs_bytes
                 + progress_bytes
                 + checkpoint_bytes
                 + grid_pair_bytes
+                + agent_run_bytes
                 + embedding_bytes
             ).label("footprint")
             optimization_rows = session.execute(

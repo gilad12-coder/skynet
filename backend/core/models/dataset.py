@@ -70,6 +70,10 @@ class SplitPlan(BaseModel):
     shuffle: bool
     seed: int = Field(ge=0)
     counts: SplitCounts
+    engine: str | None = Field(
+        default=None,
+        description="Black-box engine the fractions were sized for; ``None`` means the GEPA-tuned default.",
+    )
     rationale: list[str] = Field(
         default_factory=list,
         description="Ordered list of short Hebrew bullets explaining each decision.",
@@ -91,6 +95,14 @@ class ProfileDatasetRequest(BaseModel):
     seed: int | None = Field(
         default=None,
         description="Optional RNG seed for reproducibility; a random one is chosen if omitted.",
+    )
+    engine: str | None = Field(
+        default=None,
+        description=(
+            "Black-box engine the split will feed (``best_of_n``, ``meta_harness``, ...). "
+            "Shifts the recommended fractions towards the sets that engine actually scores on; "
+            "omit for the GEPA-tuned default."
+        ),
     )
 
 

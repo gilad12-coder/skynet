@@ -142,6 +142,10 @@ export function BlackboxConfigCard({
           .join(" · ") || msg("optimization.blackbox.config.target_agent")
       : msg("optimization.blackbox.config.target_text");
 
+  const install =
+    typeof scorer.install_command === "string" && scorer.install_command.trim() !== ""
+      ? scorer.install_command
+      : null;
   const scorerValue =
     scorer.kind === "remote"
       ? `${msg("submit.blackbox.scorer.kind.remote")} · ${scorer.url ?? "—"}`
@@ -285,22 +289,35 @@ export function BlackboxConfigCard({
                     icon={<Wrench />}
                   />
                 </div>
-                {timeout && (
+                {(timeout || install) && (
                   <div
                     className="grid gap-3"
                     style={{
                       gridTemplateColumns: "repeat(auto-fit, minmax(min(11rem, 100%), 1fr))",
                     }}
                   >
-                    <SlideMiniCard
-                      label={
-                        <HelpTip text={tip("blackbox.config.scorer_timeout")}>
-                          {msg("optimization.blackbox.config.scorer_timeout_label")}
-                        </HelpTip>
-                      }
-                      value={timeout}
-                      icon={<Wrench />}
-                    />
+                    {timeout && (
+                      <SlideMiniCard
+                        label={
+                          <HelpTip text={tip("blackbox.config.scorer_timeout")}>
+                            {msg("optimization.blackbox.config.scorer_timeout_label")}
+                          </HelpTip>
+                        }
+                        value={timeout}
+                        icon={<Wrench />}
+                      />
+                    )}
+                    {install && (
+                      <SlideMiniCard
+                        label={
+                          <HelpTip text={tip("blackbox.config.scorer_install")}>
+                            {msg("optimization.blackbox.config.scorer_install_label")}
+                          </HelpTip>
+                        }
+                        value={install}
+                        icon={<Wrench />}
+                      />
+                    )}
                   </div>
                 )}
               </div>

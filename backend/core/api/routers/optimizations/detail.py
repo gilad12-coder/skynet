@@ -11,6 +11,7 @@ Internal (frontend-only, hidden from public docs):
 - ``POST /optimizations/{id}/evaluate-examples`` — per-user playground.
 - ``GET /optimizations/{id}/test-results``
 - ``GET /optimizations/{id}/pair/{idx}/test-results``
+- ``GET /optimizations/{id}/agent-runs/{run_id}`` — one sandboxed agent run's answer and transcript.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from ....constants import (
     TOKEN_SOURCE_BYOK,
 )
 from ....models import (
+    BlackboxAgentRunResponse,
     BlackboxRunResponse,
     ColumnMapping,
     GridSearchResponse,
@@ -619,6 +621,54 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
                     )
 
         return {"results": results, "program_type": program_type}
+
+    @router.get(
+        "/optimizations/{optimization_id}/agent-runs/{run_id}",
+        response_model=BlackboxAgentRunResponse,
+        summary="One sandboxed agent run of a black-box optimization",
+        tags=["agent"],
+    )
+    def get_agent_run(
+        optimization_id: str,
+        run_id: int,
+        current_user: AuthenticatedUserDep,
+        since_transcript: int = Query(0, ge=0),
+    ) -> BlackboxAgentRunResponse:
+        """Return the answer, transcript and outcome of one sandboxed agent run.
+
+        The run view polls this while the run is live, passing the transcript
+        length it already holds so only the new tail travels.
+
+        Args:
+            optimization_id: The owning optimization.
+            run_id: The run's ordinal within the job.
+            current_user: Authenticated caller resolved from the bearer token.
+            since_transcript: Transcript characters the caller already has.
+
+        Returns:
+            The run's record, with the transcript from ``since_transcript`` on.
+
+        Raises:
+            DomainError: 404 when the optimization or the run is unknown or
+                inaccessible to the caller.
+        """
+        load_job_for_user(job_store, optimization_id, current_user)
+        get_run = getattr(job_store, "get_agent_run", None)
+        run = None if get_run is None else get_run(optimization_id, run_id)
+        if run is None:
+            raise DomainError(
+                "optimization.agent_run_not_found", status=404, optimization_id=optimization_id, run_id=run_id
+            )
+        transcript = run.get("transcript") or ""
+        offset = min(since_transcript, len(transcript))
+        return BlackboxAgentRunResponse.model_validate(
+            {
+                **run,
+                "transcript": transcript[offset:],
+                "transcript_offset": offset,
+                "transcript_length": len(transcript),
+            }
+        )
 
     @router.get(
         "/optimizations/{optimization_id}/test-results",

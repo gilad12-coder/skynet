@@ -8,25 +8,38 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives
 import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { TERMS } from "@/shared/lib/terms";
-import { cn } from "@/shared/lib/utils";
 import { useLiteMode } from "@/features/settings";
 import {
   extractCandidates,
   extractMinibatch,
   extractRejected,
+  scopeToLatestLane,
   extractValset,
   extractValsetOutputs,
 } from "../lib/extract-events";
 import { layoutTrajectory } from "../lib/layout";
+import type { BlackboxTrajectoryContext } from "../lib/types";
+import { TimelineScrubber } from "./TimelineScrubber";
 import { TrajectoryTree } from "./TrajectoryTree";
 import { TrajectoryOutline } from "./TrajectoryOutline";
 import { TrajectoryDrawer, type DrawerSelection } from "./TrajectoryDrawer";
 
 const NEWEST_HIGHLIGHT_MS = 2200;
 
+// A black-box run rendered with nothing but the job in hand still gets
+// black-box terminology — just no recipe, cases or renders to go on.
+const BLACKBOX_FALLBACK: BlackboxTrajectoryContext = {
+  recipe: null,
+  hasCases: false,
+  rendersByText: new Map(),
+};
+
 type Selected = { kind: "candidate" | "rejected"; id: string };
+
+function generationText(gen: number): string {
+  return formatMsg("trajectory.scrubber.generation_value", { gen });
+}
 
 function isLive(job: OptimizationStatusResponse): boolean {
   return job.status === "running" || job.status === "validating" || job.status === "pending";
@@ -43,6 +56,9 @@ export interface TrajectoryPanelProps {
   // Tool name → approval severity from the run's persisted react_overlay,
   // forwarded to the drawer so its tool cards match the Code tab.
   toolSeverities?: Record<string, string>;
+  // Run configuration of a black-box run, forwarded to the drawer so it names
+  // candidates by kind and shows per-case scores only when cases exist.
+  blackbox?: BlackboxTrajectoryContext | null;
 }
 
 export function TrajectoryPanel({
@@ -50,15 +66,16 @@ export function TrajectoryPanel({
   pairIndex,
   previewLayout,
   toolSeverities,
+  blackbox,
 }: TrajectoryPanelProps) {
   const live = isLive(job);
   const lite = useLiteMode();
+  const blackboxCtx = blackbox ?? (job.optimization_type === "blackbox" ? BLACKBOX_FALLBACK : null);
   const { candidates, rejected, valsetRows, minibatch, valsetOutputs } = useMemo(() => {
     const events = job.progress_events ?? [];
-    const scoped =
-      pairIndex === undefined
-        ? events
-        : events.filter((e) => e.metrics?.pair_index === pairIndex);
+    const scoped = scopeToLatestLane(
+      pairIndex === undefined ? events : events.filter((e) => e.metrics?.pair_index === pairIndex),
+    );
     return {
       candidates: extractCandidates(scoped),
       rejected: extractRejected(scoped),
@@ -156,8 +173,7 @@ export function TrajectoryPanel({
     return { kind: "rejected", ghost, parent };
   }, [layout.nodes, layout.ghosts, selected]);
 
-  const selectedTreeId =
-    selected !== null && selected.kind === "candidate" ? selected.id : null;
+  const selectedTreeId = selected !== null && selected.kind === "candidate" ? selected.id : null;
 
   const handleSelectCandidate = useCallback((id: string) => {
     setSelected({ kind: "candidate", id });
@@ -215,11 +231,14 @@ export function TrajectoryPanel({
         </CardHeader>
         <CardContent className="space-y-3">
           {maxGeneration > 0 ? (
-            <GenerationTimeline
-              maxGeneration={maxGeneration}
+            <TimelineScrubber
+              max={maxGeneration}
               value={generationFilter}
               onChange={setGenerationFilter}
               isLive={live}
+              label={msg("trajectory.scrubber.label")}
+              stepText={generationText}
+              liveText={msg("trajectory.scrubber.live")}
             />
           ) : null}
           {lite ? (
@@ -240,6 +259,7 @@ export function TrajectoryPanel({
               onSelectCandidate={handleSelectCandidate}
               onSelectRejected={handleSelectRejected}
               previewLayout={previewLayout}
+              ringMode={blackboxCtx === null ? "pass_fail" : "score"}
             />
           )}
           <TrajectoryDrawer
@@ -248,198 +268,13 @@ export function TrajectoryPanel({
             onOpenChange={setDrawerOpen}
             valsetRows={valsetRows}
             minibatch={minibatch}
+            blackbox={blackboxCtx}
             valsetOutputs={valsetOutputs}
             toolSeverities={toolSeverities}
           />
-          <div
-            ref={liveRegionRef}
-            role="status"
-            aria-live="polite"
-            className="sr-only"
-          />
+          <div ref={liveRegionRef} role="status" aria-live="polite" className="sr-only" />
         </CardContent>
       </Card>
     </FadeIn>
-  );
-}
-
-function GenerationTimeline({
-  maxGeneration,
-  value,
-  onChange,
-  isLive,
-}: {
-  maxGeneration: number;
-  value: number | null;
-  onChange: (next: number | null) => void;
-  isLive: boolean;
-}) {
-  const current = value ?? maxGeneration;
-  const isAtLive = value === null;
-  const isRtl = getActiveDir() === "rtl";
-  const trackRef = useRef<HTMLDivElement | null>(null);
-  const [dragging, setDragging] = useState(false);
-
-  const genFromClientX = useCallback(
-    (clientX: number) => {
-      const el = trackRef.current;
-      if (el === null) return current;
-      const rect = el.getBoundingClientRect();
-      // Generation 0 sits at the inline-start edge — the track's right in RTL,
-      // its left in LTR — so measure the drag from that edge in either direction.
-      const offset = isRtl ? rect.right - clientX : clientX - rect.left;
-      const pct = Math.max(0, Math.min(1, offset / rect.width));
-      return Math.round(pct * maxGeneration);
-    },
-    [current, maxGeneration, isRtl],
-  );
-
-  const applyValue = useCallback(
-    (next: number) => {
-      onChange(next >= maxGeneration ? null : next);
-    },
-    [onChange, maxGeneration],
-  );
-
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      if (e.pointerType === "mouse" && e.button !== 0) return;
-      (e.currentTarget as Element).setPointerCapture(e.pointerId);
-      setDragging(true);
-      applyValue(genFromClientX(e.clientX));
-    },
-    [applyValue, genFromClientX],
-  );
-
-  const onPointerMove = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!dragging) return;
-      applyValue(genFromClientX(e.clientX));
-    },
-    [dragging, applyValue, genFromClientX],
-  );
-
-  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
-    setDragging(false);
-  }, []);
-
-  const onKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      // Later generations sit toward the inline-end edge — visually left in RTL,
-      // right in LTR — so the arrow pointing that way means "forward in time".
-      const forwardKey = isRtl ? "ArrowLeft" : "ArrowRight";
-      const backKey = isRtl ? "ArrowRight" : "ArrowLeft";
-      if (e.key === forwardKey) {
-        e.preventDefault();
-        applyValue(Math.min(maxGeneration, current + 1));
-      } else if (e.key === backKey) {
-        e.preventDefault();
-        applyValue(Math.max(0, current - 1));
-      } else if (e.key === "Home") {
-        e.preventDefault();
-        applyValue(0);
-      } else if (e.key === "End") {
-        e.preventDefault();
-        applyValue(maxGeneration);
-      }
-    },
-    [applyValue, current, maxGeneration, isRtl],
-  );
-
-  const filledPct = maxGeneration === 0 ? 100 : (current / maxGeneration) * 100;
-  const steps = useMemo(
-    () => Array.from({ length: maxGeneration + 1 }, (_, i) => i),
-    [maxGeneration],
-  );
-
-  return (
-    <div
-      className="rounded-xl border border-border/40 bg-background/70 px-4 pt-3 pb-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]"
-      dir={isRtl ? "rtl" : "ltr"}
-    >
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {msg("trajectory.scrubber.label")}
-        </span>
-      </div>
-
-      <div
-        ref={trackRef}
-        role="slider"
-        tabIndex={0}
-        aria-label={msg("trajectory.scrubber.label")}
-        aria-valuemin={0}
-        aria-valuemax={maxGeneration}
-        aria-valuenow={current}
-        aria-valuetext={
-          isAtLive
-            ? msg("trajectory.scrubber.live")
-            : formatMsg("trajectory.scrubber.generation_value", { gen: current })
-        }
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onKeyDown={onKeyDown}
-        className="relative h-9 cursor-pointer touch-none select-none rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/60"
-      >
-        <div
-          className="absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 rounded-full"
-          style={{ background: "rgba(28, 22, 18, 0.10)" }}
-        />
-        <div
-          className="absolute top-1/2 h-[2px] -translate-y-1/2 rounded-full bg-[#7C6350]"
-          style={{ ...(isRtl ? { right: 0 } : { left: 0 }), width: `${filledPct}%` }}
-        />
-
-        {steps.map((gen) => {
-          const pct = maxGeneration === 0 ? 0 : (gen / maxGeneration) * 100;
-          const isPast = gen <= current;
-          const isActive = gen === current;
-          if (isActive) return null;
-          return (
-            <span
-              key={`tick-${gen}`}
-              className="pointer-events-none absolute top-1/2 inline-flex items-center justify-center rounded-sm bg-background/95 px-1 text-[10px] tabular-nums font-semibold leading-none"
-              style={{
-                ...(isRtl ? { right: `${pct}%` } : { left: `${pct}%` }),
-                transform: isRtl ? "translate(50%, -50%)" : "translate(-50%, -50%)",
-                color: isPast ? "#7C6350" : "rgba(28, 22, 18, 0.42)",
-              }}
-              aria-hidden="true"
-            >
-              {gen}
-            </span>
-          );
-        })}
-
-        <div
-          className="pointer-events-none absolute top-1/2 z-10"
-          style={{
-            ...(isRtl ? { right: `${filledPct}%` } : { left: `${filledPct}%` }),
-            transform: isRtl ? "translate(50%, -50%)" : "translate(-50%, -50%)",
-          }}
-        >
-          {isAtLive && isLive ? (
-            <motion.span
-              className="absolute left-1/2 top-1/2 block h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#7C8B5A]/30"
-              animate={{ scale: [1, 1.7, 1], opacity: [0.55, 0, 0.55] }}
-              transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
-              aria-hidden="true"
-            />
-          ) : null}
-          <div
-            className={cn(
-              "relative block h-4 w-4 rounded-full border-[1.5px] shadow-[0_1px_2px_rgba(28,22,18,0.18)] transition-transform",
-              isAtLive
-                ? "border-[#1c1612] bg-[#1c1612]"
-                : "border-[#1c1612] bg-[#fbf8f3]",
-              dragging && "scale-110",
-            )}
-          />
-        </div>
-      </div>
-    </div>
   );
 }

@@ -843,7 +843,10 @@ function JobRow({
 
   const handleClone = () => {
     setMenuOpen(false);
-    router.push(`/submit?clone=${job.optimization_id}`);
+    // No payload in the sidebar to read the authored recipe from; the job type
+    // still pins DSPy runs to Program and black-box ones to Anything.
+    const recipe = job.optimization_type === "blackbox" ? "anything" : "program";
+    router.push(`/submit?clone=${job.optimization_id}&recipe=${recipe}`);
   };
 
   const handleRetry = async () => {

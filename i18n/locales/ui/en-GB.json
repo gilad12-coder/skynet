@@ -105,7 +105,7 @@
   "auto.features.tutorial.lib.steps.literal.31": "Labelling modes",
   "auto.features.tutorial.lib.steps.literal.41": "Beyond the browser interface, the optimised prompt is immediately available through a REST API. Copy the endpoint URL or use the ready-made code snippets (Python, JavaScript, cURL) to integrate it into your own code.",
   "auto.features.tutorial.lib.steps.literal.49": "Free-text search across all runs in the system — yours or other users'. Type a description in English or Hebrew, and Skynet finds runs with similar meaning, not just word matches. When the field is empty it suggests your recent searches and common searches, and you can focus the field from anywhere with the keyboard. You can filter by models, optimisers, status, and date range, and browse a ranked list of results.",
-  "auto.features.tutorial.lib.steps.literal.7": "Four cards summarise activity: all runs, active runs, succeeded runs, and failed runs, alongside success and failure rates.",
+  "auto.features.tutorial.lib.steps.literal.7": "Five cards summarise activity: all runs, active runs, succeeded runs, failed runs, and cancelled runs, alongside success and failure rates.",
   "auto.features.tutorial.lib.steps.template.25": "{p1} produces the answers. {p2} analyses errors and proposes prompt improvements. You can choose a different {p3} for each role.",
   "auto.features.tutorial.lib.steps.template.27": "Submitting an optimisation",
   "auto.features.tutorial.lib.steps.template.3": "At the top there is navigation to the dashboard, text labelling, submitting a new {p1}, and semantic search across existing runs. At the bottom, the run history appears grouped by date. Through the ⋯ next to a {p2} you can share, rename, clone, pin, or delete.",

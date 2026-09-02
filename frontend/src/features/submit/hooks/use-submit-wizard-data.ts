@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { getModelCatalog, cachedCatalog } from "@/shared/lib/model-catalog";
 import { profileDataset } from "@/shared/lib/api";
 import type {
@@ -8,6 +8,7 @@ import type {
   ModelConfig,
   SplitFractions,
   SplitPlan,
+  BlackboxEngineId,
 } from "@/shared/types/api";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import { MAX_RECENT, RECENT_KEY } from "../constants";
@@ -121,17 +122,24 @@ export function useDatasetProfiling({
   setSplit,
   setShuffle,
   setSeed,
+  engine = null,
 }: {
   parsedDataset: ParsedDataset | null;
   columnRoles: Record<string, ColumnRole>;
   splitModeRef: MutableRefObject<"auto" | "manual">;
-  setDatasetProfile: (profile: DatasetProfile | null) => void;
+  setDatasetProfile?: (profile: DatasetProfile | null) => void;
   setSplitPlan: (plan: SplitPlan | null) => void;
   setProfileLoading: (loading: boolean) => void;
   setSplit: (split: SplitFractions) => void;
   setShuffle: (shuffle: boolean) => void;
   setSeed: (seed: number | undefined) => void;
+  // Black-box engine the split will feed; the planner sizes the sets for it.
+  engine?: BlackboxEngineId | null;
 }) {
+  // A new dataset resets the shuffle/seed to the plan's; a re-profile of the same
+  // dataset (engine or column change) only refreshes the fractions, so the user's
+  // shuffle choice survives.
+  const profiledDatasetRef = useRef<ParsedDataset | null>(null);
   useEffect(() => {
     if (!parsedDataset || parsedDataset.rowCount === 0) return;
     const mapping = buildColumnMapping(columnRoles);
@@ -143,15 +151,20 @@ export function useDatasetProfiling({
       profileDataset({
         dataset: parsedDataset.rows as Array<Record<string, unknown>>,
         column_mapping: mapping,
+        engine,
       })
         .then((response) => {
           if (cancelled) return;
-          setDatasetProfile(response.profile);
+          const datasetChanged = profiledDatasetRef.current !== parsedDataset;
+          profiledDatasetRef.current = parsedDataset;
+          setDatasetProfile?.(response.profile);
           setSplitPlan(response.plan);
           if (splitModeRef.current === "auto") {
             setSplit(response.plan.fractions);
-            setShuffle(response.plan.shuffle);
-            setSeed(response.plan.seed);
+            if (datasetChanged) {
+              setShuffle(response.plan.shuffle);
+              setSeed(response.plan.seed);
+            }
           }
         })
         .catch(() => {
@@ -168,6 +181,7 @@ export function useDatasetProfiling({
     };
   }, [
     columnRoles,
+    engine,
     parsedDataset,
     setDatasetProfile,
     setProfileLoading,

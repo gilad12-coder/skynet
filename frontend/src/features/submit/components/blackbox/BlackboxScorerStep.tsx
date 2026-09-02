@@ -5,18 +5,19 @@ import { CheckCircle, CircleNotch, Play, XCircle } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
-import { NumberInput } from "@/shared/ui/number-input";
+import { Switch } from "@/shared/ui/primitives/switch";
+import { HelpTip } from "@/shared/ui/help-tip";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { tip } from "@/shared/lib/tooltips";
 import { formatElapsedMs, formatScore } from "@/shared/lib/formatters";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
-import { SCORER_PRESETS } from "../../hooks/use-blackbox-wizard";
-import { emptyModelConfig } from "../../constants";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
-import { Field, MOBILE_INPUT_CLASS, MOBILE_NUMBER_INPUT_CLASS, Segmented } from "./shared";
+import { emptyModelConfig } from "../../constants";
+import { Field, MOBILE_INPUT_CLASS, Segmented } from "./shared";
 
 const MOBILE_MODEL_CHIP_CLASS =
   "min-h-[44px] max-lg:[&_button]:min-h-[44px] max-lg:[&_button]:min-w-[44px] max-lg:[&_button]:opacity-100";
@@ -43,10 +44,14 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
     setScorerUrl,
     scorerSecret,
     setScorerSecret,
-    scorerTimeout,
-    setScorerTimeout,
+    scorerInstall,
+    setScorerInstall,
     scorerModel,
     setScorerModel,
+    scorerModelDeclared,
+    setScorerModelDeclared,
+    scorerCodeCallsModel,
+    scorerUsesModel,
     setEditingModel,
     catalog,
     dryRun,
@@ -83,64 +88,59 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
 
       {scorerKind === "python" ? (
         <div className="space-y-3">
-          <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-            {msg("submit.blackbox.scorer.code_hint")}
-          </p>
-          <div className="space-y-2">
-            <Label>{msg("submit.blackbox.scorer.preset_label")}</Label>
-            <div className="flex flex-wrap gap-2">
-              {SCORER_PRESETS.map((preset) => (
-                <Button
-                  key={preset.id}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setMetricCode(preset.code);
-                    setScorerManuallyEdited(true);
-                  }}
-                  className="min-h-[36px] text-xs"
-                >
-                  {msg(`submit.blackbox.scorer.preset.${preset.id}` as Parameters<typeof msg>[0])}
-                </Button>
-              ))}
+          {/* A metric is any function; only one that calls llm() has a model
+              to pick. Code that already calls it settles the question. */}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="bb-scorer-uses-model">
+                {msg("submit.blackbox.scorer.uses_model_label")}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {msg(
+                  scorerCodeCallsModel
+                    ? "submit.blackbox.scorer.uses_model_detected"
+                    : "submit.blackbox.scorer.uses_model_desc",
+                )}
+              </p>
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label>{msg("submit.blackbox.scorer.model_label")}</Label>
-            <ModelChip
-              config={scorerModel}
-              className={MOBILE_MODEL_CHIP_CLASS}
-              roleLabel={msg("submit.blackbox.scorer.model_label")}
-              tooltip={msg("submit.blackbox.scorer.model_explainer")}
-              catalogModels={catalog?.models}
-              onClick={() =>
-                setEditingModel({
-                  config: scorerModel,
-                  onSave: setScorerModel,
-                  label: msg("submit.blackbox.scorer.model_label"),
-                })
-              }
-              onRemove={scorerModel.name ? () => setScorerModel(emptyModelConfig()) : undefined}
+            <Switch
+              id="bb-scorer-uses-model"
+              checked={scorerUsesModel}
+              disabled={scorerCodeCallsModel}
+              onCheckedChange={setScorerModelDeclared}
             />
           </div>
-          <Field
-            label={msg("submit.blackbox.scorer.timeout_label")}
-            htmlFor="bb-scorer-timeout"
-            hint={msg("submit.blackbox.scorer.timeout_hint")}
-          >
-            <NumberInput
-              id="bb-scorer-timeout"
-              value={scorerTimeout}
-              onChange={setScorerTimeout}
-              min={1}
-              max={600}
-              step={5}
-              className={`${MOBILE_NUMBER_INPUT_CLASS} sm:max-w-[14rem]`}
-            />
-          </Field>
+          {scorerUsesModel && (
+            <div className="space-y-2">
+              <Label>
+                <HelpTip text={tip("submit.blackbox.scorer_model")}>
+                  {msg("submit.blackbox.scorer.model_label")}
+                </HelpTip>
+              </Label>
+              <ModelChip
+                config={scorerModel}
+                className={MOBILE_MODEL_CHIP_CLASS}
+                roleLabel={msg("submit.blackbox.scorer.model_label")}
+                tooltip={msg("submit.blackbox.scorer.model_explainer")}
+                required
+                catalogModels={catalog?.models}
+                onClick={() =>
+                  setEditingModel({
+                    config: scorerModel,
+                    onSave: setScorerModel,
+                    label: msg("submit.blackbox.scorer.model_label"),
+                  })
+                }
+                onRemove={scorerModel.name ? () => setScorerModel(emptyModelConfig()) : undefined}
+              />
+            </div>
+          )}
           <div className="flex items-center justify-between gap-2">
-            <Label>{msg("submit.blackbox.scorer.code_label")}</Label>
+            <Label>
+              <HelpTip text={tip("submit.blackbox.scorer_code")}>
+                {msg("submit.blackbox.scorer.code_label")}
+              </HelpTip>
+            </Label>
             {codeAssistMode === "auto" && (
               <div className="flex items-center gap-2">
                 <VersionStepper agent={agent} artifact="metric" />
@@ -162,13 +162,31 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
             streaming={codeAssistMode === "auto" && agent.metricStatus === "writing"}
             flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
           />
+          <Field
+            label={msg("submit.blackbox.scorer.install_label")}
+            htmlFor="bb-scorer-install"
+            tip="submit.blackbox.scorer_install"
+          >
+            <Input
+              id="bb-scorer-install"
+              value={scorerInstall}
+              onChange={(e) => setScorerInstall(e.target.value)}
+              placeholder="pip install numpy trimesh"
+              dir="ltr"
+              className={`${MOBILE_INPUT_CLASS} font-mono`}
+            />
+          </Field>
         </div>
       ) : (
         <div className="space-y-4">
           <p className="text-[0.6875rem] leading-relaxed text-muted-foreground" dir="ltr">
             {msg("submit.blackbox.scorer.remote_hint")}
           </p>
-          <Field label={msg("submit.blackbox.scorer.url_label")} htmlFor="bb-scorer-url">
+          <Field
+            label={msg("submit.blackbox.scorer.url_label")}
+            htmlFor="bb-scorer-url"
+            tip="submit.blackbox.scorer_url"
+          >
             <Input
               id="bb-scorer-url"
               type="url"
@@ -180,7 +198,11 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
             />
           </Field>
           <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
-            <Field label={msg("submit.blackbox.scorer.secret_label")} htmlFor="bb-scorer-secret">
+            <Field
+              label={msg("submit.blackbox.scorer.secret_label")}
+              htmlFor="bb-scorer-secret"
+              tip="submit.blackbox.scorer_secret"
+            >
               <Input
                 id="bb-scorer-secret"
                 type="password"
@@ -189,17 +211,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                 onChange={(e) => setScorerSecret(e.target.value)}
                 dir="ltr"
                 className={`${MOBILE_INPUT_CLASS} font-mono`}
-              />
-            </Field>
-            <Field label={msg("submit.blackbox.scorer.timeout_label")} htmlFor="bb-scorer-timeout">
-              <NumberInput
-                id="bb-scorer-timeout"
-                value={scorerTimeout}
-                onChange={setScorerTimeout}
-                min={1}
-                max={600}
-                step={5}
-                className={MOBILE_NUMBER_INPUT_CLASS}
               />
             </Field>
           </div>

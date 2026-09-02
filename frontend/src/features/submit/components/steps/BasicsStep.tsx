@@ -11,7 +11,9 @@ import {
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import { Separator } from "@/shared/ui/primitives/separator";
+import { HelpTip } from "@/shared/ui/help-tip";
 import { cn } from "@/shared/lib/utils";
+import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { useUserPrefs } from "@/features/settings";
@@ -51,8 +53,10 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
       <CardContent className="space-y-4 px-4 sm:px-6">
         <div className="space-y-2">
           <Label>
-            {msg("auto.features.submit.components.steps.basicsstep.3")}
-            {TERMS.optimization}
+            <HelpTip text={tip("submit.name")}>
+              {msg("auto.features.submit.components.steps.basicsstep.3")}
+              {TERMS.optimization}
+            </HelpTip>
           </Label>
           <Input
             placeholder={msg("auto.features.submit.components.steps.basicsstep.literal.1")}
@@ -63,7 +67,11 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
         </div>
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label>{msg("auto.features.submit.components.steps.basicsstep.4")}</Label>
+            <Label>
+              <HelpTip text={tip("submit.description")}>
+                {msg("auto.features.submit.components.steps.basicsstep.4")}
+              </HelpTip>
+            </Label>
             <span
               className={cn(
                 "text-[0.625rem] tabular-nums transition-colors",
@@ -90,7 +98,9 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
           />
         </div>
         <div className="space-y-3">
-          <Label>{msg("submit.basics.privacy.label")}</Label>
+          <Label>
+            <HelpTip text={tip("submit.privacy")}>{msg("submit.basics.privacy.label")}</HelpTip>
+          </Label>
           <div className="relative inline-flex w-full rounded-lg bg-muted p-1 gap-1">
             <div
               className="absolute top-1 bottom-1 w-[calc(50%-6px)] rounded-md bg-background shadow-sm transition-[inset-inline-start] duration-100 ease-out"
@@ -144,10 +154,12 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
               className="flex min-h-[44px] w-full cursor-pointer items-center justify-between gap-2 lg:min-h-0"
             >
               <span className="flex items-baseline gap-2">
-                <span className="text-sm leading-none font-medium">
-                  {msg("auto.features.submit.components.steps.basicsstep.6")}
-                  {TERMS.optimization}
-                </span>
+                <HelpTip text={tip("submit.optimization_type")}>
+                  <span className="text-sm leading-none font-medium">
+                    {msg("auto.features.submit.components.steps.basicsstep.6")}
+                    {TERMS.optimization}
+                  </span>
+                </HelpTip>
                 {!optimizationTypeOpen && (
                   <span className="text-xs text-muted-foreground">
                     {jobType === "run" ? TERMS.optimizationTypeRun : TERMS.optimizationTypeGrid}

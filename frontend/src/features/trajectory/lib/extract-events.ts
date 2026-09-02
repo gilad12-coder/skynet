@@ -1,3 +1,4 @@
+import type { SideImage } from "@/shared/lib/candidate-render";
 import type { ProgressEvent } from "@/shared/types/api";
 import type {
   CandidateMetrics,
@@ -15,6 +16,30 @@ const REJECTED_EVENT = "candidate_rejected";
 const VALSET_EVENT = "valset_rows";
 const VALSET_OUTPUTS_EVENT = "valset_outputs";
 const MINIBATCH_EVENT = "minibatch_feedback";
+
+/**
+ * Keep only the trajectory events of the newest engine lane.
+ *
+ * Black-box strategies run engines in sequential lanes and candidate ids
+ * restart at "0" in each one, so mixing lanes would corrupt the tree. Events
+ * without a ``lane_index`` (every DSPy run) are lane 0, making this a no-op
+ * for them.
+ */
+export function scopeToLatestLane(events: ProgressEvent[]): ProgressEvent[] {
+  const laneOf = (event: ProgressEvent): number => {
+    const lane = event.metrics?.lane_index;
+    return typeof lane === "number" && Number.isInteger(lane) && lane > 0 ? lane : 0;
+  };
+  let latest = 0;
+  for (const event of events) {
+    if (event.event === CANDIDATE_EVENT) latest = Math.max(latest, laneOf(event));
+  }
+  if (latest === 0) return events;
+  const laned = new Set([CANDIDATE_EVENT, REJECTED_EVENT, MINIBATCH_EVENT]);
+  return events.filter(
+    (event) => event.event == null || !laned.has(event.event) || laneOf(event) === latest,
+  );
+}
 
 function coercePerExample(raw: unknown): PerExampleScore[] {
   if (!Array.isArray(raw)) return [];
@@ -193,6 +218,7 @@ function coerceMinibatch(
   const feedback = metrics.feedback;
   const prediction = metrics.prediction;
   const iteration = metrics.iteration;
+  const images_dropped = metrics.images_dropped;
   if (typeof example_id !== "string") return null;
   if (typeof score !== "number") return null;
   if (typeof feedback !== "string") return null;
@@ -203,7 +229,22 @@ function coerceMinibatch(
     prediction: coercePrediction(prediction),
     sequence,
     iteration: typeof iteration === "number" ? iteration : null,
+    images: coerceImages(metrics.images),
+    images_dropped: typeof images_dropped === "number" && images_dropped > 0 ? images_dropped : 0,
   };
+}
+
+function coerceImages(value: unknown): SideImage[] {
+  if (!Array.isArray(value)) return [];
+  const out: SideImage[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) continue;
+    const { key, src } = item as Record<string, unknown>;
+    if (typeof key !== "string" || typeof src !== "string") continue;
+    if (!src.startsWith("data:image/")) continue;
+    out.push({ key, src });
+  }
+  return out;
 }
 
 export function extractMinibatch(events: ProgressEvent[]): MinibatchEntry[] {

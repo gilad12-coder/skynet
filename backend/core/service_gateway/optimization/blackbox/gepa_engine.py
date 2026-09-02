@@ -16,13 +16,12 @@ from gepa.core.state import GEPAState
 from gepa.optimize_anything import EngineConfig, GEPAConfig, ReflectionConfig, TrackingConfig, optimize_anything
 from gepa.utils.stop_condition import ScoreThresholdStopper
 
+from ....constants import OPTIMIZER_NAME_GEPA
+from ..trajectory import capture_proposal_prompts, trajectory_watch
+from .feedback import STR_CANDIDATE_KEY, emit_scorer_feedback
 from .protocol import BudgetExhaustedError, Candidate, EngineContext, EvalServer, Result, Task
 
 logger = logging.getLogger(__name__)
-
-# GEPA's internal key for a text seed; ``GEPAResult.from_state`` needs it to
-# unwrap the single-part dict it stores text candidates as.
-_STR_CANDIDATE_KEY = "current_candidate"
 
 
 class _JobLogger:
@@ -76,8 +75,18 @@ class GepaEngine:
             stop_callbacks=[ScoreThresholdStopper(ctx.stop_at_score)] if ctx.stop_at_score is not None else None,
         )
 
+        # GEPA hands the dataset rows back by identity and keys each candidate's
+        # per-case scores by the case's index in the validation set (the train
+        # set when no val set was given). Feedback carries that same index so
+        # the tree drawer can pair the scorer's notes with a case's score cell;
+        # train-only cases follow after the validation ones.
+        validation_set = task.val_set or task.train_set
+        example_ids: dict[int, str] = {}
+        for index, example in enumerate([*validation_set, *task.train_set]):
+            example_ids.setdefault(id(example), str(index))
+
         def evaluator(candidate: Candidate, example: Any = None) -> tuple[float, dict[str, Any]]:
-            """Route one GEPA evaluation through the budgeted server.
+            """Route one GEPA evaluation through the budgeted server and report its feedback.
 
             Args:
                 candidate: The version GEPA wants scored.
@@ -86,7 +95,14 @@ class GepaEngine:
             Returns:
                 The score and side information.
             """
-            return server.evaluate(candidate, example)
+            score, side_info = server.evaluate(candidate, example)
+            emit_scorer_feedback(
+                ctx.progress_callback,
+                example_id=example_ids.get(id(example), "?"),
+                score=score,
+                side_info=side_info,
+            )
+            return score, side_info
 
         kwargs: dict[str, Any] = {"seed_candidate": task.seed_candidate, "evaluator": evaluator, "config": config}
         if task.train_set:
@@ -98,10 +114,16 @@ class GepaEngine:
         if task.background:
             kwargs["background"] = task.background
 
-        try:
-            gepa_result: GEPAResult[Any, Any] | None = optimize_anything(**kwargs)
-        except BudgetExhaustedError:
-            gepa_result = _load_result_from_state(run_dir, seed=ctx.seed, str_mode=task.str_mode)
+        # The watcher tails run_dir/gepa_state.bin and forwards each accepted
+        # candidate as a live progress event — the same channel DSPy runs
+        # stream their trajectory tree through. The proposal capture pins
+        # scorer feedback to the iteration that asked for it and snapshots
+        # rejected proposals' text, again exactly as the DSPy path does.
+        with capture_proposal_prompts(OPTIMIZER_NAME_GEPA), trajectory_watch(run_dir, ctx.progress_callback):
+            try:
+                gepa_result: GEPAResult[Any, Any] | None = optimize_anything(**kwargs)
+            except BudgetExhaustedError:
+                gepa_result = _load_result_from_state(run_dir, seed=ctx.seed, str_mode=task.str_mode)
 
         if gepa_result is None:
             fallback = server.best_candidate
@@ -116,8 +138,41 @@ class GepaEngine:
             best_candidate=best,
             best_score=float(gepa_result.val_aggregate_scores[gepa_result.best_idx]),
             total_evals=server.used,
-            metadata={"candidates": len(gepa_result.candidates), "gepa_metric_calls": gepa_result.total_metric_calls},
+            metadata={
+                "candidates": len(gepa_result.candidates),
+                "gepa_metric_calls": gepa_result.total_metric_calls,
+                "candidate_tree": _candidate_tree(gepa_result, str_mode=task.str_mode),
+            },
         )
+
+
+def _candidate_tree(gepa_result: GEPAResult[Any, Any], *, str_mode: bool) -> list[dict[str, Any]]:
+    """Flatten GEPA's lineage into JSON-safe nodes for the run result.
+
+    Args:
+        gepa_result: The finished (or state-recovered) result.
+        str_mode: Whether candidates unwrap to plain text.
+
+    Returns:
+        One node per candidate, in discovery order: the candidate, the
+        indices of the parents it was mutated from (``None`` for the seed),
+        its mean validation score and the metric-call count at discovery.
+    """
+    nodes: list[dict[str, Any]] = []
+    for index, candidate in enumerate(gepa_result.candidates):
+        unwrapped: Any = candidate
+        if str_mode and isinstance(unwrapped, dict):
+            unwrapped = next(iter(unwrapped.values()), "")
+        score = gepa_result.val_aggregate_scores[index]
+        nodes.append(
+            {
+                "candidate": unwrapped,
+                "parents": [None if parent is None else int(parent) for parent in gepa_result.parents[index]],
+                "val_score": None if score is None else float(score),
+                "discovery_evals": int(gepa_result.discovery_eval_counts[index]),
+            }
+        )
+    return nodes
 
 
 def _load_result_from_state(run_dir: str, *, seed: int, str_mode: bool) -> GEPAResult[Any, Any] | None:
@@ -137,7 +192,7 @@ def _load_result_from_state(run_dir: str, *, seed: int, str_mode: bool) -> GEPAR
             state,
             run_dir=run_dir,
             seed=seed,
-            str_candidate_key=_STR_CANDIDATE_KEY if str_mode else None,
+            str_candidate_key=STR_CANDIDATE_KEY if str_mode else None,
         )
     except Exception as exc:
         logger.info("no GEPA state to recover after budget exhaustion: %s", exc)

@@ -284,9 +284,7 @@ class BillingCustomerModel(Base):
     )
 
     username: Mapped[str] = mapped_column(String(255), primary_key=True)
-    stripe_customer_id: Mapped[str] = mapped_column(
-        String(64), nullable=False, unique=True, index=True
-    )
+    stripe_customer_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     credit_balance: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer(), "sqlite"),
         nullable=False,
@@ -297,9 +295,7 @@ class BillingCustomerModel(Base):
     # grant (500 credits, seeded once and never renewed). NULL until the first
     # wallet read or run seeds it; seeding is lazy-evaluated on read, never
     # cron'd.
-    grant_remaining: Mapped[int | None] = mapped_column(
-        BigInteger().with_variant(Integer(), "sqlite"), nullable=True
-    )
+    grant_remaining: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -327,20 +323,14 @@ class CreditLedgerModel(Base):
         autoincrement=True,
     )
     username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    delta_credits: Mapped[int] = mapped_column(
-        BigInteger().with_variant(Integer(), "sqlite"), nullable=False
-    )
+    delta_credits: Mapped[int] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     description: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Measured usage behind a run row's charge; None on top-ups/grants and on
     # rows written before token metering landed.
-    input_tokens: Mapped[int | None] = mapped_column(
-        BigInteger().with_variant(Integer(), "sqlite"), nullable=True
-    )
-    output_tokens: Mapped[int | None] = mapped_column(
-        BigInteger().with_variant(Integer(), "sqlite"), nullable=True
-    )
+    input_tokens: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
     stripe_event_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # The PaymentIntent behind a top-up (``pi_…``), the join key a refund or
     # dispute webhook uses to find the account and the credits to claw back —
@@ -398,9 +388,7 @@ class BillingProviderKeyModel(Base):
     params: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
     secret_ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     last4: Mapped[str] = mapped_column(String(8), nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="unverified", server_default="unverified"
-    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="unverified", server_default="unverified")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -408,9 +396,7 @@ class BillingProviderKeyModel(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
 
-    __table_args__ = (
-        Index("ix_billing_provider_keys_username_provider", "username", "provider"),
-    )
+    __table_args__ = (Index("ix_billing_provider_keys_username_provider", "username", "provider"),)
 
 
 class BillingOpenRouterKeyModel(Base):
@@ -559,9 +545,7 @@ class OptimizationShareLinkModel(Base):
     general_access: Mapped[str] = mapped_column(
         String(16), nullable=False, default="restricted", server_default="restricted"
     )
-    general_role: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="viewer", server_default="viewer"
-    )
+    general_role: Mapped[str] = mapped_column(String(16), nullable=False, default="viewer", server_default="viewer")
 
 
 class OptimizationShareGrantModel(Base):
@@ -640,9 +624,7 @@ class JobModel(Base):
     # Running sum of every completed leg's wall-clock duration. ``requeue_for_resume``
     # folds the finished leg in before clearing the timestamps, so elapsed reports net
     # active compute across resumes without ever counting the paused gap between legs.
-    accumulated_runtime_seconds: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0, server_default="0"
-    )
+    accumulated_runtime_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0, server_default="0")
     # Distributed grid search: a (generation, reflection) pair fanned out as
     # its own claimable row points at its grid parent here and carries its
     # global pair index. NULL for every user-visible job — child rows are
@@ -756,6 +738,48 @@ class GridPairResultModel(Base):
     )
     pair_index: Mapped[int] = mapped_column(Integer, primary_key=True)
     result: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False)
+    stored_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class BlackboxAgentRunModel(Base):
+    """One sandboxed agent run of a black-box job: its answer, transcript and outcome.
+
+    An agent target evaluates every ``(version, case)`` pair in its own
+    sandbox. The worker writes the row when the run starts, appends the
+    transcript as the box streams it, and rewrites the row with the answer
+    and outcome when the run ends, so the run view can show what each
+    version did on each case, live or after the fact. ``phase``/``trial``/
+    ``example_id`` tie the row to the progress events that name the same
+    run. ``stored_bytes`` folds into the owner's "optimizations" footprint;
+    rows go with their job via the cascading foreign key.
+    """
+
+    __tablename__ = "blackbox_agent_runs"
+
+    optimization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("jobs.optimization_id", ondelete="CASCADE"), primary_key=True
+    )
+    run_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    phase: Mapped[str] = mapped_column(String(16), nullable=False)
+    trial: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    example_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    case_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timed_out: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    elapsed_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    usage: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False, default=dict)
+    check_result: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcript: Mapped[str] = mapped_column(Text, nullable=False, default="")
     stored_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
@@ -1130,9 +1154,7 @@ class DatasetBlobModel(Base):
 
     __tablename__ = "dataset_blobs"
 
-    dataset_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True
-    )
+    dataset_id: Mapped[str] = mapped_column(String(36), ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True)
     content_type: Mapped[str] = mapped_column(String(16), nullable=False)
     compression: Mapped[str] = mapped_column(String(16), nullable=False)
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
@@ -1173,9 +1195,7 @@ class DatasetShareLinkModel(Base):
     general_access: Mapped[str] = mapped_column(
         String(16), nullable=False, default="restricted", server_default="restricted"
     )
-    general_role: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="viewer", server_default="viewer"
-    )
+    general_role: Mapped[str] = mapped_column(String(16), nullable=False, default="viewer", server_default="viewer")
 
 
 class DatasetShareGrantModel(Base):
@@ -1238,9 +1258,7 @@ class TaggingSessionShareLinkModel(Base):
     general_access: Mapped[str] = mapped_column(
         String(16), nullable=False, default="restricted", server_default="restricted"
     )
-    general_role: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="viewer", server_default="viewer"
-    )
+    general_role: Mapped[str] = mapped_column(String(16), nullable=False, default="viewer", server_default="viewer")
 
 
 class TaggingSessionShareGrantModel(Base):

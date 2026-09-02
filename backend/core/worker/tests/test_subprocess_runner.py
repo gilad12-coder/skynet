@@ -17,6 +17,7 @@ import pytest
 
 import core.worker.subprocess_runner as sr
 from core.worker.constants import (
+    EVENT_AGENT_RUN,
     EVENT_ERROR,
     EVENT_LOG,
     EVENT_PROGRESS,
@@ -73,6 +74,7 @@ def test_safe_queue_put_places_event_on_queue() -> None:
 
 def test_safe_queue_put_suppresses_exception_from_broken_queue() -> None:
     """``safe_queue_put`` swallows exceptions raised by the queue."""
+
     class _BrokenQueue:
         def put(self, item: object) -> None:
             """Always raise to simulate a broken queue."""
@@ -206,6 +208,7 @@ def test_subprocess_log_handler_falls_back_to_get_message_on_format_error() -> N
 
 def test_subprocess_log_handler_suppresses_broken_queue_errors() -> None:
     """The handler swallows queue ``put`` errors so logging never crashes the run."""
+
     class _BrokenQueue:
         def put(self, item: object) -> None:
             """Always raise to simulate a broken pipe to the parent process."""
@@ -424,9 +427,10 @@ def test_run_service_in_subprocess_blackbox_progress_is_forwarded() -> None:
     """Lane events emitted by the black-box run reach the parent as ``EVENT_PROGRESS``."""
     q: queue.Queue[dict] = queue.Queue()
 
-    def _fake_run(payload, *, artifact_id, progress_callback, gepa_log_dir_path=None):
-        """Stand-in for ``run_blackbox_optimization`` that emits one lane event."""
+    def _fake_run(payload, *, artifact_id, progress_callback, gepa_log_dir_path=None, agent_run_sink=None):
+        """Stand-in for ``run_blackbox_optimization`` that emits one lane event and one run row."""
         progress_callback("lane_started", {"engine": "gepa", "phase": "single", "budget": 5})
+        agent_run_sink({"run_id": 1, "status": "running"})
         fake_result = MagicMock()
         fake_result.model_dump.return_value = {}
         return fake_result
@@ -438,7 +442,11 @@ def test_run_service_in_subprocess_blackbox_progress_is_forwarded() -> None:
     ):
         run_service_in_subprocess(dict(_BLACKBOX_PAYLOAD), "art-10", q, "spawn")
 
-    progress_events = [e for e in _drain_queue(q) if e.get("type") == EVENT_PROGRESS]
+    events = _drain_queue(q)
+    progress_events = [e for e in events if e.get("type") == EVENT_PROGRESS]
     assert len(progress_events) == 1
     assert progress_events[0]["event"] == "lane_started"
     assert progress_events[0]["metrics"] == {"engine": "gepa", "phase": "single", "budget": 5}
+    assert [e for e in events if e.get("type") == EVENT_AGENT_RUN] == [
+        {"type": EVENT_AGENT_RUN, "run": {"run_id": 1, "status": "running"}}
+    ]

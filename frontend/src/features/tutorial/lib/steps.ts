@@ -81,6 +81,7 @@ import {
   waitForHook,
 } from "./bridge";
 import { isGeneralistAgentEnabled } from "@/features/agent-panel";
+import { PROGRAM_STEP } from "@/features/submit";
 
 function navigateTo(path: string) {
   // Prefer in-app client navigation via the tutorial-overlay hook.
@@ -333,7 +334,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     beforeShow: async () => {
       await ensureSubmit();
       injectSampleDataset();
-      setWizardStep(2);
+      setWizardStep(PROGRAM_STEP.cases);
     },
     tracks: QUICK_ONLY,
     readingTimeSec: 7,
@@ -353,7 +354,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     beforeShow: async () => {
       await ensureSubmit();
       injectSampleDataset();
-      setWizardStep(1);
+      setWizardStep(PROGRAM_STEP.start);
       callTutorialHook("setCodeAssistMode", "manual");
       callTutorialHook("chooseModule", "predict");
       callTutorialHook("setSignatureCode", DEMO_SIGNATURE_CODE);
@@ -376,7 +377,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     placement: "bottom",
     beforeShow: async () => {
       await ensureSubmit();
-      setWizardStep(4);
+      setWizardStep(PROGRAM_STEP.optimizer);
     },
     tracks: QUICK_ONLY,
     readingTimeSec: 7,
@@ -394,7 +395,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     beforeShow: async () => {
       await ensureSubmit();
       setOptimizerName("gepa");
-      setWizardStep(5);
+      setWizardStep(PROGRAM_STEP.review);
     },
     tracks: QUICK_ONLY,
     readingTimeSec: 5,

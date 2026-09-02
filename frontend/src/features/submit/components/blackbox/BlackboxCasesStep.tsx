@@ -1,23 +1,15 @@
 "use client";
 
-import { Books, UploadSimple, X } from "@/shared/ui/icons";
+import { Books, UploadSimple } from "@/shared/ui/icons";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Button } from "@/shared/ui/primitives/button";
-import { Label } from "@/shared/ui/primitives/label";
 import { Separator } from "@/shared/ui/primitives/separator";
-import { Switch } from "@/shared/ui/primitives/switch";
-import { NumberInput } from "@/shared/ui/number-input";
 import { DatasetPickerDialog } from "@/features/datasets";
 import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
-import { defaultSplit } from "../../constants";
-import { MOBILE_NUMBER_INPUT_CLASS, Segmented, StepCard } from "./shared";
-
-type HoldoutMode = "holdout" | "all";
-
-const ALL_CASES_SPLIT = { train: 1, val: 0, test: 0 };
+import { StepCard } from "./shared";
 
 export function BlackboxCasesStep({ w }: { w: BlackboxWizardContext }) {
   const {
@@ -25,18 +17,10 @@ export function BlackboxCasesStep({ w }: { w: BlackboxWizardContext }) {
     casesName,
     handleFileUpload,
     handlePickFromLibrary,
-    clearCases,
     libraryOpen,
     setLibraryOpen,
-    split,
-    setSplit,
-    shuffle,
-    setShuffle,
     targetKind,
   } = w;
-  // Train 100% means every case is both optimized on and reported on — the
-  // right shape for a fixed task set with nothing to hold out.
-  const holdout = split.val > 0 || split.test > 0;
 
   return (
     <StepCard
@@ -94,79 +78,7 @@ export function BlackboxCasesStep({ w }: { w: BlackboxWizardContext }) {
         onPick={handlePickFromLibrary}
       />
 
-      {parsedCases ? (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            {parsedCases.columns.map((c) => (
-              <Badge key={c} variant="outline" className="font-mono">
-                {c}
-              </Badge>
-            ))}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={clearCases}
-              className="ms-auto min-h-[44px] gap-1 text-muted-foreground lg:min-h-0"
-            >
-              <X className="size-3.5" />
-              {msg("submit.blackbox.cases.clear")}
-            </Button>
-          </div>
-          <div className="space-y-2">
-            <Label>{msg("submit.blackbox.cases.holdout_label")}</Label>
-            <Segmented<HoldoutMode>
-              value={holdout ? "holdout" : "all"}
-              onChange={(mode) => setSplit(mode === "all" ? ALL_CASES_SPLIT : defaultSplit)}
-              options={[
-                {
-                  value: "holdout",
-                  label: msg("submit.blackbox.cases.holdout.split"),
-                  desc: msg("submit.blackbox.cases.holdout.split_desc"),
-                },
-                {
-                  value: "all",
-                  label: msg("submit.blackbox.cases.holdout.all"),
-                  desc: msg("submit.blackbox.cases.holdout.all_desc"),
-                },
-              ]}
-            />
-          </div>
-          {holdout && (
-            <div className="space-y-2">
-              <Label>{msg("submit.blackbox.cases.split_label")}</Label>
-              <div className="grid grid-cols-3 gap-3">
-                {(
-                  [
-                    ["train", msg("submit.split.label_train")],
-                    ["val", msg("submit.split.label_val")],
-                    ["test", msg("submit.split.label_test")],
-                  ] as const
-                ).map(([key, label]) => (
-                  <div key={key} className="space-y-1">
-                    <Label htmlFor={`bb-split-${key}`} className="text-xs">
-                      {label}
-                    </Label>
-                    <NumberInput
-                      id={`bb-split-${key}`}
-                      step={0.05}
-                      min={0}
-                      max={1}
-                      value={split[key]}
-                      onChange={(v) => setSplit({ ...split, [key]: v })}
-                      className={MOBILE_NUMBER_INPUT_CLASS}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="flex min-h-[44px] items-center justify-between lg:min-h-0">
-            <Label htmlFor="bb-shuffle">{msg("submit.blackbox.cases.shuffle")}</Label>
-            <Switch id="bb-shuffle" checked={shuffle} onCheckedChange={setShuffle} />
-          </div>
-        </div>
-      ) : (
+      {!parsedCases && (
         <p className="text-xs text-muted-foreground">{msg("submit.blackbox.cases.none_hint")}</p>
       )}
     </StepCard>

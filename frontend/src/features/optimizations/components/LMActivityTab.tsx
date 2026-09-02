@@ -8,6 +8,7 @@ import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { tip } from "@/shared/lib/tooltips";
+import { mergeModelUsage } from "../lib/model-usage";
 import type {
   BlackboxRunResult,
   LMActivity,
@@ -263,6 +264,14 @@ function LMActivityMatrix({
     !hasReflection || Object.values(generation).some((c) => (c?.calls ?? 0) > 0);
   const hasAnyCalls = hasReflection || Object.values(generation).some((c) => (c?.calls ?? 0) > 0);
 
+  // Stages with no traffic in any visible column (baseline / final scoring on
+  // runs that never scored) drop out entirely rather than rendering dash rows.
+  const visibleStages = STAGE_KEYS.filter(
+    (stage) =>
+      (hasGeneration && (generation[stage]?.calls ?? 0) > 0) ||
+      (hasReflection && (reflection[stage]?.calls ?? 0) > 0),
+  );
+
   const genTotal = aggregateColumn(generation);
   const reflTotal = aggregateColumn(reflection);
 
@@ -324,7 +333,7 @@ function LMActivityMatrix({
             return {
               columns,
               rows: [
-                ...STAGE_KEYS.map((stage) =>
+                ...visibleStages.map((stage) =>
                   toRow(msg(STAGE_MESSAGE_KEYS[stage]), generation[stage], reflection[stage]),
                 ),
                 toRow(
@@ -408,7 +417,7 @@ function LMActivityMatrix({
                 </tr>
               </thead>
               <tbody>
-                {STAGE_KEYS.map((stage) => (
+                {visibleStages.map((stage) => (
                   <StageRow
                     key={stage}
                     stage={stage}
@@ -440,12 +449,16 @@ function LMActivityMatrix({
  * scorer's llm() calls, which run out of process and cannot be timed.
  */
 export function BlackboxLMActivityTab({ result }: { result: BlackboxRunResult }) {
-  const rows: ModelTokenUsage[] = (result.usage_by_model ?? []).flatMap((u) =>
-    typeof u.model === "string" &&
-    typeof u.input_tokens === "number" &&
-    typeof u.output_tokens === "number"
-      ? [{ model: u.model, input_tokens: u.input_tokens, output_tokens: u.output_tokens }]
-      : [],
+  // Persisted results predate the backend folding gateway-prefixed and bare
+  // spellings of one model together, so the merge happens here too.
+  const rows: ModelTokenUsage[] = mergeModelUsage(
+    (result.usage_by_model ?? []).flatMap((u) =>
+      typeof u.model === "string" &&
+      typeof u.input_tokens === "number" &&
+      typeof u.output_tokens === "number"
+        ? [{ model: u.model, input_tokens: u.input_tokens, output_tokens: u.output_tokens }]
+        : [],
+    ),
   );
   const totals = rows.reduce(
     (acc, u) => ({ input: acc.input + u.input_tokens, output: acc.output + u.output_tokens }),

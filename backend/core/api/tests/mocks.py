@@ -209,6 +209,7 @@ class _BaseFakeJobStore:
         self._staged: dict[str, dict] = {}
         self._checkpoints: dict[str, dict[int, dict]] = {}
         self._grid_pair_results: dict[str, dict[int, dict]] = {}
+        self._agent_runs: dict[str, dict[int, dict]] = {}
 
     def stage_dataset(self, username: str, dataset_filename: str, rows: list[dict]) -> str:
         """Persist staged rows in memory and return their opaque id.
@@ -296,6 +297,41 @@ class _BaseFakeJobStore:
         self._progress.pop(optimization_id, None)
         self._checkpoints.pop(optimization_id, None)
         self._grid_pair_results.pop(optimization_id, None)
+        self._agent_runs.pop(optimization_id, None)
+
+    def save_agent_run(self, optimization_id: str, run: dict) -> None:
+        """Store one agent run record under its ``run_id``.
+
+        Args:
+            optimization_id: Owning job id.
+            run: The record, keyed by ``run_id``.
+        """
+        self._agent_runs.setdefault(optimization_id, {})[int(run["run_id"])] = dict(run)
+
+    def append_agent_run_transcript(self, optimization_id: str, run_id: int, text: str) -> None:
+        """Extend a stored run's transcript, ignoring unknown runs.
+
+        Args:
+            optimization_id: Owning job id.
+            run_id: The run's ordinal.
+            text: The transcript piece to add.
+        """
+        run = self._agent_runs.get(optimization_id, {}).get(run_id)
+        if run is not None:
+            run["transcript"] = run.get("transcript", "") + text
+
+    def get_agent_run(self, optimization_id: str, run_id: int) -> dict | None:
+        """Return a stored run record, or ``None``.
+
+        Args:
+            optimization_id: Owning job id.
+            run_id: The run's ordinal.
+
+        Returns:
+            A copy of the record, or ``None`` when unknown.
+        """
+        run = self._agent_runs.get(optimization_id, {}).get(run_id)
+        return None if run is None else dict(run)
 
     def save_gepa_checkpoint(self, optimization_id: str, data: bytes, iteration: int, pair_index: int = -1) -> None:
         """Store GEPA checkpoint bytes in memory (test seam for resume tests)."""
@@ -364,9 +400,9 @@ class _BaseFakeJobStore:
             end = datetime.fromisoformat(job.get("completed_at") or datetime.now(UTC).isoformat())
             start = start if start.tzinfo else start.replace(tzinfo=UTC)
             end = end if end.tzinfo else end.replace(tzinfo=UTC)
-            job["accumulated_runtime_seconds"] = float(
-                job.get("accumulated_runtime_seconds") or 0.0
-            ) + max(0.0, (end - start).total_seconds())
+            job["accumulated_runtime_seconds"] = float(job.get("accumulated_runtime_seconds") or 0.0) + max(
+                0.0, (end - start).total_seconds()
+            )
         job["completed_at"] = None
         job["started_at"] = None
         job["message"] = "Resuming" if bump_attempts else "Re-running grid pair"

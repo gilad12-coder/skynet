@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
 
-from ..protocol import BudgetExhaustedError, EvalServer, PlateauReachedError, PlateauWatch, Task, candidate_key
+from ..protocol import (
+    BudgetExhaustedError,
+    EvalServer,
+    PlateauReachedError,
+    PlateauWatch,
+    ScorerAbortError,
+    Task,
+    candidate_key,
+)
 from .mocks import vowel_scorer
 
 
@@ -103,6 +112,27 @@ def test_scorer_crash_becomes_floor_score_with_feedback() -> None:
     assert server.used == 1
 
 
+def test_scorer_abort_is_not_floored() -> None:
+    """A scorer that asks to stop the run passes through instead of becoming a zero."""
+
+    def aborting(candidate: Any, case: Any = None) -> tuple[float, dict[str, Any]]:
+        """Abort on every version.
+
+        Args:
+            candidate: Ignored.
+            case: Ignored.
+
+        Raises:
+            ScorerAbortError: Always.
+        """
+        raise ScorerAbortError("harness is dead")
+
+    server = EvalServer(aborting, max_evals=5)
+
+    with pytest.raises(ScorerAbortError, match="harness is dead"):
+        server.evaluate("anything")
+
+
 def test_on_eval_fires_only_at_the_root() -> None:
     """The listener sees every evaluation once, whichever lane made it."""
     seen: list[tuple[int, float]] = []
@@ -184,3 +214,66 @@ def test_history_lists_distinct_versions_in_first_seen_order() -> None:
     assert first.side_info == {"vowels": 3}
     assert (second.count, second.first_eval, second.mean_score) == (1, 2, 0.0)
     assert [record.candidate for record in lane.history] == ["aaa", "xyz"]
+
+
+def test_evaluate_logs_a_debug_heartbeat_per_scorer_call(caplog: pytest.LogCaptureFixture) -> None:
+    """Each scorer call leaves a DEBUG line with its budget position and score for the verbose log view."""
+    server = EvalServer(lambda candidate, example: (0.25 * len(candidate), {}), max_evals=5)
+    lane = server.lane(3)
+
+    with caplog.at_level(logging.DEBUG, logger="core.service_gateway.optimization.blackbox.protocol"):
+        server.evaluate("aa")
+        lane.evaluate("aaa")
+
+    heartbeats = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert [r.getMessage() for r in heartbeats] == [
+        "scorer eval 1/5 score=0.500",
+        "scorer eval 2/5 score=0.750",
+    ]
+
+
+def test_primed_score_serves_the_first_evaluation_without_a_scorer_run() -> None:
+    """A primed (version, case) pair is returned once for free, then measured afresh."""
+    server = EvalServer(vowel_scorer, max_evals=2)
+    server.prime("aaa", {"i": 0}, 0.25, {"note": "measured outside the budget"})
+
+    assert server.recorded("aaa", {"i": 0}) == 0.25
+    assert server.recorded("aaa", {"i": 1}) is None
+    assert server.evaluate("aaa", {"i": 0}) == (0.25, {"note": "measured outside the budget"})
+    assert server.used == 0
+    assert server.mean_score("aaa") == 0.25
+    assert server.recorded("aaa", {"i": 0}) == 0.25
+
+    assert server.evaluate("aaa", {"i": 0}) == (1.0, {"vowels": 3})
+    assert server.used == 1
+    assert server.recorded("aaa", {"i": 0}) == 1.0
+    assert server.recorded("aaa") is None
+
+
+def test_primed_scores_reach_lanes_but_not_the_listener_or_plateau_watch() -> None:
+    """A free evaluation counts for best tracking only: no budget, no listener tick, no patience spent."""
+    seen: list[float] = []
+    parent = EvalServer(vowel_scorer, max_evals=4, on_eval=lambda server, score: seen.append(score))
+    watch = PlateauWatch(1, best_score=0.9)
+    lane = parent.lane(4, watch=watch)
+    parent.prime("xxa", None, 0.5, {})
+
+    assert lane.evaluate("xxa") == (0.5, {})
+
+    assert (lane.used, parent.used, seen, watch.stalled) == (0, 0, [], 0)
+    assert lane.best_score == parent.best_score == 0.5
+    assert lane.evaluate("aaa") == (1.0, {"vowels": 3})
+    assert (lane.used, parent.used, seen) == (1, 1, [1.0])
+
+
+def test_recorded_scores_are_kept_per_case_at_the_root() -> None:
+    """Scores are remembered per (version, case) across lanes, keyed by the case's content."""
+    parent = EvalServer(vowel_scorer, max_evals=4)
+    lane = parent.lane(4)
+
+    lane.evaluate("axxx", {"i": 0, "target": "aeiou"})
+
+    assert parent.recorded("axxx", {"target": "aeiou", "i": 0}) == 0.25
+    assert lane.recorded("axxx", {"i": 0, "target": "aeiou"}) == 0.25
+    assert parent.recorded("axxx", {"i": 1}) is None
+    assert parent.recorded({"a": "axxx"}, {"i": 0, "target": "aeiou"}) is None

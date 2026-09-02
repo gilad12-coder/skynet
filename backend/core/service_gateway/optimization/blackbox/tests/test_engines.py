@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import pickle
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
+from core.constants import PROGRESS_CANDIDATE, PROGRESS_MINIBATCH
 from core.exceptions import ServiceError
 from core.models.blackbox import (
     BLACKBOX_ENGINE_AUTORESEARCH,
@@ -146,6 +148,65 @@ def test_best_of_n_refuses_multi_part_seeds(tmp_path: Path) -> None:
         )
 
 
+def test_best_of_n_streams_every_scored_version(tmp_path: Path) -> None:
+    """The seed and each proposal reach the sink as tree nodes hung under the best version they came from."""
+    sink: list[tuple[str, dict[str, Any]]] = []
+    ctx = make_ctx(str(tmp_path), progress_callback=lambda e, m: sink.append((e, m)))
+    task = Task(seed_candidate="hello", objective="vowels", val_set=[{"i": 0}, {"i": 1}])
+
+    BestOfNEngine().run(task, EvalServer(vowel_scorer, max_evals=6), ctx)
+
+    candidates = [m for e, m in sink if e == PROGRESS_CANDIDATE]
+    assert [c["candidate_id"] for c in candidates] == ["0", "1", "2"]
+    assert [c["parent_id"] for c in candidates] == [None, "0", "1"]
+    assert [c["generation"] for c in candidates] == [0, 1, 2]
+    assert [c["iteration"] for c in candidates] == [0, 1, 2]
+    assert [c["discovered_at_evals"] for c in candidates] == [2, 4, 6]
+    assert candidates[0]["prompt"] == {"current_candidate": "hello"}
+    assert candidates[0]["per_example"] == [{"id": "0", "score": 0.4}, {"id": "1", "score": 0.4}]
+    assert candidates[1]["score"] == 1.0
+    assert [(m["iteration"], m["example_id"]) for e, m in sink if e == PROGRESS_MINIBATCH] == [
+        (0, "0"),
+        (0, "1"),
+        (1, "0"),
+        (1, "1"),
+        (2, "0"),
+        (2, "1"),
+    ]
+
+
+def test_best_of_n_streams_seedless_single_task_runs(tmp_path: Path) -> None:
+    """Without a seed or cases the first proposal is the root, scored as the one case ``"0"``."""
+    sink: list[tuple[str, dict[str, Any]]] = []
+    ctx = make_ctx(str(tmp_path), progress_callback=lambda e, m: sink.append((e, m)))
+
+    BestOfNEngine().run(Task(seed_candidate=None, objective="vowels"), EvalServer(vowel_scorer, max_evals=2), ctx)
+
+    candidates = [m for e, m in sink if e == PROGRESS_CANDIDATE]
+    assert [(c["candidate_id"], c["parent_id"], c["generation"]) for c in candidates] == [("0", None, 0), ("1", "0", 1)]
+    assert candidates[0]["per_example"] == [{"id": "0", "score": 1.0}]
+    assert [m["example_id"] for e, m in sink if e == PROGRESS_MINIBATCH] == ["0", "0"]
+
+
+def test_best_of_n_does_not_announce_a_version_the_budget_cut_short(tmp_path: Path) -> None:
+    """Running out of budget midway streams the calls made but no node for the half-scored version."""
+    sink: list[tuple[str, dict[str, Any]]] = []
+    ctx = make_ctx(str(tmp_path), progress_callback=lambda e, m: sink.append((e, m)))
+
+    with pytest.raises(BudgetExhaustedError):
+        BestOfNEngine._score(
+            "hello",
+            [{"i": 0}, {"i": 1}],
+            EvalServer(vowel_scorer, max_evals=1),
+            ctx,
+            version=0,
+            parent=None,
+            generation=0,
+        )
+
+    assert [e for e, _ in sink] == [PROGRESS_MINIBATCH]
+
+
 def test_best_of_n_fails_when_seedless_and_out_of_budget(tmp_path: Path) -> None:
     """With no seed and no budget there is nothing to return."""
     with pytest.raises(ServiceError, match="could not produce a version"):
@@ -181,7 +242,9 @@ def test_gepa_engine_routes_evaluations_and_unwraps_text_results(
         gepa_result.best_candidate = {"current_candidate": "aaa"}
         gepa_result.best_idx = 1
         gepa_result.val_aggregate_scores = [0.0, 1.0]
-        gepa_result.candidates = [{}, {}]
+        gepa_result.candidates = [{"current_candidate": "seed"}, {"current_candidate": "aaa"}]
+        gepa_result.parents = [[None], [0]]
+        gepa_result.discovery_eval_counts = [1, 2]
         gepa_result.total_metric_calls = 2
         return gepa_result
 
@@ -194,7 +257,14 @@ def test_gepa_engine_routes_evaluations_and_unwraps_text_results(
     assert result.best_candidate == "aaa"
     assert result.best_score == 1.0
     assert result.total_evals == 2
-    assert result.metadata == {"candidates": 2, "gepa_metric_calls": 2}
+    assert result.metadata == {
+        "candidates": 2,
+        "gepa_metric_calls": 2,
+        "candidate_tree": [
+            {"candidate": "seed", "parents": [None], "val_score": 0.0, "discovery_evals": 1},
+            {"candidate": "aaa", "parents": [0], "val_score": 1.0, "discovery_evals": 2},
+        ],
+    }
     assert seen["seed_candidate"] == "seed"
     assert seen["objective"] == "vowels"
     assert seen["background"] == "bg"
@@ -271,3 +341,91 @@ def test_gepa_engine_real_run_improves_the_seed(tmp_path: Path) -> None:
     assert result.best_score is not None
     assert vowel_scorer(result.best_candidate)[0] >= vowel_scorer("hello world")[0]
     assert (tmp_path / "gepa").is_dir()
+    tree = result.metadata["candidate_tree"]
+    assert tree[0]["candidate"] == "hello world"
+    assert tree[0]["parents"] == [None]
+    assert all(parent is None or 0 <= parent < index for index, node in enumerate(tree) for parent in node["parents"])
+    assert any(node["candidate"] == result.best_candidate for node in tree)
+
+
+def test_gepa_engine_streams_candidates_while_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Candidates checkpointed to ``gepa_state.bin`` reach the progress sink as live events."""
+
+    def fake_optimize(**kwargs: Any) -> Any:
+        """Checkpoint a two-candidate state the way GEPA's engine does, then finish."""
+        state = {
+            "program_candidates": [{"current_candidate": "seed"}, {"current_candidate": "aaa"}],
+            "parent_program_for_candidate": [[None], [0]],
+            "prog_candidate_val_subscores": [{"0": 0.0}, {"0": 1.0}],
+            "num_metric_calls_by_discovery": [1, 2],
+            "full_program_trace": [{"i": 0, "new_program_idx": 1}],
+        }
+        (Path(kwargs["config"].engine.run_dir) / "gepa_state.bin").write_bytes(pickle.dumps(state))
+        gepa_result = MagicMock()
+        gepa_result.best_candidate = {"current_candidate": "aaa"}
+        gepa_result.best_idx = 1
+        gepa_result.val_aggregate_scores = [0.0, 1.0]
+        gepa_result.candidates = [{"current_candidate": "seed"}, {"current_candidate": "aaa"}]
+        gepa_result.parents = [[None], [0]]
+        gepa_result.discovery_eval_counts = [1, 2]
+        gepa_result.total_metric_calls = 2
+        return gepa_result
+
+    monkeypatch.setattr(gepa_mod, "optimize_anything", fake_optimize)
+    sink: list[tuple[str, dict[str, Any]]] = []
+    ctx = make_ctx(str(tmp_path), progress_callback=lambda event, metrics: sink.append((event, metrics)))
+
+    result = GepaEngine().run(Task(seed_candidate="seed"), EvalServer(vowel_scorer, max_evals=5), ctx)
+
+    assert result.best_candidate == "aaa"
+    candidates = [metrics for event, metrics in sink if event == PROGRESS_CANDIDATE]
+    assert [c["candidate_id"] for c in candidates] == ["0", "1"]
+    assert candidates[0]["parent_id"] is None
+    assert candidates[0]["prompt"] == {"current_candidate": "seed"}
+    assert candidates[1]["parent_id"] == "0"
+    assert candidates[1]["generation"] == 1
+    assert candidates[1]["score"] == 1.0
+    assert candidates[1]["iteration"] == 0
+
+
+def test_gepa_engine_streams_scorer_feedback(monkeypatch, tmp_path) -> None:
+    """Each scorer call inside GEPA is forwarded as a mini-batch feedback event keyed by validation index."""
+    sink: list[tuple[str, dict]] = []
+
+    def fake_optimize_anything(**kwargs):
+        """Score the seed against the second case once, then hand back a minimal result.
+
+        Args:
+            **kwargs: The engine's ``optimize_anything`` call.
+
+        Returns:
+            A result shaped like GEPA's.
+        """
+        kwargs["evaluator"](kwargs["seed_candidate"], kwargs["dataset"][1])
+        result = MagicMock()
+        result.best_candidate = {"current_candidate": "seed"}
+        result.best_idx = 0
+        result.val_aggregate_scores = [0.5]
+        result.candidates = [{"current_candidate": "seed"}]
+        result.parents = [[None]]
+        result.discovery_eval_counts = [1]
+        result.total_metric_calls = 1
+        return result
+
+    monkeypatch.setattr(gepa_mod, "optimize_anything", fake_optimize_anything)
+    ctx = make_ctx(str(tmp_path), progress_callback=lambda event, metrics: sink.append((event, metrics)))
+    cases = [{"q": 1}, {"q": 2}]
+
+    GepaEngine().run(Task(seed_candidate="seed", train_set=cases), EvalServer(vowel_scorer, max_evals=5), ctx)
+
+    assert [m for e, m in sink if e == PROGRESS_MINIBATCH] == [
+        {
+            "example_id": "1",
+            "score": 0.5,
+            "feedback": "vowels: 2",
+            "prediction": "",
+            "iteration": None,
+            "images": [],
+            "images_dropped": 0,
+        }
+    ]

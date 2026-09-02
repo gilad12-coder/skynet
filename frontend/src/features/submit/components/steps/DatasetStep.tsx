@@ -13,10 +13,14 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Label } from "@/shared/ui/primitives/label";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Separator } from "@/shared/ui/primitives/separator";
+import { Switch } from "@/shared/ui/primitives/switch";
+import { HelpTip } from "@/shared/ui/help-tip";
 import { cn } from "@/shared/lib/utils";
+import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
 import { DatasetPickerDialog } from "@/features/datasets";
+import { useUserPrefs } from "@/features/settings";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 
@@ -32,8 +36,11 @@ export function DatasetStep({ w }: { w: SubmitWizardContext }) {
     columnKinds,
     setColumnKinds,
     datasetProfile,
+    shuffle,
+    setShuffle,
   } = w;
   const [pickerOpen, setPickerOpen] = useState(false);
+  const { prefs } = useUserPrefs();
 
   // Auto-detected kinds straight from the profiler — used to mark a column
   // as "auto-detected as image" (vs a user-driven manual flip) in the UI.
@@ -89,6 +96,21 @@ export function DatasetStep({ w }: { w: SubmitWizardContext }) {
             onChange={handleFileUpload}
           />
         </label>
+        {parsedDataset && prefs.advancedMode && (
+          <div className="flex items-center justify-between">
+            <Label htmlFor="shuffle" className="cursor-pointer text-sm">
+              <HelpTip text={tip("data.shuffle_explanation")}>
+                {msg("auto.features.submit.components.steps.paramsstep.10")}
+              </HelpTip>
+            </Label>
+            <Switch
+              id="shuffle"
+              checked={shuffle}
+              onCheckedChange={setShuffle}
+              className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
+            />
+          </div>
+        )}
 
         <div className="flex items-center gap-3">
           <Separator className="flex-1" />
@@ -116,7 +138,11 @@ export function DatasetStep({ w }: { w: SubmitWizardContext }) {
           <>
             <Separator />
             <div className="space-y-3" data-tutorial="column-mapping">
-              <Label>{msg("auto.features.submit.components.steps.datasetstep.4")}</Label>
+              <Label>
+                <HelpTip text={tip("submit.column_roles")}>
+                  {msg("auto.features.submit.components.steps.datasetstep.4")}
+                </HelpTip>
+              </Label>
               <p className="text-xs text-muted-foreground">
                 {msg("auto.features.submit.components.steps.datasetstep.5")}
               </p>

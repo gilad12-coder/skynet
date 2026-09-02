@@ -36,7 +36,7 @@ import { PingDot } from "@/shared/ui/ping-dot";
 import { markRecentSession } from "@/shared/lib/recent-session";
 import { FadeIn } from "@/shared/ui/motion";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
-import { CopyGlyph, useCopyToClipboard } from "@/shared/ui/copy-button";
+import { CopyButton } from "@/shared/ui/copy-button";
 import {
   getJob,
   cancelJob,
@@ -83,6 +83,7 @@ import type { SharedOptimizationData } from "@/shared/lib/api";
 import type { PipelineStage } from "../constants";
 import { extractScoresFromLogs } from "../lib/extract-scores";
 import { extractBlackboxScorePoints } from "../lib/blackbox";
+import { extractCandidates, scopeToLatestLane } from "@/features/trajectory";
 import { isReactModuleName } from "../lib/is-react-module";
 import { reconstructGridResult } from "../lib/reconstruct-grid";
 import { DataTab } from "./DataTab";
@@ -107,6 +108,7 @@ import { linkifyMessage } from "@/shared/lib/linkify";
 import { useStreamWithPollFallback } from "@/shared/hooks/use-stream-with-poll-fallback";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 
+const BLACKBOX_LOG_FETCH_DELAY_MS = 3000;
 const PHONE_DETAIL_TABS = new Set(["overview", "playground", "artifact", "logs"]);
 
 // Treat naive ISO timestamps (no trailing tz marker) as UTC — that matches the
@@ -222,24 +224,16 @@ function LiveElapsedBadge({
   );
 }
 
-// Copy control for the failure card. Mirrors the app-wide animated copy
-// pattern (Copy morphs into a check, tooltip flips to "copied"), tinted to
-// the warm error palette so it reads as part of the card rather than a
-// generic action.
+// The app-standard copy button, tinted to the failure card's warm error
+// palette so it reads as part of the card rather than a generic action.
 function FailureCopyButton({ text }: { text: string }) {
-  const { copied, copy } = useCopyToClipboard();
-  const label = msg(copied ? "shared.code_editor.copied" : "shared.code_editor.copy");
   return (
-    <TooltipButton tooltip={label}>
-      <button
-        type="button"
-        aria-label={label}
-        onClick={() => void copy(text)}
-        className="-me-1 flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-md text-[#B04030]/70 transition-colors hover:bg-[#B04030]/10 hover:text-[#B04030] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B04030]/30 sm:size-7 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
-      >
-        <CopyGlyph copied={copied} className="size-3.5" checkClassName="text-[#B04030]" />
-      </button>
-    </TooltipButton>
+    <CopyButton
+      text={text}
+      ariaLabel={msg("shared.code_editor.copy")}
+      copiedAriaLabel={msg("shared.code_editor.copied")}
+      className="-me-1 shrink-0 text-[#B04030]/70 hover:bg-[#B04030]/10 hover:text-[#B04030]"
+    />
   );
 }
 
@@ -472,6 +466,24 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     jobRef.current = job;
   }, [job]);
   const lastCountsRef = useRef({ logs: 0, progress: 0 });
+  // Black-box runs log sparingly (sandbox open, install, agent run, scorer
+  // phases) yet can go many minutes between progress events, so a coalesced
+  // fetch on log growth keeps the Logs tab streaming while a sandbox is being
+  // provisioned instead of freezing until the next progress tick.
+  const logFetchTimerRef = useRef<number | null>(null);
+  const scheduleLogFetch = useCallback(() => {
+    if (logFetchTimerRef.current !== null) return;
+    logFetchTimerRef.current = window.setTimeout(() => {
+      logFetchTimerRef.current = null;
+      void fetchJob();
+    }, BLACKBOX_LOG_FETCH_DELAY_MS);
+  }, [fetchJob]);
+  useEffect(
+    () => () => {
+      if (logFetchTimerRef.current !== null) window.clearTimeout(logFetchTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (skipNetwork) return;
@@ -500,10 +512,14 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         // grid / score views, emitted throughout the run via capture_tqdm) or
         // the status changes; for logs-only bumps, patch the lightweight live
         // fields in place. The Logs tab catches up on the next progress tick and
-        // a terminal status always triggers a final full fetch.
+        // a terminal status always triggers a final full fetch. Black-box jobs
+        // also coalesce a fetch on log growth: see scheduleLogFetch.
         if (progressed || statusChanged) {
           void fetchJob();
         } else {
+          if (logCount > prev.logs && jobRef.current?.optimization_type === "blackbox") {
+            scheduleLogFetch();
+          }
           setJob((p) =>
             p
               ? {
@@ -857,14 +873,27 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     (payload?.payload?.metric_code as string) ?? blackboxScorer?.metric_code ?? null;
   const workflowSpec = (payload?.payload?.workflow as WorkflowSpec | undefined) ?? null;
 
-  // Black-box runs report scores through `optimizer_progress` events rather
-  // than GEPA log lines, so the chart reads the event stream for them.
+  // The clone link carries the recipe so the picker opens preselected on the
+  // source job's slide. Payloads older than the stored recipe field carry no
+  // prompt-vs-code signal, so legacy black-box jobs fall back to "anything" —
+  // the general recipe — matching the sidebar's clone link.
+  const payloadRecipe = payload?.payload?.recipe as string | undefined;
+  const cloneRecipe =
+    job?.optimization_type !== "blackbox"
+      ? "program"
+      : payloadRecipe === "prompt" || payloadRecipe === "code" || payloadRecipe === "anything"
+        ? payloadRecipe
+        : "anything";
+  const cloneQuery = `&recipe=${cloneRecipe}`;
+
+  // Black-box runs announce each scored version as a candidate event rather
+  // than a GEPA log line, so the chart reads the newest lane's candidates.
   const jobIsBlackbox = job?.optimization_type === "blackbox";
   const jobProgressEvents = job?.progress_events;
   const scorePoints = useMemo(
     () =>
       jobIsBlackbox
-        ? extractBlackboxScorePoints(jobProgressEvents ?? [])
+        ? extractBlackboxScorePoints(extractCandidates(scopeToLatestLane(jobProgressEvents ?? [])))
         : jobLogs?.length
           ? extractScoresFromLogs(jobLogs)
           : [],
@@ -1168,7 +1197,9 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                       variant="ghost"
                       size="icon"
                       className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
-                      onClick={() => router.push(`/submit?clone=${job.optimization_id}`)}
+                      onClick={() =>
+                        router.push(`/submit?clone=${job.optimization_id}${cloneQuery}`)
+                      }
                       aria-label={msg("auto.app.optimizations.id.page.literal.4")}
                     >
                       <Copy className="size-4" />
@@ -1259,8 +1290,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                     onClick={() =>
                       router.push(
                         shareToken
-                          ? `/submit?clone=${job.optimization_id}&shareToken=${encodeURIComponent(shareToken)}`
-                          : `/submit?clone=${job.optimization_id}&public=1`,
+                          ? `/submit?clone=${job.optimization_id}&shareToken=${encodeURIComponent(shareToken)}${cloneQuery}`
+                          : `/submit?clone=${job.optimization_id}&public=1${cloneQuery}`,
                       )
                     }
                     aria-label={msg("share.clone")}
@@ -1288,7 +1319,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           onNext={() => router.push(`/optimizations/${id}?pair=${activePair.pair_index + 1}`)}
           onClone={() =>
             router.push(
-              `/submit?clone=${effectiveJob.optimization_id}&pair=${activePair.pair_index}`,
+              `/submit?clone=${effectiveJob.optimization_id}&pair=${activePair.pair_index}${cloneQuery}`,
             )
           }
           onCancel={handleCancel}
@@ -1491,6 +1522,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 onStageClick={setStageModal}
                 onPairSelect={handlePairSelect}
                 onPairDeleted={handlePairDeleted}
+                payload={payload}
                 trajectoryPreviewLayout={
                   isDemoMode && !isPairContext ? DEMO_TRAJECTORY_PREVIEW_LAYOUT : undefined
                 }

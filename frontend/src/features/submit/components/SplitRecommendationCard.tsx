@@ -7,28 +7,47 @@ import { msg, type MessageKey } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { useLocale } from "@/shared/providers";
 import { dirForLocale } from "@/shared/lib/locale";
+import type { SplitPlan } from "@/shared/types/api";
 
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
+
+// Both wizards drive the card — a structural pick keeps the blackbox context
+// compatible without tying the card to the whole standard context.
+export type SplitPlanControls = Pick<
+  SubmitWizardContext,
+  "splitPlan" | "splitMode" | "setSplitMode" | "profileLoading"
+>;
 
 const percent = (value: number): string => `${Math.round(value * 100)}%`;
 
 // Tier thresholds mirror backend planner.py (recommend_split / _recommend_fractions):
-// the split fractions are chosen there purely by total row count, so we recover the
-// matching rationale tier from the same total and localize it through the UI catalog.
-// The backend only ships Hebrew copy for these, so rendering them client-side is what
-// gives every locale its own translation (and correct direction).
+// the split fractions are chosen there from the total row count plus the engine hint,
+// so we recover the matching rationale from the plan's counts and engine and localize
+// it through the UI catalog. The backend only ships Hebrew copy for these, so rendering
+// them client-side is what gives every locale its own translation (and correct direction).
 const TIER_TINY = 30;
 const TIER_SMALL = 80;
 const TIER_MEDIUM = 300;
 
-function rationaleKey(total: number): MessageKey {
+function rationaleKey({ counts, engine }: SplitPlan): MessageKey {
+  const total = counts.train + counts.val + counts.test;
+  if (engine === "best_of_n") {
+    if (total < TIER_TINY) return "submit.split.rationale.best_of_n.pooled";
+    if (counts.train > 0) return "submit.split.rationale.best_of_n.capped";
+    return "submit.split.rationale.best_of_n.holdout";
+  }
+  if (engine === "meta_harness") {
+    return total < TIER_TINY
+      ? "submit.split.rationale.meta_harness.pooled"
+      : "submit.split.rationale.meta_harness.holdout";
+  }
   if (total < TIER_TINY) return "submit.split.rationale.tiny";
   if (total < TIER_SMALL) return "submit.split.rationale.small";
   if (total < TIER_MEDIUM) return "submit.split.rationale.medium";
   return "submit.split.rationale.large";
 }
 
-export function SplitRecommendationCard({ w }: { w: SubmitWizardContext }) {
+export function SplitRecommendationCard({ w }: { w: SplitPlanControls }) {
   const { splitPlan, splitMode, setSplitMode, profileLoading } = w;
   // The rationale/warning copy is portaled into a Radix tooltip, where the `rtl:`
   // variant doesn't fire — drive direction off the locale explicitly instead.
@@ -49,8 +68,9 @@ export function SplitRecommendationCard({ w }: { w: SubmitWizardContext }) {
 
   const { fractions, counts } = splitPlan;
   const total = counts.train + counts.val + counts.test;
-  const rationaleText = msg(rationaleKey(total), {
+  const rationaleText = msg(rationaleKey(splitPlan), {
     total,
+    train_count: counts.train,
     val_count: counts.val,
     test_count: counts.test,
   });

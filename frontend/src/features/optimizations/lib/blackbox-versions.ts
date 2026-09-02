@@ -6,8 +6,14 @@ export interface CandidateVersion {
   number: number;
   candidate: BlackboxCandidate;
   text: string;
-  /** Mean score inside the budget; falls back to the held-out metric for versions never scored there. */
+  /**
+   * The score the run ranked it by — the validation-set figure the candidate tree
+   * shows when the engine recorded one, else the mean inside the budget; falls back
+   * to the held-out metric for versions never scored there.
+   */
   score: number | null;
+  /** Running mean over every scorer call inside the budget; null before version means were recorded or when the version never went through the budget. */
+  meanScore: number | null;
   evals: number;
   /** Scorer run that first scored it; null when it never went through the budget. */
   firstRun: number | null;
@@ -15,8 +21,6 @@ export interface CandidateVersion {
   isSeed: boolean;
   /** The version the run returned. */
   isBest: boolean;
-  /** Beat every version before it — an accepted step of the trajectory. */
-  isImprovement: boolean;
 }
 
 export function candidateToText(candidate: BlackboxCandidate | null | undefined): string {
@@ -39,12 +43,12 @@ function fromRecord(
     candidate,
     text,
     score: record?.score ?? fallbackScore ?? null,
+    meanScore: record?.mean_score ?? null,
     evals: record?.evals ?? 0,
     firstRun: record?.first_run ?? null,
     sideInfo: record?.side_info ?? {},
     isSeed,
     isBest: false,
-    isImprovement: false,
   };
 }
 
@@ -80,12 +84,9 @@ export function buildVersions(result: BlackboxRunResult): CandidateVersion[] {
     );
   }
 
-  let bestSoFar = -Infinity;
   versions.forEach((version, index) => {
     version.number = index;
     version.isBest = version.text === bestText;
-    version.isImprovement = !version.isSeed && version.score != null && version.score > bestSoFar;
-    if (version.score != null) bestSoFar = Math.max(bestSoFar, version.score);
   });
   return versions;
 }

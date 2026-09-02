@@ -24,7 +24,16 @@ from ....constants import PROGRESS_LANE_COMPLETED, PROGRESS_LANE_HANDOFF, PROGRE
 from ....exceptions import ServiceError
 from ....models.blackbox import BLACKBOX_ENGINE_GEPA, BlackboxStrategy
 from ..cost_ceiling import CostCeilingExceededError
-from .protocol import BudgetExhaustedError, Candidate, EngineContext, EvalServer, PlateauWatch, Result, Task
+from .protocol import (
+    BudgetExhaustedError,
+    Candidate,
+    EngineContext,
+    EvalServer,
+    PlateauWatch,
+    Result,
+    ScorerAbortError,
+    Task,
+)
 from .registry import NO_CAPABILITIES, EngineCapabilities, available_engine_ids, get_engine
 
 logger = logging.getLogger(__name__)
@@ -61,6 +70,30 @@ def _emit(progress_callback: ProgressCallback | None, event: str, metrics: dict[
         progress_callback(event, metrics)
 
 
+def _stamp_lane(progress_callback: ProgressCallback | None, lane_index: int) -> ProgressCallback | None:
+    """Stamp ``lane_index`` onto the metrics of engine-emitted events.
+
+    Candidate ids restart at "0" in every lane, so trajectory events from
+    successive lanes would collide in the frontend's tree without a
+    discriminator.
+
+    Args:
+        progress_callback: The job's progress sink, if any.
+        lane_index: Zero-based index of the lane in execution order.
+
+    Returns:
+        A stamping wrapper, or ``None`` when there is nothing to forward to.
+    """
+    if progress_callback is None:
+        return None
+
+    def stamped(event: str, metrics: dict[str, Any]) -> None:
+        """Forward one event with the lane discriminator added."""
+        progress_callback(event, {**metrics, "lane_index": lane_index})
+
+    return stamped
+
+
 def run_lane(
     engine_id: str,
     phase: str,
@@ -70,6 +103,7 @@ def run_lane(
     progress_callback: ProgressCallback | None = None,
     *,
     caps: EngineCapabilities = NO_CAPABILITIES,
+    lane_index: int = 0,
 ) -> LaneOutcome:
     """Run one engine on its own budget slice, never letting it kill the run.
 
@@ -81,6 +115,8 @@ def run_lane(
         ctx: Run context; the lane gets its own workspace under ``ctx.run_dir``.
         progress_callback: The job's progress sink, if any.
         caps: What the deployment and the job offer the engines.
+        lane_index: Position of the lane in execution order; stamped onto
+            engine-emitted trajectory events.
 
     Returns:
         The lane's outcome, with ``status`` describing how it ended.
@@ -92,14 +128,18 @@ def run_lane(
     except ServiceError as exc:
         outcome.status, outcome.error = "unavailable", str(exc)
     else:
-        lane_ctx = replace(ctx, run_dir=str(Path(ctx.run_dir) / f"{phase}-{engine_id}"))
+        lane_ctx = replace(
+            ctx,
+            run_dir=str(Path(ctx.run_dir) / f"{phase}-{engine_id}"),
+            progress_callback=_stamp_lane(ctx.progress_callback, lane_index),
+        )
         try:
             result: Result = engine.run(task, server, lane_ctx)
         except BudgetExhaustedError as exc:
             outcome.status, outcome.error = "budget_exhausted", str(exc)
             outcome.best_candidate, outcome.best_score = server.best_candidate, server.best_score
-        except CostCeilingExceededError:
-            # The credit ceiling is a run-level stop, not a lane failure.
+        except (CostCeilingExceededError, ScorerAbortError):
+            # The credit ceiling and a scorer abort are run-level stops, not lane failures.
             raise
         except Exception as exc:
             logger.exception("%s lane '%s' failed", phase, engine_id)
@@ -185,8 +225,8 @@ def run_strategy(
 
     per_lane = max(1, int(server.max_evals * _EXPLORE_SHARE) // len(engine_ids))
     lanes = [
-        run_lane(engine_id, "explore", task, server.lane(per_lane), ctx, progress_callback, caps=caps)
-        for engine_id in engine_ids
+        run_lane(engine_id, "explore", task, server.lane(per_lane), ctx, progress_callback, caps=caps, lane_index=index)
+        for index, engine_id in enumerate(engine_ids)
     ]
     winner = _winner(lanes)
     if winner is None or winner.best_candidate is None or server.remaining <= 0:
@@ -205,6 +245,7 @@ def run_strategy(
         ctx,
         progress_callback,
         caps=caps,
+        lane_index=len(lanes),
     )
     lanes.append(continued)
     final = continued if (continued.best_score or float("-inf")) >= (winner.best_score or float("-inf")) else winner
@@ -258,7 +299,14 @@ def _run_plateau(
             )
         watch = PlateauWatch(strategy.patience, best_score=server.best_score)
         outcome = run_lane(
-            engine_id, "relay", current, server.lane(server.remaining, watch=watch), ctx, progress_callback, caps=caps
+            engine_id,
+            "relay",
+            current,
+            server.lane(server.remaining, watch=watch),
+            ctx,
+            progress_callback,
+            caps=caps,
+            lane_index=len(lanes),
         )
         lanes.append(outcome)
         record = best.best_score if best is not None else None
@@ -271,7 +319,11 @@ def _run_plateau(
             current = replace(task, seed_candidate=outcome.best_candidate)
         else:
             lanes_since_record += 1
-        if best is not None and ctx.stop_at_score is not None and (best.best_score or float("-inf")) >= ctx.stop_at_score:
+        if (
+            best is not None
+            and ctx.stop_at_score is not None
+            and (best.best_score or float("-inf")) >= ctx.stop_at_score
+        ):
             break
         if lanes_since_record >= len(engine_ids):
             break

@@ -33,6 +33,7 @@ import os
 import ssl
 import sys
 import time
+import types
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -48,6 +49,8 @@ LLM_HELPER_NAME = "llm"
 # The gateway key rides in the environment so it never touches the box filesystem.
 ENV_API_KEY = "SKYNET_API_KEY"
 IMAGE_HELPER_NAME = "Image"
+# The module scorer code imports those helpers from: ``from skynet import llm, Image``.
+HELPER_MODULE_NAME = "skynet"
 # Where Vercel's egress proxy leaves its CA when a network policy rewrites headers.
 PROXY_CA_PATH = "/usr/local/share/ca-certificates/vercel-proxy-ca.crt"
 _ENTRYPOINT_NAMES = ("score", "metric")
@@ -289,6 +292,22 @@ def normalize_score(raw: Any) -> tuple[float, SideInfo]:
     )
 
 
+def helper_module(helpers: dict[str, Any]) -> types.ModuleType:
+    """Build the ``skynet`` module scorer code imports its helpers from.
+
+    Args:
+        helpers: Helper names and the objects behind them.
+
+    Returns:
+        A module exposing every helper as an attribute.
+    """
+    module = types.ModuleType(
+        HELPER_MODULE_NAME, "Helpers for scorer code: llm(prompt, input=None, images=None) and Image(...)."
+    )
+    module.__dict__.update(helpers)
+    return module
+
+
 def load_scorer_from_code(code: str, *, helpers: dict[str, Any] | None = None) -> Callable[..., Any]:
     """Execute scorer source and return the callable it defines.
 
@@ -297,7 +316,9 @@ def load_scorer_from_code(code: str, *, helpers: dict[str, Any] | None = None) -
 
     Args:
         code: User-authored python source.
-        helpers: Names bound in the scorer's namespace before it runs.
+        helpers: Names the scorer may import from the ``skynet`` module. They
+            are also bound in its namespace, for scorers written before the
+            import existed.
 
     Returns:
         The scorer callable.
@@ -307,6 +328,7 @@ def load_scorer_from_code(code: str, *, helpers: dict[str, Any] | None = None) -
             unambiguous scorer function.
     """
     namespace: dict[str, Any] = dict(helpers or {})
+    sys.modules[HELPER_MODULE_NAME] = helper_module(namespace)
     try:
         # exec: user-supplied scorer code. Inside the sandbox this is the
         # whole point; on the backend only ``validate_scorer_code`` reaches
@@ -387,6 +409,7 @@ class GatewayClient:
         api_key: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
         timeout_seconds: float = 120.0,
     ) -> None:
         """Bind the helper to one endpoint and model.
@@ -397,6 +420,7 @@ class GatewayClient:
             api_key: Bearer token, or ``None`` when the sandbox injects it.
             temperature: Sampling temperature, when the Scorer step set one.
             max_tokens: Completion cap, when the Scorer step set one.
+            reasoning_effort: Thinking level (``low``, ``high``, ...), when the Scorer step set one.
             timeout_seconds: Per-request timeout.
         """
         self._url = url.rstrip("/") + "/chat/completions"
@@ -404,6 +428,7 @@ class GatewayClient:
         self._api_key = api_key
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._reasoning_effort = reasoning_effort
         self._timeout_seconds = timeout_seconds
         self._ssl = _ssl_context()
         self.usage: list[dict[str, Any]] = []
@@ -445,6 +470,8 @@ class GatewayClient:
             body["temperature"] = self._temperature
         if self._max_tokens is not None:
             body["max_tokens"] = self._max_tokens
+        if self._reasoning_effort:
+            body["reasoning_effort"] = self._reasoning_effort
         payload = self._post(json.dumps(body).encode("utf-8"))
         usage = payload.get("usage") if isinstance(payload, dict) else None
         if isinstance(usage, dict):
@@ -512,6 +539,7 @@ def run_call(payload: dict[str, Any]) -> dict[str, Any]:
             api_key=gateway.get("api_key") or os.environ.get(ENV_API_KEY),
             temperature=gateway.get("temperature"),
             max_tokens=gateway.get("max_tokens"),
+            reasoning_effort=gateway.get("reasoning_effort"),
             timeout_seconds=float(gateway.get("timeout_seconds") or 120.0),
         )
     helpers = {LLM_HELPER_NAME: llm if llm is not None else missing_llm, IMAGE_HELPER_NAME: Image}
