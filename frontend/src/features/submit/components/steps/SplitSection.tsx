@@ -1,6 +1,12 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/shared/ui/primitives/card";
 import { Label } from "@/shared/ui/primitives/label";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { NumberInput } from "@/shared/ui/number-input";
@@ -19,15 +25,18 @@ export type SplitControls = SplitPlanControls &
 const MOBILE_NUMBER_INPUT_CLASS =
   "h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm";
 
-// Simple mode leaves the split to the server recommendation (splitMode
-// defaults to auto) and hides the whole train/val/test surface.
+// Simple mode shows the recommendation read-only; advanced mode adds the
+// manual toggle and inputs.
 export function SplitSection({ w }: { w: SplitControls }) {
   const { prefs } = useUserPrefs();
-  const { split, updateSplit, splitSum, splitMode } = w;
-  if (!prefs.advancedMode) return null;
+  const { split, updateSplit, splitSum, splitMode, splitPlan, profileLoading } = w;
+  const advanced = prefs.advancedMode;
 
   return (
-    <Card className="border-border/50 bg-card/80 backdrop-blur-xl shadow-lg">
+    <Card
+      className="border-border/50 bg-card/80 backdrop-blur-xl shadow-lg"
+      data-tutorial="wizard-step-6"
+    >
       <CardHeader className="px-4 sm:px-6">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg">
@@ -43,10 +52,14 @@ export function SplitSection({ w }: { w: SplitControls }) {
             </Badge>
           )}
         </div>
+        <CardDescription>{msg("submit.split.step_desc")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 px-4 sm:px-6" data-tutorial="data-splits">
-        <SplitRecommendationCard w={w} />
-        {splitMode === "manual" && (
+        {!splitPlan && !profileLoading && (
+          <p className="text-sm text-muted-foreground">{msg("submit.split.empty")}</p>
+        )}
+        <SplitRecommendationCard w={w} readOnly={!advanced} />
+        {advanced && splitMode === "manual" && (
           <div className="space-y-3">
             <div className="flex h-3 rounded-full overflow-hidden">
               <div

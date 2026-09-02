@@ -1567,10 +1567,6 @@ export function useSubmitWizard() {
           if (showToast) toast.error(msg("submit.validation.output_column_required"));
           return false;
         }
-        if (datasetValidation && datasetValidation.errors.length > 0) {
-          if (showToast) toast.error(msg("submit.validation.split_too_small"));
-          return false;
-        }
         return true;
       }
       case PROGRAM_STEP.scorer: {
@@ -1645,6 +1641,13 @@ export function useSubmitWizard() {
             }
             return false;
           }
+        }
+        return true;
+      }
+      case PROGRAM_STEP.split: {
+        if (datasetValidation && datasetValidation.errors.length > 0) {
+          if (showToast) toast.error(msg("submit.validation.split_too_small"));
+          return false;
         }
         return true;
       }
@@ -1769,7 +1772,7 @@ export function useSubmitWizard() {
     advancingRef.current = true;
     setAdvancing(true);
     try {
-      if (step === PROGRAM_STEP.cases && parsedDataset && parsedDataset.rowCount > 0) {
+      if (step === PROGRAM_STEP.split && parsedDataset && parsedDataset.rowCount > 0) {
         const passed = await handleValidateDataset();
         if (!passed) return;
       }

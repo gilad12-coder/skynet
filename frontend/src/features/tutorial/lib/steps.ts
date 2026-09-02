@@ -390,7 +390,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       p2: TERMS.modelPlural,
       p3: TERMS.optimizer,
     }),
-    target: "[data-tutorial='wizard-step-6']",
+    target: "[data-tutorial='wizard-step-7']",
     placement: "bottom",
     beforeShow: async () => {
       await ensureSubmit();

@@ -34,12 +34,8 @@ export function BlackboxWizard({
     start: <BlackboxStartStep w={w} />,
     cases: <BlackboxCasesStep w={w} />,
     scorer: <BlackboxScorerStep w={w} />,
-    optimizer: (
-      <div className="space-y-4 md:space-y-6">
-        <BlackboxOptimizerStep w={w} />
-        <SplitSection w={w} />
-      </div>
-    ),
+    optimizer: <BlackboxOptimizerStep w={w} />,
+    split: <SplitSection w={w} />,
     review: <BlackboxReviewStep w={w} />,
   };
 

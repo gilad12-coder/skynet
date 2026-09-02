@@ -681,6 +681,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       case ANYTHING_STEP.cases: {
         if (targetKind === "agent" && !parsedCases?.rowCount)
           return fail("submit.blackbox.validation.cases_required");
+        return true;
+      }
+      case ANYTHING_STEP.split: {
         if (parsedCases && Math.abs(split.train + split.val + split.test - 1) > 0.001)
           return fail("submit.blackbox.validation.split_sum");
         return true;
