@@ -92,6 +92,7 @@
     "auth.missing_token": "התחבר/י כדי לבצע את הפעולה הזו.",
     "auth.not_configured": "אימות מול השרת עדיין לא הוגדר.",
     "optimization.not_found": "{term.optimization} לא נמצאה: '{optimization_id}'.",
+    "optimization.agent_run_not_found": "ריצת הסוכן {run_id} לא נמצאה עבור ה{term.optimization} '{optimization_id}'.",
     "optimization.insufficient_role": "רמת ההרשאה שלך ('{role}') לא מספיקה לפעולה הזו — נדרשת הרשאה '{required}' ומעלה.",
     "optimization.not_finished": "ה{term.optimization} עדיין לא הסתיימה.",
     "optimization.no_result": "ל{term.optimization} אין נתוני תוצאה.",

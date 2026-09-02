@@ -21,6 +21,7 @@ from ..sandbox import (
     KILL_GRACE_SECONDS,
     SANDBOX_TAG,
     CommandResult,
+    LocalSubprocessRuntime,
     SandboxSpec,
     VercelCredentials,
     VercelSandboxRuntime,
@@ -119,6 +120,13 @@ def _exit_file(wrapped: str) -> str:
     return match.group(1)
 
 
+def _output_files(wrapped: str) -> tuple[str, str]:
+    """Return the stdout and stderr file paths a wrapped command line writes to."""
+    match = re.search(r" > (\S+) 2> (\S+); echo", wrapped)
+    assert match is not None, wrapped
+    return match.group(1), match.group(2)
+
+
 class _FakeFs:
     """In-memory filesystem for a fake sandbox."""
 
@@ -181,6 +189,9 @@ class _FakeBox:
         """Record the invocation, hand back a detached fake process and schedule its exit file."""
         self.runs.append({"program": program, "args": args, "env": env, "kill_after": kill_after})
         self.fs.land_after(_exit_file(args[1]), f"{self._returncode}\n", self._polls_to_finish)
+        stdout_file, stderr_file = _output_files(args[1])
+        self.fs.files[stdout_file] = self._stdout
+        self.fs.files[stderr_file] = self._stderr
         self.process = _FakeProcess(self._stdout, self._stderr)
         return self.process
 
@@ -238,7 +249,8 @@ def test_run_wraps_in_timeout_and_flags_timeouts() -> None:
 
     wrapped = box.runs[0]["args"][1]
     assert box.runs[0]["args"][0] == "-lc"
-    assert wrapped.startswith("timeout --signal=KILL 5s bash -lc 'sleep 99'; echo $? > /tmp/.skynet-exit-")
+    assert wrapped.startswith("timeout --signal=KILL 5s bash -lc 'sleep 99' > /tmp/.skynet-output-")
+    assert "; echo $? > /tmp/.skynet-exit-" in wrapped
     assert box.runs[0]["kill_after"] == 5 + KILL_GRACE_SECONDS
     assert result.timed_out is True
     assert result.exit_code == 124
@@ -251,7 +263,7 @@ def test_run_without_timeout_has_no_kill_timer() -> None:
 
     result = session.run("echo hi")
 
-    assert box.runs[0]["args"][1].startswith("bash -lc 'echo hi'; echo $? > /tmp/.skynet-exit-")
+    assert box.runs[0]["args"][1].startswith("bash -lc 'echo hi' > /tmp/.skynet-output-")
     assert box.runs[0]["kill_after"] is None
     assert result.timed_out is False
     assert result.exit_code == 124
@@ -283,6 +295,50 @@ def test_run_polls_the_exit_file_with_growing_delays(monkeypatch: pytest.MonkeyP
     assert result.exit_code == 0
     assert result.stdout == "out"
     assert result.stderr == "err"
+
+
+def test_run_streams_output_as_the_files_grow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each poll forwards whatever the box has written since the last one, in order."""
+    box = _FakeBox(returncode=0, polls_to_finish=3)
+    session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
+    monkeypatch.setattr(sandbox_mod, "time", _FakeTime())
+    chunks = ["one\n", "two\n", "three\n"]
+    stored_read = box.fs.read_text
+
+    def read_text(path: str, cwd: str | None = None) -> str:
+        """Grow the stdout file by one chunk per poll."""
+        if path.endswith(".stdout"):
+            return "".join(chunks[: box.fs.polls])
+        return stored_read(path, cwd)
+
+    monkeypatch.setattr(box.fs, "read_text", read_text)
+    seen: list[tuple[str, str]] = []
+
+    result = session.run("chatty", on_output=lambda stream, text: seen.append((stream, text)))
+
+    assert seen == [("stdout", "one\n"), ("stdout", "two\n"), ("stdout", "three\n")]
+    assert result.stdout == "one\ntwo\nthree\n"
+    assert result.exit_code == 0
+
+
+def test_local_session_streams_lines_as_they_are_written() -> None:
+    """The local runtime forwards each output line to the sink as it arrives, per stream."""
+    session = LocalSubprocessRuntime().open(SandboxSpec(lifetime_seconds=30))
+    seen: list[tuple[str, str]] = []
+    try:
+        result = session.run(
+            "printf 'a\\nb\\n'; echo err >&2",
+            timeout_seconds=10,
+            on_output=lambda stream, text: seen.append((stream, text)),
+        )
+    finally:
+        session.close()
+
+    assert result.exit_code == 0
+    assert [text for stream, text in seen if stream == "stdout"] == ["a\n", "b\n"]
+    assert [text for stream, text in seen if stream == "stderr"] == ["err\n"]
+    assert result.stdout == "a\nb\n"
+    assert result.stderr == "err\n"
 
 
 def test_run_waits_for_the_exit_code_to_be_written(monkeypatch: pytest.MonkeyPatch) -> None:

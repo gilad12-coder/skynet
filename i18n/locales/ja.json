@@ -190,6 +190,7 @@
     "optimization.no_result_pending": "最適化にはまだ結果がありません。",
     "optimization.not_finished": "最適化が完了していません。",
     "optimization.not_found": "最適化が見つかりません: '{optimization_id}'。",
+    "optimization.agent_run_not_found": "最適化 '{optimization_id}' のエージェント実行 {run_id} が見つかりません。",
     "optimization.not_success_status_for_serve": "最適化は状態 '{status}' です。正常に完了した最適化のみ提供できます。",
     "optimization.not_success_status_for_test_results": "最適化は状態 '{status}' です。正常に完了した最適化のみテスト結果を持ちます。",
     "optimization.pair_not_rerunnable": "最適化が状態 '{status}' の間はペアを再実行できません。",

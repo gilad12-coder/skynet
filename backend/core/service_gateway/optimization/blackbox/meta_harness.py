@@ -18,6 +18,7 @@ from typing import Any
 
 from ....exceptions import ServiceError
 from ....models.blackbox import BLACKBOX_ENGINE_META_HARNESS
+from .agent_runs import PHASE_VERSION, run_scope
 from .best_of_n import _strip_fences
 from .feedback import emit_candidate, emit_case_scored, emit_scorer_feedback
 from .protocol import (
@@ -38,6 +39,9 @@ _HISTORY_TRIALS = 6
 _CANDIDATE_CHARS = 6_000
 _FEEDBACK_CASES = 8
 _FEEDBACK_CHARS = 600
+# Each side-information part keeps its head and its tail: a traceback names the failure on its last line.
+_FEEDBACK_PART_CHARS = 400
+_FEEDBACK_TAIL_CHARS = 200
 _CASE_LABEL_CHARS = 80
 # Proposals that repeat a version already tried are retried this many times.
 _DUPLICATE_RETRIES = 2
@@ -80,18 +84,23 @@ def _render_candidate(candidate: Candidate) -> str:
     )
 
 
-def _clip(text: str, limit: int) -> str:
-    """Keep the head of ``text``.
+def _clip(text: str, limit: int, tail: int = 0) -> str:
+    """Keep the head of ``text``, and optionally its tail.
 
     Args:
         text: Any text.
-        limit: Maximum characters.
+        limit: Maximum characters kept.
+        tail: How many of the kept characters come from the end of ``text``.
 
     Returns:
-        ``text`` or its first ``limit`` characters with an ellipsis.
+        ``text`` when it fits, else its head, an ellipsis and — when ``tail`` is set — its tail.
     """
     text = str(text)
-    return text if len(text) <= limit else text[:limit] + "…"
+    if len(text) <= limit:
+        return text
+    if tail <= 0:
+        return text[:limit] + "…"
+    return text[: limit - tail] + " … " + text[-tail:]
 
 
 def _case_label(case: Any) -> str:
@@ -120,7 +129,11 @@ def _feedback(side_info: SideInfo) -> str:
     Returns:
         A bounded ``key: value`` summary.
     """
-    parts = [f"{key}: {' '.join(str(side_info[key]).split())}" for key in _FEEDBACK_KEYS if side_info.get(key)]
+    parts = [
+        f"{key}: {_clip(' '.join(str(side_info[key]).split()), _FEEDBACK_PART_CHARS, tail=_FEEDBACK_TAIL_CHARS)}"
+        for key in _FEEDBACK_KEYS
+        if side_info.get(key)
+    ]
     return _clip(" | ".join(parts), _FEEDBACK_CHARS) or "no feedback"
 
 
@@ -248,7 +261,8 @@ class MetaHarnessEngine:
             """Score one case, or ``None`` once the budget is gone."""
             position, case = item
             try:
-                score, side_info = server.evaluate(candidate, case)
+                with run_scope(PHASE_VERSION, str(position), trial=index):
+                    score, side_info = server.evaluate(candidate, case)
             except BudgetExhaustedError:
                 return None
             emit_scorer_feedback(

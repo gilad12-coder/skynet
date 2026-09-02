@@ -46,6 +46,8 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
     setStopAtScore,
     reflectionModel,
     setReflectionModel,
+    scorerModel,
+    scorerUsesModel,
     setEditingModel,
     catalog,
     tokenSource,
@@ -235,6 +237,12 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
             })
           }
           onRemove={reflectionModel.name ? () => setReflectionModel(emptyModelConfig()) : undefined}
+          copyFromLabel={
+            scorerUsesModel && scorerModel.name
+              ? msg("submit.blackbox.optimizer.copy_scorer_model")
+              : undefined
+          }
+          onCopyFrom={() => setReflectionModel(scorerModel)}
         />
       </div>
 

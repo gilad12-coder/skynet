@@ -1,4 +1,5 @@
 import type {
+  BlackboxAgentRunResponse,
   BlackboxEngineCatalogResponse,
   BlackboxRunRequest,
   ColumnMapping,
@@ -1069,6 +1070,17 @@ export function getTestResults(optimizationId: string) {
     baseline: EvalExampleResult[];
     optimized: EvalExampleResult[];
   }>(`/optimizations/${optimizationId}/test-results`);
+}
+
+/**
+ * Fetch one sandboxed agent run. ``sinceTranscript`` is a code-point offset
+ * into the transcript: a live viewer asks only for what it has not seen.
+ */
+export function getAgentRun(optimizationId: string, runId: number, sinceTranscript = 0) {
+  const q = new URLSearchParams({ since_transcript: String(sinceTranscript) });
+  return request<BlackboxAgentRunResponse>(
+    `/optimizations/${optimizationId}/agent-runs/${runId}?${q.toString()}`,
+  );
 }
 
 /**

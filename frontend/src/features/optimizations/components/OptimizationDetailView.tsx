@@ -83,6 +83,7 @@ import type { SharedOptimizationData } from "@/shared/lib/api";
 import type { PipelineStage } from "../constants";
 import { extractScoresFromLogs } from "../lib/extract-scores";
 import { extractBlackboxScorePoints } from "../lib/blackbox";
+import { extractCandidates, scopeToLatestLane } from "@/features/trajectory";
 import { isReactModuleName } from "../lib/is-react-module";
 import { reconstructGridResult } from "../lib/reconstruct-grid";
 import { DataTab } from "./DataTab";
@@ -885,14 +886,14 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         : "anything";
   const cloneQuery = `&recipe=${cloneRecipe}`;
 
-  // Black-box runs report scores through `optimizer_progress` events rather
-  // than GEPA log lines, so the chart reads the event stream for them.
+  // Black-box runs announce each scored version as a candidate event rather
+  // than a GEPA log line, so the chart reads the newest lane's candidates.
   const jobIsBlackbox = job?.optimization_type === "blackbox";
   const jobProgressEvents = job?.progress_events;
   const scorePoints = useMemo(
     () =>
       jobIsBlackbox
-        ? extractBlackboxScorePoints(jobProgressEvents ?? [])
+        ? extractBlackboxScorePoints(extractCandidates(scopeToLatestLane(jobProgressEvents ?? [])))
         : jobLogs?.length
           ? extractScoresFromLogs(jobLogs)
           : [],

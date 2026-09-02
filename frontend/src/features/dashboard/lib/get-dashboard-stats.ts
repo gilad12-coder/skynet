@@ -7,6 +7,7 @@ export type DashboardStats = {
   success: number;
   running: number;
   failed: number;
+  cancelled: number;
   shared: number;
 } | null;
 
@@ -37,6 +38,7 @@ export function getDashboardStats({
       success: analyticsData.success_count,
       running: analyticsData.running_count,
       failed: analyticsData.failed_count,
+      cancelled: analyticsData.status_counts.cancelled ?? 0,
       shared,
     };
   }
@@ -47,6 +49,7 @@ export function getDashboardStats({
       success: filteredItems.filter((j) => j.status === "success").length,
       running: filteredItems.filter((j) => ACTIVE_STATUSES.has(j.status)).length,
       failed: filteredItems.filter((j) => j.status === "failed").length,
+      cancelled: filteredItems.filter((j) => j.status === "cancelled").length,
       shared,
     };
   }
@@ -56,6 +59,7 @@ export function getDashboardStats({
     success: counts.success,
     running: counts.pending + counts.validating + counts.running,
     failed: counts.failed,
+    cancelled: counts.cancelled,
     shared,
   };
 }

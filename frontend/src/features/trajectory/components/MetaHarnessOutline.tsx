@@ -84,21 +84,30 @@ function MetaHarnessOutlineImpl({
         );
       })}
       {pending !== null ? (
-        <li
-          className="flex items-center gap-2 rounded-lg border border-dashed border-[#7C6350]/40 px-3 py-1.5 text-sm text-muted-foreground"
-          aria-live="polite"
-        >
-          <span
-            className="inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-[var(--warning)]"
-            aria-hidden="true"
-          />
-          <span className="min-w-0 flex-1 truncate">
-            {formatMsg("meta_harness.live.scoring", {
-              id: displayCandidateId(String(pending.index)),
-              done: pending.scores.size,
-              total: pending.total,
-            })}
-          </span>
+        <li>
+          <button
+            type="button"
+            onClick={() => onSelect(String(pending.index))}
+            aria-pressed={String(pending.index) === selectedId}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg border border-dashed px-3 py-1.5 text-start text-sm text-muted-foreground",
+              String(pending.index) === selectedId
+                ? "border-[#B04030]/40 bg-[#B04030]/[0.05]"
+                : "border-[#7C6350]/40 hover:bg-accent/60",
+            )}
+          >
+            <span
+              className="inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-[var(--warning)]"
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 truncate" aria-live="polite">
+              {formatMsg("meta_harness.live.scoring", {
+                id: displayCandidateId(String(pending.index)),
+                done: pending.scores.size,
+                total: pending.total,
+              })}
+            </span>
+          </button>
         </li>
       ) : null}
     </ul>

@@ -110,6 +110,18 @@ def candidate_key(candidate: Candidate) -> str:
     return candidate
 
 
+def example_key(example: Any) -> str:
+    """Return a stable identity string for a case.
+
+    Args:
+        example: A case mapping, or ``None`` in single-task mode.
+
+    Returns:
+        The sorted-key JSON form of the case (``"null"`` without one).
+    """
+    return json.dumps(example, sort_keys=True, default=str)
+
+
 @dataclass
 class Task:
     """What an engine optimizes: the starting point, the goal and the cases.
@@ -241,6 +253,12 @@ class EvalServer:
         self._watch = watch
         self.used = 0
         self._records: dict[str, CandidateRecord] = {}
+        # Root only: the latest score per (version, case) an engine paid for,
+        # so the final held-out pass can reuse it instead of re-measuring, and
+        # scores handed in by :meth:`prime` for the engine's first look at a
+        # pair — each consumed once.
+        self._scores: dict[tuple[str, str], float] = {}
+        self._primed: dict[tuple[str, str], tuple[float, SideInfo]] = {}
         # Locks are only ever taken child → parent, so lanes cannot deadlock.
         self._lock = threading.Lock()
 
@@ -292,25 +310,81 @@ class EvalServer:
         Raises:
             BudgetExhaustedError: When no scorer calls remain.
         """
-        self._reserve()
         root = self._root
-        score, side_info = root._score(candidate, example)
-        # Per-call heartbeat at DEBUG so it surfaces only in the Logs tab's
-        # verbose view — the black-box counterpart of the DSPy per-example eval
-        # heartbeat, so every run type gets the same normal=aggregates /
-        # verbose=per-call split. Counted against the run-wide budget.
-        logger.debug("scorer eval %d/%d score=%.3f", root.used, root.max_evals, score)
+        key = (candidate_key(candidate), example_key(example))
+        primed = root._take_primed(key)
+        if primed is None:
+            self._reserve()
+            score, side_info = root._score(candidate, example)
+            # Per-call heartbeat at DEBUG so it surfaces only in the Logs tab's
+            # verbose view — the black-box counterpart of the DSPy per-example eval
+            # heartbeat, so every run type gets the same normal=aggregates /
+            # verbose=per-call split. Counted against the run-wide budget.
+            logger.debug("scorer eval %d/%d score=%.3f", root.used, root.max_evals, score)
+        else:
+            score, side_info = primed
+        with root._lock:
+            root._scores[key] = score
         server: EvalServer | None = self
         while server is not None:
             with server._lock:
                 server._record(candidate, score, side_info)
-            if server._watch is not None:
+            # A primed score cost no scorer run, so it neither counts toward a
+            # lane's plateau patience nor ticks the progress listener.
+            if primed is None and server._watch is not None:
                 server._watch.after_eval(server)
             server = server._parent
-        if root._on_eval is not None:
+        if primed is None and root._on_eval is not None:
             with root._lock:
                 root._on_eval(root, score)
         return score, side_info
+
+    def prime(self, candidate: Candidate, example: Any, score: float, side_info: SideInfo) -> None:
+        """Hand in a score measured outside the budget for one (version, case) pair.
+
+        The engine's first :meth:`evaluate` of that pair returns it without a
+        scorer run; any later evaluation of the pair is measured afresh.
+
+        Args:
+            candidate: The version that was scored.
+            example: The case it was scored on (``None`` in single-task mode).
+            score: The measured score.
+            side_info: The scorer's side information for that measurement.
+        """
+        root = self._root
+        with root._lock:
+            root._primed[(candidate_key(candidate), example_key(example))] = (score, side_info)
+
+    def recorded(self, candidate: Candidate, example: Any = None) -> float | None:
+        """Return the score already measured for ``(candidate, example)``, if any.
+
+        Args:
+            candidate: The version to look up.
+            example: The case, or ``None`` in single-task mode.
+
+        Returns:
+            The latest score an engine paid for on that pair, else a primed
+            score not yet consumed, else ``None``.
+        """
+        root = self._root
+        key = (candidate_key(candidate), example_key(example))
+        with root._lock:
+            score = root._scores.get(key)
+            if score is None and key in root._primed:
+                score = root._primed[key][0]
+        return score
+
+    def _take_primed(self, key: tuple[str, str]) -> tuple[float, SideInfo] | None:
+        """Pop and return the primed score for ``key``, if one is waiting.
+
+        Args:
+            key: The ``(candidate_key, example_key)`` pair.
+
+        Returns:
+            The primed ``(score, side_info)``, or ``None``.
+        """
+        with self._lock:
+            return self._primed.pop(key, None)
 
     def _reserve(self) -> None:
         """Claim one scorer call here and in every ancestor, or claim nothing.

@@ -15,6 +15,7 @@ from core.constants import (
     DETAIL_BASELINE,
     DETAIL_OPTIMIZED,
     PROGRESS_BASELINE,
+    PROGRESS_EVALUATION_STARTED,
     PROGRESS_LANE_COMPLETED,
     PROGRESS_LANE_HANDOFF,
     PROGRESS_LANE_STARTED,
@@ -36,6 +37,7 @@ from core.models.results import ModelTokenUsage
 
 from .. import scorer as scorer_mod
 from .. import service as service_mod
+from ..agent_runs import PHASE_BASELINE, PHASE_FINAL
 from ..auto import LaneOutcome
 from ..harness import GatewayConfig
 from ..protocol import Candidate, EvalServer, Result, candidate_key
@@ -138,6 +140,7 @@ def test_run_scores_baseline_and_optimized_on_the_holdout(fake_lm: FakeReflectio
     events = [event for event, _ in sink]
     assert events[0] == PROGRESS_SPLITS_READY
     assert events[1] == PROGRESS_BASELINE
+    assert events[-2] == PROGRESS_EVALUATION_STARTED
     assert events[-1] == PROGRESS_OPTIMIZED
     assert PROGRESS_LANE_STARTED in events
     assert PROGRESS_LANE_COMPLETED in events
@@ -674,7 +677,12 @@ def test_score_holdout_logs_a_debug_heartbeat_per_case(caplog: pytest.LogCapture
 
     with caplog.at_level(logging.DEBUG, logger="core.service_gateway.optimization.blackbox.service"):
         mean = service_mod._score_holdout(
-            lambda candidate, case: (case["n"] / 4, {}), "v", cases, label="optimized version", concurrency=concurrency
+            lambda candidate, case: (case["n"] / 4, {}),
+            "v",
+            cases,
+            label="optimized version",
+            phase=PHASE_FINAL,
+            concurrency=concurrency,
         )
 
     assert mean == pytest.approx(0.375)
@@ -702,7 +710,7 @@ def test_score_holdout_stops_scheduling_cases_once_one_fails() -> None:
 
     cases = [{"n": n} for n in range(1, 7)]
     with pytest.raises(ServiceError, match="scorer failed on the optimized version: ValueError: boom"):
-        service_mod._score_holdout(scorer, "v", cases, label="optimized version", concurrency=2)
+        service_mod._score_holdout(scorer, "v", cases, label="optimized version", phase=PHASE_FINAL, concurrency=2)
 
     assert set(started) <= {1, 2, 3}
 
@@ -710,7 +718,9 @@ def test_score_holdout_stops_scheduling_cases_once_one_fails() -> None:
 def test_score_holdout_logs_the_score_in_single_task_mode(caplog: pytest.LogCaptureFixture) -> None:
     """Without cases the held-out pass still says what it scores and what it scored."""
     with caplog.at_level(logging.INFO, logger="core.service_gateway.optimization.blackbox.service"):
-        score = service_mod._score_holdout(lambda candidate, case: (0.8, {}), "v", None, label="starting point")
+        score = service_mod._score_holdout(
+            lambda candidate, case: (0.8, {}), "v", None, label="starting point", phase=PHASE_BASELINE
+        )
 
     assert score == 0.8
     assert [r.getMessage() for r in caplog.records if r.levelno == logging.INFO] == [
@@ -775,3 +785,61 @@ def test_run_versions_show_the_tree_score_as_their_headline(fake_lm: FakeReflect
         assert version.score == node.val_score
         assert version.mean_score is not None
         assert version.evals >= 1
+
+
+def test_holdout_passes_share_measurements_with_the_eval_server(caplog: pytest.LogCaptureFixture) -> None:
+    """The baseline pass feeds the engine's look at the seed; the final pass reuses the engine's scores."""
+    calls: list[tuple[Candidate, Any]] = []
+
+    def scorer(candidate: Candidate, case: Any) -> tuple[float, dict[str, Any]]:
+        """Score by case number, remembering every call.
+
+        Args:
+            candidate: The version.
+            case: The case.
+
+        Returns:
+            A score that depends on the case only.
+        """
+        calls.append((candidate, case))
+        return case["n"] / 4, {"case": case["n"]}
+
+    cases = [{"n": 1}, {"n": 2}]
+    server = EvalServer(scorer, max_evals=10)
+
+    baseline = service_mod._score_holdout(
+        scorer, "seed", cases, label="starting point", phase=PHASE_BASELINE, server=server
+    )
+    assert baseline == pytest.approx(0.375)
+    assert len(calls) == 2
+    assert server.evaluate("seed", cases[0]) == (0.25, {"case": 1})
+    assert server.evaluate("seed", cases[1]) == (0.5, {"case": 2})
+    assert (server.used, len(calls)) == (0, 2)
+
+    server.evaluate("best", cases[0])
+    server.evaluate("best", cases[1])
+    assert (server.used, len(calls)) == (2, 4)
+    with caplog.at_level(logging.INFO, logger="core.service_gateway.optimization.blackbox.service"):
+        optimized = service_mod._score_holdout(
+            scorer, "best", cases, label="optimized version", phase=PHASE_FINAL, server=server
+        )
+
+    assert optimized == pytest.approx(0.375)
+    assert len(calls) == 4
+    assert any("(2 reused from the run)" in r.getMessage() for r in caplog.records)
+
+
+def test_run_without_a_test_split_measures_each_pair_once(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
+    """With the training cases as the yardstick, neither held-out pass spends scorer runs the engine repeats."""
+    response = run_blackbox_optimization(
+        _payload(split_fractions={"train": 1.0, "val": 0.0, "test": 0.0}),
+        artifact_id="job-1",
+        gepa_log_dir_path=str(tmp_path),
+    )
+
+    assert (response.split_counts.train, response.split_counts.val, response.split_counts.test) == (10, 0, 0)
+    assert response.baseline_test_metric == pytest.approx(3 / 11)
+    assert response.versions[0].mean_score == pytest.approx(3 / 11)
+    assert response.best_candidate == "aeiou"
+    assert response.optimized_test_metric == response.details["optimizer_best_score"] == 1.0
+    assert response.total_scorer_runs == 10

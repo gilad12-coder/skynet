@@ -22,6 +22,7 @@ from .analytics import (
 )
 from .artifacts import NodeArtifact, OptimizedDemo, OptimizedPredictor, ProgramArtifact, ReactOverlay
 from .blackbox import (
+    BlackboxAgentRunResponse,
     BlackboxBudget,
     BlackboxEngineCatalogResponse,
     BlackboxEngineInfo,
@@ -103,6 +104,7 @@ __all__ = [
     "HEALTH_STATUS_OK",
     "WORKFLOW_MODULE_NAME",
     "AnalyticsSummaryResponse",
+    "BlackboxAgentRunResponse",
     "BlackboxBudget",
     "BlackboxEngineCatalogResponse",
     "BlackboxEngineInfo",

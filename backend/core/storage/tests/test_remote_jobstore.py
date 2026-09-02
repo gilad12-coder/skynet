@@ -58,6 +58,7 @@ class SQLiteJobStore(RemoteDBJobStore):
         self._session_factory = sessionmaker(bind=self._engine)
         self._checkpoints = remote_mod.PostgresCheckpointBlobStore(self._engine)
         self._grid_pair_results = remote_mod.PostgresGridPairResultStore(self._engine)
+        self._agent_runs = remote_mod.PostgresAgentRunStore(self._engine)
 
 
 def _parse_iso_datetime(value: str) -> datetime:
@@ -232,6 +233,20 @@ def test_delete_job_cascades_progress_events(store: SQLiteJobStore) -> None:
     store.record_progress("job-del-3", "step", {"x": 1})
     store.delete_job("job-del-3")
     assert store.get_progress_events("job-del-3") == []
+
+
+def test_delete_job_cascades_agent_runs(store: SQLiteJobStore) -> None:
+    """Delete job removes the job's sandboxed agent runs."""
+    store.create_job("job-del-runs")
+    store.save_agent_run("job-del-runs", {"run_id": 1, "phase": "version", "status": "running"})
+    store.append_agent_run_transcript("job-del-runs", 1, "hi\n")
+    before = store.get_agent_run("job-del-runs", 1)
+    assert before is not None
+    assert before["transcript"] == "hi\n"
+
+    store.delete_job("job-del-runs")
+
+    assert store.get_agent_run("job-del-runs", 1) is None
 
 
 def test_delete_job_tolerates_nonexistent_id(store: SQLiteJobStore) -> None:
@@ -600,9 +615,7 @@ def test_internal_tagging_jobs_hidden_from_listing_surfaces(store: SQLiteJobStor
     store.create_job("run-1")
     store.set_payload_overview("run-1", {"username": "alice", "optimization_type": "run"})
     store.create_job("tag-1")
-    store.set_payload_overview(
-        "tag-1", {"username": "alice", "optimization_type": OPTIMIZATION_TYPE_TAGGING}
-    )
+    store.set_payload_overview("tag-1", {"username": "alice", "optimization_type": OPTIMIZATION_TYPE_TAGGING})
     assert {j["optimization_id"] for j in store.list_jobs()} == {"run-1"}
     assert store.count_jobs() == 1
     assert store.count_jobs_by_status() == {"pending": 1}

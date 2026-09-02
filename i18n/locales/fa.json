@@ -190,6 +190,7 @@
     "optimization.no_result_pending": "بهینه‌سازی هنوز هیچ نتیجه‌ای ندارد.",
     "optimization.not_finished": "بهینه‌سازی به پایان نرسیده است.",
     "optimization.not_found": "بهینه‌سازی یافت نشد: '{optimization_id}'.",
+    "optimization.agent_run_not_found": "اجرای عامل {run_id} برای بهینه‌سازی '{optimization_id}' یافت نشد.",
     "optimization.not_success_status_for_serve": "بهینه‌سازی در وضعیت '{status}' است — تنها بهینه‌سازی‌هایی که با موفقیت تکمیل شده‌اند قابل سرویس‌دهی هستند.",
     "optimization.not_success_status_for_test_results": "بهینه‌سازی در وضعیت '{status}' است — تنها بهینه‌سازی‌هایی که با موفقیت تکمیل شده‌اند نتایج آزمون دارند.",
     "optimization.pair_not_rerunnable": "تا زمانی که بهینه‌سازی در وضعیت '{status}' است نمی‌توان یک جفت را دوباره اجرا کرد.",

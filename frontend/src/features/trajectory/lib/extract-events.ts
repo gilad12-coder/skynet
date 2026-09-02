@@ -1,3 +1,4 @@
+import type { SideImage } from "@/shared/lib/candidate-render";
 import type { ProgressEvent } from "@/shared/types/api";
 import type {
   CandidateMetrics,
@@ -217,6 +218,7 @@ function coerceMinibatch(
   const feedback = metrics.feedback;
   const prediction = metrics.prediction;
   const iteration = metrics.iteration;
+  const images_dropped = metrics.images_dropped;
   if (typeof example_id !== "string") return null;
   if (typeof score !== "number") return null;
   if (typeof feedback !== "string") return null;
@@ -227,7 +229,22 @@ function coerceMinibatch(
     prediction: coercePrediction(prediction),
     sequence,
     iteration: typeof iteration === "number" ? iteration : null,
+    images: coerceImages(metrics.images),
+    images_dropped: typeof images_dropped === "number" && images_dropped > 0 ? images_dropped : 0,
   };
+}
+
+function coerceImages(value: unknown): SideImage[] {
+  if (!Array.isArray(value)) return [];
+  const out: SideImage[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) continue;
+    const { key, src } = item as Record<string, unknown>;
+    if (typeof key !== "string" || typeof src !== "string") continue;
+    if (!src.startsWith("data:image/")) continue;
+    out.push({ key, src });
+  }
+  return out;
 }
 
 export function extractMinibatch(events: ProgressEvent[]): MinibatchEntry[] {

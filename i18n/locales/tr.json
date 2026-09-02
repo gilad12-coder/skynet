@@ -190,6 +190,7 @@
     "optimization.no_result_pending": "Optimizasyonun henüz bir sonucu yok.",
     "optimization.not_finished": "Optimizasyon tamamlanmadı.",
     "optimization.not_found": "Optimizasyon bulunamadı: '{optimization_id}'.",
+    "optimization.agent_run_not_found": "'{optimization_id}' optimizasyonu için {run_id} numaralı ajan çalışması bulunamadı.",
     "optimization.not_success_status_for_serve": "Optimizasyon '{status}' durumunda — yalnızca başarıyla tamamlanan optimizasyonlar sunulabilir.",
     "optimization.not_success_status_for_test_results": "Optimizasyon '{status}' durumunda — yalnızca başarıyla tamamlanan optimizasyonların test sonuçları olur.",
     "optimization.pair_not_rerunnable": "Optimizasyon '{status}' durumundayken bir çift yeniden çalıştırılamaz.",

@@ -10,6 +10,15 @@ export const RENDER_KIND_EXTENSION: Record<RenderKind, string> = {
   code: "txt",
 };
 
+export const RENDER_KIND_LABEL = {
+  markdown: "optimization.blackbox.versions.kind.markdown",
+  svg: "optimization.blackbox.versions.kind.svg",
+  html: "optimization.blackbox.versions.kind.html",
+  json: "optimization.blackbox.versions.kind.json",
+  python: "optimization.blackbox.versions.kind.python",
+  code: "optimization.blackbox.versions.kind.code",
+} as const satisfies Record<RenderKind, string>;
+
 const SVG_START = /^(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/i;
 const HTML_DOCUMENT_START = /^(?:<!doctype\s+html|<html[\s>]|<head[\s>]|<body[\s>])/i;
 const HTML_FRAGMENT_START =

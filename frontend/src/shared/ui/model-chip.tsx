@@ -136,7 +136,7 @@ export function ModelChip({
           supportsVision ||
           config.token_source) && (
           <div
-            className="flex items-center gap-2.5 text-[0.625rem] text-muted-foreground"
+            className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[0.625rem] text-muted-foreground"
             dir="ltr"
           >
             {config.temperature != null && (

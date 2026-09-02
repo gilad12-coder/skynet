@@ -190,6 +190,7 @@
     "optimization.no_result_pending": "La optimización aún no tiene ningún resultado.",
     "optimization.not_finished": "La optimización no ha finalizado.",
     "optimization.not_found": "Optimización no encontrada: '{optimization_id}'.",
+    "optimization.agent_run_not_found": "No se encontró la ejecución del agente {run_id} para la optimización '{optimization_id}'.",
     "optimization.not_success_status_for_serve": "La optimización está en estado '{status}'; solo se pueden servir las optimizaciones completadas correctamente.",
     "optimization.not_success_status_for_test_results": "La optimización está en estado '{status}'; solo las optimizaciones completadas correctamente tienen resultados de prueba.",
     "optimization.pair_not_rerunnable": "No se puede volver a ejecutar un par mientras la optimización está en estado '{status}'.",

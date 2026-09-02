@@ -80,7 +80,10 @@ export type DryRunState =
 
 // The backend looks for a `score` (or `metric`) entrypoint and accepts either a
 // bare number or `{"score": ..., ...side_info}` (see blackbox/scorer.py).
-export const SCORER_TEMPLATE = `def score(candidate, case=None):
+export const SCORER_TEMPLATE = `from skynet import llm, Image  # llm(prompt, input=None, images=None) asks the scorer model
+
+
+def score(candidate, case=None):
     """Return a number — higher is better. \`case\` is one row of your cases (or None)."""
     text = candidate if isinstance(candidate, str) else "\\n".join(candidate.values())
     return float(len(text.split()))
@@ -139,6 +142,15 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+/**
+ * Whether a python scorer reaches for a model at all: only then does its
+ * model matter. Comments are dropped first, since the template documents
+ * `llm()` in one without ever calling it.
+ */
+function scorerCallsModel(code: string): boolean {
+  return /\bllm\s*\(/.test(code.replace(/#.*$/gm, ""));
+}
+
 export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -151,6 +163,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [direction, setDirection] = useState(0);
   const [furthestReachedStep, setFurthestReachedStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
+  const advancingRef = useRef(false);
   const [submitPhase, setSubmitPhase] = useState<"idle" | "sending" | "splash" | "done">("idle");
 
   const [jobName, setJobName] = useState("");
@@ -177,7 +191,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [background, setBackground] = useState("");
   const [targetKind, setTargetKind] = useState<"text" | "agent">("text");
   const [harness, setHarness] = useState<BlackboxHarness>("pi");
-  const [targetModel, setTargetModel] = useState<ModelConfig>(emptyModelConfig());
+  // The model the agent harness runs on: what the run optimizes for, and no
+  // part of the scorer. It carries only a name — the sandbox reaches it
+  // through the platform gateway, so the rest of the config would be dead
+  // weight.
+  const [targetModel, setTargetModel] = useState<ModelConfig>({ name: "" });
   const [targetTimeout, setTargetTimeout] = useState(600);
   const [targetConcurrency, setTargetConcurrency] = useState(2);
 
@@ -251,9 +269,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
   const [scorerInstall, setScorerInstall] = useState("");
-  // The model injected into the python scorer as `llm()`. Empty until the user
-  // picks one; a scorer that calls `llm()` without it fails the dry run.
+  // A metric is any function; only one that calls `llm()` needs a model.
+  // The Scorer step asks whether it does, and code that already calls
+  // `llm()` answers for itself.
   const [scorerModel, setScorerModel] = useState<ModelConfig>(emptyModelConfig());
+  const [scorerModelDeclared, setScorerModelDeclared] = useState(false);
+  const scorerCodeCallsModel = scorerCallsModel(metricCode);
+  const scorerUsesModel = scorerKind === "python" && (scorerModelDeclared || scorerCodeCallsModel);
   const [dryRun, setDryRun] = useState<DryRunState>({ status: "idle" });
   // Scorer fingerprint the in-flight/last dry run belongs to, so the reset
   // below doesn't wipe a run the agent kicked off for the code it just wrote.
@@ -271,6 +293,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     config: ModelConfig;
     onSave: (c: ModelConfig) => void;
     label: string;
+    nameOnly?: boolean;
   } | null>(null);
   const [maxCostCredits, setMaxCostCredits] = useState<number | null>(null);
 
@@ -354,7 +377,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             // ("custom"); the select can't show it, so the default stays.
             if (target.harness && BLACKBOX_HARNESSES.includes(target.harness))
               setHarness(target.harness);
-            if (target.model) setTargetModel({ ...emptyModelConfig(), name: target.model });
+            if (target.model) setTargetModel({ name: target.model });
             if (target.timeout_seconds != null) setTargetTimeout(target.timeout_seconds);
             if (target.concurrency != null) setTargetConcurrency(target.concurrency);
           }
@@ -383,7 +406,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             if (scorer.url) setScorerUrl(scorer.url);
             if (scorer.kind === "python" && scorer.install_command)
               setScorerInstall(scorer.install_command);
-            if (scorer.model?.name) setScorerModel({ ...emptyModelConfig(), ...scorer.model });
+            if (scorer.kind === "python" && scorer.model?.name) {
+              setScorerModel({ ...emptyModelConfig(), ...scorer.model });
+              setScorerModelDeclared(true);
+            }
           }
 
           const strategy = source.strategy;
@@ -421,7 +447,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     scorerUrl,
     scorerSecret,
     scorerInstall,
-    scorerModel,
+    scorerUsesModel ? scorerModel : null,
   ]);
   useEffect(() => {
     if (dryRunKeyRef.current === scorerKey) return;
@@ -445,7 +471,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             metric_code: code,
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
             install_command: scorerInstall.trim() || null,
-            model: scorerModel.name.trim() ? prepareModelConfig(scorerModel) : null,
+            model:
+              (scorerModelDeclared || scorerCallsModel(code)) && scorerModel.name.trim()
+                ? prepareModelConfig(scorerModel)
+                : null,
           }
         : {
             kind: "remote",
@@ -478,7 +507,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         scorerUrl,
         scorerSecret,
         scorerInstall,
-        scorerModel,
+        scorerKind === "python" && (scorerModelDeclared || scorerCallsModel(code))
+          ? scorerModel
+          : null,
       ]);
       setDryRun({ status: "running" });
       let outcome: ValidationResult;
@@ -523,9 +554,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       objective,
       background,
       target_kind: targetKind,
-      scorer_has_model: scorerModel.name.trim().length > 0,
+      scorer_has_model: scorerUsesModel && scorerModel.name.trim().length > 0,
     }),
-    [recipe, objective, background, targetKind, scorerModel.name],
+    [recipe, objective, background, targetKind, scorerUsesModel, scorerModel.name],
   );
 
   // The interview is offered whatever the seed mode or hand edits: its brief
@@ -657,12 +688,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       case ANYTHING_STEP.scorer: {
         if (scorerKind === "python" && !metricCode.trim())
           return fail("submit.blackbox.validation.scorer_code_required");
-        if (scorerKind === "python" && /\bllm\s*\(/.test(metricCode) && !scorerModel.name.trim())
+        if (scorerUsesModel && !scorerModel.name.trim())
           return fail("submit.blackbox.validation.scorer_model_required");
+        if (scorerKind === "python" && scorerModelDeclared && !scorerCodeCallsModel)
+          return fail("submit.blackbox.validation.scorer_llm_unused");
         if (scorerKind === "remote" && !/^https?:\/\/\S+$/.test(scorerUrl.trim()))
           return fail("submit.blackbox.validation.scorer_url_required");
-        if (dryRun.status !== "done" || !dryRun.result.ok)
-          return fail("submit.blackbox.validation.dry_run_required");
         return true;
       }
       case ANYTHING_STEP.optimizer: {
@@ -689,21 +720,48 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const goPrev = () => {
     if (step > 0) goTo(step - 1);
   };
-  const handleNext = async () => {
-    if (validateStep(step, true)) goTo(step + 1);
+  // Leaving the scorer step proves the scorer the way the DSPy wizard proves
+  // its code on Next: a missing or stale test is run, not demanded. The dry-run
+  // state resets whenever a scorer input changes, so a passed test is current.
+  const ensureScorerTested = async (): Promise<boolean> => {
+    if (dryRun.status === "done" && dryRun.result.ok) return true;
+    const outcome = await runDryRun();
+    if (outcome?.valid) return true;
+    if (step !== ANYTHING_STEP.scorer) {
+      toast.error(msg("submit.blackbox.scorer.dry_run_failed"));
+      goTo(ANYTHING_STEP.scorer);
+    }
+    return false;
   };
-  const handleTabClick = (idx: number) => {
+  const crossesScorer = (from: number, to: number) =>
+    from <= ANYTHING_STEP.scorer && to > ANYTHING_STEP.scorer;
+  const advance = async (target: number) => {
+    if (advancingRef.current) return;
+    advancingRef.current = true;
+    setAdvancing(true);
+    try {
+      for (let i = step; i < target; i++) {
+        if (!validateStep(i, true)) {
+          goTo(i);
+          return;
+        }
+      }
+      if (crossesScorer(step, target) && !(await ensureScorerTested())) return;
+      goTo(target);
+    } finally {
+      advancingRef.current = false;
+      setAdvancing(false);
+    }
+  };
+  const handleNext = async () => {
+    await advance(step + 1);
+  };
+  const handleTabClick = async (idx: number) => {
     if (idx <= step) {
       goTo(idx);
       return;
     }
-    for (let i = step; i < idx; i++) {
-      if (!validateStep(i, true)) {
-        goTo(i);
-        return;
-      }
-    }
-    goTo(idx);
+    await advance(idx);
   };
 
   const costBracket: CostBracket = useMemo(() => {
@@ -730,6 +788,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         return;
       }
     }
+    if (!(await ensureScorerTested())) return;
     setSubmitting(true);
     setSubmitPhase("sending");
     try {
@@ -800,7 +859,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     step,
     direction,
     maxReachableStep: furthestReachedStep,
-    advancing: false,
+    advancing,
     submitting,
     submitPhase,
     validateStep,
@@ -876,6 +935,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerInstall,
     scorerModel,
     setScorerModel,
+    scorerModelDeclared,
+    setScorerModelDeclared,
+    scorerCodeCallsModel,
+    scorerUsesModel,
     scorerValidation,
     dryRun,
     runDryRun,

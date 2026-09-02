@@ -190,6 +190,7 @@
     "optimization.no_result_pending": "لا يملك التحسين أي نتيجة بعد.",
     "optimization.not_finished": "لم ينتهِ التحسين.",
     "optimization.not_found": "لم يُعثر على التحسين: '{optimization_id}'.",
+    "optimization.agent_run_not_found": "لم يُعثر على تشغيل الوكيل {run_id} للتحسين '{optimization_id}'.",
     "optimization.not_success_status_for_serve": "التحسين في الحالة '{status}' — لا يمكن تقديم سوى عمليات التحسين المكتملة بنجاح.",
     "optimization.not_success_status_for_test_results": "التحسين في الحالة '{status}' — لا تملك نتائج اختبار سوى عمليات التحسين المكتملة بنجاح.",
     "optimization.pair_not_rerunnable": "لا يمكن إعادة تشغيل زوج بينما التحسين في الحالة '{status}'.",

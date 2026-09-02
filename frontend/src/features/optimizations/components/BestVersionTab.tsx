@@ -35,6 +35,7 @@ import {
   detectRenderKind,
   formatJson,
   RENDER_KIND_EXTENSION,
+  RENDER_KIND_LABEL,
   sideInfoImages,
   type RenderKind,
   isDrawable,
@@ -53,15 +54,6 @@ const ADDED_FG = "#3f4d1f";
 const REMOVED_BG = "rgba(168, 90, 59, 0.22)";
 const REMOVED_EMPHASIS_BG = "rgba(168, 90, 59, 0.45)";
 const REMOVED_FG = "#6e2e16";
-
-const KIND_LABEL = {
-  markdown: "optimization.blackbox.versions.kind.markdown",
-  svg: "optimization.blackbox.versions.kind.svg",
-  html: "optimization.blackbox.versions.kind.html",
-  json: "optimization.blackbox.versions.kind.json",
-  python: "optimization.blackbox.versions.kind.python",
-  code: "optimization.blackbox.versions.kind.code",
-} as const satisfies Record<RenderKind, string>;
 
 type View = "preview" | "code" | "diff";
 
@@ -382,7 +374,7 @@ export function BestVersionTab({
             </h3>
           </HelpTip>
           <span className="ms-auto shrink-0 text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
-            {msg(KIND_LABEL[kind])}
+            {msg(RENDER_KIND_LABEL[kind])}
           </span>
         </header>
 

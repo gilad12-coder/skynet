@@ -177,6 +177,7 @@
     "optimization.no_result_pending": "優化仲未有結果。",
     "optimization.not_finished": "優化仲未完成。",
     "optimization.not_found": "搵唔到優化：「{optimization_id}」。",
+    "optimization.agent_run_not_found": "搵唔到優化「{optimization_id}」嘅代理執行 {run_id}。",
     "optimization.not_success_status_for_serve": "優化處於「{status}」狀態——只有成功完成嘅優化先可以提供服務。",
     "optimization.not_success_status_for_test_results": "優化處於「{status}」狀態——只有成功完成嘅優化先有測試結果。",
     "optimization.pair_not_rerunnable": "當優化處於「{status}」狀態嗰陣無法重新執行配對。",

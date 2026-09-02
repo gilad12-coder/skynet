@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import type { ProgressEvent } from "@/shared/types/api";
 
-import { scopeToLatestLane } from "./extract-events.ts";
+import { extractMinibatch, scopeToLatestLane } from "./extract-events.ts";
 
 function event(name: string, metrics: Record<string, unknown> = {}): ProgressEvent {
   return { timestamp: "2026-01-01T00:00:00Z", event: name, metrics };
@@ -65,5 +65,35 @@ describe("scopeToLatestLane", () => {
       scoped.map((e) => e.metrics.candidate_id),
       ["1"],
     );
+  });
+});
+
+describe("extractMinibatch", () => {
+  const PNG = "data:image/png;base64,iVBORw0KGgo=";
+
+  it("keeps the renders a scorer attached next to its note", () => {
+    const [entry] = extractMinibatch([
+      event("minibatch_feedback", {
+        example_id: "0",
+        score: 0.5,
+        feedback: "close",
+        images: [
+          { key: "render_1", src: PNG },
+          { key: "bad" },
+          { key: "x", src: "http://a/b.png" },
+        ],
+        images_dropped: 2,
+      }),
+    ]);
+    assert.deepEqual(entry?.images, [{ key: "render_1", src: PNG }]);
+    assert.equal(entry?.images_dropped, 2);
+  });
+
+  it("reads DSPy events, which carry no renders, as having none", () => {
+    const [entry] = extractMinibatch([
+      event("minibatch_feedback", { example_id: "0", score: 1, feedback: "ok" }),
+    ]);
+    assert.deepEqual(entry?.images, []);
+    assert.equal(entry?.images_dropped, 0);
   });
 });

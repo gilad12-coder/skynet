@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from gepa.image import Image
+
 from core.constants import PROGRESS_CANDIDATE, PROGRESS_CASE_SCORED, PROGRESS_MINIBATCH
 from core.service_gateway.optimization import trajectory
 
+from .. import feedback
 from ..feedback import (
     candidate_parts,
     emit_candidate,
     emit_case_scored,
     emit_scorer_feedback,
+    scorer_feedback_images,
     scorer_feedback_text,
     without_images,
 )
@@ -29,6 +33,13 @@ def test_images_and_empty_values_are_dropped() -> None:
     side_info = {"render": PNG, "frames": [PNG, PNG], "feedback": "ok", "missing": None, "extra": {}}
 
     assert without_images(side_info) == {"frames": [], "feedback": "ok", "missing": None, "extra": {}}
+    assert scorer_feedback_text(side_info) == "ok"
+
+
+def test_revived_image_objects_are_dropped_too() -> None:
+    """The ``Image`` the sandbox scorer wraps a render in never leaks back in as a data URL."""
+    side_info = {"render_1": Image(url=PNG), "frames": [Image(url=PNG)], "feedback": "ok"}
+
     assert scorer_feedback_text(side_info) == "ok"
 
 
@@ -55,7 +66,7 @@ def test_emit_skips_when_nothing_to_say() -> None:
     sink: list[tuple[str, dict]] = []
 
     emit_scorer_feedback(None, example_id="1", score=1.0, side_info={"feedback": "hi"})
-    emit_scorer_feedback(lambda e, m: sink.append((e, m)), example_id="1", score=1.0, side_info={"render": PNG})
+    emit_scorer_feedback(lambda e, m: sink.append((e, m)), example_id="1", score=1.0, side_info={})
 
     assert sink == []
 
@@ -74,9 +85,46 @@ def test_emit_mirrors_the_dspy_event_shape() -> None:
     assert sink == [
         (
             PROGRESS_MINIBATCH,
-            {"example_id": "2", "score": 0.25, "feedback": "closer", "prediction": "", "iteration": 3},
+            {
+                "example_id": "2",
+                "score": 0.25,
+                "feedback": "closer",
+                "prediction": "",
+                "iteration": 3,
+                "images": [],
+                "images_dropped": 0,
+            },
         )
     ]
+
+
+def test_emit_carries_renders_whole_next_to_the_text() -> None:
+    """Raw and revived renders, top-level or listed, reach the event uncut and image-only side info still emits."""
+    sink: list[tuple[str, dict]] = []
+
+    emit_scorer_feedback(
+        lambda e, m: sink.append((e, m)),
+        example_id="2",
+        score=0.5,
+        side_info={"render_1": PNG, "frames": [Image(url=PNG)]},
+        iteration=1,
+    )
+
+    (event,) = sink
+    assert event[0] == PROGRESS_MINIBATCH
+    assert event[1]["feedback"] == ""
+    assert event[1]["images"] == [{"key": "render_1", "src": PNG}, {"key": "frames[0]", "src": PNG}]
+    assert event[1]["images_dropped"] == 0
+
+
+def test_renders_past_the_byte_budget_are_counted_not_cut(monkeypatch) -> None:
+    """The first renders that fit are kept whole; the rest are counted so the UI can say so."""
+    monkeypatch.setattr(feedback, "MINIBATCH_IMAGES_BYTE_CAP", len(PNG) + 1)
+
+    images, dropped = scorer_feedback_images({"a": PNG, "b": PNG, "c": [PNG], "d": "prose"})
+
+    assert images == [{"key": "a", "src": PNG}]
+    assert dropped == 2
 
 
 def test_emit_prefers_an_explicit_iteration_over_the_context() -> None:

@@ -7,7 +7,6 @@ import type { OptimizationStatusResponse } from "@/shared/types/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
-import { formatBlackboxScore } from "@/shared/lib";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { useLiteMode } from "@/features/settings";
 import {
@@ -17,11 +16,22 @@ import {
   extractValsetOutputs,
 } from "../lib/extract-events";
 import { layoutTrajectory } from "../lib/layout";
-import { buildClimb, extractCaseScores, scopeToVersionLane } from "../lib/meta-harness";
+import {
+  agentRunKey,
+  buildClimb,
+  extractAgentRuns,
+  extractCaseScores,
+  finalRunKey,
+  indexAgentRuns,
+  pendingCases,
+  scopeToVersionLane,
+  type AgentRunSummary,
+} from "../lib/meta-harness";
 import { displayCandidateId, type BlackboxTrajectoryContext } from "../lib/types";
-import { MetaHarnessCaseGrid } from "./MetaHarnessCaseGrid";
+import { AgentRunViewer } from "./AgentRunViewer";
 import { MetaHarnessClimb } from "./MetaHarnessClimb";
 import { MetaHarnessOutline } from "./MetaHarnessOutline";
+import { TimelineScrubber } from "./TimelineScrubber";
 import { TrajectoryDrawer, type DrawerSelection } from "./TrajectoryDrawer";
 
 const NEWEST_HIGHLIGHT_MS = 2200;
@@ -40,6 +50,14 @@ const STOP_REASONS: Record<string, MessageKey> = {
   no_new_proposal: "meta_harness.stopped.no_new_proposal",
 };
 
+function versionText(index: number): string {
+  return formatMsg("meta_harness.version", { id: displayCandidateId(String(index)) });
+}
+
+function versionTick(index: number): string {
+  return displayCandidateId(String(index));
+}
+
 function isLive(job: OptimizationStatusResponse): boolean {
   return job.status === "running" || job.status === "validating" || job.status === "pending";
 }
@@ -55,51 +73,81 @@ export interface MetaHarnessPanelProps {
  * Run view of a meta-harness lane. The engine hill-climbs — it rewrites the
  * best version so far and scores every candidate on all cases — so the run is
  * a climb rather than a tree: the chart lays versions out in scoring order
- * with the best so far as a staircase, and the heatmap under it shows how each
- * version did case by case, filling in live while a version is being scored.
+ * with the best so far as a staircase, and a version's drawer shows how it did
+ * case by case, each score opening the agent run behind it.
  */
 export function MetaHarnessPanel({ job, blackbox }: MetaHarnessPanelProps) {
   const live = isLive(job);
   const lite = useLiteMode();
   const blackboxCtx = blackbox ?? BLACKBOX_FALLBACK;
-  const { candidates, model, valsetRows, minibatch, valsetOutputs } = useMemo(() => {
-    const events = job.progress_events ?? [];
-    const scoped = scopeToVersionLane(events);
-    const found = extractCandidates(scoped);
-    return {
-      candidates: found,
-      model: buildClimb(found, extractCaseScores(scoped)),
-      valsetRows: extractValset(events),
-      minibatch: extractMinibatch(scoped),
-      valsetOutputs: extractValsetOutputs(scoped),
-    };
-  }, [job.progress_events]);
+  const { candidates, caseScores, valsetRows, minibatch, valsetOutputs, agentRuns } =
+    useMemo(() => {
+      const events = job.progress_events ?? [];
+      const scoped = scopeToVersionLane(events);
+      return {
+        candidates: extractCandidates(scoped),
+        caseScores: extractCaseScores(scoped),
+        valsetRows: extractValset(events),
+        minibatch: extractMinibatch(scoped),
+        valsetOutputs: extractValsetOutputs(scoped),
+        agentRuns: extractAgentRuns(scoped),
+      };
+    }, [job.progress_events]);
+  const runsByCell = useMemo(() => indexAgentRuns(agentRuns), [agentRuns]);
+  const fullModel = useMemo(
+    () => buildClimb(candidates, caseScores, agentRuns),
+    [candidates, caseScores, agentRuns],
+  );
+  const maxVersion = useMemo(
+    () => fullModel.versions.reduce((last, version) => Math.max(last, version.index), 0),
+    [fullModel],
+  );
+  const [versionFilter, setVersionFilter] = useState<number | null>(null);
+  // Scrubbed back, the climb ends at that version: later versions and the one
+  // still being scored drop out until the knob returns to the live end.
+  const model = useMemo(() => {
+    if (versionFilter === null) return fullModel;
+    const kept = new Set(
+      fullModel.versions
+        .filter((version) => version.index <= versionFilter)
+        .map((version) => version.candidate.candidate_id),
+    );
+    return buildClimb(
+      candidates.filter((candidate) => kept.has(candidate.candidate_id)),
+      caseScores.filter((scored) => scored.trial <= versionFilter),
+    );
+  }, [fullModel, candidates, caseScores, versionFilter]);
   const treeLayout = useMemo(() => layoutTrajectory(candidates), [candidates]);
   const details = job.blackbox_result?.details ?? {};
   const proposals = typeof details.proposals === "number" ? details.proposals : null;
   const stopKey =
     typeof details.stopped === "string" ? (STOP_REASONS[details.stopped] ?? null) : null;
-  const best = useMemo(
-    () => model.versions.find((v) => v.candidate.candidate_id === model.bestId) ?? null,
-    [model],
-  );
-  const pending = live ? model.pending : null;
+  // The version being scored answers to its trial number, which is also the
+  // candidate id it gets once complete, so a selection on it carries over.
+  const pendingId = live && fullModel.pending !== null ? String(fullModel.pending.index) : null;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [openRun, setOpenRun] = useState<AgentRunSummary | null>(null);
+  const [runOpen, setRunOpen] = useState(false);
   const [newestId, setNewestId] = useState<string | null>(null);
   const newestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevCountRef = useRef(0);
   const liveRegionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (candidates.length === 0) {
+    if (candidates.length === 0 && pendingId === null) {
       setSelectedId(null);
       return;
     }
-    if (selectedId !== null && candidates.some((c) => c.candidate_id === selectedId)) return;
-    setSelectedId(model.bestId ?? candidates[0]?.candidate_id ?? null);
-  }, [candidates, model.bestId, selectedId]);
+    if (
+      selectedId !== null &&
+      (selectedId === pendingId || candidates.some((c) => c.candidate_id === selectedId))
+    ) {
+      return;
+    }
+    setSelectedId(fullModel.bestId ?? candidates[0]?.candidate_id ?? null);
+  }, [candidates, fullModel.bestId, selectedId, pendingId]);
 
   useEffect(() => {
     if (candidates.length <= prevCountRef.current) {
@@ -124,6 +172,14 @@ export function MetaHarnessPanel({ job, blackbox }: MetaHarnessPanelProps) {
 
   const drawerSelection: DrawerSelection = useMemo(() => {
     if (selectedId === null) return null;
+    if (selectedId === pendingId && fullModel.pending !== null) {
+      return {
+        kind: "pending",
+        index: fullModel.pending.index,
+        total: fullModel.pending.total,
+        cases: pendingCases(fullModel),
+      };
+    }
     const node = treeLayout.nodes.find((n) => n.candidate_id === selectedId);
     if (node === undefined) return null;
     const parent =
@@ -131,16 +187,45 @@ export function MetaHarnessPanel({ job, blackbox }: MetaHarnessPanelProps) {
         ? null
         : (treeLayout.nodes.find((n) => n.candidate_id === node.parent_id) ?? null);
     return { kind: "candidate", node, parent };
-  }, [treeLayout.nodes, selectedId]);
+  }, [treeLayout.nodes, selectedId, pendingId, fullModel]);
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
     setDrawerOpen(true);
   }, []);
 
-  if (model.versions.length === 0 && pending === null) return null;
+  const handleOpenRun = useCallback((run: AgentRunSummary) => {
+    setOpenRun(run);
+    setRunOpen(true);
+  }, []);
 
-  const versionCount = formatMsg("meta_harness.header.versions", { n: model.versions.length });
+  // The runs behind the selected version's case scores: its own, plus the
+  // final check of the best version once the engine has stopped. The version
+  // still being scored has only its own, some of them still going.
+  const caseRuns = useCallback(
+    (exampleId: string): AgentRunSummary[] => {
+      if (selectedId === pendingId && fullModel.pending !== null) {
+        const own = runsByCell.get(agentRunKey(fullModel.pending.index, exampleId));
+        return own === undefined ? [] : [own];
+      }
+      const version = fullModel.versions.find((v) => v.candidate.candidate_id === selectedId);
+      if (version === undefined) return [];
+      const runs: AgentRunSummary[] = [];
+      const own = runsByCell.get(agentRunKey(version.index, exampleId));
+      if (own !== undefined) runs.push(own);
+      const final =
+        selectedId === fullModel.bestId ? runsByCell.get(finalRunKey(exampleId)) : undefined;
+      if (final !== undefined) runs.push(final);
+      return runs;
+    },
+    [fullModel, runsByCell, selectedId, pendingId],
+  );
+
+  if (fullModel.versions.length === 0 && (!live || fullModel.pending === null)) return null;
+
+  const versionCount = formatMsg("meta_harness.header.versions", {
+    n: fullModel.versions.length,
+  });
 
   return (
     <FadeIn delay={0.12}>
@@ -161,33 +246,12 @@ export function MetaHarnessPanel({ job, blackbox }: MetaHarnessPanelProps) {
               </HelpTip>
             </CardTitle>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              {best !== null ? (
-                <span>
-                  {msg("trajectory.outline.best")}{" "}
-                  <span className="font-mono font-semibold text-foreground tabular-nums" dir="ltr">
-                    {formatBlackboxScore(best.score)}
-                  </span>
-                </span>
-              ) : null}
               {proposals !== null ? (
                 <span className="tabular-nums">
                   {formatMsg("meta_harness.stats.proposals", { n: proposals })}
                 </span>
               ) : null}
               {stopKey !== null && !live ? <span>{msg(stopKey)}</span> : null}
-              {pending !== null ? (
-                <span className="inline-flex items-center gap-1.5 tabular-nums" aria-live="polite">
-                  <span
-                    className="inline-block size-1.5 animate-pulse rounded-full bg-[var(--warning)]"
-                    aria-hidden="true"
-                  />
-                  {formatMsg("meta_harness.live.scoring", {
-                    id: displayCandidateId(String(pending.index)),
-                    done: pending.scores.size,
-                    total: pending.total,
-                  })}
-                </span>
-              ) : null}
             </div>
           </div>
           {live ? (
@@ -213,6 +277,18 @@ export function MetaHarnessPanel({ job, blackbox }: MetaHarnessPanelProps) {
           )}
         </CardHeader>
         <CardContent className="space-y-4">
+          {maxVersion > 0 ? (
+            <TimelineScrubber
+              max={maxVersion}
+              value={versionFilter}
+              onChange={setVersionFilter}
+              isLive={live}
+              label={msg("meta_harness.scrubber.label")}
+              stepText={versionText}
+              liveText={msg("trajectory.scrubber.live")}
+              tickText={versionTick}
+            />
+          ) : null}
           {lite ? (
             <MetaHarnessOutline
               model={model}
@@ -230,11 +306,11 @@ export function MetaHarnessPanel({ job, blackbox }: MetaHarnessPanelProps) {
               onSelect={handleSelect}
             />
           )}
-          <MetaHarnessCaseGrid
-            model={model}
-            live={live}
-            selectedId={selectedId}
-            onSelect={handleSelect}
+          <AgentRunViewer
+            optimizationId={job.optimization_id}
+            run={openRun}
+            open={runOpen}
+            onOpenChange={setRunOpen}
           />
           <TrajectoryDrawer
             selection={drawerSelection}
@@ -244,6 +320,8 @@ export function MetaHarnessPanel({ job, blackbox }: MetaHarnessPanelProps) {
             minibatch={minibatch}
             blackbox={blackboxCtx}
             valsetOutputs={valsetOutputs}
+            caseRuns={caseRuns}
+            onOpenRun={handleOpenRun}
           />
           <div ref={liveRegionRef} role="status" aria-live="polite" className="sr-only" />
         </CardContent>

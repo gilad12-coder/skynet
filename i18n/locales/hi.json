@@ -190,6 +190,7 @@
     "optimization.no_result_pending": "ऑप्टिमाइज़ेशन में अभी तक कोई परिणाम नहीं है।",
     "optimization.not_finished": "ऑप्टिमाइज़ेशन पूर्ण नहीं हुआ है।",
     "optimization.not_found": "ऑप्टिमाइज़ेशन नहीं मिला: '{optimization_id}'।",
+    "optimization.agent_run_not_found": "ऑप्टिमाइज़ेशन '{optimization_id}' के लिए एजेंट रन {run_id} नहीं मिला।",
     "optimization.not_success_status_for_serve": "ऑप्टिमाइज़ेशन '{status}' स्थिति में है — केवल सफलतापूर्वक पूर्ण हुए ऑप्टिमाइज़ेशन ही सर्व किए जा सकते हैं।",
     "optimization.not_success_status_for_test_results": "ऑप्टिमाइज़ेशन '{status}' स्थिति में है — केवल सफलतापूर्वक पूर्ण हुए ऑप्टिमाइज़ेशन के ही परीक्षण परिणाम होते हैं।",
     "optimization.pair_not_rerunnable": "ऑप्टिमाइज़ेशन के '{status}' स्थिति में रहते हुए किसी जोड़ी को पुनः नहीं चलाया जा सकता।",

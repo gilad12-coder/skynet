@@ -17,7 +17,12 @@ from collections.abc import Callable
 from typing import Any
 
 from ....constants import PROGRESS_CANDIDATE, PROGRESS_CASE_SCORED, PROGRESS_MINIBATCH
-from ..trajectory import MINIBATCH_FEEDBACK_CHAR_CAP, CandidateEvent, current_proposal_iteration
+from ..trajectory import (
+    MINIBATCH_FEEDBACK_CHAR_CAP,
+    MINIBATCH_IMAGES_BYTE_CAP,
+    CandidateEvent,
+    current_proposal_iteration,
+)
 from .protocol import Candidate, SideInfo
 from .runner import side_info_json_default
 
@@ -31,7 +36,11 @@ STR_CANDIDATE_KEY = "current_candidate"
 
 
 def is_data_image(value: Any) -> bool:
-    """Tell whether a side-info value is an inline ``data:image/…`` URL.
+    """Tell whether a side-info value is an inline image.
+
+    Both the raw ``data:image/…`` URL a scorer returns and the ``Image`` the
+    sandbox scorer revives it into for the reflection model count; the
+    latter would otherwise be JSON-dumped back into a data URL.
 
     Args:
         value: Any side-info value.
@@ -39,7 +48,56 @@ def is_data_image(value: Any) -> bool:
     Returns:
         Whether it is an inline image.
     """
-    return isinstance(value, str) and value.startswith("data:image/")
+    if isinstance(value, str):
+        return value.startswith("data:image/")
+    return callable(getattr(value, "to_openai_content_part", None))
+
+
+def image_src(value: Any) -> str:
+    """Return the data URL behind an inline image, raw or revived.
+
+    Args:
+        value: A value :func:`is_data_image` accepted.
+
+    Returns:
+        Its ``data:image/…`` URL.
+    """
+    if isinstance(value, str):
+        return value
+    return value.to_openai_content_part()["image_url"]["url"]
+
+
+def scorer_feedback_images(side_info: SideInfo) -> tuple[list[dict[str, str]], int]:
+    """Collect the renders a scorer attached, whole, in side-info order.
+
+    Renders travel next to the capped feedback text rather than inside it,
+    so a PNG never gets cut mid-base64. A byte budget still bounds one
+    event: the first renders are kept, the ones past it are counted.
+
+    Args:
+        side_info: What the scorer returned next to the score.
+
+    Returns:
+        The kept ``{"key", "src"}`` renders and how many did not fit.
+    """
+    images: list[dict[str, str]] = []
+    dropped = 0
+    used = 0
+    for key, value in side_info.items():
+        if isinstance(value, list):
+            entries = [(f"{key}[{index}]", item) for index, item in enumerate(value)]
+        else:
+            entries = [(key, value)]
+        for name, item in entries:
+            if not is_data_image(item):
+                continue
+            src = image_src(item)
+            if used + len(src) > MINIBATCH_IMAGES_BYTE_CAP:
+                dropped += 1
+                continue
+            used += len(src)
+            images.append({"key": name, "src": src})
+    return images, dropped
 
 
 def without_images(side_info: dict[str, Any]) -> dict[str, Any]:
@@ -111,7 +169,8 @@ def emit_scorer_feedback(
 
     The event mirrors what DSPy runs emit per metric call, including the
     proposal iteration the call belongs to, so the drawer can show a
-    candidate the feedback that led to it.
+    candidate the feedback that led to it. Renders ride along whole under
+    ``images``, outside the feedback text cap.
 
     Args:
         progress_callback: The lane's progress sink, if any.
@@ -125,7 +184,8 @@ def emit_scorer_feedback(
     if progress_callback is None:
         return
     feedback = scorer_feedback_text(side_info)
-    if not feedback:
+    images, images_dropped = scorer_feedback_images(side_info)
+    if not feedback and not images:
         return
     if iteration is None:
         iteration = current_proposal_iteration()
@@ -138,6 +198,8 @@ def emit_scorer_feedback(
                 "feedback": feedback,
                 "prediction": "",
                 "iteration": iteration,
+                "images": images,
+                "images_dropped": images_dropped,
             },
         )
     except Exception:

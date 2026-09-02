@@ -21,7 +21,7 @@ import type {
   OptimizationStatusResponse,
   PairResult,
 } from "@/shared/types/api";
-import { type PipelineStage } from "../constants";
+import { PIPELINE_STAGES, type PipelineStage } from "../constants";
 import { detectPairStage, detectStage } from "../lib/detect-stage";
 import {
   formatBlackboxDelta,
@@ -39,6 +39,7 @@ import { MetaHarnessPanel, TrajectoryPanel, isMetaHarnessRun } from "@/features/
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { buildBlackboxTrajectoryContext } from "../lib/blackbox-trajectory";
+import { describeBlackboxArtifact } from "../lib/blackbox-artifact";
 
 const ScoreChart = dynamic(() => import("@/shared/ui/score-chart").then((m) => m.ScoreChart), {
   ssr: false,
@@ -140,6 +141,13 @@ function OverviewTabImpl({
         : null,
     [isBlackbox, job.blackbox_result, payload],
   );
+  const scoreChartArtifact = useMemo(
+    () =>
+      isBlackbox
+        ? describeBlackboxArtifact(job.blackbox_result ?? null, payload ?? null)
+        : undefined,
+    [isBlackbox, job.blackbox_result, payload],
+  );
   // A meta-harness lane hill-climbs instead of branching, so it gets the
   // climb view; the lane that produced the newest versions decides.
   const strategyEngine = (payload?.payload.strategy as Partial<BlackboxStrategy> | undefined)
@@ -201,6 +209,16 @@ function OverviewTabImpl({
     runResult?.metric_improvement ??
     bbResult?.metric_improvement ??
     (baseline != null && optimized != null ? optimized - baseline : undefined);
+  // A stage the flow never ran (DSPy runs measure no baseline or final score
+  // without a test split; black-box runs measure no baseline without a
+  // starting point) must not read as completed once the run is past it.
+  const stageIndex = (stage: PipelineStage | "done") =>
+    stage === "done" ? PIPELINE_STAGES.length : PIPELINE_STAGES.findIndex((s) => s.key === stage);
+  const skippedStages: PipelineStage[] = [];
+  if (baseline == null && stageIndex(currentStage) > stageIndex("baseline"))
+    skippedStages.push("baseline");
+  if (optimized == null && currentStage === "done" && !stagesFailed)
+    skippedStages.push("evaluating");
   const scoresReady =
     (runResult != null || bbResult != null) &&
     baseline != null &&
@@ -356,6 +374,7 @@ function OverviewTabImpl({
             stageTs={stageTs}
             isActive={stagesActive}
             isFailed={stagesFailed}
+            skippedStages={skippedStages}
             onStageClick={onStageClick}
             dataTutorial={isPairContext ? undefined : "pipeline-stages"}
           />
@@ -619,7 +638,7 @@ function OverviewTabImpl({
             </CardHeader>
             <CardContent>
               <div className="h-[220px] min-w-0">
-                <ScoreChart data={scorePoints} />
+                <ScoreChart data={scorePoints} artifact={scoreChartArtifact} />
               </div>
             </CardContent>
           </Card>

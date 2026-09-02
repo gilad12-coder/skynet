@@ -109,6 +109,7 @@ class I18nKey(StrEnum):
     NOTIFIER_TITLE_COMPLETED = 'notifier.title.completed'
     NOTIFIER_TITLE_FAILED = 'notifier.title.failed'
     NOTIFIER_TITLE_NEW = 'notifier.title.new'
+    OPTIMIZATION_AGENT_RUN_NOT_FOUND = 'optimization.agent_run_not_found'
     OPTIMIZATION_ALREADY_TERMINAL = 'optimization.already_terminal'
     OPTIMIZATION_CANCELLED_NO_ARTIFACT = 'optimization.cancelled_no_artifact'
     OPTIMIZATION_CANNOT_DELETE = 'optimization.cannot_delete'

@@ -26,6 +26,7 @@ import pytest
 import core.worker.engine as engine_module
 from core.storage.base import JobStore
 from core.worker.constants import (
+    EVENT_AGENT_RUN,
     EVENT_ERROR,
     EVENT_LOG,
     EVENT_PROGRESS,
@@ -95,6 +96,29 @@ def test_drain_routes_progress_event_to_record_progress(
     assert opt_id == "opt-1"
     assert evt_name == "iter_done"
     assert metrics == {"score": 0.8}
+
+
+def test_drain_routes_agent_run_rows_and_deltas_to_the_store(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A run row is saved, a transcript delta appended, and a malformed run ignored."""
+    store.seed_job("opt-1")
+    q = _make_fake_queue(
+        {"type": EVENT_AGENT_RUN, "run": {"run_id": 1, "status": "running", "transcript": ""}},
+        {"type": EVENT_AGENT_RUN, "run": {"run_id": 1, "transcript_delta": "hi\n"}},
+        {"type": EVENT_AGENT_RUN, "run": {"run_id": "bogus"}},
+        {"type": EVENT_AGENT_RUN, "run": None},
+    )
+
+    _result, error, drained = worker._drain_subprocess_events("opt-1", q)
+
+    assert error is None
+    assert drained == 4
+    assert store.agent_run_calls == [
+        ("opt-1", "save", {"run_id": 1, "status": "running", "transcript": ""}),
+        ("opt-1", "append", (1, "hi\n")),
+    ]
 
 
 def test_drain_routes_log_event_to_append_log(
@@ -524,6 +548,7 @@ def test_init_falls_back_to_1_0_when_cancel_poll_interval_is_not_a_float(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Init falls back to ``1.0`` when ``cancel_poll_interval`` cannot be parsed."""
+
     # Patch settings on the engine module so ``str(settings.cancel_poll_interval)``
     # returns a value that ``float()`` cannot parse — exercising the
     # ``except ValueError`` fallback in ``BackgroundWorker.__init__``.
@@ -543,6 +568,7 @@ def test_resolve_mp_context_raises_and_falls_back_on_bogus_method(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``_resolve_mp_context`` falls back to a default context for bad methods."""
+
     class _FakeSettings:
         cancel_poll_interval = 1.0
         job_run_start_method = "bogus_method"
@@ -562,6 +588,7 @@ def test_resolve_mp_context_emits_warning_for_bogus_method(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """``_resolve_mp_context`` warns when an unknown start method is configured."""
+
     class _FakeSettings:
         cancel_poll_interval = 1.0
         job_run_start_method = "definitely_invalid"
@@ -580,6 +607,7 @@ def test_resolve_mp_context_emits_warning_for_non_fork_method(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """``_resolve_mp_context`` warns when a non-fork method is configured."""
+
     class _FakeSettings:
         cancel_poll_interval = 1.0
         job_run_start_method = "spawn"

@@ -665,6 +665,32 @@ export interface BlackboxEngineCatalogResponse {
   engines: BlackboxEngineInfo[];
 }
 
+/** One sandboxed agent run of a black-box optimization, with a transcript tail. */
+export interface BlackboxAgentRunResponse {
+  run_id: number;
+  phase: string;
+  trial?: number | null;
+  example_id?: string | null;
+  case_id?: string | null;
+  label: string;
+  status: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  /** The model the harness drove in this run. */
+  model?: string | null;
+  exit_code?: number | null;
+  timed_out: boolean;
+  elapsed_seconds?: number | null;
+  error?: string | null;
+  usage: Record<string, unknown>;
+  check?: Record<string, unknown> | null;
+  output?: string | null;
+  /** The transcript from ``transcript_offset`` on; the whole of it when the offset is 0. */
+  transcript: string;
+  transcript_offset: number;
+  transcript_length: number;
+}
+
 export interface OptimizationStatusResponse extends OptimizationSummaryResponse {
   progress_events: ProgressEvent[];
   logs: OptimizationLogEntry[];

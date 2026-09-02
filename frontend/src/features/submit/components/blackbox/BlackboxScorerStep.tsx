@@ -5,6 +5,7 @@ import { CheckCircle, CircleNotch, Play, XCircle } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
+import { Switch } from "@/shared/ui/primitives/switch";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -12,10 +13,10 @@ import { tip } from "@/shared/lib/tooltips";
 import { formatElapsedMs, formatScore } from "@/shared/lib/formatters";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
-import { emptyModelConfig } from "../../constants";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
+import { emptyModelConfig } from "../../constants";
 import { Field, MOBILE_INPUT_CLASS, Segmented } from "./shared";
 
 const MOBILE_MODEL_CHIP_CLASS =
@@ -47,6 +48,10 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
     setScorerInstall,
     scorerModel,
     setScorerModel,
+    scorerModelDeclared,
+    setScorerModelDeclared,
+    scorerCodeCallsModel,
+    scorerUsesModel,
     setEditingModel,
     catalog,
     dryRun,
@@ -83,28 +88,53 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
 
       {scorerKind === "python" ? (
         <div className="space-y-3">
-          <div className="space-y-2">
-            <Label>
-              <HelpTip text={tip("submit.blackbox.scorer_model")}>
-                {msg("submit.blackbox.scorer.model_label")}
-              </HelpTip>
-            </Label>
-            <ModelChip
-              config={scorerModel}
-              className={MOBILE_MODEL_CHIP_CLASS}
-              roleLabel={msg("submit.blackbox.scorer.model_label")}
-              tooltip={msg("submit.blackbox.scorer.model_explainer")}
-              catalogModels={catalog?.models}
-              onClick={() =>
-                setEditingModel({
-                  config: scorerModel,
-                  onSave: setScorerModel,
-                  label: msg("submit.blackbox.scorer.model_label"),
-                })
-              }
-              onRemove={scorerModel.name ? () => setScorerModel(emptyModelConfig()) : undefined}
+          {/* A metric is any function; only one that calls llm() has a model
+              to pick. Code that already calls it settles the question. */}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
+            <div className="min-w-0 space-y-0.5">
+              <Label htmlFor="bb-scorer-uses-model">
+                {msg("submit.blackbox.scorer.uses_model_label")}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {msg(
+                  scorerCodeCallsModel
+                    ? "submit.blackbox.scorer.uses_model_detected"
+                    : "submit.blackbox.scorer.uses_model_desc",
+                )}
+              </p>
+            </div>
+            <Switch
+              id="bb-scorer-uses-model"
+              checked={scorerUsesModel}
+              disabled={scorerCodeCallsModel}
+              onCheckedChange={setScorerModelDeclared}
             />
           </div>
+          {scorerUsesModel && (
+            <div className="space-y-2">
+              <Label>
+                <HelpTip text={tip("submit.blackbox.scorer_model")}>
+                  {msg("submit.blackbox.scorer.model_label")}
+                </HelpTip>
+              </Label>
+              <ModelChip
+                config={scorerModel}
+                className={MOBILE_MODEL_CHIP_CLASS}
+                roleLabel={msg("submit.blackbox.scorer.model_label")}
+                tooltip={msg("submit.blackbox.scorer.model_explainer")}
+                required
+                catalogModels={catalog?.models}
+                onClick={() =>
+                  setEditingModel({
+                    config: scorerModel,
+                    onSave: setScorerModel,
+                    label: msg("submit.blackbox.scorer.model_label"),
+                  })
+                }
+                onRemove={scorerModel.name ? () => setScorerModel(emptyModelConfig()) : undefined}
+              />
+            </div>
+          )}
           <div className="flex items-center justify-between gap-2">
             <Label>
               <HelpTip text={tip("submit.blackbox.scorer_code")}>

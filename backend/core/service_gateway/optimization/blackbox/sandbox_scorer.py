@@ -74,6 +74,7 @@ class ScorerGateway:
     billing_model: str
     temperature: float | None = None
     max_tokens: int | None = None
+    reasoning_effort: str | None = None
     timeout_seconds: float = 120.0
 
     def runner_payload(self) -> dict[str, Any]:
@@ -83,6 +84,7 @@ class ScorerGateway:
             "model": self.model,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
+            "reasoning_effort": self.reasoning_effort,
             "timeout_seconds": self.timeout_seconds,
         }
 
@@ -126,10 +128,12 @@ def scorer_gateway(config: ModelConfig, settings: Settings) -> ScorerGateway:
         ServiceError: When no reachable gateway can be resolved.
     """
     name = config.name
+    effort = config.extra.get("reasoning_effort")
     common: dict[str, Any] = {
         "billing_model": name,
         "temperature": config.temperature,
         "max_tokens": config.max_tokens,
+        "reasoning_effort": effort if isinstance(effort, str) and effort else None,
         "timeout_seconds": settings.lm_request_timeout_seconds,
     }
     own_key = config.extra.get("api_key")

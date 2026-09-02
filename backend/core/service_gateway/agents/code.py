@@ -182,7 +182,7 @@ def _validate_scorer_code(code: str) -> str:
     """Statically check a black-box scorer snippet.
 
     The runtime enforces the full contract (``score(candidate, case=None)``,
-    stdlib only, the injected ``llm`` helper) inside a sandbox; here a
+    stdlib only, the ``llm`` helper imported from ``skynet``) inside a sandbox; here a
     syntax error, a missing entrypoint or one that takes no arguments is
     caught before the code lands in the editor — the guarantee the DSPy
     artifacts get from their validators, without executing model-written
@@ -973,9 +973,9 @@ _SCORER_CONTRACT = """The scorer is one python function, def score(candidate, ca
 
 _SCORER_AGENT_CONTRACT = """The target is an AGENT: candidate is the instructions file a coding agent runs with, and the agent has ALREADY run on the case when the scorer is called, so case is the run record, not the raw case. case["case"] is the original case dict; case["output"] is the agent's answer (the answer file, else its final message; None when it produced nothing); case["exit_code"], case["timed_out"], case["error"] and case["transcript"] describe the run. Score case["output"] against case["case"]; never try to run the agent yourself."""
 
-_SCORER_LLM_CONTRACT = """A helper llm(prompt, input=None, images=None) -> str is injected at run time: do not import or define it. llm(candidate, case["<input column>"]) runs the candidate as the system message with the case's input column as the user message and returns the reply; that is how a prompt is exercised. With a single argument, llm(rubric_text) asks the model a free-form question, e.g. to grade a reply against a rubric: parse the answer defensively (look for a number or a verdict word, default to 0.0). images= attaches PNG/JPEG bytes, file paths or data: URLs for a vision model to look at; an Image(path=..., base64_data=..., media_type=...) wrapper is injected next to llm for putting renders into side_info."""
+_SCORER_LLM_CONTRACT = """The helpers come from the skynet module: start the file with `from skynet import llm, Image` (the one import beyond the standard library) and never define your own. llm(prompt, input=None, images=None) -> str; llm(candidate, case["<input column>"]) runs the candidate as the system message with the case's input column as the user message and returns the reply; that is how a prompt is exercised. With a single argument, llm(rubric_text) asks the model a free-form question, e.g. to grade a reply against a rubric: parse the answer defensively (look for a number or a verdict word, default to 0.0). images= attaches PNG/JPEG bytes, file paths or data: URLs for a vision model to look at; Image(path=..., base64_data=..., media_type=...) wraps a render so it can go into side_info."""
 
-_SCORER_NO_LLM_CONTRACT = """No model is attached to the scorer, so there is NO llm helper: never call llm(). Score the candidate text itself with deterministic checks (structure, required content, length, regexes, numeric fields, similarity to the expected column)."""
+_SCORER_NO_LLM_CONTRACT = """No model is attached to the scorer, so there is NO llm helper: never import skynet or call llm(). Score the candidate text itself with deterministic checks (structure, required content, length, regexes, numeric fields, similarity to the expected column)."""
 
 _SCORER_PATTERNS = """Scorer shapes that work well; pick the one the objective calls for, or combine several into a weighted score. "The answer" below means llm(candidate, case["<input column>"]) when the candidate is a prompt and the llm helper exists, case["output"] for an agent target, and the candidate text itself otherwise.
 - Length / shape: deterministic checks on the text (word or character budget, required sections, forbidden phrases, regex structure), graded by distance from the target rather than pass/fail.
@@ -995,7 +995,7 @@ def _scorer_contract(target_kind: str, scorer_has_model: bool) -> str:
     Args:
         target_kind: ``"text"`` or ``"agent"`` — what a version is.
         scorer_has_model: Whether the scorer step has a model, i.e. whether
-            the ``llm`` helper is injected at run time.
+            ``skynet.llm`` reaches a model at run time.
 
     Returns:
         The contract text handed to the scorer author and the chat agent,

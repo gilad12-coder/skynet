@@ -24,8 +24,9 @@ from ..agent_eval import (
     gateway_from_settings,
     safe_relative_path,
 )
+from ..agent_runs import PHASE_BASELINE, AgentRunRecorder, run_scope
 from ..harness import ANSWER_FILE, PROMPT_FILE, GatewayConfig
-from ..sandbox import CommandResult
+from ..sandbox import CommandResult, OutputSink
 from .mocks import FakeSandboxRuntime, FakeSandboxSession
 
 _GATEWAY = GatewayConfig(url="https://gw.example/v1", api_key="secret-key")
@@ -181,7 +182,12 @@ class _DyingSession(FakeSandboxSession):
     """Box whose transport fails on the first command, the way a stalled SDK call does."""
 
     def run(
-        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
     ) -> CommandResult:
         """Raise a transport error instead of running anything.
 
@@ -204,9 +210,7 @@ def test_run_retries_once_in_a_fresh_box_when_the_sandbox_transport_fails() -> N
     def factory() -> FakeSandboxSession:
         """Hand out a dying box first, then a healthy one."""
         session = (
-            _DyingSession()
-            if not boxes
-            else FakeSandboxSession(produces={"run-agent": {"output/answer.txt": "done"}})
+            _DyingSession() if not boxes else FakeSandboxSession(produces={"run-agent": {"output/answer.txt": "done"}})
         )
         boxes.append(session)
         return session
@@ -230,7 +234,9 @@ def test_run_reports_a_sandbox_that_dies_twice_as_a_sandbox_failure() -> None:
     runtime = FakeSandboxRuntime(session_factory=_DyingSession)
     scorer = _scorer_of(runtime, _target())
 
-    with pytest.raises(ServiceError, match=r"agent sandbox failed twice \(TimeoutError\): The read operation timed out"):
+    with pytest.raises(
+        ServiceError, match=r"agent sandbox failed twice \(TimeoutError\): The read operation timed out"
+    ):
         scorer.run("v", {"prompt": "p"})
 
     assert len(runtime.sessions) == 2
@@ -241,7 +247,12 @@ class _StuckSession(FakeSandboxSession):
     """Box whose runtime gives up on a command that outlives its timeout, the way the real one does."""
 
     def run(
-        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
     ) -> CommandResult:
         """Raise the runtime's own error instead of running anything.
 
@@ -308,11 +319,16 @@ class _TimeoutRecorder(FakeSandboxSession):
         self.timeouts: list[float | None] = []
 
     def run(
-        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
     ) -> CommandResult:
         """Record the timeout, then behave like the base fake."""
         self.timeouts.append(timeout_seconds)
-        return super().run(command, env=env, timeout_seconds=timeout_seconds)
+        return super().run(command, env=env, timeout_seconds=timeout_seconds, on_output=on_output)
 
 
 def test_run_timeout_is_shortened_only_when_the_ceiling_bites(
@@ -428,6 +444,133 @@ def test_unsafe_candidate_path_raises_before_opening_a_sandbox() -> None:
     with pytest.raises(ServiceError):
         scorer.run({"../escape": "x"}, {"prompt": "p"})
     assert runtime.sessions == []
+
+
+class _RecordedRuns:
+    """Everything a recorder sent: run rows and deltas on the sink, summaries on progress."""
+
+    def __init__(self) -> None:
+        """Start empty and build the recorder that feeds this collector."""
+        self.rows: list[dict[str, Any]] = []
+        self.progress: list[tuple[str, dict[str, Any]]] = []
+        self.recorder = AgentRunRecorder(
+            progress_callback=lambda event, metrics: self.progress.append((event, metrics)),
+            run_sink=self.rows.append,
+            secrets=("sk-secret",),
+        )
+
+
+class _StreamingSession(FakeSandboxSession):
+    """Box that streams two lines, one carrying the gateway key, before exiting cleanly."""
+
+    def run(
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
+    ) -> CommandResult:
+        """Stream the lines to ``on_output`` and return a clean exit.
+
+        Args:
+            command: The command line.
+            env: Ignored.
+            timeout_seconds: Ignored.
+            on_output: Receives the streamed lines.
+
+        Returns:
+            A clean exit with no captured output.
+        """
+        self.commands.append(command)
+        if on_output is not None:
+            on_output("stdout", "thinking with sk-secret\n")
+            on_output("stderr", "warn: slow\n")
+        self.files[ANSWER_FILE] = "the answer"
+        return CommandResult(exit_code=0)
+
+
+def test_run_records_the_answer_and_transcript_under_the_current_scope() -> None:
+    """The run view gets a running row at start and, at the end, the answer, transcript and outcome."""
+    runs = _RecordedRuns()
+    runtime = FakeSandboxRuntime()
+    scorer = SandboxAgentScorer(
+        lambda candidate, case: (0.0, {}),
+        runtime=runtime,
+        target=_target(),
+        gateway=_GATEWAY,
+        job_id="job-1",
+        recorder=runs.recorder,
+    )
+
+    with run_scope(PHASE_BASELINE, "2"):
+        record = scorer.run("v", {"prompt": "p", "id": "case-a"})
+
+    assert record["output"] == "done"
+    assert [event for event, _ in runs.progress] == ["agent_run", "agent_run"]
+    running, finished = (metrics for _, metrics in runs.progress)
+    assert running["status"] == "running"
+    assert running["phase"] == PHASE_BASELINE
+    assert running["example_id"] == "2"
+    assert running["trial"] is None
+    assert running["case_id"] == "case-a"
+    assert running["run_id"] == 1
+    assert finished["status"] == "finished"
+    assert finished["exit_code"] == 0
+    assert runs.rows[0]["status"] == "running"
+    assert runs.rows[0]["transcript"] == ""
+    last = runs.rows[-1]
+    assert last["status"] == "finished"
+    assert last["output"] == "done"
+    assert "[run] started\n" in last["transcript"]
+    assert "ok\n" in last["transcript"]
+    assert "[run] exit=0\n" in last["transcript"]
+    assert last["finished_at"] is not None
+
+
+def test_run_streams_box_output_into_the_transcript_and_redacts_the_key() -> None:
+    """Streamed lines land in the transcript in order, with the gateway key masked."""
+    runs = _RecordedRuns()
+    session = _StreamingSession()
+    scorer = SandboxAgentScorer(
+        lambda candidate, case: (0.0, {}),
+        runtime=_runtime_of(session),
+        target=_target(),
+        gateway=_GATEWAY,
+        job_id="job-1",
+        recorder=runs.recorder,
+    )
+
+    record = scorer.run("v", {"prompt": "p"})
+
+    assert record["output"] == "the answer"
+    transcript = runs.rows[-1]["transcript"]
+    assert "thinking with ***\n" in transcript
+    assert "warn: slow\n" in transcript
+    assert "sk-secret" not in transcript
+    assert runs.rows[-1]["output"] == "the answer"
+
+
+def test_run_marks_the_record_failed_when_the_sandbox_dies_twice() -> None:
+    """A run whose boxes both die is closed as failed with the sandbox error, not left running."""
+    runs = _RecordedRuns()
+    scorer = SandboxAgentScorer(
+        lambda candidate, case: (0.0, {}),
+        runtime=FakeSandboxRuntime(session_factory=_DyingSession),
+        target=_target(),
+        gateway=_GATEWAY,
+        job_id="job-1",
+        recorder=runs.recorder,
+    )
+
+    with pytest.raises(ServiceError):
+        scorer.run("v", {"prompt": "p"})
+
+    last = runs.rows[-1]
+    assert last["status"] == "failed"
+    assert last["error"].startswith("agent sandbox failed twice")
+    assert "[sandbox] the box died; retrying in a fresh one" in last["transcript"]
+    assert runs.progress[-1][1]["status"] == "failed"
 
 
 def test_call_scores_the_record_and_merges_feedback() -> None:

@@ -190,6 +190,7 @@
     "optimization.no_result_pending": "Оптимізація ще не має результату.",
     "optimization.not_finished": "Оптимізацію не завершено.",
     "optimization.not_found": "Оптимізацію не знайдено: '{optimization_id}'.",
+    "optimization.agent_run_not_found": "Запуск агента {run_id} для оптимізації '{optimization_id}' не знайдено.",
     "optimization.not_success_status_for_serve": "Оптимізація перебуває у стані '{status}' — обслуговувати можна лише успішно завершені оптимізації.",
     "optimization.not_success_status_for_test_results": "Оптимізація перебуває у стані '{status}' — результати тестів мають лише успішно завершені оптимізації.",
     "optimization.pair_not_rerunnable": "Неможливо повторно запустити пару, поки оптимізація перебуває у стані '{status}'.",

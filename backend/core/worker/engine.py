@@ -67,7 +67,7 @@ from ..service_gateway.optimization.core import _merge_usage_rows
 from ..service_gateway.optimization.trajectory import GEPA_STATE_FILENAME, GRID_PAIR_RESULT_FILENAME
 from ..storage import JobStore
 from ..telemetry import record_server_event
-from .constants import EVENT_ERROR, EVENT_LOG, EVENT_PROGRESS, EVENT_RESULT
+from .constants import EVENT_AGENT_RUN, EVENT_ERROR, EVENT_LOG, EVENT_PROGRESS, EVENT_RESULT
 from .memory_guard import memory_usage_fraction
 from .subprocess_runner import run_service_in_subprocess, set_fork_service
 from .tagging_job import TaggingAutotagPayload, run_autotag_job
@@ -1445,11 +1445,13 @@ class BackgroundWorker:
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, int]:
         """Drain all pending events from the subprocess queue, routing each by type.
 
-        Handles four event types emitted by ``run_service_in_subprocess``:
+        Handles the event types emitted by ``run_service_in_subprocess``:
         ``EVENT_PROGRESS`` → ``job_store.record_progress``; ``EVENT_LOG`` →
-        ``job_store.append_log``; ``EVENT_RESULT`` → captured as the return value;
-        ``EVENT_ERROR`` → captured as the error return value.  Store errors are
-        swallowed so a DB hiccup cannot abort an otherwise-healthy optimization.
+        ``job_store.append_log``; ``EVENT_AGENT_RUN`` → ``job_store.save_agent_run``
+        or ``append_agent_run_transcript`` (on stores that keep agent runs);
+        ``EVENT_RESULT`` → captured as the return value; ``EVENT_ERROR`` →
+        captured as the error return value.  Store errors are swallowed so a DB
+        hiccup cannot abort an otherwise-healthy optimization.
 
         Args:
             optimization_id: ID the events are persisted under — the job itself,
@@ -1512,6 +1514,8 @@ class BackgroundWorker:
                     )
                 except Exception:
                     logger.exception("Optimization %s: failed to persist subprocess log entry", optimization_id)
+            elif event_type == EVENT_AGENT_RUN:
+                self._persist_agent_run_event(optimization_id, event.get("run"))
             elif event_type == EVENT_RESULT:
                 payload = event.get("result")
                 if isinstance(payload, dict):
@@ -1524,6 +1528,28 @@ class BackgroundWorker:
                 error_payload = payload
 
         return result_payload, error_payload, drained_count
+
+    def _persist_agent_run_event(self, optimization_id: str, run: Any) -> None:
+        """Store one agent run record or transcript delta, on stores that keep agent runs.
+
+        Args:
+            optimization_id: The job the run belongs to.
+            run: The event's ``run`` payload.
+        """
+        if not isinstance(run, dict) or not isinstance(run.get("run_id"), int):
+            return
+        save_run = getattr(self._job_store, "save_agent_run", None)
+        append_transcript = getattr(self._job_store, "append_agent_run_transcript", None)
+        if save_run is None or append_transcript is None:
+            return
+        try:
+            delta = run.get("transcript_delta")
+            if isinstance(delta, str):
+                append_transcript(optimization_id, run["run_id"], delta)
+            else:
+                save_run(optimization_id, run)
+        except Exception:
+            logger.exception("Optimization %s: failed to persist agent run %s", optimization_id, run.get("run_id"))
 
     def _checkpoints_enabled(self, optimization_type: str) -> bool:
         """Return whether this job is a GEPA run/grid on a checkpoint-capable store.

@@ -12,9 +12,10 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle, Circle, CircleNotch, XCircle } from "@/shared/ui/icons";
+import { CheckCircle, Circle, CircleNotch, Minus, XCircle } from "@/shared/ui/icons";
 import { PIPELINE_STAGES, type PipelineStage } from "../constants";
 import type { ProgressEvent } from "@/shared/types/api";
+import { msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 const VERTICAL_BREAKPOINT_PX = 600;
@@ -58,6 +59,7 @@ export function computeStageTimestamps(
     grid_pair_started: "baseline",
     baseline_evaluated: "baseline",
     optimizer_progress: "optimizing",
+    evaluation_started: "optimizing",
     optimized_evaluated: "evaluating",
     grid_pair_completed: "evaluating",
   };
@@ -90,6 +92,7 @@ export function PipelineStages({
   stageTs,
   isActive,
   isFailed,
+  skippedStages = [],
   onStageClick,
   dataTutorial,
 }: {
@@ -97,6 +100,8 @@ export function PipelineStages({
   stageTs: Partial<Record<PipelineStage, StageTs>>;
   isActive: boolean;
   isFailed: boolean;
+  /** Stages the run went past without executing (no test split, no starting point). */
+  skippedStages?: readonly PipelineStage[];
   onStageClick: (stage: PipelineStage) => void;
   dataTutorial?: string;
 }) {
@@ -142,6 +147,7 @@ export function PipelineStages({
         const isDone = i < completedStageIdx;
         const isCurrent = isActive && i === completedStageIdx;
         const isStopped = isFailed && i === completedStageIdx;
+        const isSkipped = isDone && skippedStages.includes(s.key);
         const ts = stageTs[s.key];
         return (
           <div
@@ -159,12 +165,16 @@ export function PipelineStages({
                   ? "bg-destructive text-white shadow-[0_0_0_4px_rgba(176,64,48,0.15)]"
                   : isCurrent
                     ? "bg-[#3D2E22] text-white shadow-[0_0_0_4px_rgba(61,46,34,0.15)]"
-                    : isDone
-                      ? "bg-[#3D2E22] text-white"
-                      : "bg-[#E5DDD4] text-[#8C7A6B]"
+                    : isSkipped
+                      ? "bg-[#E5DDD4] text-[#8C7A6B] ring-2 ring-inset ring-[#3D2E22]/40"
+                      : isDone
+                        ? "bg-[#3D2E22] text-white"
+                        : "bg-[#E5DDD4] text-[#8C7A6B]"
               }`}
             >
-              {isDone ? (
+              {isSkipped ? (
+                <Minus className="size-3.5" />
+              ) : isDone ? (
                 <CheckCircle className="size-3.5" />
               ) : isCurrent ? (
                 <CircleNotch className="size-3.5 animate-spin" />
@@ -180,14 +190,25 @@ export function PipelineStages({
                   ? "text-[#3D2E22] font-semibold"
                   : isStopped
                     ? "text-destructive font-semibold"
-                    : isDone
-                      ? "text-[#3D2E22]/80"
-                      : "text-muted-foreground/40"
+                    : isSkipped
+                      ? "text-muted-foreground/60"
+                      : isDone
+                        ? "text-[#3D2E22]/80"
+                        : "text-muted-foreground/40"
               }`}
             >
               {s.label}
             </span>
-            {ts && isDone && (
+            {isSkipped && (
+              <span
+                className={`text-[0.625rem] text-muted-foreground/50 tracking-wide uppercase ${
+                  isVertical ? "ms-auto" : "-mt-0.5"
+                }`}
+              >
+                {msg("pipeline.stage.skipped")}
+              </span>
+            )}
+            {ts && isDone && !isSkipped && (
               <div
                 className={
                   isVertical

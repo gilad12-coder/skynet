@@ -1,6 +1,6 @@
 """Event-type discriminators for the subprocess → parent worker queue.
 
-These four strings tag every dict the subprocess runner pushes onto the
+These strings tag every dict the subprocess runner pushes onto the
 shared :class:`multiprocessing.Queue`. :class:`BackgroundWorker` dispatches
 on them in its event-consume loop. They are an internal contract between
 :mod:`subprocess_runner` and :mod:`engine` — not a wire-level value seen
@@ -13,3 +13,6 @@ EVENT_PROGRESS = "progress"
 EVENT_LOG = "log"
 EVENT_RESULT = "result"
 EVENT_ERROR = "error"
+# A sandboxed agent run's record or a piece of its live transcript, for the
+# ``blackbox_agent_runs`` table rather than the progress log.
+EVENT_AGENT_RUN = "agent_run"

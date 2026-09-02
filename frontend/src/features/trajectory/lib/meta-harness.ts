@@ -6,6 +6,15 @@ const REJECTED_EVENT = "candidate_rejected";
 const MINIBATCH_EVENT = "minibatch_feedback";
 const CASE_SCORED_EVENT = "case_scored";
 const LANE_STARTED_EVENT = "lane_started";
+const AGENT_RUN_EVENT = "agent_run";
+
+export const AGENT_RUN_PHASE_VERSION = "version";
+export const AGENT_RUN_PHASE_BASELINE = "baseline";
+export const AGENT_RUN_PHASE_FINAL = "final";
+export const AGENT_RUN_STATUS_RUNNING = "running";
+export const AGENT_RUN_STATUS_FAILED = "failed";
+
+const LANED_EVENTS = new Set([CANDIDATE_EVENT, REJECTED_EVENT, MINIBATCH_EVENT, CASE_SCORED_EVENT]);
 
 export const META_HARNESS_ENGINE = "meta_harness";
 
@@ -31,17 +40,22 @@ export function latestVersionLane(events: ProgressEvent[]): number {
   return latest;
 }
 
+// The held-out agent runs (starting point, best version) belong to the run as
+// a whole; only the per-version ones are bound to a lane.
+function isLaneBound(event: ProgressEvent): boolean {
+  if (event.event == null) return false;
+  if (event.event === AGENT_RUN_EVENT) return event.metrics?.phase === AGENT_RUN_PHASE_VERSION;
+  return LANED_EVENTS.has(event.event);
+}
+
 /**
  * Keep only the version events of the newest lane — ``scopeToLatestLane`` with
- * per-case scores counted as version events too.
+ * per-case scores and per-version agent runs counted as version events too.
  */
 export function scopeToVersionLane(events: ProgressEvent[]): ProgressEvent[] {
   const latest = latestVersionLane(events);
   if (latest === 0) return events;
-  const laned = new Set([CANDIDATE_EVENT, REJECTED_EVENT, MINIBATCH_EVENT, CASE_SCORED_EVENT]);
-  return events.filter(
-    (event) => event.event == null || !laned.has(event.event) || laneOf(event) === latest,
-  );
+  return events.filter((event) => !isLaneBound(event) || laneOf(event) === latest);
 }
 
 /**
@@ -111,6 +125,83 @@ export function extractCaseScores(events: ProgressEvent[]): CaseScore[] {
   return out;
 }
 
+// What the ``agent_run`` progress event carries: enough to place the run in
+// the grid and show whether it is still going; the record itself is fetched
+// on demand.
+export interface AgentRunSummary {
+  run_id: number;
+  phase: string;
+  trial: number | null;
+  example_id: string | null;
+  case_id: string | null;
+  label: string;
+  status: string;
+  exit_code: number | null;
+  timed_out: boolean;
+  error: string | null;
+  elapsed_seconds: number | null;
+}
+
+function idOf(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  return null;
+}
+
+/** The latest summary of every agent run, in the order the runs started. */
+export function extractAgentRuns(events: ProgressEvent[]): AgentRunSummary[] {
+  const byId = new Map<number, AgentRunSummary>();
+  for (const event of events) {
+    if (event.event !== AGENT_RUN_EVENT) continue;
+    const m = event.metrics ?? {};
+    if (typeof m.run_id !== "number" || typeof m.phase !== "string") continue;
+    if (typeof m.status !== "string") continue;
+    byId.set(m.run_id, {
+      run_id: m.run_id,
+      phase: m.phase,
+      trial: typeof m.trial === "number" ? m.trial : null,
+      example_id: idOf(m.example_id),
+      case_id: typeof m.case_id === "string" ? m.case_id : null,
+      label: typeof m.label === "string" ? m.label : "",
+      status: m.status,
+      exit_code: typeof m.exit_code === "number" ? m.exit_code : null,
+      timed_out: m.timed_out === true,
+      error: typeof m.error === "string" ? m.error : null,
+      elapsed_seconds: typeof m.elapsed_seconds === "number" ? m.elapsed_seconds : null,
+    });
+  }
+  return [...byId.values()];
+}
+
+/** Grid address of a per-version run: the version index and the case it ran. */
+export function agentRunKey(trial: number, exampleId: string): string {
+  return `${trial}:${exampleId}`;
+}
+
+export function finalRunKey(exampleId: string): string {
+  return `final:${exampleId}`;
+}
+
+/**
+ * Runs by the version and case they scored, so a case can open the run behind
+ * its score. The starting point is scored before any proposal, so its runs
+ * file under version 0; the final check of the best version keeps its own key.
+ */
+export function indexAgentRuns(runs: AgentRunSummary[]): Map<string, AgentRunSummary> {
+  const byCell = new Map<string, AgentRunSummary>();
+  for (const run of runs) {
+    if (run.example_id === null) continue;
+    if (run.phase === AGENT_RUN_PHASE_FINAL) {
+      byCell.set(finalRunKey(run.example_id), run);
+      continue;
+    }
+    const trial = run.phase === AGENT_RUN_PHASE_BASELINE ? 0 : run.trial;
+    if (trial === null) continue;
+    byCell.set(agentRunKey(trial, run.example_id), run);
+  }
+  return byCell;
+}
+
 export interface ClimbVersion {
   candidate: CandidateMetrics;
   index: number;
@@ -126,6 +217,12 @@ export interface PendingVersion {
   index: number;
   total: number;
   scores: Map<string, number>;
+}
+
+// One case of the pending version: scored, or still in the box.
+export interface PendingCase {
+  id: string;
+  score: number | null;
 }
 
 export interface ClimbModel {
@@ -144,9 +241,16 @@ function compareIds(a: string, b: string): number {
 
 /**
  * Turn the lane's versions into a climb: each version measured against the
- * best before it, plus the version currently being scored, if any.
+ * best before it, plus the version currently being scored, if any. That
+ * version's sandbox runs start before its first case is scored, so a
+ * version-phase run on a later trial than any finished version announces
+ * it too.
  */
-export function buildClimb(candidates: CandidateMetrics[], caseScores: CaseScore[]): ClimbModel {
+export function buildClimb(
+  candidates: CandidateMetrics[],
+  caseScores: CaseScore[],
+  runs: AgentRunSummary[] = [],
+): ClimbModel {
   const sorted = [...candidates].sort((a, b) => compareIds(a.candidate_id, b.candidate_id));
   const versions: ClimbVersion[] = [];
   const caseIds = new Set<string>();
@@ -166,9 +270,16 @@ export function buildClimb(candidates: CandidateMetrics[], caseScores: CaseScore
     for (const entry of candidate.per_example) caseIds.add(entry.id);
   }
 
+  const versionRuns = runs.filter(
+    (run) => run.phase === AGENT_RUN_PHASE_VERSION && run.trial !== null,
+  );
   let pendingIndex = -1;
   for (const scored of caseScores) {
     if (scored.trial > lastIndex) pendingIndex = Math.max(pendingIndex, scored.trial);
+  }
+  for (const run of versionRuns) {
+    if (run.trial !== null && run.trial > lastIndex)
+      pendingIndex = Math.max(pendingIndex, run.trial);
   }
   let pending: PendingVersion | null = null;
   if (pendingIndex >= 0) {
@@ -179,9 +290,31 @@ export function buildClimb(candidates: CandidateMetrics[], caseScores: CaseScore
       pending.total = Math.max(pending.total, scored.total);
       caseIds.add(scored.example_id);
     }
+    for (const run of versionRuns) {
+      if (run.trial === pendingIndex && run.example_id !== null) caseIds.add(run.example_id);
+    }
+    // The case count arrives with the first score; until then every case
+    // seen so far stands in for it.
+    pending.total = Math.max(pending.total, caseIds.size);
   }
 
   return { versions, caseIds: [...caseIds].sort(compareIds), pending, bestId };
+}
+
+/**
+ * List every case of the pending version with its score so far.
+ *
+ * Args:
+ *   model: The climb the version belongs to.
+ *
+ * Returns:
+ *   One entry per case the job scores, unscored ones with a ``null`` score;
+ *   empty when no version is being scored.
+ */
+export function pendingCases(model: ClimbModel): PendingCase[] {
+  const pending = model.pending;
+  if (pending === null) return [];
+  return model.caseIds.map((id) => ({ id, score: pending.scores.get(id) ?? null }));
 }
 
 export const CLIMB_LAYOUT = {
@@ -207,8 +340,6 @@ export interface ClimbPoint {
 export interface ClimbLayout {
   points: ClimbPoint[];
   pending: { x: number; y: number } | null;
-  // The best score so far as a staircase: one riser per improving version.
-  bestPath: Array<{ x: number; y: number }>;
   edges: Array<{ from: ClimbPoint; to: ClimbPoint }>;
   ticks: Array<{ value: number; y: number }>;
   domain: { min: number; max: number; unit: boolean };
@@ -277,13 +408,9 @@ export function layoutClimb(
   }));
   const byId = new Map(points.map((p) => [p.id, p]));
 
-  const bestPath: ClimbLayout["bestPath"] = [];
   let best: number | null = null;
-  for (const point of points) {
-    if (best !== null) bestPath.push({ x: point.x, y: yOf(best) });
+  for (const point of points)
     if (best === null || point.version.score > best) best = point.version.score;
-    bestPath.push({ x: point.x, y: yOf(best) });
-  }
 
   const edges: ClimbLayout["edges"] = [];
   for (const point of points) {
@@ -315,7 +442,6 @@ export function layoutClimb(
   return {
     points,
     pending,
-    bestPath,
     edges,
     ticks,
     domain,

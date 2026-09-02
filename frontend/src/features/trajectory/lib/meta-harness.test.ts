@@ -6,17 +6,39 @@ import type { CandidateMetrics } from "./types";
 
 import {
   CLIMB_LAYOUT,
+  agentRunKey,
   buildClimb,
   engineOfLatestLane,
+  extractAgentRuns,
   extractCaseScores,
+  finalRunKey,
+  indexAgentRuns,
   isMetaHarnessRun,
   latestVersionLane,
   layoutClimb,
+  pendingCases,
   scopeToVersionLane,
+  type AgentRunSummary,
 } from "./meta-harness.ts";
 
 function event(name: string, metrics: Record<string, unknown> = {}): ProgressEvent {
   return { timestamp: "2026-01-01T00:00:00Z", event: name, metrics };
+}
+
+function versionRun(runId: number, trial: number, exampleId: string): AgentRunSummary {
+  return {
+    run_id: runId,
+    phase: "version",
+    trial,
+    example_id: exampleId,
+    case_id: null,
+    label: `run-${runId}`,
+    status: "running",
+    exit_code: null,
+    timed_out: false,
+    error: null,
+    elapsed_seconds: null,
+  };
 }
 
 function candidate(
@@ -59,6 +81,92 @@ describe("latestVersionLane", () => {
       scopeToVersionLane(events).map((e) => e.event),
       ["lane_completed", "case_scored"],
     );
+  });
+
+  it("keeps held-out agent runs of every lane but version runs of the newest only", () => {
+    const events = [
+      event("agent_run", { run_id: 1, phase: "baseline", status: "finished", lane_index: 0 }),
+      event("agent_run", { run_id: 2, phase: "version", status: "finished", lane_index: 0 }),
+      event("case_scored", { trial: 0, example_id: "0", score: 1, total: 1, lane_index: 1 }),
+      event("agent_run", { run_id: 3, phase: "version", status: "running", lane_index: 1 }),
+    ];
+    assert.deepEqual(
+      scopeToVersionLane(events).map((e) => e.metrics.run_id ?? e.event),
+      [1, "case_scored", 3],
+    );
+  });
+});
+
+describe("extractAgentRuns", () => {
+  it("keeps the latest summary per run in start order and drops malformed ones", () => {
+    const events = [
+      event("agent_run", {
+        run_id: 1,
+        phase: "version",
+        trial: 2,
+        example_id: 0,
+        case_id: "unicorn",
+        label: "version 3",
+        status: "running",
+      }),
+      event("agent_run", { run_id: 2, phase: "baseline", example_id: "1", status: "running" }),
+      event("agent_run", { run_id: "3", phase: "version", status: "running" }),
+      event("agent_run", { run_id: 4, phase: "version" }),
+      event("agent_run", {
+        run_id: 1,
+        phase: "version",
+        trial: 2,
+        example_id: "0",
+        status: "finished",
+        exit_code: 0,
+        elapsed_seconds: 12.5,
+      }),
+    ];
+    const runs = extractAgentRuns(events);
+    assert.deepEqual(
+      runs.map((run) => [run.run_id, run.status]),
+      [
+        [1, "finished"],
+        [2, "running"],
+      ],
+    );
+    assert.deepEqual(runs[0], {
+      run_id: 1,
+      phase: "version",
+      trial: 2,
+      example_id: "0",
+      case_id: null,
+      label: "",
+      status: "finished",
+      exit_code: 0,
+      timed_out: false,
+      error: null,
+      elapsed_seconds: 12.5,
+    });
+    assert.equal(runs[1]?.trial, null);
+  });
+
+  it("indexes runs by version and case, with the starting point as version 0", () => {
+    const runs = extractAgentRuns([
+      event("agent_run", {
+        run_id: 1,
+        phase: "version",
+        trial: 1,
+        example_id: "1",
+        status: "running",
+      }),
+      event("agent_run", { run_id: 2, phase: "baseline", example_id: "1", status: "running" }),
+      event("agent_run", { run_id: 3, phase: "version", example_id: "1", status: "running" }),
+      event("agent_run", { run_id: 4, phase: "final", example_id: "1", status: "finished" }),
+    ]);
+    const byCell = indexAgentRuns(runs);
+    assert.deepEqual(
+      [...byCell.keys()],
+      [agentRunKey(1, "1"), agentRunKey(0, "1"), finalRunKey("1")],
+    );
+    assert.equal(byCell.get("1:1")?.run_id, 1);
+    assert.equal(byCell.get("0:1")?.run_id, 2);
+    assert.equal(byCell.get("final:1")?.run_id, 4);
   });
 });
 
@@ -151,6 +259,46 @@ describe("buildClimb", () => {
     );
     assert.equal(model.pending, null);
   });
+
+  it("announces the pending version from its running agent runs before any case is scored", () => {
+    const model = buildClimb(
+      [
+        candidate("0", 0.5, null, [
+          ["0", 0.5],
+          ["1", 0.5],
+        ]),
+      ],
+      [],
+      [versionRun(7, 1, "0"), versionRun(8, 1, "1"), versionRun(3, 0, "1")],
+    );
+    assert.equal(model.pending?.index, 1);
+    assert.equal(model.pending?.total, 2);
+    assert.equal(model.pending?.scores.size, 0);
+    assert.deepEqual(pendingCases(model), [
+      { id: "0", score: null },
+      { id: "1", score: null },
+    ]);
+  });
+
+  it("lists the pending version's cases with the scores in so far", () => {
+    const model = buildClimb(
+      [
+        candidate("0", 0.5, null, [
+          ["0", 0.5],
+          ["1", 0.5],
+          ["2", 0.5],
+        ]),
+      ],
+      [{ trial: 1, example_id: "1", score: 0.9, total: 3 }],
+      [versionRun(9, 1, "2")],
+    );
+    assert.deepEqual(pendingCases(model), [
+      { id: "0", score: null },
+      { id: "1", score: 0.9 },
+      { id: "2", score: null },
+    ]);
+    assert.deepEqual(pendingCases(buildClimb([candidate("0", 0.5, null)], [])), []);
+  });
 });
 
 describe("layoutClimb", () => {
@@ -199,11 +347,8 @@ describe("layoutClimb", () => {
     assert.ok(layout.domain.max > 30);
   });
 
-  it("draws the best-so-far staircase that never steps down", () => {
+  it("links every version to the one it was rewritten from", () => {
     const layout = layoutClimb(model);
-    const ys = layout.bestPath.map((p) => p.y);
-    for (let i = 1; i < ys.length; i += 1) assert.ok((ys[i] ?? 0) <= (ys[i - 1] ?? 0));
-    assert.equal(layout.bestPath.length, 2 * layout.points.length - 1);
     assert.equal(layout.edges.length, 3);
     assert.deepEqual(
       layout.edges.map((e) => [e.from.id, e.to.id]),

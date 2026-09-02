@@ -1,7 +1,14 @@
 "use client";
 
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowsIn, ArrowsOut } from "@/shared/ui/icons";
+import {
+  ArrowCounterClockwise,
+  ArrowsIn,
+  ArrowsOut,
+  Crosshair,
+  Minus,
+  Plus,
+} from "@/shared/ui/icons";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { formatBlackboxScore } from "@/shared/lib";
@@ -45,13 +52,37 @@ const SURFACE_GRADIENT = "radial-gradient(ellipse at 50% 0%, var(--muted), var(-
 // Room under the plot for the legend that floats over the chart's bottom edge.
 const LEGEND_ROOM_PX = 48;
 
+// The map controls mirror TrajectoryTree so both charts pan and zoom alike.
+const ZOOM_MIN = 0.4;
+const ZOOM_MAX = 6;
+const ZOOM_WHEEL_FACTOR = 0.0015;
+const ZOOM_BUTTON_IN = 1.25;
+const ZOOM_BUTTON_OUT = 0.8;
+const DRAG_THRESHOLD_PX = 4;
+
 const RING_R = CLIMB_LAYOUT.nodeRadius - CLIMB_LAYOUT.ringThickness / 2;
 const INNER_R = CLIMB_LAYOUT.nodeRadius - CLIMB_LAYOUT.ringThickness;
 
 interface LayerVisibility {
-  best: boolean;
+  improved: boolean;
+  regressed: boolean;
   lineage: boolean;
   winner: boolean;
+}
+
+interface View {
+  k: number;
+  tx: number;
+  ty: number;
+}
+
+interface PanState {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startTx: number;
+  startTy: number;
+  moved: boolean;
 }
 
 export interface MetaHarnessClimbProps {
@@ -62,13 +93,46 @@ export interface MetaHarnessClimbProps {
   onSelect: (id: string) => void;
 }
 
+function clampScale(k: number): number {
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, k));
+}
+
+// At rest the climb sits at its natural size against the start edge, shrunk
+// only when it would not fit; the viewer zooms and pans from there.
+function fitView(size: { w: number; h: number }, layoutW: number, layoutH: number): View {
+  if (size.w < 2 || size.h < 2 || layoutW <= 0 || layoutH <= 0) {
+    return { k: 1, tx: 0, ty: 0 };
+  }
+  const plotH = size.h - LEGEND_ROOM_PX;
+  const k = clampScale(Math.min(1, size.w / layoutW, plotH / layoutH));
+  return { k, tx: 0, ty: Math.max(0, (plotH - layoutH * k) / 2) };
+}
+
+// Panning and zooming stop where the drawing stops: the climb either fills
+// the viewport or sits inside it, never leaving bare canvas beside it.
+function clampView(
+  view: View,
+  size: { w: number; h: number },
+  layoutW: number,
+  layoutH: number,
+): View {
+  const slackX = size.w - layoutW * view.k;
+  const slackY = size.h - LEGEND_ROOM_PX - layoutH * view.k;
+  return {
+    k: view.k,
+    tx: Math.max(Math.min(0, slackX), Math.min(Math.max(0, slackX), view.tx)),
+    ty: Math.max(Math.min(0, slackY), Math.min(Math.max(0, slackY), view.ty)),
+  };
+}
+
+// Whether the legend has this version's kind of outcome switched on.
+function versionShown(point: ClimbPoint, layers: LayerVisibility): boolean {
+  return point.version.improved ? layers.improved : layers.regressed;
+}
+
 function edgePath(from: { x: number; y: number }, to: { x: number; y: number }): string {
   const midX = (from.x + to.x) / 2;
   return `M ${from.x} ${from.y} C ${midX} ${from.y}, ${midX} ${to.y}, ${to.x} ${to.y}`;
-}
-
-function stairPath(points: ClimbLayout["bestPath"]): string {
-  return points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 }
 
 function ringFraction(score: number, domain: ClimbLayout["domain"]): number {
@@ -99,9 +163,8 @@ function arc(cx: number, cy: number, r: number, width: number, color: string, fr
 /**
  * The meta-harness run as a climb: versions left to right in the order they
  * were scored, height by score, the best so far drawn as a staircase and each
- * version tied to the version it was rewritten from. Nothing branches, so the
- * chart scrolls sideways instead of panning: the tree's map controls would be
- * noise here.
+ * version tied to the version it was rewritten from. The chart pans and zooms
+ * like the candidate tree, and every legend entry filters what it shows.
  */
 export function MetaHarnessClimb({
   model,
@@ -112,14 +175,21 @@ export function MetaHarnessClimb({
 }: MetaHarnessClimbProps) {
   const reduceMotion = useReducedMotion() === true;
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(0);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  const [view, setView] = useState<View>({ k: 1, tx: 0, ty: 0 });
+  const [isDragging, setIsDragging] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [layers, setLayers] = useState<LayerVisibility>({
-    best: true,
+    improved: true,
+    regressed: true,
     lineage: true,
     winner: true,
   });
+  const panStateRef = useRef<PanState | null>(null);
+  // Auto-fit keeps framing the climb as versions stream in until the viewer
+  // pans or zooms; reset and the maximize toggle release the lock.
+  const userInteractedRef = useRef(false);
   const toggleLayer = useCallback((key: keyof LayerVisibility) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
@@ -127,9 +197,14 @@ export function MetaHarnessClimb({
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    setWidth(el.getBoundingClientRect().width);
+    // Seed the size synchronously so the first paint after a portal move has
+    // the new container's dimensions rather than one stale frame.
+    const rect = el.getBoundingClientRect();
+    setSize({ w: rect.width, h: rect.height });
     const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) setWidth(entry.contentRect.width);
+      for (const entry of entries) {
+        setSize({ w: entry.contentRect.width, h: entry.contentRect.height });
+      }
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -138,76 +213,205 @@ export function MetaHarnessClimb({
   }, [isMaximized]);
 
   useEffect(() => {
+    userInteractedRef.current = false;
+  }, [isMaximized]);
+
+  useEffect(() => {
     if (!isMaximized) return;
-    const prevOverflow = document.body.style.overflow;
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setIsMaximized(false);
-      }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsMaximized(false);
     };
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKeyDown);
     return () => {
-      document.body.style.overflow = prevOverflow;
-      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
     };
   }, [isMaximized]);
 
   const layout = useMemo(
-    () => layoutClimb(model, { availableWidth: width, showPending: live }),
-    [model, width, live],
+    () => layoutClimb(model, { availableWidth: size.w, showPending: live }),
+    [model, size.w, live],
   );
-  const svgWidth = Math.max(layout.width, width);
-  const svgHeight = layout.height + LEGEND_ROOM_PX;
+  const chartHeight = layout.height + LEGEND_ROOM_PX;
   const bestPoint = useMemo(
-    () => layout.points.find((p) => p.id === model.bestId) ?? null,
-    [layout.points, model.bestId],
+    () => layout.points.find((point) => point.id === model.bestId) ?? null,
+    [layout, model.bestId],
   );
+
+  useEffect(() => {
+    if (size.w < 2 || size.h < 2) return;
+    setView((v) =>
+      userInteractedRef.current
+        ? clampView(v, size, layout.width, layout.height)
+        : fitView(size, layout.width, layout.height),
+    );
+  }, [size, layout.width, layout.height]);
+
+  const zoomAt = useCallback(
+    (cx: number, cy: number, factor: number) => {
+      setView((v) => {
+        const nextK = clampScale(v.k * factor);
+        if (nextK === v.k) return v;
+        userInteractedRef.current = true;
+        const wx = (cx - v.tx) / v.k;
+        const wy = (cy - v.ty) / v.k;
+        return clampView(
+          { k: nextK, tx: cx - wx * nextK, ty: cy - wy * nextK },
+          size,
+          layout.width,
+          layout.height,
+        );
+      });
+    },
+    [size, layout.width, layout.height],
+  );
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = container.getBoundingClientRect();
+      zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * ZOOM_WHEEL_FACTOR));
+    };
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => container.removeEventListener("wheel", onWheel);
+    // Same portal caveat as the ResizeObserver: the listener follows the host.
+  }, [zoomAt, isMaximized]);
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      const target = e.target as Element | null;
+      if (target?.closest("[data-trajectory-controls]")) return;
+      // Capturing here would steal the click from the node under the pointer,
+      // so capture waits until the pointer actually starts panning.
+      panStateRef.current = {
+        pointerId: e.pointerId,
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startTx: view.tx,
+        startTy: view.ty,
+        moved: false,
+      };
+    },
+    [view.tx, view.ty],
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const ps = panStateRef.current;
+      if (!ps || ps.pointerId !== e.pointerId) return;
+      const dx = e.clientX - ps.startClientX;
+      const dy = e.clientY - ps.startClientY;
+      if (!ps.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+        ps.moved = true;
+        userInteractedRef.current = true;
+        setIsDragging(true);
+        (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+      }
+      if (ps.moved) {
+        setView((v) =>
+          clampView(
+            { k: v.k, tx: ps.startTx + dx, ty: ps.startTy + dy },
+            size,
+            layout.width,
+            layout.height,
+          ),
+        );
+      }
+    },
+    [size, layout.width, layout.height],
+  );
+
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const ps = panStateRef.current;
+    if (!ps || ps.pointerId !== e.pointerId) return;
+    panStateRef.current = null;
+    if (ps.moved) {
+      (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+      setIsDragging(false);
+    }
+  }, []);
+
+  // A release that ends a pan must not also select the node it lands on.
+  const handleSelect = useCallback(
+    (id: string) => {
+      if (panStateRef.current?.moved) return;
+      onSelect(id);
+    },
+    [onSelect],
+  );
+
+  const zoomFromCenter = useCallback(
+    (factor: number) => zoomAt(size.w / 2, size.h / 2, factor),
+    [size.w, size.h, zoomAt],
+  );
+  const resetView = useCallback(() => {
+    userInteractedRef.current = false;
+    setView(fitView(size, layout.width, layout.height));
+  }, [size, layout.width, layout.height]);
+  const isTransformed = useMemo(() => {
+    const rest = fitView(size, layout.width, layout.height);
+    return view.k !== rest.k || view.tx !== rest.tx || view.ty !== rest.ty;
+  }, [view, size, layout.width, layout.height]);
+
+  const transform = `translate(${view.tx}, ${view.ty}) scale(${view.k})`;
+  // Gridlines run past the last version to the edge of whatever is in view.
+  const gridEnd = Math.max(layout.width, (size.w - view.tx) / view.k);
 
   const body = (
     <div
       ref={containerRef}
       className={
         isMaximized
-          ? "fixed inset-0 z-50 flex h-screen w-screen flex-col overflow-hidden border-0"
+          ? "fixed inset-0 z-50 h-screen w-screen overflow-hidden border-0"
           : "relative w-full overflow-hidden rounded-xl border border-[#DDD4C8]/60"
       }
-      style={{ background: SURFACE_GRADIENT }}
+      style={
+        isMaximized
+          ? { background: SURFACE_GRADIENT }
+          : { height: chartHeight, background: SURFACE_GRADIENT }
+      }
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     >
-      <div
-        dir="ltr"
-        className={cn(
-          "overflow-x-auto overflow-y-hidden",
-          isMaximized && "flex min-h-0 flex-1 items-center",
-        )}
+      <svg
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${Math.max(size.w, 1)} ${Math.max(size.h, 1)}`}
+        preserveAspectRatio="xMidYMid meet"
+        role="group"
+        aria-label={msg("meta_harness.a11y.chart_label")}
+        className="block select-none"
+        style={{
+          direction: "ltr",
+          cursor: isDragging ? "grabbing" : "grab",
+          touchAction: "none",
+        }}
       >
-        <svg
-          width={svgWidth}
-          height={svgHeight}
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          role="group"
-          aria-label={msg("meta_harness.a11y.chart_label")}
-          className="block select-none"
-          style={{ minWidth: layout.width }}
-        >
+        <g transform={transform}>
           <g aria-hidden="true">
             {layout.ticks.map((tick) => (
               <g key={tick.value}>
                 <line
                   x1={CLIMB_LAYOUT.padStart - CLIMB_LAYOUT.nodeRadius - 6}
-                  x2={svgWidth}
+                  x2={gridEnd}
                   y1={tick.y}
                   y2={tick.y}
                   stroke={GRID_LINE_COLOR}
                   strokeWidth={1}
                 />
                 <text
-                  x={CLIMB_LAYOUT.padStart - CLIMB_LAYOUT.nodeRadius - 12}
-                  y={tick.y + 3.5}
+                  x={CLIMB_LAYOUT.padStart - CLIMB_LAYOUT.nodeRadius - 10}
+                  y={tick.y + 3}
                   textAnchor="end"
-                  fontFamily="var(--font-mono, monospace)"
-                  fontSize="10"
+                  fontSize={10}
                   fill={AXIS_INK}
                   style={{ fontVariantNumeric: "tabular-nums" }}
                 >
@@ -216,29 +420,26 @@ export function MetaHarnessClimb({
               </g>
             ))}
             <text
-              x={CLIMB_LAYOUT.padStart - CLIMB_LAYOUT.nodeRadius - 12}
+              x={CLIMB_LAYOUT.padStart - CLIMB_LAYOUT.nodeRadius - 6}
               y={CLIMB_LAYOUT.padTop - 18}
-              textAnchor="end"
-              fontFamily='"Heebo", "Assistant", system-ui, sans-serif'
-              fontSize="10"
+              fontSize={10}
               fontWeight={600}
               fill={AXIS_INK}
+              style={{ letterSpacing: "0.08em", textTransform: "uppercase" }}
             >
               {msg("meta_harness.axis.score")}
             </text>
             <text
               x={CLIMB_LAYOUT.padStart - CLIMB_LAYOUT.nodeRadius - 6}
               y={layout.height - 10}
-              textAnchor="start"
-              fontFamily='"Heebo", "Assistant", system-ui, sans-serif'
-              fontSize="10"
+              fontSize={10}
               fontWeight={600}
               fill={AXIS_INK}
+              style={{ letterSpacing: "0.08em", textTransform: "uppercase" }}
             >
               {msg("meta_harness.axis.version")} →
             </text>
           </g>
-
           <ClimbContent
             layout={layout}
             model={model}
@@ -248,62 +449,61 @@ export function MetaHarnessClimb({
             hoveredId={hoveredId}
             newestId={newestId}
             reduceMotion={reduceMotion}
-            onSelect={onSelect}
+            onSelect={handleSelect}
             onHover={setHoveredId}
           />
-        </svg>
-      </div>
+        </g>
+      </svg>
 
       <div
         data-trajectory-controls
-        className={
-          isMaximized
-            ? "absolute top-4 start-4 z-20 flex overflow-hidden rounded-lg border border-border/70 bg-background/95 shadow-md backdrop-blur-sm"
-            : "absolute top-3 end-3 z-20 flex overflow-hidden rounded-lg border border-border/70 bg-background/90 shadow-sm backdrop-blur-sm"
-        }
+        className="absolute end-3 top-3 z-10 flex items-center gap-1 rounded-lg border border-border/60 bg-background/90 p-1 shadow-sm backdrop-blur-sm"
       >
+        <MapControlButton
+          label={msg("trajectory.controls.zoom_in")}
+          onClick={() => zoomFromCenter(ZOOM_BUTTON_IN)}
+        >
+          <Plus className="size-3.5" />
+        </MapControlButton>
+        <MapControlButton
+          label={msg("trajectory.controls.zoom_out")}
+          onClick={() => zoomFromCenter(ZOOM_BUTTON_OUT)}
+        >
+          <Minus className="size-3.5" />
+        </MapControlButton>
+        <MapControlButton label={msg("trajectory.controls.zoom_reset")} onClick={resetView}>
+          {isTransformed ? (
+            <ArrowCounterClockwise className="size-3.5" />
+          ) : (
+            <Crosshair className="size-3.5" />
+          )}
+        </MapControlButton>
+        <ControlsDivider />
         <MapControlButton
           label={
             isMaximized
               ? msg("trajectory.controls.fullscreen_exit")
               : msg("trajectory.controls.fullscreen_enter")
           }
-          onClick={() => setIsMaximized((v) => !v)}
+          onClick={() => setIsMaximized((prev) => !prev)}
         >
-          {isMaximized ? (
-            <ArrowsIn className="size-3.5" aria-hidden="true" />
-          ) : (
-            <ArrowsOut className="size-3.5" aria-hidden="true" />
-          )}
+          {isMaximized ? <ArrowsIn className="size-3.5" /> : <ArrowsOut className="size-3.5" />}
         </MapControlButton>
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
-        <div className="pointer-events-auto inline-flex flex-wrap items-center gap-x-1 gap-y-1 rounded-lg border border-[#DDD4C8]/70 bg-background/85 px-2 py-1 text-[11px] font-medium text-muted-foreground/90 backdrop-blur-sm">
-          <LegendItem
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3">
+        <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full border border-border/60 bg-background/90 px-3 py-1.5 text-[10px] text-muted-foreground shadow-sm backdrop-blur-sm">
+          <LegendToggle
+            pressed={layers.improved}
+            onToggle={() => toggleLayer("improved")}
             swatch={<RingSwatch color={IMPROVED_FILL} />}
             label={msg("meta_harness.legend.improved")}
           />
-          <LegendItem
+          <LegendToggle
+            pressed={layers.regressed}
+            onToggle={() => toggleLayer("regressed")}
             swatch={<RingSwatch color={REGRESSED_FILL} />}
             label={msg("meta_harness.legend.regressed")}
-          />
-          <LegendDivider />
-          <LegendToggle
-            pressed={layers.best}
-            onToggle={() => toggleLayer("best")}
-            swatch={
-              <svg className="h-2.5 w-4" viewBox="0 0 16 10" aria-hidden="true">
-                <path
-                  d="M 1 8 L 6 8 L 6 3 L 15 3"
-                  fill="none"
-                  stroke={WINNER_INDICATOR}
-                  strokeWidth="1.8"
-                  strokeDasharray="3 2"
-                />
-              </svg>
-            }
-            label={msg("meta_harness.legend.best_line")}
           />
           <LegendDivider />
           <LegendToggle
@@ -342,9 +542,9 @@ export function MetaHarnessClimb({
     return (
       <>
         <div
-          aria-hidden="true"
+          aria-hidden
           className="w-full rounded-xl border border-[#DDD4C8]/60 opacity-40"
-          style={{ height: svgHeight, background: SURFACE_GRADIENT }}
+          style={{ height: chartHeight, background: SURFACE_GRADIENT }}
         />
         {createPortal(body, document.body)}
       </>
@@ -382,6 +582,11 @@ const ClimbContent = memo(function ClimbContent({
   const pending = layout.pending;
   const pendingDone = model.pending?.scores.size ?? 0;
   const pendingTotal = model.pending?.total ?? 0;
+  // The version being scored answers to its trial number, like the finished
+  // ones answer to their candidate id, so it selects the same way.
+  const pendingId = model.pending === null ? null : String(model.pending.index);
+  const pendingSelected = pendingId !== null && pendingId === selectedId;
+  const pendingHovered = pendingId !== null && pendingId === hoveredId;
   const activate = (id: string) => (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -393,42 +598,32 @@ const ClimbContent = memo(function ClimbContent({
     <>
       <LayerFade show={layers.lineage} reduceMotion={reduceMotion}>
         {layout.edges.map((edge) => (
-          <motion.path
+          <LayerFade
             key={`edge-${edge.to.id}`}
-            d={edgePath(edge.from, edge.to)}
-            fill="none"
-            stroke={EDGE_STROKE}
-            strokeWidth={1.4}
-            initial={reduceMotion ? false : { pathLength: 0, opacity: 0 }}
-            animate={reduceMotion ? undefined : { pathLength: 1, opacity: 1 }}
-            transition={reduceMotion ? undefined : { duration: 0.5, ease: "easeOut" }}
-          />
+            show={versionShown(edge.from, layers) && versionShown(edge.to, layers)}
+            reduceMotion={reduceMotion}
+          >
+            <motion.path
+              d={edgePath(edge.from, edge.to)}
+              fill="none"
+              stroke={EDGE_STROKE}
+              strokeWidth={1.4}
+              initial={reduceMotion ? false : { pathLength: 0, opacity: 0 }}
+              animate={reduceMotion ? undefined : { pathLength: 1, opacity: 1 }}
+              transition={reduceMotion ? undefined : { duration: 0.5, ease: "easeOut" }}
+            />
+          </LayerFade>
         ))}
         {pending !== null && bestPoint !== null ? (
-          <path
-            d={edgePath(bestPoint, pending)}
-            fill="none"
-            stroke={EDGE_STROKE}
-            strokeWidth={1.2}
-            strokeDasharray="3 3"
-          />
-        ) : null}
-      </LayerFade>
-
-      <LayerFade show={layers.best} reduceMotion={reduceMotion}>
-        {layout.bestPath.length > 1 ? (
-          <motion.path
-            d={stairPath(layout.bestPath)}
-            fill="none"
-            stroke={WINNER_INDICATOR}
-            strokeWidth={1.8}
-            strokeDasharray="5 4"
-            strokeLinejoin="round"
-            opacity={0.8}
-            initial={reduceMotion ? false : { pathLength: 0 }}
-            animate={reduceMotion ? undefined : { pathLength: 1 }}
-            transition={reduceMotion ? undefined : { duration: 0.6, ease: "easeOut" }}
-          />
+          <LayerFade show={versionShown(bestPoint, layers)} reduceMotion={reduceMotion}>
+            <path
+              d={edgePath(bestPoint, pending)}
+              fill="none"
+              stroke={EDGE_STROKE}
+              strokeWidth={1.2}
+              strokeDasharray="3 3"
+            />
+          </LayerFade>
         ) : null}
       </LayerFade>
 
@@ -440,170 +635,190 @@ const ClimbContent = memo(function ClimbContent({
           const isNewest = point.id === newestId;
           const isWinner = point.id === model.bestId;
           const winnerShown = isWinner && layers.winner;
+          const shown = versionShown(point, layers);
           const coreStroke = isSelected
             ? NODE_CORE_STROKE_SELECTED
             : isHovered
               ? NODE_CORE_STROKE_HOVER
               : NODE_CORE_STROKE;
           return (
-            <motion.g
-              key={point.id}
-              role="button"
-              aria-label={formatMsg("meta_harness.a11y.node_label", {
-                id: displayCandidateId(point.id),
-                score: formatBlackboxScore(version.score),
-              })}
-              aria-pressed={isSelected}
-              tabIndex={0}
-              onMouseEnter={() => onHover(point.id)}
-              onMouseLeave={() => onHover(null)}
-              onClick={() => onSelect(point.id)}
-              onKeyDown={activate(point.id)}
-              initial={reduceMotion ? false : { scale: isNewest ? 0 : 0.7, opacity: 0 }}
-              animate={reduceMotion ? undefined : { scale: 1, opacity: 1 }}
-              transition={reduceMotion ? undefined : { duration: 0.45, ease: [0.2, 0.8, 0.2, 1] }}
-              style={{ cursor: "pointer", transformOrigin: `${point.x}px ${point.y}px` }}
-            >
-              {isNewest && !reduceMotion ? (
-                <motion.circle
-                  cx={point.x}
-                  cy={point.y}
-                  r={R}
-                  fill="none"
-                  stroke={WINNER_INDICATOR}
-                  strokeWidth="1.6"
-                  initial={{ r: R, opacity: 0.6 }}
-                  animate={{ r: R * 2.2, opacity: 0 }}
-                  transition={{ duration: 1.2, ease: "easeOut", repeat: 2 }}
-                />
-              ) : null}
-              {isSelected ? (
-                <circle
-                  cx={point.x}
-                  cy={point.y}
-                  r={R + 5}
-                  fill="none"
-                  stroke={NODE_CORE_STROKE_SELECTED}
-                  strokeWidth={1.5}
-                  strokeOpacity={0.7}
-                />
-              ) : null}
-              {isWinner ? (
-                <LayerFade show={layers.winner} reduceMotion={reduceMotion}>
+            <LayerFade key={point.id} show={shown} reduceMotion={reduceMotion}>
+              <motion.g
+                role="button"
+                aria-label={formatMsg("meta_harness.a11y.node_label", {
+                  id: displayCandidateId(point.id),
+                  score: formatBlackboxScore(version.score),
+                })}
+                aria-pressed={isSelected}
+                tabIndex={shown ? 0 : -1}
+                onMouseEnter={() => onHover(point.id)}
+                onMouseLeave={() => onHover(null)}
+                onClick={() => onSelect(point.id)}
+                onKeyDown={activate(point.id)}
+                initial={reduceMotion ? false : { scale: isNewest ? 0 : 0.7, opacity: 0 }}
+                animate={reduceMotion ? undefined : { scale: 1, opacity: 1 }}
+                transition={reduceMotion ? undefined : { duration: 0.45, ease: [0.2, 0.8, 0.2, 1] }}
+                style={{ cursor: "pointer", transformOrigin: `${point.x}px ${point.y}px` }}
+              >
+                {isNewest && !reduceMotion ? (
+                  <motion.circle
+                    cx={point.x}
+                    cy={point.y}
+                    r={R}
+                    fill="none"
+                    stroke={WINNER_INDICATOR}
+                    strokeWidth="1.6"
+                    initial={{ r: R, opacity: 0.6 }}
+                    animate={{ r: R * 2.2, opacity: 0 }}
+                    transition={{ duration: 1.2, ease: "easeOut", repeat: 2 }}
+                  />
+                ) : null}
+                {isSelected ? (
                   <circle
                     cx={point.x}
                     cy={point.y}
-                    r={R + 11}
+                    r={R + 5}
                     fill="none"
-                    stroke={WINNER_HALO}
-                    strokeWidth={3}
+                    stroke={NODE_CORE_STROKE_SELECTED}
+                    strokeWidth={1.5}
+                    strokeOpacity={0.7}
                   />
-                  {reduceMotion ? null : (
-                    <motion.circle
+                ) : null}
+                {isWinner ? (
+                  <LayerFade show={layers.winner} reduceMotion={reduceMotion}>
+                    <circle
+                      cx={point.x}
+                      cy={point.y}
+                      r={R + 11}
+                      fill="none"
+                      stroke={WINNER_HALO}
+                      strokeWidth={3}
+                    />
+                    {reduceMotion ? null : (
+                      <motion.circle
+                        cx={point.x}
+                        cy={point.y}
+                        r={R + 4}
+                        fill="none"
+                        stroke={WINNER_INDICATOR}
+                        strokeWidth={1.4}
+                        initial={{ opacity: 0.5, r: R + 4 }}
+                        animate={{ opacity: [0.5, 0.12, 0.5], r: [R + 4, R + 10, R + 4] }}
+                        transition={{ duration: 3.2, ease: "easeInOut", repeat: Infinity }}
+                      />
+                    )}
+                    <circle
                       cx={point.x}
                       cy={point.y}
                       r={R + 4}
                       fill="none"
                       stroke={WINNER_INDICATOR}
-                      strokeWidth={1.4}
-                      initial={{ opacity: 0.5, r: R + 4 }}
-                      animate={{ opacity: [0.5, 0.12, 0.5], r: [R + 4, R + 10, R + 4] }}
-                      transition={{ duration: 3.2, ease: "easeInOut", repeat: Infinity }}
+                      strokeWidth={2.6}
                     />
-                  )}
-                  <circle
-                    cx={point.x}
-                    cy={point.y}
-                    r={R + 4}
-                    fill="none"
-                    stroke={WINNER_INDICATOR}
-                    strokeWidth={2.6}
-                  />
-                </LayerFade>
-              ) : null}
-              <circle
-                cx={point.x}
-                cy={point.y}
-                r={RING_R}
-                fill="none"
-                stroke={SCORE_TRACK_STROKE}
-                strokeWidth={CLIMB_LAYOUT.ringThickness}
-              />
-              {arc(
-                point.x,
-                point.y,
-                RING_R,
-                CLIMB_LAYOUT.ringThickness,
-                version.improved ? IMPROVED_FILL : REGRESSED_FILL,
-                ringFraction(version.score, layout.domain),
-              )}
-              <circle
-                cx={point.x}
-                cy={point.y}
-                r={INNER_R}
-                fill={winnerShown ? WINNER_FILL : NODE_CORE_FILL}
-                stroke={coreStroke}
-                strokeWidth={isSelected ? 1.4 : 0.8}
-                style={{
-                  transition: "fill 250ms ease, stroke 120ms ease, stroke-width 120ms ease",
-                }}
-              />
-              <text
-                x={point.x}
-                y={point.y + 4.5}
-                textAnchor="middle"
-                fontFamily="var(--font-mono, monospace)"
-                fontSize="13"
-                fontWeight={700}
-                fill="#1c1612"
-                pointerEvents="none"
-              >
-                {displayCandidateId(point.id)}
-              </text>
-              {isWinner ? (
-                <LayerFade show={layers.winner} reduceMotion={reduceMotion}>
-                  <WinnerBadge x={point.x} y={point.y + R + 4} />
-                </LayerFade>
-              ) : null}
-              <motion.g
-                initial={false}
-                animate={{ y: isWinner && !layers.winner ? -20 : 0 }}
-                transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: "easeOut" }}
-              >
+                  </LayerFade>
+                ) : null}
+                <circle
+                  cx={point.x}
+                  cy={point.y}
+                  r={RING_R}
+                  fill="none"
+                  stroke={SCORE_TRACK_STROKE}
+                  strokeWidth={CLIMB_LAYOUT.ringThickness}
+                />
+                {arc(
+                  point.x,
+                  point.y,
+                  RING_R,
+                  CLIMB_LAYOUT.ringThickness,
+                  version.improved ? IMPROVED_FILL : REGRESSED_FILL,
+                  ringFraction(version.score, layout.domain),
+                )}
+                <circle
+                  cx={point.x}
+                  cy={point.y}
+                  r={INNER_R}
+                  fill={winnerShown ? WINNER_FILL : NODE_CORE_FILL}
+                  stroke={coreStroke}
+                  strokeWidth={isSelected ? 1.4 : 0.8}
+                  style={{
+                    transition: "fill 250ms ease, stroke 120ms ease, stroke-width 120ms ease",
+                  }}
+                />
                 <text
                   x={point.x}
-                  y={point.y + R + (isWinner ? 34 : 14)}
+                  y={point.y + 4.5}
                   textAnchor="middle"
                   fontFamily="var(--font-mono, monospace)"
-                  fontSize="10.5"
-                  fontWeight={600}
-                  fill="rgba(28, 22, 18, 0.72)"
-                  stroke={LABEL_HALO}
-                  strokeWidth={2.5}
-                  strokeLinejoin="round"
+                  fontSize="13"
+                  fontWeight={700}
+                  fill="#1c1612"
                   pointerEvents="none"
-                  style={{ fontVariantNumeric: "tabular-nums", paintOrder: "stroke" }}
                 >
-                  {formatBlackboxScore(version.score)}
+                  {displayCandidateId(point.id)}
                 </text>
+                {isWinner ? (
+                  <LayerFade show={layers.winner} reduceMotion={reduceMotion}>
+                    <WinnerBadge x={point.x} y={point.y + R + 4} />
+                  </LayerFade>
+                ) : null}
+                <motion.g
+                  initial={false}
+                  animate={{ y: isWinner && !layers.winner ? -20 : 0 }}
+                  transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: "easeOut" }}
+                >
+                  <text
+                    x={point.x}
+                    y={point.y + R + (isWinner ? 34 : 14)}
+                    textAnchor="middle"
+                    fontFamily="var(--font-mono, monospace)"
+                    fontSize="10.5"
+                    fontWeight={600}
+                    fill="rgba(28, 22, 18, 0.72)"
+                    stroke={LABEL_HALO}
+                    strokeWidth={2.5}
+                    strokeLinejoin="round"
+                    pointerEvents="none"
+                    style={{ fontVariantNumeric: "tabular-nums", paintOrder: "stroke" }}
+                  >
+                    {formatBlackboxScore(version.score)}
+                  </text>
+                </motion.g>
               </motion.g>
-            </motion.g>
+            </LayerFade>
           );
         })}
 
-        {pending !== null && model.pending !== null ? (
+        {pending !== null && model.pending !== null && pendingId !== null ? (
           <motion.g
             key={`pending-${model.pending.index}`}
-            role="img"
+            role="button"
             aria-label={formatMsg("meta_harness.a11y.pending_label", {
               id: displayCandidateId(String(model.pending.index)),
               done: pendingDone,
               total: pendingTotal,
             })}
+            aria-pressed={pendingSelected}
+            tabIndex={0}
+            onMouseEnter={() => onHover(pendingId)}
+            onMouseLeave={() => onHover(null)}
+            onClick={() => onSelect(pendingId)}
+            onKeyDown={activate(pendingId)}
             initial={reduceMotion ? false : { opacity: 0, y: pending.y }}
             animate={{ opacity: 1, y: pending.y }}
             transition={reduceMotion ? { duration: 0 } : { duration: 0.6, ease: "easeOut" }}
+            style={{ cursor: "pointer" }}
           >
+            {pendingSelected ? (
+              <circle
+                cx={pending.x}
+                cy={0}
+                r={R + 9}
+                fill="none"
+                stroke={NODE_CORE_STROKE_SELECTED}
+                strokeWidth={1.5}
+                strokeOpacity={0.7}
+              />
+            ) : null}
             {reduceMotion ? (
               <circle
                 cx={pending.x}
@@ -649,8 +864,14 @@ const ClimbContent = memo(function ClimbContent({
               cy={0}
               r={INNER_R}
               fill={NODE_CORE_FILL}
-              stroke={NODE_CORE_STROKE}
-              strokeWidth={0.8}
+              stroke={
+                pendingSelected
+                  ? NODE_CORE_STROKE_SELECTED
+                  : pendingHovered
+                    ? NODE_CORE_STROKE_HOVER
+                    : NODE_CORE_STROKE
+              }
+              strokeWidth={pendingSelected ? 1.4 : 0.8}
             />
             <text
               x={pending.x}
@@ -754,15 +975,6 @@ function RingSwatch({ color }: { color: string }) {
   );
 }
 
-function LegendItem({ swatch, label }: { swatch: React.ReactNode; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap px-1.5 py-0.5">
-      {swatch}
-      <span>{label}</span>
-    </span>
-  );
-}
-
 function LegendToggle({
   swatch,
   label,
@@ -819,5 +1031,15 @@ function MapControlButton({
         {label}
       </TooltipContent>
     </UiTooltip>
+  );
+}
+
+function ControlsDivider() {
+  return (
+    <span
+      aria-hidden="true"
+      className="my-1.5 inline-block w-px bg-border/60"
+      style={{ alignSelf: "stretch" }}
+    />
   );
 }

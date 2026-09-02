@@ -94,6 +94,7 @@ export function BlackboxWizard({
         catalogModels={w.catalog?.models}
         recentConfigs={w.recentConfigs}
         onRemoveRecent={w.removeRecentConfig}
+        nameOnly={w.editingModel?.nameOnly}
       />
 
       <SubmitSplashOverlay show={w.submitPhase === "splash" || w.submitPhase === "done"} />

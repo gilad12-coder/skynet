@@ -183,6 +183,7 @@
     "optimization.no_result_pending": "Optimization has no result yet.",
     "optimization.not_finished": "Optimization is not finished.",
     "optimization.not_found": "Optimization not found: '{optimization_id}'.",
+    "optimization.agent_run_not_found": "Agent run {run_id} not found for optimization '{optimization_id}'.",
     "optimization.not_success_status_for_serve": "Optimization is in state '{status}' — only successfully completed optimizations can be served.",
     "optimization.not_success_status_for_test_results": "Optimization is in state '{status}' — only successfully completed optimizations have test results.",
     "optimization.pair_not_rerunnable": "Cannot re-run a pair while the optimization is in state '{status}'.",

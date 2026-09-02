@@ -311,6 +311,32 @@ class BlackboxRunResponse(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
 
+# One sandboxed agent run of a black-box job, as ``GET
+# /optimizations/{id}/agent-runs/{run_id}`` serves it. ``transcript`` starts
+# at ``transcript_offset`` so a live viewer fetches only what it lacks.
+class BlackboxAgentRunResponse(BaseModel):
+    run_id: int
+    phase: str
+    trial: int | None = None
+    example_id: str | None = None
+    case_id: str | None = None
+    label: str = ""
+    status: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    model: str | None = None
+    exit_code: int | None = None
+    timed_out: bool = False
+    elapsed_seconds: float | None = None
+    error: str | None = None
+    usage: dict[str, Any] = Field(default_factory=dict)
+    check: dict[str, Any] | None = None
+    output: str | None = None
+    transcript: str = ""
+    transcript_offset: int = 0
+    transcript_length: int = 0
+
+
 # One entry of ``GET /blackbox/engines``: the catalog the wizard renders,
 # with availability resolved for the requested target kind.
 class BlackboxEngineInfo(BaseModel):

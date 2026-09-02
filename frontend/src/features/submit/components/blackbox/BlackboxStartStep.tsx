@@ -15,6 +15,7 @@ import {
 } from "@/shared/ui/primitives/select";
 import { NumberInput } from "@/shared/ui/number-input";
 import { ModelChip } from "@/shared/ui/model-chip";
+import { cn } from "@/shared/lib/utils";
 import { HarnessLogo } from "@/shared/ui/harness-logo";
 import { BLACKBOX_HARNESSES, harnessLabel } from "@/shared/lib/blackbox-harness";
 import { msg } from "@/shared/lib/messages";
@@ -27,7 +28,6 @@ import type {
   BlackboxWizardContext,
   SeedMode,
 } from "../../hooks/use-blackbox-wizard";
-import { emptyModelConfig } from "../../constants";
 import { detectLanguage, looksLikeCode, type SeedLanguage } from "../../lib/seed-format";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
@@ -357,10 +357,36 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
 
       {targetKind === "agent" && (
         <div className="space-y-4 rounded-lg border border-border/50 bg-muted/20 p-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <Field
+              label={msg("submit.blackbox.start.agent_model_label")}
+              tip="blackbox.config.agent_model"
+            >
+              <ModelChip
+                config={targetModel}
+                className={MOBILE_MODEL_CHIP_CLASS}
+                required
+                catalogModels={catalog?.models}
+                onClick={() =>
+                  setEditingModel({
+                    config: targetModel,
+                    onSave: setTargetModel,
+                    nameOnly: true,
+                    label: msg("submit.blackbox.start.agent_model_label"),
+                  })
+                }
+                onRemove={targetModel.name ? () => setTargetModel({ name: "" }) : undefined}
+              />
+            </Field>
             <Field label={msg("submit.blackbox.start.harness_label")} tip="submit.blackbox.harness">
               <Select value={harness} onValueChange={(v) => setHarness(v as BlackboxHarness)}>
-                <SelectTrigger className={MOBILE_INPUT_CLASS}>
+                {/* Same box as the model chip beside it: py-2 around a 2rem row. */}
+                <SelectTrigger
+                  className={cn(
+                    MOBILE_INPUT_CLASS,
+                    "data-[size=default]:h-auto *:data-[slot=select-value]:min-h-8",
+                  )}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -375,25 +401,8 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
                 </SelectContent>
               </Select>
             </Field>
-            <Field
-              label={msg("submit.blackbox.start.agent_model_label")}
-              tip="blackbox.config.agent_model"
-            >
-              <ModelChip
-                config={targetModel}
-                className={MOBILE_MODEL_CHIP_CLASS}
-                required
-                catalogModels={catalog?.models}
-                onClick={() =>
-                  setEditingModel({
-                    config: targetModel,
-                    onSave: setTargetModel,
-                    label: msg("submit.blackbox.start.agent_model_label"),
-                  })
-                }
-                onRemove={targetModel.name ? () => setTargetModel(emptyModelConfig()) : undefined}
-              />
-            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
             <Field
               label={msg("submit.blackbox.start.timeout_label")}
               htmlFor="bb-target-timeout"

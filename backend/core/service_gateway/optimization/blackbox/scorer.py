@@ -77,7 +77,7 @@ def load_scorer_from_code(code: str, *, helpers: dict[str, Any] | None = None) -
 
     Args:
         code: User-authored python source.
-        helpers: Names bound in the scorer's namespace before it runs.
+        helpers: Names the scorer may import from ``skynet``; also bound in its namespace.
 
     Returns:
         The scorer callable.

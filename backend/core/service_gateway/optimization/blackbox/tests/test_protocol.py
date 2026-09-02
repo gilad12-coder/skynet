@@ -230,3 +230,50 @@ def test_evaluate_logs_a_debug_heartbeat_per_scorer_call(caplog: pytest.LogCaptu
         "scorer eval 1/5 score=0.500",
         "scorer eval 2/5 score=0.750",
     ]
+
+
+def test_primed_score_serves_the_first_evaluation_without_a_scorer_run() -> None:
+    """A primed (version, case) pair is returned once for free, then measured afresh."""
+    server = EvalServer(vowel_scorer, max_evals=2)
+    server.prime("aaa", {"i": 0}, 0.25, {"note": "measured outside the budget"})
+
+    assert server.recorded("aaa", {"i": 0}) == 0.25
+    assert server.recorded("aaa", {"i": 1}) is None
+    assert server.evaluate("aaa", {"i": 0}) == (0.25, {"note": "measured outside the budget"})
+    assert server.used == 0
+    assert server.mean_score("aaa") == 0.25
+    assert server.recorded("aaa", {"i": 0}) == 0.25
+
+    assert server.evaluate("aaa", {"i": 0}) == (1.0, {"vowels": 3})
+    assert server.used == 1
+    assert server.recorded("aaa", {"i": 0}) == 1.0
+    assert server.recorded("aaa") is None
+
+
+def test_primed_scores_reach_lanes_but_not_the_listener_or_plateau_watch() -> None:
+    """A free evaluation counts for best tracking only: no budget, no listener tick, no patience spent."""
+    seen: list[float] = []
+    parent = EvalServer(vowel_scorer, max_evals=4, on_eval=lambda server, score: seen.append(score))
+    watch = PlateauWatch(1, best_score=0.9)
+    lane = parent.lane(4, watch=watch)
+    parent.prime("xxa", None, 0.5, {})
+
+    assert lane.evaluate("xxa") == (0.5, {})
+
+    assert (lane.used, parent.used, seen, watch.stalled) == (0, 0, [], 0)
+    assert lane.best_score == parent.best_score == 0.5
+    assert lane.evaluate("aaa") == (1.0, {"vowels": 3})
+    assert (lane.used, parent.used, seen) == (1, 1, [1.0])
+
+
+def test_recorded_scores_are_kept_per_case_at_the_root() -> None:
+    """Scores are remembered per (version, case) across lanes, keyed by the case's content."""
+    parent = EvalServer(vowel_scorer, max_evals=4)
+    lane = parent.lane(4)
+
+    lane.evaluate("axxx", {"i": 0, "target": "aeiou"})
+
+    assert parent.recorded("axxx", {"target": "aeiou", "i": 0}) == 0.25
+    assert lane.recorded("axxx", {"i": 0, "target": "aeiou"}) == 0.25
+    assert parent.recorded("axxx", {"i": 1}) is None
+    assert parent.recorded({"a": "axxx"}, {"i": 0, "target": "aeiou"}) is None

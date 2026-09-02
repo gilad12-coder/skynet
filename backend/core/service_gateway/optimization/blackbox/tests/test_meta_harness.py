@@ -11,7 +11,7 @@ import pytest
 from core.constants import PROGRESS_CANDIDATE, PROGRESS_CASE_SCORED, PROGRESS_MINIBATCH
 from core.exceptions import ServiceError
 
-from ..meta_harness import MetaHarnessEngine
+from ..meta_harness import MetaHarnessEngine, _feedback
 from ..protocol import EvalServer, Task
 from .mocks import FakeReflectionLM, make_ctx, vowel_scorer
 
@@ -273,3 +273,14 @@ def test_meta_harness_streams_multi_part_versions_as_their_parts(tmp_path: Path)
     MetaHarnessEngine._evaluate(candidate, [{"i": 0}], EvalServer(vowel_scorer, max_evals=5), ctx, index=0, parent=None)
 
     assert [m["prompt"] for e, m in sink if e == PROGRESS_CANDIDATE] == [candidate]
+
+
+def test_meta_harness_feedback_keeps_the_end_of_a_long_error() -> None:
+    """A traceback's last line — the one that names the failure — survives clipping."""
+    traceback_text = "Traceback (most recent call last):\n" + "  File x, line 1\n" * 60 + "RuntimeError: boom"
+
+    summary = _feedback({"error": "the script crashed: " + traceback_text, "check": "x" * 900})
+
+    assert summary.startswith("error: the script crashed: Traceback")
+    assert "RuntimeError: boom" in summary
+    assert "check: xxx" in summary

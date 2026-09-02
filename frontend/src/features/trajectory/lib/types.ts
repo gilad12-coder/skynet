@@ -1,3 +1,5 @@
+import type { SideImage } from "@/shared/lib/candidate-render";
+
 // Wire shape for trajectory events. Matches CandidateEvent.to_metrics() and
 // RejectedEvent.to_metrics() in backend/core/service_gateway/optimization/trajectory.py.
 
@@ -62,6 +64,11 @@ export interface MinibatchEntry {
   // null when the event predates iteration plumbing or fires outside a
   // propose() call (baseline / full-valset evaluation).
   iteration: number | null;
+  // Renders the scorer attached, whole. They ride on the event outside the
+  // feedback text cap; older events only had them inside the text.
+  images: SideImage[];
+  // Renders left out of the event by its byte budget.
+  images_dropped: number;
 }
 
 export interface ValsetPrediction {

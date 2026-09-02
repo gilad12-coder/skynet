@@ -12,6 +12,7 @@ import json
 import pickle
 import zipfile
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -258,6 +259,97 @@ def test_get_summary_returns_200_for_existing_job(opt_client: TestClient, store:
 
     assert resp.status_code == 200
     assert resp.json()["optimization_id"] == "s1"
+
+
+def _agent_run(**overrides: Any) -> dict[str, Any]:
+    """Build a stored agent run record.
+
+    Args:
+        **overrides: Field overrides.
+
+    Returns:
+        The record.
+    """
+    run: dict[str, Any] = {
+        "run_id": 1,
+        "phase": "version",
+        "trial": 0,
+        "example_id": "0",
+        "case_id": "c",
+        "label": "v1 · case 1",
+        "status": "finished",
+        "started_at": "2026-09-01T10:00:00+00:00",
+        "finished_at": "2026-09-01T10:01:00+00:00",
+        "exit_code": 0,
+        "timed_out": False,
+        "elapsed_seconds": 60.0,
+        "error": None,
+        "usage": {"total_tokens": 3},
+        "check": {"passed": True, "exit_code": 0, "output": ""},
+        "output": "answer",
+        "transcript": "abcdef",
+    }
+    run.update(overrides)
+    return run
+
+
+def test_get_agent_run_returns_404_for_unknown_job(opt_client: TestClient) -> None:
+    """A run lookup on an unknown optimization returns 404."""
+    resp = opt_client.get("/optimizations/missing/agent-runs/1")
+
+    assert resp.status_code == 404
+
+
+def test_get_agent_run_returns_404_for_unknown_run(opt_client: TestClient, store: _ExtendedFakeJobStore) -> None:
+    """A run id the job never recorded returns 404."""
+    store.seed_job("r1")
+
+    resp = opt_client.get("/optimizations/r1/agent-runs/7")
+
+    assert resp.status_code == 404
+
+
+def test_get_agent_run_serves_the_record_and_the_transcript_tail(
+    opt_client: TestClient, store: _ExtendedFakeJobStore
+) -> None:
+    """The record comes back whole, with only the transcript past the caller's offset."""
+    store.seed_job("r2")
+    store.save_agent_run("r2", _agent_run())
+
+    resp = opt_client.get("/optimizations/r2/agent-runs/1?since_transcript=4")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["run_id"] == 1
+    assert body["status"] == "finished"
+    assert body["output"] == "answer"
+    assert body["usage"] == {"total_tokens": 3}
+    assert body["check"]["passed"] is True
+    assert body["transcript"] == "ef"
+    assert body["transcript_offset"] == 4
+    assert body["transcript_length"] == 6
+
+
+def test_get_agent_run_clamps_an_offset_past_the_end(opt_client: TestClient, store: _ExtendedFakeJobStore) -> None:
+    """An offset beyond the transcript yields an empty tail at the transcript's length."""
+    store.seed_job("r3")
+    store.save_agent_run("r3", _agent_run())
+
+    resp = opt_client.get("/optimizations/r3/agent-runs/1?since_transcript=99")
+
+    assert resp.status_code == 200
+    assert resp.json()["transcript"] == ""
+    assert resp.json()["transcript_offset"] == 6
+
+
+def test_get_agent_run_rejects_a_negative_offset(opt_client: TestClient, store: _ExtendedFakeJobStore) -> None:
+    """A negative offset is a validation error."""
+    store.seed_job("r4")
+    store.save_agent_run("r4", _agent_run())
+
+    resp = opt_client.get("/optimizations/r4/agent-runs/1?since_transcript=-1")
+
+    assert resp.status_code == 422
 
 
 def test_cancel_job_returns_404_for_unknown_id(opt_client: TestClient) -> None:

@@ -29,6 +29,7 @@ from ..constants import (
     STRUCTURAL_PROGRESS_EVENTS,
     TQDM_KEY_PREFIX,
 )
+from .agent_run_store import PostgresAgentRunStore
 from .base import JobRecord, LogEntryRecord, ProgressEventRecord
 from .checkpoint_store import GepaCheckpoint, PostgresCheckpointBlobStore, PostgresGridPairResultStore
 from .migrate import sync_migration_head
@@ -36,6 +37,7 @@ from .models import (
     EMBEDDING_DIM,
     AgentStagedDatasetModel,
     Base,
+    BlackboxAgentRunModel,
     ConversationEmbeddingModel,
     GepaCheckpointModel,
     GridPairResultModel,
@@ -389,6 +391,7 @@ class RemoteDBJobStore:
         self._session_factory = sessionmaker(bind=self._engine)
         self._checkpoints = PostgresCheckpointBlobStore(self._engine)
         self._grid_pair_results = PostgresGridPairResultStore(self._engine)
+        self._agent_runs = PostgresAgentRunStore(self._engine)
         parsed_url = urlparse(db_url)
         db_location = parsed_url.hostname or "<masked>"
         if parsed_url.port:
@@ -894,6 +897,9 @@ class RemoteDBJobStore:
                 session.query(JobEmbeddingModel).filter(JobEmbeddingModel.optimization_id == optimization_id).delete()
             session.query(GepaCheckpointModel).filter(GepaCheckpointModel.optimization_id == optimization_id).delete()
             session.query(GridPairResultModel).filter(GridPairResultModel.optimization_id == optimization_id).delete()
+            session.query(BlackboxAgentRunModel).filter(
+                BlackboxAgentRunModel.optimization_id == optimization_id
+            ).delete()
             self._delete_grid_pair_children(session, optimization_id)
             session.query(JobModel).filter(JobModel.optimization_id == optimization_id).delete()
             session.commit()
@@ -926,6 +932,9 @@ class RemoteDBJobStore:
             synchronize_session=False
         )
         session.query(GridPairResultModel).filter(GridPairResultModel.optimization_id.in_(child_ids)).delete(
+            synchronize_session=False
+        )
+        session.query(BlackboxAgentRunModel).filter(BlackboxAgentRunModel.optimization_id.in_(child_ids)).delete(
             synchronize_session=False
         )
         session.query(JobModel).filter(JobModel.optimization_id.in_(child_ids)).delete(synchronize_session=False)
@@ -1004,15 +1013,18 @@ class RemoteDBJobStore:
                 synchronize_session=False
             )
             if settings.embeddings_enabled:
-                session.query(JobEmbeddingModel).filter(
-                    JobEmbeddingModel.optimization_id.in_(optimization_ids)
-                ).delete(synchronize_session=False)
+                session.query(JobEmbeddingModel).filter(JobEmbeddingModel.optimization_id.in_(optimization_ids)).delete(
+                    synchronize_session=False
+                )
             session.query(GepaCheckpointModel).filter(GepaCheckpointModel.optimization_id.in_(optimization_ids)).delete(
                 synchronize_session=False
             )
             session.query(GridPairResultModel).filter(GridPairResultModel.optimization_id.in_(optimization_ids)).delete(
                 synchronize_session=False
             )
+            session.query(BlackboxAgentRunModel).filter(
+                BlackboxAgentRunModel.optimization_id.in_(optimization_ids)
+            ).delete(synchronize_session=False)
             for parent_id in optimization_ids:
                 self._delete_grid_pair_children(session, parent_id)
             deleted = (
@@ -1025,6 +1037,37 @@ class RemoteDBJobStore:
             session.close()
         self._evict_job_counters(optimization_ids)
         return int(deleted or 0)
+
+    def save_agent_run(self, optimization_id: str, run: dict[str, Any]) -> None:
+        """Persist (or replace) one sandboxed agent run's record.
+
+        Args:
+            optimization_id: Owning job id.
+            run: The record as the job's recorder sends it, keyed by ``run_id``.
+        """
+        self._agent_runs.save(optimization_id, run)
+
+    def append_agent_run_transcript(self, optimization_id: str, run_id: int, text: str) -> None:
+        """Add a piece of live transcript to a sandboxed agent run.
+
+        Args:
+            optimization_id: Owning job id.
+            run_id: The run's ordinal within the job.
+            text: The new transcript text.
+        """
+        self._agent_runs.append_transcript(optimization_id, run_id, text)
+
+    def get_agent_run(self, optimization_id: str, run_id: int) -> dict[str, Any] | None:
+        """Return one sandboxed agent run's record, or ``None``.
+
+        Args:
+            optimization_id: Owning job id.
+            run_id: The run's ordinal within the job.
+
+        Returns:
+            The record, or ``None`` when no row exists.
+        """
+        return self._agent_runs.get(optimization_id, run_id)
 
     def save_gepa_checkpoint(self, optimization_id: str, data: bytes, iteration: int, pair_index: int = -1) -> None:
         """Persist (or replace) the latest GEPA state blob for one run or grid pair.
@@ -1398,6 +1441,9 @@ class RemoteDBJobStore:
                 session.query(JobEmbeddingModel).filter(JobEmbeddingModel.optimization_id == optimization_id).delete()
             session.query(GepaCheckpointModel).filter(GepaCheckpointModel.optimization_id == optimization_id).delete()
             session.query(GridPairResultModel).filter(GridPairResultModel.optimization_id == optimization_id).delete()
+            session.query(BlackboxAgentRunModel).filter(
+                BlackboxAgentRunModel.optimization_id == optimization_id
+            ).delete()
             # A distributed grid's pair children belong to the discarded
             # attempt: drop them so the re-claimed parent fans out fresh rows
             # instead of "resuming" stale terminal children. Deleted
@@ -2412,9 +2458,7 @@ class RemoteDBJobStore:
         """
         session = self._get_session()
         try:
-            log_count = (
-                session.query(LogEntryModel).filter(LogEntryModel.optimization_id == optimization_id).count()
-            )
+            log_count = session.query(LogEntryModel).filter(LogEntryModel.optimization_id == optimization_id).count()
             excess = log_count - self._log_entries_cap
             if excess <= 0:
                 return
@@ -2942,9 +2986,7 @@ class RemoteDBJobStore:
         """
         session = self._get_session()
         try:
-            q = session.query(JobModel.status, func.count(JobModel.optimization_id)).filter(
-                _user_facing_jobs()
-            )
+            q = session.query(JobModel.status, func.count(JobModel.optimization_id)).filter(_user_facing_jobs())
             if username:
                 q = q.filter(JobModel.username == username)
             return dict(q.group_by(JobModel.status).all())

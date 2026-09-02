@@ -4,10 +4,13 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
 import {
   CaretRight,
+  CheckCircle,
   Code,
   Eye,
   GitDiff,
   Hash,
+  Hourglass,
+  Terminal,
   TextAlignLeft,
   XCircle,
   type Icon,
@@ -20,6 +23,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
 } from "react";
 import {
   BLACKBOX_STR_CANDIDATE_KEY,
@@ -47,17 +51,37 @@ import {
   formatJson,
   isDrawable,
   type RenderKind,
+  type SideImage,
 } from "@/shared/lib/candidate-render";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
+import { arrowPageStep } from "@/shared/lib/arrow-paging";
+import { formatDuration } from "@/shared/lib/formatters";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { PingDot } from "@/shared/ui/ping-dot";
+import { MessageMarkdown } from "@/shared/ui/agent/message-markdown";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { RenderedText } from "@/shared/ui/rendered-text";
+import {
+  AGENT_RUN_PHASE_FINAL,
+  AGENT_RUN_STATUS_RUNNING,
+  meanOf,
+  type AgentRunSummary,
+  type PendingCase,
+} from "../lib/meta-harness";
 import { RecordedChatTranscript, type ChatMessage } from "./RecordedChat";
+import { agentRunStatusKey, agentRunSucceeded } from "./AgentRunViewer";
+import { parseScorerNote } from "../lib/scorer-note";
 import { UserBubble } from "@/shared/ui/agent/user-bubble";
 import { AgentBubble } from "@/shared/ui/agent/agent-bubble";
-import { Carousel, ToolCallRow, ToolHeader, ToolsCarousel } from "@/features/agent-panel";
+import {
+  Carousel,
+  CarouselNav,
+  ToolCallRow,
+  ToolHeader,
+  ToolsCarousel,
+} from "@/features/agent-panel";
 import type { AgentMessage, AgentToolCall } from "@/shared/ui/agent";
 import {
   Sheet,
@@ -109,6 +133,9 @@ const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m
 export type DrawerSelection =
   | { kind: "candidate"; node: TrajectoryNode; parent: TrajectoryNode | null }
   | { kind: "rejected"; ghost: RejectedNode; parent: TrajectoryNode | null }
+  // A black-box version still being scored: its trial number, and every case
+  // with the score in so far. Its text arrives only once the trial completes.
+  | { kind: "pending"; index: number; total: number; cases: PendingCase[] }
   | null;
 
 export interface TrajectoryDrawerProps {
@@ -129,6 +156,10 @@ export interface TrajectoryDrawerProps {
   // shows per-case scores only when cases exist and reads the scorer's notes
   // as such.
   blackbox?: BlackboxTrajectoryContext | null;
+  // The agent runs behind a black-box version's case scores, so a focused case
+  // can open the sandboxed run that produced its score.
+  caseRuns?: (exampleId: string) => AgentRunSummary[];
+  onOpenRun?: (run: AgentRunSummary) => void;
 }
 
 interface NodeView {
@@ -136,7 +167,8 @@ interface NodeView {
   rawId: string;
   displayId: string;
   iteration: number | null;
-  score: number;
+  // Null while a version is being scored and no case has come back yet.
+  score: number | null;
   scoreMode: "valset" | "minibatch";
   scoreN: number;
   parentScoreOnMinibatch: number | null;
@@ -145,6 +177,9 @@ interface NodeView {
   parentPrompt: Record<string, string>;
   // Populated for accepted candidates (full valset).
   perExample: PerExampleScore[];
+  // Every case of the version, unscored ones included while it is being scored.
+  cases: PendingCase[];
+  pending: { done: number; total: number } | null;
 }
 
 function toNodeView(selection: NonNullable<DrawerSelection>): NodeView {
@@ -163,6 +198,28 @@ function toNodeView(selection: NonNullable<DrawerSelection>): NodeView {
       prompt: node.prompt,
       parentPrompt: selection.parent?.prompt ?? {},
       perExample: node.per_example,
+      cases: node.per_example,
+      pending: null,
+    };
+  }
+  if (selection.kind === "pending") {
+    const id = String(selection.index);
+    const scored = selection.cases.filter((c): c is PerExampleScore => c.score !== null);
+    return {
+      kind: "accepted",
+      rawId: id,
+      displayId: displayCandidateId(id),
+      iteration: selection.index,
+      score: meanOf(scored.map((c) => c.score)),
+      scoreMode: "valset",
+      scoreN: selection.total,
+      parentScoreOnMinibatch: null,
+      parentId: null,
+      prompt: {},
+      parentPrompt: {},
+      perExample: scored,
+      cases: selection.cases,
+      pending: { done: scored.length, total: selection.total },
     };
   }
   const ghost = selection.ghost;
@@ -179,6 +236,8 @@ function toNodeView(selection: NonNullable<DrawerSelection>): NodeView {
     prompt: ghost.proposal_prompt,
     parentPrompt: ghost.parent_prompt,
     perExample: [],
+    cases: [],
+    pending: null,
   };
 }
 
@@ -191,6 +250,8 @@ export function TrajectoryDrawer({
   valsetOutputs,
   toolSeverities,
   blackbox = null,
+  caseRuns,
+  onOpenRun,
 }: TrajectoryDrawerProps) {
   const isRtl = getActiveDir() === "rtl";
   if (selection === null) {
@@ -223,6 +284,8 @@ export function TrajectoryDrawer({
           valsetOutputs={valsetOutputs}
           toolSeverities={toolSeverities}
           blackbox={blackbox}
+          caseRuns={caseRuns}
+          onOpenRun={onOpenRun}
         />
       </SheetContent>
     </Sheet>
@@ -236,6 +299,8 @@ function NodeBody({
   valsetOutputs,
   toolSeverities,
   blackbox,
+  caseRuns,
+  onOpenRun,
 }: {
   view: NodeView;
   valsetRows: ValsetRow[];
@@ -243,6 +308,8 @@ function NodeBody({
   valsetOutputs: Map<string, Map<string, PredictionValue>>;
   toolSeverities?: Record<string, string>;
   blackbox: BlackboxTrajectoryContext | null;
+  caseRuns?: (exampleId: string) => AgentRunSummary[];
+  onOpenRun?: (run: AgentRunSummary) => void;
 }) {
   const [pinnedExampleId, setPinnedExampleId] = useState<string | null>(null);
   const [promptViewMode, setPromptViewMode] = usePromptView();
@@ -299,7 +366,7 @@ function NodeBody({
 
   // A black-box run scored against cases has a score per case to break down; a
   // single-task run scores each version once and has nothing to break down.
-  const hasCases = blackbox !== null && (blackbox.hasCases || view.perExample.length > 1);
+  const hasCases = blackbox !== null && (blackbox.hasCases || view.cases.length > 1);
   const canPreview =
     isBlackbox &&
     (blackboxParts.some((part) => isDrawable(part.kind)) || blackboxRenders.length > 0);
@@ -318,20 +385,27 @@ function NodeBody({
         : "code";
 
   const headerTitle =
-    view.kind === "accepted"
-      ? formatMsg("trajectory.node.header.accepted_title", { id: view.displayId })
-      : msg("trajectory.node.header.rejected_title");
+    view.pending !== null
+      ? formatMsg("trajectory.node.header.pending_title", { id: view.displayId })
+      : view.kind === "accepted"
+        ? formatMsg("trajectory.node.header.accepted_title", { id: view.displayId })
+        : msg("trajectory.node.header.rejected_title");
   const scoreLabel =
-    isBlackbox && !hasCases
-      ? msg("trajectory.blackbox.header.label.score")
-      : view.scoreMode === "valset"
-        ? msg("trajectory.node.header.label.score_valset")
-        : msg("trajectory.node.header.label.score_minibatch");
-  const scoreSub = isBlackbox
-    ? hasCases
-      ? formatMsg("trajectory.blackbox.header.sub.cases", { n: view.scoreN })
-      : undefined
-    : formatMsg("trajectory.node.header.sub.examples", { n: view.scoreN });
+    view.pending !== null
+      ? msg("trajectory.blackbox.header.label.score_so_far")
+      : isBlackbox && !hasCases
+        ? msg("trajectory.blackbox.header.label.score")
+        : view.scoreMode === "valset"
+          ? msg("trajectory.node.header.label.score_valset")
+          : msg("trajectory.node.header.label.score_minibatch");
+  const scoreSub =
+    view.pending !== null
+      ? formatMsg("trajectory.blackbox.header.sub.cases_scored", view.pending)
+      : isBlackbox
+        ? hasCases
+          ? formatMsg("trajectory.blackbox.header.sub.cases", { n: view.scoreN })
+          : undefined
+        : formatMsg("trajectory.node.header.sub.examples", { n: view.scoreN });
   const formatScore = (value: number) =>
     isBlackbox ? formatBlackboxScore(value) : value.toFixed(2);
   const versionTitleKey: MessageKey =
@@ -359,6 +433,8 @@ function NodeBody({
           ? "trajectory.node.section.module.explain"
           : "trajectory.node.section.prompt.explain";
 
+  const showCases = view.kind === "accepted" && view.cases.length > 0 && (!isBlackbox || hasCases);
+
   return (
     <ToolSeveritiesContext.Provider value={toolSeverities ?? EMPTY_SEVERITIES}>
       <ToolDescriptionsContext.Provider value={toolDescriptions}>
@@ -366,6 +442,11 @@ function NodeBody({
           <SheetTitle className="flex items-center gap-2 text-base">
             {view.kind === "rejected" ? (
               <XCircle className="size-4 text-[#a85a3b]" aria-hidden="true" />
+            ) : view.pending !== null ? (
+              <span className="relative flex size-2.5 shrink-0" aria-hidden="true">
+                <span className="absolute inline-flex size-full rounded-full bg-[#7C6350]/45 motion-safe:animate-ping" />
+                <span className="relative inline-flex size-2.5 rounded-full bg-[#7C6350]" />
+              </span>
             ) : null}
             <span>{headerTitle}</span>
           </SheetTitle>
@@ -380,7 +461,7 @@ function NodeBody({
               ) : null}
               <StatTile
                 label={scoreLabel}
-                value={formatScore(view.score)}
+                value={view.score === null ? "—" : formatScore(view.score)}
                 sub={scoreSub}
                 tone={view.kind === "rejected" ? "rejected" : "accepted"}
                 emphasis
@@ -397,7 +478,7 @@ function NodeBody({
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-4 pb-6 space-y-5">
-          {view.kind === "accepted" && view.perExample.length > 0 && (!isBlackbox || hasCases) ? (
+          {showCases ? (
             <Section
               title={msg(
                 isBlackbox
@@ -412,10 +493,12 @@ function NodeBody({
             >
               {isBlackbox ? (
                 <BlackboxCasesGrid
-                  examples={view.perExample}
+                  examples={view.cases}
                   pinnedId={pinnedExampleId}
-                  onPin={(id) => setPinnedExampleId((prev) => (prev === id ? null : id))}
+                  onPin={setPinnedExampleId}
                   notes={scorerNotes}
+                  runs={caseRuns}
+                  onOpenRun={onOpenRun}
                 />
               ) : (
                 <ParetoGridSection
@@ -429,7 +512,7 @@ function NodeBody({
             </Section>
           ) : null}
 
-          {view.kind === "rejected" || promptEntries.length > 0 ? (
+          {view.kind === "rejected" || view.pending !== null || promptEntries.length > 0 ? (
             <Section
               title={msg(versionTitleKey)}
               info={msg(versionInfoKey)}
@@ -447,9 +530,11 @@ function NodeBody({
               {promptEntries.length === 0 ? (
                 <EmptyHint
                   text={msg(
-                    isBlackbox
-                      ? "trajectory.blackbox.rejected.unavailable"
-                      : "trajectory.drawer.rejected.prompt_unavailable",
+                    view.pending !== null
+                      ? "trajectory.blackbox.pending.version_hint"
+                      : isBlackbox
+                        ? "trajectory.blackbox.rejected.unavailable"
+                        : "trajectory.drawer.rejected.prompt_unavailable",
                   )}
                 />
               ) : isBlackbox ? (
@@ -484,26 +569,30 @@ function NodeBody({
             </Section>
           ) : null}
 
-          <Section
-            title={msg(
-              isBlackbox
-                ? "trajectory.blackbox.section.feedback"
-                : "trajectory.drawer.section.minibatch",
-            )}
-            info={msg(
-              isBlackbox
-                ? "trajectory.blackbox.section.feedback.explain"
-                : "trajectory.drawer.section.minibatch.explain",
-            )}
-          >
-            <MinibatchPanel
-              entries={scorerEntries}
-              valsetRows={valsetRows}
-              iteration={isBlackbox ? null : view.iteration}
-              scorerFeedback={isBlackbox}
-              caseLabels={hasCases}
-            />
-          </Section>
+          {/* The cases grid already carries each case's scorer note, so a
+              blackbox version with cases has nothing left for this section. */}
+          {isBlackbox && showCases ? null : (
+            <Section
+              title={msg(
+                isBlackbox
+                  ? "trajectory.blackbox.section.feedback"
+                  : "trajectory.drawer.section.minibatch",
+              )}
+              info={msg(
+                isBlackbox
+                  ? "trajectory.blackbox.section.feedback.explain"
+                  : "trajectory.drawer.section.minibatch.explain",
+              )}
+            >
+              <MinibatchPanel
+                entries={scorerEntries}
+                valsetRows={valsetRows}
+                iteration={isBlackbox ? null : view.iteration}
+                scorerFeedback={isBlackbox}
+                caseLabels={hasCases}
+              />
+            </Section>
+          )}
         </div>
       </ToolDescriptionsContext.Provider>
     </ToolSeveritiesContext.Provider>
@@ -3084,106 +3173,327 @@ export function caseShade(
   };
 }
 
+// The dashed ring the climb draws around the version being scored, so an
+// unscored case reads as the same "still in the box" state.
+const PENDING_CASE_STROKE = "rgba(124, 99, 80, 0.6)";
+const PENDING_CASE_INK = "#7C6350";
+
+function agentRunActionKey(run: AgentRunSummary): MessageKey {
+  if (run.phase === AGENT_RUN_PHASE_FINAL) return "agent_run.open_final";
+  return run.status === AGENT_RUN_STATUS_RUNNING ? "agent_run.watch_live" : "agent_run.open";
+}
+
+function CaseRunRow({
+  run,
+  onOpen,
+}: {
+  run: AgentRunSummary;
+  onOpen: (run: AgentRunSummary) => void;
+}) {
+  const running = run.status === AGENT_RUN_STATUS_RUNNING;
+  const ok = agentRunSucceeded(run);
+  const StatusIcon = ok ? CheckCircle : run.timed_out ? Hourglass : XCircle;
+  const tone = running
+    ? "text-muted-foreground"
+    : ok
+      ? "text-[var(--success)]"
+      : run.timed_out
+        ? "text-[var(--warning)]"
+        : "text-[var(--danger)]";
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onOpen(run)}
+        className="group flex min-h-[44px] w-full items-center gap-2.5 px-2.5 text-start transition-colors duration-[var(--duration-fast)] hover:bg-[#F8F4EF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#3D2E22]/40 lg:min-h-9"
+      >
+        <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-foreground/85">
+          {msg(agentRunActionKey(run))}
+        </span>
+        <span
+          className={cn("inline-flex shrink-0 items-center gap-1 text-[10px] font-medium", tone)}
+        >
+          {running ? (
+            <PingDot className="scale-75" />
+          ) : (
+            <StatusIcon className="size-3.5" aria-hidden="true" />
+          )}
+          {msg(agentRunStatusKey(run))}
+        </span>
+        {run.elapsed_seconds !== null ? (
+          <span
+            className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground"
+            dir="ltr"
+          >
+            {formatDuration(run.elapsed_seconds)}
+          </span>
+        ) : null}
+        <CaretRight
+          className="size-3 shrink-0 text-muted-foreground/70 transition-transform duration-[var(--duration-fast)] group-hover:translate-x-0.5 rtl:-scale-x-100 rtl:group-hover:-translate-x-0.5"
+          aria-hidden="true"
+        />
+      </button>
+    </li>
+  );
+}
+
 function BlackboxCasesGrid({
   examples,
   pinnedId,
   onPin,
   notes,
+  runs,
+  onOpenRun,
 }: {
-  examples: PerExampleScore[];
+  examples: PendingCase[];
   pinnedId: string | null;
   onPin: (id: string) => void;
   notes: ReadonlyMap<string, MinibatchEntry>;
+  runs?: (exampleId: string) => AgentRunSummary[];
+  onOpenRun?: (run: AgentRunSummary) => void;
 }) {
-  const focused = pinnedId === null ? null : (examples.find((e) => e.id === pinnedId) ?? null);
-  const focusedIndex = focused === null ? -1 : examples.indexOf(focused);
-  const scores = examples.map((e) => e.score);
+  const isRtl = getActiveDir() === "rtl";
+  const reduceMotion = useReducedMotion();
+  // Forward slides enter from the inline-end edge — leftward in RTL, rightward
+  // in LTR — so the animation's x-sign tracks the active direction.
+  const [slide, setSlide] = useState<1 | -1>(1);
+  const pinnedIndex = pinnedId === null ? -1 : examples.findIndex((e) => e.id === pinnedId);
+  // The carousel always shows a case: the pinned one, else the first.
+  const index = pinnedIndex === -1 ? 0 : pinnedIndex;
+  const focused = examples[index];
+  const scores = examples.flatMap((e) => (e.score === null ? [] : [e.score]));
   const min = Math.min(...scores);
   const max = Math.max(...scores);
   const unit = scores.every((score) => score >= 0 && score <= 1);
-  const note = focused === null ? null : (notes.get(focused.id) ?? null);
+  const runsOf = (id: string) => (runs === undefined ? [] : runs(id));
+  const isRunning = (id: string) =>
+    runsOf(id).some((run) => run.status === AGENT_RUN_STATUS_RUNNING);
+
+  const go = (next: number) => {
+    const target = examples[Math.max(0, Math.min(examples.length - 1, next))];
+    if (target === undefined || target.id === focused?.id) return;
+    const forward = next > index;
+    setSlide(forward === isRtl ? -1 : 1);
+    onPin(target.id);
+  };
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const step = arrowPageStep(e, isRtl);
+    if (step === 0) return;
+    e.preventDefault();
+    go(index + step);
+  };
+
+  if (focused === undefined) return null;
+
+  const note = notes.get(focused.id) ?? null;
+  const parsed = note === null ? null : parseScorerNote(note.feedback);
+  let images: SideImage[] = [];
+  let cut = 0;
+  if (note !== null && parsed !== null) {
+    images = note.images.length > 0 ? note.images : parsed.images;
+    cut = parsed.truncated + note.images_dropped;
+  }
+  const hasNotes = parsed !== null && (parsed.body.length > 0 || images.length > 0);
+  const focusedRuns = runsOf(focused.id);
 
   return (
     <div className="space-y-2">
-      <div className="text-[10px] text-muted-foreground tabular-nums">
-        {formatMsg("trajectory.blackbox.cases.range", {
-          min: formatBlackboxScore(min),
-          max: formatBlackboxScore(max),
-        })}
+      <div className="flex items-center gap-2">
+        <div
+          className="flex min-w-0 flex-1 flex-wrap gap-1"
+          role="group"
+          aria-label={msg("trajectory.blackbox.section.cases")}
+        >
+          {examples.map((ex, idx) => {
+            const active = idx === index;
+            const shade = ex.score === null ? null : caseShade(ex.score, min, max, unit);
+            // An unscored case pulses while its sandbox run is still going.
+            const running = ex.score === null && isRunning(ex.id);
+            return (
+              <button
+                key={ex.id}
+                type="button"
+                onClick={() => go(idx)}
+                aria-label={
+                  ex.score === null
+                    ? formatMsg("trajectory.blackbox.cases.cell_pending_label", { id: idx + 1 })
+                    : formatMsg("trajectory.blackbox.cases.cell_label", {
+                        id: idx + 1,
+                        score: formatBlackboxScore(ex.score),
+                      })
+                }
+                aria-current={active ? "true" : undefined}
+                className={cn(
+                  "relative rounded-sm font-mono text-[9px] tabular-nums leading-none transition-transform hover:scale-110 focus:scale-110 focus:outline-none",
+                  running && "motion-safe:animate-pulse",
+                )}
+                style={{
+                  width: 24,
+                  height: 24,
+                  background: shade === null ? "transparent" : shade.background,
+                  color: shade === null ? PENDING_CASE_INK : shade.color,
+                  border: shade === null ? `1px dashed ${PENDING_CASE_STROKE}` : undefined,
+                  outline: active ? "2px solid #1c1612" : "none",
+                  outlineOffset: active ? "1px" : undefined,
+                  boxShadow: active ? "inset 0 0 0 1px rgba(28, 22, 18, 0.45)" : undefined,
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-0 flex items-center justify-center font-semibold opacity-70"
+                >
+                  {idx + 1}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span
+            className="font-mono text-[10px] tabular-nums text-muted-foreground"
+            dir="ltr"
+            aria-hidden="true"
+          >
+            {index + 1} / {examples.length}
+          </span>
+          <CarouselNav direction="prev" disabled={index === 0} onClick={() => go(index - 1)} />
+          <CarouselNav
+            direction="next"
+            disabled={index === examples.length - 1}
+            onClick={() => go(index + 1)}
+          />
+        </div>
       </div>
       <div
-        className="flex flex-wrap gap-1"
-        role="grid"
-        aria-label={msg("trajectory.blackbox.section.cases")}
+        role="region"
+        aria-roledescription="carousel"
+        aria-label={msg("trajectory.blackbox.cases.carousel_aria")}
+        tabIndex={0}
+        onKeyDown={onKey}
+        className="relative overflow-hidden rounded-lg border border-[#DDD4C8]/60 bg-background/70 shadow-[0_1px_2px_rgba(28,22,18,0.02)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3D2E22]/40 focus-visible:ring-offset-1"
       >
-        {examples.map((ex, idx) => {
-          const isPinned = pinnedId === ex.id;
-          const shade = caseShade(ex.score, min, max, unit);
-          return (
-            <button
-              key={ex.id}
-              type="button"
-              onClick={() => onPin(ex.id)}
-              aria-label={formatMsg("trajectory.blackbox.cases.cell_label", {
-                id: idx + 1,
-                score: formatBlackboxScore(ex.score),
-              })}
-              aria-pressed={isPinned}
-              className="relative rounded-sm font-mono text-[9px] tabular-nums leading-none transition-transform hover:scale-110 focus:scale-110 focus:outline-none"
-              style={{
-                width: 24,
-                height: 24,
-                background: shade.background,
-                color: shade.color,
-                outline: isPinned ? "2px solid #1c1612" : "none",
-                outlineOffset: isPinned ? "1px" : undefined,
-                boxShadow: isPinned ? "inset 0 0 0 1px rgba(28, 22, 18, 0.45)" : undefined,
-              }}
-            >
-              <span
-                aria-hidden="true"
-                className="absolute inset-0 flex items-center justify-center font-semibold opacity-70"
-              >
-                {idx + 1}
+        <AnimatePresence custom={slide} mode="wait" initial={false}>
+          <motion.article
+            key={focused.id}
+            custom={slide}
+            variants={{
+              enter: (d: 1 | -1) => ({ x: reduceMotion ? 0 : d * 28, opacity: 0 }),
+              center: { x: 0, opacity: 1 },
+              exit: (d: 1 | -1) => ({ x: reduceMotion ? 0 : d * -28, opacity: 0 }),
+            }}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+            aria-label={formatMsg("trajectory.blackbox.cases.case_label", { id: index + 1 })}
+          >
+            <header className="flex items-center justify-between gap-3 border-b border-border/30 bg-[#F8F4EF]/60 px-3 py-2">
+              <span className="text-[12px] font-semibold text-foreground">
+                {formatMsg("trajectory.blackbox.cases.case_label", { id: index + 1 })}
               </span>
-            </button>
-          );
-        })}
+              <HelpTip text={msg("trajectory.blackbox.score_label.explain")}>
+                <span className="inline-flex items-baseline gap-1.5">
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {msg("trajectory.minibatch.score_label")}
+                  </span>
+                  {focused.score === null ? (
+                    <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground italic">
+                      {isRunning(focused.id) ? <PingDot className="scale-75" /> : null}
+                      {msg("trajectory.blackbox.cases.pending_score")}
+                    </span>
+                  ) : (
+                    <span
+                      className="font-mono text-[15px] font-semibold tabular-nums leading-none text-foreground"
+                      dir="ltr"
+                    >
+                      {formatBlackboxScore(focused.score)}
+                    </span>
+                  )}
+                </span>
+              </HelpTip>
+            </header>
+            <div className="space-y-3 px-3 pb-3 pt-2.5">
+              {focusedRuns.length > 0 && onOpenRun !== undefined ? (
+                <ul className="m-0 list-none divide-y divide-border/30 overflow-hidden rounded-md border border-border/50 p-0">
+                  {focusedRuns.map((run) => (
+                    <CaseRunRow key={run.run_id} run={run} onOpen={onOpenRun} />
+                  ))}
+                </ul>
+              ) : null}
+              {images.length > 0 ? (
+                <div className="space-y-1">
+                  <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {msg("trajectory.blackbox.cases.renders_label")}
+                  </div>
+                  <ul
+                    className="m-0 flex snap-x list-none gap-2 overflow-x-auto p-0 pb-1"
+                    aria-label={msg("trajectory.blackbox.cases.renders_label")}
+                  >
+                    {images.map((image) => (
+                      <li key={image.key} className="max-w-full shrink-0 snap-start">
+                        <RenderFigure image={image} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {parsed !== null && parsed.body.length > 0 ? (
+                <div className="space-y-1">
+                  <HelpTip text={msg("trajectory.minibatch.scorer_feedback_label.explain")}>
+                    <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {msg("trajectory.minibatch.scorer_feedback_label")}
+                    </div>
+                  </HelpTip>
+                  <ScorerNoteBody text={parsed.body} />
+                </div>
+              ) : null}
+              {cut > 0 ? (
+                <p className="m-0 text-[10px] text-muted-foreground italic">
+                  {formatMsg("trajectory.blackbox.cases.renders_dropped", { n: cut })}
+                </p>
+              ) : null}
+              {hasNotes ? null : (
+                <div className="text-[11px] text-muted-foreground italic">
+                  {msg(
+                    focused.score === null
+                      ? "trajectory.blackbox.cases.pending_feedback"
+                      : "trajectory.blackbox.cases.no_feedback",
+                  )}
+                </div>
+              )}
+            </div>
+          </motion.article>
+        </AnimatePresence>
       </div>
-      {focused !== null ? (
-        <div className="overflow-hidden rounded-lg border border-[#DDD4C8]/60 bg-background/70 shadow-[0_1px_2px_rgba(28,22,18,0.02)]">
-          <div className="flex items-center justify-between gap-2 border-b border-border/30 bg-[#F8F4EF]/60 px-3 py-2">
-            <span className="font-mono text-[10px] text-muted-foreground" dir="ltr">
-              {formatMsg("trajectory.blackbox.cases.case_label", { id: focusedIndex + 1 })}
-            </span>
-            <HelpTip text={msg("trajectory.blackbox.score_label.explain")}>
-              <span className="inline-flex items-baseline gap-1.5">
-                <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {msg("trajectory.minibatch.score_label")}
-                </span>
-                <span className="font-mono tabular-nums text-[11px] font-semibold text-foreground">
-                  {formatBlackboxScore(focused.score)}
-                </span>
-              </span>
-            </HelpTip>
-          </div>
-          <div className="space-y-2.5 px-3 pb-3 pt-2.5">
-            {note !== null && note.feedback.length > 0 ? (
-              <FeedbackBlock body={note.feedback} scorer />
-            ) : (
-              <div className="text-[11px] text-muted-foreground italic">
-                {msg("trajectory.blackbox.cases.no_feedback")}
-              </div>
-            )}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
 
-// One part of a black-box version: a dict candidate's parts each carry their
-// key and kind; a plain-string candidate is one unlabeled part.
+// The scorer's note, drawn the way a version's own artifacts are: prose as
+// markdown, SVG and HTML in a sandboxed frame, JSON pretty-printed, code as code.
+function ScorerNoteBody({ text }: { text: string }) {
+  const kind = detectRenderKind(text);
+  if (kind === "markdown") {
+    return (
+      <MessageMarkdown
+        content={text}
+        className="max-w-[68ch] text-[11px] leading-relaxed text-foreground/90"
+      />
+    );
+  }
+  if (isDrawable(kind)) {
+    return (
+      <RenderedText
+        text={text}
+        kind={kind}
+        title={msg("trajectory.minibatch.scorer_feedback_label")}
+      />
+    );
+  }
+  return <PromptCodeView value={text} />;
+}
+
 function BlackboxEntry({
   part,
   parentText,

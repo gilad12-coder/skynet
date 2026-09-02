@@ -190,6 +190,7 @@
     "optimization.no_result_pending": "L'optimisation n'a pas encore de résultat.",
     "optimization.not_finished": "L'optimisation n'est pas terminée.",
     "optimization.not_found": "Optimisation introuvable : '{optimization_id}'.",
+    "optimization.agent_run_not_found": "Exécution d'agent {run_id} introuvable pour l'optimisation '{optimization_id}'.",
     "optimization.not_success_status_for_serve": "L'optimisation est dans l'état '{status}' — seules les optimisations terminées avec succès peuvent être déployées.",
     "optimization.not_success_status_for_test_results": "L'optimisation est dans l'état '{status}' — seules les optimisations terminées avec succès ont des résultats de test.",
     "optimization.pair_not_rerunnable": "Impossible de relancer une paire tant que l'optimisation est dans l'état '{status}'.",

@@ -200,6 +200,9 @@ def emit_valset_event(
 
 MINIBATCH_FEEDBACK_CHAR_CAP = 4096
 MINIBATCH_PREDICTION_CHAR_CAP = 1024
+# Bytes of inline renders one scorer call may attach next to its capped
+# feedback text; the text cap alone would cut a PNG mid-base64.
+MINIBATCH_IMAGES_BYTE_CAP = 2_000_000
 
 
 # Set by capture_proposal_prompts while a single GEPA reflective propose() is

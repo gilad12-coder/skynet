@@ -419,5 +419,13 @@ def test_gepa_engine_streams_scorer_feedback(monkeypatch, tmp_path) -> None:
     GepaEngine().run(Task(seed_candidate="seed", train_set=cases), EvalServer(vowel_scorer, max_evals=5), ctx)
 
     assert [m for e, m in sink if e == PROGRESS_MINIBATCH] == [
-        {"example_id": "1", "score": 0.5, "feedback": "vowels: 2", "prediction": "", "iteration": None}
+        {
+            "example_id": "1",
+            "score": 0.5,
+            "feedback": "vowels: 2",
+            "prediction": "",
+            "iteration": None,
+            "images": [],
+            "images_dropped": 0,
+        }
     ]

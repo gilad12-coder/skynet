@@ -27,9 +27,10 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -65,6 +66,10 @@ _POLL_CAP_SECONDS = 8.0
 _POLL_DEADLINE_SLACK_SECONDS = 60.0
 # Where a command's wrapper records its exit code for the poll to find.
 _EXIT_FILE_PREFIX = "/tmp/.skynet-exit-"
+# A detached command's output is redirected here and read back while it runs.
+_OUTPUT_FILE_PREFIX = "/tmp/.skynet-output-"
+# Called with the stream name (``stdout``/``stderr``) and each new piece of output.
+OutputSink = Callable[[str, str], None]
 _BRIEF_COMMAND_CHARS = 80
 # Every sandbox carries this tag so stragglers from a crashed worker can be found and destroyed.
 SANDBOX_TAG = {"skynet": "blackbox"}
@@ -127,7 +132,12 @@ class SandboxSession(Protocol):
         ...
 
     def run(
-        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
     ) -> CommandResult:
         """Run ``command`` through ``bash -lc`` in the working directory and wait for it.
 
@@ -135,6 +145,7 @@ class SandboxSession(Protocol):
             command: Shell command line.
             env: Extra environment for this command.
             timeout_seconds: Kill the command after this long.
+            on_output: Receives each new piece of output while the command runs.
 
         Returns:
             Exit code, captured output and whether the timeout fired.
@@ -218,6 +229,14 @@ def _brief(command: str) -> str:
     return head if len(head) <= _BRIEF_COMMAND_CHARS else head[: _BRIEF_COMMAND_CHARS - 1] + "…"
 
 
+@dataclass
+class _OutputFile:
+    """One output stream of a detached command: the file it goes to and the text read so far."""
+
+    path: str
+    text: str = ""
+
+
 class VercelSandboxSession:
     """Session over one Vercel sandbox, bound to the SDK session that created it."""
 
@@ -247,7 +266,12 @@ class VercelSandboxSession:
             self._box.fs.write_text(path, text, cwd=self._cwd)
 
     def run(
-        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
     ) -> CommandResult:
         """Run ``command`` through ``bash -lc`` in the working directory and wait for it.
 
@@ -257,13 +281,16 @@ class VercelSandboxSession:
         "missing final metadata". A plain status read never carries a detached
         process's exit code either (the runtime only settles it on a blocking
         wait, which the edge cuts off the same way), so the wrapper records the
-        code in a file and the poll watches for that file. Output is read only
-        after exit, when the log replay is a short buffered response.
+        code in a file and the poll watches for that file. Output goes to files
+        in the box for the same reason: each poll reads what has landed since
+        the last one and hands the new part to ``on_output``, and the files are
+        the command's captured output once it exits.
 
         Args:
             command: Shell command line.
             env: Extra environment for this command.
             timeout_seconds: Kill the command after this long.
+            on_output: Receives each new piece of output at every poll.
 
         Returns:
             Exit code, captured output and whether the timeout fired.
@@ -280,11 +307,13 @@ class VercelSandboxSession:
             inner = f"timeout --signal=KILL {seconds}s {inner}"
             kill_after = seconds + KILL_GRACE_SECONDS
             deadline = time.monotonic() + kill_after + _POLL_DEADLINE_SLACK_SECONDS
-        sentinel = f"{_EXIT_FILE_PREFIX}{uuid.uuid4().hex}"
+        token = uuid.uuid4().hex
+        sentinel = f"{_EXIT_FILE_PREFIX}{token}"
+        streams = {name: _OutputFile(f"{_OUTPUT_FILE_PREFIX}{token}.{name}") for name in ("stdout", "stderr")}
         started = time.monotonic()
         process = self._box.create_process(
             "bash",
-            ["-lc", f"{inner}; echo $? > {sentinel}"],
+            ["-lc", f"{inner} > {streams['stdout'].path} 2> {streams['stderr'].path}; echo $? > {sentinel}"],
             cwd=self._cwd,
             env=dict(env) if env else None,
             kill_after=kill_after,
@@ -302,14 +331,35 @@ class VercelSandboxSession:
             time.sleep(delay)
             delay = min(delay * 2, _POLL_CAP_SECONDS)
             exit_code = self._recorded_exit_code(sentinel)
-        stdout = process.stdout.read() if process.stdout is not None else ""
-        stderr = process.stderr.read() if process.stderr is not None else ""
+            if on_output is not None:
+                self._forward_output(streams, on_output)
+        self._forward_output(streams, on_output)
         return CommandResult(
             exit_code=exit_code,
-            stdout=stdout or "",
-            stderr=stderr or "",
+            stdout=streams["stdout"].text,
+            stderr=streams["stderr"].text,
             timed_out=timeout_seconds is not None and exit_code in _TIMEOUT_EXIT_CODES,
         )
+
+    def _forward_output(self, streams: Mapping[str, _OutputFile], on_output: OutputSink | None) -> None:
+        """Re-read the command's output files and hand anything new to ``on_output``.
+
+        Args:
+            streams: The output files, by stream name.
+            on_output: The sink, or ``None`` to only refresh the captured text.
+        """
+        for name, stream in streams.items():
+            text = stream.text
+            with contextlib.suppress(Exception):
+                if self._box.fs.exists(stream.path):
+                    text = self._box.fs.read_text(stream.path) or ""
+            # A shorter read is a stale replica or a race with the shell; keep what was seen.
+            if len(text) <= len(stream.text):
+                continue
+            new = text[len(stream.text) :]
+            stream.text = text
+            if on_output is not None:
+                on_output(name, new)
 
     def _recorded_exit_code(self, sentinel: str) -> int | None:
         """Return the exit code the wrapper wrote to ``sentinel``, or ``None`` while the command runs.
@@ -538,7 +588,12 @@ class LocalSubprocessSession:
             target.write_text(text, encoding="utf-8")
 
     def run(
-        self, command: str, *, env: Mapping[str, str] | None = None, timeout_seconds: float | None = None
+        self,
+        command: str,
+        *,
+        env: Mapping[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
     ) -> CommandResult:
         """Run ``command`` through ``bash -c`` in the working directory and wait for it.
 
@@ -546,6 +601,7 @@ class LocalSubprocessSession:
             command: Shell command line.
             env: Extra environment for this command.
             timeout_seconds: Kill the command (and everything it spawned) after this long.
+            on_output: Receives each line of output as it is written.
 
         Returns:
             Exit code, captured output and whether the timeout fired.
@@ -560,11 +616,27 @@ class LocalSubprocessSession:
             errors="replace",
             start_new_session=True,
         )
+        # One reader per pipe: waiting on the process with both pipes idle
+        # would deadlock once a pipe buffer fills, and the readers are what
+        # hands output to the caller while the command still runs.
+        captured: dict[str, list[str]] = {"stdout": [], "stderr": []}
+        readers = [
+            threading.Thread(target=_pump, args=(name, pipe, captured[name], on_output), daemon=True)
+            for name, pipe in (("stdout", process.stdout), ("stderr", process.stderr))
+        ]
+        for reader in readers:
+            reader.start()
+        timed_out = False
         try:
-            stdout, stderr = process.communicate(timeout=timeout_seconds)
+            process.wait(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
             _kill_process_group(process.pid)
-            stdout, stderr = process.communicate()
+            process.wait()
+            timed_out = True
+        for reader in readers:
+            reader.join()
+        stdout, stderr = "".join(captured["stdout"]), "".join(captured["stderr"])
+        if timed_out:
             return CommandResult(exit_code=_LOCAL_KILLED_EXIT_CODE, stdout=stdout, stderr=stderr, timed_out=True)
         return CommandResult(exit_code=process.returncode, stdout=stdout, stderr=stderr)
 
@@ -585,6 +657,22 @@ class LocalSubprocessSession:
     def close(self) -> None:
         """Remove the working directory. Never raises."""
         shutil.rmtree(self._dir, ignore_errors=True)
+
+
+def _pump(name: str, pipe: Any, captured: list[str], on_output: OutputSink | None) -> None:
+    """Read ``pipe`` line by line until it closes, keeping every line and forwarding it.
+
+    Args:
+        name: The stream name handed to ``on_output``.
+        pipe: The text pipe to drain.
+        captured: Receives every line, for the command's captured output.
+        on_output: Receives each line as it arrives, when set.
+    """
+    with pipe:
+        for line in iter(pipe.readline, ""):
+            captured.append(line)
+            if on_output is not None:
+                on_output(name, line)
 
 
 def _kill_process_group(pid: int) -> None:

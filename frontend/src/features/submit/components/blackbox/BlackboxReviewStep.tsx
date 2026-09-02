@@ -44,6 +44,7 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
     scorerKind,
     scorerUrl,
     scorerModel,
+    scorerUsesModel,
     scorerInstall,
     strategyMode,
     selectedEngine,
@@ -124,7 +125,7 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
         </Row>
         <Row label={msg("submit.blackbox.scorer.title")} tip="submit.blackbox.review_scorer">
           {scorerKind === "python" ? (
-            scorerModel.name.trim() ? (
+            scorerUsesModel ? (
               <span>
                 {msg("submit.blackbox.scorer.kind.python")} ·{" "}
                 <span className="font-mono text-xs" dir="ltr">

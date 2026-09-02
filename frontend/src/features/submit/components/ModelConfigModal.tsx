@@ -38,6 +38,11 @@ interface ModelConfigModalProps {
   recentConfigs?: ModelConfig[];
   /** Remove a single recent config by its model name (rendered as a per-row X). */
   onRemoveRecent?: (name: string) => void;
+  /**
+   * Only the model id is chosen; billing source, sampling and thinking are
+   * hidden and never saved. For targets that take nothing but a model id.
+   */
+  nameOnly?: boolean;
 }
 
 const TOKEN_SOURCE_SEGMENTS: Array<{
@@ -81,6 +86,7 @@ export function ModelConfigModal({
   catalogModels,
   recentConfigs,
   onRemoveRecent,
+  nameOnly = false,
 }: ModelConfigModalProps) {
   const { keys } = useByokKeys();
   const { openTo } = useSettingsModal();
@@ -90,7 +96,7 @@ export function ModelConfigModal({
   const effortPillId = React.useId();
   const tokenSourcePillId = React.useId();
   const [draft, setDraft] = React.useState<ModelConfig>(() => withoutInlineConnection(config));
-  const mode = draft.token_source ?? "managed";
+  const mode = nameOnly ? "managed" : (draft.token_source ?? "managed");
 
   // In BYOK mode the picker lists the BYOK catalog narrowed to the providers
   // the user has a *verified* key for (mapped to their LiteLLM prefix), so a
@@ -160,7 +166,7 @@ export function ModelConfigModal({
   };
 
   const handleSave = () => {
-    onSave(withoutInlineConnection(draft));
+    onSave(nameOnly ? { name: draft.name } : withoutInlineConnection(draft));
     onOpenChange(false);
   };
 
@@ -197,7 +203,11 @@ export function ModelConfigModal({
                       >
                         <ProviderLogo slug={modelProviderSlug(rc.name)} size={14} />
                         <span className="truncate max-w-[120px]">{rc.name.split("/").pop()}</span>
-                        <span className="text-[9px] opacity-60">{rc.temperature?.toFixed(1)}</span>
+                        {!nameOnly && (
+                          <span className="text-[9px] opacity-60">
+                            {rc.temperature?.toFixed(1)}
+                          </span>
+                        )}
                       </button>
                       {onRemoveRecent && (
                         <button
@@ -223,80 +233,86 @@ export function ModelConfigModal({
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
-              {msg("billing.mode.label")}
-            </Label>
-            <div
-              role="group"
-              aria-label={msg("billing.mode.aria")}
-              data-tutorial="model-billing-source"
-              className="flex w-full rounded-lg bg-muted p-0.5 sm:w-fit"
-            >
-              {TOKEN_SOURCE_SEGMENTS.map(({ mode: value, icon: Icon, labelKey }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() =>
-                    setDraft((current) =>
-                      withoutInlineConnection({
-                        ...current,
-                        name: "",
-                        token_source: value,
-                        byok_provider: undefined,
-                      }),
-                    )
-                  }
-                  aria-pressed={mode === value}
-                  className={cn(
-                    "relative flex min-h-[44px] flex-1 cursor-pointer items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:flex-none lg:min-h-0",
-                    mode === value
-                      ? "text-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
+          {!nameOnly && (
+            <>
+              <div className="space-y-2">
+                <Label className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                  {msg("billing.mode.label")}
+                </Label>
+                <div
+                  role="group"
+                  aria-label={msg("billing.mode.aria")}
+                  data-tutorial="model-billing-source"
+                  className="flex w-full rounded-lg bg-muted p-0.5 sm:w-fit"
                 >
-                  {mode === value && (
-                    <motion.span
-                      layoutId={`token-source-pill-${tokenSourcePillId}`}
-                      className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
-                      transition={prefersReducedMotion ? { duration: 0 } : TOKEN_SOURCE_TRANSITION}
-                      aria-hidden="true"
-                    />
-                  )}
-                  <span className="relative z-10 flex items-center gap-1.5">
-                    <Icon className="size-3.5" aria-hidden="true" />
-                    {msg(labelKey)}
-                  </span>
-                </button>
-              ))}
-            </div>
-            {mode === "managed" && (
-              <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
-                <span className="min-w-0 flex-1">{msg("billing.mode.managed_hint")}</span>
+                  {TOKEN_SOURCE_SEGMENTS.map(({ mode: value, icon: Icon, labelKey }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() =>
+                        setDraft((current) =>
+                          withoutInlineConnection({
+                            ...current,
+                            name: "",
+                            token_source: value,
+                            byok_provider: undefined,
+                          }),
+                        )
+                      }
+                      aria-pressed={mode === value}
+                      className={cn(
+                        "relative flex min-h-[44px] flex-1 cursor-pointer items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:flex-none lg:min-h-0",
+                        mode === value
+                          ? "text-foreground"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {mode === value && (
+                        <motion.span
+                          layoutId={`token-source-pill-${tokenSourcePillId}`}
+                          className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
+                          transition={
+                            prefersReducedMotion ? { duration: 0 } : TOKEN_SOURCE_TRANSITION
+                          }
+                          aria-hidden="true"
+                        />
+                      )}
+                      <span className="relative z-10 flex items-center gap-1.5">
+                        <Icon className="size-3.5" aria-hidden="true" />
+                        {msg(labelKey)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {mode === "managed" && (
+                  <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <span className="min-w-0 flex-1">{msg("billing.mode.managed_hint")}</span>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
 
-          {mode === "byok" && (
-            <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
-              <span className="min-w-0 flex-1">{msg("billing.mode.byok_hint")}</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onOpenChange(false);
-                      openTo("providers");
-                    }}
-                    aria-label={msg("billing.mode.manage_keys")}
-                    className="inline-flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/60 lg:size-8"
-                  >
-                    <Key className="size-4" aria-hidden="true" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{msg("billing.mode.manage_keys")}</TooltipContent>
-              </Tooltip>
-            </div>
+              {mode === "byok" && (
+                <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+                  <span className="min-w-0 flex-1">{msg("billing.mode.byok_hint")}</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onOpenChange(false);
+                          openTo("providers");
+                        }}
+                        aria-label={msg("billing.mode.manage_keys")}
+                        className="inline-flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/60 lg:size-8"
+                      >
+                        <Key className="size-4" aria-hidden="true" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{msg("billing.mode.manage_keys")}</TooltipContent>
+                  </Tooltip>
+                </div>
+              )}
+            </>
           )}
 
           <div className="space-y-2">
@@ -333,101 +349,107 @@ export function ModelConfigModal({
             />
           </div>
 
-          <Separator />
-
-          <Label className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
-            {msg("auto.features.submit.components.modelconfigmodal.section.parameters")}
-          </Label>
-
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>
-                <HelpTip text={tip("model_config.temperature")}>
-                  {msg("auto.features.submit.components.modelconfigmodal.5")}
-                </HelpTip>
-              </Label>
-              <span className="text-xs font-mono text-muted-foreground">
-                {draft.temperature?.toFixed(1) ?? "0.7"}
-              </span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="2"
-              step="0.1"
-              value={draft.temperature ?? 0.7}
-              onChange={(e) => setDraft((p) => ({ ...p, temperature: parseFloat(e.target.value) }))}
-              className="h-[44px] w-full cursor-pointer appearance-none rounded-full bg-transparent accent-primary [&::-moz-range-track]:h-2 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-muted [&::-webkit-slider-runnable-track]:h-2 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-muted lg:h-2 lg:bg-muted"
-              dir="auto"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>
-              <HelpTip text={tip("model_config.max_tokens")}>
-                {msg("auto.features.submit.components.modelconfigmodal.7")}
-              </HelpTip>
-            </Label>
-            <NumberInput
-              min={1}
-              step={256}
-              value={draft.max_tokens ?? ""}
-              onChange={(v) => setDraft((p) => ({ ...p, max_tokens: v }))}
-              className="h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm"
-            />
-          </div>
-
-          {canThink && (
+          {!nameOnly && (
             <>
               <Separator />
-              <div className="space-y-3">
+
+              <Label className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                {msg("auto.features.submit.components.modelconfigmodal.section.parameters")}
+              </Label>
+
+              <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label>{msg("auto.features.submit.components.modelconfigmodal.8")}</Label>
-                  <Switch
-                    checked={thinkingEnabled}
-                    onCheckedChange={setThinking}
-                    className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
-                  />
+                  <Label>
+                    <HelpTip text={tip("model_config.temperature")}>
+                      {msg("auto.features.submit.components.modelconfigmodal.5")}
+                    </HelpTip>
+                  </Label>
+                  <span className="text-xs font-mono text-muted-foreground">
+                    {draft.temperature?.toFixed(1) ?? "0.7"}
+                  </span>
                 </div>
-                {thinkingEnabled && (
-                  <div className="space-y-2 p-3 border rounded-lg bg-muted/30">
-                    <Label>{msg("auto.features.submit.components.modelconfigmodal.9")}</Label>
-                    <div className="flex rounded-lg bg-muted p-0.5 w-full">
-                      {effortLadder.map((val) => (
-                        <button
-                          key={val}
-                          type="button"
-                          onClick={() => setEffort(val)}
-                          className={cn(
-                            "relative min-h-[44px] flex-1 cursor-pointer rounded-md px-2 py-1.5 text-center text-xs font-medium transition-colors sm:px-3 lg:min-h-0",
-                            reasoningEffort === val
-                              ? "text-foreground"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          {reasoningEffort === val && (
-                            <motion.span
-                              layoutId={effortPillId}
-                              transition={
-                                prefersReducedMotion
-                                  ? { duration: 0 }
-                                  : {
-                                      type: "tween",
-                                      duration: 0.2,
-                                      ease: [0.2, 0.8, 0.2, 1],
-                                    }
-                              }
-                              className="absolute inset-0 rounded-md bg-background shadow-sm"
-                              aria-hidden="true"
-                            />
-                          )}
-                          <span className="relative">{effortLabel(val)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <input
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  value={draft.temperature ?? 0.7}
+                  onChange={(e) =>
+                    setDraft((p) => ({ ...p, temperature: parseFloat(e.target.value) }))
+                  }
+                  className="h-[44px] w-full cursor-pointer appearance-none rounded-full bg-transparent accent-primary [&::-moz-range-track]:h-2 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-muted [&::-webkit-slider-runnable-track]:h-2 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-muted lg:h-2 lg:bg-muted"
+                  dir="auto"
+                />
               </div>
+
+              <div className="space-y-2">
+                <Label>
+                  <HelpTip text={tip("model_config.max_tokens")}>
+                    {msg("auto.features.submit.components.modelconfigmodal.7")}
+                  </HelpTip>
+                </Label>
+                <NumberInput
+                  min={1}
+                  step={256}
+                  value={draft.max_tokens ?? ""}
+                  onChange={(v) => setDraft((p) => ({ ...p, max_tokens: v }))}
+                  className="h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm"
+                />
+              </div>
+
+              {canThink && (
+                <>
+                  <Separator />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <Label>{msg("auto.features.submit.components.modelconfigmodal.8")}</Label>
+                      <Switch
+                        checked={thinkingEnabled}
+                        onCheckedChange={setThinking}
+                        className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
+                      />
+                    </div>
+                    {thinkingEnabled && (
+                      <div className="space-y-2 p-3 border rounded-lg bg-muted/30">
+                        <Label>{msg("auto.features.submit.components.modelconfigmodal.9")}</Label>
+                        <div className="flex rounded-lg bg-muted p-0.5 w-full">
+                          {effortLadder.map((val) => (
+                            <button
+                              key={val}
+                              type="button"
+                              onClick={() => setEffort(val)}
+                              className={cn(
+                                "relative min-h-[44px] flex-1 cursor-pointer rounded-md px-2 py-1.5 text-center text-xs font-medium transition-colors sm:px-3 lg:min-h-0",
+                                reasoningEffort === val
+                                  ? "text-foreground"
+                                  : "text-muted-foreground hover:text-foreground",
+                              )}
+                            >
+                              {reasoningEffort === val && (
+                                <motion.span
+                                  layoutId={effortPillId}
+                                  transition={
+                                    prefersReducedMotion
+                                      ? { duration: 0 }
+                                      : {
+                                          type: "tween",
+                                          duration: 0.2,
+                                          ease: [0.2, 0.8, 0.2, 1],
+                                        }
+                                  }
+                                  className="absolute inset-0 rounded-md bg-background shadow-sm"
+                                  aria-hidden="true"
+                                />
+                              )}
+                              <span className="relative">{effortLabel(val)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>
