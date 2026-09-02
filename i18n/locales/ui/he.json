@@ -2616,7 +2616,6 @@
   "submit.blackbox.scorer.uses_model_label": "המדד שלי קורא למודל",
   "submit.blackbox.scorer.uses_model_desc": "הפעילו כדי לבחור את המודל ש-llm() עונה איתו. מדד רגיל לא צריך מודל.",
   "submit.blackbox.scorer.uses_model_detected": "המדד שלכם קורא ל-llm(), ולכן צריך מודל.",
-  "submit.blackbox.optimizer.copy_scorer_model": "להשתמש במודל המדד",
   "submit.blackbox.scorer.remote_hint": "נשלח POST עם candidate ו-case; הכתובת מחזירה JSON עם score.",
   "submit.blackbox.scorer.result_error": "המדד נכשל",
   "submit.blackbox.scorer.result_ok": "בדיקת המדד עברה בהצלחה",

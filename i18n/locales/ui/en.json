@@ -3446,7 +3446,6 @@
   "submit.blackbox.scorer.uses_model_label": "My metric calls a model",
   "submit.blackbox.scorer.uses_model_desc": "Turn on to pick the model llm() answers with. A plain metric needs none.",
   "submit.blackbox.scorer.uses_model_detected": "Your scorer calls llm(), so it needs a model.",
-  "submit.blackbox.optimizer.copy_scorer_model": "Use the scorer model",
   "submit.blackbox.scorer.model_explainer": "Import it with from skynet import llm, Image; llm(prompt, input, images=...) then answers with this model — to run each candidate on a case, or to judge text and rendered images before scoring. Only a scorer that calls llm() needs it.",
   "submit.blackbox.strategy.plateau": "Plateau relay",
   "submit.blackbox.strategy.plateau_desc": "One engine runs until it stalls, then hands off to the next",

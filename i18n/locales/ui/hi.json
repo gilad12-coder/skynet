@@ -148,7 +148,6 @@
   "submit.blackbox.scorer.uses_model_label": "मेरा मेट्रिक एक मॉडल को कॉल करता है",
   "submit.blackbox.scorer.uses_model_desc": "llm() जिस मॉडल से जवाब देगा उसे चुनने के लिए चालू करें। सादे मेट्रिक को किसी मॉडल की ज़रूरत नहीं।",
   "submit.blackbox.scorer.uses_model_detected": "आपका स्कोरर llm() को कॉल करता है, इसलिए उसे एक मॉडल चाहिए।",
-  "submit.blackbox.optimizer.copy_scorer_model": "स्कोरर मॉडल का उपयोग करें",
   "submit.blackbox.scorer.remote_hint": "हम candidate और case POST करते हैं; एंडपॉइंट स्कोर के साथ JSON लौटाता है।",
   "submit.blackbox.scorer.result_error": "स्कोरर विफल रहा",
   "submit.blackbox.scorer.result_ok": "स्कोरर टेस्ट सफल रहा",

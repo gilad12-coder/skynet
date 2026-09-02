@@ -148,7 +148,6 @@
   "submit.blackbox.scorer.uses_model_label": "Ma métrique appelle un modèle",
   "submit.blackbox.scorer.uses_model_desc": "Activez pour choisir le modèle avec lequel llm() répond. Une métrique simple n'en a pas besoin.",
   "submit.blackbox.scorer.uses_model_detected": "Votre scorer appelle llm(), il lui faut donc un modèle.",
-  "submit.blackbox.optimizer.copy_scorer_model": "Utiliser le modèle du scorer",
   "submit.blackbox.scorer.remote_hint": "Nous envoyons candidate et case en POST ; le point de terminaison renvoie du JSON contenant un score.",
   "submit.blackbox.scorer.result_error": "Échec de l'évaluateur",
   "submit.blackbox.scorer.result_ok": "Test de l'évaluateur réussi",

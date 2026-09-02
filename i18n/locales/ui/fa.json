@@ -148,7 +148,6 @@
   "submit.blackbox.scorer.uses_model_label": "معیار من یک مدل را فراخوانی می‌کند",
   "submit.blackbox.scorer.uses_model_desc": "برای انتخاب مدلی که llm() با آن پاسخ می‌دهد روشن کنید. معیار ساده به مدل نیاز ندارد.",
   "submit.blackbox.scorer.uses_model_detected": "امتیازدهنده شما llm() را فراخوانی می‌کند، پس به مدل نیاز دارد.",
-  "submit.blackbox.optimizer.copy_scorer_model": "استفاده از مدل امتیازدهنده",
   "submit.blackbox.scorer.remote_hint": "ما candidate و case را با POST می‌فرستیم؛ نقطه‌ی پایانی یک JSON حاوی امتیاز بازمی‌گرداند.",
   "submit.blackbox.scorer.result_error": "امتیازدهنده ناموفق بود",
   "submit.blackbox.scorer.result_ok": "آزمون امتیازدهنده موفق بود",

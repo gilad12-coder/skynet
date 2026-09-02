@@ -148,7 +148,6 @@
   "submit.blackbox.scorer.uses_model_label": "我嘅指標會調用模型",
   "submit.blackbox.scorer.uses_model_desc": "開啟之後可以揀 llm() 用嚟回應嘅模型。普通指標唔需要模型。",
   "submit.blackbox.scorer.uses_model_detected": "你嘅評分器會調用 llm()，所以需要一個模型。",
-  "submit.blackbox.optimizer.copy_scorer_model": "使用評分器模型",
   "submit.blackbox.scorer.remote_hint": "我哋會 POST candidate 同 case；端點會傳回帶有分數嘅 JSON。",
   "submit.blackbox.scorer.result_error": "評分器失敗",
   "submit.blackbox.scorer.result_ok": "評分器測試成功",
