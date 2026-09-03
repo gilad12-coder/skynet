@@ -3547,5 +3547,15 @@
   "submit.budget.byok_note": "Model token'larını kendi sağlayıcı anahtarınız öder; bu rakamlar platform ücretidir.",
   "tooltip.submit.budget": "Bu çalıştırmanın harcayabileceği her şey için tek bir toplam: kurulum kontrolleri, optimizasyonun kendisi ve faturalandırılan sandbox süresi. Krediler iş başlamadan önce ayrılır ve gerçek kullanıma göre kapatılır; toplama ulaşıldığında çalıştırma durur.",
   "tooltip.submit.blackbox.roles": "Çalıştırmanın bir modele verdiği her rol. Optimizasyon modeli iyileştirmeler önerir; puanlama modeli, puanlayıcınız birini çağırdığında çıktıları yargılar; görev modeli kodlama ajanını yönlendirir.",
-  "tooltip.submit.blackbox.evidence": "Geçen bir kontrol yalnızca birlikte çalıştığı puanlayıcı, örnek, modeller ve ayarlar için geçerlidir. Bunlardan birini değiştirirseniz kontrol yeniden çalışmalıdır."
+  "tooltip.submit.blackbox.evidence": "Geçen bir kontrol yalnızca birlikte çalıştığı puanlayıcı, örnek, modeller ve ayarlar için geçerlidir. Bunlardan birini değiştirirseniz kontrol yeniden çalışmalıdır.",
+  "submit.draft.restore.title": "Önceki kurulumunuzdan devam edilsin mi?",
+  "submit.draft.restore.meta": "{workflow} · {stage} · {time} düzenlendi",
+  "submit.draft.restore.continue": "Taslağa devam et",
+  "submit.draft.restore.start_new": "Yeniden başla",
+  "submit.draft.restore.retry": "Tekrar dene",
+  "submit.draft.restore.failed": "Kaydedilen kurulum geri yüklenemedi. Tekrar deneyin veya yeniden başlayın.",
+  "submit.draft.restore.gone": "Kaydedilen kurulum bu tarayıcıda artık kullanılamıyor.",
+  "submit.draft.save_failed": "Kurulumunuz bu tarayıcıya kaydedilemedi. Kaybetmemek için bu sekmeyi açık tutun.",
+  "submit.draft.reset_failed": "Kaydedilen kurulum temizlenemedi. Önceki taslağınız hâlâ kullanılabilir.",
+  "submit.recipe.choose_new": "Yeni bir {p1} kurulumu başlat"
 }

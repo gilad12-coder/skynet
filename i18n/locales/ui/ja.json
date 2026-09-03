@@ -3547,5 +3547,15 @@
   "submit.budget.byok_note": "モデルのトークンはご自身のプロバイダーキーで支払われます。ここに表示される金額はプラットフォーム手数料です。",
   "tooltip.submit.budget": "この実行で使われる可能性のあるすべてに対する 1 つの合計: セットアップチェック、最適化そのもの、課金対象の sandbox 時間。クレジットは作業開始前に予約され、実際の使用量で精算されます。合計に達すると実行は停止します。",
   "tooltip.submit.blackbox.roles": "実行がモデルに与える各ロール。最適化モデルは改善を提案し、スコアリングモデルはスコアラーが呼び出したときに出力を判定し、タスクモデルはコーディングエージェントを駆動します。",
-  "tooltip.submit.blackbox.evidence": "合格したチェックは、実行時とまったく同じスコアラー、例、モデル、設定に対してのみ有効です。いずれかを変更すると、チェックを再実行する必要があります。"
+  "tooltip.submit.blackbox.evidence": "合格したチェックは、実行時とまったく同じスコアラー、例、モデル、設定に対してのみ有効です。いずれかを変更すると、チェックを再実行する必要があります。",
+  "submit.draft.restore.title": "前回の設定から続けますか？",
+  "submit.draft.restore.meta": "{workflow} · {stage} · 最終編集: {time}",
+  "submit.draft.restore.continue": "下書きを続ける",
+  "submit.draft.restore.start_new": "新しく始める",
+  "submit.draft.restore.retry": "再試行",
+  "submit.draft.restore.failed": "保存した設定を復元できませんでした。再試行するか、新しく始めてください。",
+  "submit.draft.restore.gone": "保存した設定はこのブラウザーでは利用できなくなりました。",
+  "submit.draft.save_failed": "この設定をブラウザーに保存できませんでした。失わないように、このタブを開いたままにしてください。",
+  "submit.draft.reset_failed": "保存した設定を消去できませんでした。以前の下書きは引き続き利用できます。",
+  "submit.recipe.choose_new": "新しい{p1}の設定を始める"
 }

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer-motion";
 
 import { SubmitWizard } from "./SubmitWizard";
 import { BlackboxWizard } from "./blackbox/BlackboxWizard";
 import { RecipeChip, RecipePicker, parseRecipeLink, type Recipe } from "./RecipePicker";
+import { WizardDraftsProvider, useWizardDraftController } from "../hooks/use-wizard-drafts";
 
 type Screen = "picker" | "wizard";
 
@@ -23,6 +24,7 @@ const STILL_VARIANTS: Variants = {
 
 /** `/submit` root: the recipe picker first, then the DSPy or black-box wizard it selects. */
 export function SubmitEntry() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const link = parseRecipeLink(searchParams.get("recipe"));
   const initial = link?.recipe ?? null;
@@ -39,9 +41,47 @@ export function SubmitEntry() {
   // `shown` trails `picking` by one exit: the outgoing screen has left the
   // column before the incoming one takes it.
   const [shown, setShown] = useState<Screen>(initial === null || cloning ? "picker" : "wizard");
+  // Continue and Start new both hand the wizard a fresh instance: the hooks
+  // hydrate once at mount, so a live instance is never re-seeded underneath
+  // the user.
+  const [wizardKey, setWizardKey] = useState(0);
   const variants = useReducedMotion() ? STILL_VARIANTS : SCREEN_VARIANTS;
 
+  const {
+    api: drafts,
+    offerPending,
+    startNew,
+  } = useWizardDraftController({
+    onContinue: (next) => {
+      setWizardKey((k) => k + 1);
+      setRecipe(next);
+      setPicking(false);
+      setShown("wizard");
+      // The restored setup owns the form; a clone or share link left in the
+      // URL would hydrate over it on the next load.
+      if (searchParams.toString()) router.replace("/submit");
+    },
+    onStartNew: () => {
+      setWizardKey((k) => k + 1);
+      // A clone link keeps its preselected slide so the clone can still be
+      // made once the old draft is gone.
+      setRecipe(cloning ? initial : null);
+      setPicking(true);
+      setShown("picker");
+    },
+  });
+
   const choose = (next: Recipe) => {
+    if (offerPending) {
+      // Entering a workflow past a pending offer is an explicit start-new:
+      // the saved draft goes through the same reset before a wizard mounts.
+      void startNew().then((ok) => {
+        if (!ok) return;
+        setRecipe(next);
+        setPicking(false);
+      });
+      return;
+    }
     setRecipe(next);
     setPicking(false);
   };
@@ -49,7 +89,7 @@ export function SubmitEntry() {
   const wizardShown = shown === "wizard" && !picking;
 
   return (
-    <>
+    <WizardDraftsProvider api={drafts}>
       <AnimatePresence initial={false} onExitComplete={() => setShown("wizard")}>
         {shown === "picker" && picking && (
           <motion.div
@@ -64,7 +104,7 @@ export function SubmitEntry() {
             // shorter and scrolls.
             className="mx-auto flex w-full min-w-0 max-w-4xl flex-col justify-center pb-6 md:min-h-[calc(100dvh-var(--header-height,53px)-5rem)] md:pb-8"
           >
-            <RecipePicker current={recipe} onChoose={choose} />
+            <RecipePicker current={recipe} onChoose={choose} startsNew={offerPending} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -79,12 +119,16 @@ export function SubmitEntry() {
           className={shown === "wizard" ? undefined : "hidden"}
         >
           {recipe === "anything" ? (
-            <BlackboxWizard header={chip} initialRecipe={link?.kind ?? "anything"} />
+            <BlackboxWizard
+              key={wizardKey}
+              header={chip}
+              initialRecipe={link?.kind ?? "anything"}
+            />
           ) : (
-            <SubmitWizard header={chip} />
+            <SubmitWizard key={wizardKey} header={chip} />
           )}
         </motion.div>
       )}
-    </>
+    </WizardDraftsProvider>
   );
 }

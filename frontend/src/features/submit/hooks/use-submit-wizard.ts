@@ -58,13 +58,11 @@ import {
   type CostBracket,
 } from "../lib/cost-bracket";
 import {
-  saveWizardDraft,
-  readWizardDraft,
-  clearWizardDraft,
-  stashWizardDraftForReload,
+  isMeaningfulProgramDraft,
+  stripModelSecrets,
   type WizardDraftData,
-} from "../lib/wizard-draft";
-import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
+} from "../lib/draft-record";
+import { useWizardDrafts } from "./use-wizard-drafts";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
 import {
@@ -490,9 +488,35 @@ export function useSubmitWizard() {
   }, [wizardCtx]);
   const submittedRef = useRef(false);
 
-  // Mirror the full serializable wizard snapshot into a ref every commit so the
-  // unmount cleanup below parks the *latest* values — a []-deps cleanup would
-  // otherwise close over the first render's state.
+  const drafts = useWizardDrafts();
+  const draftsRef = useRef(drafts);
+  useEffect(() => {
+    draftsRef.current = drafts;
+  }, [drafts]);
+  // Taken once at mount: the saved draft this instance hydrates from, or null
+  // when the form starts blank. Publishing waits until that hydration has
+  // landed so the first snapshot written is the restored one, not the empty
+  // initial state.
+  const [draftSnapshot] = useState(() => drafts.takeSnapshot("program"));
+  const hydratedRef = useRef(false);
+  // The draft never carries credentials: a restored BYOK model comes back
+  // without its key and shows as missing credentials.
+  const safeModelConfig = useMemo(() => stripModelSecrets(modelConfig), [modelConfig]);
+  const safeSecondModelConfig = useMemo(
+    () => (secondModelConfig ? stripModelSecrets(secondModelConfig) : null),
+    [secondModelConfig],
+  );
+  const safeGenerationModels = useMemo(
+    () => generationModels.map(stripModelSecrets),
+    [generationModels],
+  );
+  const safeReflectionModels = useMemo(
+    () => reflectionModels.map(stripModelSecrets),
+    [reflectionModels],
+  );
+
+  // Mirror the full serializable wizard snapshot into a ref every commit and
+  // hand it to the draft saver, which debounces and dedupes the writes.
   const draftRef = useRef<WizardDraftData | null>(null);
   useEffect(() => {
     draftRef.current = {
@@ -519,10 +543,10 @@ export function useSubmitWizard() {
       datasetFileName,
       columnRoles,
       columnKinds,
-      modelConfig,
-      secondModelConfig,
-      generationModels,
-      reflectionModels,
+      modelConfig: safeModelConfig,
+      secondModelConfig: safeSecondModelConfig,
+      generationModels: safeGenerationModels,
+      reflectionModels: safeReflectionModels,
       split,
       seed,
       autoLevel,
@@ -536,32 +560,21 @@ export function useSubmitWizard() {
       shuffle,
       maxCostCredits,
     };
-  });
-
-  // A locale switch reloads the page (see LocaleProvider), which would lose
-  // this in-memory form. Stash the live snapshot for that one hop so the user
-  // comes back to the same step in the new language instead of a blank wizard.
-  useEffect(() => {
-    const onLocaleReload = () => {
+    // A submit that has left is not re-parked while its splash plays out.
+    if (hydratedRef.current && !submittedRef.current) {
       const d = draftRef.current;
-      if (
-        d &&
-        (d.stage !== "goal" ||
-          d.moduleChosen ||
-          d.parsedDataset !== null ||
-          d.datasetFileName !== null ||
-          d.jobName.trim() !== "")
-      ) {
-        stashWizardDraftForReload(d);
-      }
-    };
-    window.addEventListener(LOCALE_RELOAD_EVENT, onLocaleReload);
-    return () => window.removeEventListener(LOCALE_RELOAD_EVENT, onLocaleReload);
-  }, []);
+      draftsRef.current.publish("program", d, isMeaningfulProgramDraft(d));
+    }
+  });
+  // Stage boundaries are the one place the debounce is skipped: a refresh right
+  // after Next lands on the stage the user just reached.
+  useEffect(() => {
+    if (hydratedRef.current) draftsRef.current.flush();
+  }, [step]);
 
-  // Restore a parked draft on mount so switching to another sidebar tab and
-  // coming back lands the user on the same step with inputs intact. Skipped when
-  // a clone/share URL owns hydration — that flow populates the form itself.
+  // Hydrate once from the draft this instance was handed (Continue, a locale
+  // reload) so the user lands on the same step with inputs intact. A blank
+  // start leaves a clone/share URL to populate the form itself.
   const restoredRef = useRef(false);
   // The draft's stage is applied one render after its fields, so the
   // prerequisite walk (below validateStep) checks the restored state rather
@@ -573,9 +586,11 @@ export function useSubmitWizard() {
   useEffect(() => {
     if (restoredRef.current) return;
     restoredRef.current = true;
-    if (searchParams.get("clone") || searchParams.get("shareToken")) return;
-    const d = readWizardDraft();
-    if (!d) return;
+    const d = draftSnapshot;
+    if (!d) {
+      hydratedRef.current = true;
+      return;
+    }
     setPendingRestore({ stage: d.stage, furthest: d.furthestStage });
     setSummaryTab(d.summaryTab);
     setSummaryCodeTab(d.summaryCodeTab);
@@ -624,32 +639,19 @@ export function useSubmitWizard() {
       if (firstGeneration) setModelConfig({ ...emptyModelConfig(), ...firstGeneration });
       if (firstReflection) setSecondModelConfig({ ...emptyModelConfig(), ...firstReflection });
     }
+    hydratedRef.current = true;
   }, [advancedMode]);
 
   useEffect(
     () => () => {
       if (submittedRef.current) {
-        // A submit leaves on purpose: reset the shared agent state and drop any
-        // draft parked on an earlier nav-away, rather than parking this form to
-        // restore later.
+        // A submit leaves on purpose: reset the shared agent state; the draft
+        // was already consumed when the job was accepted.
         wizardCtxRef.current?.reset();
-        clearWizardDraft();
         return;
       }
-      // Park a half-filled form (skip a pristine one) so the round-trip restores.
-      const d = draftRef.current;
-      if (
-        d &&
-        (d.stage !== "goal" ||
-          d.moduleChosen ||
-          d.parsedDataset !== null ||
-          d.datasetFileName !== null ||
-          d.jobName.trim() !== "")
-      ) {
-        saveWizardDraft(d);
-      } else {
-        clearWizardDraft();
-      }
+      // Leaving mid-setup keeps the draft: write whatever the debounce still holds.
+      draftsRef.current.flush();
     },
     [],
   );
@@ -1257,7 +1259,9 @@ export function useSubmitWizard() {
 
   useEffect(() => {
     const cloneId = searchParams.get("clone");
-    if (!cloneId || cloneRan.current) return;
+    // A restored draft owns the form; the clone URL it was continued past must
+    // not hydrate over it.
+    if (!cloneId || cloneRan.current || draftSnapshot) return;
     cloneRan.current = true;
     const pairParam = searchParams.get("pair");
     const clonePairIndex = pairParam == null ? null : Number(pairParam);
@@ -2138,6 +2142,7 @@ export function useSubmitWizard() {
       // Mark the submit so the unmount cleanup clears the shared wizard state
       // once navigation tears this form down.
       submittedRef.current = true;
+      draftsRef.current.consumed();
       const jobUrl = `/optimizations/${result.optimization_id}`;
       setSubmitPhase("splash");
       // Collapse sidebar before navigating so the job page opens with full width
@@ -2284,7 +2289,7 @@ export function useSubmitWizard() {
     seedEnabled: !moduleSelectionRequired && (!interviewPossible || interview.resolved),
     interviewBrief: interview.confirmedBrief,
     // The conversation rides through the locale-switch reload alongside the
-    // wizard draft (see wizard-draft.ts).
+    // wizard draft (see use-wizard-drafts.tsx).
     reloadPersistKey: "submit-code-agent",
   });
   useEffect(() => {

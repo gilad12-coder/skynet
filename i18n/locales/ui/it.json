@@ -3547,5 +3547,15 @@
   "submit.budget.byok_note": "La tua chiave del provider paga i token del modello; queste cifre sono la commissione della piattaforma.",
   "tooltip.submit.budget": "Un unico totale per tutto ciò che questa esecuzione può spendere: controlli di configurazione, l'ottimizzazione stessa e il tempo di sandbox fatturabile. I crediti vengono riservati prima dell'inizio del lavoro e regolati in base all'uso effettivo; l'esecuzione si ferma al raggiungimento del totale.",
   "tooltip.submit.blackbox.roles": "Ogni ruolo che l'esecuzione assegna a un modello. Il modello di ottimizzazione propone miglioramenti; il modello di scoring, quando il tuo scorer ne chiama uno, giudica gli output; il modello del task guida l'agente di coding.",
-  "tooltip.submit.blackbox.evidence": "Un controllo superato vale solo per lo scorer, l'esempio, i modelli e le impostazioni esatti con cui è stato eseguito. Cambia uno di questi e il controllo dovrà essere ripetuto."
+  "tooltip.submit.blackbox.evidence": "Un controllo superato vale solo per lo scorer, l'esempio, i modelli e le impostazioni esatti con cui è stato eseguito. Cambia uno di questi e il controllo dovrà essere ripetuto.",
+  "submit.draft.restore.title": "Riprendere la configurazione precedente?",
+  "submit.draft.restore.meta": "{workflow} · {stage} · modificata {time}",
+  "submit.draft.restore.continue": "Riprendi la bozza",
+  "submit.draft.restore.start_new": "Inizia da capo",
+  "submit.draft.restore.retry": "Riprova",
+  "submit.draft.restore.failed": "Non è stato possibile ripristinare la configurazione salvata. Riprova o inizia da capo.",
+  "submit.draft.restore.gone": "La configurazione salvata non è più disponibile in questo browser.",
+  "submit.draft.save_failed": "Non è stato possibile salvare la configurazione in questo browser. Tieni aperta questa scheda per non perderla.",
+  "submit.draft.reset_failed": "Non è stato possibile cancellare la configurazione salvata. La bozza precedente è ancora disponibile.",
+  "submit.recipe.choose_new": "Inizia una nuova configurazione {p1}"
 }

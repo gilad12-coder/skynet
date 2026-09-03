@@ -3547,5 +3547,15 @@
   "submit.budget.byok_note": "Your own provider key pays for model tokens; these figures are the platform fee.",
   "tooltip.submit.budget": "One total for everything this run may spend: setup checks, the optimization itself and billable sandbox time. Credits are reserved before work starts and settled on what was actually used; the run stops when the total is reached.",
   "tooltip.submit.blackbox.roles": "Each role the run gives a model. The optimization model proposes improvements; the scoring model, when your evaluator calls one, judges outputs; the task model drives the coding agent.",
-  "tooltip.submit.blackbox.evidence": "A passed check vouches only for the exact evaluator, example, models and settings it ran with. Change any of them and the check has to run again."
+  "tooltip.submit.blackbox.evidence": "A passed check vouches only for the exact evaluator, example, models and settings it ran with. Change any of them and the check has to run again.",
+  "submit.draft.restore.title": "Continue from your previous setup?",
+  "submit.draft.restore.meta": "{workflow} · {stage} · edited {time}",
+  "submit.draft.restore.continue": "Continue draft",
+  "submit.draft.restore.start_new": "Start new",
+  "submit.draft.restore.retry": "Try again",
+  "submit.draft.restore.failed": "The saved setup could not be restored. Try again or start new.",
+  "submit.draft.restore.gone": "The saved setup is no longer available in this browser.",
+  "submit.draft.save_failed": "Your setup could not be saved in this browser. Keep this tab open so you don't lose it.",
+  "submit.draft.reset_failed": "The saved setup could not be cleared. Your previous draft is still available.",
+  "submit.recipe.choose_new": "Start a new {p1} setup"
 }

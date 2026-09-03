@@ -44,7 +44,7 @@ import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import type { ValidationResult } from "@/shared/ui/code-editor";
 
 import { defaultSplit, emptyModelConfig, type ColumnRole } from "../constants";
-import { LAST_WIZARD_STAGE, WIZARD_STAGE } from "../lib/wizard-steps";
+import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { availableBudget, suggestedRunName } from "../lib/budget";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import { focusField } from "../lib/focus-field";
@@ -66,6 +66,12 @@ import {
   projectCostBracket,
   type CostBracket,
 } from "../lib/cost-bracket";
+import {
+  isMeaningfulAnythingDraft,
+  stripModelSecrets,
+  type AnythingDraftData,
+} from "../lib/draft-record";
+import { useWizardDrafts } from "./use-wizard-drafts";
 import { prepareModelConfig } from "./use-submit-wizard";
 import {
   useDatasetProfiling,
@@ -327,6 +333,74 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   } | null>(null);
   const [maxCostCredits, setMaxCostCredits] = useState<number | null>(null);
 
+  const drafts = useWizardDrafts();
+  const draftsRef = useRef(drafts);
+  useEffect(() => {
+    draftsRef.current = drafts;
+  }, [drafts]);
+  // Taken once at mount: the saved draft this instance hydrates from, or null
+  // when the form starts blank. Publishing waits until that hydration has
+  // landed so the first snapshot written is the restored one, not the empty
+  // initial state.
+  const [draftSnapshot] = useState(() => drafts.takeSnapshot("anything"));
+  const hydratedRef = useRef(false);
+  const submittedRef = useRef(false);
+  // The draft's stage is applied one render after its fields, so the
+  // prerequisite walk (below validateStep) checks the restored state rather
+  // than the empty initial one.
+  const [pendingRestore, setPendingRestore] = useState<{
+    stage: WizardStageId;
+    furthest: WizardStageId;
+  } | null>(null);
+  useEffect(() => {
+    const d = draftSnapshot;
+    if (!d) {
+      hydratedRef.current = true;
+      return;
+    }
+    setPendingRestore({ stage: d.stage, furthest: d.furthestStage });
+    setJobName(d.jobName);
+    setJobDescription(d.jobDescription);
+    setIsPrivate(d.isPrivate);
+    setRecipeState(d.recipe);
+    setCodeAssistMode(d.codeAssistMode);
+    setSeedMode(d.seedMode);
+    setSeedText(d.seedText);
+    setSeedParts(d.seedParts);
+    setSeedManuallyEdited(d.seedManuallyEdited);
+    setScorerManuallyEdited(d.scorerManuallyEdited);
+    setObjective(d.objective);
+    setBackground(d.background);
+    setTargetKind(d.targetKind);
+    setHarness(d.harness);
+    setTargetModel(d.targetModel);
+    setTargetTimeout(d.targetTimeout);
+    setTargetConcurrency(d.targetConcurrency);
+    setParsedCases(d.parsedCases);
+    setCasesName(d.casesName);
+    splitModeRef.current = d.splitMode;
+    setSplitModeState(d.splitMode);
+    setSplit(d.split);
+    setShuffle(d.shuffle);
+    setSeed(d.seed);
+    setScorerKind(d.scorerKind);
+    setMetricCode(d.metricCode);
+    setScorerUrl(d.scorerUrl);
+    setScorerInstall(d.scorerInstall);
+    setScorerModel(d.scorerModel);
+    setScorerModelDeclared(d.scorerModelDeclared);
+    setScorerModelMode(d.scorerModelMode);
+    setStrategyMode(d.strategyMode);
+    setEngine(d.engine);
+    setPatience(d.patience);
+    setMaxScorerRuns(d.maxScorerRuns);
+    setMaxIterations(d.maxIterations);
+    setStopAtScore(d.stopAtScore);
+    setReflectionModel(d.reflectionModel);
+    setMaxCostCredits(d.maxCostCredits);
+    setSetupSpent(d.setupSpent);
+  }, [draftSnapshot]);
+
   // Auto and Plateau relay pick engines themselves, so only a hand-picked engine
   // shapes the recommended split.
   useDatasetProfiling({
@@ -363,7 +437,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [cloned, setCloned] = useState(false);
   useEffect(() => {
     const cloneId = searchParams.get("clone");
-    if (!cloneId || cloneRan.current) return;
+    // A restored draft owns the form; the clone URL it was continued past must
+    // not hydrate over it.
+    if (!cloneId || cloneRan.current || draftSnapshot) return;
     cloneRan.current = true;
     Promise.all([getOptimizationPayload(cloneId), getJob(cloneId).catch(() => null)])
       .then(([{ optimization_type, payload }, jobData]) => {
@@ -852,6 +928,21 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     }
   };
 
+  // Walk the restored stage's prerequisites against the restored state: a
+  // saved stage whose earlier stages no longer validate opens on the first
+  // failing one instead. Publishing starts here, after the restored fields
+  // have landed.
+  useEffect(() => {
+    if (!pendingRestore) return;
+    setPendingRestore(null);
+    hydratedRef.current = true;
+    const target = WIZARD_STAGE[pendingRestore.stage];
+    let reachable = 0;
+    while (reachable < target && validateStep(reachable)) reachable += 1;
+    setStep(reachable);
+    setFurthestReachedStep(Math.max(reachable, WIZARD_STAGE[pendingRestore.furthest]));
+  }, [pendingRestore, validateStep]);
+
   const goTo = (idx: number) => {
     setDirection(idx > step ? 1 : -1);
     setStep(idx);
@@ -1034,6 +1125,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         scorer: scorerKind,
         has_cases: parsedCases != null,
       });
+      // The accepted job consumed the draft: nothing is re-parked while the
+      // splash plays out.
+      submittedRef.current = true;
+      draftsRef.current.consumed();
       const jobUrl = `/optimizations/${result.optimization_id}`;
       setSubmitPhase("splash");
       window.dispatchEvent(new Event("sidebar:collapse"));
@@ -1052,6 +1147,74 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       setSubmitting(false);
     }
   };
+
+  // The draft never carries credentials: a restored BYOK model comes back
+  // without its key and shows as missing credentials.
+  const safeTargetModel = useMemo(() => stripModelSecrets(targetModel), [targetModel]);
+  const safeScorerModel = useMemo(() => stripModelSecrets(scorerModel), [scorerModel]);
+  const safeReflectionModel = useMemo(() => stripModelSecrets(reflectionModel), [reflectionModel]);
+  // Every commit hands the saver the serializable snapshot; it debounces and
+  // dedupes. Evidence, dry-run results and the remote secret stay out on
+  // purpose so a continued draft re-runs its checks.
+  useEffect(() => {
+    if (!hydratedRef.current || submittedRef.current) return;
+    const snapshot: AnythingDraftData = {
+      stage: stageAt(step),
+      furthestStage: stageAt(furthestReachedStep),
+      jobName,
+      jobDescription,
+      isPrivate,
+      recipe,
+      codeAssistMode,
+      seedMode,
+      seedText,
+      seedParts,
+      seedManuallyEdited,
+      scorerManuallyEdited,
+      objective,
+      background,
+      targetKind,
+      harness,
+      targetModel: safeTargetModel,
+      targetTimeout,
+      targetConcurrency,
+      parsedCases,
+      casesName,
+      split,
+      shuffle,
+      seed,
+      splitMode,
+      scorerKind,
+      metricCode,
+      scorerUrl,
+      scorerInstall,
+      scorerModel: safeScorerModel,
+      scorerModelDeclared,
+      scorerModelMode,
+      strategyMode,
+      engine,
+      patience,
+      maxScorerRuns,
+      maxIterations,
+      stopAtScore,
+      reflectionModel: safeReflectionModel,
+      maxCostCredits,
+      setupSpent,
+    };
+    draftsRef.current.publish("anything", snapshot, isMeaningfulAnythingDraft(snapshot));
+  });
+  // Stage boundaries are the one place the debounce is skipped: a refresh right
+  // after Next lands on the stage the user just reached.
+  useEffect(() => {
+    if (hydratedRef.current) draftsRef.current.flush();
+  }, [step]);
+  useEffect(
+    () => () => {
+      // Leaving mid-setup keeps the draft: write whatever the debounce still holds.
+      if (!submittedRef.current) draftsRef.current.flush();
+    },
+    [],
+  );
 
   return {
     recipe,
