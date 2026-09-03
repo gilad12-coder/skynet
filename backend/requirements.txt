@@ -123,7 +123,7 @@ frozenlist==1.8.0
     #   aiosignal
 fsspec==2026.3.0
     # via huggingface-hub
-gepa==0.1.4
+gepa @ git+https://github.com/gepa-ai/gepa@0632cdb5dcc052e690eab439e1b4a7e3e9cfe407
     # via
     #   dspy
     #   skynet

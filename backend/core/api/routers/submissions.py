@@ -1165,6 +1165,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
     def blackbox_engines(
         current_user: AuthenticatedUserDep,
         target: Literal["text", "agent"] = "text",
+        proposer_runtime: Literal["worker", "vercel"] = "worker",
     ) -> BlackboxEngineCatalogResponse:
         """Describe every engine so the wizard can show why one cannot run here.
 
@@ -1174,12 +1175,13 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         Args:
             current_user: Authenticated caller resolved from the bearer token.
             target: The target kind the job will use.
+            proposer_runtime: Execution location for upstream agent proposers.
 
         Returns:
             The catalog in registry order.
         """
         del current_user
-        return engine_catalog(target)
+        return engine_catalog(target, proposer_runtime)
 
     @router.post(
         "/blackbox/scorer/dry-run",

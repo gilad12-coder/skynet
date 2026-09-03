@@ -1,8 +1,9 @@
 # Air-gap operators: see AIRGAP.html for REGISTRY_PREFIX / DEBIAN_MIRROR /
-# PIP_INDEX_URL / PIP_TRUSTED_HOST build-args, plus DENO_DOWNLOAD_BASE /
-# NPM_CONFIG_REGISTRY for the Flex-capable (dspy 3.3) image's Deno sandbox.
+# PIP_INDEX_URL / PIP_TRUSTED_HOST / GEPA_GIT_MIRROR build-args, plus
+# DENO_DOWNLOAD_BASE / NPM_CONFIG_REGISTRY for Deno and the optimizer CLI.
 # With those set nothing in this file fetches from public mirrors.
 ARG REGISTRY_PREFIX=docker.io
+FROM ${REGISTRY_PREFIX}/node:22.22.0-bookworm-slim AS node-runtime
 # 3.12 for PEP 683 immortal objects: core interpreter objects stop taking
 # refcount writes, so job children fork()ed from the fat parent dirty far
 # fewer copy-on-write pages. Full test suite verified green on 3.12.
@@ -16,8 +17,27 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
             sed -i "s|http[s]\?://deb.debian.org|$DEBIAN_MIRROR|g; s|http[s]\?://security.debian.org|$DEBIAN_MIRROR|g" {} \; ; \
     fi \
     && apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl unzip \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates curl unzip git bubblewrap \
     && rm -rf /var/lib/apt/lists/*
+
+# Claude Code 2.1.259 requires Node >=22; Debian's nodejs may be older.
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+ARG NPM_CONFIG_REGISTRY
+RUN npm install --global --prefix /usr/local \
+        ${NPM_CONFIG_REGISTRY:+--registry "$NPM_CONFIG_REGISTRY"} \
+        @anthropic-ai/claude-code@2.1.259 \
+    && npm cache clean --force
+
+# PIP_INDEX_URL cannot redirect a VCS dependency. Mirroring the repository
+# preserves the approved commit while keeping air-gap builds off GitHub.
+ARG GEPA_GIT_MIRROR
+RUN if [ -n "$GEPA_GIT_MIRROR" ]; then \
+        git config --global "url.${GEPA_GIT_MIRROR}.insteadOf" https://github.com/gepa-ai/gepa; \
+    fi
 
 COPY pyproject.toml uv.lock requirements.txt requirements.stable.txt ./
 
@@ -33,11 +53,11 @@ ARG PIP_TRUSTED_HOST
 # Either way the deps land in their own layer (before the source copy) so it
 # caches until the lockfile / requirements change. Both requirements files are
 # complete compiled lockfiles, so we install with --no-deps to skip
-# re-resolution. That is load-bearing for BOTH lines: each pins gepa==0.1.4
-# (for GEPA PxN batched sampling), but dspy's metadata hard-pins an older gepa —
+# re-resolution. Both lines pin the same gepa git commit for the upstream OA
+# engines and GEPA PxN sampling, but dspy's metadata hard-pins an older gepa —
 # ==0.0.27 on dspy 3.2.1, ==0.1.1 on dspy 3.3.0 — so a resolving install fails
-# with ResolutionImpossible. gepa 0.1.4 runs cleanly against both dspy versions
-# at runtime; only the resolver objects, and --no-deps sidesteps it. The uv path
+# with ResolutionImpossible. --no-deps preserves this deliberate override.
+# Compatibility is exercised by the pip-path image smoke tests. The uv path
 # carries the same override in uv.lock ([tool.uv] override-dependencies).
 ARG PKG_MANAGER=uv
 ARG DSPY_LINE=preview
@@ -71,7 +91,6 @@ RUN if [ "$PKG_MANAGER" = "pip" ]; then \
 # and `deno cache` fetches nothing public.
 ARG DENO_VERSION=2.6.6
 ARG DENO_DOWNLOAD_BASE=https://github.com/denoland/deno/releases/download
-ARG NPM_CONFIG_REGISTRY
 ENV DENO_DIR=/app/.deno
 RUN if [ "$PKG_MANAGER" = "uv" ] || [ "$DSPY_LINE" = "preview" ]; then \
         case "$(dpkg --print-architecture)" in \

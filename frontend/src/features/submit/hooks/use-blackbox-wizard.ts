@@ -10,6 +10,7 @@ import type {
   BlackboxEngineCatalogResponse,
   BlackboxEngineId,
   BlackboxHarness,
+  BlackboxProposerRuntime,
   BlackboxRunRequest,
   BlackboxScorer,
   BlackboxTarget,
@@ -49,8 +50,14 @@ import { availableBudget, suggestedRunName } from "../lib/budget";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import { focusField } from "../lib/focus-field";
 import {
+  engineSelectionIssue,
+  supportsIterationLimit,
+  usesNativeProposer,
+} from "../lib/engine-contract";
+import {
   modelIdentity,
   optimizationModelFamily,
+  proposerModelConfig,
   resolveScoringModel,
   type ScoringModelMode,
 } from "../lib/model-roles";
@@ -319,12 +326,29 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const [strategyMode, setStrategyMode] = useState<"auto" | "single" | "plateau">("auto");
   const [engine, setEngine] = useState<BlackboxEngineId | null>(null);
+  const [proposerRuntime, setProposerRuntime] = useState<BlackboxProposerRuntime>("worker");
   const [patience, setPatience] = useState(DEFAULT_PATIENCE);
-  const [engineCatalog, setEngineCatalog] = useState<BlackboxEngineCatalogResponse | null>(null);
+  const [engineCatalogResult, setEngineCatalogResult] = useState<{
+    target: BlackboxTarget["kind"];
+    runtime: BlackboxProposerRuntime;
+    data: BlackboxEngineCatalogResponse | null;
+  } | null>(null);
+  const currentCatalogResult =
+    engineCatalogResult?.target === targetKind && engineCatalogResult.runtime === proposerRuntime
+      ? engineCatalogResult
+      : null;
+  const engineCatalog = currentCatalogResult?.data ?? null;
+  const engineCatalogFailed = currentCatalogResult !== null && engineCatalog === null;
   const [maxScorerRuns, setMaxScorerRuns] = useState(DEFAULT_MAX_SCORER_RUNS);
   const [maxIterations, setMaxIterations] = useState<number | "">("");
   const [stopAtScore, setStopAtScore] = useState("");
   const [reflectionModel, setReflectionModel] = useState<ModelConfig>(emptyModelConfig());
+  const nativeProposer = usesNativeProposer(strategyMode, engine);
+  const iterationLimitSupported = supportsIterationLimit(strategyMode, engine);
+  const effectiveReflectionModel = useMemo(
+    () => proposerModelConfig(reflectionModel, nativeProposer),
+    [reflectionModel, nativeProposer],
+  );
   const [editingModel, setEditingModel] = useState<{
     config: ModelConfig;
     onSave: (c: ModelConfig) => void;
@@ -392,6 +416,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerModelMode(d.scorerModelMode);
     setStrategyMode(d.strategyMode);
     setEngine(d.engine);
+    setProposerRuntime(d.proposerRuntime ?? "worker");
     setPatience(d.patience);
     setMaxScorerRuns(d.maxScorerRuns);
     setMaxIterations(d.maxIterations);
@@ -417,17 +442,19 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   useEffect(() => {
     let cancelled = false;
-    getBlackboxEngines(targetKind)
+    getBlackboxEngines(targetKind, proposerRuntime)
       .then((res) => {
-        if (!cancelled) setEngineCatalog(res);
+        if (!cancelled)
+          setEngineCatalogResult({ target: targetKind, runtime: proposerRuntime, data: res });
       })
       .catch(() => {
-        if (!cancelled) setEngineCatalog(null);
+        if (!cancelled)
+          setEngineCatalogResult({ target: targetKind, runtime: proposerRuntime, data: null });
       });
     return () => {
       cancelled = true;
     };
-  }, [targetKind]);
+  }, [targetKind, proposerRuntime]);
 
   // A `?clone=` link hydrates the wizard from the source run's stored payload
   // (server-scrubbed: no model api_key, no remote-scorer secret). The clone
@@ -522,6 +549,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           }
 
           const strategy = source.strategy;
+          setProposerRuntime(source.proposer_runtime ?? "worker");
           if (strategy) {
             setStrategyMode(strategy.mode);
             setEngine(strategy.engine ?? null);
@@ -561,9 +589,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         usesModel: scorerUsesModel,
         mode: scorerModelMode,
         explicit: scorerModel,
-        optimization: reflectionModel,
+        optimization: effectiveReflectionModel,
       }),
-    [scorerUsesModel, scorerModelMode, scorerModel, reflectionModel],
+    [scorerUsesModel, scorerModelMode, scorerModel, effectiveReflectionModel],
   );
   const resolvedScorerModel = scoringBinding?.resolved ?? null;
   // Inherited from an optimization model not chosen yet: the evaluator check
@@ -838,6 +866,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   };
 
   const selectedEngine = engineCatalog?.engines.find((e) => e.id === engine) ?? null;
+  const trainingCaseCount = parsedCases?.rows.length
+    ? Math.floor(parsedCases.rows.length * split.train)
+    : null;
   const autoEngineLabels = useMemo<string[]>(
     () =>
       (engineCatalog?.auto_engines ?? []).map(
@@ -845,26 +876,26 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       ),
     [engineCatalog],
   );
-  // An engine that cannot run here stays selectable and configurable; only
-  // Run is held back, with the backend's reason. Auto and Plateau need at
-  // least one engine their recipe may invoke.
   const runDisabledReason = useMemo<string | null>(() => {
-    if (!engineCatalog) return null;
-    if (strategyMode === "single") {
-      if (selectedEngine && !selectedEngine.available) {
-        return selectedEngine.unavailable_reason?.trim()
-          ? formatMsg("submit.blackbox.run_disabled.engine_reason", {
-              engine: selectedEngine.label,
-              reason: selectedEngine.unavailable_reason,
-            })
-          : formatMsg("submit.blackbox.run_disabled.engine", { engine: selectedEngine.label });
-      }
-      return null;
-    }
-    if ((engineCatalog.auto_engines ?? []).length === 0)
-      return msg("submit.blackbox.run_disabled.no_engines");
-    return null;
-  }, [engineCatalog, strategyMode, selectedEngine]);
+    if (engineCatalogFailed) return msg("submit.blackbox.engines.check_failed");
+    const issue = engineSelectionIssue({
+      catalog: engineCatalog,
+      mode: strategyMode,
+      engine,
+      runtime: proposerRuntime,
+      hasParts: seedMode === "parts",
+      trainingCaseCount,
+    });
+    return issue ? msg(issue.key, issue.params) : null;
+  }, [
+    engineCatalog,
+    engineCatalogFailed,
+    strategyMode,
+    engine,
+    proposerRuntime,
+    seedMode,
+    trainingCaseCount,
+  ]);
   const optimizationFamily = optimizationModelFamily(strategyMode, engine);
 
   const validateStep = (s: number, showToast = false): boolean => {
@@ -906,6 +937,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         return true;
       }
       case WIZARD_STAGE.optimization: {
+        if (trainingCaseCount === 0 && (strategyMode !== "single" || engine === "meta_harness"))
+          return fail("submit.blackbox.validation.training_cases");
         // Availability is not a validation failure: an unavailable engine is a
         // configuration state that holds Run back with its reason.
         if (strategyMode === "single") {
@@ -913,12 +946,20 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             return fail("submit.blackbox.validation.engine_required", "bb-engines");
           if (seedMode === "parts" && selectedEngine && !selectedEngine.supports_parts)
             return fail("submit.blackbox.validation.engine_parts", "bb-engines");
+        } else if (seedMode === "parts") {
+          return fail("submit.blackbox.validation.auto_parts", "bb-engines");
         }
         if (!reflectionModel.name.trim())
           return fail(
             "submit.blackbox.validation.reflection_model_required",
             "bb-optimization-model",
           );
+        if (nativeProposer && reflectionModel.token_source === "byok")
+          return fail("submit.blackbox.validation.native_managed", "bb-optimization-model");
+        if (nativeProposer && maxCostCredits == null)
+          return fail("submit.blackbox.validation.native_budget", "totalBudgetInput");
+        if (strategyMode === "auto" && maxScorerRuns < 4)
+          return fail("submit.blackbox.validation.auto_budget", "bb-max-runs");
         if (maxScorerRuns < 1)
           return fail("submit.blackbox.validation.budget_required", "bb-max-runs");
         return true;
@@ -1083,7 +1124,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setSubmitting(true);
     setSubmitPhase("sending");
     try {
-      const reflection = prepareModelConfig(reflectionModel);
+      const reflection = prepareModelConfig(effectiveReflectionModel);
       const estimate = chargeableBracket(costBracket, tokenSource);
       const payload: BlackboxRunRequest = {
         name: jobName.trim() || suggestedName || undefined,
@@ -1100,7 +1141,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         seed,
         budget: {
           max_scorer_runs: maxScorerRuns,
-          max_iterations: maxIterations === "" ? undefined : maxIterations,
+          max_iterations:
+            iterationLimitSupported && maxIterations !== "" ? maxIterations : undefined,
           stop_at_score: parseOptionalNumber(stopAtScore),
         },
         strategy:
@@ -1109,6 +1151,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             : strategyMode === "plateau"
               ? { mode: "plateau", patience }
               : { mode: "auto" },
+        proposer_runtime: proposerRuntime,
         target: buildTarget(),
         reflection_model_config: reflection,
         token_source: tokenSource,
@@ -1193,6 +1236,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       scorerModelMode,
       strategyMode,
       engine,
+      proposerRuntime,
       patience,
       maxScorerRuns,
       maxIterations,
@@ -1315,6 +1359,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setStrategyMode,
     engine,
     setEngine,
+    proposerRuntime,
+    setProposerRuntime,
+    nativeProposer,
+    iterationLimitSupported,
     patience,
     setPatience,
     engineCatalog,
@@ -1328,7 +1376,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setMaxIterations,
     stopAtScore,
     setStopAtScore,
-    reflectionModel,
+    reflectionModel: effectiveReflectionModel,
     setReflectionModel,
     editingModel,
     setEditingModel,

@@ -1,6 +1,7 @@
 import type {
   BlackboxEngineId,
   BlackboxHarness,
+  BlackboxProposerRuntime,
   ModelConfig,
   SplitFractions,
   ValidateCodeResponse,
@@ -101,6 +102,7 @@ export interface AnythingDraftData {
   scorerModelMode: ScoringModelMode;
   strategyMode: "auto" | "single" | "plateau";
   engine: BlackboxEngineId | null;
+  proposerRuntime?: BlackboxProposerRuntime;
   patience: number;
   maxScorerRuns: number;
   maxIterations: number | "";

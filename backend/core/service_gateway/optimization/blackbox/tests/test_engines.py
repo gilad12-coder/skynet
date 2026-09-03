@@ -1,13 +1,21 @@
-"""Tests for the in-process engines and the registry."""
+"""Verify upstream engine fidelity, accounting transport and registry availability."""
 
 from __future__ import annotations
 
+import json
 import pickle
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import dspy
 import pytest
+from dspy.utils.callback import BaseCallback
+from gepa.oa.budget import BudgetTracker
+from gepa.oa.config import OptimizeAnythingConfig
+from gepa.oa.engines.best_of_n import BestOfNEngine as UpstreamBestOfN
+from gepa.oa.eval_server import EvalServer as UpstreamEvalServer
+from gepa.oa.task import Task as UpstreamTask
 
 from core.constants import PROGRESS_CANDIDATE, PROGRESS_MINIBATCH
 from core.exceptions import ServiceError
@@ -17,200 +25,262 @@ from core.models.blackbox import (
     BLACKBOX_ENGINE_GEPA,
     BLACKBOX_ENGINE_META_HARNESS,
 )
+from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededError
 
 from .. import gepa_engine as gepa_mod
-from ..best_of_n import BestOfNEngine, _strip_fences
+from ..autoresearch import AutoResearchEngine
+from ..best_of_n import BestOfNEngine
 from ..gepa_engine import GepaEngine
 from ..meta_harness import MetaHarnessEngine
-from ..protocol import BudgetExhaustedError, EvalServer, Task
+from ..protocol import BudgetExhaustedError, EngineContext, EvalServer, Task
 from ..registry import ENGINES, EngineCapabilities, available_engine_ids, get_engine
-from .mocks import FakeReflectionLM, make_ctx, vowel_scorer
+from ..upstream import GEPA_SOURCE
+from .mocks import FakeGateway, make_ctx, vowel_scorer
 
-_AGENT_CAPS = EngineCapabilities(sandbox=True, agent_target=True)
+_NATIVE_CAPS = EngineCapabilities(proposer_available=True)
 
 
-def test_registry_lists_only_runnable_engines() -> None:
-    """Without sandboxes only the in-process engines run; AutoResearch never does."""
+class _SequenceModel:
+    """Return deterministic completions while recording unmodified chat messages."""
+
+    def __init__(self, completions: list[str]) -> None:
+        """Store the completion sequence.
+
+        Args:
+            completions: Responses consumed in order by the real upstream engine.
+        """
+        self._responses = iter(completions)
+        self.messages: list[list[dict[str, Any]]] = []
+
+    def __call__(self, prompt: str | list[dict[str, Any]]) -> str:
+        """Record the input and return the next completion.
+
+        Args:
+            prompt: Original upstream prompt, or its chat transport form.
+
+        Returns:
+            The next scripted completion.
+        """
+        messages = [{"role": "user", "content": prompt}] if isinstance(prompt, str) else prompt
+        self.messages.append(messages)
+        return next(self._responses)
+
+
+def test_registry_requires_native_proposer_availability() -> None:
+    """Keep native algorithms visible in the catalog but reject unavailable runtimes."""
     assert available_engine_ids() == [BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_BEST_OF_N]
     assert isinstance(get_engine(BLACKBOX_ENGINE_GEPA), GepaEngine)
     assert isinstance(get_engine(BLACKBOX_ENGINE_BEST_OF_N), BestOfNEngine)
     for engine_id in (BLACKBOX_ENGINE_AUTORESEARCH, BLACKBOX_ENGINE_META_HARNESS):
-        with pytest.raises(ServiceError, match="not available"):
+        assert ENGINES[engine_id].factory is not None
+        with pytest.raises(ServiceError, match="proposer runtime is not configured"):
             get_engine(engine_id)
-    with pytest.raises(ServiceError, match="not implemented yet"):
-        get_engine(BLACKBOX_ENGINE_AUTORESEARCH, _AGENT_CAPS)
+        unavailable = EngineCapabilities(proposer_reason="Install the pinned Claude CLI")
+        assert ENGINES[engine_id].unavailable_reason_for(unavailable) == "Install the pinned Claude CLI"
 
 
-def test_registry_unlocks_meta_harness_for_agent_targets_with_sandboxes() -> None:
-    """Meta-Harness needs both a sandbox runtime and an agent target, and each miss is explained."""
-    assert available_engine_ids(_AGENT_CAPS) == [
+@pytest.mark.parametrize("sandbox", [False, True])
+def test_registry_native_algorithms_do_not_depend_on_candidate_target(sandbox: bool) -> None:
+    """Allow native proposal execution for scored code once its runtime is ready."""
+    caps = EngineCapabilities(sandbox=sandbox, agent_target=False, proposer_available=True)
+    assert available_engine_ids(caps) == [
         BLACKBOX_ENGINE_GEPA,
         BLACKBOX_ENGINE_BEST_OF_N,
+        BLACKBOX_ENGINE_AUTORESEARCH,
         BLACKBOX_ENGINE_META_HARNESS,
     ]
-    assert isinstance(get_engine(BLACKBOX_ENGINE_META_HARNESS, _AGENT_CAPS), MetaHarnessEngine)
-    spec = ENGINES[BLACKBOX_ENGINE_META_HARNESS]
-    no_sandbox = EngineCapabilities(sandbox=False, agent_target=True, sandbox_reason="set VERCEL_TOKEN")
-    assert spec.unavailable_reason_for(no_sandbox) == "set VERCEL_TOKEN"
-    assert spec.unavailable_reason_for(EngineCapabilities(sandbox=False, agent_target=True)) == (
-        "Agent sandboxes are not configured on this deployment."
-    )
-    text_target = EngineCapabilities(sandbox=True, agent_target=False)
-    assert "target must be an agent" in str(spec.unavailable_reason_for(text_target))
-    with pytest.raises(ServiceError, match="target must be an agent"):
-        get_engine(BLACKBOX_ENGINE_META_HARNESS, text_target)
+    assert isinstance(get_engine(BLACKBOX_ENGINE_META_HARNESS, caps), MetaHarnessEngine)
+    assert isinstance(get_engine(BLACKBOX_ENGINE_AUTORESEARCH, caps), AutoResearchEngine)
 
 
 def test_registry_filters_multi_part_engines() -> None:
-    """``parts=True`` keeps the engines that take a named-parts starting point."""
+    """Expose named-component inputs only for engines whose pinned adapter supports them."""
     assert available_engine_ids(parts=True) == [BLACKBOX_ENGINE_GEPA]
-    assert available_engine_ids(_AGENT_CAPS, parts=True) == [BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_META_HARNESS]
+    assert available_engine_ids(_NATIVE_CAPS, parts=True) == [BLACKBOX_ENGINE_GEPA]
 
 
 def test_registry_rejects_unknown_engine() -> None:
-    """An unknown id names the engines that do exist for the job."""
+    """Name only algorithms runnable with the supplied execution capabilities."""
     with pytest.raises(ServiceError, match=r"Unknown engine 'nope'\. Available engines: gepa, best_of_n\."):
         get_engine("nope")
-    with pytest.raises(ServiceError, match=r"Available engines: gepa, best_of_n, meta_harness\."):
-        get_engine("nope", _AGENT_CAPS)
+    with pytest.raises(ServiceError, match=r"Available engines: gepa, best_of_n, autoresearch, meta_harness\."):
+        get_engine("nope", _NATIVE_CAPS)
 
 
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [("```\nhello\n```", "hello"), ("```text\nhello\n```", "hello"), ("  plain  ", "plain"), ("``````", "")],
-)
-def test_strip_fences(raw: str, expected: str) -> None:
-    """Surrounding code fences (with or without a language tag) are removed.
+def test_best_of_n_matches_direct_upstream_sampling(tmp_path: Path) -> None:
+    """Preserve upstream prompts, case selection, independent samples and aggregate winner."""
+    completions = ["```text\nhello\n```", "```\naeiou\n```", "xyz"]
+    direct_model = _SequenceModel(completions)
+    adapter_model = _SequenceModel(completions)
+    direct_calls: list[tuple[Any, Any]] = []
+    adapter_calls: list[tuple[Any, Any]] = []
+    task = Task(
+        seed_candidate="never score this seed",
+        objective="more vowels",
+        background="Keep the task unchanged",
+        train_set=[{"id": "train-a"}, {"id": "train-b"}],
+        val_set=[{"id": "validation"}],
+    )
 
-    Args:
-        raw: The LM output.
-        expected: The unwrapped text.
-    """
-    assert _strip_fences(raw) == expected
+    def direct_score(candidate: Any, example: Any = None) -> tuple[float, dict[str, Any]]:
+        """Record direct-upstream evaluations before applying the deterministic metric.
+
+        Args:
+            candidate: Proposed text.
+            example: Upstream-selected task example.
+
+        Returns:
+            Vowel density and feedback.
+        """
+        direct_calls.append((candidate, example))
+        return vowel_scorer(candidate, example)
+
+    def adapter_score(candidate: Any, example: Any = None) -> tuple[float, dict[str, Any]]:
+        """Record adapted evaluations before applying the same metric.
+
+        Args:
+            candidate: Proposed text.
+            example: Upstream-selected task example.
+
+        Returns:
+            Vowel density and feedback.
+        """
+        adapter_calls.append((candidate, example))
+        return vowel_scorer(candidate, example)
+
+    upstream_task = UpstreamTask(
+        name="direct",
+        seed_candidate=task.seed_candidate,
+        objective=task.objective,
+        background=task.background,
+        train_set=task.train_set,
+        val_set=task.val_set,
+    )
+    upstream = UpstreamEvalServer(upstream_task, direct_score, BudgetTracker(max_evals=6))
+    with FakeGateway(reply=lambda body: direct_model(body["messages"])) as gateway:
+        expected = UpstreamBestOfN(
+            OptimizeAnythingConfig(
+                engine="best_of_n",
+                max_evals=6,
+                engine_config={
+                    "model": "openai/direct-fixture",
+                    "lm_kwargs": {"api_base": gateway.url, "api_key": "fixture", "num_retries": 0},
+                },
+            )
+        ).run(upstream_task, upstream)
+    server = EvalServer(adapter_score, max_evals=6)
+    actual = BestOfNEngine().run(task, server, EngineContext(reflection_lm=adapter_model, run_dir=str(tmp_path)))
+
+    assert (actual.best_candidate, actual.best_score) == (expected.best_candidate, expected.best_score)
+    assert actual.best_candidate == "aeiou"
+    assert actual.total_evals == server.used == upstream.budget.used == 6
+    assert adapter_calls == direct_calls
+    assert all(candidate != task.seed_candidate for candidate, _ in adapter_calls)
+    assert adapter_model.messages == direct_model.messages
+    assert adapter_model.messages == [adapter_model.messages[0]] * 3
+    assert actual.metadata["n_samples"] == expected.metadata["n_samples"] == 3
+    assert actual.metadata["upstream_source"] == GEPA_SOURCE
+    persisted = [json.loads(line) for line in (tmp_path / "bon_cost_log.jsonl").read_text().splitlines()]
+    assert [entry["score"] for entry in persisted] == [entry["score"] for entry in expected.eval_log]
 
 
-def test_best_of_n_keeps_the_best_proposal_within_budget(tmp_path: Path) -> None:
-    """Best-of-N scores the seed, proposes until the budget is spent, and returns the best."""
-    lm = FakeReflectionLM()
-    server = EvalServer(vowel_scorer, max_evals=4)
-    task = Task(seed_candidate="hello world", objective="more vowels", val_set=[{"i": 0}, {"i": 1}])
+def test_best_of_n_keeps_completed_incumbent_when_next_candidate_is_partial(tmp_path: Path) -> None:
+    """Exclude a promising one-case result when the budget cuts its evaluation short."""
+    model = _SequenceModel(["completed", "incomplete"])
 
-    result = BestOfNEngine().run(task, server, make_ctx(str(tmp_path), lm))
+    def score(candidate: Any, example: Any = None) -> tuple[float, dict[str, Any]]:
+        """Give the incomplete proposal a tempting score on its first case.
 
-    # 2 cases per candidate: the seed plus one proposal fit a budget of 4.
-    assert server.used == 4
-    assert result.metadata == {"proposals": 1}
-    assert result.best_candidate == "aeiou"
-    assert result.best_score == 1.0
-    assert result.total_evals == 4
-    assert "Objective: more vowels" in lm.prompts[0]
+        Args:
+            candidate: Scripted proposal.
+            example: Dataset example.
+
+        Returns:
+            Deterministic case score and no feedback.
+        """
+        return (0.4 if candidate == "completed" else 1.0), {}
+
+    server = EvalServer(score, max_evals=3)
+    task = Task(seed_candidate="seed", val_set=[{"id": "a"}, {"id": "b"}])
+    result = BestOfNEngine().run(task, server, EngineContext(reflection_lm=model, run_dir=str(tmp_path)))
+
+    assert server.best_candidate == "incomplete"
+    assert result.best_candidate == "completed"
+    assert result.best_score == 0.4
+    assert result.total_evals == 3
+    assert len(result.metadata["bon_cost_log"]) == 1
 
 
-def test_best_of_n_returns_seed_when_nothing_beats_it(tmp_path: Path) -> None:
-    """A seed that no proposal beats is returned with its own score."""
-    server = EvalServer(vowel_scorer, max_evals=3)
-    task = Task(seed_candidate="aaa")
+@pytest.mark.parametrize("seed", ["seed", None])
+@pytest.mark.parametrize("budget", [0, 1])
+def test_best_of_n_does_not_invent_a_seed_score(tmp_path: Path, seed: str | None, budget: int) -> None:
+    """Preserve unscored seeds and reject seedless runs without a completed candidate."""
+    model = _SequenceModel(["proposed"])
+    server = EvalServer(vowel_scorer, max_evals=budget)
+    task = Task(seed_candidate=seed, val_set=[{"id": "a"}, {"id": "b"}])
+    context = EngineContext(reflection_lm=model, run_dir=str(tmp_path))
+    if seed is None:
+        with pytest.raises(ServiceError, match="stopped before producing a fully evaluated candidate"):
+            BestOfNEngine().run(task, server, context)
+    else:
+        result = BestOfNEngine().run(task, server, context)
+        assert result.best_candidate == seed
+        assert result.best_score is None
+        assert result.total_evals == budget
+        assert result.metadata["bon_cost_log"] == []
 
-    result = BestOfNEngine().run(task, server, make_ctx(str(tmp_path), FakeReflectionLM(improving=False)))
-
-    assert result.best_candidate == "aaa"
-    assert result.best_score == 1.0
-    assert result.metadata == {"proposals": 2}
+    assert server.used == budget
+    assert len(model.messages) == budget
 
 
 def test_best_of_n_stops_at_target_score(tmp_path: Path) -> None:
-    """``stop_at_score`` ends the loop before the budget is spent."""
+    """Let upstream stop once a fully evaluated sample meets the requested score."""
+    model = _SequenceModel(["aeiou", "must not be requested"])
     server = EvalServer(vowel_scorer, max_evals=10)
-    task = Task(seed_candidate="hello", objective="vowels")
-
-    result = BestOfNEngine().run(task, server, make_ctx(str(tmp_path), stop_at_score=0.9))
-
+    result = BestOfNEngine().run(
+        Task(seed_candidate="seed"),
+        server,
+        EngineContext(reflection_lm=model, run_dir=str(tmp_path), stop_at_score=0.9),
+    )
     assert result.best_score == 1.0
-    assert server.used < 10
-
-
-def test_best_of_n_works_without_a_seed(tmp_path: Path) -> None:
-    """Seedless tasks get a first version from the objective alone."""
-    lm = FakeReflectionLM()
-    server = EvalServer(vowel_scorer, max_evals=2)
-
-    result = BestOfNEngine().run(Task(seed_candidate=None, objective="vowels"), server, make_ctx(str(tmp_path), lm))
-
-    assert result.best_candidate == "aeiou"
-    assert "There is no version yet" in lm.prompts[0]
+    assert server.used == len(model.messages) == 1
 
 
 def test_best_of_n_refuses_multi_part_seeds(tmp_path: Path) -> None:
-    """Named-part starting points are GEPA-only."""
+    """Reject unsupported named components before any model or evaluation call."""
     with pytest.raises(ServiceError, match="text starting points only"):
         BestOfNEngine().run(
             Task(seed_candidate={"a": "b"}), EvalServer(vowel_scorer, max_evals=5), make_ctx(str(tmp_path))
         )
 
 
-def test_best_of_n_streams_every_scored_version(tmp_path: Path) -> None:
-    """The seed and each proposal reach the sink as tree nodes hung under the best version they came from."""
-    sink: list[tuple[str, dict[str, Any]]] = []
-    ctx = make_ctx(str(tmp_path), progress_callback=lambda e, m: sink.append((e, m)))
-    task = Task(seed_candidate="hello", objective="vowels", val_set=[{"i": 0}, {"i": 1}])
+def test_best_of_n_uses_metered_model_and_propagates_dspy_callbacks(tmp_path: Path) -> None:
+    """Keep optimization calls in the configured model's usage history and callback context."""
+    callback = MagicMock(spec=BaseCallback)
+    with FakeGateway(reply="```\naeiou\n```", usage=(7, 2)) as gateway:
+        lm = dspy.LM("openai/metered-fixture", api_base=gateway.url, api_key="fixture-key", cache=False)
+        ctx = EngineContext(reflection_lm=lambda messages: lm(messages=messages)[0], run_dir=str(tmp_path))
+        with dspy.context(callbacks=[callback]):
+            result = BestOfNEngine().run(Task(seed_candidate="seed"), EvalServer(vowel_scorer, max_evals=2), ctx)
 
-    BestOfNEngine().run(task, EvalServer(vowel_scorer, max_evals=6), ctx)
-
-    candidates = [m for e, m in sink if e == PROGRESS_CANDIDATE]
-    assert [c["candidate_id"] for c in candidates] == ["0", "1", "2"]
-    assert [c["parent_id"] for c in candidates] == [None, "0", "1"]
-    assert [c["generation"] for c in candidates] == [0, 1, 2]
-    assert [c["iteration"] for c in candidates] == [0, 1, 2]
-    assert [c["discovered_at_evals"] for c in candidates] == [2, 4, 6]
-    assert candidates[0]["prompt"] == {"current_candidate": "hello"}
-    assert candidates[0]["per_example"] == [{"id": "0", "score": 0.4}, {"id": "1", "score": 0.4}]
-    assert candidates[1]["score"] == 1.0
-    assert [(m["iteration"], m["example_id"]) for e, m in sink if e == PROGRESS_MINIBATCH] == [
-        (0, "0"),
-        (0, "1"),
-        (1, "0"),
-        (1, "1"),
-        (2, "0"),
-        (2, "1"),
-    ]
+    assert result.total_evals == 2
+    assert len(gateway.requests) == len(lm.history) == 2
+    assert callback.on_lm_end.call_count == 2
+    assert sum(entry["usage"]["prompt_tokens"] for entry in lm.history) == 14
+    assert sum(entry["usage"]["completion_tokens"] for entry in lm.history) == 4
+    assert {request["authorization"] for request in gateway.requests} == {"Bearer fixture-key"}
 
 
-def test_best_of_n_streams_seedless_single_task_runs(tmp_path: Path) -> None:
-    """Without a seed or cases the first proposal is the root, scored as the one case ``"0"``."""
-    sink: list[tuple[str, dict[str, Any]]] = []
-    ctx = make_ctx(str(tmp_path), progress_callback=lambda e, m: sink.append((e, m)))
-
-    BestOfNEngine().run(Task(seed_candidate=None, objective="vowels"), EvalServer(vowel_scorer, max_evals=2), ctx)
-
-    candidates = [m for e, m in sink if e == PROGRESS_CANDIDATE]
-    assert [(c["candidate_id"], c["parent_id"], c["generation"]) for c in candidates] == [("0", None, 0), ("1", "0", 1)]
-    assert candidates[0]["per_example"] == [{"id": "0", "score": 1.0}]
-    assert [m["example_id"] for e, m in sink if e == PROGRESS_MINIBATCH] == ["0", "0"]
-
-
-def test_best_of_n_does_not_announce_a_version_the_budget_cut_short(tmp_path: Path) -> None:
-    """Running out of budget midway streams the calls made but no node for the half-scored version."""
-    sink: list[tuple[str, dict[str, Any]]] = []
-    ctx = make_ctx(str(tmp_path), progress_callback=lambda e, m: sink.append((e, m)))
-
-    with pytest.raises(BudgetExhaustedError):
-        BestOfNEngine._score(
-            "hello",
-            [{"i": 0}, {"i": 1}],
-            EvalServer(vowel_scorer, max_evals=1),
-            ctx,
-            version=0,
-            parent=None,
-            generation=0,
+def test_best_of_n_propagates_model_cost_stop(tmp_path: Path) -> None:
+    """Propagate metering errors through the transport instead of reporting a successful seed."""
+    lm = MagicMock(side_effect=CostCeilingExceededError("credit allowance reached"))
+    with pytest.raises(CostCeilingExceededError, match="credit allowance reached"):
+        BestOfNEngine().run(
+            Task(seed_candidate="seed"),
+            EvalServer(vowel_scorer, max_evals=2),
+            EngineContext(reflection_lm=lm, run_dir=str(tmp_path)),
         )
-
-    assert [e for e, _ in sink] == [PROGRESS_MINIBATCH]
-
-
-def test_best_of_n_fails_when_seedless_and_out_of_budget(tmp_path: Path) -> None:
-    """With no seed and no budget there is nothing to return."""
-    with pytest.raises(ServiceError, match="could not produce a version"):
-        BestOfNEngine().run(Task(seed_candidate=None), EvalServer(vowel_scorer, max_evals=0), make_ctx(str(tmp_path)))
+    assert lm.call_count == 1
 
 
 def test_gepa_engine_returns_seed_without_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -258,6 +328,7 @@ def test_gepa_engine_routes_evaluations_and_unwraps_text_results(
     assert result.best_score == 1.0
     assert result.total_evals == 2
     assert result.metadata == {
+        "upstream_source": GEPA_SOURCE,
         "candidates": 2,
         "gepa_metric_calls": 2,
         "candidate_tree": [
@@ -279,10 +350,10 @@ def test_gepa_engine_routes_evaluations_and_unwraps_text_results(
     assert Path(config.engine.run_dir).is_dir()
 
 
-def test_gepa_engine_falls_back_to_server_best_when_budget_runs_out(
+def test_gepa_engine_keeps_unscored_seed_without_checkpoint_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the budget dies mid-run and no state was checkpointed, the server's best wins."""
+    """Do not promote raw case scores when a budget interruption leaves no completed checkpoint."""
 
     def fake_optimize(**kwargs: Any) -> Any:
         """Score until the server cuts the run off."""
@@ -297,8 +368,8 @@ def test_gepa_engine_falls_back_to_server_best_when_budget_runs_out(
         Task(seed_candidate="seed"), EvalServer(vowel_scorer, max_evals=2), make_ctx(str(tmp_path))
     )
 
-    assert result.best_candidate == "aaa"
-    assert result.best_score == 1.0
+    assert result.best_candidate == "seed"
+    assert result.best_score is None
     assert result.total_evals == 2
 
 

@@ -1,4 +1,4 @@
-"""Run the pinned upstream Meta-Harness proposer and search implementation."""
+"""Run the pinned upstream AutoResearch engine in its native environment."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ from .native_runtime import run_native_engine
 from .protocol import EngineContext, EvalServer, Result, Task
 
 
-class MetaHarnessEngine:
-    """Select the native Meta-Harness engine without changing its algorithm."""
+class AutoResearchEngine:
+    """Select upstream AutoResearch without replacing its agentic research loop."""
 
-    name = "meta_harness"
+    name = "autoresearch"
 
     def run(self, task: Task, server: EvalServer, ctx: EngineContext) -> Result:
         """Delegate the unchanged engine to the selected execution runtime.

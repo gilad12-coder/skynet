@@ -3,8 +3,8 @@
 A black-box job optimizes any text artifact (a prompt, a policy, a config
 file, a piece of code) against a user-supplied scorer, with no DSPy program
 in the loop. The contract mirrors GEPA's ``optimize_anything`` surface —
-starting point, cases, scorer, budget — plus Skynet's strategy layer (the
-Auto explore → continue flow over the engine registry).
+starting point, cases, scorer, budget — plus execution location and model
+routing for the pinned upstream engines and compositions.
 
 Pydantic class docstrings are part of the OpenAPI contract — see AGENTS.md
 "Pydantic class docstrings" — so per-model annotations live in comments
@@ -41,13 +41,13 @@ BLACKBOX_HARNESSES = (
     BLACKBOX_HARNESS_CUSTOM,
 )
 # Engines that accept a multi-part (named files) starting point.
-BLACKBOX_MULTI_PART_ENGINES = frozenset({BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_META_HARNESS})
+BLACKBOX_MULTI_PART_ENGINES = frozenset({BLACKBOX_ENGINE_GEPA})
 # Stands in for ``module_name`` in the job overview and notifications, where
 # DSPy jobs record the program they optimized.
 BLACKBOX_MODULE_NAME = "blackbox"
 
 # A text artifact under optimization. ``dict`` form names several parts that
-# are optimized together (GEPA and Meta-Harness only).
+# are optimized together (the pinned GEPA engine only).
 BlackboxCandidate = str | dict[str, str]
 
 
@@ -186,6 +186,7 @@ class BlackboxRunRequest(BaseModel):
     budget: BlackboxBudget = Field(default_factory=BlackboxBudget)
     strategy: BlackboxStrategy = Field(default_factory=BlackboxStrategy)
     target: BlackboxTarget = Field(default_factory=BlackboxTarget)
+    proposer_runtime: Literal["worker", "vercel"] = "worker"
     reflection_model_settings: ModelConfig = Field(alias="reflection_model_config")
     token_source: Literal["managed", "byok"] = "managed"
     is_private: bool = False
@@ -195,7 +196,7 @@ class BlackboxRunRequest(BaseModel):
 
     @model_validator(mode="after")
     def _ensure_starting_point(self) -> BlackboxRunRequest:
-        """Reject starting points the engines cannot work from.
+        """Reject starting points and limits the selected engine cannot honor.
 
         Returns:
             The validated request instance.
@@ -204,7 +205,8 @@ class BlackboxRunRequest(BaseModel):
             ValueError: When the seed is blank, an empty dict, or missing
                 without an objective; when a multi-part seed is paired with
                 an engine that only takes text; or when an agent target has
-                no cases to run the agent on.
+                no cases to run the agent on; or when an iteration cap is
+                supplied outside a single Meta-Harness run.
         """
         seed = self.seed_candidate
         if seed is None:
@@ -213,7 +215,7 @@ class BlackboxRunRequest(BaseModel):
         elif isinstance(seed, dict):
             if not seed:
                 raise ValueError("A multi-part starting point needs at least one part.")
-            if self.strategy.mode == "single" and self.strategy.engine not in BLACKBOX_MULTI_PART_ENGINES:
+            if self.strategy.mode != "single" or self.strategy.engine not in BLACKBOX_MULTI_PART_ENGINES:
                 raise ValueError(
                     "Multi-part starting points are only supported by the "
                     f"{' and '.join(sorted(BLACKBOX_MULTI_PART_ENGINES))} engines."
@@ -222,6 +224,10 @@ class BlackboxRunRequest(BaseModel):
             raise ValueError("The starting point cannot be blank.")
         if self.target.kind == BLACKBOX_TARGET_AGENT and not self.cases:
             raise ValueError("An agent target needs at least one case: the tasks the agent is run on.")
+        if self.budget.max_iterations is not None and (
+            self.strategy.mode != "single" or self.strategy.engine != BLACKBOX_ENGINE_META_HARNESS
+        ):
+            raise ValueError("An iteration limit is only supported by single Meta-Harness runs.")
         return self
 
 
@@ -351,6 +357,12 @@ class BlackboxEngineInfo(BaseModel):
     supports_parts: bool = False
 
 
+class BlackboxProposerRuntimeInfo(BaseModel):
+    id: Literal["worker", "vercel"]
+    available: bool
+    unavailable_reason: str | None = None
+
+
 class BlackboxEngineCatalogResponse(BaseModel):
     target_kind: Literal["text", "agent"]
     sandbox_available: bool
@@ -359,3 +371,7 @@ class BlackboxEngineCatalogResponse(BaseModel):
     # The engines Auto's execution recipe can actually invoke here: a visible
     # catalog entry is not the same as one Auto may run.
     auto_engines: list[str] = Field(default_factory=list)
+    auto_available: bool = False
+    auto_unavailable_reason: str | None = None
+    proposer_runtimes: list[BlackboxProposerRuntimeInfo] = Field(default_factory=list)
+    upstream_revision: str | None = None

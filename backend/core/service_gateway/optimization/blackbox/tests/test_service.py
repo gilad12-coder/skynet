@@ -35,12 +35,15 @@ from core.models.blackbox import (
 )
 from core.models.results import ModelTokenUsage
 
+from .. import autoresearch as autoresearch_mod
+from .. import meta_harness as meta_harness_mod
 from .. import scorer as scorer_mod
 from .. import service as service_mod
 from ..agent_runs import PHASE_BASELINE, PHASE_FINAL
 from ..auto import LaneOutcome
 from ..harness import GatewayConfig
-from ..protocol import Candidate, EvalServer, Result, candidate_key
+from ..native_runtime import NativeOptions
+from ..protocol import Candidate, EngineContext, EvalServer, Result, Task, candidate_key
 from ..sandbox_scorer import ScorerGateway, ScorerProbeResult
 from ..service import dry_run_scorer, run_blackbox_optimization, validate_blackbox_payload
 from .mocks import (
@@ -93,6 +96,56 @@ def fake_lm(monkeypatch: pytest.MonkeyPatch) -> FakeReflectionLM:
     return lm
 
 
+@pytest.fixture
+def fake_native_proposers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, EngineContext]]:
+    """Replace paid native proposal generation while retaining upstream ensemble scheduling.
+
+    Args:
+        monkeypatch: Pytest fixture for native runtime and gateway replacements.
+
+    Returns:
+        Native invocations with the execution context received from the service.
+    """
+    invocations: list[tuple[str, EngineContext]] = []
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    monkeypatch.setattr(
+        service_mod,
+        "gateway_from_settings",
+        lambda _settings: GatewayConfig(url="https://unused.example/v1", api_key="test-key"),
+    )
+
+    def run_native(engine: str, task: Task, server: EvalServer, ctx: EngineContext) -> Result:
+        """Score a deterministic native proposal against the real budgeted evaluator.
+
+        Args:
+            engine: Native engine selected by the upstream composition.
+            task: Actual slice task passed by upstream.
+            server: Slice budget and scorer bridge.
+            ctx: Model, runtime and proposer budget passed by the service.
+
+        Returns:
+            Candidate-level aggregate evidence from the fake proposal.
+        """
+        invocations.append((engine, ctx))
+        candidate = "aeioua" if engine == "autoresearch" else "aeiouaa"
+        scores = []
+        for example in task.train_set or task.val_set or [None]:
+            if server.remaining <= 0:
+                break
+            score, _ = server.evaluate(candidate, example)
+            scores.append(score)
+        return Result(
+            best_candidate=candidate,
+            best_score=sum(scores) / len(scores) if scores else 1.0,
+            total_evals=server.used,
+            metadata={"engine": engine},
+        )
+
+    monkeypatch.setattr(autoresearch_mod, "run_native_engine", run_native)
+    monkeypatch.setattr(meta_harness_mod, "run_native_engine", run_native)
+    return invocations
+
+
 def test_run_scores_baseline_and_optimized_on_the_holdout(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
     """A single best_of_n run improves the seed and reports the split, lanes, usage and reflection timing."""
     sink: list[tuple[str, dict[str, Any]]] = []
@@ -135,7 +188,8 @@ def test_run_scores_baseline_and_optimized_on_the_holdout(fake_lm: FakeReflectio
     }
     assert response.optimization_metadata["target"]["kind"] == "text"
     assert response.details["optimizer_best_score"] == 1.0
-    assert response.details["proposals"] >= 1
+    assert response.details["n_samples"] == len(fake_lm.history)
+    assert response.details["n_parse_failures"] == 0
 
     events = [event for event, _ in sink]
     assert events[0] == PROGRESS_SPLITS_READY
@@ -155,12 +209,20 @@ def test_run_scores_baseline_and_optimized_on_the_holdout(fake_lm: FakeReflectio
     assert optimizer_events[-1][TQDM_N_KEY] == response.total_scorer_runs
 
 
-def test_auto_run_hands_off_between_engines(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
-    """The default Auto strategy explores both in-process engines and continues with GEPA."""
+def test_auto_run_hands_off_between_engines(
+    fake_lm: FakeReflectionLM, tmp_path: Path, fake_native_proposers: list[tuple[str, EngineContext]]
+) -> None:
+    """Run the exact upstream three-engine exploration recipe before GEPA continuation.
+
+    Args:
+        fake_lm: Metered model fake used by the real GEPA implementation.
+        tmp_path: Per-test artifact directory.
+        fake_native_proposers: Captured native invocations without paid model calls.
+    """
     sink: list[tuple[str, dict[str, Any]]] = []
 
     response = run_blackbox_optimization(
-        _payload(strategy={"mode": "auto"}, budget={"max_scorer_runs": 24}),
+        _payload(strategy={"mode": "auto"}, budget={"max_scorer_runs": 24}, max_cost_credits=100),
         artifact_id="job-2",
         progress_callback=lambda e, m: sink.append((e, m)),
         gepa_log_dir_path=str(tmp_path),
@@ -168,12 +230,17 @@ def test_auto_run_hands_off_between_engines(fake_lm: FakeReflectionLM, tmp_path:
 
     assert response.optimizer_name == "auto"
     assert response.strategy_mode == "auto"
-    assert [(lane.engine, lane.phase) for lane in response.lanes] == [
+    assert {(lane.engine, lane.phase) for lane in response.lanes[:3]} == {
         ("gepa", "explore"),
-        ("best_of_n", "explore"),
-        ("gepa", "continue"),
-    ]
-    assert response.engine_used in {"gepa", "best_of_n"}
+        ("autoresearch", "explore"),
+        ("meta_harness", "explore"),
+    }
+    assert (response.lanes[-1].engine, response.lanes[-1].phase) == ("gepa", "continue")
+    assert response.engine_used == "gepa"
+    assert {engine for engine, _ in fake_native_proposers} == {"autoresearch", "meta_harness"}
+    assert all(ctx.native_options.model == "fake/model" for _, ctx in fake_native_proposers)
+    assert all(ctx.native_options.runtime == "worker" for _, ctx in fake_native_proposers)
+    assert all(ctx.native_options.max_token_cost > 0 for _, ctx in fake_native_proposers)
     assert response.total_scorer_runs <= 24
     assert response.optimized_test_metric >= response.baseline_test_metric
     handoffs = [m for e, m in sink if e == PROGRESS_LANE_HANDOFF]
@@ -231,6 +298,7 @@ def test_validate_payload_checks_engine_and_scorer_code(monkeypatch: pytest.Monk
     """Validation rejects unavailable engines and unloadable scorer code, and passes clean payloads."""
     checked: list[str] = []
     monkeypatch.setattr(service_mod, "validate_scorer_code", checked.append)
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: "missing runtime")
 
     validate_blackbox_payload(_payload())
     assert checked == [VOWEL_SCORER_CODE]
@@ -292,6 +360,14 @@ def test_dry_run_bounds_python_scorers_by_the_spec_timeout(monkeypatch: pytest.M
     seen: dict[str, Any] = {}
 
     def fake_probe(**kwargs: Any) -> ScorerProbeResult:
+        """Capture scorer settings and return a successful probe.
+
+        Args:
+            **kwargs: Settings forwarded by the dry-run service.
+
+        Returns:
+            A deterministic successful scorer result.
+        """
         seen.update(kwargs)
         return ScorerProbeResult(score=1.0, side_info={}, error=None)
 
@@ -452,12 +528,20 @@ _JUDGE_SCORER_CODE = (
 )
 
 
-def test_plateau_run_relays_between_engines(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
-    """The plateau strategy relays over the engine order until a full round brings no record."""
+def test_plateau_run_relays_between_engines(
+    fake_lm: FakeReflectionLM, tmp_path: Path, fake_native_proposers: list[tuple[str, EngineContext]]
+) -> None:
+    """Preserve upstream adaptive scheduling and its shared evaluation budget.
+
+    Args:
+        fake_lm: Metered model fake used by GEPA slices.
+        tmp_path: Per-test artifact directory.
+        fake_native_proposers: Captured native invocations without paid model calls.
+    """
     sink: list[tuple[str, dict[str, Any]]] = []
 
     response = run_blackbox_optimization(
-        _payload(strategy={"mode": "plateau", "patience": 5}, budget={"max_scorer_runs": 40}),
+        _payload(strategy={"mode": "plateau", "patience": 5}, budget={"max_scorer_runs": 40}, max_cost_credits=100),
         artifact_id="job-plateau",
         progress_callback=lambda e, m: sink.append((e, m)),
         gepa_log_dir_path=str(tmp_path),
@@ -466,12 +550,171 @@ def test_plateau_run_relays_between_engines(fake_lm: FakeReflectionLM, tmp_path:
     assert response.strategy_mode == "plateau"
     assert response.lanes[0].engine == "gepa"
     assert {lane.phase for lane in response.lanes} == {"relay"}
-    assert response.lanes[0].status == "plateaued"
     assert len(response.lanes) >= 2
+    assert {engine for engine, _ in fake_native_proposers} == {"autoresearch", "meta_harness"}
     assert response.total_scorer_runs <= 40
     assert response.optimized_test_metric >= response.baseline_test_metric
-    handoffs = [m for e, m in sink if e == PROGRESS_LANE_HANDOFF]
-    assert handoffs[0] == {"from_engine": "gepa", "to_engine": "best_of_n", "best_score": 1.0, "reason": "plateaued"}
+    assert response.details["adaptive_switches"] >= 2
+    assert response.details["adaptive_schedule"][0]["engine_idx"] == 0
+    assert all(step["eval_delta"] <= 5 for step in response.details["adaptive_schedule"])
+    assert "stage_results" not in response.details
+    assert len([event for event, _ in sink if event == PROGRESS_LANE_STARTED]) == len(response.lanes)
+    assert len([event for event, _ in sink if event == PROGRESS_LANE_COMPLETED]) == len(response.lanes)
+    response.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [
+        {"mode": "auto"},
+        {"mode": "plateau"},
+        {"mode": "single", "engine": "autoresearch"},
+        {"mode": "single", "engine": "meta_harness"},
+    ],
+)
+def test_unavailable_native_recipe_fails_before_building_a_scorer(
+    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str]
+) -> None:
+    """Reject unavailable native execution before a baseline or any paid setup starts.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+        strategy: Recipe requiring native proposals.
+    """
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: "missing runtime")
+
+    def unexpected_scorer(*args: Any, **kwargs: Any) -> None:
+        """Fail if scorer construction starts for a rejected recipe.
+
+        Args:
+            *args: Unexpected scorer arguments.
+            **kwargs: Unexpected scorer options.
+        """
+        pytest.fail("Scorer was constructed before native execution was validated")
+
+    monkeypatch.setattr(service_mod, "build_scorer", unexpected_scorer)
+
+    with pytest.raises(ServiceError, match="missing runtime"):
+        run_blackbox_optimization(_payload(strategy=strategy, max_cost_credits=100), artifact_id="invalid-native")
+
+
+@pytest.mark.parametrize(
+    ("strategy", "requires_train"),
+    [
+        ({"mode": "auto"}, True),
+        ({"mode": "plateau"}, True),
+        ({"mode": "single", "engine": "meta_harness"}, True),
+        ({"mode": "single", "engine": "gepa"}, False),
+        ({"mode": "single", "engine": "autoresearch"}, False),
+    ],
+)
+@pytest.mark.parametrize("train_fraction", [0.0, 0.01])
+def test_empty_training_split_rejected_only_for_meta_harness_recipes(
+    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str], requires_train: bool, train_fraction: float
+) -> None:
+    """Protect Meta-Harness from dropping validation-only data without relocating any cases.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+        strategy: Upstream recipe being validated.
+        requires_train: Whether the recipe includes Meta-Harness.
+        train_fraction: Fraction that rounds to zero training cases.
+    """
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
+    payload = _payload(
+        strategy=strategy,
+        max_cost_credits=100,
+        split_fractions={"train": train_fraction, "val": 0.8, "test": 0.2 - train_fraction},
+    )
+    before = payload.model_dump()
+
+    def unexpected_scorer(*args: Any, **kwargs: Any) -> None:
+        """Fail if an invalid training split reaches scorer construction.
+
+        Args:
+            *args: Unexpected scorer arguments.
+            **kwargs: Unexpected scorer options.
+        """
+        pytest.fail("Invalid training split reached scorer construction")
+
+    monkeypatch.setattr(service_mod, "build_scorer", unexpected_scorer)
+    if requires_train:
+        with pytest.raises(ServiceError, match="at least one training case"):
+            run_blackbox_optimization(payload, artifact_id="empty-training")
+    else:
+        validate_blackbox_payload(payload)
+
+    assert payload.model_dump() == before
+
+
+def test_combined_usage_preserves_distinct_native_model_keys() -> None:
+    """Merge shared model usage while retaining tokens from other native model identities."""
+    lm = FakeReflectionLM(model="fake/model")
+    lm("reflection")
+    native = NativeOptions(
+        runtime="worker",
+        model="fake/model",
+        gateway=GatewayConfig(url="https://unused.example/v1", api_key="test-key"),
+        max_token_cost=1.0,
+        usage_by_model={
+            "fake/model": {"prompt_tokens": 3, "completion_tokens": 1},
+            "native/other-model": {"prompt_tokens": 7, "completion_tokens": 2},
+        },
+    )
+
+    assert service_mod._combined_usage([lm], native) == {
+        "fake/model": (13, 6),
+        "native/other-model": (7, 2),
+    }
+    assert native.usage_by_model["fake/model"] == {"prompt_tokens": 3, "completion_tokens": 1}
+
+
+@pytest.mark.parametrize(
+    ("strategy", "native"),
+    [
+        ({"mode": "auto"}, True),
+        ({"mode": "plateau"}, True),
+        ({"mode": "single", "engine": "meta_harness"}, True),
+        ({"mode": "single", "engine": "autoresearch"}, True),
+        ({"mode": "single", "engine": "gepa"}, False),
+        ({"mode": "single", "engine": "best_of_n"}, False),
+    ],
+)
+@pytest.mark.parametrize(
+    "model_options",
+    [
+        {"temperature": 0.2},
+        {"max_tokens": 4096},
+        {"base_url": "https://models.example/v1"},
+        {"extra": {"reasoning_effort": "high"}},
+    ],
+    ids=["temperature", "max-tokens", "base-url", "extra"],
+)
+def test_native_model_controls_are_rejected_without_restricting_direct_engines(
+    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str], native: bool, model_options: dict[str, Any]
+) -> None:
+    """Reject native model knobs that upstream cannot honor while retaining direct engine controls.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+        strategy: Recipe whose model controls are validated.
+        native: Whether the recipe includes an upstream native proposer.
+        model_options: Explicit sampler or routing options on the submitted model.
+    """
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    payload = _payload(
+        strategy=strategy,
+        max_cost_credits=100,
+        scorer={"kind": "remote", "url": "https://scorer.example"},
+        reflection_model_config={"name": "fake/model", **model_options},
+    )
+
+    if native:
+        with pytest.raises(ServiceError, match="custom sampling and routing settings are unsupported"):
+            validate_blackbox_payload(payload)
+    else:
+        validate_blackbox_payload(payload)
 
 
 def test_strategy_patience_has_bounds() -> None:
@@ -575,6 +818,15 @@ def test_reflection_caller_hands_chat_messages_to_the_model() -> None:
 
     class LM:
         def __call__(self, prompt: Any = None, *, messages: Any = None) -> list[str]:
+            """Record whether reflection uses a text prompt or chat messages.
+
+            Args:
+                prompt: Positional reflection text.
+                messages: Structured reflection messages.
+
+            Returns:
+                A deterministic reflection response.
+            """
             calls.append((prompt, messages))
             return ["reflected"]
 
@@ -588,17 +840,23 @@ def test_reflection_caller_hands_chat_messages_to_the_model() -> None:
 
 
 def test_run_persists_every_version_it_scored(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
-    """The result carries one entry per distinct version, in order, with scores and side info."""
+    """Record search evaluations in order and keep the baseline in its dedicated result fields.
+
+    Args:
+        fake_lm: Metered model fake used by upstream Best-of-N.
+        tmp_path: Per-test artifact directory.
+    """
     response = run_blackbox_optimization(_payload(), artifact_id="job-v", gepa_log_dir_path=str(tmp_path))
 
     assert response.versions
-    assert response.versions[0].candidate == "hello world"
-    assert {version.candidate for version in response.versions} >= {"hello world", "aeiou"}
+    assert response.seed_candidate == "hello world"
+    assert response.baseline_test_metric == pytest.approx(3 / 11)
+    assert response.versions[0].candidate == "aeiou"
     assert [version.first_run for version in response.versions] == sorted(
         version.first_run for version in response.versions
     )
     assert all(version.evals >= 1 and version.score is not None for version in response.versions)
-    assert response.versions[0].side_info == {"vowels": 3}
+    assert response.versions[0].side_info == {"vowels": 5}
     assert max(response.versions, key=lambda version: version.score or 0.0).candidate == "aeiou"
 
 
@@ -830,7 +1088,12 @@ def test_holdout_passes_share_measurements_with_the_eval_server(caplog: pytest.L
 
 
 def test_run_without_a_test_split_measures_each_pair_once(fake_lm: FakeReflectionLM, tmp_path: Path) -> None:
-    """With the training cases as the yardstick, neither held-out pass spends scorer runs the engine repeats."""
+    """Reuse a completed candidate's training scores while charging partial subsequent proposals.
+
+    Args:
+        fake_lm: Metered model fake used by upstream Best-of-N.
+        tmp_path: Per-test artifact directory.
+    """
     response = run_blackbox_optimization(
         _payload(split_fractions={"train": 1.0, "val": 0.0, "test": 0.0}),
         artifact_id="job-1",
@@ -839,7 +1102,9 @@ def test_run_without_a_test_split_measures_each_pair_once(fake_lm: FakeReflectio
 
     assert (response.split_counts.train, response.split_counts.val, response.split_counts.test) == (10, 0, 0)
     assert response.baseline_test_metric == pytest.approx(3 / 11)
-    assert response.versions[0].mean_score == pytest.approx(3 / 11)
+    assert response.versions[0].mean_score == 1.0
+    assert response.versions[0].evals == 10
     assert response.best_candidate == "aeiou"
     assert response.optimized_test_metric == response.details["optimizer_best_score"] == 1.0
-    assert response.total_scorer_runs == 10
+    assert response.total_scorer_runs == 12
+    assert response.versions[1].evals == 2

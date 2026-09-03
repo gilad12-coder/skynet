@@ -13,7 +13,14 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+from gepa.oa.budget import BudgetExhausted
+
+from ..cost_ceiling import CostCeilingExceededError
+
+if TYPE_CHECKING:
+    from .native_runtime import NativeOptions
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +188,10 @@ class EngineContext:
 
     reflection_lm: Callable[[str | list[dict[str, Any]]], str]
     run_dir: str
+    native_options: NativeOptions | None = None
+    proposer_token_budget_usd: float | None = None
+    check_budget: Callable[[], None] | None = None
+    remaining_cost_usd: Callable[[], float] | None = None
     seed: int = 0
     stop_at_score: float | None = None
     # Cap on proposer rounds for engines that iterate (Meta-Harness); ``None``
@@ -422,7 +433,7 @@ class EvalServer:
         """
         try:
             return self._scorer(candidate, example)
-        except ScorerAbortError:
+        except (ScorerAbortError, BudgetExhaustedError, BudgetExhausted, CostCeilingExceededError):
             raise
         except Exception as exc:
             logger.warning("scorer raised on a candidate: %s", exc)

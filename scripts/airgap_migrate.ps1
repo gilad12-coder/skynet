@@ -347,9 +347,23 @@ function Invoke-ValidateMigrations {
     $pkgManager = Get-OrDefault 'PKG_MANAGER' 'uv'
     $hasUv      = [bool](Get-Command uv -ErrorAction SilentlyContinue)
     $useUv      = ($pkgManager -eq 'uv') -and $hasUv
+    $gepaGitMirror = Get-OrDefault 'GEPA_GIT_MIRROR' ''
+    $gitEnvironment = @{}
+    if ($gepaGitMirror) {
+        $gitConfigIndex = [int](Get-OrDefault 'GIT_CONFIG_COUNT' '0')
+        $gitEnvironment['GIT_CONFIG_COUNT'] = [string]($gitConfigIndex + 1)
+        $gitEnvironment["GIT_CONFIG_KEY_$gitConfigIndex"] = "url.$gepaGitMirror.insteadOf"
+        $gitEnvironment["GIT_CONFIG_VALUE_$gitConfigIndex"] = 'https://github.com/gepa-ai/gepa'
+    }
+    $previousGitEnvironment = @{}
 
     Push-Location $backendDir
     try {
+        # Child processes inherit this override; finally restores the caller's environment.
+        foreach ($name in $gitEnvironment.Keys) {
+            $previousGitEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+            [Environment]::SetEnvironmentVariable($name, $gitEnvironment[$name], 'Process')
+        }
         # env.py reads REMOTE_DB_URL but `--sql` only needs the dialect, so
         # supply a placeholder when the operator hasn't set one. A real value
         # is still honoured if exported.
@@ -386,7 +400,7 @@ function Invoke-ValidateMigrations {
                 # require it — demanding it wrongly rejects otherwise-capable hosts.
                 & python -c 'import alembic, sqlalchemy, pgvector' 2>$null
                 if ($LASTEXITCODE -ne 0) {
-                    $pipArgs = @('-m', 'pip', 'install', '--quiet')
+                    $pipArgs = @('-m', 'pip', 'install', '--quiet', '--no-deps')
                     $pipIndexUrl    = Get-OrDefault 'PIP_INDEX_URL'    ''
                     $pipTrustedHost = Get-OrDefault 'PIP_TRUSTED_HOST' ''
                     if ($pipIndexUrl)    { $pipArgs += @('--index-url', $pipIndexUrl) }
@@ -411,6 +425,9 @@ function Invoke-ValidateMigrations {
         }
     }
     finally {
+        foreach ($name in $previousGitEnvironment.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $previousGitEnvironment[$name], 'Process')
+        }
         Pop-Location
     }
 
@@ -432,6 +449,8 @@ function Invoke-BuildImages {
     $pipTrustedHost  = Get-OrDefault 'PIP_TRUSTED_HOST' ''
     $baseImage       = Get-OrDefault 'BASE_IMAGE'       ''
     $npmRegistry     = Get-OrDefault 'NPM_REGISTRY'     ''
+    $gepaGitMirror   = Get-OrDefault 'GEPA_GIT_MIRROR'  ''
+    $backendNpmRegistry = Get-OrDefault 'NPM_CONFIG_REGISTRY' $npmRegistry
 
     $backendArgs = @('build', (Join-Path $RootDir 'backend'),
                      '-t', "$REGISTRY/$BACKEND_REPOSITORY`:$IMAGE_TAG",
@@ -439,6 +458,8 @@ function Invoke-BuildImages {
     if ($debianMirror)   { $backendArgs += @('--build-arg', "DEBIAN_MIRROR=$debianMirror") }
     if ($pipIndexUrl)    { $backendArgs += @('--build-arg', "PIP_INDEX_URL=$pipIndexUrl") }
     if ($pipTrustedHost) { $backendArgs += @('--build-arg', "PIP_TRUSTED_HOST=$pipTrustedHost") }
+    if ($gepaGitMirror)  { $backendArgs += @('--build-arg', "GEPA_GIT_MIRROR=$gepaGitMirror") }
+    if ($backendNpmRegistry) { $backendArgs += @('--build-arg', "NPM_CONFIG_REGISTRY=$backendNpmRegistry") }
 
     $frontendArgs = @('build', (Join-Path $RootDir 'frontend'),
                       '-t', "$REGISTRY/$FRONTEND_REPOSITORY`:$IMAGE_TAG")

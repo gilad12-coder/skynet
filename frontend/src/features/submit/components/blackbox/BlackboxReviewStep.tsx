@@ -25,14 +25,14 @@ function Row({
   children,
 }: {
   label: ReactNode;
-  tip: TooltipKey;
+  tip?: TooltipKey;
   onEdit?: () => void;
   children: ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-1 py-2.5 sm:flex-row sm:items-start sm:gap-4">
       <dt className="shrink-0 text-xs font-medium text-muted-foreground sm:w-36">
-        <HelpTip text={tipText(tip)}>{label}</HelpTip>
+        {tip ? <HelpTip text={tipText(tip)}>{label}</HelpTip> : label}
       </dt>
       <dd className="min-w-0 flex-1 text-sm text-foreground" dir="auto">
         {children}
@@ -94,6 +94,9 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
     selectedEngine,
     autoEngineLabels,
     runDisabledReason,
+    proposerRuntime,
+    nativeProposer,
+    iterationLimitSupported,
     patience,
     maxScorerRuns,
     maxIterations,
@@ -324,6 +327,18 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
             </span>
           )}
         </Row>
+        {nativeProposer && (
+          <Row
+            label={msg("submit.blackbox.runtime.label")}
+            onEdit={edit("optimization", "bb-proposer-runtime")}
+          >
+            {msg(
+              proposerRuntime === "worker"
+                ? "submit.blackbox.runtime.worker"
+                : "submit.blackbox.runtime.vercel",
+            )}
+          </Row>
+        )}
         <Row
           label={msg("submit.blackbox.review.budget")}
           tip="submit.blackbox.budget"
@@ -333,7 +348,7 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
             <Badge variant="outline">
               {formatMsg("submit.blackbox.review.budget_runs", { runs: maxScorerRuns })}
             </Badge>
-            {maxIterations !== "" && (
+            {iterationLimitSupported && maxIterations !== "" && (
               <Badge variant="outline">
                 {formatMsg("submit.blackbox.review.budget_iterations", { n: maxIterations })}
               </Badge>

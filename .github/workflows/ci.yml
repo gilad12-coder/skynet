@@ -83,8 +83,8 @@ jobs:
       # stripe, which is not installed") and two pins that cannot coexist
       # ("prometheus-fastapi-instrumentator 7.1.0 has requirement
       # starlette<1.0.0, but you have starlette 1.3.1").
-      # Both lines pin gepa 0.1.4 over dspy's hard gepa[dspy] requirement on
-      # purpose (for GEPA PxN batched sampling; see the requirements headers) —
+      # Both lines pin the same gepa git commit (reporting 0.1.4) over dspy's
+      # hard gepa[dspy] requirement for upstream OA engines and PxN sampling —
       # ==0.0.27 on the stable line (dspy 3.2.1), ==0.1.1 on the preview line
       # (dspy 3.3.0). Those two mismatch lines are filtered; everything else pip
       # check emits is a real defect.
@@ -108,7 +108,18 @@ jobs:
           import core.billing.service
           import core.worker.subprocess_runner
           import core.service_gateway.optimization
+          from gepa.oa import list_engines
+          from gepa.optimize_anything import optimize_best_of
+          assert {'gepa', 'meta_harness', 'autoresearch', 'best_of_n'} <= set(list_engines())
           print('pip-path image imports OK')
+          "
+      - name: Pinned native optimizer runtime is installed
+        run: |
+          docker run --rm --network none skynet-backend:pip-${{ matrix.dspy_line }} python -c "
+          import subprocess
+          assert subprocess.check_output(['node', '--version'], text=True).strip() == 'v22.22.0'
+          assert subprocess.check_output(['claude', '--version'], text=True).strip() == '2.1.259 (Claude Code)'
+          subprocess.run(['bwrap', '--version'], check=True)
           "
 
   frontend:

@@ -21,6 +21,7 @@ from typing import Any
 
 import dspy
 
+from ....billing.pricing import CREDIT_USD_VALUE, MARKUP, credits_for_usage, raw_cost_usd, usages_from_breakdown
 from ....config import settings
 from ....constants import (
     DETAIL_BASELINE,
@@ -46,6 +47,7 @@ from ....models.blackbox import (
     BlackboxEngineCatalogResponse,
     BlackboxEngineInfo,
     BlackboxLaneResult,
+    BlackboxProposerRuntimeInfo,
     BlackboxRunRequest,
     BlackboxRunResponse,
     BlackboxTarget,
@@ -63,19 +65,21 @@ from ...language_models import (
     usage_by_model_from_history,
 )
 from ...safe_exec import validate_scorer_code
-from ..cost_ceiling import CostCeilingCallback
+from ..cost_ceiling import CostCeilingCallback, CostCeilingExceededError
 from ..data import split_examples
 from ..timing import STAGE_TRAINING
 from .agent_eval import SandboxAgentScorer, agent_target_unavailable_reason, gateway_from_settings
 from .agent_runs import PHASE_BASELINE, PHASE_FINAL, AgentRunRecorder, AgentRunSink, run_scope
 from .auto import LaneOutcome, run_strategy
 from .feedback import without_images
+from .native_runtime import NativeOptions, native_runtime_unavailable_reason
 from .protocol import Candidate, EngineContext, EvalServer, ScorerFn, Task, candidate_key
-from .registry import ENGINES, EngineCapabilities, available_engine_ids, get_engine
+from .registry import ENGINES, EngineCapabilities, get_engine
 from .runner import side_info_json_default
 from .sandbox import sandbox_runtime_from_settings
 from .sandbox_scorer import probe_scorer
 from .scorer import JobScorer, RemoteScorer, build_scorer
+from .upstream import AUTO_ENGINES, GEPA_REVISION
 
 logger = logging.getLogger(__name__)
 
@@ -86,36 +90,51 @@ ProgressCallback = Callable[[str, dict[str, Any]], None]
 _PROGRESS_EVENTS = 100
 
 
-def engine_capabilities(target: BlackboxTarget) -> EngineCapabilities:
+def engine_capabilities(target: BlackboxTarget, proposer_runtime: str = "worker") -> EngineCapabilities:
     """Describe what this deployment and ``target`` offer the engines.
 
     Args:
         target: The job's target.
+        proposer_runtime: Runtime selected for upstream coding-agent proposers.
 
     Returns:
         Capabilities for the registry: sandboxes per the settings, agent
         target per the job.
     """
     reason = agent_target_unavailable_reason(settings)
+    proposer_reason = native_runtime_unavailable_reason(proposer_runtime, settings)
     return EngineCapabilities(
-        sandbox=reason is None, agent_target=target.kind == BLACKBOX_TARGET_AGENT, sandbox_reason=reason
+        sandbox=reason is None,
+        agent_target=target.kind == BLACKBOX_TARGET_AGENT,
+        sandbox_reason=reason,
+        proposer_available=proposer_reason is None,
+        proposer_reason=proposer_reason,
     )
 
 
-def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
+def engine_catalog(target_kind: str, proposer_runtime: str = "worker") -> BlackboxEngineCatalogResponse:
     """List every engine with its availability for a job whose target is ``target_kind``.
 
     Args:
         target_kind: ``text`` or ``agent`` — the target the wizard is building.
+        proposer_runtime: Runtime whose engine availability is requested.
 
     Returns:
         The catalog in registry order, each entry carrying the user-facing
         reason it cannot run here, when it cannot.
     """
     reason = agent_target_unavailable_reason(settings)
-    caps = EngineCapabilities(
-        sandbox=reason is None, agent_target=target_kind == BLACKBOX_TARGET_AGENT, sandbox_reason=reason
+    caps = engine_capabilities(BlackboxTarget(), proposer_runtime)
+    auto_reason = next(
+        (ENGINES[name].unavailable_reason_for(caps) for name in AUTO_ENGINES if not ENGINES[name].available_for(caps)),
+        None,
     )
+    runtimes = []
+    for runtime in ("worker", "vercel"):
+        unavailable = native_runtime_unavailable_reason(runtime, settings)
+        runtimes.append(
+            BlackboxProposerRuntimeInfo(id=runtime, available=unavailable is None, unavailable_reason=unavailable)
+        )
     return BlackboxEngineCatalogResponse(
         target_kind=target_kind,
         sandbox_available=caps.sandbox,
@@ -132,7 +151,11 @@ def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
             )
             for spec in ENGINES.values()
         ],
-        auto_engines=available_engine_ids(caps),
+        auto_engines=list(AUTO_ENGINES),
+        auto_available=auto_reason is None,
+        auto_unavailable_reason=auto_reason,
+        proposer_runtimes=runtimes,
+        upstream_revision=GEPA_REVISION,
     )
 
 
@@ -147,11 +170,34 @@ def validate_blackbox_payload(payload: BlackboxRunRequest) -> None:
             cannot run agents, the chosen engine is unknown/unavailable, or
             the python scorer code does not load.
     """
-    caps = engine_capabilities(payload.target)
+    caps = engine_capabilities(payload.target, payload.proposer_runtime)
     if caps.agent_target and not caps.sandbox:
         raise ServiceError(f"Agent targets cannot run on this deployment: {caps.sandbox_reason}")
     if payload.strategy.mode == "single":
         get_engine(str(payload.strategy.engine), caps)
+    else:
+        for name in AUTO_ENGINES:
+            get_engine(name, caps)
+    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in {"meta_harness", "autoresearch"}
+    if needs_native:
+        if payload.token_source != "managed" or payload.reflection_model_settings.token_source == "byok":
+            raise ServiceError("Upstream agent proposers currently require managed model routing.")
+        model = payload.reflection_model_settings
+        if model.temperature is not None or model.max_tokens is not None or model.base_url or model.extra:
+            raise ServiceError(
+                "Native proposers accept a model selection; custom sampling and routing settings are unsupported."
+            )
+        if payload.max_cost_credits is None:
+            raise ServiceError("Set a total credit budget before starting an upstream agent proposer.")
+        includes_meta_harness = payload.strategy.mode != "single" or payload.strategy.engine == "meta_harness"
+        if includes_meta_harness and payload.cases:
+            splits = split_examples(
+                list(payload.cases), payload.split_fractions, shuffle=payload.shuffle, seed=payload.seed
+            )
+            if not splits.train:
+                raise ServiceError("Meta-Harness and compositions containing it require at least one training case.")
+    if payload.strategy.mode == "auto" and payload.budget.max_scorer_runs < 4:
+        raise ServiceError("Auto needs at least four scorer runs.")
     if payload.scorer.kind == "python":
         validate_scorer_code(str(payload.scorer.metric_code))
 
@@ -410,24 +456,31 @@ def _reflection_caller(lm: dspy.LM) -> tuple[Callable[[str | list[dict[str, Any]
     """
     durations_ms: list[float] = []
 
-    def reflection_lm(prompt: str | list[dict[str, Any]]) -> str:
-        """Call the reflection model on ``prompt`` and return its first completion.
+    class ReflectionCaller:
+        """Expose measured proposer spend to upstream's native cost stopper."""
 
-        Args:
-            prompt: The engine's reflection prompt — text, or chat messages
-                with image parts.
+        @property
+        def total_cost(self) -> float:
+            """Return the provider cost represented by the model's usage history."""
+            return raw_cost_usd(usages_from_breakdown(usage_by_model_from_history(lm) or {}))
 
-        Returns:
-            The completion text.
-        """
-        started = time.monotonic()
-        try:
-            completions = lm(messages=prompt) if isinstance(prompt, list) else lm(prompt)
-        finally:
-            durations_ms.append((time.monotonic() - started) * 1000.0)
-        return str(completions[0])
+        def __call__(self, prompt: str | list[dict[str, Any]]) -> str:
+            """Call the selected optimization model and record its duration.
 
-    return reflection_lm, durations_ms
+            Args:
+                prompt: Text or multimodal messages generated by upstream.
+
+            Returns:
+                The first completion text.
+            """
+            started = time.monotonic()
+            try:
+                completions = lm(messages=prompt) if isinstance(prompt, list) else lm(prompt)
+            finally:
+                durations_ms.append((time.monotonic() - started) * 1000.0)
+            return str(completions[0])
+
+    return ReflectionCaller(), durations_ms
 
 
 def _reflection_activity(durations_ms: list[float]) -> LMActivity | None:
@@ -477,6 +530,7 @@ def run_blackbox_optimization(
             starting point, or no engine produced a version for a seedless job.
     """
     started = time.perf_counter()
+    validate_blackbox_payload(payload)
     base_scorer = build_scorer(payload.scorer, job_id=artifact_id)
     try:
         return _run_job(
@@ -490,6 +544,29 @@ def run_blackbox_optimization(
         )
     finally:
         base_scorer.close()
+
+
+def _combined_usage(lms: list[Any], native: NativeOptions | None) -> dict[str, tuple[int, int]]:
+    """Preserve each native model's identity when combining token accounting.
+
+    Args:
+        lms: Metered DSPy models and scorer ledgers.
+        native: Shared native usage collector, if the recipe uses one.
+
+    Returns:
+        Model-specific input/output counts across both transports.
+    """
+    usage = dict(usage_by_model_from_history(*lms) or {})
+    if native is not None:
+        with native.usage_lock:
+            snapshot = {model: dict(counts) for model, counts in native.usage_by_model.items()}
+        for model, counts in snapshot.items():
+            previous = usage.get(model, (0, 0))
+            usage[model] = (
+                previous[0] + counts.get("prompt_tokens", 0),
+                previous[1] + counts.get("completion_tokens", 0),
+            )
+    return usage
 
 
 def _run_job(
@@ -518,7 +595,7 @@ def _run_job(
     """
     scorer: ScorerFn = base_scorer
     target = payload.target
-    caps = engine_capabilities(target)
+    caps = engine_capabilities(target, payload.proposer_runtime)
     if caps.agent_target:
         scorer = _agent_scorer(
             scorer, target, job_id=artifact_id, progress_callback=progress_callback, agent_run_sink=agent_run_sink
@@ -566,6 +643,20 @@ def _run_job(
 
     lm = build_language_model(payload.reflection_model_settings, disable_cache=True)
     reflection_lm, reflection_durations_ms = _reflection_caller(lm)
+    token_budget = None if payload.max_cost_credits is None else payload.max_cost_credits * CREDIT_USD_VALUE / MARKUP
+    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in {"meta_harness", "autoresearch"}
+    native_options = None
+    if needs_native:
+        validate_blackbox_payload(payload)
+        gateway = gateway_from_settings(settings)
+        if gateway is None or token_budget is None:
+            raise ServiceError("The upstream proposer needs a gateway and a total credit budget.")
+        native_options = NativeOptions(
+            runtime=payload.proposer_runtime,
+            model=payload.reflection_model_settings.name,
+            gateway=gateway,
+            max_token_cost=token_budget,
+        )
 
     task = Task(
         seed_candidate=seed_candidate,
@@ -576,6 +667,8 @@ def _run_job(
     )
     ctx = EngineContext(
         reflection_lm=reflection_lm,
+        native_options=native_options,
+        proposer_token_budget_usd=token_budget,
         run_dir=gepa_log_dir_path or tempfile.mkdtemp(prefix=f"skynet-blackbox-{artifact_id}-"),
         seed=payload.seed or 0,
         stop_at_score=payload.budget.stop_at_score,
@@ -588,6 +681,22 @@ def _run_job(
     # the credit ceiling and the usage the worker bills.
     lms = [lm] if base_scorer.usage is None else [lm, base_scorer.usage]
     callbacks = [CostCeilingCallback(payload.max_cost_credits, *lms)] if payload.max_cost_credits is not None else []
+    if callbacks:
+
+        def check_budget() -> None:
+            """Stop engine boundaries even when DSPy has caught a callback exception."""
+            usage = usages_from_breakdown(_combined_usage(lms, native_options))
+            if credits_for_usage(usage) >= payload.max_cost_credits:
+                raise CostCeilingExceededError("The run's total credit budget has been reached.")
+
+        ctx.check_budget = check_budget
+
+        def remaining_cost_usd() -> float:
+            """Return the run allowance after measured model usage across every lane."""
+            spent = raw_cost_usd(usages_from_breakdown(_combined_usage(lms, native_options)))
+            return max(0.0, float(token_budget) - spent)
+
+        ctx.remaining_cost_usd = remaining_cost_usd
     iterations = f", up to {payload.budget.max_iterations} iteration(s)" if payload.budget.max_iterations else ""
     logger.info(
         "optimizing: mode=%s engine=%s, budget %d scorer run(s)%s",
@@ -622,7 +731,7 @@ def _run_job(
     # The reflection LM reports the gateway transport id (``litellm_proxy/…``)
     # while the scorer ledger keys by catalog id; fold them so one model is one row.
     usage: dict[str, tuple[int, int]] = {}
-    for model, in_out in (usage_by_model_from_history(*lms) or {}).items():
+    for model, in_out in _combined_usage(lms, native_options).items():
         key = canonical_model_id(model)
         prior = usage.get(key, (0, 0))
         usage[key] = (prior[0] + in_out[0], prior[1] + in_out[1])
@@ -656,7 +765,7 @@ def _run_job(
         runtime_seconds=time.perf_counter() - started,
         num_lm_calls=sum(lm_call_count(model) or 0 for model in lms),
         lm_activity=_reflection_activity(reflection_durations_ms),
-        total_tokens=total_tokens_from_history(*lms),
+        total_tokens=sum(sum(in_out) for in_out in usage.values()) or total_tokens_from_history(*lms),
         usage_by_model=[
             ModelTokenUsage(model=model, input_tokens=in_out[0], output_tokens=in_out[1])
             for model, in_out in usage.items()
@@ -665,6 +774,8 @@ def _run_job(
             "strategy": payload.strategy.model_dump(),
             "budget": payload.budget.model_dump(),
             "target": target.model_dump(),
+            "proposer_runtime": payload.proposer_runtime,
+            "upstream_revision": GEPA_REVISION,
         },
         details={"optimizer_best_score": result.best_score, **result.metadata},
     )

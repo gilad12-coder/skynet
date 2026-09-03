@@ -67,19 +67,30 @@ class FakeReflectionLM:
         self.history: list[dict[str, Any]] = []
         self.prompts: list[str] = []
 
-    def __call__(self, prompt: str, *args: Any, **kwargs: Any) -> list[str]:
+    def __call__(
+        self,
+        prompt: str | list[dict[str, Any]] | None = None,
+        *args: Any,
+        messages: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> list[str]:
         """Return one fenced completion, as the engines expect.
 
         Args:
-            prompt: The engine's reflection prompt.
+            prompt: The engine's reflection text or positional chat messages.
             *args: Ignored.
+            messages: Chat messages passed by the upstream model transport.
             **kwargs: Ignored.
 
         Returns:
             A single-element completion list.
         """
-        self.prompts.append(prompt)
-        self.history.append({"prompt": prompt, "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
+        chat = prompt if isinstance(prompt, list) else messages
+        text_prompt = (
+            prompt if isinstance(prompt, str) else "\n".join(str(message.get("content", "")) for message in chat or [])
+        )
+        self.prompts.append(text_prompt)
+        self.history.append({"prompt": text_prompt, "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
         text = ("aeiou " * len(self.history)).strip() if self.improving else "xyz"
         return [f"```\n{text}\n```"]
 

@@ -270,8 +270,9 @@ cmd_todos() {
 # imports the same env.py as the migration Job. Use this to review the exact
 # schema delta before pushing the backend image to your internal registry.
 # Honours the PKG_MANAGER toggle (uv by default, pip when set to "pip"); needs
-# no network IF the backend deps are already importable, or an internal PyPI
-# mirror is reachable via UV_INDEX_URL (uv) / PIP_INDEX_URL (pip).
+# no network IF the backend deps are already importable, or internal package
+# mirrors are reachable via UV_INDEX_URL (uv) / PIP_INDEX_URL (pip) and
+# GEPA_GIT_MIRROR for the pinned source dependency.
 cmd_validate_migrations() {
   local backend_dir="$ROOT_DIR/backend"
   local out="${MIGRATION_SQL_OUT:-$ROOT_DIR/migration.sql}"
@@ -280,6 +281,14 @@ cmd_validate_migrations() {
   }
   local pkg_manager="${PKG_MANAGER:-uv}"
   local runner=""
+  local git_env=(env)
+  if [[ -n "${GEPA_GIT_MIRROR:-}" ]]; then
+    # Append to inherited command-scoped Git settings without changing the host.
+    local git_config_index="${GIT_CONFIG_COUNT:-0}"
+    git_env+=("GIT_CONFIG_COUNT=$((git_config_index + 1))")
+    git_env+=("GIT_CONFIG_KEY_${git_config_index}=url.${GEPA_GIT_MIRROR}.insteadOf")
+    git_env+=("GIT_CONFIG_VALUE_${git_config_index}=https://github.com/gepa-ai/gepa")
+  fi
   if [[ "$pkg_manager" == "uv" ]] && command -v uv >/dev/null 2>&1; then
     # Materialize the lockfile-pinned env first. Without this the script
     # falls through to whatever 'alembic' the system Python happens to
@@ -288,7 +297,7 @@ cmd_validate_migrations() {
     # backend/Dockerfile so uv never reaches out to download a Python build;
     # if UV_INDEX_URL is set we pass it through so an internal PyPI mirror
     # satisfies the sync with no internet.
-    ( cd "$backend_dir" && UV_PYTHON_DOWNLOADS=never ${UV_INDEX_URL:+UV_INDEX_URL="$UV_INDEX_URL"} uv sync --frozen --quiet ) || {
+    ( cd "$backend_dir" && "${git_env[@]}" UV_PYTHON_DOWNLOADS=never ${UV_INDEX_URL:+UV_INDEX_URL="$UV_INDEX_URL"} uv sync --frozen --quiet ) || {
       echo "uv sync --frozen failed; resolve dep conflicts before validate-migrations" >&2
       exit 1
     }
@@ -304,7 +313,7 @@ cmd_validate_migrations() {
         echo "backend deps not importable and pip unavailable; install alembic/sqlalchemy/pgvector before validate-migrations" >&2
         exit 1
       }
-      ( cd "$backend_dir" && python3 -m pip install --quiet \
+      ( cd "$backend_dir" && "${git_env[@]}" python3 -m pip install --quiet --no-deps \
           ${PIP_INDEX_URL:+--index-url "$PIP_INDEX_URL"} \
           ${PIP_TRUSTED_HOST:+--trusted-host "$PIP_TRUSTED_HOST"} \
           -r requirements.txt ) || {
@@ -322,7 +331,7 @@ cmd_validate_migrations() {
   # supply a placeholder when the operator hasn't set one. A real value is
   # still honoured if exported.
   local db_url="${REMOTE_DB_URL:-postgresql+psycopg2://placeholder/skynet}"
-  ( cd "$backend_dir" && REMOTE_DB_URL="$db_url" $runner alembic upgrade head --sql ) >"$out"
+  ( cd "$backend_dir" && "${git_env[@]}" REMOTE_DB_URL="$db_url" $runner alembic upgrade head --sql ) >"$out"
   if [[ ! -s "$out" ]]; then
     echo "alembic produced an empty $out; aborting" >&2
     exit 1
@@ -340,6 +349,8 @@ cmd_build_images() {
   [[ -n "${DEBIAN_MIRROR:-}" ]] && backend_args+=(--build-arg "DEBIAN_MIRROR=$DEBIAN_MIRROR")
   [[ -n "${PIP_INDEX_URL:-}" ]] && backend_args+=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL")
   [[ -n "${PIP_TRUSTED_HOST:-}" ]] && backend_args+=(--build-arg "PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST")
+  [[ -n "${GEPA_GIT_MIRROR:-}" ]] && backend_args+=(--build-arg "GEPA_GIT_MIRROR=$GEPA_GIT_MIRROR")
+  [[ -n "${NPM_CONFIG_REGISTRY:-${NPM_REGISTRY:-}}" ]] && backend_args+=(--build-arg "NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY:-$NPM_REGISTRY}")
   local frontend_args=()
   [[ -n "${BASE_IMAGE:-}" ]] && frontend_args+=(--build-arg "BASE_IMAGE=$BASE_IMAGE")
   [[ -n "${NPM_REGISTRY:-}" ]] && frontend_args+=(--build-arg "NPM_REGISTRY=$NPM_REGISTRY")
