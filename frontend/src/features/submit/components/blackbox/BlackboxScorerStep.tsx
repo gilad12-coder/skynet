@@ -5,7 +5,6 @@ import { CheckCircle, CircleNotch, Play, XCircle } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
-import { Switch } from "@/shared/ui/primitives/switch";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -54,9 +53,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
     resolvedScorerModel,
     scoringModelPending,
     reflectionModel,
-    scorerModelDeclared,
-    setScorerModelDeclared,
-    scorerCodeCallsModel,
     scorerUsesModel,
     evaluatorEvidence,
     evaluatorStatus,
@@ -97,28 +93,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
 
       {scorerKind === "python" ? (
         <div className="space-y-3">
-          {/* A metric is any function; only one that calls llm() has a model
-              to pick. Code that already calls it settles the question. */}
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
-            <div className="min-w-0 space-y-0.5">
-              <Label htmlFor="bb-scorer-uses-model">
-                {msg("submit.blackbox.scorer.uses_model_label")}
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                {msg(
-                  scorerCodeCallsModel
-                    ? "submit.blackbox.scorer.uses_model_detected"
-                    : "submit.blackbox.scorer.uses_model_desc",
-                )}
-              </p>
-            </div>
-            <Switch
-              id="bb-scorer-uses-model"
-              checked={scorerUsesModel}
-              disabled={scorerCodeCallsModel}
-              onCheckedChange={setScorerModelDeclared}
-            />
-          </div>
           {scorerUsesModel && (
             <div
               id="bb-scoring-model"

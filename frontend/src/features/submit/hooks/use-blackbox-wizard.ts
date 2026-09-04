@@ -44,6 +44,7 @@ import type { ValidationResult } from "@/shared/ui/code-editor";
 import { defaultSplit, emptyModelConfig, type ColumnRole } from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { suggestedRunName } from "../lib/budget";
+import { detectLanguage, looksLikeCode, type SeedLanguage } from "../lib/seed-format";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import { focusField } from "../lib/focus-field";
 import { preflightDestination } from "../lib/preflight-destination";
@@ -96,6 +97,12 @@ export type SeedMode = "text" | "parts" | "none";
 // The wizard offers two kinds of starting point. Runs saved before the
 // prompt kind folded into text still carry "prompt"; they land on text.
 export type BlackboxRecipe = "code" | "anything";
+
+interface SeedGuess {
+  code: boolean;
+  language: SeedLanguage | null;
+}
+const NO_GUESS: SeedGuess = { code: false, language: null };
 
 /** Maps a stored or linked recipe onto the kinds the wizard offers. */
 export function wizardRecipe(value: string | null | undefined): BlackboxRecipe {
@@ -207,8 +214,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [jobDescription, setJobDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(true);
 
-  // The kind of starting point — a prompt, code or any other text. Chosen in
-  // the Starting point step; the picker's link only seeds it.
+  // The kind of starting point — a prompt, code or any other text. It follows
+  // what the seed reads as; the picker's link, a draft or a clone only seeds it.
   const [recipe, setRecipeState] = useState<BlackboxRecipe>(initialRecipe);
 
   const [codeAssistMode, setCodeAssistMode] = useState<"auto" | "manual">(() =>
@@ -298,23 +305,23 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // The kind only seeds the scorer: a scorer still on the outgoing kind's
   // template follows the switch, while anything the user or the agent wrote
   // stays put.
-  const setRecipe = (next: BlackboxRecipe) => {
-    if (metricCode === scorerTemplateFor(recipe)) setMetricCode(scorerTemplateFor(next));
-    setRecipeState(next);
-  };
+  const setRecipe = useCallback(
+    (next: BlackboxRecipe) => {
+      if (metricCode === scorerTemplateFor(recipe)) setMetricCode(scorerTemplateFor(next));
+      setRecipeState(next);
+    },
+    [metricCode, recipe],
+  );
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
   const [scorerInstall, setScorerInstall] = useState("");
-  // A metric is any function; only one that calls `llm()` needs a model.
-  // The Scorer step asks whether it does, and code that already calls
-  // `llm()` answers for itself.
+  // A metric is any function; only one that calls `llm()` needs a model, and
+  // the code says whether it does.
   const [scorerModel, setScorerModel] = useState<ModelConfig>(emptyModelConfig());
-  const [scorerModelDeclared, setScorerModelDeclared] = useState(false);
   // The scoring model inherits the optimization model until the user picks
   // one of its own; `scorerModel` only speaks when the mode is explicit.
   const [scorerModelMode, setScorerModelMode] = useState<ScoringModelMode>("inherit");
-  const scorerCodeCallsModel = scorerCallsModel(metricCode);
-  const scorerUsesModel = scorerKind === "python" && (scorerModelDeclared || scorerCodeCallsModel);
+  const scorerUsesModel = scorerKind === "python" && scorerCallsModel(metricCode);
   const [dryRun, setDryRun] = useState<DryRunState>({ status: "idle" });
   const dryRunAttemptRef = useRef(0);
   const updateScorerSecret = useCallback((value: string) => {
@@ -431,7 +438,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerUrl(d.scorerUrl);
     setScorerInstall(d.scorerInstall);
     setScorerModel(d.scorerModel);
-    setScorerModelDeclared(d.scorerModelDeclared);
     setScorerModelMode(d.scorerModelMode);
     setStrategyMode(d.strategyMode);
     setEngine(d.engine);
@@ -460,12 +466,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     let cancelled = false;
     getBlackboxEngines(targetKind)
       .then((res) => {
-        if (!cancelled)
-          setEngineCatalogResult({ target: targetKind, data: res });
+        if (!cancelled) setEngineCatalogResult({ target: targetKind, data: res });
       })
       .catch(() => {
-        if (!cancelled)
-          setEngineCatalogResult({ target: targetKind, data: null });
+        if (!cancelled) setEngineCatalogResult({ target: targetKind, data: null });
       });
     return () => {
       cancelled = true;
@@ -563,7 +567,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             // the optimization model: the field alone cannot say it was inherited.
             if (scorer.kind === "python" && scorer.model?.name) {
               setScorerModel({ ...emptyModelConfig(), ...scorer.model });
-              setScorerModelDeclared(true);
               setScorerModelMode("explicit");
             }
           }
@@ -594,6 +597,32 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         toast.error(msg("submit.clone.failed"));
       });
   }, [searchParams]);
+
+  // What the seed reads as, latched until the seed is cleared so the editor
+  // never swaps out from under the caret while a snippet is typed or trimmed.
+  // The kind follows the same reading, so an agent-written seed and a pasted
+  // one land on the same scorer template.
+  const seedSample = seedMode === "text" ? seedText : seedParts.map((p) => p.value).join("\n");
+  const [seedGuess, setSeedGuess] = useState<SeedGuess>(NO_GUESS);
+  useEffect(() => {
+    if (!seedSample.trim()) {
+      setSeedGuess(NO_GUESS);
+      return;
+    }
+    const language = detectLanguage(seedSample);
+    const code = language !== null || looksLikeCode(seedSample);
+    if (code) {
+      setSeedGuess((prev) =>
+        prev.code && (!language || prev.language === language)
+          ? prev
+          : { code: true, language: language ?? prev.language },
+      );
+    }
+    if (seedMode === "none") return;
+    const detected: BlackboxRecipe = code || seedGuess.code ? "code" : "anything";
+    if (detected !== recipe) setRecipe(detected);
+  }, [seedSample, seedMode, seedGuess.code, recipe, setRecipe]);
+  const seedIsCode = recipe === "code" || seedGuess.code;
 
   const seedCandidate = useMemo<BlackboxCandidate | null>(() => {
     if (seedMode === "none") return null;
@@ -626,7 +655,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
             install_command: scorerInstall.trim() || null,
             model:
-              (scorerModelDeclared || scorerCallsModel(code)) && resolvedScorerModel?.name.trim()
+              scorerCallsModel(code) && resolvedScorerModel?.name.trim()
                 ? prepareModelConfig(resolvedScorerModel)
                 : null,
           }
@@ -636,15 +665,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             secret: scorerSecret.trim() || undefined,
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
           },
-    [
-      scorerKind,
-      metricCode,
-      scorerUrl,
-      scorerSecret,
-      scorerInstall,
-      scorerModelDeclared,
-      resolvedScorerModel,
-    ],
+    [scorerKind, metricCode, scorerUrl, scorerSecret, scorerInstall, resolvedScorerModel],
   );
 
   const buildTarget = (): BlackboxTarget =>
@@ -753,8 +774,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             : { mode: "auto" },
       proposer_runtime: proposerRuntime,
       target: buildTarget(),
-      task_model_config:
-        targetKind === "agent" ? prepareModelConfig(targetModel) : undefined,
+      task_model_config: targetKind === "agent" ? prepareModelConfig(targetModel) : undefined,
       reflection_model_config: reflection,
       token_source: tokenSource,
       is_private: isPrivate,
@@ -994,14 +1014,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       trainingCaseCount,
     });
     return issue ? msg(issue.key, issue.params) : null;
-  }, [
-    engineCatalog,
-    engineCatalogFailed,
-    strategyMode,
-    engine,
-    seedMode,
-    trainingCaseCount,
-  ]);
+  }, [engineCatalog, engineCatalogFailed, strategyMode, engine, seedMode, trainingCaseCount]);
   const optimizationFamily = optimizationModelFamily(strategyMode, engine);
 
   const validateStep = (s: number, showToast = false): boolean => {
@@ -1036,8 +1049,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return fail("submit.blackbox.validation.scorer_code_required", "bb-scorer-code");
         if (scorerUsesModel && scorerModelMode === "explicit" && !scorerModel.name.trim())
           return fail("submit.blackbox.validation.scorer_model_required", "bb-scoring-model");
-        if (scorerKind === "python" && scorerModelDeclared && !scorerCodeCallsModel)
-          return fail("submit.blackbox.validation.scorer_llm_unused", "bb-scorer-uses-model");
         if (scorerKind === "remote" && !/^https?:\/\/\S+$/.test(scorerUrl.trim()))
           return fail("submit.blackbox.validation.scorer_url_required", "bb-scorer-url");
         if (parsedCases && Math.abs(split.train + split.val + split.test - 1) > 0.001)
@@ -1307,7 +1318,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       scorerUrl,
       scorerInstall,
       scorerModel: safeScorerModel,
-      scorerModelDeclared,
       scorerModelMode,
       strategyMode,
       engine,
@@ -1374,6 +1384,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     seedParts,
     setSeedParts,
     seedCandidate,
+    seedIsCode,
+    seedLanguage: seedGuess.language,
     objective,
     setObjective,
     background,
@@ -1417,9 +1429,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerInstall,
     scorerModel,
     setScorerModel,
-    scorerModelDeclared,
-    setScorerModelDeclared,
-    scorerCodeCallsModel,
     scorerUsesModel,
     scorerModelMode,
     setScorerModelMode,

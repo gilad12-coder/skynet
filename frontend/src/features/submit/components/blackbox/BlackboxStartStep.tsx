@@ -1,29 +1,18 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { msg } from "@/shared/lib/messages";
 
-import type {
-  BlackboxRecipe,
-  BlackboxWizardContext,
-  SeedMode,
-} from "../../hooks/use-blackbox-wizard";
-import { detectLanguage, looksLikeCode, type SeedLanguage } from "../../lib/seed-format";
+import type { BlackboxWizardContext, SeedMode } from "../../hooks/use-blackbox-wizard";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
 import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
 import { Field, MOBILE_INPUT_CLASS, Segmented, TEXTAREA_CLASS } from "./shared";
-
-interface SeedGuess {
-  code: boolean;
-  language: SeedLanguage | null;
-}
-const NO_GUESS: SeedGuess = { code: false, language: null };
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
   ssr: false,
@@ -41,7 +30,8 @@ export function BlackboxStartStep({
 }) {
   const {
     recipe,
-    setRecipe,
+    seedIsCode,
+    seedLanguage,
     codeAssistMode,
     interviewEligible,
     agent,
@@ -61,25 +51,7 @@ export function BlackboxStartStep({
   const updatePart = (i: number, patch: { key?: string; value?: string }) =>
     setSeedParts(seedParts.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
 
-  // What the seed reads as, latched until the seed is cleared so the editor
-  // never swaps out from under the caret while a snippet is typed or trimmed.
-  // The code kind is always code.
-  const [seedGuess, setSeedGuess] = useState<SeedGuess>(NO_GUESS);
-  useEffect(() => {
-    if (!seedText.trim()) {
-      setSeedGuess(NO_GUESS);
-      return;
-    }
-    const language = detectLanguage(seedText);
-    if (!language && !looksLikeCode(seedText)) return;
-    setSeedGuess((prev) =>
-      prev.code && (!language || prev.language === language)
-        ? prev
-        : { code: true, language: language ?? prev.language },
-    );
-  }, [seedText]);
-  const seedIsCode = recipe === "code" || seedGuess.code;
-  const seedLanguage = seedGuess.language ?? (recipe === "code" ? "Python" : "text");
+  const editorLanguage = seedLanguage ?? (recipe === "code" ? "Python" : "text");
 
   // The code kind names its starting point in its own words; text keeps the
   // generic copy.
@@ -160,8 +132,8 @@ export function BlackboxStartStep({
                   setSeedManuallyEdited(true);
                 }}
                 height="420px"
-                language={seedLanguage}
-                label={seedGuess.language ?? msg("submit.blackbox.start.seed_editor_label")}
+                language={editorLanguage}
+                label={seedLanguage ?? msg("submit.blackbox.start.seed_editor_label")}
                 streaming={codeAssistMode === "auto" && agent.signatureStatus === "writing"}
                 flashLines={codeAssistMode === "auto" ? agent.signatureFlashLines : undefined}
               />
@@ -279,32 +251,7 @@ export function BlackboxStartStep({
       title={part === "objective" ? msg("submit.blackbox.start.objective_label") : seedLabel}
       description={msg("submit.blackbox.start.desc")}
     >
-      {part === "objective" ? (
-        <>
-          <Field label={msg("submit.blackbox.start.kind_label")} tip="submit.blackbox.kind">
-            <Segmented<BlackboxRecipe>
-              label={msg("submit.blackbox.start.kind_label")}
-              value={recipe}
-              onChange={setRecipe}
-              options={[
-                {
-                  value: "anything",
-                  label: msg("submit.blackbox.start.kind.anything"),
-                  desc: msg("submit.blackbox.start.kind.anything_desc"),
-                },
-                {
-                  value: "code",
-                  label: msg("submit.blackbox.start.kind.code"),
-                  desc: msg("submit.blackbox.start.kind.code_desc"),
-                },
-              ]}
-            />
-          </Field>
-          {objectiveFields}
-        </>
-      ) : (
-        seedFields
-      )}
+      {part === "objective" ? objectiveFields : seedFields}
     </BlackboxAuthoringShell>
   );
 }

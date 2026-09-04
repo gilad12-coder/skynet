@@ -122,7 +122,6 @@ export function BlackboxWizard({
     } else if (
       (w.scorerKind === "python" && !w.metricCode.trim()) ||
       (w.scorerUsesModel && w.scorerModelMode === "explicit" && !w.scorerModel.name.trim()) ||
-      (w.scorerKind === "python" && w.scorerModelDeclared && !w.scorerCodeCallsModel) ||
       (w.scorerKind === "remote" && !/^https?:\/\/\S+$/.test(w.scorerUrl.trim()))
     ) {
       setEvaluationPart(2);
