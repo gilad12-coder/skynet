@@ -49,6 +49,10 @@ export function BlackboxAuthoringShell({
         ) : (
           <CodeAgentPanel
             agent={agent}
+            model={interview.model}
+            onModelChange={interview.setModel}
+            reasoningEffort={interview.reasoningEffort}
+            onReasoningEffortChange={interview.setReasoningEffort}
             disabled={!!disabledReason}
             disabledReason={disabledReason}
             blackbox

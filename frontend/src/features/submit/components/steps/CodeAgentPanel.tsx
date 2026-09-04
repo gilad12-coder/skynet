@@ -6,7 +6,13 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
 import { TERMS } from "@/shared/lib/terms";
-import { AgentThread, ChatErrorBanner, ChatTranscript, Composer } from "@/shared/ui/agent";
+import {
+  AgentThread,
+  ChatErrorBanner,
+  ChatTranscript,
+  Composer,
+  ComposerModelMenu,
+} from "@/shared/ui/agent";
 import { ActivityBreadcrumb } from "@/shared/ui/agent/activity-breadcrumb";
 import type { AgentToolCall as SharedAgentToolCall } from "@/shared/ui/agent";
 import { EmptyState as SharedEmptyState } from "@/shared/ui/empty-state";
@@ -22,9 +28,23 @@ interface Props {
   className?: string;
   /** Black-box wizard: the agent drafts a starting point + scorer, not DSPy code. */
   blackbox?: boolean;
+  model: string | null;
+  onModelChange: (model: string | null) => void;
+  reasoningEffort: string | null;
+  onReasoningEffortChange: (effort: string | null) => void;
 }
 
-export function CodeAgentPanel({ agent, disabled, disabledReason, className, blackbox }: Props) {
+export function CodeAgentPanel({
+  agent,
+  disabled,
+  disabledReason,
+  className,
+  blackbox,
+  model,
+  onModelChange,
+  reasoningEffort,
+  onReasoningEffortChange,
+}: Props) {
   const [draft, setDraft] = React.useState("");
 
   const streaming = agent.status === "streaming";
@@ -147,6 +167,14 @@ export function CodeAgentPanel({ agent, disabled, disabledReason, className, bla
         }
         disabled={disabled}
         streaming={streaming}
+        modelMenu={
+          <ComposerModelMenu
+            value={model}
+            onChange={onModelChange}
+            effort={reasoningEffort}
+            onEffortChange={onReasoningEffortChange}
+          />
+        }
       />
     </div>
   );

@@ -2522,6 +2522,8 @@ export function useSubmitWizard() {
     // The conversation rides through the locale-switch reload alongside the
     // wizard draft (see use-wizard-drafts.tsx).
     reloadPersistKey: "submit-code-agent",
+    model: interview.model,
+    reasoningEffort: interview.reasoningEffort,
   });
   useEffect(() => {
     agentResetRef.current = agent.reset;

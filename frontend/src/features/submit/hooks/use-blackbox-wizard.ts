@@ -938,6 +938,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     seedEnabled: interview.resolved,
     interviewBrief: interview.confirmedBrief,
     blackbox: authoringContext,
+    model: interview.model,
+    reasoningEffort: interview.reasoningEffort,
   });
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

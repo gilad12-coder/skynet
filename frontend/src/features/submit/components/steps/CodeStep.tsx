@@ -192,6 +192,10 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "module" |
   ) : (
     <CodeAgentPanel
       agent={agent}
+      model={interview.model}
+      onModelChange={interview.setModel}
+      reasoningEffort={interview.reasoningEffort}
+      onReasoningEffortChange={interview.setReasoningEffort}
       disabled={!hasContext}
       disabledReason={disabledReason}
       className="absolute inset-0"
@@ -283,6 +287,10 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "module" |
                 ) : (
                   <CodeAgentPanel
                     agent={agent}
+                    model={interview.model}
+                    onModelChange={interview.setModel}
+                    reasoningEffort={interview.reasoningEffort}
+                    onReasoningEffortChange={interview.setReasoningEffort}
                     disabled={!hasContext}
                     disabledReason={disabledReason}
                   />
