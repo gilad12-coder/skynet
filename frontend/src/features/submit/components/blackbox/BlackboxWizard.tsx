@@ -55,7 +55,7 @@ export function BlackboxWizard({
   const activeEvaluationStep: EvaluationStep = evaluationSteps[activeEvaluationPart] ?? "budget";
   const goToEvaluation = (key: EvaluationStep) =>
     setEvaluationPart(Math.max(0, evaluationSteps.indexOf(key)));
-  const optimizationSteps = ["strategy", "model", "limits", "checks"] as const;
+  const optimizationSteps = ["strategy", "model", "checks"] as const;
   const reviewSteps = ["details", "summary"] as const;
 
   const goalPanels: readonly ReactNode[] = [<BlackboxStartStep key="goal" w={w} header={header} />];
@@ -78,7 +78,6 @@ export function BlackboxWizard({
   const optimizationPanels: readonly ReactNode[] = [
     <BlackboxOptimizerStep key="strategy" w={w} part="strategy" />,
     <BlackboxOptimizerStep key="model" w={w} part="model" />,
-    <BlackboxOptimizerStep key="limits" w={w} part="limits" />,
     <PreflightChecks key="checks" preflight={w.preflight} scope="execution" />,
   ];
   const handleEditField = (stage: WizardStageId, field?: string) => {
@@ -92,8 +91,7 @@ export function BlackboxWizard({
       else goToEvaluation("checks");
     }
     if (stage === "optimization") {
-      if (field === "bb-optimization-model") setOptimizationPart(1);
-      else if (field === "bb-max-runs") setOptimizationPart(2);
+      if (field === "bb-optimization-model" || field === "bb-max-runs") setOptimizationPart(1);
       else setOptimizationPart(0);
     }
     w.goTo(WIZARD_STAGE[stage]);
@@ -151,7 +149,7 @@ export function BlackboxWizard({
         return;
       }
       const modelIssue = !w.reflectionModel.name.trim();
-      setOptimizationPart(modelIssue ? 1 : w.maxCostCredits == null ? 2 : 0);
+      setOptimizationPart(modelIssue || w.maxCostCredits == null ? 1 : 0);
       return;
     }
     await w.handleNext();

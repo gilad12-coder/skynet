@@ -41,7 +41,13 @@ import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import type { ValidationResult } from "@/shared/ui/code-editor";
 
-import { defaultSplit, emptyModelConfig, type ColumnRole } from "../constants";
+import {
+  DEFAULT_TARGET_CONCURRENCY,
+  DEFAULT_TARGET_TIMEOUT,
+  defaultSplit,
+  emptyModelConfig,
+  type ColumnRole,
+} from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { suggestedRunName } from "../lib/budget";
 import { detectLanguage, looksLikeCode, type SeedLanguage } from "../lib/seed-format";
@@ -241,8 +247,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // through the platform gateway, so the rest of the config would be dead
   // weight.
   const [targetModel, setTargetModel] = useState<ModelConfig>({ name: "" });
-  const [targetTimeout, setTargetTimeout] = useState(600);
-  const [targetConcurrency, setTargetConcurrency] = useState(2);
+  const [targetTimeout, setTargetTimeout] = useState(DEFAULT_TARGET_TIMEOUT);
+  const [targetConcurrency, setTargetConcurrency] = useState(DEFAULT_TARGET_CONCURRENCY);
 
   const [parsedCases, setParsedCases] = useState<ParsedDataset | null>(null);
   const [casesName, setCasesName] = useState("");

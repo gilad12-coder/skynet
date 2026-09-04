@@ -11,6 +11,10 @@ export const emptyModelConfig = (): ModelConfig => ({
 });
 
 export const defaultSplit: SplitFractions = { train: 0.7, val: 0.15, test: 0.15 };
+// Sandbox limits for agent-run candidates; the wizard folds them away until
+// they differ from these.
+export const DEFAULT_TARGET_TIMEOUT = 600;
+export const DEFAULT_TARGET_CONCURRENCY = 2;
 
 // A dataset column's role. React is now a generic GEPA module, so every run —
 // react included — maps columns to signature I/O exactly the same way.
