@@ -44,7 +44,8 @@ export function StepCard({
         <CardTitle className="text-lg">{title}</CardTitle>
         {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
-      <CardContent className="space-y-5 px-4 sm:px-6">{children}</CardContent>
+      {/* Positioned so an expanded textarea covers the fields, not the page. */}
+      <CardContent className="relative space-y-5 px-4 sm:px-6">{children}</CardContent>
     </Card>
   );
 }
@@ -55,6 +56,7 @@ export function Field({
   hint,
   tip,
   trailing,
+  className,
   children,
 }: {
   label: ReactNode;
@@ -64,11 +66,13 @@ export function Field({
   tip?: TooltipKey;
   // Rendered at the end of the label row (status chips, version steppers).
   trailing?: ReactNode;
+  // Root classes, e.g. to let the field fill a flex column.
+  className?: string;
   children: ReactNode;
 }) {
   const labelNode = tip ? <HelpTip text={tipText(tip)}>{label}</HelpTip> : label;
   return (
-    <div className="space-y-2">
+    <div className={cn("flex flex-col gap-2", className)}>
       {trailing ? (
         <div className="flex items-center justify-between gap-2">
           <Label htmlFor={htmlFor}>{labelNode}</Label>

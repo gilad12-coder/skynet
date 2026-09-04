@@ -108,7 +108,16 @@ const WorkflowCanvas = dynamic(
   { ssr: false, loading: () => <Skeleton height={480} borderRadius={8} /> },
 );
 
-export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "module" | "code" }) {
+export function CodeStep({
+  w,
+  part,
+  header,
+}: {
+  w: SubmitWizardContext;
+  part: "module" | "code";
+  // The recipe chip, seated in the module picker's header band on the Goal stage.
+  header?: React.ReactNode;
+}) {
   const {
     isWorkflow,
     isReact,
@@ -256,7 +265,7 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "module" |
 
   let content: React.ReactNode;
   if (view === "picker") {
-    content = <ModulePicker current={moduleName} onChoose={handleModuleChoose} />;
+    content = <ModulePicker current={moduleName} onChoose={handleModuleChoose} header={header} />;
   } else if (view === "workflow") {
     content = (
       <AuthoringShell
@@ -411,9 +420,11 @@ function MobileCodeEditorActions({ children }: { children: React.ReactNode }) {
 function ModulePicker({
   current,
   onChoose,
+  header,
 }: {
   current: string;
   onChoose: (module: string) => void;
+  header?: React.ReactNode;
 }) {
   // Two tiers: first the composition (a single module vs a workflow), then —
   // for "single" — the atomic-module carousel. The step swaps the picker out
@@ -437,37 +448,46 @@ function ModulePicker({
   };
 
   return (
-    // A container, not a breakpoint: the step card is max-w-5xl in auto mode
-    // and max-w-2xl in manual, so only its own width can say whether a slide
-    // (or the two composition cards) has room to sit side by side.
     <div
-      className="@container rounded-2xl border border-border/50 bg-card/80 px-4 py-5 shadow-lg backdrop-blur-xl sm:px-8 sm:py-7"
+      className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg backdrop-blur-xl"
       data-tutorial="module-selector"
     >
-      <AnimatePresence mode="wait" initial={false} custom={tierOffset}>
-        <motion.div
-          key={tier}
-          custom={tierOffset}
-          variants={MODULE_TIER_VARIANTS}
-          initial="enter"
-          animate="center"
-          exit="exit"
-          transition={prefersReducedMotion ? { duration: 0 } : MODULE_TIER_TRANSITION}
-        >
-          {tier === "composition" ? (
-            <CompositionChoice
-              onSingle={showAtomicModules}
-              onWorkflow={() => onChoose("workflow")}
-            />
-          ) : (
-            <AtomicModulePicker
-              current={current}
-              onChoose={onChoose}
-              onBack={showCompositionChoice}
-            />
-          )}
-        </motion.div>
-      </AnimatePresence>
+      {/* The same header band as the authoring shell, so the recipe chip
+          reads as part of this card rather than a strip floating above it. */}
+      {header && (
+        <div className="flex items-center border-b border-border/40 bg-[#FAF8F5] px-4 py-2.5">
+          {header}
+        </div>
+      )}
+      {/* A container, not a breakpoint: the step card is max-w-5xl in auto
+          mode and max-w-2xl in manual, so only its own width can say whether
+          a slide (or the two composition cards) has room to sit side by side. */}
+      <div className="@container px-4 py-5 sm:px-8 sm:py-7">
+        <AnimatePresence mode="wait" initial={false} custom={tierOffset}>
+          <motion.div
+            key={tier}
+            custom={tierOffset}
+            variants={MODULE_TIER_VARIANTS}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={prefersReducedMotion ? { duration: 0 } : MODULE_TIER_TRANSITION}
+          >
+            {tier === "composition" ? (
+              <CompositionChoice
+                onSingle={showAtomicModules}
+                onWorkflow={() => onChoose("workflow")}
+              />
+            ) : (
+              <AtomicModulePicker
+                current={current}
+                onChoose={onChoose}
+                onBack={showCompositionChoice}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

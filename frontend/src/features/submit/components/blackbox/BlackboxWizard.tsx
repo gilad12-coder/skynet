@@ -17,7 +17,7 @@ import { SubmitNav } from "../SubmitNav";
 import { ModelConfigModal } from "../ModelConfigModal";
 import { PreflightChecks } from "../PreflightChecks";
 import { TotalBudgetCard } from "../TotalBudgetCard";
-import { WizardSubsteps, type WizardSubstep } from "../WizardSubsteps";
+import { WizardSubsteps } from "../WizardSubsteps";
 import { SplitSection } from "../steps/SplitSection";
 import { BlackboxBasicsStep } from "./BlackboxBasicsStep";
 import { BlackboxStartStep } from "./BlackboxStartStep";
@@ -40,35 +40,14 @@ export function BlackboxWizard({
   const [optimizationPart, setOptimizationPart] = useState(0);
   const [reviewPart, setReviewPart] = useState(0);
 
-  const goalSteps: readonly WizardSubstep[] = [
-    { id: "objective", label: msg("submit.blackbox.start.objective_label") },
-    { id: "seed", label: msg("submit.blackbox.start.seed_label") },
-  ];
-  const evaluationSteps: readonly WizardSubstep[] = [
-    { id: "budget", label: msg("submit.budget.label") },
-    { id: "cases", label: msg("submit.blackbox.cases.title") },
-    { id: "scorer", label: msg("submit.blackbox.scorer.title") },
-    { id: "execution", label: msg("submit.blackbox.execution.title") },
-    {
-      id: "split",
-      label: `${msg("auto.features.submit.components.steps.paramsstep.4")}${TERMS.dataset}`,
-    },
-    { id: "checks", label: msg("submit.preflight.evaluation") },
-  ];
-  const optimizationSteps: readonly WizardSubstep[] = [
-    { id: "strategy", label: msg("submit.blackbox.review.strategy") },
-    { id: "model", label: msg("submit.blackbox.roles.optimization.label") },
-    { id: "limits", label: msg("submit.blackbox.budget.max_runs") },
-    { id: "checks", label: msg("submit.preflight.execution") },
-  ];
-  const reviewSteps: readonly WizardSubstep[] = [
-    { id: "details", label: msg("auto.features.submit.components.steps.basicsstep.1") },
-    { id: "summary", label: msg("auto.features.submit.constants.literal.4") },
-  ];
+  const goalSteps = ["objective", "seed"] as const;
+  const evaluationSteps = ["budget", "cases", "scorer", "execution", "split", "checks"] as const;
+  const optimizationSteps = ["strategy", "model", "limits", "checks"] as const;
+  const reviewSteps = ["details", "summary"] as const;
 
   const goalPanels: readonly ReactNode[] = [
-    <BlackboxStartStep key="objective" w={w} part="objective" />,
-    <BlackboxStartStep key="seed" w={w} part="seed" />,
+    <BlackboxStartStep key="objective" w={w} part="objective" header={header} />,
+    <BlackboxStartStep key="seed" w={w} part="seed" header={header} />,
   ];
   const evaluationPanels: readonly ReactNode[] = [
     <TotalBudgetCard key="budget" w={w} mode={w.tokenSource} />,
@@ -177,13 +156,7 @@ export function BlackboxWizard({
 
   const stageViews: Record<WizardStageId, ReactNode> = {
     goal: (
-      <WizardSubsteps
-        active={goalPart}
-        ariaLabel={msg("submit.stage.goal")}
-        idPrefix="anything-goal"
-        onSelect={setGoalPart}
-        steps={goalSteps}
-      >
+      <WizardSubsteps active={goalPart} ariaLabel={msg("submit.stage.goal")} steps={goalSteps}>
         {goalPanels[goalPart]}
       </WizardSubsteps>
     ),
@@ -191,8 +164,6 @@ export function BlackboxWizard({
       <WizardSubsteps
         active={evaluationPart}
         ariaLabel={msg("submit.stage.evaluation")}
-        idPrefix="anything-evaluation"
-        onSelect={setEvaluationPart}
         steps={evaluationSteps}
       >
         {evaluationPanels[evaluationPart]}
@@ -202,8 +173,6 @@ export function BlackboxWizard({
       <WizardSubsteps
         active={optimizationPart}
         ariaLabel={msg("submit.stage.optimization")}
-        idPrefix="anything-optimization"
-        onSelect={setOptimizationPart}
         steps={optimizationSteps}
       >
         {optimizationPanels[optimizationPart]}
@@ -213,8 +182,6 @@ export function BlackboxWizard({
       <WizardSubsteps
         active={reviewPart}
         ariaLabel={msg("submit.stage.review")}
-        idPrefix="anything-review"
-        onSelect={setReviewPart}
         steps={reviewSteps}
       >
         {reviewPanels[reviewPart]}
@@ -252,19 +219,18 @@ export function BlackboxWizard({
             ? () => setReviewPart((current) => current + 1)
             : w.handleNext;
   const showSubmit = w.step === WIZARD_STAGE.review && reviewPart === reviewSteps.length - 1;
+  // Auto mode seats the agent pane beside the form on both Goal substeps and
+  // the scorer, so those take the wide column; plain forms keep the narrow one.
   const wideAuthoringPanel =
     w.codeAssistMode === "auto" &&
-    ((w.step === WIZARD_STAGE.goal && goalPart === 1) ||
-      (w.step === WIZARD_STAGE.evaluation && evaluationPart === 2));
-  const containerWidthClass = wideAuthoringPanel ? "max-w-5xl" : "max-w-2xl";
+    (w.step === WIZARD_STAGE.goal || (w.step === WIZARD_STAGE.evaluation && evaluationPart === 2));
+  const containerWidthClass = wideAuthoringPanel ? "max-w-6xl" : "max-w-2xl";
 
   return (
     <div
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
       <SubmitStepper w={w} />
-
-      {w.step === WIZARD_STAGE.goal && header && <div className="mb-2">{header}</div>}
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">
         <AnimatePresence mode="wait" custom={w.direction}>

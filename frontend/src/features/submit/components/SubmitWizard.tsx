@@ -5,11 +5,10 @@ import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "react-toastify";
 
 import { msg } from "@/shared/lib/messages";
-import { TERMS } from "@/shared/lib/terms";
 
 import { PreflightChecks } from "./PreflightChecks";
 import { TotalBudgetCard } from "./TotalBudgetCard";
-import { WizardSubsteps, type WizardSubstep } from "./WizardSubsteps";
+import { WizardSubsteps } from "./WizardSubsteps";
 import { aggregateTokenSource } from "../lib/cost-bracket";
 import { useSubmitWizard } from "../hooks/use-submit-wizard";
 import { emptyModelConfig, slideVariants } from "../constants";
@@ -32,25 +31,9 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
   const [optimizationPart, setOptimizationPart] = useState(0);
   const [reviewPart, setReviewPart] = useState(0);
 
-  const evaluationSteps: readonly WizardSubstep[] = [
-    { id: "budget", label: msg("submit.budget.label") },
-    { id: "dataset", label: TERMS.dataset },
-    { id: "code", label: msg("auto.features.submit.components.steps.codestep.1") },
-    {
-      id: "split",
-      label: `${msg("auto.features.submit.components.steps.paramsstep.4")}${TERMS.dataset}`,
-    },
-    { id: "checks", label: msg("submit.preflight.evaluation") },
-  ];
-  const optimizationSteps: readonly WizardSubstep[] = [
-    { id: "parameters", label: msg("auto.features.submit.components.steps.paramsstep.1") },
-    { id: "models", label: msg("auto.features.submit.components.steps.modelstep.6") },
-    { id: "checks", label: msg("submit.preflight.execution") },
-  ];
-  const reviewSteps: readonly WizardSubstep[] = [
-    { id: "details", label: msg("auto.features.submit.components.steps.basicsstep.1") },
-    { id: "summary", label: msg("auto.features.submit.constants.literal.4") },
-  ];
+  const evaluationSteps = ["budget", "dataset", "code", "split", "checks"] as const;
+  const optimizationSteps = ["parameters", "models", "checks"] as const;
+  const reviewSteps = ["details", "summary"] as const;
 
   const budgetMode = aggregateTokenSource(
     w.jobType === "grid_search"
@@ -141,13 +124,11 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
   };
 
   const stageViews: Record<WizardStageId, ReactNode> = {
-    goal: <CodeStep w={w} part="module" />,
+    goal: <CodeStep w={w} part="module" header={header} />,
     evaluation: (
       <WizardSubsteps
         active={evaluationPart}
         ariaLabel={msg("submit.stage.evaluation")}
-        idPrefix="dspy-evaluation"
-        onSelect={setEvaluationPart}
         steps={evaluationSteps}
       >
         {evaluationPanels[evaluationPart]}
@@ -157,8 +138,6 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       <WizardSubsteps
         active={optimizationPart}
         ariaLabel={msg("submit.stage.optimization")}
-        idPrefix="dspy-optimization"
-        onSelect={setOptimizationPart}
         steps={optimizationSteps}
       >
         {optimizationPanels[optimizationPart]}
@@ -168,8 +147,6 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       <WizardSubsteps
         active={reviewPart}
         ariaLabel={msg("submit.stage.review")}
-        idPrefix="dspy-review"
-        onSelect={setReviewPart}
         steps={reviewSteps}
       >
         {reviewPanels[reviewPart]}
@@ -211,7 +188,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
   const showSubmit = w.step === WIZARD_STAGE.review && reviewPart === reviewSteps.length - 1;
   const containerWidthClass =
     w.step === WIZARD_STAGE.evaluation && evaluationPart === 2 && w.codeAssistMode === "auto"
-      ? "max-w-5xl"
+      ? "max-w-6xl"
       : "max-w-2xl";
 
   return (
@@ -219,8 +196,6 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
       <SubmitStepper w={w} />
-
-      {w.step === WIZARD_STAGE.goal && header && <div className="mb-2">{header}</div>}
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">
         <AnimatePresence mode="wait" custom={w.direction}>

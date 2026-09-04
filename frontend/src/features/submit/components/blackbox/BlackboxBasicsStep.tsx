@@ -7,6 +7,7 @@ import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { Field, MOBILE_INPUT_CLASS, Segmented, StepCard, TEXTAREA_CLASS } from "./shared";
@@ -53,37 +54,46 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
           className={MOBILE_INPUT_CLASS}
         />
       </Field>
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <Label>
-            <HelpTip text={tip("submit.description")}>
-              {msg("auto.features.submit.components.steps.basicsstep.4")}
-            </HelpTip>
-          </Label>
-          <span
-            className={cn(
-              "text-[0.625rem] tabular-nums transition-colors",
-              jobDescription.length > 280
-                ? "text-destructive font-medium"
-                : "text-muted-foreground/50",
-            )}
-          >
-            {jobDescription.length}
-            {msg("auto.features.submit.components.steps.basicsstep.5")}
-          </span>
-        </div>
-        <textarea
-          value={jobDescription}
-          onChange={(e) => {
-            if (e.target.value.length <= 280) setJobDescription(e.target.value);
-          }}
-          placeholder={formatMsg("auto.features.submit.components.steps.basicsstep.template.1", {
-            p1: TERMS.optimization,
-          })}
-          rows={3}
-          className={TEXTAREA_CLASS}
-        />
-      </div>
+      <ExpandableTextarea
+        id="bb-job-description"
+        label={msg("auto.features.submit.components.steps.basicsstep.4")}
+        value={jobDescription}
+        onChange={(value) => {
+          if (value.length <= 280) setJobDescription(value);
+        }}
+        placeholder={formatMsg("auto.features.submit.components.steps.basicsstep.template.1", {
+          p1: TERMS.optimization,
+        })}
+        rows={3}
+        className={TEXTAREA_CLASS}
+      >
+        {({ textarea, trigger }) => (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <Label>
+                <HelpTip text={tip("submit.description")}>
+                  {msg("auto.features.submit.components.steps.basicsstep.4")}
+                </HelpTip>
+              </Label>
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "text-[0.625rem] tabular-nums transition-colors",
+                    jobDescription.length > 280
+                      ? "text-destructive font-medium"
+                      : "text-muted-foreground/50",
+                  )}
+                >
+                  {jobDescription.length}
+                  {msg("auto.features.submit.components.steps.basicsstep.5")}
+                </span>
+                {trigger}
+              </div>
+            </div>
+            {textarea}
+          </div>
+        )}
+      </ExpandableTextarea>
       <Field label={msg("submit.basics.privacy.label")} tip="submit.privacy">
         <Segmented
           label={msg("submit.basics.privacy.label")}

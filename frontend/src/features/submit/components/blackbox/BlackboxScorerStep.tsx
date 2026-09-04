@@ -220,7 +220,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                 setMetricCode(v);
                 setScorerManuallyEdited(true);
               }}
-              height="260px"
+              height="360px"
               onRun={runDryRun}
               runLabel={msg("submit.blackbox.scorer.test")}
               runningLabel={msg("submit.blackbox.scorer.testing")}

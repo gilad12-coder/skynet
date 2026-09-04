@@ -36,16 +36,20 @@ export interface ModeToggleProps {
   value: "auto" | "manual";
   onChange: (mode: "auto" | "manual") => void;
   disabledReason?: string;
+  // Leading slot of the header band: the wizard's recipe chip, so the recipe
+  // and the step it opens read as one card.
+  start?: React.ReactNode;
   // Chip showing the chosen module with a click-to-switch affordance.
   module?: { label: string; onChangeModule: () => void } | null;
 }
 
-export function ModeToggle({ value, onChange, disabledReason, module }: ModeToggleProps) {
+export function ModeToggle({ value, onChange, disabledReason, start, module }: ModeToggleProps) {
   const autoDisabled = !!disabledReason && value !== "auto";
 
   return (
     <div className="flex flex-col items-stretch gap-2.5 border-b border-border/40 bg-[#FAF8F5] px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-      <div className="flex min-w-0 items-center gap-2.5 sm:w-auto">
+      <div className="flex min-w-0 flex-col items-stretch gap-2.5 sm:flex-row sm:items-center sm:w-auto">
+        {start}
         {module && (
           <button
             type="button"
@@ -115,6 +119,7 @@ export function AuthoringShell({
   value,
   onChange,
   disabledReason,
+  start,
   module,
   sidePanel,
   title,
@@ -127,13 +132,23 @@ export function AuthoringShell({
         value={value}
         onChange={onChange}
         disabledReason={disabledReason}
+        start={start}
         module={module}
       />
+      {/* The agent pane grows with the card instead of sitting at a fixed
+          width, keeping a floor that fits a question and its choices; the
+          editors stay the wider side. On desktop the pane also sets the
+          card's height: it reaches the nav (22rem is the stepper, header
+          band, nav and page paddings around it) but never drops under
+          56rem, so a conversation and a long brief both have room. */}
       <div
-        className={cn("grid grid-cols-1", value === "auto" && "lg:grid-cols-[400px_minmax(0,1fr)]")}
+        className={cn(
+          "grid grid-cols-1",
+          value === "auto" && "lg:grid-cols-[minmax(20rem,5fr)_minmax(0,6fr)]",
+        )}
       >
         {value === "auto" && (
-          <div className="relative h-[70svh] min-h-[30rem] max-h-[700px] self-stretch overflow-hidden border-b border-border/40 lg:h-auto lg:min-h-[700px] lg:max-h-none lg:border-b-0 lg:border-e">
+          <div className="relative h-[70svh] min-h-[30rem] max-h-[700px] self-stretch overflow-hidden border-b border-border/40 lg:h-auto lg:min-h-[max(56rem,calc(100svh-22rem))] lg:max-h-none lg:border-b-0 lg:border-e">
             {sidePanel}
           </div>
         )}

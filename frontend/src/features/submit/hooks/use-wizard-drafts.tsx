@@ -15,8 +15,7 @@ import { toast } from "react-toastify";
 
 import { readBudgetDraft, type WizardBudgetDraft } from "../lib/execution-budget-session";
 import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
-import { formatRelativeTime } from "@/shared/lib/formatters";
-import { formatMsg, msg } from "@/shared/lib/messages";
+import { msg } from "@/shared/lib/messages";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 
 import { DraftRestoreToast, type DraftRestoreState } from "../components/DraftRestoreToast";
@@ -83,12 +82,6 @@ const SAVE_FAILED_TOAST = "wizard-draft-save-failed";
 
 function offerToastId(draftId: string): string {
   return `draft-restore:${draftId}`;
-}
-
-function offerMeta(record: WizardDraftRecord): string | null {
-  return formatMsg("submit.draft.restore.meta", {
-    time: formatRelativeTime(new Date(record.updatedAt).toISOString()),
-  });
 }
 
 /**
@@ -172,7 +165,6 @@ export function useWizardDraftController({
     (record: WizardDraftRecord, continueDraft: () => void) => (
       <DraftRestoreToast
         title={msg("submit.draft.restore.title")}
-        meta={offerMeta(record)}
         state={offerStateRef.current.state}
         failureText={offerStateRef.current.failure}
         continueLabel={msg("submit.draft.restore.continue")}

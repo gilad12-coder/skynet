@@ -134,7 +134,11 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
 
   const runTurn = React.useCallback(
     (next: InterviewTurn[]) => {
-      if ((!parsedDataset && !blackbox) || busy || localeReloadingRef.current) return;
+      // `busy` is state, so a second call before its render lands — the
+      // opening-question effect re-running under StrictMode — still sees it
+      // false; the live controller is the synchronous in-flight guard.
+      if ((!parsedDataset && !blackbox) || busy || abortRef.current || localeReloadingRef.current)
+        return;
       setTurns(next);
       setDone(false);
       setBusy(true);

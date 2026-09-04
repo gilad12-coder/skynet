@@ -65,7 +65,7 @@ export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
           <h3 className="text-sm font-semibold text-foreground">
             {msg("submit.code.interview.title")}
           </h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">{msg(copy.subtitle)}</p>
+          <p className="mt-0.5 text-pretty text-xs text-muted-foreground">{msg(copy.subtitle)}</p>
         </div>
         {/* The header spans both the chat and the brief card, so a re-run is
             one click away from the brief too — mirroring the tagger. */}
