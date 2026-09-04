@@ -1,23 +1,78 @@
 import { AnimatePresence, motion } from "framer-motion";
 import * as React from "react";
-import { Trash, X } from "@/shared/ui/icons";
+import { Copy, PushPin, PushPinSlash, Square, Trash, Users, X } from "@/shared/ui/icons";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
+import { cn } from "@/shared/lib/utils";
+import { ShareDialog } from "@/features/optimizations";
 
 type BulkActionBarProps = {
   canDelete: boolean;
+  canManageShare: boolean;
+  canStop: boolean;
+  canTogglePin: boolean;
+  selectedJobId: string | null;
   selectedCount: number;
+  willPin: boolean;
+  actionPending: boolean;
   onClear: () => void;
+  onClone: () => void;
+  onStop: () => void;
+  onTogglePin: () => void;
   onRequestBulkDelete: () => void;
 };
 
+function SelectionAction({
+  label,
+  onClick,
+  disabled,
+  destructive,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <TooltipButton tooltip={label} side="top" delayDuration={150}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className={cn(
+          "flex size-[44px] cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-all active:scale-95 disabled:pointer-events-none disabled:opacity-50 lg:size-8",
+          destructive
+            ? "hover:bg-destructive/10 hover:text-destructive"
+            : "hover:bg-accent hover:text-foreground",
+        )}
+        aria-label={label}
+      >
+        {children}
+      </button>
+    </TooltipButton>
+  );
+}
+
 export function BulkActionBar({
   canDelete,
+  canManageShare,
+  canStop,
+  canTogglePin,
+  selectedJobId,
   selectedCount,
+  willPin,
+  actionPending,
   onClear,
+  onClone,
+  onStop,
+  onTogglePin,
   onRequestBulkDelete,
 }: BulkActionBarProps) {
+  const [shareOpen, setShareOpen] = React.useState(false);
+
   return (
     <AnimatePresence>
       {selectedCount > 0 && (
@@ -72,21 +127,58 @@ export function BulkActionBar({
                 <X />
               </button>
             </TooltipButton>
-            {canDelete && (
-              <TooltipButton
-                tooltip={msg("auto.features.dashboard.components.bulkactionbar.5")}
-                side="top"
-                delayDuration={150}
+            {selectedJobId && (
+              <>
+                {canManageShare && (
+                  <>
+                    <SelectionAction label={msg("share.button")} onClick={() => setShareOpen(true)}>
+                      <Users className="size-4" />
+                    </SelectionAction>
+                    <ShareDialog
+                      key={selectedJobId}
+                      optimizationId={selectedJobId}
+                      open={shareOpen}
+                      onOpenChange={setShareOpen}
+                      hideTrigger
+                    />
+                  </>
+                )}
+                <SelectionAction label={msg("share.clone_tooltip")} onClick={onClone}>
+                  <Copy className="size-4" />
+                </SelectionAction>
+              </>
+            )}
+            {canTogglePin && (
+              <SelectionAction
+                label={
+                  willPin
+                    ? msg("auto.features.sidebar.components.sidebar.literal.14")
+                    : msg("auto.features.sidebar.components.sidebar.literal.13")
+                }
+                onClick={onTogglePin}
+                disabled={actionPending}
               >
-                <button
-                  type="button"
-                  onClick={onRequestBulkDelete}
-                  className="flex size-[44px] cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-all hover:bg-destructive/10 hover:text-destructive active:scale-95 lg:size-8"
-                  aria-label={msg("auto.features.dashboard.components.bulkactionbar.literal.5")}
-                >
-                  <Trash className="size-4" />
-                </button>
-              </TooltipButton>
+                {willPin ? <PushPin className="size-4" /> : <PushPinSlash className="size-4" />}
+              </SelectionAction>
+            )}
+            {canStop && (
+              <SelectionAction
+                label={msg("auto.features.agent.panel.lib.tool.meta.literal.7")}
+                onClick={onStop}
+                disabled={actionPending}
+              >
+                <Square className="size-4" />
+              </SelectionAction>
+            )}
+            {canDelete && (
+              <SelectionAction
+                label={msg("auto.features.dashboard.components.bulkactionbar.5")}
+                onClick={onRequestBulkDelete}
+                disabled={actionPending}
+                destructive
+              >
+                <Trash className="size-4" />
+              </SelectionAction>
             )}
           </div>
         </motion.div>

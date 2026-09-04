@@ -1827,6 +1827,18 @@ export async function cancelJob(optimizationId: string) {
   return res;
 }
 
+export async function bulkCancelJobs(optimizationIds: string[]) {
+  const res = await request<{
+    cancelled: string[];
+    skipped: Array<{ optimization_id: string; reason: string }>;
+  }>("/optimizations/bulk-cancel", {
+    method: "POST",
+    body: JSON.stringify({ optimization_ids: optimizationIds }),
+  });
+  invalidateCache("/optimizations");
+  return res;
+}
+
 // Pause suspends a running run at its checkpoint (status → "paused"), keeping it
 // resumable. Like cancel it acts on the SAME run in place, so callers refresh the
 // current view rather than navigating.
@@ -2087,6 +2099,18 @@ export async function togglePinOptimization(optimizationId: string) {
     `/optimizations/${optimizationId}/pin`,
     { method: "PATCH" },
   );
+  invalidateCache("/optimizations");
+  return res;
+}
+
+export async function bulkPinOptimizations(optimizationIds: string[], value: boolean) {
+  const res = await request<{
+    updated: string[];
+    skipped: Array<{ optimization_id: string; reason: string }>;
+  }>("/optimizations/bulk-pin", {
+    method: "POST",
+    body: JSON.stringify({ optimization_ids: optimizationIds, value }),
+  });
   invalidateCache("/optimizations");
   return res;
 }
