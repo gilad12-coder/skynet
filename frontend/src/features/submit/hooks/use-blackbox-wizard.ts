@@ -40,8 +40,8 @@ import { msg } from "@/shared/lib/messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import type { ValidationResult } from "@/shared/ui/code-editor";
 
-import { BLACKBOX_STEPS, defaultSplit, emptyModelConfig, type ColumnRole } from "../constants";
-import { ANYTHING_STEP } from "../lib/wizard-steps";
+import { defaultSplit, emptyModelConfig, type ColumnRole } from "../constants";
+import { LAST_WIZARD_STAGE, WIZARD_STAGE } from "../lib/wizard-steps";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import {
   chargeableBracket,
@@ -565,11 +565,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // A clone is a complete prior submission — its seed is decided, so the
   // interview (which would redraft it on resolve) is never offered.
   const interviewPossible = codeAssistMode === "auto" && !cloned;
-  // The interview opens the moment the Starting point is reached — drafting
-  // the seed is its job, so it never waits for a typed objective. The seed
-  // pass runs when it resolves, so the user leaves the step with a drafted
+  // The interview opens on the Goal stage, the wizard's first — drafting the
+  // seed is its job, so it never waits for a typed objective. The seed pass
+  // runs when it resolves, so the user leaves the stage with a drafted
   // starting point instead of having to write one.
-  const interviewEligible = interviewPossible && step >= ANYTHING_STEP.start;
+  const interviewEligible = interviewPossible;
   const interview = useCodeInterview({
     enabled: interviewEligible,
     parsedDataset: parsedCases,
@@ -664,7 +664,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       return false;
     };
     switch (s) {
-      case ANYTHING_STEP.start: {
+      case WIZARD_STAGE.goal: {
         // In auto mode the agent drafts the text seed from the objective, so
         // the objective is the required input and the seed may stay blank.
         const agentDrafts = codeAssistMode === "auto" && seedMode === "text";
@@ -678,17 +678,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         }
         return true;
       }
-      case ANYTHING_STEP.cases: {
+      case WIZARD_STAGE.evaluation: {
         if (targetKind === "agent" && !parsedCases?.rowCount)
           return fail("submit.blackbox.validation.cases_required");
-        return true;
-      }
-      case ANYTHING_STEP.split: {
-        if (parsedCases && Math.abs(split.train + split.val + split.test - 1) > 0.001)
-          return fail("submit.blackbox.validation.split_sum");
-        return true;
-      }
-      case ANYTHING_STEP.scorer: {
         if (scorerKind === "python" && !metricCode.trim())
           return fail("submit.blackbox.validation.scorer_code_required");
         if (scorerUsesModel && !scorerModel.name.trim())
@@ -697,9 +689,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return fail("submit.blackbox.validation.scorer_llm_unused");
         if (scorerKind === "remote" && !/^https?:\/\/\S+$/.test(scorerUrl.trim()))
           return fail("submit.blackbox.validation.scorer_url_required");
+        if (parsedCases && Math.abs(split.train + split.val + split.test - 1) > 0.001)
+          return fail("submit.blackbox.validation.split_sum");
         return true;
       }
-      case ANYTHING_STEP.optimizer: {
+      case WIZARD_STAGE.optimization: {
         if (strategyMode === "single") {
           if (!selectedEngine?.available) return fail("submit.blackbox.validation.engine_required");
           if (seedMode === "parts" && !selectedEngine.supports_parts)
@@ -723,21 +717,21 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const goPrev = () => {
     if (step > 0) goTo(step - 1);
   };
-  // Leaving the scorer step proves the scorer the way the DSPy wizard proves
+  // Leaving the Evaluation stage proves the scorer the way the DSPy wizard proves
   // its code on Next: a missing or stale test is run, not demanded. The dry-run
   // state resets whenever a scorer input changes, so a passed test is current.
   const ensureScorerTested = async (): Promise<boolean> => {
     if (dryRun.status === "done" && dryRun.result.ok) return true;
     const outcome = await runDryRun();
     if (outcome?.valid) return true;
-    if (step !== ANYTHING_STEP.scorer) {
+    if (step !== WIZARD_STAGE.evaluation) {
       toast.error(msg("submit.blackbox.scorer.dry_run_failed"));
-      goTo(ANYTHING_STEP.scorer);
+      goTo(WIZARD_STAGE.evaluation);
     }
     return false;
   };
   const crossesScorer = (from: number, to: number) =>
-    from <= ANYTHING_STEP.scorer && to > ANYTHING_STEP.scorer;
+    from <= WIZARD_STAGE.evaluation && to > WIZARD_STAGE.evaluation;
   const advance = async (target: number) => {
     if (advancingRef.current) return;
     advancingRef.current = true;
@@ -785,7 +779,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const tokenSource = reflectionModel.token_source ?? "managed";
 
   const handleSubmit = async () => {
-    for (let i = 0; i < BLACKBOX_STEPS.length - 1; i++) {
+    for (let i = 0; i < LAST_WIZARD_STAGE; i++) {
       if (!validateStep(i, true)) {
         goTo(i);
         return;

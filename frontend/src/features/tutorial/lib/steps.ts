@@ -81,7 +81,7 @@ import {
   waitForHook,
 } from "./bridge";
 import { isGeneralistAgentEnabled } from "@/features/agent-panel";
-import { PROGRAM_STEP } from "@/features/submit";
+import { WIZARD_STAGE } from "@/features/submit";
 
 function navigateTo(path: string) {
   // Prefer in-app client navigation via the tutorial-overlay hook.
@@ -334,7 +334,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     beforeShow: async () => {
       await ensureSubmit();
       injectSampleDataset();
-      setWizardStep(PROGRAM_STEP.cases);
+      setWizardStep(WIZARD_STAGE.evaluation);
     },
     tracks: QUICK_ONLY,
     readingTimeSec: 7,
@@ -354,7 +354,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     beforeShow: async () => {
       await ensureSubmit();
       injectSampleDataset();
-      setWizardStep(PROGRAM_STEP.start);
+      setWizardStep(WIZARD_STAGE.evaluation);
       callTutorialHook("setCodeAssistMode", "manual");
       callTutorialHook("chooseModule", "predict");
       callTutorialHook("setSignatureCode", DEMO_SIGNATURE_CODE);
@@ -377,7 +377,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     placement: "bottom",
     beforeShow: async () => {
       await ensureSubmit();
-      setWizardStep(PROGRAM_STEP.optimizer);
+      setWizardStep(WIZARD_STAGE.optimization);
     },
     tracks: QUICK_ONLY,
     readingTimeSec: 7,
@@ -390,12 +390,12 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       p2: TERMS.modelPlural,
       p3: TERMS.optimizer,
     }),
-    target: "[data-tutorial='wizard-step-7']",
+    target: "[data-tutorial='wizard-stage-review']",
     placement: "bottom",
     beforeShow: async () => {
       await ensureSubmit();
       setOptimizerName("gepa");
-      setWizardStep(PROGRAM_STEP.review);
+      setWizardStep(WIZARD_STAGE.review);
     },
     tracks: QUICK_ONLY,
     readingTimeSec: 5,
