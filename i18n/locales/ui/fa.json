@@ -2874,6 +2874,8 @@
   "shared.excel_filter.search_placeholder": "جستجو…",
   "shared.excel_filter.select_all": "انتخاب همه",
   "shared.excel_filter.sort_by": "مرتب‌سازی بر اساس {label}",
+  "shared.expandable_textarea.expand": "گسترش",
+  "shared.expandable_textarea.collapse": "جمع کردن",
   "shared.inline_error.dismiss": "بستن",
   "shared.language.auto_detect": "تشخیص خودکار",
   "shared.language.no_results": "هیچ زبانی یافت نشد",

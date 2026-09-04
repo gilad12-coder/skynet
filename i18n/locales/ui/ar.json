@@ -2874,6 +2874,8 @@
   "shared.excel_filter.search_placeholder": "بحث…",
   "shared.excel_filter.select_all": "تحديد الكل",
   "shared.excel_filter.sort_by": "الفرز حسب {label}",
+  "shared.expandable_textarea.expand": "توسيع",
+  "shared.expandable_textarea.collapse": "طي",
   "shared.inline_error.dismiss": "تجاهل",
   "shared.language.auto_detect": "كشف تلقائي",
   "shared.language.no_results": "لم يُعثر على لغات",

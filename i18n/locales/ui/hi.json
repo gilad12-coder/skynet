@@ -2874,6 +2874,8 @@
   "shared.excel_filter.search_placeholder": "खोजें…",
   "shared.excel_filter.select_all": "सभी चुनें",
   "shared.excel_filter.sort_by": "{label} के अनुसार क्रमबद्ध करें",
+  "shared.expandable_textarea.expand": "विस्तार करें",
+  "shared.expandable_textarea.collapse": "संक्षिप्त करें",
   "shared.inline_error.dismiss": "बंद करें",
   "shared.language.auto_detect": "स्वतः पहचानें",
   "shared.language.no_results": "कोई भाषा नहीं मिली",

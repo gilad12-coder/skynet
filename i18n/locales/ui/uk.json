@@ -2874,6 +2874,8 @@
   "shared.excel_filter.search_placeholder": "Пошук…",
   "shared.excel_filter.select_all": "Вибрати все",
   "shared.excel_filter.sort_by": "Сортувати за {label}",
+  "shared.expandable_textarea.expand": "Розгорнути",
+  "shared.expandable_textarea.collapse": "Згорнути",
   "shared.inline_error.dismiss": "Dismiss",
   "shared.language.auto_detect": "Автовизначення",
   "shared.language.no_results": "Мов не знайдено",

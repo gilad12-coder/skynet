@@ -2874,6 +2874,8 @@
   "shared.excel_filter.search_placeholder": "搜索…",
   "shared.excel_filter.select_all": "全选",
   "shared.excel_filter.sort_by": "按{label}排序",
+  "shared.expandable_textarea.expand": "展开",
+  "shared.expandable_textarea.collapse": "收起",
   "shared.inline_error.dismiss": "Dismiss",
   "shared.language.auto_detect": "自动检测",
   "shared.language.no_results": "未找到语言",
