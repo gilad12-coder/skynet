@@ -148,7 +148,6 @@
   "submit.blackbox.scorer.uses_model_label": "我的指标会调用模型",
   "submit.blackbox.scorer.uses_model_desc": "开启后可选择 llm() 用来回应的模型。普通指标不需要模型。",
   "submit.blackbox.scorer.uses_model_detected": "你的评分器调用了 llm()，因此需要一个模型。",
-  "submit.blackbox.optimizer.copy_scorer_model": "使用评分器模型",
   "submit.blackbox.scorer.remote_hint": "我们会发送 candidate 和 case；端点返回包含 score 的 JSON。",
   "submit.blackbox.scorer.result_error": "评分器失败",
   "submit.blackbox.scorer.result_ok": "评分器测试通过",

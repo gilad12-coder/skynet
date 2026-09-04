@@ -148,7 +148,6 @@
   "submit.blackbox.scorer.uses_model_label": "Metriğim bir model çağırıyor",
   "submit.blackbox.scorer.uses_model_desc": "llm() fonksiyonunun yanıt vereceği modeli seçmek için açın. Düz bir metriğin modele ihtiyacı yoktur.",
   "submit.blackbox.scorer.uses_model_detected": "Skorlayıcınız llm() çağırıyor, bu yüzden bir modele ihtiyacı var.",
-  "submit.blackbox.optimizer.copy_scorer_model": "Skorlayıcı modelini kullan",
   "submit.blackbox.scorer.remote_hint": "Adayı ve örneği POST ederiz; uç nokta puan içeren JSON döndürür.",
   "submit.blackbox.scorer.result_error": "Puanlayıcı başarısız oldu",
   "submit.blackbox.scorer.result_ok": "Puanlayıcı testi başarılı",

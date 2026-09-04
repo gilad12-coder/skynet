@@ -148,7 +148,6 @@
   "submit.blackbox.scorer.uses_model_label": "Моя метрика вызывает модель",
   "submit.blackbox.scorer.uses_model_desc": "Включите, чтобы выбрать модель, которой отвечает llm(). Простой метрике модель не нужна.",
   "submit.blackbox.scorer.uses_model_detected": "Ваш скорер вызывает llm(), поэтому ему нужна модель.",
-  "submit.blackbox.optimizer.copy_scorer_model": "Использовать модель скорера",
   "submit.blackbox.scorer.remote_hint": "Мы отправляем POST-запросом candidate и case; эндпоинт возвращает JSON с оценкой.",
   "submit.blackbox.scorer.result_error": "Ошибка оценщика",
   "submit.blackbox.scorer.result_ok": "Тест оценщика пройден",

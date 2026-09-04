@@ -148,7 +148,6 @@
   "submit.blackbox.scorer.uses_model_label": "مقياسي يستدعي نموذجًا",
   "submit.blackbox.scorer.uses_model_desc": "فعّل هذا لاختيار النموذج الذي يجيب به llm(). المقياس العادي لا يحتاج إلى نموذج.",
   "submit.blackbox.scorer.uses_model_detected": "مقياسك يستدعي llm()، لذا يحتاج إلى نموذج.",
-  "submit.blackbox.optimizer.copy_scorer_model": "استخدام نموذج المقياس",
   "submit.blackbox.scorer.remote_hint": "نُرسِل candidate وcase عبر POST؛ وتُرجِع نقطة النهاية JSON يتضمّن score.",
   "submit.blackbox.scorer.result_error": "فشل المُقيِّم",
   "submit.blackbox.scorer.result_ok": "نجح اختبار المُقيِّم",

@@ -148,7 +148,6 @@
   "submit.blackbox.scorer.uses_model_label": "A minha métrica chama um modelo",
   "submit.blackbox.scorer.uses_model_desc": "Ative para escolher o modelo com que llm() responde. Uma métrica simples não precisa de nenhum.",
   "submit.blackbox.scorer.uses_model_detected": "O seu scorer chama llm(), por isso precisa de um modelo.",
-  "submit.blackbox.optimizer.copy_scorer_model": "Usar o modelo do scorer",
   "submit.blackbox.scorer.remote_hint": "Enviamos candidate e case por POST; o endpoint devolve JSON com uma pontuação.",
   "submit.blackbox.scorer.result_error": "Falha no pontuador",
   "submit.blackbox.scorer.result_ok": "Teste do pontuador bem-sucedido",

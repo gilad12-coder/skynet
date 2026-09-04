@@ -148,7 +148,6 @@
   "submit.blackbox.scorer.uses_model_label": "Моя метрика викликає модель",
   "submit.blackbox.scorer.uses_model_desc": "Увімкніть, щоб вибрати модель, якою відповідає llm(). Простій метриці модель не потрібна.",
   "submit.blackbox.scorer.uses_model_detected": "Ваш скорер викликає llm(), тому йому потрібна модель.",
-  "submit.blackbox.optimizer.copy_scorer_model": "Використати модель скорера",
   "submit.blackbox.scorer.remote_hint": "Ми надсилаємо POST із candidate і case; кінцева точка повертає JSON з оцінкою.",
   "submit.blackbox.scorer.result_error": "Помилка оцінювача",
   "submit.blackbox.scorer.result_ok": "Тест оцінювача пройдено",

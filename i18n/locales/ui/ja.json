@@ -148,7 +148,6 @@
   "submit.blackbox.scorer.uses_model_label": "メトリクスがモデルを呼び出す",
   "submit.blackbox.scorer.uses_model_desc": "オンにすると llm() が応答に使うモデルを選べます。単純なメトリクスにモデルは不要です。",
   "submit.blackbox.scorer.uses_model_detected": "スコアラーが llm() を呼び出しているため、モデルが必要です。",
-  "submit.blackbox.optimizer.copy_scorer_model": "スコアラーのモデルを使う",
   "submit.blackbox.scorer.remote_hint": "candidate と case を POST すると、エンドポイントはスコアを含む JSON を返します。",
   "submit.blackbox.scorer.result_error": "スコアラーが失敗しました",
   "submit.blackbox.scorer.result_ok": "スコアラーのテストに成功しました",
