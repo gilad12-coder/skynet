@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "react-toastify";
 
@@ -27,6 +27,8 @@ import { BlackboxExecutionSection } from "./BlackboxExecutionSection";
 import { BlackboxOptimizerStep } from "./BlackboxOptimizerStep";
 import { BlackboxReviewStep } from "./BlackboxReviewStep";
 
+type EvaluationStep = "budget" | "cases" | "scorer" | "execution" | "split" | "checks";
+
 export function BlackboxWizard({
   header,
   initialRecipe,
@@ -40,23 +42,39 @@ export function BlackboxWizard({
   const [reviewPart, setReviewPart] = useState(0);
 
   const goalSteps = ["goal"] as const;
-  const evaluationSteps = ["budget", "cases", "scorer", "execution", "split", "checks"] as const;
+  // The split only exists once there are cases to divide.
+  const hasCases = Boolean(w.parsedCases?.rowCount);
+  const evaluationSteps = useMemo<readonly EvaluationStep[]>(
+    () =>
+      hasCases
+        ? ["budget", "cases", "scorer", "execution", "split", "checks"]
+        : ["budget", "cases", "scorer", "execution", "checks"],
+    [hasCases],
+  );
+  const activeEvaluationPart = Math.min(evaluationPart, evaluationSteps.length - 1);
+  const activeEvaluationStep: EvaluationStep = evaluationSteps[activeEvaluationPart] ?? "budget";
+  const goToEvaluation = (key: EvaluationStep) =>
+    setEvaluationPart(Math.max(0, evaluationSteps.indexOf(key)));
   const optimizationSteps = ["strategy", "model", "limits", "checks"] as const;
   const reviewSteps = ["details", "summary"] as const;
 
   const goalPanels: readonly ReactNode[] = [<BlackboxStartStep key="goal" w={w} header={header} />];
-  const evaluationPanels: readonly ReactNode[] = [
-    <TotalBudgetCard key="budget" w={w} mode={w.tokenSource} />,
-    <div key="cases" id="bb-cases" tabIndex={-1} className="outline-none">
-      <BlackboxCasesStep w={w} />
-    </div>,
-    <BlackboxScorerStep key="scorer" w={w} />,
-    <BlackboxExecutionSection key="execution" w={w} />,
-    <div key="split" id="bb-split" tabIndex={-1} className="outline-none">
-      <SplitSection w={w} />
-    </div>,
-    <PreflightChecks key="checks" preflight={w.preflight} scope="evaluation" />,
-  ];
+  const evaluationPanels: Record<EvaluationStep, ReactNode> = {
+    budget: <TotalBudgetCard w={w} mode={w.tokenSource} />,
+    cases: (
+      <div id="bb-cases" tabIndex={-1} className="outline-none">
+        <BlackboxCasesStep w={w} />
+      </div>
+    ),
+    scorer: <BlackboxScorerStep w={w} />,
+    execution: <BlackboxExecutionSection w={w} />,
+    split: (
+      <div id="bb-split" tabIndex={-1} className="outline-none">
+        <SplitSection w={w} />
+      </div>
+    ),
+    checks: <PreflightChecks preflight={w.preflight} scope="evaluation" />,
+  };
   const optimizationPanels: readonly ReactNode[] = [
     <BlackboxOptimizerStep key="strategy" w={w} part="strategy" />,
     <BlackboxOptimizerStep key="model" w={w} part="model" />,
@@ -65,12 +83,13 @@ export function BlackboxWizard({
   ];
   const handleEditField = (stage: WizardStageId, field?: string) => {
     if (stage === "evaluation") {
-      if (field === "totalBudgetInput") setEvaluationPart(0);
-      else if (field === "bb-cases") setEvaluationPart(1);
-      else if (field?.startsWith("bb-scorer")) setEvaluationPart(2);
-      else if (field === "bb-execution-agent" || field === "bb-task-model") setEvaluationPart(3);
-      else if (field === "bb-split") setEvaluationPart(4);
-      else setEvaluationPart(5);
+      if (field === "totalBudgetInput") goToEvaluation("budget");
+      else if (field === "bb-cases") goToEvaluation("cases");
+      else if (field?.startsWith("bb-scorer")) goToEvaluation("scorer");
+      else if (field === "bb-execution-agent" || field === "bb-task-model")
+        goToEvaluation("execution");
+      else if (field === "bb-split") goToEvaluation(hasCases ? "split" : "cases");
+      else goToEvaluation("checks");
     }
     if (stage === "optimization") {
       if (field === "bb-optimization-model") setOptimizationPart(1);
@@ -91,27 +110,27 @@ export function BlackboxWizard({
   };
 
   const handleEvaluationNext = async () => {
-    if (evaluationPart < evaluationSteps.length - 1) {
-      setEvaluationPart((current) => current + 1);
+    if (activeEvaluationPart < evaluationSteps.length - 1) {
+      setEvaluationPart(activeEvaluationPart + 1);
       return;
     }
     if (w.maxCostCredits == null) {
-      setEvaluationPart(0);
+      goToEvaluation("budget");
       toast.error(msg("budget.invalid"));
       return;
     }
-    if (w.targetKind === "agent" && !w.parsedCases?.rowCount) {
-      setEvaluationPart(1);
+    if (w.targetKind === "agent" && !hasCases) {
+      goToEvaluation("cases");
     } else if (w.targetKind === "agent" && !w.targetModel.name.trim()) {
-      setEvaluationPart(3);
+      goToEvaluation("execution");
     } else if (
       (w.scorerKind === "python" && !w.metricCode.trim()) ||
       (w.scorerUsesModel && w.scorerModelMode === "explicit" && !w.scorerModel.name.trim()) ||
       (w.scorerKind === "remote" && !/^https?:\/\/\S+$/.test(w.scorerUrl.trim()))
     ) {
-      setEvaluationPart(2);
-    } else if (w.parsedCases && w.splitSum !== 1) {
-      setEvaluationPart(4);
+      goToEvaluation("scorer");
+    } else if (hasCases && w.splitSum !== 1) {
+      goToEvaluation("split");
     }
     if (!w.validateStep(WIZARD_STAGE.evaluation, true)) return;
     await w.handleNext();
@@ -127,7 +146,7 @@ export function BlackboxWizard({
         (!w.parsedCases?.rowCount || w.split.train === 0) &&
         (w.strategyMode !== "single" || w.engine === "meta_harness");
       if (missingTrainingCases) {
-        setEvaluationPart(1);
+        goToEvaluation("cases");
         w.goTo(WIZARD_STAGE.evaluation);
         return;
       }
@@ -146,11 +165,11 @@ export function BlackboxWizard({
     ),
     evaluation: (
       <WizardSubsteps
-        active={evaluationPart}
+        active={activeEvaluationPart}
         ariaLabel={msg("submit.stage.evaluation")}
         steps={evaluationSteps}
       >
-        {evaluationPanels[evaluationPart]}
+        {evaluationPanels[activeEvaluationStep]}
       </WizardSubsteps>
     ),
     optimization: (
@@ -174,8 +193,8 @@ export function BlackboxWizard({
   };
 
   const onBack = () => {
-    if (w.step === WIZARD_STAGE.evaluation && evaluationPart > 0) {
-      setEvaluationPart((current) => current - 1);
+    if (w.step === WIZARD_STAGE.evaluation && activeEvaluationPart > 0) {
+      setEvaluationPart(activeEvaluationPart - 1);
       return;
     }
     if (w.step === WIZARD_STAGE.optimization && optimizationPart > 0) {
@@ -203,7 +222,8 @@ export function BlackboxWizard({
   // scorer, so those take the wide column; plain forms keep the narrow one.
   const wideAuthoringPanel =
     w.codeAssistMode === "auto" &&
-    (w.step === WIZARD_STAGE.goal || (w.step === WIZARD_STAGE.evaluation && evaluationPart === 2));
+    (w.step === WIZARD_STAGE.goal ||
+      (w.step === WIZARD_STAGE.evaluation && activeEvaluationStep === "scorer"));
   const containerWidthClass = wideAuthoringPanel ? "max-w-6xl" : "max-w-2xl";
 
   return (
