@@ -81,7 +81,6 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
             <ModelRoleRow
               id="bb-task-model"
               role={msg("submit.blackbox.roles.task.label")}
-              modelName={targetModel.name.trim() || null}
               description={msg("submit.blackbox.roles.task.desc")}
               tip={tip("blackbox.config.agent_model")}
             >

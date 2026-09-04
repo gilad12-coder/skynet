@@ -4,15 +4,13 @@ import type { ReactNode } from "react";
 import { HelpTip } from "@/shared/ui/help-tip";
 
 /**
- * One model role as the wizard explains it: "Role · model · binding" on the
- * first line, one sentence on what the role does beneath it, and the picker
- * or the actions that change it below. Model names are never translated and
- * always render as one LTR run.
+ * One model role as the wizard explains it: "Role · binding" on the first
+ * line, one sentence on what the role does beneath it, and the picker or
+ * the actions that change it below. The chip inside names the model.
  */
 export function ModelRoleRow({
   id,
   role,
-  modelName,
   binding,
   description,
   tip,
@@ -21,7 +19,6 @@ export function ModelRoleRow({
 }: {
   id?: string;
   role: ReactNode;
-  modelName?: string | null;
   binding?: ReactNode;
   description: ReactNode;
   tip?: string;
@@ -37,16 +34,6 @@ export function ModelRoleRow({
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
         <span className="font-medium">{roleNode}</span>
-        {modelName ? (
-          <>
-            <span className="text-muted-foreground/60" aria-hidden="true">
-              ·
-            </span>
-            <span className="font-mono text-xs" dir="ltr">
-              {modelName}
-            </span>
-          </>
-        ) : null}
         {binding ? (
           <>
             <span className="text-muted-foreground/60" aria-hidden="true">

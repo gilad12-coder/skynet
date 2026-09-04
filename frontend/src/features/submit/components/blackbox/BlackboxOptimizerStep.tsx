@@ -280,7 +280,6 @@ export function BlackboxOptimizerStep({
           <ModelRoleRow
             id="bb-optimization-model"
             role={optimizationLabel}
-            modelName={reflectionModel.name.trim() || null}
             description={
               <>
                 {msg(OPTIMIZATION_MODEL_DESCRIPTION[optimizationFamily])}
@@ -312,7 +311,6 @@ export function BlackboxOptimizerStep({
               }
             />
           </ModelRoleRow>
-
         </>
       )}
 
