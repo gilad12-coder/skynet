@@ -7,7 +7,7 @@ import type { OptimizationStatusResponse } from "@/shared/types/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
-import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
+import { formatMsg, msg } from "@/shared/lib/messages";
 import { useLiteMode } from "@/features/settings";
 import {
   extractCandidates,
@@ -40,14 +40,6 @@ const BLACKBOX_FALLBACK: BlackboxTrajectoryContext = {
   recipe: null,
   hasCases: false,
   rendersByText: new Map(),
-};
-
-// Why the engine stopped, as the result's details name it.
-const STOP_REASONS: Record<string, MessageKey> = {
-  target_reached: "meta_harness.stopped.target_reached",
-  max_iterations: "meta_harness.stopped.max_iterations",
-  budget_exhausted: "meta_harness.stopped.budget_exhausted",
-  no_new_proposal: "meta_harness.stopped.no_new_proposal",
 };
 
 function versionText(index: number): string {
@@ -118,10 +110,6 @@ export function MetaHarnessPanel({ job, blackbox }: MetaHarnessPanelProps) {
     );
   }, [fullModel, candidates, caseScores, versionFilter]);
   const treeLayout = useMemo(() => layoutTrajectory(candidates), [candidates]);
-  const details = job.blackbox_result?.details ?? {};
-  const proposals = typeof details.proposals === "number" ? details.proposals : null;
-  const stopKey =
-    typeof details.stopped === "string" ? (STOP_REASONS[details.stopped] ?? null) : null;
   // The version being scored answers to its trial number, which is also the
   // candidate id it gets once complete, so a selection on it carries over.
   const pendingId = live && fullModel.pending !== null ? String(fullModel.pending.index) : null;
@@ -245,14 +233,6 @@ export function MetaHarnessPanel({ job, blackbox }: MetaHarnessPanelProps) {
                 <span className="font-bold tracking-tight">{msg("meta_harness.panel.title")}</span>
               </HelpTip>
             </CardTitle>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              {proposals !== null ? (
-                <span className="tabular-nums">
-                  {formatMsg("meta_harness.stats.proposals", { n: proposals })}
-                </span>
-              ) : null}
-              {stopKey !== null && !live ? <span>{msg(stopKey)}</span> : null}
-            </div>
           </div>
           {live ? (
             <motion.div

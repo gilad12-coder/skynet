@@ -327,6 +327,17 @@ describe("layoutClimb", () => {
     );
   });
 
+  it("grows the plot to the height on hand, never below its natural height", () => {
+    const natural = layoutClimb(model);
+    const naturalHeight = CLIMB_LAYOUT.padTop + CLIMB_LAYOUT.plotHeight + CLIMB_LAYOUT.padBottom;
+    assert.equal(natural.height, naturalHeight);
+    assert.equal(layoutClimb(model, { availableHeight: 100 }).height, naturalHeight);
+    const tall = layoutClimb(model, { availableHeight: 1_000 });
+    assert.equal(tall.height, 1_000);
+    assert.equal(tall.ticks[0]?.y, 1_000 - CLIMB_LAYOUT.padBottom);
+    assert.equal(tall.ticks[CLIMB_LAYOUT.tickCount - 1]?.y, CLIMB_LAYOUT.padTop);
+  });
+
   it("uses the unit scale when every score is a fraction and ranks higher scores higher", () => {
     const layout = layoutClimb(model);
     assert.deepEqual(layout.domain, { min: 0, max: 1, unit: true });
