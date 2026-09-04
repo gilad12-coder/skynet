@@ -2263,6 +2263,7 @@ def test_submit_blackbox_native_engine_accepts_byok_model_routes(
     store.engine = engine
     client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
     monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: None)
     payload = _blackbox_payload()
     payload.update(strategy={"mode": "single", "engine": "autoresearch"}, max_cost_credits=100)
     payload.update(override)
