@@ -30,7 +30,6 @@ import {
 import { toast } from "react-toastify";
 
 import { Button } from "@/shared/ui/primitives/button";
-import { Badge } from "@/shared/ui/primitives/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/primitives/tabs";
 import { PingDot } from "@/shared/ui/ping-dot";
 import { markRecentSession } from "@/shared/lib/recent-session";
@@ -1167,27 +1166,24 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 {job.optimization_id}
               </code>
               <div className="flex items-center gap-3 flex-wrap text-sm text-muted-foreground">
-                <Badge
-                  variant="outline"
-                  className="gap-1.5 border-[#C8A882]/45 bg-[#C8A882]/15 font-semibold text-[0.6875rem] text-[#3D2E22] [&>svg]:text-[#8a6d44]"
-                >
+                <span className="flex items-center gap-1.5">
                   {job.optimization_type === "grid_search" ? (
                     <>
-                      <GridFour />
+                      <GridFour className="size-3.5" />
                       {msg("auto.app.optimizations.id.page.literal.2")}
                     </>
                   ) : jobIsBlackbox ? (
                     <>
-                      <Cube />
+                      <Cube className="size-3.5" />
                       {msg("optimization.blackbox.badge")}
                     </>
                   ) : (
                     <>
-                      <RocketLaunch />
+                      <RocketLaunch className="size-3.5" />
                       {msg("auto.app.optimizations.id.page.literal.3")}
                     </>
                   )}
-                </Badge>
+                </span>
                 <LiveElapsedBadge
                   isActive={isActive}
                   startedAt={startedAt}
