@@ -46,6 +46,7 @@ const STEP_LABELS: Record<WizardStepId, () => string> = {
   cases: () => msg("submit.blackbox.step.cases"),
   scorer: () => msg("submit.blackbox.step.scorer"),
   optimizer: () => msg("submit.blackbox.step.optimizer"),
+  split: () => msg("submit.blackbox.step.split"),
   review: () => msg("auto.features.submit.constants.literal.4"),
 };
 

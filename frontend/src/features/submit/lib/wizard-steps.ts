@@ -2,15 +2,23 @@
  * Step order of the two submit wizards.
  *
  * Both recipes walk the same spine — basics, what you start from, the cases it
- * is judged on, how it is scored, how hard to search, review — but the Program
- * wizard needs the cases before the starting point: its signature and metric
- * are drafted from the role-mapped columns, so the Start step's agent has
- * nothing to read until the rows exist. The Anything wizard drafts its seed
- * from the objective alone, so its cases stay optional and come after. Hooks,
- * step renderers and the tutorial address steps through these index maps
- * rather than literals so the two orders can differ safely.
+ * is judged on, how it is scored, how hard to search, how its rows are split,
+ * review — but the Program wizard needs the cases before the starting point:
+ * its signature and metric are drafted from the role-mapped columns, so the
+ * Start step's agent has nothing to read until the rows exist. The Anything
+ * wizard drafts its seed from the objective alone, so its cases stay optional
+ * and come after. Hooks, step renderers and the tutorial address steps
+ * through these index maps rather than literals so the two orders can differ
+ * safely.
  */
-export type WizardStepId = "basics" | "start" | "cases" | "scorer" | "optimizer" | "review";
+export type WizardStepId =
+  | "basics"
+  | "start"
+  | "cases"
+  | "scorer"
+  | "optimizer"
+  | "split"
+  | "review";
 
 export const PROGRAM_STEP_ORDER: readonly WizardStepId[] = [
   "basics",
@@ -18,6 +26,7 @@ export const PROGRAM_STEP_ORDER: readonly WizardStepId[] = [
   "start",
   "scorer",
   "optimizer",
+  "split",
   "review",
 ];
 
@@ -27,6 +36,7 @@ export const ANYTHING_STEP_ORDER: readonly WizardStepId[] = [
   "cases",
   "scorer",
   "optimizer",
+  "split",
   "review",
 ];
 

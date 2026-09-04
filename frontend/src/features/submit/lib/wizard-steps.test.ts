@@ -9,7 +9,7 @@ import {
   stepIndexMap,
 } from "./wizard-steps.ts";
 
-test("both wizards walk the same six steps, from basics to review", () => {
+test("both wizards walk the same seven steps, from basics to review", () => {
   assert.deepEqual([...PROGRAM_STEP_ORDER].sort(), [...ANYTHING_STEP_ORDER].sort());
   assert.equal(new Set(PROGRAM_STEP_ORDER).size, PROGRAM_STEP_ORDER.length);
   for (const order of [PROGRAM_STEP_ORDER, ANYTHING_STEP_ORDER]) {
@@ -21,11 +21,15 @@ test("both wizards walk the same six steps, from basics to review", () => {
 test("the Program wizard collects the cases before the starting point", () => {
   assert.ok(PROGRAM_STEP.cases < PROGRAM_STEP.start);
   assert.ok(PROGRAM_STEP.start < PROGRAM_STEP.scorer);
+  assert.ok(PROGRAM_STEP.optimizer < PROGRAM_STEP.split);
+  assert.ok(PROGRAM_STEP.split < PROGRAM_STEP.review);
 });
 
 test("the Anything wizard drafts the starting point before the cases", () => {
   assert.ok(ANYTHING_STEP.start < ANYTHING_STEP.cases);
   assert.ok(ANYTHING_STEP.cases < ANYTHING_STEP.scorer);
+  assert.ok(ANYTHING_STEP.optimizer < ANYTHING_STEP.split);
+  assert.ok(ANYTHING_STEP.split < ANYTHING_STEP.review);
 });
 
 test("stepIndexMap round-trips every id to its position", () => {

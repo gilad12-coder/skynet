@@ -47,7 +47,13 @@ function rationaleKey({ counts, engine }: SplitPlan): MessageKey {
   return "submit.split.rationale.large";
 }
 
-export function SplitRecommendationCard({ w }: { w: SplitPlanControls }) {
+export function SplitRecommendationCard({
+  w,
+  readOnly = false,
+}: {
+  w: SplitPlanControls;
+  readOnly?: boolean;
+}) {
   const { splitPlan, splitMode, setSplitMode, profileLoading } = w;
   // The rationale/warning copy is portaled into a Radix tooltip, where the `rtl:`
   // variant doesn't fire — drive direction off the locale explicitly instead.
@@ -118,14 +124,16 @@ export function SplitRecommendationCard({ w }: { w: SplitPlanControls }) {
               </Tooltip>
             )}
           </div>
-          <ModeToggle value={splitMode} onChange={setSplitMode} />
+          {!readOnly && <ModeToggle value={splitMode} onChange={setSplitMode} />}
         </div>
       </div>
 
       <div
         className={cn(
           "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
-          splitMode === "auto" ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+          readOnly || splitMode === "auto"
+            ? "grid-rows-[1fr] opacity-100"
+            : "grid-rows-[0fr] opacity-0",
         )}
       >
         <div className="overflow-hidden">

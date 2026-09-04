@@ -25,12 +25,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
 
   const stepViews: Record<WizardStepId, ReactNode> = {
     basics: <BasicsStep w={w} />,
-    cases: (
-      <div className="space-y-4 md:space-y-6">
-        <DatasetStep w={w} />
-        <SplitSection w={w} />
-      </div>
-    ),
+    cases: <DatasetStep w={w} />,
     start: <CodeStep w={w} part="start" />,
     scorer: <CodeStep w={w} part="scorer" />,
     optimizer: (
@@ -39,6 +34,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
         <ModelStep w={w} />
       </div>
     ),
+    split: <SplitSection w={w} />,
     review: <SummaryStep w={w} />,
   };
 
