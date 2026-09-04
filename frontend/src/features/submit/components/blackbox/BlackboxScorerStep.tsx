@@ -18,7 +18,6 @@ import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
 import { emptyModelConfig } from "../../constants";
 import { EvidenceChip } from "./EvidenceChip";
-import { ModelRoleRow } from "./ModelRoleRow";
 import { Field, MOBILE_INPUT_CLASS, Segmented } from "./shared";
 
 const MOBILE_MODEL_CHIP_CLASS =
@@ -121,77 +120,70 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
             />
           </div>
           {scorerUsesModel && (
-            <ModelRoleRow
+            <div
               id="bb-scoring-model"
-              role={msg("submit.blackbox.roles.scoring.label")}
-              modelName={resolvedScorerModel?.name.trim() || null}
-              binding={msg(
-                scorerModelMode === "inherit"
-                  ? "submit.blackbox.roles.scoring.inherited"
-                  : "submit.blackbox.roles.scoring.custom",
-              )}
-              description={msg(
-                scorerModelMode === "explicit"
-                  ? "submit.blackbox.roles.scoring.custom_desc"
-                  : scoringModelPending
-                    ? "submit.blackbox.roles.scoring.pending_desc"
-                    : "submit.blackbox.roles.scoring.inherited_desc",
-              )}
-              tip={tip("submit.blackbox.scorer_model")}
-              actions={
-                scorerModelMode === "inherit" ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="min-h-[44px] lg:min-h-0"
-                    onClick={() =>
-                      setEditingModel({
-                        // Seeded from the model it replaces so a different
-                        // scoring model starts one field away, not from blank.
-                        config: scorerModel.name ? scorerModel : { ...reflectionModel },
-                        onSave: (config) => {
-                          setScorerModel(config);
-                          setScorerModelMode("explicit");
-                        },
-                        label: msg("submit.blackbox.roles.scoring.label"),
-                      })
-                    }
-                  >
-                    {msg("submit.blackbox.roles.scoring.use_different")}
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="min-h-[44px] lg:min-h-0"
-                    onClick={() => setScorerModelMode("inherit")}
-                  >
-                    {msg("submit.blackbox.roles.scoring.use_optimization")}
-                  </Button>
-                )
-              }
+              tabIndex={-1}
+              className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border/50 bg-muted/20 p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
-              {scorerModelMode === "explicit" && (
-                <ModelChip
-                  config={scorerModel}
-                  className={MOBILE_MODEL_CHIP_CLASS}
-                  roleLabel={msg("submit.blackbox.roles.scoring.label")}
-                  tooltip={msg("submit.blackbox.scorer.model_explainer")}
-                  required
-                  catalogModels={catalog?.models}
-                  onClick={() =>
-                    setEditingModel({
-                      config: scorerModel,
-                      onSave: setScorerModel,
-                      label: msg("submit.blackbox.roles.scoring.label"),
-                    })
-                  }
-                  onRemove={scorerModel.name ? () => setScorerModel(emptyModelConfig()) : undefined}
-                />
-              )}
-            </ModelRoleRow>
+              {/* Inheriting shows the optimization model itself; picking a
+                  different one is one click on the chip, and its × returns
+                  the role to the optimization model. */}
+              <ModelChip
+                config={
+                  scorerModelMode === "explicit"
+                    ? scorerModel
+                    : (resolvedScorerModel ?? emptyModelConfig())
+                }
+                className={MOBILE_MODEL_CHIP_CLASS}
+                roleLabel={msg("submit.blackbox.roles.scoring.label")}
+                tooltip={msg("submit.blackbox.scorer.model_explainer")}
+                required
+                emptyLabel={
+                  scoringModelPending ? msg("submit.blackbox.roles.not_chosen") : undefined
+                }
+                catalogModels={catalog?.models}
+                onClick={() =>
+                  setEditingModel({
+                    // Seeded from the model it replaces so a different scoring
+                    // model starts one field away, not from blank.
+                    config:
+                      scorerModelMode === "explicit" || scorerModel.name
+                        ? scorerModel
+                        : { ...reflectionModel },
+                    onSave: (config) => {
+                      setScorerModel(config);
+                      setScorerModelMode("explicit");
+                    },
+                    label: msg("submit.blackbox.roles.scoring.label"),
+                  })
+                }
+                onRemove={
+                  scorerModelMode === "explicit"
+                    ? () => {
+                        setScorerModel(emptyModelConfig());
+                        setScorerModelMode("inherit");
+                      }
+                    : undefined
+                }
+              />
+              <HelpTip
+                text={`${tip("submit.blackbox.scorer_model")} ${msg(
+                  scorerModelMode === "explicit"
+                    ? "submit.blackbox.roles.scoring.custom_desc"
+                    : scoringModelPending
+                      ? "submit.blackbox.roles.scoring.pending_desc"
+                      : "submit.blackbox.roles.scoring.inherited_desc",
+                )}`}
+              >
+                <span className="text-xs text-muted-foreground">
+                  {msg(
+                    scorerModelMode === "inherit"
+                      ? "submit.blackbox.roles.scoring.inherited"
+                      : "submit.blackbox.roles.scoring.custom",
+                  )}
+                </span>
+              </HelpTip>
+            </div>
           )}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Label>
