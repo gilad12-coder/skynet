@@ -35,20 +35,16 @@ export function BlackboxWizard({
   initialRecipe: BlackboxRecipe;
 }) {
   const w = useBlackboxWizard(initialRecipe);
-  const [goalPart, setGoalPart] = useState(0);
   const [evaluationPart, setEvaluationPart] = useState(0);
   const [optimizationPart, setOptimizationPart] = useState(0);
   const [reviewPart, setReviewPart] = useState(0);
 
-  const goalSteps = ["objective", "seed"] as const;
+  const goalSteps = ["goal"] as const;
   const evaluationSteps = ["budget", "cases", "scorer", "execution", "split", "checks"] as const;
   const optimizationSteps = ["strategy", "model", "limits", "checks"] as const;
   const reviewSteps = ["details", "summary"] as const;
 
-  const goalPanels: readonly ReactNode[] = [
-    <BlackboxStartStep key="objective" w={w} part="objective" header={header} />,
-    <BlackboxStartStep key="seed" w={w} part="seed" header={header} />,
-  ];
+  const goalPanels: readonly ReactNode[] = [<BlackboxStartStep key="goal" w={w} header={header} />];
   const evaluationPanels: readonly ReactNode[] = [
     <TotalBudgetCard key="budget" w={w} mode={w.tokenSource} />,
     <div key="cases" id="bb-cases" tabIndex={-1} className="outline-none">
@@ -68,7 +64,6 @@ export function BlackboxWizard({
     <PreflightChecks key="checks" preflight={w.preflight} scope="execution" />,
   ];
   const handleEditField = (stage: WizardStageId, field?: string) => {
-    if (stage === "goal") setGoalPart(field === "bb-seed" ? 1 : 0);
     if (stage === "evaluation") {
       if (field === "totalBudgetInput") setEvaluationPart(0);
       else if (field === "bb-cases") setEvaluationPart(1);
@@ -91,17 +86,7 @@ export function BlackboxWizard({
   ];
 
   const handleGoalNext = async () => {
-    if (goalPart < goalSteps.length - 1) {
-      setGoalPart((current) => current + 1);
-      return;
-    }
-    if (!w.validateStep(WIZARD_STAGE.goal, true)) {
-      const needsObjective =
-        (w.seedMode === "none" || (w.codeAssistMode === "auto" && w.seedMode === "text")) &&
-        !w.objective.trim();
-      setGoalPart(needsObjective ? 0 : 1);
-      return;
-    }
+    if (!w.validateStep(WIZARD_STAGE.goal, true)) return;
     await w.handleNext();
   };
 
@@ -155,8 +140,8 @@ export function BlackboxWizard({
 
   const stageViews: Record<WizardStageId, ReactNode> = {
     goal: (
-      <WizardSubsteps active={goalPart} ariaLabel={msg("submit.stage.goal")} steps={goalSteps}>
-        {goalPanels[goalPart]}
+      <WizardSubsteps active={0} ariaLabel={msg("submit.stage.goal")} steps={goalSteps}>
+        {goalPanels[0]}
       </WizardSubsteps>
     ),
     evaluation: (
@@ -189,10 +174,6 @@ export function BlackboxWizard({
   };
 
   const onBack = () => {
-    if (w.step === WIZARD_STAGE.goal && goalPart > 0) {
-      setGoalPart((current) => current - 1);
-      return;
-    }
     if (w.step === WIZARD_STAGE.evaluation && evaluationPart > 0) {
       setEvaluationPart((current) => current - 1);
       return;
@@ -218,8 +199,8 @@ export function BlackboxWizard({
             ? () => setReviewPart((current) => current + 1)
             : w.handleNext;
   const showSubmit = w.step === WIZARD_STAGE.review && reviewPart === reviewSteps.length - 1;
-  // Auto mode seats the agent pane beside the form on both Goal substeps and
-  // the scorer, so those take the wide column; plain forms keep the narrow one.
+  // Auto mode seats the agent pane beside the form on the Goal stage and the
+  // scorer, so those take the wide column; plain forms keep the narrow one.
   const wideAuthoringPanel =
     w.codeAssistMode === "auto" &&
     (w.step === WIZARD_STAGE.goal || (w.step === WIZARD_STAGE.evaluation && evaluationPart === 2));
@@ -252,7 +233,7 @@ export function BlackboxWizard({
         w={w}
         onBack={onBack}
         onNext={onNext}
-        backDisabled={w.step === WIZARD_STAGE.goal && goalPart === 0}
+        backDisabled={w.step === WIZARD_STAGE.goal}
         showSubmit={showSubmit}
       />
 

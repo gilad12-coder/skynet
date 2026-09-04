@@ -22,7 +22,7 @@ export function BlackboxAuthoringShell({
   w: BlackboxWizardContext;
   start?: ReactNode;
   title: ReactNode;
-  description?: ReactNode;
+  description?: string;
   children: ReactNode;
 }) {
   const { codeAssistMode, setCodeAssistMode, objective, agent, interview, interviewEligible } = w;
