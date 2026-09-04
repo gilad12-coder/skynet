@@ -56,17 +56,16 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
       <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
         <div className="min-w-0 space-y-0.5">
           <Label htmlFor="bb-execution-agent">
-            <HelpTip text={tip("submit.blackbox.target")}>
+            <HelpTip
+              text={`${tip("submit.blackbox.target")} ${msg(
+                agent
+                  ? "submit.blackbox.start.target.agent_desc"
+                  : "submit.blackbox.start.target.text_desc",
+              )}`}
+            >
               {msg("submit.blackbox.execution.label")}
             </HelpTip>
           </Label>
-          <p className="text-xs text-muted-foreground">
-            {msg(
-              agent
-                ? "submit.blackbox.start.target.agent_desc"
-                : "submit.blackbox.start.target.text_desc",
-            )}
-          </p>
         </div>
         <Switch
           id="bb-execution-agent"

@@ -5,8 +5,8 @@ import { HelpTip } from "@/shared/ui/help-tip";
 
 /**
  * One model role as the wizard explains it: "Role · binding" on the first
- * line, one sentence on what the role does beneath it, and the picker or
- * the actions that change it below. The chip inside names the model.
+ * line, with what the role does in the role's tooltip, and the picker or the
+ * actions that change it below. The chip inside names the model.
  */
 export function ModelRoleRow({
   id,
@@ -20,12 +20,13 @@ export function ModelRoleRow({
   id?: string;
   role: ReactNode;
   binding?: ReactNode;
-  description: ReactNode;
+  description?: string;
   tip?: string;
   actions?: ReactNode;
   children?: ReactNode;
 }) {
-  const roleNode = tip ? <HelpTip text={tip}>{role}</HelpTip> : role;
+  const help = [tip, description].filter(Boolean).join(" ");
+  const roleNode = help ? <HelpTip text={help}>{role}</HelpTip> : role;
   return (
     <div
       id={id}
@@ -43,7 +44,6 @@ export function ModelRoleRow({
           </>
         ) : null}
       </div>
-      <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">{description}</p>
       {children}
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
     </div>

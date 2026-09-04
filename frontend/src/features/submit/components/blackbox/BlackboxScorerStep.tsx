@@ -226,33 +226,23 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
             htmlFor="bb-scorer-install"
             tip="submit.blackbox.scorer_install"
           >
-            <div className="space-y-1.5">
-              <Input
-                id="bb-scorer-install"
-                value={scorerInstall}
-                onChange={(e) => setScorerInstall(e.target.value)}
-                placeholder="pip install --no-index --find-links=/opt/skynet/wheels package-name"
-                dir="ltr"
-                className={`${MOBILE_INPUT_CLASS} font-mono`}
-              />
-              <p className="text-[0.6875rem] leading-relaxed text-muted-foreground" dir="auto">
-                {tip("submit.blackbox.scorer_install")}
-              </p>
-            </div>
+            <Input
+              id="bb-scorer-install"
+              value={scorerInstall}
+              onChange={(e) => setScorerInstall(e.target.value)}
+              placeholder="pip install --no-index --find-links=/opt/skynet/wheels package-name"
+              dir="ltr"
+              className={`${MOBILE_INPUT_CLASS} font-mono`}
+            />
           </Field>
         </div>
       ) : (
         <div className="space-y-4">
-          <p className="text-[0.6875rem] leading-relaxed text-muted-foreground" dir="ltr">
-            {msg("submit.blackbox.scorer.remote_hint")}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {msg("submit.budget.external_endpoint_fees")}
-          </p>
           <Field
             label={msg("submit.blackbox.scorer.url_label")}
             htmlFor="bb-scorer-url"
             tip="submit.blackbox.scorer_url"
+            hint={`${msg("submit.blackbox.scorer.remote_hint")} ${msg("submit.budget.external_endpoint_fees")}`}
           >
             <Input
               id="bb-scorer-url"

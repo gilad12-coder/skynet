@@ -25,6 +25,7 @@ export function BlackboxCasesStep({ w }: { w: BlackboxWizardContext }) {
   return (
     <StepCard
       title={msg("submit.blackbox.cases.title")}
+      tip={msg("submit.blackbox.cases.none_hint")}
       description={msg(
         targetKind === "agent" ? "submit.blackbox.cases.desc_agent" : "submit.blackbox.cases.desc",
       )}
@@ -77,10 +78,6 @@ export function BlackboxCasesStep({ w }: { w: BlackboxWizardContext }) {
         onOpenChange={setLibraryOpen}
         onPick={handlePickFromLibrary}
       />
-
-      {!parsedCases && (
-        <p className="text-xs text-muted-foreground">{msg("submit.blackbox.cases.none_hint")}</p>
-      )}
     </StepCard>
   );
 }

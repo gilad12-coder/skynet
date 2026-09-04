@@ -280,15 +280,15 @@ export function BlackboxOptimizerStep({
           <ModelRoleRow
             id="bb-optimization-model"
             role={optimizationLabel}
-            description={
-              <>
-                {msg(OPTIMIZATION_MODEL_DESCRIPTION[optimizationFamily])}
-                {nativeProposer && <> {msg("submit.blackbox.roles.optimization.managed_hint")}</>}
-                {scorerUsesModel && scorerModelMode === "inherit" && (
-                  <> {msg("submit.blackbox.roles.optimization.also_scoring")}</>
-                )}
-              </>
-            }
+            description={[
+              msg(OPTIMIZATION_MODEL_DESCRIPTION[optimizationFamily]),
+              nativeProposer ? msg("submit.blackbox.roles.optimization.managed_hint") : null,
+              scorerUsesModel && scorerModelMode === "inherit"
+                ? msg("submit.blackbox.roles.optimization.also_scoring")
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" ")}
             tip={tip("blackbox.config.reflection_model")}
           >
             <ModelChip
@@ -351,11 +351,12 @@ export function BlackboxOptimizerStep({
                 className={cn("size-4 transition-transform", advancedOpen && "rotate-180")}
                 aria-hidden="true"
               />
-              <span>{msg("submit.blackbox.optimizer.advanced")}</span>
-              {iterationLimitSupported && (
-                <span className="text-xs font-normal text-muted-foreground">
-                  {msg("submit.blackbox.optimizer.advanced_hint")}
-                </span>
+              {iterationLimitSupported ? (
+                <HelpTip text={msg("submit.blackbox.optimizer.advanced_hint")}>
+                  <span>{msg("submit.blackbox.optimizer.advanced")}</span>
+                </HelpTip>
+              ) : (
+                <span>{msg("submit.blackbox.optimizer.advanced")}</span>
               )}
             </button>
             <div id="bb-advanced" className={cnGrid(advancedOpen)}>
