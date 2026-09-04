@@ -13,13 +13,15 @@ from typing import Any
 
 from gepa.core.result import GEPAResult
 from gepa.core.state import GEPAState
-from gepa.optimize_anything import EngineConfig, GEPAConfig, ReflectionConfig, TrackingConfig, optimize_anything
+from gepa.gepa_launcher import EngineConfig, GEPAConfig, ReflectionConfig, TrackingConfig, optimize_anything
 from gepa.utils.stop_condition import ScoreThresholdStopper
 
 from ....constants import OPTIMIZER_NAME_GEPA
+from ....exceptions import ServiceError
 from ..trajectory import capture_proposal_prompts, trajectory_watch
 from .feedback import STR_CANDIDATE_KEY, emit_scorer_feedback
 from .protocol import BudgetExhaustedError, Candidate, EngineContext, EvalServer, Result, Task
+from .upstream import GEPA_SOURCE
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +66,14 @@ class GepaEngine:
                 run_dir=run_dir,
                 seed=ctx.seed,
                 max_metric_calls=server.remaining,
+                max_reflection_cost=ctx.proposer_token_budget_usd,
                 # Scorers may be user code or a remote endpoint with no
                 # concurrency guarantees, and a serial loop keeps the budget
                 # accounting exact.
                 parallel=False,
                 display_progress_bar=False,
             ),
-            reflection=ReflectionConfig(reflection_lm=ctx.reflection_lm),
+            reflection=ReflectionConfig(reflection_lm=_LaneReflection(ctx.reflection_lm, ctx.check_budget)),
             tracking=TrackingConfig(logger=_JobLogger()),
             stop_callbacks=[ScoreThresholdStopper(ctx.stop_at_score)] if ctx.stop_at_score is not None else None,
         )
@@ -95,7 +98,11 @@ class GepaEngine:
             Returns:
                 The score and side information.
             """
+            if ctx.check_budget is not None:
+                ctx.check_budget()
             score, side_info = server.evaluate(candidate, example)
+            if ctx.check_budget is not None:
+                ctx.check_budget()
             emit_scorer_feedback(
                 ctx.progress_callback,
                 example_id=example_ids.get(id(example), "?"),
@@ -126,10 +133,9 @@ class GepaEngine:
                 gepa_result = _load_result_from_state(run_dir, seed=ctx.seed, str_mode=task.str_mode)
 
         if gepa_result is None:
-            fallback = server.best_candidate
-            if fallback is None:
-                return Result(best_candidate=task.seed_candidate or "", best_score=None, total_evals=server.used)
-            return Result(best_candidate=fallback, best_score=server.best_score, total_evals=server.used)
+            if task.seed_candidate is None:
+                raise ServiceError("GEPA stopped before producing a fully evaluated candidate.")
+            return Result(best_candidate=task.seed_candidate, best_score=None, total_evals=server.used)
 
         best: Any = gepa_result.best_candidate
         if isinstance(best, dict) and task.str_mode:
@@ -139,11 +145,48 @@ class GepaEngine:
             best_score=float(gepa_result.val_aggregate_scores[gepa_result.best_idx]),
             total_evals=server.used,
             metadata={
+                "upstream_source": GEPA_SOURCE,
                 "candidates": len(gepa_result.candidates),
                 "gepa_metric_calls": gepa_result.total_metric_calls,
                 "candidate_tree": _candidate_tree(gepa_result, str_mode=task.str_mode),
             },
         )
+
+
+class _LaneReflection:
+    """Expose only this invocation's measured spend to upstream's cost stopper."""
+
+    def __init__(self, reflection_lm: Any, check_budget: Any = None) -> None:
+        """Record the shared model's starting cost.
+
+        Args:
+            reflection_lm: Metered model callable.
+            check_budget: Direct run-wide guard outside DSPy's callback wrapper.
+        """
+        self.reflection_lm = reflection_lm
+        self.check_budget = check_budget
+        self.starting_cost = float(getattr(reflection_lm, "total_cost", 0.0))
+
+    @property
+    def total_cost(self) -> float:
+        """Return measured cost since this lane started."""
+        return float(getattr(self.reflection_lm, "total_cost", 0.0)) - self.starting_cost
+
+    def __call__(self, prompt: Any) -> str:
+        """Forward an upstream prompt to the selected metered model.
+
+        Args:
+            prompt: Text or multimodal messages.
+
+        Returns:
+            Model completion text.
+        """
+        if self.check_budget is not None:
+            self.check_budget()
+        result = self.reflection_lm(prompt)
+        if self.check_budget is not None:
+            self.check_budget()
+        return result
 
 
 def _candidate_tree(gepa_result: GEPAResult[Any, Any], *, str_mode: bool) -> list[dict[str, Any]]:

@@ -499,6 +499,7 @@ export type BlackboxCandidate = string | Record<string, string>;
 
 export type BlackboxEngineId = "gepa" | "best_of_n" | "autoresearch" | "meta_harness";
 export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "custom";
+export type BlackboxProposerRuntime = "worker" | "vercel";
 
 export interface BlackboxScorer {
   kind: "python" | "remote";
@@ -555,6 +556,7 @@ export interface BlackboxRunRequest {
   seed?: number | null;
   budget: BlackboxBudget;
   strategy: BlackboxStrategy;
+  proposer_runtime?: BlackboxProposerRuntime;
   target: BlackboxTarget;
   reflection_model_config: ModelConfig;
   token_source?: "managed" | "byok";
@@ -665,10 +667,15 @@ export interface BlackboxEngineCatalogResponse {
   sandbox_available: boolean;
   sandbox_reason?: string | null;
   engines: BlackboxEngineInfo[];
-  // Ids of the engines Auto's execution recipe can invoke here — a visible
-  // catalog entry is not the same as one Auto may run. Optional only for
-  // responses from a backend that predates the field.
-  auto_engines?: string[];
+  auto_engines: BlackboxEngineId[];
+  auto_available: boolean;
+  auto_unavailable_reason: string | null;
+  upstream_revision: string;
+  proposer_runtimes: Array<{
+    id: BlackboxProposerRuntime;
+    available: boolean;
+    unavailable_reason: string | null;
+  }>;
 }
 
 /** One sandboxed agent run of a black-box optimization, with a transcript tail. */

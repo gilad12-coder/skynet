@@ -182,6 +182,22 @@ test("a held saver writes nothing; release writes once per distinct snapshot", a
   assert.deepEqual(s.log, ["write:1", "write:2"]);
 });
 
+test("the proposer runtime survives durable draft saving and restoration", async () => {
+  const s = fakeStore();
+  const timers = fakeTimers();
+  const { saver } = saverWith(s.store, timers);
+  saver.hold(false);
+  saver.publish(
+    "anything",
+    anythingDraft({ objective: "Better code", proposerRuntime: "vercel" }),
+    true,
+  );
+  await saver.flush();
+  const restored = saverWith(s.store, fakeTimers()).saver;
+  restored.adopt(await s.store.read("me@example.com"));
+  assert.equal(restored.current?.anything?.data.proposerRuntime, "vercel");
+});
+
 test("blanking every field removes the stored record", async () => {
   const s = fakeStore();
   const timers = fakeTimers();

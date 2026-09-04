@@ -3,9 +3,8 @@
 #   cp .env.example .env
 #   docker compose up --build
 #
-# Air-gap operators: set REGISTRY_PREFIX (and DEBIAN_MIRROR / PIP_INDEX_URL
-# for the API build) so nothing pulls from public registries. See
-# AIRGAP.html.
+# Air-gap operators: set REGISTRY_PREFIX and the Debian, Python, git, npm,
+# and Deno build mirrors below. See AIRGAP.html for exact upstream pins.
 
 services:
   db:
@@ -29,6 +28,9 @@ services:
         REGISTRY_PREFIX: ${REGISTRY_PREFIX:-docker.io}
         DEBIAN_MIRROR: ${DEBIAN_MIRROR-}
         PIP_INDEX_URL: ${PIP_INDEX_URL-}
+        GEPA_GIT_MIRROR: ${GEPA_GIT_MIRROR-}
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY-}
+        DENO_DOWNLOAD_BASE: ${DENO_DOWNLOAD_BASE:-https://github.com/denoland/deno/releases/download}
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: skynet-api
     ports:

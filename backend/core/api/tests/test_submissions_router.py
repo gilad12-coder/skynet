@@ -1907,10 +1907,15 @@ def test_blackbox_scorer_dry_run_returns_422_without_a_candidate(monkeypatch: py
 
 
 def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The catalog lists every engine in registry order and flips Meta-Harness on for agent targets."""
+    """Expose native engines for either evaluation target when the proposer runtime is available.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+    """
     store = _FakeJobStore()
     client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
     monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: None)
+    monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
 
     text = client.get("/blackbox/engines")
     agent = client.get("/blackbox/engines", params={"target": "agent"})
@@ -1922,23 +1927,36 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     assert list(by_id) == ["gepa", "best_of_n", "autoresearch", "meta_harness"]
     assert by_id["gepa"]["available"] is True
     assert by_id["gepa"]["supports_parts"] is True
-    assert by_id["autoresearch"]["available"] is False
-    assert by_id["autoresearch"]["unavailable_reason"]
-    assert by_id["meta_harness"]["available"] is False
-    assert by_id["meta_harness"]["requires_agent_target"] is True
-    assert text.json()["auto_engines"] == ["gepa", "best_of_n"]
+    assert by_id["autoresearch"]["available"] is True
+    assert by_id["autoresearch"]["unavailable_reason"] is None
+    assert by_id["meta_harness"]["available"] is True
+    assert by_id["meta_harness"]["requires_agent_target"] is False
+    assert {key for key, engine in by_id.items() if engine["supports_parts"]} == {"gepa"}
+    assert text.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness"]
+    assert text.json()["auto_available"] is True
+    assert text.json()["auto_unavailable_reason"] is None
+    assert text.json()["upstream_revision"] == "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
+    assert text.json()["proposer_runtimes"] == [
+        {"id": "worker", "available": True, "unavailable_reason": None},
+        {"id": "vercel", "available": True, "unavailable_reason": None},
+    ]
     assert agent.status_code == 200
     agent_by_id = {engine["id"]: engine for engine in agent.json()["engines"]}
     assert agent_by_id["meta_harness"]["available"] is True
     assert agent_by_id["meta_harness"]["unavailable_reason"] is None
-    assert agent.json()["auto_engines"] == ["gepa", "best_of_n", "meta_harness"]
+    assert agent.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness"]
 
 
 def test_blackbox_engine_catalog_surfaces_the_missing_sandbox_reason(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without a sandbox the catalog says so once at the top and again on the engines that need it."""
+    """Keep evaluator sandbox availability separate from native proposer capabilities.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+    """
     store = _FakeJobStore()
     client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
     monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: "no sandbox here")
+    monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
 
     resp = client.get("/blackbox/engines", params={"target": "agent"})
 
@@ -1946,9 +1964,96 @@ def test_blackbox_engine_catalog_surfaces_the_missing_sandbox_reason(monkeypatch
     assert resp.json()["sandbox_available"] is False
     assert resp.json()["sandbox_reason"] == "no sandbox here"
     by_id = {engine["id"]: engine for engine in resp.json()["engines"]}
-    assert by_id["meta_harness"]["available"] is False
-    assert by_id["meta_harness"]["unavailable_reason"] == "no sandbox here"
+    assert by_id["meta_harness"]["available"] is True
+    assert by_id["meta_harness"]["unavailable_reason"] is None
     assert by_id["gepa"]["available"] is True
+
+
+def test_blackbox_engine_catalog_checks_the_selected_proposer_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Block the full Auto recipe when one runtime cannot launch its native engines.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+    """
+    client = _make_client(_FakeService(), _FakeJobStore(), monkeypatch=monkeypatch)
+    monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: None)
+    monkeypatch.setattr(
+        _bb_service,
+        "native_runtime_unavailable_reason",
+        lambda runtime, _settings: "Worker isolation is missing" if runtime == "worker" else None,
+    )
+
+    worker = client.get("/blackbox/engines").json()
+    vercel = client.get("/blackbox/engines", params={"proposer_runtime": "vercel"}).json()
+
+    assert worker["auto_engines"] == ["gepa", "autoresearch", "meta_harness"]
+    assert worker["auto_available"] is False
+    assert "Worker isolation is missing" in worker["auto_unavailable_reason"]
+    assert worker["proposer_runtimes"][0]["available"] is False
+    by_id = {engine["id"]: engine for engine in worker["engines"]}
+    assert by_id["gepa"]["available"] is True
+    assert by_id["autoresearch"]["available"] is False
+    assert by_id["meta_harness"]["available"] is False
+    assert vercel["auto_available"] is True
+
+
+@pytest.mark.parametrize("engine", ["meta_harness", "autoresearch"])
+@pytest.mark.parametrize("runtime", ["worker", "vercel"])
+def test_submit_blackbox_native_engine_accepts_text_target(
+    monkeypatch: pytest.MonkeyPatch, engine: str, runtime: str
+) -> None:
+    """Queue native engines with direct evaluation and either supported proposer runtime.
+
+    Args:
+        monkeypatch: Pytest fixture that isolates runtime checks and scorer validation.
+        engine: Native upstream engine under test.
+        runtime: Selected proposer execution location.
+    """
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    monkeypatch.setattr(_bb_service, "validate_scorer_code", lambda _code: None)
+    payload = _blackbox_payload()
+    payload.update(strategy={"mode": "single", "engine": engine}, proposer_runtime=runtime, max_cost_credits=100)
+    payload["split_fractions"] = {"train": 1.0, "val": 0.0, "test": 0.0}
+
+    response = client.post("/blackbox/run", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["optimizer_name"] == engine
+    assert len(store.created_ids()) == 1
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"max_cost_credits": None},
+        {"token_source": "byok"},
+        {"reflection_model_config": {"name": "gpt-4o", "token_source": "byok"}},
+    ],
+    ids=["missing-budget", "byok-run", "byok-proposer"],
+)
+def test_submit_blackbox_native_engine_requires_managed_model_and_budget(
+    monkeypatch: pytest.MonkeyPatch, override: dict[str, Any]
+) -> None:
+    """Reject unsupported routing or an unbounded native run before creating a job.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+        override: Invalid modification to a native request.
+    """
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    payload = _blackbox_payload()
+    payload.update(strategy={"mode": "single", "engine": "autoresearch"}, max_cost_credits=100)
+    payload.update(override)
+
+    response = client.post("/blackbox/run", json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "submission.validation_failed"
+    assert store.created_ids() == []
 
 
 def test_blackbox_engine_catalog_rejects_unknown_targets(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1959,6 +2064,19 @@ def test_blackbox_engine_catalog_rejects_unknown_targets(monkeypatch: pytest.Mon
     resp = client.get("/blackbox/engines", params={"target": "robot"})
 
     assert resp.status_code == 422
+
+
+def test_blackbox_engine_catalog_rejects_unknown_proposer_runtimes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reject unsupported execution locations instead of falling back to the worker.
+
+    Args:
+        monkeypatch: Pytest fixture used by the API client factory.
+    """
+    client = _make_client(_FakeService(), _FakeJobStore(), monkeypatch=monkeypatch)
+
+    response = client.get("/blackbox/engines", params={"proposer_runtime": "local"})
+
+    assert response.status_code == 422
 
 
 def _alice_billing_engine(*, grant_remaining: int) -> object:

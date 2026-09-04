@@ -10,7 +10,7 @@ import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 export type ScoringModelMode = "inherit" | "explicit";
 
 /** The engine families whose proposer the optimization model drives. */
-export type OptimizationModelFamily = "gepa" | "meta_harness" | "autoresearch";
+export type OptimizationModelFamily = "gepa" | "meta_harness" | "autoresearch" | "auto";
 
 /**
  * Credential-free identity of a model configuration. Two configs with the
@@ -39,6 +39,12 @@ export function sameModelConfig(
   b: ModelConfig | null | undefined,
 ): boolean {
   return modelIdentity(a) === modelIdentity(b);
+}
+
+/** Native proposers use model defaults; preserve BYOK so validation cannot hide it. */
+export function proposerModelConfig(config: ModelConfig, native: boolean): ModelConfig {
+  if (!native) return config;
+  return { name: config.name, token_source: config.token_source ?? "managed" };
 }
 
 export interface ScoringBinding {
@@ -73,6 +79,7 @@ export function optimizationModelFamily(
   strategyMode: "auto" | "single" | "plateau",
   engine: BlackboxEngineId | null,
 ): OptimizationModelFamily {
+  if (strategyMode !== "single") return "auto";
   if (strategyMode === "single") {
     if (engine === "meta_harness") return "meta_harness";
     if (engine === "autoresearch") return "autoresearch";
@@ -82,6 +89,7 @@ export function optimizationModelFamily(
 
 export const OPTIMIZATION_MODEL_DESCRIPTION: Readonly<Record<OptimizationModelFamily, MessageKey>> =
   {
+    auto: "submit.blackbox.roles.optimization.desc.auto",
     gepa: "submit.blackbox.roles.optimization.desc.gepa",
     meta_harness: "submit.blackbox.roles.optimization.desc.meta_harness",
     autoresearch: "submit.blackbox.roles.optimization.desc.autoresearch",

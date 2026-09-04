@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   modelIdentity,
   optimizationModelFamily,
+  proposerModelConfig,
   resolveScoringModel,
   sameModelConfig,
 } from "./model-roles.ts";
@@ -27,6 +28,21 @@ test("modelIdentity ignores credentials and transport but keeps sampling setting
   );
   assert.equal(modelIdentity({ name: "  " }), null);
   assert.equal(modelIdentity(null), null);
+});
+
+test("native model configuration drops unsupported sampling without changing token source", () => {
+  assert.deepEqual(proposerModelConfig(gpt, true), {
+    name: gpt.name,
+    token_source: "managed",
+  });
+  assert.deepEqual(
+    proposerModelConfig(
+      { ...gpt, token_source: "byok", extra: { reasoning_effort: "high" } },
+      true,
+    ),
+    { name: gpt.name, token_source: "byok" },
+  );
+  assert.equal(proposerModelConfig(gpt, false), gpt);
 });
 
 test("sameModelConfig compares full configs, not names", () => {
@@ -86,8 +102,8 @@ test("resolveScoringModel keeps an explicit override even when it matches the op
 });
 
 test("optimizationModelFamily names the proposer the model drives", () => {
-  assert.equal(optimizationModelFamily("auto", null), "gepa");
-  assert.equal(optimizationModelFamily("plateau", "meta_harness"), "gepa");
+  assert.equal(optimizationModelFamily("auto", null), "auto");
+  assert.equal(optimizationModelFamily("plateau", "meta_harness"), "auto");
   assert.equal(optimizationModelFamily("single", "best_of_n"), "gepa");
   assert.equal(optimizationModelFamily("single", "meta_harness"), "meta_harness");
   assert.equal(optimizationModelFamily("single", "autoresearch"), "autoresearch");

@@ -40,6 +40,11 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
     setPatience,
     engineCatalog,
     autoEngineLabels,
+    proposerRuntime,
+    setProposerRuntime,
+    nativeProposer,
+    iterationLimitSupported,
+    runDisabledReason,
     seedMode,
     targetKind,
     maxScorerRuns,
@@ -63,7 +68,7 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
   // Opens by itself when a limit is already set (a clone, a returning draft)
   // so nothing that shapes the run hides behind a closed panel.
   const [advancedOpen, setAdvancedOpen] = useState(
-    () => maxIterations !== "" || stopAtScore.trim() !== "",
+    () => (iterationLimitSupported && maxIterations !== "") || stopAtScore.trim() !== "",
   );
   const optimizationLabel = msg("submit.blackbox.roles.optimization.label");
 
@@ -98,7 +103,7 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
         <p
           className={cn(
             "text-xs leading-relaxed",
-            autoEngineLabels.length > 0 ? "text-muted-foreground" : "text-amber-700",
+            engineCatalog.auto_available ? "text-muted-foreground" : "text-amber-700",
           )}
         >
           {autoEngineLabels.length > 0
@@ -201,6 +206,31 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
         </div>
       )}
 
+      {nativeProposer && (
+        <div id="bb-proposer-runtime" tabIndex={-1} className="space-y-2 outline-none">
+          <Field
+            label={msg("submit.blackbox.runtime.label")}
+            hint={msg("submit.blackbox.runtime.hint")}
+          >
+            <Segmented
+              value={proposerRuntime}
+              onChange={setProposerRuntime}
+              options={[
+                { value: "worker", label: msg("submit.blackbox.runtime.worker") },
+                { value: "vercel", label: msg("submit.blackbox.runtime.vercel") },
+              ]}
+            />
+          </Field>
+        </div>
+      )}
+
+      {runDisabledReason && (
+        <p className="flex items-start gap-2 text-xs text-amber-700" role="status">
+          <Warning className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <span dir="auto">{runDisabledReason}</span>
+        </p>
+      )}
+
       <Separator />
 
       <ModelRoleRow
@@ -210,6 +240,7 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
         description={
           <>
             {msg(OPTIMIZATION_MODEL_DESCRIPTION[optimizationFamily])}
+            {nativeProposer && <> {msg("submit.blackbox.roles.optimization.managed_hint")}</>}
             {scorerUsesModel && scorerModelMode === "inherit" && (
               <> {msg("submit.blackbox.roles.optimization.also_scoring")}</>
             )}
@@ -229,11 +260,18 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
               config: reflectionModel,
               onSave: setReflectionModel,
               label: optimizationLabel,
+              nameOnly: nativeProposer,
             })
           }
           onRemove={reflectionModel.name ? () => setReflectionModel(emptyModelConfig()) : undefined}
         />
       </ModelRoleRow>
+
+      {nativeProposer && reflectionModel.token_source === "byok" && (
+        <p className="text-xs text-amber-700" role="status">
+          {msg("submit.blackbox.validation.native_managed")}
+        </p>
+      )}
 
       <Separator />
 
@@ -247,11 +285,16 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
             id="bb-max-runs"
             value={maxScorerRuns}
             onChange={setMaxScorerRuns}
-            min={1}
+            min={strategyMode === "auto" ? 4 : 1}
             max={100000}
             step={10}
             className={MOBILE_NUMBER_INPUT_CLASS}
           />
+          {strategyMode === "auto" && maxScorerRuns < 4 && (
+            <p className="text-xs text-amber-700" role="status">
+              {msg("submit.blackbox.validation.auto_budget")}
+            </p>
+          )}
         </Field>
       </div>
 
@@ -275,21 +318,23 @@ export function BlackboxOptimizerStep({ w }: { w: BlackboxWizardContext }) {
         <div id="bb-advanced" className={cnGrid(advancedOpen)}>
           <div className="overflow-hidden">
             <div className="grid gap-4 pt-1 sm:grid-cols-2">
-              <Field
-                label={msg("submit.blackbox.budget.max_iterations")}
-                htmlFor="bb-max-iterations"
-                tip="blackbox.config.budget_iterations"
-              >
-                <NumberInput
-                  id="bb-max-iterations"
-                  value={maxIterations}
-                  onChange={setMaxIterations}
-                  min={1}
-                  max={1000}
-                  className={MOBILE_NUMBER_INPUT_CLASS}
-                  disabled={!advancedOpen}
-                />
-              </Field>
+              {iterationLimitSupported && (
+                <Field
+                  label={msg("submit.blackbox.budget.max_iterations")}
+                  htmlFor="bb-max-iterations"
+                  tip="blackbox.config.budget_iterations"
+                >
+                  <NumberInput
+                    id="bb-max-iterations"
+                    value={maxIterations}
+                    onChange={setMaxIterations}
+                    min={1}
+                    max={1000}
+                    className={MOBILE_NUMBER_INPUT_CLASS}
+                    disabled={!advancedOpen}
+                  />
+                </Field>
+              )}
               <Field
                 label={msg("submit.blackbox.budget.stop_at")}
                 htmlFor="bb-stop-at"

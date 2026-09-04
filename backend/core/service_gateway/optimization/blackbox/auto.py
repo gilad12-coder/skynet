@@ -1,52 +1,33 @@
-"""Strategy layer: ``single`` runs one engine; ``auto`` explores, then continues; ``plateau`` relays.
-
-Auto mirrors GEPA's *omni* recipe: every engine available to the job gets
-an equal slice of the explore budget, the best explore result is handed
-to GEPA, and GEPA spends what remains continuing from it. Plateau walks
-the same engine order but hands over on stagnation instead of on a fixed
-slice: a lane runs until ``patience`` scorer runs pass without beating the
-run's record, then the next engine picks up from the best version. Which
-engines are available depends on :class:`EngineCapabilities` (agent
-sandboxes on the deployment, an agent target on the job). Each lane emits
-``lane_started`` / ``lane_completed`` events and the hand-off emits
-``lane_handoff`` so the run page can render the lane table.
-"""
+"""Compose pinned upstream engines with the published omni and relay helpers."""
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Callable
+import itertools
+import math
+import threading
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+import dspy
+from gepa.oa.config import OptimizeAnythingConfig
+from gepa.oa.engine import Result as UpstreamResult
+from gepa.oa.ensemble import optimize_adaptive_sequential, optimize_best_of
+from gepa.oa.eval_server import EvalServer as UpstreamEvalServer
+from gepa.oa.task import Task as UpstreamTask
+
 from ....constants import PROGRESS_LANE_COMPLETED, PROGRESS_LANE_HANDOFF, PROGRESS_LANE_STARTED
 from ....exceptions import ServiceError
-from ....models.blackbox import BLACKBOX_ENGINE_GEPA, BlackboxStrategy
+from ....models.blackbox import BlackboxStrategy
 from ..cost_ceiling import CostCeilingExceededError
-from .protocol import (
-    BudgetExhaustedError,
-    Candidate,
-    EngineContext,
-    EvalServer,
-    PlateauWatch,
-    Result,
-    ScorerAbortError,
-    Task,
-)
-from .registry import NO_CAPABILITIES, EngineCapabilities, available_engine_ids, get_engine
-
-logger = logging.getLogger(__name__)
-
-ProgressCallback = Callable[[str, dict[str, Any]], None]
-
-# Share of the budget spent exploring; the rest continues from the winner.
-_EXPLORE_SHARE = 0.75
+from .protocol import EngineContext, EvalServer, Result, Task
+from .registry import NO_CAPABILITIES, EngineCapabilities, get_engine
+from .upstream import AUTO_ENGINES, GEPA_SOURCE, local_result
 
 
 @dataclass
 class LaneOutcome:
-    """What one engine lane produced, in the shape the result persists."""
+    """Persist the outcome of one actual upstream invocation."""
 
     engine: str
     phase: str
@@ -54,133 +35,145 @@ class LaneOutcome:
     best_score: float | None = None
     scorer_runs: int = 0
     error: str | None = None
-    best_candidate: Candidate | None = None
+    best_candidate: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def _emit(progress_callback: ProgressCallback | None, event: str, metrics: dict[str, Any]) -> None:
-    """Send one progress event when a callback is attached.
+def _admit_context(ctx: EngineContext) -> EngineContext:
+    """Bound a fresh invocation by cumulative spend already known to the worker.
 
     Args:
-        progress_callback: The job's progress sink, if any.
-        event: Event name.
-        metrics: Event payload.
-    """
-    if progress_callback is not None:
-        progress_callback(event, metrics)
-
-
-def _stamp_lane(progress_callback: ProgressCallback | None, lane_index: int) -> ProgressCallback | None:
-    """Stamp ``lane_index`` onto the metrics of engine-emitted events.
-
-    Candidate ids restart at "0" in every lane, so trajectory events from
-    successive lanes would collide in the frontend's tree without a
-    discriminator.
-
-    Args:
-        progress_callback: The job's progress sink, if any.
-        lane_index: Zero-based index of the lane in execution order.
+        ctx: Configured lane allowance and shared run accounting.
 
     Returns:
-        A stamping wrapper, or ``None`` when there is nothing to forward to.
+        A context with its proposer allowance clamped to the remaining run cap.
+
+    Raises:
+        CostCeilingExceededError: When another engine already spent the allowance.
     """
-    if progress_callback is None:
-        return None
+    if ctx.check_budget is not None:
+        ctx.check_budget()
+    if ctx.remaining_cost_usd is None:
+        return ctx
+    remaining = ctx.remaining_cost_usd()
+    if remaining <= 0:
+        raise CostCeilingExceededError("The run's total credit budget has been reached.")
+    budget = min(ctx.proposer_token_budget_usd or remaining, remaining)
+    native = (
+        None
+        if ctx.native_options is None
+        else replace(ctx.native_options, max_token_cost=min(ctx.native_options.max_token_cost, remaining))
+    )
+    return replace(ctx, native_options=native, proposer_token_budget_usd=budget)
 
-    def stamped(event: str, metrics: dict[str, Any]) -> None:
-        """Forward one event with the lane discriminator added."""
-        progress_callback(event, {**metrics, "lane_index": lane_index})
 
-    return stamped
+class _LaneEngine:
+    """Adapt only scorer transport, execution location and progress for an engine."""
 
+    def __init__(
+        self,
+        name: str,
+        phase: str,
+        ctx: EngineContext,
+        caps: EngineCapabilities,
+        lanes: list[LaneOutcome],
+        progress_callback: Any,
+        lane_ids: Any,
+    ) -> None:
+        """Bind platform resources before upstream schedules this engine.
 
-def run_lane(
-    engine_id: str,
-    phase: str,
-    task: Task,
-    server: EvalServer,
-    ctx: EngineContext,
-    progress_callback: ProgressCallback | None = None,
-    *,
-    caps: EngineCapabilities = NO_CAPABILITIES,
-    lane_index: int = 0,
-) -> LaneOutcome:
-    """Run one engine on its own budget slice, never letting it kill the run.
+        Args:
+            name: Upstream engine identifier.
+            phase: Product progress phase.
+            ctx: Models, runtime and workspace.
+            caps: Validated deployment capabilities.
+            lanes: Shared result collector.
+            progress_callback: Optional event sink.
+            lane_ids: Run-wide sequence for trajectory identifiers.
+        """
+        self.name, self.phase, self.ctx = name, phase, ctx
+        self.caps, self.lanes, self.progress_callback = caps, lanes, progress_callback
+        self.model_context = dict(dspy.settings.copy())
+        self.invocations = 0
+        self.lane_ids = lane_ids
+        self.lock = threading.Lock()
 
-    Args:
-        engine_id: Catalog id of the engine.
-        phase: ``explore``, ``continue``, ``single`` or ``relay``.
-        task: The task for this lane (the continue lane seeds from the winner).
-        server: The lane's budget slice.
-        ctx: Run context; the lane gets its own workspace under ``ctx.run_dir``.
-        progress_callback: The job's progress sink, if any.
-        caps: What the deployment and the job offer the engines.
-        lane_index: Position of the lane in execution order; stamped onto
-            engine-emitted trajectory events.
+    def run(self, task: UpstreamTask, upstream: UpstreamEvalServer) -> UpstreamResult:
+        """Invoke the selected upstream implementation under its assigned allowance.
 
-    Returns:
-        The lane's outcome, with ``status`` describing how it ended.
-    """
-    _emit(progress_callback, PROGRESS_LANE_STARTED, {"engine": engine_id, "phase": phase, "budget": server.max_evals})
-    outcome = LaneOutcome(engine=engine_id, phase=phase, status="completed")
-    try:
-        engine = get_engine(engine_id, caps)
-    except ServiceError as exc:
-        outcome.status, outcome.error = "unavailable", str(exc)
-    else:
-        lane_ctx = replace(
-            ctx,
-            run_dir=str(Path(ctx.run_dir) / f"{phase}-{engine_id}"),
-            progress_callback=_stamp_lane(ctx.progress_callback, lane_index),
+        Args:
+            task: Task supplied by the upstream composition, including its chosen seed.
+            upstream: Upstream composition's evaluation server.
+
+        Returns:
+            An upstream result retaining the engine's aggregate score.
+        """
+        with self.lock:
+            invocation = self.invocations
+            self.invocations += 1
+        lane_id = f"{self.phase}-{self.name}-{invocation}"
+        lane_index = next(self.lane_ids)
+        lane = LaneOutcome(self.name, self.phase, "completed")
+        self.lanes.append(lane)
+        callback = self.progress_callback
+        if callback is not None:
+            callback(
+                PROGRESS_LANE_STARTED, {"engine": self.name, "phase": self.phase, "budget": upstream.budget.remaining}
+            )
+
+        def progress(event: str, metrics: dict[str, Any]) -> None:
+            """Keep candidate identifiers distinct across parallel engines and relay slices.
+
+            Args:
+                event: Upstream/platform event name.
+                metrics: Event payload.
+            """
+            if callback is not None:
+                callback(event, {**metrics, "lane_index": lane_index})
+
+        context = replace(self.ctx, run_dir=str(Path(self.ctx.run_dir) / lane_id), progress_callback=progress)
+        server = EvalServer(upstream.evaluate, max_evals=upstream.budget.remaining or 0)
+        local_task = Task(
+            task.seed_candidate, task.objective, task.background, task.train_set or [], task.val_set or []
         )
         try:
-            result: Result = engine.run(task, server, lane_ctx)
-        except BudgetExhaustedError as exc:
-            outcome.status, outcome.error = "budget_exhausted", str(exc)
-            outcome.best_candidate, outcome.best_score = server.best_candidate, server.best_score
-        except (CostCeilingExceededError, ScorerAbortError):
-            # The credit ceiling and a scorer abort are run-level stops, not lane failures.
-            raise
+            with dspy.context(**self.model_context):
+                result = get_engine(self.name, self.caps).run(local_task, server, _admit_context(context))
+                if context.check_budget is not None:
+                    context.check_budget()
+            lane.best_candidate, lane.best_score = result.best_candidate, result.best_score
+            lane.metadata = result.metadata
+            return UpstreamResult(
+                best_candidate=result.best_candidate,
+                best_score=result.best_score if result.best_score is not None else -math.inf,
+                total_evals=server.used,
+                metadata={**result.metadata, "engine": self.name, "phase": self.phase},
+            )
         except Exception as exc:
-            logger.exception("%s lane '%s' failed", phase, engine_id)
-            outcome.status, outcome.error = "failed", f"{type(exc).__name__}: {exc}"
-            outcome.best_candidate, outcome.best_score = server.best_candidate, server.best_score
-        else:
-            outcome.best_candidate, outcome.best_score = result.best_candidate, result.best_score
-            outcome.metadata = dict(result.metadata)
-        # A plateau ends a lane through the budget path (engines stop and
-        # hand back their best); it is a stop, not an error.
-        if server.plateaued and outcome.status in ("completed", "budget_exhausted"):
-            outcome.status, outcome.error = "plateaued", None
-    outcome.scorer_runs = server.used
-    _emit(
-        progress_callback,
-        PROGRESS_LANE_COMPLETED,
-        {
-            "engine": engine_id,
-            "phase": phase,
-            "status": outcome.status,
-            "best_score": outcome.best_score,
-            "scorer_runs": outcome.scorer_runs,
-            "error": outcome.error,
-        },
-    )
-    return outcome
+            lane.status, lane.error = "failed", str(exc)
+            raise
+        finally:
+            lane.scorer_runs = server.used
+            if callback is not None:
+                callback(
+                    PROGRESS_LANE_COMPLETED,
+                    {
+                        "engine": self.name,
+                        "phase": self.phase,
+                        "status": lane.status,
+                        "best_score": lane.best_score,
+                        "scorer_runs": lane.scorer_runs,
+                        "error": lane.error,
+                    },
+                )
 
+    def process_result(self, result: UpstreamResult, output_dir: Path | None) -> None:
+        """Leave artifact persistence to the engine's execution adapter.
 
-def _winner(outcomes: list[LaneOutcome]) -> LaneOutcome | None:
-    """Pick the lane with the best score among those that produced a version.
-
-    Args:
-        outcomes: Finished lanes.
-
-    Returns:
-        The winning lane, or ``None`` when no lane scored anything.
-    """
-    scored = [o for o in outcomes if o.best_candidate is not None and o.best_score is not None]
-    if not scored:
-        return None
-    return max(scored, key=lambda o: o.best_score or float("-inf"))
+        Args:
+            result: Completed engine result.
+            output_dir: Upstream composition artifact directory.
+        """
 
 
 def run_strategy(
@@ -188,173 +181,188 @@ def run_strategy(
     task: Task,
     server: EvalServer,
     ctx: EngineContext,
-    progress_callback: ProgressCallback | None = None,
+    progress_callback: Any = None,
     *,
     caps: EngineCapabilities = NO_CAPABILITIES,
 ) -> tuple[Result, list[LaneOutcome]]:
-    """Run the requested strategy and return the best version plus every lane.
+    """Invoke a single engine or the pinned upstream composition helpers.
 
     Args:
-        strategy: ``single`` with an engine id, ``auto`` or ``plateau``.
-        task: The starting point, goal and cases.
-        server: The run's full scorer budget.
-        ctx: Reflection LM, workspace and stop settings.
-        progress_callback: The job's progress sink, if any.
-        caps: What the deployment and the job offer the engines; decides
-            which engines Auto explores and Plateau relays over.
+        strategy: Selected engine or composition.
+        task: Optimization inputs without held-out test data.
+        server: Run-wide scoring allowance and evidence collector.
+        ctx: Model routing, runtime and artifact directory.
+        progress_callback: Optional job event sink.
+        caps: Validated runtime capabilities.
 
     Returns:
-        The winning result and the lane outcomes in execution order.
+        The upstream-selected incumbent and observed engine invocations.
 
     Raises:
-        ServiceError: When no lane produced a version and there is no
-            starting point to fall back to.
+        ServiceError: If the exact recipe cannot run; never substitutes an engine.
     """
-    if strategy.mode == "single":
-        lane = run_lane(
-            str(strategy.engine), "single", task, server.lane(server.remaining), ctx, progress_callback, caps=caps
-        )
-        return _finalize(task, server, [lane], lane), [lane]
-    if strategy.mode == "plateau":
-        return _run_plateau(strategy, task, server, ctx, progress_callback, caps=caps)
-
-    engine_ids = available_engine_ids(caps, parts=not task.str_mode)
-    if len(engine_ids) == 1:
-        lane = run_lane(engine_ids[0], "single", task, server.lane(server.remaining), ctx, progress_callback, caps=caps)
-        return _finalize(task, server, [lane], lane), [lane]
-
-    per_lane = max(1, int(server.max_evals * _EXPLORE_SHARE) // len(engine_ids))
-    lanes = [
-        run_lane(engine_id, "explore", task, server.lane(per_lane), ctx, progress_callback, caps=caps, lane_index=index)
-        for index, engine_id in enumerate(engine_ids)
-    ]
-    winner = _winner(lanes)
-    if winner is None or winner.best_candidate is None or server.remaining <= 0:
-        return _finalize(task, server, lanes, winner), lanes
-
-    _emit(
-        progress_callback,
-        PROGRESS_LANE_HANDOFF,
-        {"from_engine": winner.engine, "to_engine": BLACKBOX_ENGINE_GEPA, "best_score": winner.best_score},
-    )
-    continued = run_lane(
-        BLACKBOX_ENGINE_GEPA,
-        "continue",
-        replace(task, seed_candidate=winner.best_candidate),
-        server.lane(server.remaining),
-        ctx,
-        progress_callback,
-        caps=caps,
-        lane_index=len(lanes),
-    )
-    lanes.append(continued)
-    final = continued if (continued.best_score or float("-inf")) >= (winner.best_score or float("-inf")) else winner
-    return _finalize(task, server, lanes, final), lanes
-
-
-def _run_plateau(
-    strategy: BlackboxStrategy,
-    task: Task,
-    server: EvalServer,
-    ctx: EngineContext,
-    progress_callback: ProgressCallback | None,
-    *,
-    caps: EngineCapabilities,
-) -> tuple[Result, list[LaneOutcome]]:
-    """Relay over the available engines, handing over whenever a lane stalls.
-
-    Each lane gets the whole remaining budget under a fresh
-    :class:`PlateauWatch`, seeded from the best version so far. The relay
-    stops when the budget is spent, the target score is reached, or a
-    full round of engines passes without a new record.
-
-    Args:
-        strategy: Carries ``patience``.
-        task: The starting point, goal and cases.
-        server: The run's full scorer budget.
-        ctx: Reflection LM, workspace and stop settings.
-        progress_callback: The job's progress sink, if any.
-        caps: What the deployment and the job offer the engines.
-
-    Returns:
-        The winning result and the lane outcomes in execution order.
-    """
-    engine_ids = available_engine_ids(caps, parts=not task.str_mode)
     lanes: list[LaneOutcome] = []
-    best: LaneOutcome | None = None
-    current = task
-    lanes_since_record = 0
-    while server.remaining > 0:
-        engine_id = engine_ids[len(lanes) % len(engine_ids)]
-        if lanes:
-            _emit(
-                progress_callback,
-                PROGRESS_LANE_HANDOFF,
+    lane_ids = itertools.count()
+    if strategy.mode == "single":
+        engine = get_engine(str(strategy.engine), caps)
+        if progress_callback is not None:
+            progress_callback(
+                PROGRESS_LANE_STARTED, {"engine": engine.name, "phase": "single", "budget": server.remaining}
+            )
+        result = engine.run(task, server, _admit_context(ctx))
+        if ctx.check_budget is not None:
+            ctx.check_budget()
+        result.metadata.update(engine=engine.name, upstream_source=GEPA_SOURCE)
+        lanes.append(
+            LaneOutcome(
+                engine.name,
+                "single",
+                "completed",
+                result.best_score,
+                server.used,
+                best_candidate=result.best_candidate,
+                metadata=dict(result.metadata),
+            )
+        )
+        if progress_callback is not None:
+            progress_callback(
+                PROGRESS_LANE_COMPLETED,
                 {
-                    "from_engine": lanes[-1].engine,
-                    "to_engine": engine_id,
-                    "best_score": None if best is None else best.best_score,
-                    "reason": lanes[-1].status,
+                    "engine": engine.name,
+                    "phase": "single",
+                    "status": "completed",
+                    "best_score": result.best_score,
+                    "scorer_runs": server.used,
                 },
             )
-        watch = PlateauWatch(strategy.patience, best_score=server.best_score)
-        outcome = run_lane(
-            engine_id,
-            "relay",
-            current,
-            server.lane(server.remaining, watch=watch),
-            ctx,
-            progress_callback,
-            caps=caps,
-            lane_index=len(lanes),
+        return result, lanes
+
+    if not task.str_mode:
+        raise ServiceError(
+            "The upstream Auto and Plateau recipes require a text starting point; use GEPA for named parts."
         )
-        lanes.append(outcome)
-        record = best.best_score if best is not None else None
-        if (
-            outcome.best_candidate is not None
-            and outcome.best_score is not None
-            and (record is None or outcome.best_score > record)
-        ):
-            best, lanes_since_record = outcome, 0
-            current = replace(task, seed_candidate=outcome.best_candidate)
-        else:
-            lanes_since_record += 1
-        if (
-            best is not None
-            and ctx.stop_at_score is not None
-            and (best.best_score or float("-inf")) >= ctx.stop_at_score
-        ):
-            break
-        if lanes_since_record >= len(engine_ids):
-            break
-    return _finalize(task, server, lanes, best), lanes
+    for name in AUTO_ENGINES:
+        get_engine(name, caps)
+    if strategy.mode == "auto" and server.remaining < 4:
+        raise ServiceError("Auto needs at least four scorer runs: three exploration lanes and one continuation.")
 
+    def configuration(name: str, phase: str, allowance: int, fraction: float) -> OptimizeAnythingConfig:
+        """Partition resources while leaving scheduling and winner selection upstream.
 
-def _finalize(task: Task, server: EvalServer, lanes: list[LaneOutcome], chosen: LaneOutcome | None) -> Result:
-    """Turn the chosen lane into the run's result, falling back to the seed.
+        Args:
+            name: Engine identifier.
+            phase: Progress phase.
+            allowance: Assigned evaluation calls.
+            fraction: Share of the proposer cost ceiling.
 
-    Args:
-        task: The original task (for the seed fallback).
-        server: The run's budget, for the total count.
-        lanes: Every lane that ran, for the error summary.
-        chosen: The lane whose version wins, if any produced one.
-
-    Returns:
-        The run's best version.
-
-    Raises:
-        ServiceError: When nothing was produced and there is no seed.
-    """
-    if chosen is not None and chosen.best_candidate is not None:
-        return Result(
-            best_candidate=chosen.best_candidate,
-            best_score=chosen.best_score,
-            total_evals=server.used,
-            metadata={**chosen.metadata, "engine": chosen.engine, "phase": chosen.phase},
+        Returns:
+            The upstream config with an execution adapter.
+        """
+        token_budget = None if ctx.proposer_token_budget_usd is None else ctx.proposer_token_budget_usd * fraction
+        native = None if ctx.native_options is None else replace(ctx.native_options, max_token_cost=token_budget)
+        context = replace(ctx, native_options=native, proposer_token_budget_usd=token_budget)
+        return OptimizeAnythingConfig(
+            engine=_LaneEngine(name, phase, context, caps, lanes, progress_callback, lane_ids),
+            max_evals=allowance,
+            max_token_cost=token_budget,
+            max_concurrency=ctx.concurrency,
+            output_dir=str(Path(ctx.run_dir) / f"{phase}-{name}-evals"),
         )
-    if task.seed_candidate is None:
-        errors = "; ".join(f"{lane.engine}: {lane.error}" for lane in lanes if lane.error)
-        raise ServiceError(f"No engine produced a version. {errors}".strip())
-    return Result(
-        best_candidate=task.seed_candidate, best_score=None, total_evals=server.used, metadata={"engine": None}
+
+    kwargs = {
+        "seed_candidate": task.seed_candidate,
+        "evaluator": server.evaluate,
+        "dataset": task.train_set or None,
+        "valset": task.val_set or None,
+        "objective": task.objective,
+        "background": task.background,
+        "name": Path(ctx.run_dir).name,
+    }
+    if strategy.mode == "plateau":
+        result = optimize_adaptive_sequential(
+            **kwargs,
+            configs=[configuration(name, "relay", server.remaining, 1 / 3) for name in AUTO_ENGINES],
+            plateau_evals=strategy.patience,
+            max_evals=server.remaining,
+            max_concurrency=ctx.concurrency,
+            output_dir=str(Path(ctx.run_dir) / "relay-evals"),
+        )
+        return local_result(result, server), lanes
+
+    per_lane = server.remaining // 4
+    continuation_allowance = server.remaining - 3 * per_lane
+    winner = optimize_best_of(
+        **kwargs,
+        configs=[configuration(name, "explore", per_lane, 0.25) for name in AUTO_ENGINES],
+        max_workers=3,
     )
+    if progress_callback is not None:
+        progress_callback(
+            PROGRESS_LANE_HANDOFF,
+            {
+                "from_engine": winner.metadata.get("engine"),
+                "to_engine": "gepa",
+                "best_score": winner.best_score,
+            },
+        )
+    continuation_index = next(lane_ids)
+
+    def continuation_progress(event: str, metrics: dict[str, Any]) -> None:
+        """Scope GEPA's continuation trajectory separately from exploration.
+
+        Args:
+            event: Progress event name.
+            metrics: Event payload.
+        """
+        if progress_callback is not None:
+            progress_callback(event, {**metrics, "lane_index": continuation_index})
+
+    continuation_ctx = replace(
+        ctx,
+        run_dir=str(Path(ctx.run_dir) / "continue-gepa"),
+        progress_callback=continuation_progress,
+        proposer_token_budget_usd=None
+        if ctx.proposer_token_budget_usd is None
+        else ctx.proposer_token_budget_usd * 0.25,
+    )
+    continuation_server = server.lane(min(continuation_allowance, server.remaining))
+    if progress_callback is not None:
+        progress_callback(
+            PROGRESS_LANE_STARTED, {"engine": "gepa", "phase": "continue", "budget": continuation_server.remaining}
+        )
+    continued = get_engine("gepa", caps).run(
+        replace(task, seed_candidate=winner.best_candidate), continuation_server, _admit_context(continuation_ctx)
+    )
+    if ctx.check_budget is not None:
+        ctx.check_budget()
+    lanes.append(
+        LaneOutcome(
+            "gepa",
+            "continue",
+            "completed",
+            continued.best_score,
+            continuation_server.used,
+            best_candidate=continued.best_candidate,
+            metadata=dict(continued.metadata),
+        )
+    )
+    if progress_callback is not None:
+        progress_callback(
+            PROGRESS_LANE_COMPLETED,
+            {
+                "engine": "gepa",
+                "phase": "continue",
+                "status": "completed",
+                "best_score": continued.best_score,
+                "scorer_runs": continuation_server.used,
+            },
+        )
+    continued.metadata.update(
+        engine="gepa",
+        phase="continue",
+        upstream_source=GEPA_SOURCE,
+        upstream_recipe="omni-gepa",
+        explore_engine=winner.metadata.get("engine"),
+    )
+    continued.total_evals = server.used
+    return continued, lanes

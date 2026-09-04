@@ -1,10 +1,7 @@
-"""Engine registry: the catalog the Auto strategy explores and ``single`` picks from.
+"""Publish pinned engine contracts and contextual execution availability.
 
-Availability is contextual. The in-process engines (GEPA, Best-of-N)
-always run; Meta-Harness needs a sandbox runtime (a deployment property)
-and an agent target (a job property). :class:`EngineCapabilities` carries
-both, so the API validates a job against the same answer the strategy
-layer later runs on.
+Native proposers use the selected worker or Vercel runtime independently of
+whether a candidate is scored directly or executed by a task harness.
 """
 
 from __future__ import annotations
@@ -19,14 +16,12 @@ from ....models.blackbox import (
     BLACKBOX_ENGINE_GEPA,
     BLACKBOX_ENGINE_META_HARNESS,
 )
+from .autoresearch import AutoResearchEngine
 from .best_of_n import BestOfNEngine
 from .gepa_engine import GepaEngine
 from .meta_harness import MetaHarnessEngine
 from .protocol import Engine
 
-_AUTORESEARCH_REASON = (
-    "AutoResearch (an agent editing the version inside a long-lived sandbox loop) is not implemented yet."
-)
 _AGENT_TARGET_REASON = "Meta-Harness optimizes a coding agent's harness; the job's target must be an agent."
 _NO_SANDBOX_REASON = "Agent sandboxes are not configured on this deployment."
 
@@ -43,6 +38,8 @@ class EngineCapabilities:
     sandbox: bool = False
     agent_target: bool = False
     sandbox_reason: str | None = None
+    proposer_available: bool = False
+    proposer_reason: str | None = None
 
 
 NO_CAPABILITIES = EngineCapabilities()
@@ -60,6 +57,7 @@ class EngineSpec:
     requires_sandbox: bool = False
     requires_agent_target: bool = False
     supports_parts: bool = False
+    requires_proposer: bool = False
 
     def unavailable_reason_for(self, caps: EngineCapabilities) -> str | None:
         """Explain why the engine cannot run for ``caps``, or return ``None`` when it can.
@@ -72,6 +70,8 @@ class EngineSpec:
         """
         if self.factory is None:
             return self.unavailable_reason
+        if self.requires_proposer and not caps.proposer_available:
+            return caps.proposer_reason or "The upstream proposer runtime is not configured on this deployment."
         if self.requires_sandbox and not caps.sandbox:
             return caps.sandbox_reason or _NO_SANDBOX_REASON
         if self.requires_agent_target and not caps.agent_target:
@@ -108,16 +108,15 @@ ENGINES: dict[str, EngineSpec] = {
         id=BLACKBOX_ENGINE_AUTORESEARCH,
         label="AutoResearch",
         description="A coding agent iterates on the version in a sandbox.",
-        unavailable_reason=_AUTORESEARCH_REASON,
+        factory=AutoResearchEngine,
+        requires_proposer=True,
     ),
     BLACKBOX_ENGINE_META_HARNESS: EngineSpec(
         id=BLACKBOX_ENGINE_META_HARNESS,
         label="Meta-Harness",
-        description="The optimizer model rewrites the agent's harness from the traces of its runs.",
+        description="A coding-agent proposer searches harness code using candidate and evaluation history.",
         factory=MetaHarnessEngine,
-        requires_sandbox=True,
-        requires_agent_target=True,
-        supports_parts=True,
+        requires_proposer=True,
     ),
 }
 

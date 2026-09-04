@@ -477,9 +477,12 @@ export function dryRunScorer(payload: ScorerDryRunRequest) {
   });
 }
 
-export function getBlackboxEngines(target: "text" | "agent") {
+export function getBlackboxEngines(
+  target: "text" | "agent",
+  proposerRuntime: "worker" | "vercel" = "worker",
+) {
   return request<BlackboxEngineCatalogResponse>(
-    `/blackbox/engines?target=${encodeURIComponent(target)}`,
+    `/blackbox/engines?target=${encodeURIComponent(target)}&proposer_runtime=${proposerRuntime}`,
   );
 }
 
