@@ -550,7 +550,7 @@ export interface GridSearchResult {
 export type BlackboxCandidate = string | Record<string, string>;
 
 export type BlackboxEngineId = "gepa" | "best_of_n" | "autoresearch" | "meta_harness";
-export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "custom";
+export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "prime" | "custom";
 export type BlackboxProposerRuntime = "vercel";
 
 export interface BlackboxScorer {

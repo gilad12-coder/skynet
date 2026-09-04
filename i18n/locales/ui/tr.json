@@ -172,6 +172,7 @@
   "submit.blackbox.start.harness.custom": "Özel komut",
   "submit.blackbox.start.harness.opencode": "OpenCode",
   "submit.blackbox.start.harness.pi": "Pi",
+  "submit.blackbox.start.harness.prime": "Prime Agent",
   "submit.blackbox.start.harness_label": "Aracı ortamı",
   "submit.blackbox.start.objective_hint_auto": "Boş bırakırsanız yandaki görüşme önce bunu sorar.",
   "submit.blackbox.start.objective_label": "Amaç",

@@ -3355,6 +3355,7 @@
   "submit.blackbox.start.harness.custom": "Custom command",
   "submit.blackbox.start.harness.opencode": "OpenCode",
   "submit.blackbox.start.harness.pi": "Pi",
+  "submit.blackbox.start.harness.prime": "Prime Agent",
   "submit.blackbox.start.seed_label": "Starting candidate",
   "submit.blackbox.start.seed_editor_label": "Code",
   "submit.blackbox.start.seed_mode.text": "Whole",

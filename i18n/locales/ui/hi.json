@@ -172,6 +172,7 @@
   "submit.blackbox.start.harness.custom": "कस्टम कमांड",
   "submit.blackbox.start.harness.opencode": "OpenCode",
   "submit.blackbox.start.harness.pi": "Pi",
+  "submit.blackbox.start.harness.prime": "Prime Agent",
   "submit.blackbox.start.harness_label": "एजेंट हार्नेस",
   "submit.blackbox.start.objective_hint_auto": "इसे खाली छोड़ दें तो बगल का इंटरव्यू पहले यही पूछता है।",
   "submit.blackbox.start.objective_label": "उद्देश्य",

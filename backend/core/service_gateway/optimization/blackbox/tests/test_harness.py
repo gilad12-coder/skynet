@@ -16,12 +16,15 @@ from core.models.blackbox import (
     BLACKBOX_HARNESS_CUSTOM,
     BLACKBOX_HARNESS_OPENCODE,
     BLACKBOX_HARNESS_PI,
+    BLACKBOX_HARNESS_PRIME,
     BLACKBOX_TARGET_AGENT,
     BlackboxTarget,
 )
 
 from ..harness import (
     ANSWER_FILE,
+    PRIME_AGENT_TARBALL,
+    PRIME_AGENT_VERSION,
     PROMPT_FILE,
     GatewayConfig,
     _parse_claude_output,
@@ -162,7 +165,9 @@ def test_opencode_launch_names_the_gateway_model() -> None:
     assert launch.parse_output is _parse_plain_output
 
 
-@pytest.mark.parametrize("harness", [BLACKBOX_HARNESS_PI, BLACKBOX_HARNESS_CODEX, BLACKBOX_HARNESS_OPENCODE])
+@pytest.mark.parametrize(
+    "harness", [BLACKBOX_HARNESS_PI, BLACKBOX_HARNESS_CODEX, BLACKBOX_HARNESS_OPENCODE, BLACKBOX_HARNESS_PRIME]
+)
 def test_protected_harness_uses_offline_dependencies_and_local_relay(tmp_path: Path, harness: str) -> None:
     """Execute generated config substitution without invoking a CLI or contacting a provider."""
     launch = build_launch(_target(harness, run_command="true"), _GATEWAY, protected=True)
@@ -184,6 +189,47 @@ def test_protected_harness_uses_offline_dependencies_and_local_relay(tmp_path: P
         content = (tmp_path / name).read_text()
         assert _GATEWAY.url not in content
         assert "http://127.0.0.1:3210/v1" in content
+
+
+def test_prime_agent_launch_reuses_the_pi_gateway_config_in_its_own_agent_dir() -> None:
+    """Prime Agent gets Pi's models.json under .skynet/prime, is pointed there, and streams Pi-shaped JSON."""
+    launch = build_launch(_target(BLACKBOX_HARNESS_PRIME), _GATEWAY)
+
+    assert launch.instructions_file == "AGENTS.md"
+    models = json.loads(launch.files[".skynet/prime/models.json"])
+    provider = models["providers"]["skynet"]
+    assert provider["baseUrl"] == _GATEWAY.url
+    assert provider["api"] == "openai-completions"
+    assert provider["apiKey"] == "!printenv SKYNET_API_KEY"
+    assert provider["models"][0]["id"] == "target-model"
+    assert launch.run_command.startswith('PRIME_AGENT_CODING_AGENT_DIR="$PWD/.skynet/prime" prime-agent --mode json')
+    assert '--no-session --provider skynet --model "$SKYNET_MODEL"' in launch.run_command
+    assert launch.parse_output is _parse_pi_output
+
+
+def test_prime_agent_launch_pins_the_release_tarball_and_bootstraps_the_kernel() -> None:
+    """The install pins the CDN tarball, builds the Python kernel up front, and never waits on a prompt."""
+    launch = build_launch(_target(BLACKBOX_HARNESS_PRIME), _GATEWAY)
+
+    assert launch.install_command is not None
+    assert f'"$(prime-agent --version 2>/dev/null)" = "{PRIME_AGENT_VERSION}"' in launch.install_command
+    assert "PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL=1 npm install -g" in launch.install_command
+    assert f'"{PRIME_AGENT_TARBALL}"' in launch.install_command
+    assert launch.env["PRIME_AGENT_INSTALL_UV"] == "1"
+    assert launch.env["PRIME_AGENT_TELEMETRY"] == "0"
+    assert launch.env["PI_SKIP_VERSION_CHECK"] == "1"
+    assert launch.env["SKYNET_MODEL"] == "target-model"
+
+
+def test_prime_agent_launch_bounds_reasoning_behind_openrouter() -> None:
+    """Behind OpenRouter the Prime Agent entry carries Pi's thinking format and effort, like Pi's does."""
+    gateway = GatewayConfig(url="https://openrouter.ai/api/v1", api_key="k")
+    launch = build_launch(_target(BLACKBOX_HARNESS_PRIME), gateway)
+
+    entry = json.loads(launch.files[".skynet/prime/models.json"])["providers"]["skynet"]["models"][0]
+    assert entry["reasoning"] is True
+    assert entry["compat"] == {"thinkingFormat": "openrouter"}
+    assert '--model "$SKYNET_MODEL:low"' in launch.run_command
 
 
 def test_custom_launch_fills_placeholders() -> None:

@@ -172,6 +172,7 @@
   "submit.blackbox.start.harness.custom": "自訂指令",
   "submit.blackbox.start.harness.opencode": "OpenCode",
   "submit.blackbox.start.harness.pi": "Pi",
+  "submit.blackbox.start.harness.prime": "Prime Agent",
   "submit.blackbox.start.harness_label": "Agent 執行環境",
   "submit.blackbox.start.objective_hint_auto": "留空嘅話，旁邊嘅訪談會先問你呢樣嘢。",
   "submit.blackbox.start.objective_label": "目標",

@@ -172,6 +172,7 @@
   "submit.blackbox.start.harness.custom": "Comando personalizado",
   "submit.blackbox.start.harness.opencode": "OpenCode",
   "submit.blackbox.start.harness.pi": "Pi",
+  "submit.blackbox.start.harness.prime": "Prime Agent",
   "submit.blackbox.start.harness_label": "Ambiente do agente",
   "submit.blackbox.start.objective_hint_auto": "Se deixar em branco, a entrevista ao lado começa por perguntar isso.",
   "submit.blackbox.start.objective_label": "Objetivo",
