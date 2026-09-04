@@ -92,7 +92,7 @@ training = [
     # template to score ECHO-style observation grounding 1:1 with serving.
     # The FastAPI runtime never imports this. ``transformers`` renders the
     # chat template; ``httpx`` drives the Fireworks echo-logprob scorer.
-    "transformers>=4.44",
+    "transformers>=5.10.1",
     "httpx>=0.25",
 ]
 render = [
