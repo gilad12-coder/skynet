@@ -100,6 +100,35 @@ def test_summary_response_keeps_dict_column_mapping_untouched() -> None:
     assert resp.column_mapping.outputs == {"answer": "a"}
 
 
+@pytest.mark.parametrize("legacy_state", ["waiting_for_usage", "resuming"])
+def test_summary_response_normalizes_internal_recovery_phases(legacy_state: str) -> None:
+    """Expose one stable recovering state while retaining the internal phase.
+
+    Args:
+        legacy_state: Previously persisted internal state discriminator.
+    """
+    payload = _required_base_fields()
+    payload["recovery"] = {"state": legacy_state, "reason": "continuing"}
+
+    response = OptimizationSummaryResponse.model_validate(payload)
+
+    assert response.recovery == {"state": "recovering", "phase": legacy_state, "reason": "continuing"}
+
+
+def test_summary_response_handles_unknown_recovery_state_defensively() -> None:
+    """Render unknown persisted states as unavailable rather than breaking clients."""
+    payload = _required_base_fields()
+    payload["recovery"] = {"state": "future_phase"}
+
+    response = OptimizationSummaryResponse.model_validate(payload)
+
+    assert response.recovery == {
+        "state": "unavailable",
+        "phase": "future_phase",
+        "reason": "This run has an unsupported recovery state.",
+    }
+
+
 def test_optimization_summary_response_metric_fields_default_none() -> None:
     """Verify OptimizationSummaryResponse defaults metric fields to None."""
     resp = OptimizationSummaryResponse.model_validate(_required_base_fields())

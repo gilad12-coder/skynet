@@ -9,10 +9,10 @@ import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import {
   submitRun,
   submitGridSearch,
-  dryRunWorkflowStream,
   type WorkflowDryRunStreamHandlers,
   validateCode,
   validateDataset,
+  getExecutionRuntimes,
   getOptimizationPayload,
   getJob,
   getSharedOptimization,
@@ -25,6 +25,7 @@ import {
   type DatasetSummary,
 } from "@/shared/lib/api";
 import type {
+  ExecutionRuntime,
   ModelConfig,
   SplitFractions,
   ValidateCodeResponse,
@@ -32,7 +33,7 @@ import type {
   DatasetProfile,
   SplitPlan,
   RunRequest,
-  ToolSource,
+  GridSearchRequest,
   WorkflowSpec,
 } from "@/shared/types/api";
 import { parseDatasetFile, type ParsedDataset } from "@/shared/lib/parse-dataset";
@@ -45,8 +46,18 @@ import { readPref, useUserPrefs } from "@/features/settings";
 import { emptyModelConfig, defaultSplit, defaultReactConfig } from "../constants";
 import type { ReactConfig, ColumnRole } from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
-import { beginValidationToast } from "../lib/validation-toast";
-import { cloneBasics, cloneColumnRoles, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
+import { focusField } from "../lib/focus-field";
+import { preflightDestination } from "../lib/preflight-destination";
+import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
+import { beginValidationToast, type ValidationToast } from "../lib/validation-toast";
+import {
+  cloneBasics,
+  cloneColumnRoles,
+  cloneReactToolFilter,
+  cloneRows,
+  cloneSourceRecipe,
+} from "../lib/clone-payload";
+import { buildLiveMcpToolSource } from "../lib/react-tool-filter";
 import { buildSignatureTemplate } from "../lib/build-signature";
 import { buildMetricTemplate } from "../lib/build-metric";
 import { buildOptimizerKwargs } from "../lib/build-kwargs";
@@ -55,7 +66,9 @@ import {
   defaultCeilingForBracket,
   chargeableBracket,
   aggregateTokenSource,
+  runtimeCostProjection,
   type CostBracket,
+  type ProjectedModelRole,
 } from "../lib/cost-bracket";
 import {
   isMeaningfulProgramDraft,
@@ -63,6 +76,16 @@ import {
   type WizardDraftData,
 } from "../lib/draft-record";
 import { useWizardDrafts } from "./use-wizard-drafts";
+import { useExecutionBudget } from "./use-execution-budget";
+import { useWizardPreflight } from "./use-wizard-preflight";
+import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import type {
+  ExecutionRuntimeCatalog,
+  PreflightScope,
+  WizardPreflightResponse,
+} from "@/shared/types/wizard-preflight";
+import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
 import {
@@ -150,6 +173,7 @@ export function useSubmitWizard() {
   // React (ReAct-agent) tool roster. Only sent when moduleName is "react".
   // React is generic — it is scored by the same standard metric_code as
   // predict/cot, and this config only carries the live tool source.
+  const executionRuntime: ExecutionRuntime = "vercel";
   const [reactConfig, setReactConfig] = useState<ReactConfig>(defaultReactConfig);
   const updateReactConfig = useCallback(
     (patch: Partial<ReactConfig>) => setReactConfig((prev) => ({ ...prev, ...patch })),
@@ -157,6 +181,9 @@ export function useSubmitWizard() {
   );
   const isReact = moduleName.toLowerCase() === "react";
   const isWorkflow = moduleName.toLowerCase() === "workflow";
+  const reactToolSelectionEmpty =
+    Array.isArray(reactConfig.toolFilter) &&
+    !reactConfig.toolFilter.some((name) => name.trim().length > 0);
   const moduleSelectionRequired = !moduleChosen;
   // Bound after the agent/interview hooks are created below; chooseModule only
   // runs on user clicks, so the refs are always populated by then.
@@ -235,13 +262,42 @@ export function useSubmitWizard() {
   // source — upload, clone, agent-staged — replaces ``parsedDataset`` with a
   // fresh object, so this identity-bound ref naturally goes stale and the submit
   // falls back to inlining rows without clearing a flag at each call site.
-  const librarySourceRef = useRef<{ id: string; parsed: ParsedDataset } | null>(null);
+  const [librarySource, setLibrarySource] = useState<{ id: string; parsed: ParsedDataset } | null>(
+    null,
+  );
 
   const [columnRoles, setColumnRoles] = useState<Record<string, ColumnRole>>({});
   // Manual override for input column modality. The dataset profiler auto-fills
   // entries for every input column (kind = "text" | "image"); the user can
   // flip a column manually via the DatasetStep toggle.
   const [columnKinds, setColumnKinds] = useState<Record<string, "text" | "image">>({});
+  const hasImageInputs = Object.entries(columnKinds).some(
+    ([column, kind]) => kind === "image" && columnRoles[column] === "input",
+  );
+  const [runtimeResult, setRuntimeResult] = useState<{
+    images: boolean;
+    catalog: ExecutionRuntimeCatalog | null;
+  } | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    getExecutionRuntimes(hasImageInputs, controller.signal)
+      .then((catalog) => {
+        if (!controller.signal.aborted) setRuntimeResult({ images: hasImageInputs, catalog });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setRuntimeResult({ images: hasImageInputs, catalog: null });
+      });
+    return () => controller.abort();
+  }, [hasImageInputs]);
+  const runtimeCatalog = runtimeResult?.images === hasImageInputs ? runtimeResult.catalog : null;
+  const runtimeUnavailableReason =
+    runtimeResult?.images !== hasImageInputs
+      ? msg("submit.runtime.loading")
+      : runtimeCatalog?.runtimes.find((runtime) => runtime.id === executionRuntime)?.available
+        ? null
+        : (runtimeCatalog?.runtimes.find((runtime) => runtime.id === executionRuntime)
+            ?.unavailable_reason ?? msg("submit.runtime.failed"));
+
   const [signatureManuallyEdited, setSignatureManuallyEdited] = useState(false);
   const [metricManuallyEdited, setMetricManuallyEdited] = useState(false);
   const [codeAssistMode, setCodeAssistMode] = useState<"auto" | "manual">(() =>
@@ -400,10 +456,14 @@ export function useSubmitWizard() {
     pxnProposals,
   ]);
   const [shuffle, setShuffle] = useState(true);
-  // User-set Max Cost Ceiling, in credits — null until the user opts into a cap.
-  // The run is hard-stopped server-side once spend exceeds it (Phase 2 [FG-1]),
-  // and the run button carries the cap. `null` ⇒ no ceiling sent.
-  const [maxCostCredits, setMaxCostCredits] = useState<number | null>(null);
+  // One shared total follows both workflow forms; the server owns spending and reservations.
+  const {
+    maxCostCredits,
+    setMaxCostCredits,
+    session: budgetSession,
+    setupSpent,
+    availableCredits,
+  } = useExecutionBudget();
 
   const [submitting, setSubmitting] = useState(false);
   const [submitPhase, setSubmitPhase] = useState<"idle" | "sending" | "splash" | "done">("idle");
@@ -414,9 +474,19 @@ export function useSubmitWizard() {
   const [advancing, setAdvancing] = useState(false);
   const advancingRef = useRef(false);
   const validationAttemptRef = useRef(0);
+  const navigationRevisionRef = useRef(0);
+  const validationToastRef = useRef<ValidationToast | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      navigationRevisionRef.current += 1;
+      validationToastRef.current?.dismiss();
+    };
+  }, []);
 
-  // Memoise validation results per (kind, code, mapping, sample_row,
-  // optimizer) tuple. Storing the in-flight promise itself also dedupes
+  // Storing the in-flight promise itself also dedupes
   // concurrent calls against the same key — useful when both signature and
   // metric run in parallel and one is re-triggered before the other lands.
   const validationCacheRef = useRef(new Map<string, Promise<ValidateCodeResponse>>());
@@ -501,6 +571,7 @@ export function useSubmitWizard() {
   const hydratedRef = useRef(false);
   // The draft never carries credentials: a restored BYOK model comes back
   // without its key and shows as missing credentials.
+  const safeReactConfig = useMemo(() => ({ ...reactConfig, mcpAuthHeader: "" }), [reactConfig]);
   const safeModelConfig = useMemo(() => stripModelSecrets(modelConfig), [modelConfig]);
   const safeSecondModelConfig = useMemo(
     () => (secondModelConfig ? stripModelSecrets(secondModelConfig) : null),
@@ -531,14 +602,15 @@ export function useSubmitWizard() {
       moduleName,
       moduleChosen,
       optimizerName,
-      reactConfig,
+      executionRuntime,
+      codeAssistMode,
+      splitMode,
+      reactConfig: safeReactConfig,
       workflowSpec,
       signatureCode,
       metricCode,
       signatureManuallyEdited,
       metricManuallyEdited,
-      signatureValidation,
-      metricValidation,
       parsedDataset,
       datasetFileName,
       columnRoles,
@@ -601,7 +673,10 @@ export function useSubmitWizard() {
     setModuleName(d.moduleName);
     setModuleChosen(d.moduleChosen);
     setOptimizerName(d.optimizerName);
-    setReactConfig(d.reactConfig);
+    setCodeAssistMode(d.codeAssistMode ?? "manual");
+    splitModeRef.current = d.splitMode ?? "manual";
+    setSplitModeState(d.splitMode ?? "manual");
+    setReactConfig({ ...d.reactConfig, mcpAuthHeader: "" });
     if (d.workflowSpec) {
       replaceWorkflowSpec(d.workflowSpec);
       workflowPristineRef.current = false;
@@ -609,10 +684,12 @@ export function useSubmitWizard() {
     }
     setSignatureCode(d.signatureCode);
     setMetricCode(d.metricCode);
-    setSignatureManuallyEdited(d.signatureManuallyEdited);
-    setMetricManuallyEdited(d.metricManuallyEdited);
-    setSignatureValidation(d.signatureValidation ?? null);
-    setMetricValidation(d.metricValidation ?? null);
+    setSignatureManuallyEdited(d.signatureManuallyEdited || !!d.signatureCode.trim());
+    setMetricManuallyEdited(d.metricManuallyEdited || !!d.metricCode.trim());
+    setSignatureValidation(null);
+    setMetricValidation(null);
+    setDatasetValidation(null);
+    validationCacheRef.current.clear();
     setParsedDataset(d.parsedDataset);
     setDatasetFileName(d.datasetFileName);
     setColumnRoles(d.columnRoles);
@@ -632,7 +709,7 @@ export function useSubmitWizard() {
     setPxnParents(d.pxnParents ?? DEFAULT_PXN);
     setPxnProposals(d.pxnProposals ?? DEFAULT_PXN);
     setShuffle(d.shuffle);
-    setMaxCostCredits(d.maxCostCredits);
+
     if (!advancedMode && d.jobType === "grid_search") {
       const firstGeneration = d.generationModels.find((model) => model.name.trim());
       const firstReflection = d.reflectionModels.find((model) => model.name.trim());
@@ -678,9 +755,18 @@ export function useSubmitWizard() {
         setModuleChosen(true);
       } else if (key === "react_config" && sharedState.react_config) {
         const rc = sharedState.react_config as Record<string, unknown>;
-        setReactConfig((prev) =>
-          typeof rc.mcpUrl === "string" ? { ...prev, mcpUrl: rc.mcpUrl } : prev,
-        );
+        setReactConfig((prev) => {
+          const next = { ...prev };
+          if (typeof rc.mcpUrl === "string") next.mcpUrl = rc.mcpUrl;
+          if (rc.toolFilter === null) {
+            next.toolFilter = null;
+          } else if (Array.isArray(rc.toolFilter)) {
+            next.toolFilter = rc.toolFilter.filter(
+              (name): name is string => typeof name === "string",
+            );
+          }
+          return next;
+        });
       } else if (key === "signature_code" && typeof sharedState.signature_code === "string") {
         setSignatureCode(sharedState.signature_code);
         setSignatureManuallyEdited(true);
@@ -784,44 +870,80 @@ export function useSubmitWizard() {
     }
   }, [parsedDataset, wizardCtx]);
 
+  const estimateModelConfigs =
+    effectiveJobType === "run"
+      ? [
+          modelConfig,
+          ...(optimizerName.toLowerCase() === "gepa" && secondModelConfig?.name?.trim()
+            ? [secondModelConfig]
+            : []),
+        ]
+      : [...generationModels, ...reflectionModels];
+  const estimateTokenSource = aggregateTokenSource(estimateModelConfigs);
+
   // Projected pre-run credit bracket [FG-1]: a DSPy job's token use isn't linear,
   // so we show a range rather than a false-precision single number and seed the
   // Max Cost Ceiling from its high end. For a grid, count the (gen × refl) pairs
   // so the bracket reflects the whole sweep.
-  const gridPairs =
-    effectiveJobType === "grid_search"
-      ? Math.max(
-          1,
-          (generationModels.filter((m) => m.name.trim()).length || 1) *
-            (reflectionModels.filter((m) => m.name.trim()).length || 1),
-        )
-      : 1;
   const costBracket: CostBracket = useMemo(() => {
-    // Price the projection on the actually-chosen models (a representative
-    // gen/refl pair for a grid). Looked up in the catalog so each model's real
-    // $/token moves the estimate; unresolved names price at the engine defaults.
-    const taskName =
-      effectiveJobType === "grid_search"
-        ? generationModels.find((m) => m.name.trim())?.name
-        : modelConfig.name;
-    const reflName =
-      effectiveJobType === "grid_search"
-        ? reflectionModels.find((m) => m.name.trim())?.name
-        : secondModelConfig?.name;
-    const taskModel = taskName?.trim()
-      ? (catalog?.models.find((m) => m.value === taskName) ?? null)
-      : null;
-    const reflectionModel = reflName?.trim()
-      ? (catalog?.models.find((m) => m.value === reflName) ?? null)
-      : null;
+    const findModel = (config: ModelConfig) =>
+      config.name.trim()
+        ? (catalog?.models.find((candidate) => candidate.value === config.name) ?? null)
+        : null;
+    let modelRoles: ProjectedModelRole[];
+    if (effectiveJobType === "grid_search") {
+      const tasks = generationModels.filter((config) => config.name.trim());
+      const optimizers = reflectionModels.filter((config) => config.name.trim());
+      modelRoles = [
+        ...tasks.map((config) => ({
+          role: "task" as const,
+          model: findModel(config),
+          tokenSource: config.token_source ?? "managed",
+          tokenShare: (1 - 0.35) * Math.max(1, optimizers.length),
+        })),
+        ...optimizers.map((config) => ({
+          role: "optimization" as const,
+          model: findModel(config),
+          tokenSource: config.token_source ?? "managed",
+          tokenShare: 0.35 * Math.max(1, tasks.length),
+        })),
+      ];
+    } else {
+      const optimization =
+        optimizerName.toLowerCase() === "gepa" && secondModelConfig?.name.trim()
+          ? secondModelConfig
+          : null;
+      modelRoles = [
+        {
+          role: "task",
+          model: findModel(modelConfig),
+          tokenSource: modelConfig.token_source ?? "managed",
+          tokenShare: optimization ? 1 - 0.35 : 1,
+        },
+        ...(optimization
+          ? [
+              {
+                role: "optimization" as const,
+                model: findModel(optimization),
+                tokenSource: optimization.token_source ?? "managed",
+                tokenShare: 0.35,
+              },
+            ]
+          : []),
+      ];
+    }
+    const selectedRuntime = runtimeCatalog?.runtimes.find(
+      (runtime) => runtime.id === executionRuntime,
+    );
+    // DSPy defaults to Vercel before Evaluation, so a fresh Vercel path opens
+    // one session for each paid Continue scope and one for the submitted run.
     return projectCostBracket({
       autoLevel,
       maxFullEvals: advancedMode ? maxFullEvals : DEFAULT_MAX_FULL_EVALS,
       maxMetricCalls: advancedMode ? maxMetricCalls : "",
       datasetRows: parsedDataset?.rowCount ?? 0,
-      pairs: gridPairs,
-      taskModel,
-      reflectionModel,
+      modelRoles,
+      runtime: runtimeCostProjection(selectedRuntime?.cost, 3),
     });
   }, [
     autoLevel,
@@ -831,16 +953,21 @@ export function useSubmitWizard() {
     parsedDataset?.rowCount,
     effectiveJobType,
     modelConfig.name,
+    modelConfig.token_source,
     secondModelConfig,
     generationModels,
     reflectionModels,
     catalog,
-    gridPairs,
+    optimizerName,
+    runtimeCatalog,
   ]);
 
   // Default the cap to the bracket's high end (with headroom) the first time a
   // user opens the ceiling control; once they set a value we leave it alone.
-  const suggestedCeiling = useMemo(() => defaultCeilingForBracket(costBracket), [costBracket]);
+  const suggestedCeiling = useMemo(
+    () => defaultCeilingForBracket(chargeableBracket(costBracket, estimateTokenSource)),
+    [costBracket, estimateTokenSource],
+  );
 
   // Stage the parsed rows on the backend so the agent can submit by id
   // without inlining tens of thousands of rows into its tool arguments.
@@ -1410,14 +1537,17 @@ export function useSubmitWizard() {
       // React run config — hydrate tool source from the wire model. Scoring is
       // owned by metric_code (hydrated above), so there is no reward to restore.
       // mcp_auth_header is scrubbed from cloned/shared payloads, never present.
-      // The wire `kind` and `tool_filter` are ignored: the wizard only submits
-      // unfiltered live MCP now, so a clone of an old dataset-snapshot or
-      // filtered run re-runs against the live server's full roster.
+      // Missing/null is the legacy full-roster contract; an array is an exact
+      // allow-list, including an invalid empty list that the wizard must repair
+      // rather than silently widen.
       const ts = payload.tool_source as Record<string, unknown> | undefined;
       if (ts) {
-        setReactConfig((prev) =>
-          ts.mcp_url != null ? { ...prev, mcpUrl: String(ts.mcp_url) } : prev,
-        );
+        const toolFilter = cloneReactToolFilter(payload);
+        setReactConfig((prev) => ({
+          ...prev,
+          ...(ts.mcp_url != null ? { mcpUrl: String(ts.mcp_url) } : {}),
+          ...(toolFilter !== undefined ? { toolFilter } : {}),
+        }));
       }
       toast.success(msg("submit.clone.success"));
     };
@@ -1463,7 +1593,111 @@ export function useSubmitWizard() {
       .finally(() => setCloneLoading(false));
   }, [advancedMode]);
 
+  const currentColumnMapping = () => buildColumnMapping(columnRoles);
+
+  const buildSubmissionPayload = (): RunRequest | GridSearchRequest => {
+    const pxnEligible = advancedMode && optimizerName.toLowerCase() === "gepa";
+    const optKw = buildOptimizerKwargs({
+      autoLevel,
+      maxFullEvals: advancedMode ? maxFullEvals : DEFAULT_MAX_FULL_EVALS,
+      maxMetricCalls: advancedMode ? maxMetricCalls : "",
+      reflectionMinibatchSize: advancedMode
+        ? reflectionMinibatchSize
+        : DEFAULT_REFLECTION_MINIBATCH,
+      useMerge: advancedMode ? useMerge : true,
+      pxnParents: pxnEligible ? pxnParents : DEFAULT_PXN,
+      pxnProposals: pxnEligible ? pxnProposals : DEFAULT_PXN,
+    });
+    const parsedTargetScore =
+      advancedMode && optimizerName.toLowerCase() === "gepa"
+        ? parseTargetScore(targetScore)
+        : undefined;
+    // Submit by reference when the on-screen rows are still the library dataset
+    // we loaded — the server inlines the rows and records the link back to it.
+    // Any other dataset source replaced the object identity, so fall back to
+    // sending the rows inline. The two are mutually exclusive server-side.
+    const librarySourceId =
+      librarySource && librarySource.parsed === parsedDataset ? librarySource.id : null;
+    const tokenSource = estimateTokenSource;
+    // Persist the chargeable bracket the user just saw so it can be
+    // reconciled against the actual charge. Same bracket the cost
+    // surface and review recap showed (managed: full per-model; byok: fee).
+    const estimate = chargeableBracket(costBracket, tokenSource);
+    const base = {
+      name: jobName.trim() || undefined,
+      description: jobDescription.trim() || undefined,
+      username: username.trim(),
+      module_name: moduleName,
+      // A workflow run carries its per-node signatures inside the graph
+      // spec; every other module wraps the single top-level signature.
+      ...(isWorkflow && workflowSpec
+        ? { workflow: workflowSpec }
+        : { signature_code: signatureCode }),
+      metric_code: metricCode,
+      optimizer_name: optimizerName,
+      execution_runtime: executionRuntime,
+      ...(librarySourceId
+        ? { source_dataset_id: librarySourceId }
+        : { dataset: (parsedDataset?.rows ?? []) as Array<Record<string, unknown>> }),
+      dataset_filename: datasetFileName || undefined,
+      column_mapping: currentColumnMapping(),
+      // Preserve the on-screen column order (file order) so a clone restores
+      // it — JSONB would otherwise scramble the dataset's object-key order.
+      column_order: parsedDataset?.columns,
+      split_fractions: split,
+      shuffle,
+      is_private: isPrivate,
+      token_source: tokenSource,
+      estimated_credits_low: estimate.lowCredits,
+      estimated_credits_high: estimate.highCredits,
+      ...(maxCostCredits != null && { max_cost_credits: maxCostCredits }),
+      ...(parsedTargetScore != null && { target_score: parsedTargetScore }),
+      ...(seed != null && { seed }),
+      ...(Object.keys(optKw).length > 0 && { optimizer_kwargs: optKw }),
+    };
+
+    // Reshape the flat UI react config into the backend ToolSource wire
+    // model. mcp_auth_header is forwarded once on the wire but never persisted
+    // (backend) or mirrored into shared agent state.
+    const buildReactFields = () => ({ tool_source: buildLiveMcpToolSource(reactConfig) });
+
+    const needsToolSource =
+      isReact || (isWorkflow && !!workflowSpec && workflowUsesTools(workflowSpec));
+    if (effectiveJobType === "run") {
+      const secondApplied =
+        optimizerName.toLowerCase() === "gepa" && secondModelConfig?.name?.trim()
+          ? prepareModelConfig(secondModelConfig)
+          : undefined;
+      return {
+        ...base,
+        model_config: prepareModelConfig(modelConfig),
+        ...(secondApplied ? { reflection_model_config: secondApplied } : {}),
+        ...(needsToolSource ? buildReactFields() : {}),
+      };
+    }
+    return {
+      ...base,
+      generation_models: generationModels.filter((m) => m.name.trim()).map(prepareModelConfig),
+      reflection_models: reflectionModels.filter((m) => m.name.trim()).map(prepareModelConfig),
+    };
+  };
+
+  const preflight = useWizardPreflight("dspy", buildSubmissionPayload(), budgetSession);
+  const currentEvidence =
+    preflight.evidence.execution?.identity === preflight.identity
+      ? preflight.evidence.execution
+      : preflight.evidence.evaluation;
+  const evaluationStatus =
+    currentEvidence?.identity === preflight.identity &&
+    currentEvidence.response.status === "succeeded"
+      ? "passed"
+      : currentEvidence
+        ? "stale"
+        : "idle";
   const goNext = () => {
+    navigationRevisionRef.current += 1;
+    validationToastRef.current?.dismiss();
+    preflight.cancel();
     if (step < LAST_WIZARD_STAGE) {
       setDirection(1);
       setStep((s) => {
@@ -1474,18 +1708,22 @@ export function useSubmitWizard() {
     }
   };
   const goPrev = () => {
+    navigationRevisionRef.current += 1;
+    validationToastRef.current?.dismiss();
+    preflight.cancel();
     if (step > 0) {
       setDirection(-1);
       setStep((s) => s - 1);
     }
   };
   const goTo = (idx: number) => {
+    navigationRevisionRef.current += 1;
+    validationToastRef.current?.dismiss();
+    preflight.cancel();
     setDirection(idx > step ? 1 : -1);
     setStep(idx);
     setFurthestReachedStep((prev) => Math.max(prev, idx));
   };
-
-  const currentColumnMapping = () => buildColumnMapping(columnRoles);
 
   const validateTargetScore = (showToast: boolean): boolean => {
     if (!advancedMode || optimizerName.toLowerCase() !== "gepa" || !targetScore.trim()) return true;
@@ -1527,8 +1765,26 @@ export function useSubmitWizard() {
     [splitPlan],
   );
 
+  const evaluationIdentity = JSON.stringify([
+    signatureCode,
+    metricCode,
+    executionRuntime,
+    currentColumnMapping(),
+    parsedDataset?.rows[0],
+    parsedDataset?.rowCount,
+    split,
+    shuffle,
+    seed,
+    optimizerName,
+    moduleName,
+    workflowSpec,
+  ]);
+  const evaluationIdentityRef = useRef(evaluationIdentity);
+  useEffect(() => {
+    evaluationIdentityRef.current = evaluationIdentity;
+  }, [evaluationIdentity]);
   /** Validates a wizard step; optionally surfaces toast errors. */
-  const validateStep = (s: number, showToast = false): boolean => {
+  const validateStep = (s: number, showToast = false, structureOnly = false): boolean => {
     switch (s) {
       case WIZARD_STAGE.goal:
         if (moduleSelectionRequired) {
@@ -1558,6 +1814,10 @@ export function useSubmitWizard() {
           if (showToast) toast.error(msg("submit.validation.mcp_url_required"));
           return false;
         }
+        if (needsTools && reactToolSelectionEmpty) {
+          if (showToast) toast.error(msg("submit.validation.mcp_tool_required"));
+          return false;
+        }
         if (isWorkflow) {
           if (!workflowSpec) return false;
           if (validateWorkflowSpec(workflowSpec, workflowIssueText).length > 0) {
@@ -1569,9 +1829,6 @@ export function useSubmitWizard() {
             if (showToast) toast.error(msg("submit.validation.signature_required"));
             return false;
           }
-          if (!signatureValidation || signatureValidation.errors.length > 0) {
-            return false;
-          }
         }
         if (!metricCode.trim()) {
           if (showToast) toast.error(msg("submit.validation.metric_required"));
@@ -1579,28 +1836,30 @@ export function useSubmitWizard() {
         }
         // Server-side validation covers the signature and the metric together;
         // handleNext runs it before this check when the stage is left.
-        if (!metricValidation || metricValidation.errors.length > 0) {
-          return false;
-        }
-        if (datasetValidation && datasetValidation.errors.length > 0) {
+        if (!structureOnly && evaluationStatus !== "passed") return false;
+        if (!structureOnly && datasetValidation && datasetValidation.errors.length > 0) {
           if (showToast) toast.error(msg("submit.validation.split_too_small"));
           return false;
         }
         return true;
       }
       case WIZARD_STAGE.optimization: {
+        if (!structureOnly && runtimeUnavailableReason) {
+          if (showToast) toast.error(runtimeUnavailableReason);
+          return false;
+        }
         if (!validateTargetScore(showToast)) return false;
         if (effectiveJobType === "run") {
           if (!modelConfig.name.trim()) {
             if (showToast) toast.error(msg("submit.validation.model_required"));
             return false;
           }
-          if (modelConfig.token_source !== "byok" && !anyProviderHasEnvKey) {
+          if (!structureOnly && modelConfig.token_source !== "byok" && !anyProviderHasEnvKey) {
             if (showToast) toast.error(msg("submit.validation.api_key_required"));
             return false;
           }
           const secondModel = secondModelConfig;
-          if (!secondModel?.name?.trim()) {
+          if (optimizerName.toLowerCase() === "gepa" && !secondModel?.name?.trim()) {
             if (showToast) toast.error(msg("submit.validation.reflection_model_required"));
             return false;
           }
@@ -1622,7 +1881,7 @@ export function useSubmitWizard() {
         const imageInputs = Object.entries(columnKinds)
           .filter(([col, kind]) => kind === "image" && columnRoles[col] === "input")
           .map(([col]) => col);
-        if (imageInputs.length > 0 && catalog?.models?.length) {
+        if (!structureOnly && imageInputs.length > 0 && catalog?.models?.length) {
           const visionByValue = new Map(catalog.models.map((m) => [m.value, m.supports_vision]));
           const isVision = (id: string): boolean => visionByValue.get(id) ?? false;
           const candidates: string[] =
@@ -1673,7 +1932,7 @@ export function useSubmitWizard() {
     let open = target;
     let reachable = furthest;
     for (let i = 0; i < furthest; i++) {
-      if (!validateStep(i)) {
+      if (!validateStep(i, false, true)) {
         open = Math.min(open, i);
         reachable = i;
         break;
@@ -1699,20 +1958,23 @@ export function useSubmitWizard() {
       return { valid: false, errors: [msg("submit.validation.dataset_before_code")], warnings: [] };
     }
     const mapping = currentColumnMapping();
-    const sampleRow = parsedDataset.rows[0] as Record<string, unknown>;
-    const cacheKey = JSON.stringify([kind, code, mapping, sampleRow, optimizerName, moduleName]);
+    const cacheKey = JSON.stringify([kind, code, mapping, optimizerName, moduleName]);
     const cached = validationCacheRef.current.get(cacheKey);
     if (cached) return cached;
     const pending = validateCode({
       signature_code: kind === "signature" ? code : undefined,
       metric_code: kind === "metric" ? code : undefined,
       column_mapping: mapping,
-      sample_row: sampleRow,
       optimizer_name: optimizerName,
       module_name: moduleName,
     });
     validationCacheRef.current.set(cacheKey, pending);
-    pending.catch(() => validationCacheRef.current.delete(cacheKey));
+    pending.then(
+      (result) => {
+        if (!result.valid || result.errors.length > 0) validationCacheRef.current.delete(cacheKey);
+      },
+      () => validationCacheRef.current.delete(cacheKey),
+    );
     return pending;
   };
 
@@ -1720,8 +1982,10 @@ export function useSubmitWizard() {
     overrideCode?: string,
   ): Promise<EditorValidationResult | null> => {
     try {
+      const identity = evaluationIdentityRef.current;
       const result = await validateBlock("signature", overrideCode);
-      setSignatureValidation(result as ValidateCodeResponse);
+      if (mountedRef.current && identity === evaluationIdentityRef.current)
+        setSignatureValidation(result as ValidateCodeResponse);
       return result;
     } catch (err) {
       const errorMessage =
@@ -1734,8 +1998,10 @@ export function useSubmitWizard() {
     overrideCode?: string,
   ): Promise<EditorValidationResult | null> => {
     try {
+      const identity = evaluationIdentityRef.current;
       const result = await validateBlock("metric", overrideCode);
-      setMetricValidation(result as ValidateCodeResponse);
+      if (mountedRef.current && identity === evaluationIdentityRef.current)
+        setMetricValidation(result as ValidateCodeResponse);
       return result;
     } catch (err) {
       const errorMessage =
@@ -1782,11 +2048,13 @@ export function useSubmitWizard() {
       return false;
     }
     try {
+      const identity = evaluationIdentityRef.current;
       const result = await validateDataset({
         row_count: parsedDataset.rowCount,
         fractions: effectiveFractions,
       });
-      setDatasetValidation(result);
+      if (mountedRef.current && identity === evaluationIdentityRef.current)
+        setDatasetValidation(result);
       if (result.errors.length === 0) return true;
       report(msg("submit.validation.split_too_small"));
       return false;
@@ -1796,62 +2064,47 @@ export function useSubmitWizard() {
     }
   };
 
-  const handleNext = async () => {
+  const advance = async (target: number) => {
     if (advancingRef.current) return;
     advancingRef.current = true;
     setAdvancing(true);
     try {
-      const checkDataset =
-        step === WIZARD_STAGE.evaluation && !!parsedDataset && parsedDataset.rowCount > 0;
-      const checkCode =
-        step === WIZARD_STAGE.evaluation &&
-        !moduleSelectionRequired &&
-        (isWorkflow || !!signatureCode.trim()) &&
-        !!parsedDataset &&
-        !!metricCode.trim();
-      if (checkDataset || checkCode) {
-        // One toast per attempt carries every phase and always ends in a
-        // terminal state; a Continue with nothing to test shows nothing.
-        const t = beginValidationToast(
-          toast,
-          `wizard-validate-${++validationAttemptRef.current}`,
-          msg("submit.validation.toast.running"),
-        );
-        if (checkDataset) {
-          t.phase(msg("submit.validation.toast.checking_split"));
-          if (!(await handleValidateDataset(t.fail))) return;
-        }
-        if (checkCode) {
-          t.phase(msg("submit.validation.toast.checking_code"));
-          if (!(await handleValidateCode(t.fail))) return;
-        }
-        // The stage check reads the results those calls stored and reports
-        // its own message, so the loading line just closes.
-        if (!validateStep(step, true)) {
-          t.dismiss();
+      for (let i = 0; i < target; i++) {
+        if (!validateStep(i, true, true)) {
+          goTo(i);
+          focusField(
+            i === WIZARD_STAGE.goal
+              ? "module-picker"
+              : i === WIZARD_STAGE.evaluation
+                ? "dataset-upload"
+                : runtimeUnavailableReason
+                  ? "execution-preflight-checks"
+                  : "model-catalog",
+          );
           return;
         }
-        t.succeed(msg("submit.validation.toast.passed"));
-        goNext();
-        return;
       }
-      if (validateStep(step, true)) goNext();
+      if (
+        target > WIZARD_STAGE.evaluation &&
+        !(await ensureSetupChecked(target > WIZARD_STAGE.optimization ? "execution" : "evaluation"))
+      )
+        return;
+      if (mountedRef.current) goTo(target);
     } finally {
       advancingRef.current = false;
-      setAdvancing(false);
+      if (mountedRef.current) setAdvancing(false);
     }
   };
 
-  const handleTabClick = (idx: number) => {
+  const handleNext = async () => {
+    await advance(step + 1);
+  };
+  const handleTabClick = async (idx: number) => {
     if (idx <= step) {
       goTo(idx);
       return;
     }
-    if (idx <= maxReachableStep) {
-      goTo(idx);
-      return;
-    }
-    validateStep(step, true);
+    await advance(idx);
   };
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1910,8 +2163,8 @@ export function useSubmitWizard() {
       const columns = res.columns.length > 0 ? res.columns : Object.keys(res.rows[0] ?? {});
       const parsed: ParsedDataset = { columns, rows: res.rows, rowCount: res.row_count };
       // Bind the reference to this exact object so handleSubmit can tell a live
-      // library pick from a later upload/clone by identity (see librarySourceRef).
-      librarySourceRef.current = { id: dataset.id, parsed };
+      // library pick from a later upload/clone by identity (see librarySource).
+      setLibrarySource({ id: dataset.id, parsed });
       setParsedDataset(parsed);
       setDatasetFileName(dataset.name);
       // Restore the saved roles; any column the schema didn't cover defaults to
@@ -1953,7 +2206,86 @@ export function useSubmitWizard() {
   };
   const splitSum = +(split.train + split.val + split.test).toFixed(4);
 
+  const ensureSetupChecked = async (
+    scope: PreflightScope,
+    preserveWorkflowResult = false,
+  ): Promise<WizardPreflightResponse | null> => {
+    const completed = preflight.reusable(scope);
+    if (completed) return completed;
+    const navigation = navigationRevisionRef.current;
+    const identity = preflight.identity;
+    const t = beginValidationToast(
+      toast,
+      `wizard-validate-${++validationAttemptRef.current}`,
+      msg("submit.validation.toast.running"),
+    );
+    validationToastRef.current = t;
+    try {
+      const response = await preflight.run(scope);
+      if (
+        !mountedRef.current ||
+        navigation !== navigationRevisionRef.current ||
+        !preflight.isCurrent(identity)
+      ) {
+        t.obsolete(msg("submit.validation.toast.obsolete"));
+        return null;
+      }
+      if (preflightMayAdvance(response, scope)) {
+        if (response.status === "succeeded") {
+          const locale = getActiveIntlLocale();
+          t.succeed(
+            `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetAmount(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetAmount(response.budget.available_credits, locale)}`,
+          );
+        } else {
+          t.pending(msg(preflightPendingMessageKey(response)));
+        }
+        return response;
+      }
+      if (response.status === "pending") {
+        t.fail(msg(preflightPendingMessageKey(response)));
+        return preserveWorkflowResult && response.workflow_result ? response : null;
+      }
+      const failure = response.checks.find((check) => check.status === "failed");
+      t.fail(failure?.message ?? msg("submit.preflight.failed"));
+      if (preserveWorkflowResult && response.workflow_result) return response;
+      const destination = preflightDestination("dspy", failure?.field ?? failure?.key, scope);
+      goTo(WIZARD_STAGE[destination.stage]);
+      focusField(destination.fieldId);
+      return null;
+    } catch (error) {
+      if (mountedRef.current && navigation === navigationRevisionRef.current) {
+        const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
+        t.fail(message.startsWith("budget.") ? msg(message as MessageKey) : message);
+        if (message.startsWith("budget.")) {
+          goTo(WIZARD_STAGE.evaluation);
+          focusField("totalBudgetInput");
+        }
+      }
+      return null;
+    } finally {
+      if (!t.settled) t.dismiss();
+    }
+  };
+
   const handleSubmit = async () => {
+    if (advancingRef.current || submitting) return;
+    for (let i = 0; i < LAST_WIZARD_STAGE; i++) {
+      if (!validateStep(i, true, true)) {
+        goTo(i);
+        return;
+      }
+    }
+    advancingRef.current = true;
+    setAdvancing(true);
+    let checked: WizardPreflightResponse | null;
+    try {
+      checked = await ensureSetupChecked("execution");
+      if (!checked) return;
+    } finally {
+      advancingRef.current = false;
+      if (mountedRef.current) setAdvancing(false);
+    }
+    if (!mountedRef.current) return;
     if (!username.trim()) {
       toast.error(msg("submit.validation.username_required"));
       goTo(WIZARD_STAGE.review);
@@ -1993,6 +2325,11 @@ export function useSubmitWizard() {
       goTo(WIZARD_STAGE.evaluation);
       return;
     }
+    if (needsToolSource && reactToolSelectionEmpty) {
+      toast.error(msg("submit.validation.mcp_tool_required"));
+      goTo(WIZARD_STAGE.evaluation);
+      return;
+    }
 
     const columnMapping = currentColumnMapping();
     if (Object.keys(columnMapping.inputs).length === 0) {
@@ -2009,133 +2346,26 @@ export function useSubmitWizard() {
     setSubmitting(true);
     setSubmitPhase("sending");
     try {
-      const pxnEligible = advancedMode && optimizerName.toLowerCase() === "gepa";
-      const optKw = buildOptimizerKwargs({
-        autoLevel,
-        maxFullEvals: advancedMode ? maxFullEvals : DEFAULT_MAX_FULL_EVALS,
-        maxMetricCalls: advancedMode ? maxMetricCalls : "",
-        reflectionMinibatchSize: advancedMode
-          ? reflectionMinibatchSize
-          : DEFAULT_REFLECTION_MINIBATCH,
-        useMerge: advancedMode ? useMerge : true,
-        pxnParents: pxnEligible ? pxnParents : DEFAULT_PXN,
-        pxnProposals: pxnEligible ? pxnProposals : DEFAULT_PXN,
-      });
-      const parsedTargetScore =
-        advancedMode && optimizerName.toLowerCase() === "gepa"
-          ? parseTargetScore(targetScore)
-          : undefined;
-      // Submit by reference when the on-screen rows are still the library dataset
-      // we loaded — the server inlines the rows and records the link back to it.
-      // Any other dataset source replaced the object identity, so fall back to
-      // sending the rows inline. The two are mutually exclusive server-side.
-      const librarySourceId =
-        librarySourceRef.current && librarySourceRef.current.parsed === parsedDataset
-          ? librarySourceRef.current.id
-          : null;
-      const selectedConfigs =
-        effectiveJobType === "run"
-          ? [modelConfig, ...(secondModelConfig?.name?.trim() ? [secondModelConfig] : [])]
-          : [...generationModels, ...reflectionModels];
-      const tokenSource = aggregateTokenSource(selectedConfigs);
-      // Persist the chargeable bracket the user just saw so it can be
-      // reconciled against the actual charge. Same bracket the cost
-      // surface and review recap showed (managed: full per-model; byok: fee).
-      const estimate = chargeableBracket(costBracket, tokenSource);
-      const base = {
-        name: jobName.trim() || undefined,
-        description: jobDescription.trim() || undefined,
-        username: username.trim(),
-        module_name: moduleName,
-        // A workflow run carries its per-node signatures inside the graph
-        // spec; every other module wraps the single top-level signature.
-        ...(isWorkflow && workflowSpec
-          ? { workflow: workflowSpec }
-          : { signature_code: signatureCode }),
-        metric_code: metricCode,
-        optimizer_name: optimizerName,
-        ...(librarySourceId
-          ? { source_dataset_id: librarySourceId }
-          : { dataset: parsedDataset.rows as Array<Record<string, unknown>> }),
-        dataset_filename: datasetFileName || undefined,
-        column_mapping: columnMapping,
-        // Preserve the on-screen column order (file order) so a clone restores
-        // it — JSONB would otherwise scramble the dataset's object-key order.
-        column_order: parsedDataset.columns,
-        split_fractions: split,
-        shuffle,
-        is_private: isPrivate,
-        token_source: tokenSource,
-        estimated_credits_low: estimate.lowCredits,
-        estimated_credits_high: estimate.highCredits,
-        ...(maxCostCredits != null && { max_cost_credits: maxCostCredits }),
-        ...(parsedTargetScore != null && { target_score: parsedTargetScore }),
-        ...(seed != null && { seed }),
-        ...(Object.keys(optKw).length > 0 && { optimizer_kwargs: optKw }),
+      const payload = {
+        ...buildSubmissionPayload(),
+        execution_budget_id: checked.budget.id,
+        execution_budget_revision: checked.budget.revision,
+        preflight_id: checked.id,
+        preflight_fingerprint: checked.fingerprint,
       };
-
-      // Reshape the flat UI react config into the backend ToolSource wire
-      // model. mcp_auth_header is forwarded once on the wire but never persisted
-      // (backend) or mirrored into shared agent state.
-      const buildReactFields = (): { tool_source: ToolSource } => {
-        const tool_source: ToolSource = {
-          kind: "live_mcp",
-          ...(reactConfig.mcpUrl.trim() ? { mcp_url: reactConfig.mcpUrl.trim() } : {}),
-          ...(reactConfig.mcpAuthHeader.trim()
-            ? { mcp_auth_header: reactConfig.mcpAuthHeader.trim() }
-            : {}),
-        };
-        return { tool_source };
-      };
-
+      const key = await budgetSession.submissionKey(checked.fingerprint);
       let result;
-      if (effectiveJobType === "run") {
-        if (!modelConfig.name.trim()) {
-          toast.error(msg("submit.validation.model_required"));
-          goTo(WIZARD_STAGE.optimization);
-          setSubmitting(false);
-          setSubmitPhase("idle");
-          return;
-        }
-        const secondApplied = secondModelConfig?.name?.trim()
-          ? prepareModelConfig(secondModelConfig)
-          : undefined;
-        const runPayload: RunRequest = {
-          ...base,
-          model_config: prepareModelConfig(modelConfig),
-          ...(secondApplied ? { reflection_model_config: secondApplied } : {}),
-          ...(needsToolSource ? buildReactFields() : {}),
-        };
-        result = await submitRun(runPayload);
+      if ("model_config" in payload) {
+        result = await submitRun(payload, key);
         track(TelemetryEvent.RunSubmitted, {
           react: isReact,
-          has_reflection: Boolean(secondApplied),
+          has_reflection: Boolean(payload.reflection_model_config),
         });
       } else {
-        const validGen = generationModels.filter((m) => m.name.trim()).map(prepareModelConfig);
-        const validRef = reflectionModels.filter((m) => m.name.trim()).map(prepareModelConfig);
-        if (validGen.length === 0) {
-          toast.error(msg("submit.validation.generation_model_required"));
-          goTo(WIZARD_STAGE.optimization);
-          setSubmitting(false);
-          setSubmitPhase("idle");
-          return;
-        }
-        if (validRef.length === 0) {
-          toast.error(msg("submit.validation.reflection_models_required"));
-          goTo(WIZARD_STAGE.optimization);
-          setSubmitting(false);
-          setSubmitPhase("idle");
-          return;
-        }
-        result = await submitGridSearch({
-          ...base,
-          generation_models: validGen,
-          reflection_models: validRef,
-        });
+        result = await submitGridSearch(payload, key);
         track(TelemetryEvent.GridSearchSubmitted, {
-          generation_models: validGen.length,
-          reflection_models: validRef.length,
+          generation_models: payload.generation_models.length,
+          reflection_models: payload.reflection_models.length,
         });
       }
 
@@ -2180,10 +2410,14 @@ export function useSubmitWizard() {
     return samples;
   }, [parsedDataset, columnRoles]);
 
-  const workflowDryRunDisabledReason =
-    isWorkflow && workflowSpec && workflowUsesTools(workflowSpec) && !reactConfig.mcpUrl.trim()
+  const workflowNeedsTools = isWorkflow && workflowSpec && workflowUsesTools(workflowSpec);
+  const workflowDryRunDisabledReason = workflowNeedsTools
+    ? !reactConfig.mcpUrl.trim()
       ? msg("submit.validation.mcp_url_required")
-      : null;
+      : reactToolSelectionEmpty
+        ? msg("submit.validation.mcp_tool_required")
+        : null
+    : null;
   // A dry run needs a model, but the model step comes after the code step —
   // instead of a "pick a model first" dead end, the canvas opens the shared
   // model-config modal in place and the pick carries into the model step.
@@ -2196,31 +2430,28 @@ export function useSubmitWizard() {
     });
   }, [modelConfig]);
 
-  const runWorkflowDryRun = useCallback(
-    async (inputs: Record<string, unknown>, handlers: WorkflowDryRunStreamHandlers) => {
-      if (!workflowSpec) throw new Error(msg("submit.validation.workflow_invalid"));
-      const mc = prepareModelConfig(modelConfig);
-      const tool_source: ToolSource | undefined = workflowUsesTools(workflowSpec)
-        ? {
-            kind: "live_mcp",
-            ...(reactConfig.mcpUrl.trim() ? { mcp_url: reactConfig.mcpUrl.trim() } : {}),
-            ...(reactConfig.mcpAuthHeader.trim()
-              ? { mcp_auth_header: reactConfig.mcpAuthHeader.trim() }
-              : {}),
-          }
-        : undefined;
-      return dryRunWorkflowStream(
-        {
-          workflow: workflowSpec,
-          inputs,
-          model_config: mc,
-          ...(tool_source ? { tool_source } : {}),
-        },
-        handlers,
-      );
-    },
-    [workflowSpec, modelConfig, reactConfig],
-  );
+  const runWorkflowDryRun = async (
+    _inputs: Record<string, unknown>,
+    handlers: WorkflowDryRunStreamHandlers,
+  ) => {
+    if (!workflowSpec) throw new Error(msg("submit.validation.workflow_invalid"));
+    if (handlers.signal?.aborted) return;
+    const cancel = () => preflight.cancel();
+    handlers.signal?.addEventListener("abort", cancel, { once: true });
+    try {
+      const response = await ensureSetupChecked("execution", true);
+      if (handlers.signal?.aborted) return;
+      if (response?.workflow_result) handlers.onFinal(response.workflow_result);
+      else
+        handlers.onError(
+          msg(
+            response?.status === "pending" ? "submit.preflight.pending" : "submit.preflight.failed",
+          ),
+        );
+    } finally {
+      handlers.signal?.removeEventListener("abort", cancel);
+    }
+  };
 
   // The Signature & Metric interview: a few grounded questions before the
   // seed pass, distilled into an authoring brief the seed authors honor.
@@ -2314,6 +2545,8 @@ export function useSubmitWizard() {
     maxReachableStep,
     validateStep,
     handleNext,
+    evaluationStatus,
+    preflight,
     handleTabClick,
     jobType: effectiveJobType,
     setOptimizationType,
@@ -2346,6 +2579,9 @@ export function useSubmitWizard() {
     updateReactConfig,
     optimizerName,
     setOptimizerName,
+    executionRuntime,
+    runtimeCatalog,
+    runtimeUnavailableReason,
     optimizationTypeOpen,
     setOptimizationTypeOpen,
     optimizerSettingsOpen,
@@ -2420,6 +2656,9 @@ export function useSubmitWizard() {
     setPxnProposals,
     maxCostCredits,
     setMaxCostCredits,
+    budgetSession,
+    setupSpent,
+    availableCredits,
     costBracket,
     suggestedCeiling,
     submitting,

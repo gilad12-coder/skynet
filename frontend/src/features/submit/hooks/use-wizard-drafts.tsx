@@ -13,16 +13,15 @@ import {
 import { useSession } from "next-auth/react";
 import { toast } from "react-toastify";
 
+import { readBudgetDraft, type WizardBudgetDraft } from "../lib/execution-budget-session";
 import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
 import { formatRelativeTime } from "@/shared/lib/formatters";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { sessionIdentity } from "@/shared/lib/session-identity";
-import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 
 import { DraftRestoreToast, type DraftRestoreState } from "../components/DraftRestoreToast";
 import {
   DraftSaver,
-  draftStage,
   hasMeaningfulDraft,
   recipeToOpen,
   type DraftDataFor,
@@ -40,6 +39,8 @@ import {
 export interface WizardDraftsApi {
   /** A discovered draft awaits the user's choice; nothing is saved meanwhile. */
   offerPending: boolean;
+  takeExecution(): WizardBudgetDraft;
+  saveExecution(execution: WizardBudgetDraft): Promise<void>;
   /** The in-memory snapshot for a workflow, or null while an offer is pending. */
   takeSnapshot<K extends DraftRecipe>(recipe: K): DraftDataFor<K> | null;
   publish<K extends DraftRecipe>(recipe: K, data: DraftDataFor<K>, meaningful: boolean): void;
@@ -51,6 +52,10 @@ export interface WizardDraftsApi {
 
 const NOOP_API: WizardDraftsApi = {
   offerPending: false,
+  takeExecution: () => ({}),
+  saveExecution: async () => {
+    throw new Error("draft_not_ready");
+  },
   takeSnapshot: () => null,
   publish: () => {},
   flush: () => {},
@@ -81,12 +86,7 @@ function offerToastId(draftId: string): string {
 }
 
 function offerMeta(record: WizardDraftRecord): string | null {
-  const recipe = recipeToOpen(record);
-  const stage = draftStage(record);
-  if (!recipe || !stage) return null;
   return formatMsg("submit.draft.restore.meta", {
-    workflow: msg(`submit.recipe.${recipe}.title` as MessageKey),
-    stage: msg(`submit.stage.${stage}` as MessageKey),
     time: formatRelativeTime(new Date(record.updatedAt).toISOString()),
   });
 }
@@ -109,6 +109,8 @@ export function useWizardDraftController({
   const accountId = status === "loading" ? null : sessionIdentity(session) || null;
 
   const saverRef = useRef<DraftSaver | null>(null);
+  const [readyAccount, setReadyAccount] = useState<string | null>(null);
+  const lastAccountRef = useRef<string | null>(null);
   const accountRef = useRef<string | null>(null);
   useEffect(() => {
     accountRef.current = accountId;
@@ -154,7 +156,11 @@ export function useWizardDraftController({
       return false;
     }
     if (accountRef.current) {
-      channelRef.current?.post({ type: "reset", accountId: accountRef.current });
+      channelRef.current?.post({
+        type: "reset",
+        accountId: accountRef.current,
+        resetGeneration: saver.resetFence,
+      });
     }
     dismissOffer();
     saver.hold(false);
@@ -193,14 +199,14 @@ export function useWizardDraftController({
     show("working", null);
     indexedDbDraftStore
       .read(account)
-      .then((fresh) => {
-        if (offerRef.current !== current) return;
+      .then(({ record: fresh, resetGeneration }) => {
+        if (offerRef.current !== current || accountRef.current !== account) return;
         const recipe = recipeToOpen(fresh);
         if (!fresh || !recipe) {
           show("failed", msg("submit.draft.restore.gone"));
           return;
         }
-        saver.adopt(fresh);
+        saver.adopt(fresh, resetGeneration);
         saver.hold(false);
         dismissOffer();
         transitions.current.onContinue(recipe);
@@ -238,8 +244,13 @@ export function useWizardDraftController({
   useEffect(() => {
     const channel = openDraftChannel((message) => {
       if (message.type !== "reset" || message.accountId !== accountRef.current) return;
+      const saver = saverRef.current;
+      if (!saver || message.resetGeneration <= saver.resetFence) return;
       dismissOffer();
-      saverRef.current?.dropQueued();
+      saver.dropQueued();
+      saver.adopt(null, message.resetGeneration);
+      saver.hold(false);
+      transitions.current.onStartNew();
     });
     channelRef.current = channel;
     return () => {
@@ -250,8 +261,12 @@ export function useWizardDraftController({
 
   useEffect(() => {
     dismissOffer();
-    saverRef.current?.detach();
     saverRef.current = null;
+    if (lastAccountRef.current !== null && lastAccountRef.current !== accountId) {
+      transitions.current.onStartNew();
+    }
+    lastAccountRef.current = accountId;
+    setReadyAccount(null);
     if (!accountId) return;
     const saver = new DraftSaver(accountId, {
       store: indexedDbDraftStore,
@@ -269,31 +284,32 @@ export function useWizardDraftController({
     let cancelled = false;
     indexedDbDraftStore
       .read(accountId)
-      .then((record) => {
+      .then(({ record, resetGeneration }) => {
         if (cancelled || saver.epoch !== epoch) return;
+        setReadyAccount(accountId);
         if (!record || !hasMeaningfulDraft(record)) {
-          if (record) void indexedDbDraftStore.remove(accountId).catch(() => {});
-          saver.adopt(null);
+          saver.adopt(null, resetGeneration);
           saver.hold(false);
           return;
         }
         if (takeResumeAfterReload(accountId)) {
-          saver.adopt(record);
+          saver.adopt(record, resetGeneration);
           saver.hold(false);
           const recipe = recipeToOpen(record);
           if (recipe) transitions.current.onContinue(recipe);
           return;
         }
-        saver.adopt(record);
+        saver.adopt(record, resetGeneration);
         setOffer(record);
       })
       .catch(() => {
         if (cancelled || saver.epoch !== epoch) return;
-        saver.adopt(null);
-        saver.hold(false);
+        setReadyAccount(accountId);
+        warnSaveFailed();
       });
     return () => {
       cancelled = true;
+      void saver.flush().finally(() => saver.detach());
     };
   }, [accountId, dismissOffer, warnSaveFailed]);
 
@@ -313,28 +329,61 @@ export function useWizardDraftController({
   const api = useMemo<WizardDraftsApi>(
     () => ({
       offerPending,
+      takeExecution: () => {
+        const saver = saverRef.current;
+        if (!saver || saver.accountId !== accountId || saver.isHeld) return {};
+        const record = saver.current;
+        if (!record) return {};
+        return {
+          budgetTotalCredits: record[record.activeRecipe]?.data.maxCostCredits ?? null,
+          ...readBudgetDraft(record),
+        };
+      },
+      saveExecution: async (execution) => {
+        const saver = saverRef.current;
+        if (!saver || saver.accountId !== accountId)
+          throw new DOMException("Draft detached", "AbortError");
+        if (saver.isHeld) throw new Error(msg("submit.draft.save_failed"));
+        await saver.saveExecution(execution);
+      },
       takeSnapshot: <K extends DraftRecipe>(recipe: K) => {
         const saver = saverRef.current;
-        if (!saver || saver.isHeld) return null;
+        if (!saver || saver.accountId !== accountId || saver.isHeld) return null;
         return (saver.current?.[recipe]?.data ?? null) as DraftDataFor<K> | null;
       },
-      publish: (recipe, data, meaningful) => saverRef.current?.publish(recipe, data, meaningful),
-      flush: () => void saverRef.current?.flush(),
+      publish: (recipe, data, meaningful) => {
+        const saver = saverRef.current;
+        if (saver?.accountId === accountId) saver.publish(recipe, data, meaningful);
+      },
+      flush: () => {
+        const saver = saverRef.current;
+        if (saver?.accountId === accountId) void saver.flush();
+      },
       consumed: () => {
         const saver = saverRef.current;
-        if (!saver) return;
+        if (!saver || saver.accountId !== accountId) return;
         saver
           .reset()
           .then(() => {
             if (accountRef.current) {
-              channelRef.current?.post({ type: "reset", accountId: accountRef.current });
+              channelRef.current?.post({
+                type: "reset",
+                accountId: accountRef.current,
+                resetGeneration: saver.resetFence,
+              });
             }
           })
           .catch(() => {});
       },
     }),
-    [offerPending],
+    [accountId, offerPending],
   );
 
-  return { api, offerPending, startNew };
+  return {
+    api,
+    offerPending,
+    startNew,
+    accountReady: accountId !== null && readyAccount === accountId,
+    accountId,
+  };
 }

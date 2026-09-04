@@ -12,6 +12,8 @@ import {
 import { Label } from "@/shared/ui/primitives/label";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { cn } from "@/shared/lib/utils";
+import { getActiveDir } from "@/shared/lib/runtime-locale";
+import { radioNavigationIndex } from "../../lib/radio-navigation";
 import { tip as tipText, type TooltipKey } from "@/shared/lib/tooltips";
 
 export const TEXTAREA_CLASS =
@@ -101,8 +103,10 @@ export function Segmented<T extends string>({
   onChange,
   options,
   compact = false,
+  label,
 }: {
   value: T;
+  label: string;
   onChange: (v: T) => void;
   options: Array<SegmentedOption<T>>;
   // Sized to sit inside a label row instead of spanning the field.
@@ -118,8 +122,9 @@ export function Segmented<T extends string>({
       )}
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
       role="radiogroup"
+      aria-label={label}
     >
-      {options.map((o) => {
+      {options.map((o, index) => {
         const selected = o.value === value;
         return (
           <button
@@ -127,6 +132,23 @@ export function Segmented<T extends string>({
             type="button"
             role="radio"
             aria-checked={selected}
+            tabIndex={selected ? 0 : -1}
+            onKeyDown={(event) => {
+              const next = radioNavigationIndex(
+                event.key,
+                index,
+                options.length,
+                getActiveDir() === "rtl",
+              );
+              if (next === null) return;
+              event.preventDefault();
+              const option = options[next];
+              if (!option) return;
+              onChange(option.value);
+              event.currentTarget.parentElement
+                ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+                [next]?.focus();
+            }}
             onClick={() => onChange(o.value)}
             className={cn(
               "relative cursor-pointer rounded-md text-center transition-colors duration-200 lg:min-h-0",

@@ -21,6 +21,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ...billing import StripeBillingService
+from ...billing.credential_safety import scrub_model_config
 from ...billing.metering import meter_llm_run
 from ...config import settings
 from ...constants import (
@@ -289,19 +290,15 @@ async def sse_from_events(
 
 
 def strip_api_key(d: dict) -> dict:
-    """Return a shallow copy of *d* with ``extra.api_key`` removed.
+    """Return a deep copy of a model configuration without credentials.
 
     Args:
-        d: A model-settings dict that may contain an ``extra.api_key`` field.
+        d: Model settings that may contain inline or nested credential fields.
 
     Returns:
-        A copy of ``d`` with the API key scrubbed from ``extra``.
+        A copy safe for persistence and API responses.
     """
-    result = dict(d)
-    extra = result.get("extra")
-    if isinstance(extra, dict) and "api_key" in extra:
-        result["extra"] = {k: v for k, v in extra.items() if k != "api_key"}
-    return result
+    return scrub_model_config(d)
 
 
 def stable_seed(optimization_id: str) -> int:
@@ -762,6 +759,9 @@ def _has_resumable_state(job_store: Any, optimization_id: str) -> bool:
     Returns:
         ``True`` when there is state to resume from.
     """
+    compatible = getattr(job_store, "has_compatible_gepa_checkpoint", None)
+    if callable(compatible):
+        return bool(compatible(optimization_id))
     has_checkpoint = getattr(job_store, "has_gepa_checkpoint", None)
     if callable(has_checkpoint) and has_checkpoint(optimization_id):
         return True
@@ -1012,7 +1012,7 @@ def sanitize_port_values(values: dict[str, Any]) -> dict[str, Any]:
     for key, value in values.items():
         if isinstance(value, str):
             sanitized[key] = truncate_text(value, AGENT_MAX_TEXT)
-        elif value is None or isinstance(value, (bool, int, float)):
+        elif value is None or isinstance(value, bool | int | float):
             sanitized[key] = value
         else:
             sanitized[key] = truncate_text(str(value), AGENT_MAX_TEXT)
@@ -1176,6 +1176,209 @@ def _stable_hash(payload: Any) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
+def require_unprotected_api_execution(job_data: dict[str, Any]) -> None:
+    """Reject protected authored-code execution in the API process.
+
+    Protected optimization runs own a selected sandbox and a shared execution
+    budget, but the completed-job endpoints do not yet have a separately
+    metered interactive sandbox protocol. This guard must run before loading a
+    signature, metric, workflow, ReAct tool roster, or serialized program.
+
+    Args:
+        job_data: Stored optimization row, including its protected budget and
+            original payload when available.
+
+    Raises:
+        DomainError: 409 when the job belongs to the protected execution path.
+    """
+    runtime = _protected_api_runtime(job_data)
+    if runtime is None:
+        return
+    raise DomainError(
+        "optimization.protected_interactive_sandbox_required",
+        status=409,
+        runtime=runtime,
+    )
+
+
+def _protected_api_runtime(job_data: dict[str, Any]) -> str | None:
+    """Return the managed runtime for a protected job, if one exists.
+
+    Args:
+        job_data: Stored optimization row, including its protected budget and
+            original payload when available.
+
+    Returns:
+        ``vercel`` for a protected job, or ``None`` for a legacy unprotected
+        job. Retired payload values do not restore host execution.
+    """
+    payload = job_data.get("payload")
+    payload_budget_id = payload.get("execution_budget_id") if isinstance(payload, dict) else None
+    if job_data.get("execution_budget_id") is None and payload_budget_id is None:
+        return None
+
+    return "vercel"
+
+
+def _raw_artifact_has_payload(artifact: Any) -> bool:
+    """Check a persisted artifact mapping without decoding its program payload.
+
+    Args:
+        artifact: Raw JSON value stored under ``program_artifact``.
+
+    Returns:
+        ``True`` when the mapping carries JSON state or an encoded legacy
+        pickle. The encoded value is never decoded here.
+    """
+    if not isinstance(artifact, dict):
+        return False
+    return artifact.get("program_state_json") is not None or bool(artifact.get("program_pickle_base64"))
+
+
+def load_program_metadata(
+    job_store,
+    optimization_id: str,
+    user: AuthenticatedUser,
+) -> tuple[ProgramArtifact | dict[str, Any], dict[str, Any], str]:
+    """Load serve-form metadata without materializing protected authored code.
+
+    Legacy jobs retain the existing :func:`load_program` path and its exact
+    reconstruction checks. Protected jobs read only the already-scrubbed
+    overview and artifact prompt metadata persisted by the worker. They never
+    decode a pickle, load program state, import signature code, or resolve a
+    tool roster in the API process.
+
+    Args:
+        job_store: The job store to read the job row from.
+        optimization_id: Optimization whose serve metadata should be loaded.
+        user: Authenticated caller; must hold editor-tier access.
+
+    Returns:
+        ``(artifact, overview, model_name)`` with an unmaterialized artifact.
+
+    Raises:
+        DomainError: 404 when the job is unknown or inaccessible; 403 when the
+            caller is below editor; 409 when the job is not successful or has
+            no persisted program artifact.
+    """
+    job_data, _role = require_role_at_least(job_store, optimization_id, user, ShareRole.editor)
+    if _protected_api_runtime(job_data) is None:
+        _program, result, overview = load_program(job_store, optimization_id, user)
+        artifact = result.program_artifact
+        if not _artifact_has_payload(artifact):
+            raise DomainError("optimization.no_program_artifact_scoped", status=409)
+        return artifact, overview, str(overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, ""))
+
+    overview = parse_overview(job_data)
+    status = status_to_job_status(job_data.get("status", "pending"))
+    if status != OptimizationStatus.success:
+        raise DomainError(
+            "optimization.not_success_status_for_serve",
+            status=409,
+            params={"status": status.value},
+        )
+
+    result_data = job_data.get("result")
+    if not isinstance(result_data, dict):
+        raise DomainError("optimization.no_result", status=409)
+
+    optimization_type = overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE, OPTIMIZATION_TYPE_RUN)
+    model_name = str(overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, ""))
+    if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH:
+        best_pair = result_data.get("best_pair")
+        if not isinstance(best_pair, dict):
+            raise DomainError("grid_search.no_best_pair", status=409)
+        artifact = best_pair.get("program_artifact")
+        if not _raw_artifact_has_payload(artifact):
+            raise DomainError("grid_search.no_best_program_artifact", status=409)
+        model_name = str(best_pair.get("generation_model") or model_name)
+    else:
+        artifact = result_data.get("program_artifact")
+        if not _raw_artifact_has_payload(artifact):
+            raise DomainError("optimization.no_program_artifact_scoped", status=409)
+
+    return artifact, overview, model_name
+
+
+def load_pair_program_metadata(
+    job_store,
+    optimization_id: str,
+    pair_index: int,
+    user: AuthenticatedUser,
+) -> tuple[ProgramArtifact | dict[str, Any], PairResult | dict[str, Any], dict[str, Any]]:
+    """Load one pair's serve metadata without materializing protected code.
+
+    Args:
+        job_store: The job store to read the job row from.
+        optimization_id: Grid-search optimization whose pair should be read.
+        pair_index: Persisted pair index to select.
+        user: Authenticated caller; must hold editor-tier access.
+
+    Returns:
+        ``(artifact, pair, overview)`` with an unmaterialized artifact.
+
+    Raises:
+        DomainError: 404 when the job or pair is unknown; 403 when the caller
+            is below editor; 409 when the job is not a successful grid search,
+            the pair failed, or its artifact is missing.
+    """
+    job_data, _role = require_role_at_least(job_store, optimization_id, user, ShareRole.editor)
+    if _protected_api_runtime(job_data) is None:
+        _program, pair, overview = load_pair_program(job_store, optimization_id, pair_index, user)
+        artifact = pair.program_artifact
+        if not _artifact_has_payload(artifact):
+            raise DomainError(
+                "grid_search.pair_no_artifact",
+                status=409,
+                pair_index=pair_index,
+            )
+        return artifact, pair, overview
+
+    overview = parse_overview(job_data)
+    if overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE, OPTIMIZATION_TYPE_RUN) != OPTIMIZATION_TYPE_GRID_SEARCH:
+        raise DomainError("grid_search.pair_submission_grid_only", status=409)
+
+    status = status_to_job_status(job_data.get("status", "pending"))
+    if status != OptimizationStatus.success:
+        raise DomainError(
+            "optimization.not_success_status_for_serve",
+            status=409,
+            params={"status": status.value},
+        )
+
+    result_data = job_data.get("result")
+    if not isinstance(result_data, dict):
+        raise DomainError("optimization.no_result", status=409)
+    raw_pairs = result_data.get("pair_results")
+    pairs = raw_pairs if isinstance(raw_pairs, list) else []
+    pair = next(
+        (candidate for candidate in pairs if isinstance(candidate, dict) and candidate.get("pair_index") == pair_index),
+        None,
+    )
+    if pair is None:
+        raise DomainError(
+            "grid_search.pair_position_missing",
+            status=404,
+            pair_index=pair_index,
+        )
+    if pair.get("error"):
+        raise DomainError(
+            "grid_search.pair_failed_error",
+            status=409,
+            pair_index=pair_index,
+            error=pair["error"],
+        )
+
+    artifact = pair.get("program_artifact")
+    if not _raw_artifact_has_payload(artifact):
+        raise DomainError(
+            "grid_search.pair_no_artifact",
+            status=409,
+            pair_index=pair_index,
+        )
+    return artifact, pair, overview
+
+
 def load_program(
     job_store,
     optimization_id: str,
@@ -1202,9 +1405,11 @@ def load_program(
     Raises:
         DomainError: 404 when the job is unknown or inaccessible; 403 when the
             caller's role is below editor; 409 when the job is not in a success
-            state, has no result, or lacks a serialized program artifact.
+            state, has no result, lacks a serialized program artifact, or its
+            protected interactive sandbox path is unavailable.
     """
     job_data, _role = require_role_at_least(job_store, optimization_id, user, ShareRole.editor)
+    require_unprotected_api_execution(job_data)
 
     overview = parse_overview(job_data)
     optimization_type = overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE, OPTIMIZATION_TYPE_RUN)
@@ -1288,9 +1493,11 @@ def load_react_chat_inputs(
         DomainError: 404 when unknown/inaccessible; 403 when the caller's role
             is below editor; 409 when not in a success state, has no result, is
             not a react run, was not served from a live-MCP source, or is
-            missing its signature code.
+            missing its signature code, or its protected interactive sandbox
+            path is unavailable.
     """
     job_data, _role = require_role_at_least(job_store, optimization_id, user, ShareRole.editor)
+    require_unprotected_api_execution(job_data)
     overview = parse_overview(job_data)
     optimization_type = overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE, OPTIMIZATION_TYPE_RUN)
 
@@ -1355,9 +1562,11 @@ def load_pair_program(
         DomainError: 404 when the job or pair index is unknown or the caller
             cannot access the job; 403 when the caller's role is below editor;
             409 when the job is not a successful grid search, the pair failed,
-            or the program artifact is missing.
+            the program artifact is missing, or its protected interactive
+            sandbox path is unavailable.
     """
     job_data, _role = require_role_at_least(job_store, optimization_id, user, ShareRole.editor)
+    require_unprotected_api_execution(job_data)
 
     overview = parse_overview(job_data)
     optimization_type = overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE, OPTIMIZATION_TYPE_RUN)

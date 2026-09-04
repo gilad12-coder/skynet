@@ -86,6 +86,7 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
       </div>
       <Field label={msg("submit.basics.privacy.label")} tip="submit.privacy">
         <Segmented
+          label={msg("submit.basics.privacy.label")}
           value={isPrivate ? "private" : "public"}
           onChange={(v) => setIsPrivate(v === "private")}
           options={[

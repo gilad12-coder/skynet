@@ -47,6 +47,7 @@ except ImportError:  # Optional dep: tests/CI can run without the Scalar docs UI
     get_scalar_api_reference = None  # type: ignore[assignment]
 
 from ..billing import StripeBillingService, start_openrouter_float_sweeper
+from ..billing.budgets import BudgetService
 from ..config import settings
 from ..error_reporting import capture_exception
 from ..exceptions import AppError
@@ -96,6 +97,8 @@ from .routers.dashboard import create_dashboard_router
 from .routers.dataset_library import create_dataset_library_router
 from .routers.dataset_share import create_dataset_share_router
 from .routers.datasets import create_datasets_router
+from .routers.execution_budgets import create_execution_budgets_router
+from .routers.execution_runtimes import create_execution_runtimes_router
 from .routers.generalist_agent import create_generalist_agent_router
 from .routers.mcp_probe import create_mcp_probe_router
 from .routers.models import create_models_router
@@ -114,6 +117,7 @@ from .routers.transcription import create_transcription_router
 from .routers.usage import create_usage_router
 from .routers.user_preferences import create_user_preferences_router
 from .routers.wizard import create_wizard_router
+from .routers.wizard_preflight import create_wizard_preflight_router
 from .routers.workflows import create_workflows_router
 
 logger = logging.getLogger(__name__)
@@ -726,7 +730,7 @@ def create_app(
         # peer pod's in-flight job is not orphaned and is left alone. The
         # periodic sweeper (below) covers steady-state; this one-shot keeps
         # boot latency low when a single replica restarts.
-        job_store.recover_orphaned_jobs()
+        job_store.recover_orphaned_jobs(budget_service=BudgetService(engine=job_store.engine))
         # ``recover_pending_jobs`` is no longer required for correctness because
         # any pod can claim a pending row via ``claim_next_job`` on its next
         # tick, but we still pass the IDs as a same-pod hint so a fresh restart
@@ -1280,6 +1284,9 @@ def create_app(
     app.include_router(create_agent_history_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_api_tokens_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_billing_router(job_store=job_store), tags=["Billing"])
+    app.include_router(create_execution_budgets_router(job_store=job_store), tags=["Billing"])
+    app.include_router(create_execution_runtimes_router(), tags=["Wizard"])
+    app.include_router(create_wizard_preflight_router(job_store=job_store), tags=["Wizard"])
     app.include_router(
         create_accounts_router(job_store=job_store, login_throttle=build_login_throttle()),
         tags=["Auth"],

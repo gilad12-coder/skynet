@@ -171,14 +171,14 @@ function OverviewTabImpl({
   const stageTs = computeStageTimestamps(
     job.progress_events ?? [],
     job.started_at,
-    job.completed_at,
+    job.status === "stopped" ? null : job.completed_at,
     pairIndex,
   );
   const stagesActive = isPairContext
     ? isActive && currentStage !== "done" && !activePair.error
     : isActive;
   const stagesFailed = isPairContext
-    ? !!activePair.error || (!isActive && currentStage !== "done")
+    ? !!activePair.error || (!isActive && job.status !== "stopped" && currentStage !== "done")
     : job.status === "failed" || job.status === "cancelled";
 
   // Score values — pair view picks up the pair's own metrics with event
@@ -250,7 +250,8 @@ function OverviewTabImpl({
   // baseline and the optimized score exist, keeping the three cards coherent.
   const displayImprovement =
     baseline != null && optimized != null ? (improvement ?? optimized - baseline) : undefined;
-  const showScoreCards = scoresReady || (stagesActive && baseline != null);
+  const showScoreCards =
+    scoresReady || ((stagesActive || job.status === "stopped") && baseline != null);
 
   // Status text reflects what the user is looking at — for a pair, that is
   // the pair's own state (running/done/failed), not the parent grid.
@@ -270,7 +271,7 @@ function OverviewTabImpl({
 
   return (
     <>
-      {renderRunBlocks && (
+      {renderRunBlocks && job.status !== "stopped" && job.recovery?.state !== "recovering" && (
         <FadeIn>
           <p className="text-sm text-muted-foreground">
             {viewStatus === "running"

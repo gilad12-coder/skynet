@@ -10,7 +10,6 @@ import type {
   BlackboxEngineCatalogResponse,
   BlackboxEngineId,
   BlackboxHarness,
-  BlackboxProposerRuntime,
   BlackboxRunRequest,
   BlackboxScorer,
   BlackboxTarget,
@@ -21,7 +20,6 @@ import type {
   ValidateCodeResponse,
 } from "@/shared/types/api";
 import {
-  dryRunScorer,
   getBlackboxEngines,
   getDatasetRows,
   getJob,
@@ -32,7 +30,6 @@ import {
   type BlackboxAuthoringContext,
   type DatasetSummary,
 } from "@/shared/lib/api";
-import { formatCredits } from "@/features/billing";
 import { readPref, useUserPrefs } from "@/features/settings";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
@@ -46,32 +43,40 @@ import type { ValidationResult } from "@/shared/ui/code-editor";
 
 import { defaultSplit, emptyModelConfig, type ColumnRole } from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
-import { availableBudget, suggestedRunName } from "../lib/budget";
+import { suggestedRunName } from "../lib/budget";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import { focusField } from "../lib/focus-field";
+import { preflightDestination } from "../lib/preflight-destination";
+import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import {
   engineSelectionIssue,
   supportsIterationLimit,
   usesNativeProposer,
 } from "../lib/engine-contract";
 import {
-  modelIdentity,
   optimizationModelFamily,
   proposerModelConfig,
   resolveScoringModel,
   type ScoringModelMode,
 } from "../lib/model-roles";
 import {
-  evaluatorIdentity,
-  evidenceStatus,
+  preflightIdentity,
   type ValidationEvidence,
+  type EvidenceStatus,
 } from "../lib/validation-evidence";
-import { beginValidationToast } from "../lib/validation-toast";
+import type { PreflightScope, WizardPreflightResponse } from "@/shared/types/wizard-preflight";
+import { useWizardPreflight } from "./use-wizard-preflight";
+import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { seedPartsIssue } from "../lib/seed-parts";
+import { beginValidationToast, type ValidationToast } from "../lib/validation-toast";
 import {
+  aggregateTokenSource,
   chargeableBracket,
   defaultCeilingForBracket,
   projectCostBracket,
+  runtimeCostProjection,
   type CostBracket,
+  type ProjectedModelRole,
 } from "../lib/cost-bracket";
 import {
   isMeaningfulAnythingDraft,
@@ -79,6 +84,7 @@ import {
   type AnythingDraftData,
 } from "../lib/draft-record";
 import { useWizardDrafts } from "./use-wizard-drafts";
+import { useExecutionBudget } from "./use-execution-budget";
 import { prepareModelConfig } from "./use-submit-wizard";
 import {
   useDatasetProfiling,
@@ -310,33 +316,35 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const scorerCodeCallsModel = scorerCallsModel(metricCode);
   const scorerUsesModel = scorerKind === "python" && (scorerModelDeclared || scorerCodeCallsModel);
   const [dryRun, setDryRun] = useState<DryRunState>({ status: "idle" });
-  // The remote secret enters the validation identity as a revision, never as
-  // its value; a passed check for one secret does not vouch for the next.
-  const [secretRevision, setSecretRevision] = useState(0);
+  const dryRunAttemptRef = useRef(0);
   const updateScorerSecret = useCallback((value: string) => {
     setScorerSecret(value);
-    setSecretRevision((n) => n + 1);
   }, []);
   const [evaluatorEvidence, setEvaluatorEvidence] = useState<ValidationEvidence | null>(null);
-  const [runningIdentity, setRunningIdentity] = useState<string | null>(null);
-  // Credits the evaluator checks debited so far, shown against the total
-  // budget until the server-side accounting record takes over.
-  const [setupSpent, setSetupSpent] = useState(0);
+
   const validationAttemptRef = useRef(0);
+  const navigationRevisionRef = useRef(0);
+  const mountedRef = useRef(true);
+  const validationToastRef = useRef<ValidationToast | null>(null);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      navigationRevisionRef.current += 1;
+      validationToastRef.current?.dismiss();
+    };
+  }, []);
 
   const [strategyMode, setStrategyMode] = useState<"auto" | "single" | "plateau">("auto");
   const [engine, setEngine] = useState<BlackboxEngineId | null>(null);
-  const [proposerRuntime, setProposerRuntime] = useState<BlackboxProposerRuntime>("worker");
+  const proposerRuntime = "vercel" as const;
   const [patience, setPatience] = useState(DEFAULT_PATIENCE);
   const [engineCatalogResult, setEngineCatalogResult] = useState<{
     target: BlackboxTarget["kind"];
-    runtime: BlackboxProposerRuntime;
     data: BlackboxEngineCatalogResponse | null;
   } | null>(null);
   const currentCatalogResult =
-    engineCatalogResult?.target === targetKind && engineCatalogResult.runtime === proposerRuntime
-      ? engineCatalogResult
-      : null;
+    engineCatalogResult?.target === targetKind ? engineCatalogResult : null;
   const engineCatalog = currentCatalogResult?.data ?? null;
   const engineCatalogFailed = currentCatalogResult !== null && engineCatalog === null;
   const [maxScorerRuns, setMaxScorerRuns] = useState(DEFAULT_MAX_SCORER_RUNS);
@@ -354,8 +362,15 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     onSave: (c: ModelConfig) => void;
     label: string;
     nameOnly?: boolean;
+    modelDefaultsOnly?: boolean;
   } | null>(null);
-  const [maxCostCredits, setMaxCostCredits] = useState<number | null>(null);
+  const {
+    maxCostCredits,
+    setMaxCostCredits,
+    session: budgetSession,
+    setupSpent,
+    availableCredits,
+  } = useExecutionBudget();
 
   const drafts = useWizardDrafts();
   const draftsRef = useRef(drafts);
@@ -391,8 +406,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setSeedMode(d.seedMode);
     setSeedText(d.seedText);
     setSeedParts(d.seedParts);
-    setSeedManuallyEdited(d.seedManuallyEdited);
-    setScorerManuallyEdited(d.scorerManuallyEdited);
+    setSeedManuallyEdited(
+      d.seedManuallyEdited ||
+        !!d.seedText.trim() ||
+        d.seedParts.some((part) => !!part.value.trim()),
+    );
+    setScorerManuallyEdited(d.scorerManuallyEdited || !!d.metricCode.trim());
     setObjective(d.objective);
     setBackground(d.background);
     setTargetKind(d.targetKind);
@@ -416,14 +435,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerModelMode(d.scorerModelMode);
     setStrategyMode(d.strategyMode);
     setEngine(d.engine);
-    setProposerRuntime(d.proposerRuntime ?? "worker");
     setPatience(d.patience);
     setMaxScorerRuns(d.maxScorerRuns);
     setMaxIterations(d.maxIterations);
     setStopAtScore(d.stopAtScore);
     setReflectionModel(d.reflectionModel);
-    setMaxCostCredits(d.maxCostCredits);
-    setSetupSpent(d.setupSpent);
   }, [draftSnapshot]);
 
   // Auto and Plateau relay pick engines themselves, so only a hand-picked engine
@@ -442,19 +458,19 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   useEffect(() => {
     let cancelled = false;
-    getBlackboxEngines(targetKind, proposerRuntime)
+    getBlackboxEngines(targetKind)
       .then((res) => {
         if (!cancelled)
-          setEngineCatalogResult({ target: targetKind, runtime: proposerRuntime, data: res });
+          setEngineCatalogResult({ target: targetKind, data: res });
       })
       .catch(() => {
         if (!cancelled)
-          setEngineCatalogResult({ target: targetKind, runtime: proposerRuntime, data: null });
+          setEngineCatalogResult({ target: targetKind, data: null });
       });
     return () => {
       cancelled = true;
     };
-  }, [targetKind, proposerRuntime]);
+  }, [targetKind]);
 
   // A `?clone=` link hydrates the wizard from the source run's stored payload
   // (server-scrubbed: no model api_key, no remote-scorer secret). The clone
@@ -510,7 +526,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             // ("custom"); the select can't show it, so the default stays.
             if (target.harness && BLACKBOX_HARNESSES.includes(target.harness))
               setHarness(target.harness);
-            if (target.model) setTargetModel({ name: target.model });
+            if (source.task_model_config?.name) {
+              setTargetModel({ ...emptyModelConfig(), ...source.task_model_config });
+            } else if (target.model) {
+              setTargetModel({ name: target.model });
+            }
             if (target.timeout_seconds != null) setTargetTimeout(target.timeout_seconds);
             if (target.concurrency != null) setTargetConcurrency(target.concurrency);
           }
@@ -549,7 +569,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           }
 
           const strategy = source.strategy;
-          setProposerRuntime(source.proposer_runtime ?? "worker");
           if (strategy) {
             setStrategyMode(strategy.mode);
             setEngine(strategy.engine ?? null);
@@ -598,49 +617,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // waits until the user leaves Optimization instead of failing here.
   const scoringModelPending = scoringBinding?.pending ?? false;
 
-  const describeEvaluator = useCallback(
-    (code: string) =>
-      evaluatorIdentity({
-        candidate: seedCandidate ?? objective,
-        example: parsedCases?.rows[0] ?? null,
-        scorer: { kind: scorerKind, code, url: scorerUrl, install: scorerInstall, secretRevision },
-        scoringModel:
-          scorerKind === "python" && (scorerModelDeclared || scorerCallsModel(code))
-            ? modelIdentity(resolvedScorerModel)
-            : null,
-      }),
-    [
-      seedCandidate,
-      objective,
-      parsedCases,
-      scorerKind,
-      scorerUrl,
-      scorerInstall,
-      secretRevision,
-      scorerModelDeclared,
-      resolvedScorerModel,
-    ],
-  );
-  // A passed check only vouches for the inputs it ran against; the identity
-  // decides whether the evidence still applies. The ref lets an awaited check
-  // see edits that landed while it ran.
-  const currentEvaluatorIdentity = useMemo(
-    () => describeEvaluator(metricCode),
-    [describeEvaluator, metricCode],
-  );
-  const identityRef = useRef(currentEvaluatorIdentity);
-  useEffect(() => {
-    identityRef.current = currentEvaluatorIdentity;
-  }, [currentEvaluatorIdentity]);
-  const evaluatorStatus = evidenceStatus(
-    evaluatorEvidence,
-    runningIdentity,
-    currentEvaluatorIdentity,
-  );
-  useEffect(() => {
-    if (evaluatorStatus === "stale") setScorerValidation(null);
-  }, [evaluatorStatus]);
-
   const buildScorer = useCallback(
     (code: string = metricCode): BlackboxScorer =>
       scorerKind === "python"
@@ -682,78 +658,202 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           concurrency: targetConcurrency,
         };
 
-  // One evaluator check, recorded as evidence for the inputs it ran against.
-  // Also the agent's metric validator: it passes the code it just wrote (the
-  // state update hasn't landed yet), the editor's Run button passes nothing.
+  const costBracket: CostBracket = useMemo(() => {
+    const findModel = (config: ModelConfig) =>
+      config.name.trim()
+        ? (catalog?.models.find((candidate) => candidate.value === config.name) ?? null)
+        : null;
+    const modelRoles: ProjectedModelRole[] = [
+      {
+        role: "optimization",
+        model: findModel(effectiveReflectionModel),
+        tokenSource: effectiveReflectionModel.token_source ?? "managed",
+        tokenShare: 1,
+      },
+      ...(targetKind === "agent" && targetModel.name.trim()
+        ? [
+            {
+              role: "task" as const,
+              model: findModel(targetModel),
+              tokenSource: targetModel.token_source ?? "managed",
+              tokenShare: 1,
+            },
+          ]
+        : []),
+      ...(scorerUsesModel && resolvedScorerModel?.name.trim()
+        ? [
+            {
+              role: "judge" as const,
+              model: findModel(resolvedScorerModel),
+              tokenSource: resolvedScorerModel.token_source ?? "managed",
+              tokenShare: 1,
+            },
+          ]
+        : []),
+    ];
+    const selectedRuntime = engineCatalog?.proposer_runtimes.find(
+      (runtime) => runtime.id === proposerRuntime,
+    );
+    // Setup and the submitted run use separate metered Vercel sessions.
+    return projectCostBracket({
+      autoLevel: "",
+      maxFullEvals: "",
+      maxMetricCalls: String(maxScorerRuns),
+      datasetRows: Math.max(1, parsedCases?.rowCount ?? 0),
+      modelRoles,
+      runtime: runtimeCostProjection(selectedRuntime?.cost, 2),
+    });
+  }, [
+    effectiveReflectionModel,
+    targetKind,
+    targetModel,
+    scorerUsesModel,
+    resolvedScorerModel,
+    catalog,
+    engineCatalog,
+    maxScorerRuns,
+    parsedCases?.rowCount,
+  ]);
+  const tokenSource = aggregateTokenSource([
+    effectiveReflectionModel,
+    ...(targetKind === "agent" ? [targetModel] : []),
+    ...(scorerUsesModel && resolvedScorerModel ? [resolvedScorerModel] : []),
+  ]);
+  const suggestedCeiling = useMemo(
+    () => defaultCeilingForBracket(chargeableBracket(costBracket, tokenSource)),
+    [costBracket, tokenSource],
+  );
+
+  const buildSubmissionPayload = (overrideCode?: string): BlackboxRunRequest => {
+    const reflection = prepareModelConfig(effectiveReflectionModel);
+    const estimate = chargeableBracket(costBracket, tokenSource);
+    return {
+      name: jobName.trim() || suggestedRunName(objective) || undefined,
+      description: jobDescription.trim() || undefined,
+      username,
+      objective: objective.trim() || undefined,
+      background: background.trim() || undefined,
+      recipe,
+      seed_candidate: seedCandidate ?? undefined,
+      scorer: buildScorer(overrideCode),
+      cases: parsedCases?.rows,
+      split_fractions: split,
+      shuffle,
+      seed,
+      budget: {
+        max_scorer_runs: maxScorerRuns,
+        max_iterations: iterationLimitSupported && maxIterations !== "" ? maxIterations : undefined,
+        stop_at_score: parseOptionalNumber(stopAtScore),
+      },
+      strategy:
+        strategyMode === "single"
+          ? { mode: "single", engine }
+          : strategyMode === "plateau"
+            ? { mode: "plateau", patience }
+            : { mode: "auto" },
+      proposer_runtime: proposerRuntime,
+      target: buildTarget(),
+      task_model_config:
+        targetKind === "agent" ? prepareModelConfig(targetModel) : undefined,
+      reflection_model_config: reflection,
+      token_source: tokenSource,
+      is_private: isPrivate,
+      max_cost_credits: maxCostCredits ?? undefined,
+      estimated_credits_low: estimate.lowCredits,
+      estimated_credits_high: estimate.highCredits,
+    };
+  };
+
+  const preflight = useWizardPreflight("anything", buildSubmissionPayload(), budgetSession);
+  const evaluationCheck = preflight.evidence.evaluation;
+  const executionCheck = preflight.evidence.execution;
+  const currentCheck =
+    executionCheck?.identity === preflight.identity ? executionCheck : evaluationCheck;
+  const evaluatorStatus: EvidenceStatus =
+    preflight.running.evaluation === preflight.identity ||
+    preflight.running.execution === preflight.identity
+      ? "running"
+      : preflight.error
+        ? "failed"
+        : currentCheck
+          ? currentCheck.identity !== preflight.identity
+            ? "stale"
+            : currentCheck.response.status === "succeeded"
+              ? "passed"
+              : currentCheck.response.status === "failed"
+                ? "failed"
+                : "idle"
+          : "idle";
+  useEffect(() => {
+    if (evaluatorStatus === "stale") setScorerValidation(null);
+  }, [evaluatorStatus]);
+
   const performDryRun = useCallback(
-    async (
-      overrideCode?: string,
-    ): Promise<{ outcome: ValidationResult; evidence: ValidationEvidence }> => {
-      const code = typeof overrideCode === "string" ? overrideCode : metricCode;
-      const identity = describeEvaluator(code);
-      const modelName =
-        scorerKind === "python" && (scorerModelDeclared || scorerCallsModel(code))
-          ? resolvedScorerModel?.name.trim() || null
-          : null;
-      setRunningIdentity(identity);
-      setDryRun({ status: "running" });
-      let outcome: ValidationResult;
-      let evidence: ValidationEvidence;
+    async (overrideCode?: string, scope: PreflightScope = "evaluation") => {
+      const attempt = ++dryRunAttemptRef.current;
+      const navigation = navigationRevisionRef.current;
+      const requestPayload = buildSubmissionPayload(overrideCode);
+      const requestIdentity = preflightIdentity("anything", requestPayload);
+      const completed = preflight.reusable(scope, requestPayload);
+      if (!completed) setDryRun({ status: "running" });
       try {
-        const result = await dryRunScorer({
-          scorer: buildScorer(code),
-          candidate: seedCandidate ?? objective,
-          case: parsedCases?.rows[0] ?? null,
-        });
-        setDryRun({ status: "done", result });
-        const creditsCharged = result.credits_charged ?? 0;
-        if (creditsCharged > 0) setSetupSpent((spent) => spent + creditsCharged);
-        const error = result.ok
-          ? null
-          : (result.error ?? msg("submit.blackbox.scorer.dry_run_failed"));
-        outcome = { valid: result.ok, errors: error ? [error] : [], warnings: [] };
-        evidence = {
-          identity,
-          ok: result.ok,
-          error,
-          checkedAt: Date.now(),
-          modelName,
-          creditsCharged,
-        };
-      } catch (err) {
+        const response = completed ?? (await preflight.run(scope, requestPayload));
         const error =
-          err instanceof Error ? err.message : msg("submit.blackbox.scorer.dry_run_failed");
-        setDryRun({ status: "done", result: { ok: false, error, side_info: {}, elapsed_ms: 0 } });
-        outcome = { valid: false, errors: [error], warnings: [] };
-        evidence = {
-          identity,
-          ok: false,
+          response.checks.find((check) => check.status === "failed")?.message ??
+          (response.status === "failed" ? msg("submit.preflight.failed") : null);
+        const evidence: ValidationEvidence = {
+          identity: requestIdentity,
+          ok: response.status === "succeeded",
           error,
           checkedAt: Date.now(),
-          modelName,
-          creditsCharged: 0,
+          modelName: scorerUsesModel ? (resolvedScorerModel?.name ?? null) : null,
+          creditsCharged: response.scorer_result?.credits_charged,
         };
+        const outcome: ValidationResult | null =
+          response.status === "pending"
+            ? null
+            : {
+                valid: response.status === "succeeded",
+                errors: error ? [error] : [],
+                warnings: [],
+              };
+        if (
+          mountedRef.current &&
+          attempt === dryRunAttemptRef.current &&
+          navigation === navigationRevisionRef.current &&
+          preflight.isCurrent(evidence.identity)
+        ) {
+          setDryRun(
+            response.scorer_result
+              ? { status: "done", result: response.scorer_result }
+              : { status: "idle" },
+          );
+          setEvaluatorEvidence(evidence);
+          setScorerValidation(outcome);
+        }
+        return { response, evidence, outcome };
+      } finally {
+        if (!completed && mountedRef.current && attempt === dryRunAttemptRef.current)
+          setDryRun((current) => (current.status === "running" ? { status: "idle" } : current));
       }
-      setRunningIdentity((current) => (current === identity ? null : current));
-      setEvaluatorEvidence(evidence);
-      setScorerValidation(outcome);
-      return { outcome, evidence };
     },
-    [
-      buildScorer,
-      describeEvaluator,
-      seedCandidate,
-      objective,
-      parsedCases,
-      metricCode,
-      scorerKind,
-      scorerModelDeclared,
-      resolvedScorerModel,
-    ],
+    [preflight, buildSubmissionPayload, scorerUsesModel, resolvedScorerModel],
   );
   const runDryRun = useCallback(
-    async (overrideCode?: string): Promise<ValidationResult | null> =>
-      (await performDryRun(overrideCode)).outcome,
+    async (overrideCode?: string): Promise<ValidationResult | null> => {
+      try {
+        return (await performDryRun(overrideCode)).outcome;
+      } catch (error) {
+        if (!mountedRef.current) return null;
+        setDryRun({ status: "idle" });
+        const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
+        return {
+          valid: false,
+          errors: [message.startsWith("budget.") ? msg(message as MessageKey) : message],
+          warnings: [],
+        };
+      }
+    },
     [performDryRun],
   );
 
@@ -768,12 +868,18 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     [recipe, objective, background, targetKind, scorerUsesModel, resolvedScorerModel],
   );
 
-  // The interview is offered whatever the seed mode or hand edits: its brief
-  // always yields a text starting point, so a parts or from-scratch seed
-  // switches to Text when the draft lands (agentSetSeed below).
-  // A clone is a complete prior submission — its seed is decided, so the
-  // interview (which would redraft it on resolve) is never offered.
-  const interviewPossible = codeAssistMode === "auto" && !cloned;
+  // Restored or cloned authored artifacts must survive the first render before hydration.
+  const interviewPossible =
+    codeAssistMode === "auto" &&
+    !cloned &&
+    !seedManuallyEdited &&
+    !scorerManuallyEdited &&
+    !(
+      draftSnapshot &&
+      (draftSnapshot.seedText.trim() ||
+        draftSnapshot.metricCode.trim() ||
+        draftSnapshot.seedParts.some((part) => part.value.trim()))
+    );
   // The interview opens on the Goal stage, the wizard's first — drafting the
   // seed is its job, so it never waits for a typed objective. The seed pass
   // runs when it resolves, so the user leaves the stage with a drafted
@@ -828,7 +934,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     signatureValidation: seedValidation,
     metricValidation: scorerValidation,
     runSignatureValidation: noSeedValidation,
-    runMetricValidation: runDryRun,
+    runMetricValidation: noSeedValidation,
     seedEnabled: interview.resolved,
     interviewBrief: interview.confirmedBrief,
     blackbox: authoringContext,
@@ -882,7 +988,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       catalog: engineCatalog,
       mode: strategyMode,
       engine,
-      runtime: proposerRuntime,
       hasParts: seedMode === "parts",
       trainingCaseCount,
     });
@@ -892,7 +997,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     engineCatalogFailed,
     strategyMode,
     engine,
-    proposerRuntime,
     seedMode,
     trainingCaseCount,
   ]);
@@ -908,6 +1012,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     };
     switch (s) {
       case WIZARD_STAGE.goal: {
+        const partsIssue = seedMode === "parts" ? seedPartsIssue(seedParts) : null;
+        if (partsIssue) return fail(`submit.parts.${partsIssue}`, "bb-seed");
         // In auto mode the agent drafts the text seed from the objective, so
         // the objective is the required input and the seed may stay blank.
         const agentDrafts = codeAssistMode === "auto" && seedMode === "text";
@@ -954,8 +1060,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             "submit.blackbox.validation.reflection_model_required",
             "bb-optimization-model",
           );
-        if (nativeProposer && reflectionModel.token_source === "byok")
-          return fail("submit.blackbox.validation.native_managed", "bb-optimization-model");
         if (nativeProposer && maxCostCredits == null)
           return fail("submit.blackbox.validation.native_budget", "totalBudgetInput");
         if (strategyMode === "auto" && maxScorerRuns < 4)
@@ -985,6 +1089,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   }, [pendingRestore, validateStep]);
 
   const goTo = (idx: number) => {
+    navigationRevisionRef.current += 1;
+    dryRunAttemptRef.current += 1;
+    setDryRun((current) => (current.status === "running" ? { status: "idle" } : current));
+    preflight.cancel();
+    validationToastRef.current?.dismiss();
     setDirection(idx > step ? 1 : -1);
     setStep(idx);
     setFurthestReachedStep((prev) => Math.max(prev, idx));
@@ -992,81 +1101,87 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const goPrev = () => {
     if (step > 0) goTo(step - 1);
   };
-  const budgetLedger = useMemo(
-    () => ({ total: maxCostCredits, setupSpent, runSpent: 0, reserved: 0 }),
-    [maxCostCredits, setupSpent],
-  );
-  const availableCredits = availableBudget(budgetLedger);
 
-  // Continue runs the evaluator check unless current evidence already passed.
-  // One toast per attempt, and it always ends: success, a concise error, or
-  // "setup changed" when the inputs moved under the check.
-  const ensureEvaluatorChecked = async (): Promise<boolean> => {
-    if (evaluatorStatus === "passed") return true;
-    const attempt = ++validationAttemptRef.current;
+  const ensureEvaluatorChecked = async (
+    scope: PreflightScope,
+  ): Promise<WizardPreflightResponse | null> => {
+    const completed = preflight.reusable(scope);
+    if (completed) return completed;
+    const navigation = navigationRevisionRef.current;
+    const identity = preflight.identity;
     const t = beginValidationToast(
       toast,
-      `wizard-validate-${attempt}`,
+      `wizard-validate-${++validationAttemptRef.current}`,
       msg("submit.validation.toast.running"),
     );
-    const modelName = scorerUsesModel ? resolvedScorerModel?.name.trim() : "";
-    t.phase(
-      modelName
-        ? formatMsg("submit.validation.toast.testing_evaluator", {
-            model: `\u2066${modelName}\u2069`,
-          })
-        : msg("submit.validation.toast.testing_evaluator_plain"),
-    );
-    const { evidence } = await performDryRun();
-    if (identityRef.current !== evidence.identity) {
-      t.obsolete(msg("submit.validation.toast.obsolete"));
-      return false;
+    validationToastRef.current = t;
+    try {
+      const { response } = await performDryRun(undefined, scope);
+      if (
+        !mountedRef.current ||
+        navigation !== navigationRevisionRef.current ||
+        !preflight.isCurrent(identity)
+      ) {
+        t.obsolete(msg("submit.validation.toast.obsolete"));
+        return null;
+      }
+      if (preflightMayAdvance(response, scope)) {
+        if (response.status === "succeeded") {
+          const locale = getActiveIntlLocale();
+          t.succeed(
+            `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetAmount(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetAmount(response.budget.available_credits, locale)}`,
+          );
+        } else {
+          t.pending(msg(preflightPendingMessageKey(response)));
+        }
+        return response;
+      }
+      if (response.status === "pending") {
+        t.fail(msg(preflightPendingMessageKey(response)));
+        return null;
+      }
+      const failure = response.checks.find((check) => check.status === "failed");
+      t.fail(failure?.message ?? msg("submit.preflight.failed"));
+      const destination = preflightDestination("anything", failure?.field ?? failure?.key, scope);
+      goTo(WIZARD_STAGE[destination.stage]);
+      focusField(destination.fieldId);
+      return null;
+    } catch (error) {
+      if (mountedRef.current && navigation === navigationRevisionRef.current) {
+        const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
+        t.fail(message.startsWith("budget.") ? msg(message as MessageKey) : message);
+        if (message.startsWith("budget.")) {
+          goTo(WIZARD_STAGE.evaluation);
+          focusField("totalBudgetInput");
+        }
+      }
+      return null;
+    } finally {
+      if (!t.settled) t.dismiss();
     }
-    if (evidence.ok) {
-      const locale = getActiveIntlLocale();
-      const spentLine =
-        evidence.creditsCharged > 0 && maxCostCredits != null
-          ? formatMsg("submit.validation.toast.setup_used", {
-              amount: formatCredits(evidence.creditsCharged, locale),
-              remaining: formatCredits(
-                Math.max(0, maxCostCredits - setupSpent - evidence.creditsCharged),
-                locale,
-              ),
-            })
-          : "";
-      t.succeed(
-        spentLine
-          ? `${msg("submit.validation.toast.passed")} · ${spentLine}`
-          : msg("submit.validation.toast.passed"),
-      );
-      return true;
-    }
-    t.fail(evidence.error ?? msg("submit.blackbox.scorer.dry_run_failed"));
-    if (step !== WIZARD_STAGE.evaluation) goTo(WIZARD_STAGE.evaluation);
-    focusField(scorerKind === "python" ? "bb-scorer-code" : "bb-scorer-url");
-    return false;
   };
-  // Leaving Evaluation checks the evaluator when its inputs are complete; a
-  // scoring model still inherited from an unchosen optimization model defers
-  // the check to leaving Optimization.
-  const needsEvaluatorCheck = (from: number, to: number) =>
-    from <= WIZARD_STAGE.optimization && to > WIZARD_STAGE.evaluation && !scoringModelPending;
   const advance = async (target: number) => {
     if (advancingRef.current) return;
     advancingRef.current = true;
     setAdvancing(true);
     try {
-      for (let i = step; i < target; i++) {
+      for (let i = 0; i < target; i++) {
         if (!validateStep(i, true)) {
           goTo(i);
           return;
         }
       }
-      if (needsEvaluatorCheck(step, target) && !(await ensureEvaluatorChecked())) return;
+      if (
+        target > WIZARD_STAGE.evaluation &&
+        !(await ensureEvaluatorChecked(
+          target > WIZARD_STAGE.optimization ? "execution" : "evaluation",
+        ))
+      )
+        return;
       goTo(target);
     } finally {
       advancingRef.current = false;
-      setAdvancing(false);
+      if (mountedRef.current) setAdvancing(false);
     }
   };
   const handleNext = async () => {
@@ -1080,29 +1195,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     await advance(idx);
   };
 
-  const costBracket: CostBracket = useMemo(() => {
-    const name = reflectionModel.name.trim();
-    const model = name ? (catalog?.models.find((m) => m.value === name) ?? null) : null;
-    // Every LM call in a black-box run goes through the reflection model, so it
-    // prices both the "task" and the reflection share of the bracket.
-    return projectCostBracket({
-      autoLevel: "",
-      maxFullEvals: "",
-      maxMetricCalls: String(maxScorerRuns),
-      datasetRows: Math.max(1, parsedCases?.rowCount ?? 0),
-      taskModel: model,
-      reflectionModel: model,
-    });
-  }, [reflectionModel.name, catalog, maxScorerRuns, parsedCases?.rowCount]);
-  const suggestedCeiling = useMemo(() => defaultCeilingForBracket(costBracket), [costBracket]);
-  const tokenSource = reflectionModel.token_source ?? "managed";
-
   // Suggested from the objective without a paid call; a typed or cloned name
   // always wins.
   const suggestedName = useMemo(() => suggestedRunName(objective), [objective]);
 
   const handleSubmit = async () => {
-    if (advancingRef.current) return;
+    if (advancingRef.current || submitting) return;
     for (let i = 0; i < LAST_WIZARD_STAGE; i++) {
       if (!validateStep(i, true)) {
         goTo(i);
@@ -1115,52 +1213,27 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     }
     advancingRef.current = true;
     setAdvancing(true);
+    let checked: WizardPreflightResponse | null;
     try {
-      if (!(await ensureEvaluatorChecked())) return;
+      checked = await ensureEvaluatorChecked("execution");
+      if (!checked) return;
     } finally {
       advancingRef.current = false;
-      setAdvancing(false);
+      if (mountedRef.current) setAdvancing(false);
     }
+    if (!mountedRef.current) return;
     setSubmitting(true);
     setSubmitPhase("sending");
     try {
-      const reflection = prepareModelConfig(effectiveReflectionModel);
-      const estimate = chargeableBracket(costBracket, tokenSource);
-      const payload: BlackboxRunRequest = {
-        name: jobName.trim() || suggestedName || undefined,
-        description: jobDescription.trim() || undefined,
-        username,
-        objective: objective.trim() || undefined,
-        background: background.trim() || undefined,
-        recipe,
-        seed_candidate: seedCandidate ?? undefined,
-        scorer: buildScorer(),
-        cases: parsedCases?.rows,
-        split_fractions: split,
-        shuffle,
-        seed,
-        budget: {
-          max_scorer_runs: maxScorerRuns,
-          max_iterations:
-            iterationLimitSupported && maxIterations !== "" ? maxIterations : undefined,
-          stop_at_score: parseOptionalNumber(stopAtScore),
-        },
-        strategy:
-          strategyMode === "single"
-            ? { mode: "single", engine }
-            : strategyMode === "plateau"
-              ? { mode: "plateau", patience }
-              : { mode: "auto" },
-        proposer_runtime: proposerRuntime,
-        target: buildTarget(),
-        reflection_model_config: reflection,
-        token_source: tokenSource,
-        is_private: isPrivate,
-        max_cost_credits: maxCostCredits ?? undefined,
-        estimated_credits_low: estimate.lowCredits,
-        estimated_credits_high: estimate.highCredits,
+      const payload = {
+        ...buildSubmissionPayload(),
+        execution_budget_id: checked.budget.id,
+        execution_budget_revision: checked.budget.revision,
+        preflight_id: checked.id,
+        preflight_fingerprint: checked.fingerprint,
       };
-      const result = await submitBlackboxRun(payload);
+      const key = await budgetSession.submissionKey(checked.fingerprint);
+      const result = await submitBlackboxRun(payload, key);
       track(TelemetryEvent.BlackboxSubmitted, {
         strategy: strategyMode,
         engine: engine ?? "auto",
@@ -1355,12 +1428,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     runDryRun,
     evaluatorEvidence,
     evaluatorStatus,
+    preflight,
     strategyMode,
     setStrategyMode,
     engine,
     setEngine,
     proposerRuntime,
-    setProposerRuntime,
     nativeProposer,
     iterationLimitSupported,
     patience,
@@ -1385,6 +1458,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     tokenSource,
     maxCostCredits,
     setMaxCostCredits,
+    budgetSession,
     setupSpent,
     availableCredits,
     suggestedName,

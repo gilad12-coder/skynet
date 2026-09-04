@@ -24,6 +24,7 @@ class FakeJobStore:
         self.append_log_calls: list[dict[str, Any]] = []
         self.record_progress_calls: list[tuple[str, str | None, dict[str, Any]]] = []
         self.agent_run_calls: list[tuple[str, str, Any]] = []
+        self.requeue_calls: list[dict[str, Any]] = []
 
     def claim_completion_notification(self, optimization_id: str) -> bool:
         """Atomically claim the notification right for ``optimization_id``.
@@ -89,12 +90,19 @@ class FakeJobStore:
         """
         self._jobs[optimization_id].update(kwargs)
 
-    def requeue_for_resume(self, optimization_id: str, *, bump_attempts: bool = True) -> int | None:
+    def requeue_for_resume(
+        self,
+        optimization_id: str,
+        *,
+        bump_attempts: bool = True,
+        **kwargs: Any,
+    ) -> int | None:
         """Re-queue a job to ``pending`` for resume, bumping the attempt count.
 
         Args:
             optimization_id: ID of the job to re-queue.
             bump_attempts: Whether to count this re-queue against the attempt cap.
+            **kwargs: Recovery coordination fields recorded for assertions.
 
         Returns:
             The new attempt count, or ``None`` when the job is missing.
@@ -102,6 +110,7 @@ class FakeJobStore:
         job = self._jobs.get(optimization_id)
         if job is None:
             return None
+        self.requeue_calls.append({"optimization_id": optimization_id, "bump_attempts": bump_attempts, **kwargs})
         current = int(job.get("attempts") or 0)
         next_attempt = current + 1 if bump_attempts else current
         job.update(

@@ -4,10 +4,13 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer-motion";
 
+import { useWizardStateOptional } from "@/features/agent-panel";
+
 import { SubmitWizard } from "./SubmitWizard";
 import { BlackboxWizard } from "./blackbox/BlackboxWizard";
 import { RecipeChip, RecipePicker, parseRecipeLink, type Recipe } from "./RecipePicker";
 import { WizardDraftsProvider, useWizardDraftController } from "../hooks/use-wizard-drafts";
+import { ExecutionBudgetProvider } from "../hooks/use-execution-budget";
 
 type Screen = "picker" | "wizard";
 
@@ -25,6 +28,7 @@ const STILL_VARIANTS: Variants = {
 /** `/submit` root: the recipe picker first, then the DSPy or black-box wizard it selects. */
 export function SubmitEntry() {
   const router = useRouter();
+  const wizardState = useWizardStateOptional();
   const searchParams = useSearchParams();
   const link = parseRecipeLink(searchParams.get("recipe"));
   const initial = link?.recipe ?? null;
@@ -51,8 +55,11 @@ export function SubmitEntry() {
     api: drafts,
     offerPending,
     startNew,
+    accountReady,
+    accountId,
   } = useWizardDraftController({
     onContinue: (next) => {
+      wizardState?.reset();
       setWizardKey((k) => k + 1);
       setRecipe(next);
       setPicking(false);
@@ -62,6 +69,7 @@ export function SubmitEntry() {
       if (searchParams.toString()) router.replace("/submit");
     },
     onStartNew: () => {
+      wizardState?.reset();
       setWizardKey((k) => k + 1);
       // A clone link keeps its preselected slide so the clone can still be
       // made once the old draft is gone.
@@ -90,45 +98,47 @@ export function SubmitEntry() {
 
   return (
     <WizardDraftsProvider api={drafts}>
-      <AnimatePresence initial={false} onExitComplete={() => setShown("wizard")}>
-        {shown === "picker" && picking && (
+      <ExecutionBudgetProvider key={`${accountId}:${wizardKey}`}>
+        <AnimatePresence initial={false} onExitComplete={() => setShown("wizard")}>
+          {shown === "picker" && picking && (
+            <motion.div
+              key="picker"
+              variants={variants}
+              initial="out"
+              animate="in"
+              exit="out"
+              // Centered in the content column (viewport minus header and the
+              // shell's block padding) so the picker doesn't hug the top of an
+              // otherwise empty page. Phones keep top alignment: their shell is
+              // shorter and scrolls.
+              className="mx-auto flex w-full min-w-0 max-w-4xl flex-col justify-center pb-6 md:min-h-[calc(100dvh-var(--header-height,53px)-5rem)] md:pb-8"
+            >
+              <RecipePicker current={recipe} onChoose={choose} startsNew={offerPending} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+        {recipe && accountReady && !offerPending && (
           <motion.div
-            key="picker"
             variants={variants}
-            initial="out"
-            animate="in"
-            exit="out"
-            // Centered in the content column (viewport minus header and the
-            // shell's block padding) so the picker doesn't hug the top of an
-            // otherwise empty page. Phones keep top alignment: their shell is
-            // shorter and scrolls.
-            className="mx-auto flex w-full min-w-0 max-w-4xl flex-col justify-center pb-6 md:min-h-[calc(100dvh-var(--header-height,53px)-5rem)] md:pb-8"
+            initial={false}
+            animate={wizardShown ? "in" : "out"}
+            onAnimationComplete={(definition) => {
+              if (definition === "out" && picking) setShown("picker");
+            }}
+            className={shown === "wizard" ? undefined : "hidden"}
           >
-            <RecipePicker current={recipe} onChoose={choose} startsNew={offerPending} />
+            {recipe === "anything" ? (
+              <BlackboxWizard
+                key={`${accountId}:${wizardKey}`}
+                header={chip}
+                initialRecipe={link?.kind ?? "anything"}
+              />
+            ) : (
+              <SubmitWizard key={`${accountId}:${wizardKey}`} header={chip} />
+            )}
           </motion.div>
         )}
-      </AnimatePresence>
-      {recipe && (
-        <motion.div
-          variants={variants}
-          initial={false}
-          animate={wizardShown ? "in" : "out"}
-          onAnimationComplete={(definition) => {
-            if (definition === "out" && picking) setShown("picker");
-          }}
-          className={shown === "wizard" ? undefined : "hidden"}
-        >
-          {recipe === "anything" ? (
-            <BlackboxWizard
-              key={wizardKey}
-              header={chip}
-              initialRecipe={link?.kind ?? "anything"}
-            />
-          ) : (
-            <SubmitWizard key={wizardKey} header={chip} />
-          )}
-        </motion.div>
-      )}
+      </ExecutionBudgetProvider>
     </WizardDraftsProvider>
   );
 }

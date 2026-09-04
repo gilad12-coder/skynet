@@ -30,7 +30,9 @@ from ...billing import (
     cost_ceiling_budget,
     provider_slug_for_model,
 )
-from ...billing.metering import meter_llm_usage
+from ...billing.budgets import BudgetError, BudgetService
+from ...billing.credential_safety import public_endpoint
+from ...billing.protected_credentials import ProtectedCredentialVault, protect_execution_credentials
 from ...config import settings
 from ...constants import (
     COMPOSITION_SINGLE,
@@ -73,7 +75,6 @@ from ...constants import (
     PAYLOAD_OVERVIEW_USERNAME,
     PAYLOAD_OVERVIEW_WORKFLOW,
     TOKEN_SOURCE_BYOK,
-    TOKEN_SOURCE_MANAGED,
 )
 from ...i18n import t
 from ...i18n_keys import I18nKey
@@ -94,25 +95,187 @@ from ...models.workflow import WORKFLOW_MODULE_NAME
 from ...notifications import notify_job_started
 from ...registry import RegistryError
 from ...service_gateway import ServiceError
-from ...service_gateway.optimization.blackbox.service import dry_run_scorer, engine_catalog, validate_blackbox_payload
+from ...service_gateway.optimization.blackbox.service import engine_catalog, validate_blackbox_payload
 from ...service_gateway.safe_exec import validate_signature_code
 from ...storage.dataset_library import DatasetLibraryStore, PostgresDatasetBlobStore
+from ...storage.preflights import PreflightStore, setup_seed
 from ...storage.usage import json_byte_size
 from ...worker.engine import get_worker
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..dataset_access import resolve_effective_role
 from ..errors import DomainError
+from ..model_billing import normalize_model_token_sources
 from ..model_catalog import get_catalog_cached
+from ..preflight_execution import WizardPreflightRequest, run_preflight
+from ..protected_preview import run_protected_preview
 from ..rate_limit import enforce_submission_rate
+from ..submission_idempotency import resolve_submission_replay_keys
 from ._helpers import (
     compute_task_fingerprint,
-    enforce_llm_credits,
     enforce_storage_quota,
     stable_seed,
     strip_api_key,
 )
+from .execution_budgets import budget_http_error
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_api_budget(
+    payload,
+    job_store,
+    workflow: str,
+    budget_creation_key: str | None,
+    user: AuthenticatedUser,
+    *,
+    recover_existing: bool,
+) -> None:
+    """Give older API requests the same durable setup and run authority as the wizard.
+
+    Args:
+        payload: Materialized typed request, optionally lacking modern budget fields.
+        job_store: Authoritative wallet and job database.
+        workflow: DSPy or Anything request family.
+        budget_creation_key: Stable account-scoped identity for budget creation.
+        user: Authenticated submitter.
+        recover_existing: Reuse the original approved total for a synthesized legacy retry.
+    """
+    if payload.execution_budget_id is not None:
+        return
+    engine = getattr(job_store, "engine", None)
+    if engine is None or budget_creation_key is None:
+        raise DomainError("budget.invalid", status=503)
+    service = BudgetService(engine=engine)
+    try:
+        budget = service.find_by_creation_key(user.username, budget_creation_key) if recover_existing else None
+        if budget is None:
+            spendable = _enforce_credit_balance(job_store, user.username, payload.token_source)
+            total = payload.max_cost_credits
+            if total is None:
+                total = cost_ceiling_budget(spendable or 0, payload.token_source)
+            budget = service.create(user.username, total, idempotency_key=budget_creation_key)
+    except BudgetError as error:
+        raise budget_http_error(error) from error
+    payload.execution_budget_id = budget.id
+    payload.execution_budget_revision = budget.revision
+    payload.max_cost_credits = budget.total_credits
+    if payload.seed is None:
+        payload.seed = setup_seed(budget.id)
+    checked = run_preflight(
+        WizardPreflightRequest(
+            scope="execution",
+            workflow=workflow,
+            payload=payload.model_dump(mode="json", by_alias=True),
+            execution_budget_id=budget.id,
+            execution_budget_revision=budget.revision,
+        ),
+        user,
+        job_store,
+    )
+    if checked.status != "succeeded":
+        raise DomainError(
+            "budget.pending" if checked.status == "pending" else "submission.validation_failed", status=409
+        )
+    payload.preflight_id = checked.id
+    payload.preflight_fingerprint = checked.fingerprint
+
+
+def _protected_submission(payload, job_store, workflow: str) -> dict | None:
+    """Require current complete setup evidence before accepting a protected submission.
+
+    Args:
+        payload: Typed public run request.
+        job_store: Authoritative storage for budget and evidence ownership.
+        workflow: DSPy or Anything.
+
+    Returns:
+        Canonical verified inputs for the atomic attachment transaction, or None for a legacy request.
+    """
+    if payload.execution_budget_id is None:
+        return None
+    if payload.seed is None:
+        payload.seed = setup_seed(payload.execution_budget_id)
+    try:
+        budget = BudgetService(engine=job_store.engine).get(payload.execution_budget_id, payload.username)
+        if budget.revision != payload.execution_budget_revision:
+            raise DomainError("budget.conflict", status=409)
+        canonical = _persistable_payload(payload, job_store)
+        PreflightStore(job_store.engine).require_current(
+            username=payload.username,
+            budget_id=budget.id,
+            identity=payload.preflight_id,
+            fingerprint=payload.preflight_fingerprint,
+            workflow=workflow,
+            payload=canonical,
+        )
+    except BudgetError as error:
+        raise budget_http_error(error) from error
+    return canonical
+
+
+def _persistable_payload(payload, job_store) -> dict:
+    """Serialize a request with protected MCP credentials replaced by an opaque reference.
+
+    Args:
+        payload: Typed submission request.
+        job_store: Store whose engine owns the execution credential vault.
+
+    Returns:
+        Canonical payload safe for preflight fingerprinting and job persistence.
+    """
+    canonical = payload.model_dump(mode="json", by_alias=True)
+    if payload.execution_budget_id is None:
+        return canonical
+    return protect_execution_credentials(
+        canonical,
+        username=payload.username,
+        binding_id=payload.execution_budget_id,
+        vault=ProtectedCredentialVault(engine=job_store.engine),
+    )
+
+
+def _create_submission_job(job_store, optimization_id: str, payload, key: str | None, verified: dict | None) -> None:
+    """Atomically attach verified setup spend to the single accepted root job.
+
+    Args:
+        job_store: Database-backed job store.
+        optimization_id: New root identity.
+        payload: Typed request whose runtime budget generation is stamped after attachment.
+        key: Account-scoped submission replay identity.
+        verified: Exact inputs validated by the preflight authority.
+    """
+    if verified is None:
+        job_store.create_job(optimization_id, username=payload.username, idempotency_key=key)
+        return
+    try:
+        job = job_store.create_job(
+            optimization_id,
+            username=payload.username,
+            idempotency_key=key,
+            budget_service=BudgetService(engine=job_store.engine),
+            preflight_store=PreflightStore(job_store.engine),
+            execution_budget_id=payload.execution_budget_id,
+            execution_budget_revision=payload.execution_budget_revision,
+            preflight_id=payload.preflight_id,
+            preflight_fingerprint=payload.preflight_fingerprint,
+            preflight_payload=verified,
+            preflight_workflow="anything" if isinstance(payload, BlackboxRunRequest) else "dspy",
+        )
+        payload.execution_budget_generation = job["execution_budget_generation"]
+    except BudgetError as error:
+        raise budget_http_error(error) from error
+
+
+def _execution_overview(payload) -> dict:
+    """Expose the attached budget and runtime identity on a protected job overview."""
+    if payload.execution_budget_id is None:
+        return {}
+    return {
+        "execution_budget_id": payload.execution_budget_id,
+        "execution_budget_generation": payload.execution_budget_generation,
+        "execution_runtime": getattr(payload, "execution_runtime", None),
+    }
+
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 IdempotencyKeyHeader = Annotated[
@@ -122,7 +285,10 @@ IdempotencyKeyHeader = Annotated[
         description=(
             "Optional client-supplied dedup key. When the same key is reused "
             "for the same authenticated submitter, the original submission "
-            "response is returned and no new job is enqueued."
+            "response is returned and no new job is enqueued. A budgetless "
+            "legacy request with no key receives a content-addressed replay "
+            "identity; submit an explicit new key or change the request to "
+            "intentionally start the same work again."
         ),
         max_length=128,
     ),
@@ -421,11 +587,10 @@ def _committed_active_credits(job_store, username: str) -> int:
 def _enforce_credit_balance(job_store, username: str, token_source: str) -> int | None:
     """Block a depleted account from starting a run, and report its free balance.
 
-    Reads the account's spendable credits (any remaining legacy grant plus the
-    purchased balance), subtracts the ceilings its still-active runs are already
-    committed to (:func:`_committed_active_credits`), and refuses the submission
-    when nothing uncommitted is left — so concurrent submissions cannot
-    collectively promise more than the account holds. There is no free
+    Reads spendable credits after StripeBillingService has subtracted both
+    authoritative operation holds and database-backed legacy job commitments.
+    Subtracting the legacy ceilings again would reject funded submissions.
+    Concurrent dispatch is serialized by the shared ledger. There is no free
     allowance — a brand-new account is gated until it buys credits. Both run
     modes are gated: a managed run spends its full per-token cost, and a BYOK
     run still spends Skynet's platform fee (the provider tokens are on the
@@ -453,10 +618,7 @@ def _enforce_credit_balance(job_store, username: str, token_source: str) -> int 
     spendable = service.spendable_credits(username)
     if spendable <= 0:
         raise DomainError("billing.insufficient_credits", status=402)
-    uncommitted = spendable - _committed_active_credits(job_store, username)
-    if uncommitted <= 0:
-        raise DomainError("billing.insufficient_credits", status=402)
-    return uncommitted
+    return spendable
 
 
 def _enforce_global_daily_spend_ceiling(job_store) -> None:
@@ -553,71 +715,6 @@ def _cap_cost_ceiling_to_balance(
     payload.max_cost_credits = budget if current is None else min(current, budget)
 
 
-def _request_model_configs(payload: _OptimizationRequestBase | BlackboxRunRequest) -> list[ModelConfig]:
-    """Return every executable model config carried by a submission.
-
-    Args:
-        payload: Run, grid or black-box request.
-
-    Returns:
-        Model configs in execution order.
-    """
-    if isinstance(payload, BlackboxRunRequest):
-        return [
-            config for config in (payload.reflection_model_settings, payload.scorer.model) if config is not None
-        ]
-    if isinstance(payload, RunRequest):
-        return [
-            config
-            for config in (
-                payload.model_settings,
-                payload.reflection_model_settings,
-                payload.task_model_settings,
-            )
-            if config is not None
-        ]
-    if isinstance(payload, GridSearchRequest):
-        return [*payload.generation_models, *payload.reflection_models]
-    return []
-
-
-def _normalize_model_token_sources(
-    payload: _OptimizationRequestBase | BlackboxRunRequest,
-) -> tuple[list[ModelConfig], dict[str, str]]:
-    """Resolve legacy job-level sources into explicit per-model sources.
-
-    Args:
-        payload: Run, grid or black-box request to normalize in place.
-
-    Returns:
-        The model configs and their normalized model-to-source billing map.
-
-    Raises:
-        DomainError: 400 when one model id is assigned conflicting sources.
-    """
-    configs = _request_model_configs(payload)
-    sources: dict[str, str] = {}
-    for config in configs:
-        source = config.token_source or payload.token_source
-        config.token_source = source
-        config.base_url = None
-        for field in ("api_key", "api_base", "base_url"):
-            config.extra.pop(field, None)
-        if source == TOKEN_SOURCE_MANAGED:
-            config.byok_provider = None
-        model = config.normalized_identifier()
-        existing = sources.get(model)
-        if existing is not None and existing != source:
-            raise DomainError("submission.validation_failed", status=400)
-        sources[model] = source
-    payload.token_source = (
-        TOKEN_SOURCE_BYOK
-        if sources and all(source == TOKEN_SOURCE_BYOK for source in sources.values())
-        else TOKEN_SOURCE_MANAGED
-    )
-    return configs, sources
-
-
 def _enforce_byok_connections(job_store, username: str, model_configs: list[ModelConfig]) -> None:
     """Refuse BYOK models without a verified saved provider connection.
 
@@ -679,7 +776,7 @@ def _scrubbed_tool_source(tool_source) -> dict | None:
         return None
     scrubbed: dict = {"kind": tool_source.kind}
     if tool_source.mcp_url is not None:
-        scrubbed["mcp_url"] = tool_source.mcp_url
+        scrubbed["mcp_url"] = public_endpoint(tool_source.mcp_url)
     if tool_source.tool_filter is not None:
         scrubbed["tool_filter"] = list(tool_source.tool_filter)
     return scrubbed
@@ -723,6 +820,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         Args:
             payload: The run-request body validated by FastAPI.
             current_user: Authenticated submitter resolved from the bearer token.
+            idempotency_key: Optional caller-controlled replay identity.
 
         Returns:
             An ``OptimizationSubmissionResponse`` carrying the assigned id
@@ -733,27 +831,48 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         """
         payload.username = current_user.username
 
-        normalized_key = (idempotency_key or "").strip() or None
+        replay_keys = resolve_submission_replay_keys(
+            payload,
+            username=payload.username,
+            workflow="dspy",
+            supplied_key=idempotency_key,
+        )
+        normalized_key = replay_keys.job
         if normalized_key:
             existing_id = job_store.find_job_by_idempotency_key(payload.username, normalized_key)
             if existing_id:
                 cached = _existing_submission_response(job_store, existing_id)
                 if cached is not None:
                     logger.info(
-                        "Idempotent retry hit: returning existing %s for user=%s key=%s",
+                        "Idempotent retry hit: returning existing %s for user=%s",
                         existing_id,
                         payload.username,
-                        normalized_key,
                     )
                     return cached
 
         _enforce_submission_admission(job_store, payload.username)
 
+        _run_model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
+        _spendable = _enforce_credit_balance(job_store, payload.username, payload.token_source)
+        if payload.execution_budget_id is None:
+            _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
+        _enforce_byok_connections(job_store, payload.username, _run_model_configs)
+
         staged_id = _materialize_staged_dataset(payload, job_store=job_store, username=payload.username)
         source_dataset_id = _materialize_library_dataset(payload, job_store=job_store, user=current_user)
+        _ensure_api_budget(
+            payload,
+            job_store,
+            "dspy",
+            replay_keys.budget,
+            current_user,
+            recover_existing=replay_keys.synthesized,
+        )
+        verified = _protected_submission(payload, job_store, "dspy")
 
         try:
-            service.validate_payload(payload)
+            if verified is None:
+                service.validate_payload(payload)
         except (ServiceError, RegistryError) as exc:
             # Log the resolver/validation detail server-side only; the client
             # gets a stable code without the internal registry surface leaked.
@@ -762,16 +881,11 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
 
         # Workflow runs have no top-level signature; per-node image fields are
         # rejected by the workflow deep-validation pass instead.
-        if payload.signature_code is not None:
+        if payload.signature_code is not None and verified is None:
             _enforce_vision_capability(
                 signature_code=payload.signature_code,
                 candidate_models=[payload.model_settings],
             )
-
-        _run_model_configs, _token_sources_by_model = _normalize_model_token_sources(payload)
-        _spendable = _enforce_credit_balance(job_store, payload.username, payload.token_source)
-        _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
-        _enforce_byok_connections(job_store, payload.username, _run_model_configs)
 
         optimization_id = str(uuid4())
         # Workflow runs fingerprint the whole graph spec in place of the
@@ -792,17 +906,19 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         # twice doubled the request's transient footprint. Taken only after
         # the last payload mutations (cost-ceiling cap, seed) so the counted
         # bytes are exactly the persisted bytes.
-        payload_dump = payload.model_dump(mode="json", by_alias=True)
+        payload_dump = _persistable_payload(payload, job_store)
         enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
 
         composition = (
             COMPOSITION_WORKFLOW if payload.module_name.lower() == WORKFLOW_MODULE_NAME else COMPOSITION_SINGLE
         )
-        job_store.create_job(optimization_id, username=payload.username, idempotency_key=normalized_key)
+        _create_submission_job(job_store, optimization_id, payload, normalized_key, verified)
+        payload_dump["execution_budget_generation"] = payload.execution_budget_generation
         job_store.set_payload_overview(
             optimization_id,
             {
                 PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE: OPTIMIZATION_TYPE_RUN,
+                **_execution_overview(payload),
                 PAYLOAD_OVERVIEW_COMPOSITION: composition,
                 PAYLOAD_OVERVIEW_NAME: payload.name,
                 PAYLOAD_OVERVIEW_DESCRIPTION: payload.description,
@@ -897,6 +1013,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         Args:
             payload: The grid-search request body validated by FastAPI.
             current_user: Authenticated submitter resolved from the bearer token.
+            idempotency_key: Optional caller-controlled replay identity.
 
         Returns:
             An ``OptimizationSubmissionResponse`` carrying the assigned id
@@ -907,28 +1024,48 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                 (malformed).
         """
         payload.username = current_user.username
+        replay_keys = resolve_submission_replay_keys(
+            payload,
+            username=payload.username,
+            workflow="dspy",
+            supplied_key=idempotency_key,
+        )
         _expand_catalog_grid_payload(payload)
 
-        normalized_key = (idempotency_key or "").strip() or None
+        normalized_key = replay_keys.job
         if normalized_key:
             existing_id = job_store.find_job_by_idempotency_key(payload.username, normalized_key)
             if existing_id:
                 cached = _existing_submission_response(job_store, existing_id)
                 if cached is not None:
                     logger.info(
-                        "Idempotent grid-search retry hit: returning existing %s for user=%s key=%s",
+                        "Idempotent grid-search retry hit: returning existing %s for user=%s",
                         existing_id,
                         payload.username,
-                        normalized_key,
                     )
                     return cached
 
         _enforce_submission_admission(job_store, payload.username)
 
+        _grid_model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
+        _spendable = _enforce_credit_balance(job_store, payload.username, payload.token_source)
+        if payload.execution_budget_id is None:
+            _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
+        _enforce_byok_connections(job_store, payload.username, _grid_model_configs)
+
         staged_id = _materialize_staged_dataset(payload, job_store=job_store, username=payload.username)
         source_dataset_id = _materialize_library_dataset(payload, job_store=job_store, user=current_user)
 
-        if hasattr(service, "validate_grid_search_payload"):
+        _ensure_api_budget(
+            payload,
+            job_store,
+            "dspy",
+            replay_keys.budget,
+            current_user,
+            recover_existing=replay_keys.synthesized,
+        )
+        verified = _protected_submission(payload, job_store, "dspy")
+        if verified is None and hasattr(service, "validate_grid_search_payload"):
             try:
                 service.validate_grid_search_payload(payload)
             except (ServiceError, RegistryError) as exc:
@@ -936,15 +1073,11 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                 logger.warning("Grid search validation failed: %s", exc)
                 raise DomainError("submission.validation_failed", status=400) from exc
 
-        _enforce_vision_capability(
-            signature_code=payload.signature_code,
-            candidate_models=list(payload.generation_models),
-        )
-
-        _grid_model_configs, _token_sources_by_model = _normalize_model_token_sources(payload)
-        _spendable = _enforce_credit_balance(job_store, payload.username, payload.token_source)
-        _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
-        _enforce_byok_connections(job_store, payload.username, _grid_model_configs)
+        if verified is None:
+            _enforce_vision_capability(
+                signature_code=payload.signature_code,
+                candidate_models=list(payload.generation_models),
+            )
 
         optimization_id = str(uuid4())
         if payload.seed is None:
@@ -954,14 +1087,16 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         task_fingerprint = compute_task_fingerprint(payload.signature_code, payload.metric_code, payload.dataset)
 
         # Same single-serialization pattern as /run — see the note there.
-        payload_dump = payload.model_dump(mode="json", by_alias=True)
+        payload_dump = _persistable_payload(payload, job_store)
         enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
 
-        job_store.create_job(optimization_id, username=payload.username, idempotency_key=normalized_key)
+        _create_submission_job(job_store, optimization_id, payload, normalized_key, verified)
+        payload_dump["execution_budget_generation"] = payload.execution_budget_generation
         job_store.set_payload_overview(
             optimization_id,
             {
                 PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE: OPTIMIZATION_TYPE_GRID_SEARCH,
+                **_execution_overview(payload),
                 # A grid search sweeps model pairs over a single module — the request
                 # model rejects workflows — so its composition is always "single".
                 PAYLOAD_OVERVIEW_COMPOSITION: COMPOSITION_SINGLE,
@@ -981,8 +1116,12 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                 PAYLOAD_OVERVIEW_OPTIMIZER_KWARGS: dict(payload.optimizer_kwargs),
                 PAYLOAD_OVERVIEW_COMPILE_KWARGS: dict(payload.compile_kwargs),
                 PAYLOAD_OVERVIEW_TOTAL_PAIRS: total_pairs,
-                PAYLOAD_OVERVIEW_GENERATION_MODELS: [m.model_dump() for m in payload.generation_models],
-                PAYLOAD_OVERVIEW_REFLECTION_MODELS: [m.model_dump() for m in payload.reflection_models],
+                PAYLOAD_OVERVIEW_GENERATION_MODELS: [
+                    strip_api_key(model.model_dump()) for model in payload.generation_models
+                ],
+                PAYLOAD_OVERVIEW_REFLECTION_MODELS: [
+                    strip_api_key(model.model_dump()) for model in payload.reflection_models
+                ],
                 PAYLOAD_OVERVIEW_TASK_FINGERPRINT: task_fingerprint,
                 PAYLOAD_OVERVIEW_TOKEN_SOURCE: payload.token_source,
                 PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL: _token_sources_by_model,
@@ -1059,33 +1198,49 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         """
         payload.username = current_user.username
 
-        normalized_key = (idempotency_key or "").strip() or None
+        replay_keys = resolve_submission_replay_keys(
+            payload,
+            username=payload.username,
+            workflow="anything",
+            supplied_key=idempotency_key,
+        )
+        normalized_key = replay_keys.job
         if normalized_key:
             existing_id = job_store.find_job_by_idempotency_key(payload.username, normalized_key)
             if existing_id:
                 cached = _existing_submission_response(job_store, existing_id)
                 if cached is not None:
                     logger.info(
-                        "Idempotent blackbox retry hit: returning existing %s for user=%s key=%s",
+                        "Idempotent blackbox retry hit: returning existing %s for user=%s",
                         existing_id,
                         payload.username,
-                        normalized_key,
                     )
                     return cached
 
         _enforce_submission_admission(job_store, payload.username)
 
+        _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
+        _spendable = _enforce_credit_balance(job_store, payload.username, payload.token_source)
+        if payload.execution_budget_id is None:
+            _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
+        _enforce_byok_connections(job_store, payload.username, _model_configs)
+
+        _ensure_api_budget(
+            payload,
+            job_store,
+            "anything",
+            replay_keys.budget,
+            current_user,
+            recover_existing=replay_keys.synthesized,
+        )
+        verified = _protected_submission(payload, job_store, "anything")
         try:
-            validate_blackbox_payload(payload)
+            if verified is None:
+                validate_blackbox_payload(payload)
         except ServiceError as exc:
             # Log the detail server-side only; don't leak it to the client.
             logger.warning("Blackbox validation failed: %s", exc)
             raise DomainError("submission.validation_failed", status=400) from exc
-
-        _model_configs, _token_sources_by_model = _normalize_model_token_sources(payload)
-        _spendable = _enforce_credit_balance(job_store, payload.username, payload.token_source)
-        _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
-        _enforce_byok_connections(job_store, payload.username, _model_configs)
 
         optimization_id = str(uuid4())
         if payload.seed is None:
@@ -1094,14 +1249,16 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         reflection_model = payload.reflection_model_settings.normalized_identifier()
 
         # Same single-serialization pattern as /run — see the note there.
-        payload_dump = payload.model_dump(mode="json", by_alias=True)
+        payload_dump = _persistable_payload(payload, job_store)
         enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
 
-        job_store.create_job(optimization_id, username=payload.username, idempotency_key=normalized_key)
+        _create_submission_job(job_store, optimization_id, payload, normalized_key, verified)
+        payload_dump["execution_budget_generation"] = payload.execution_budget_generation
         job_store.set_payload_overview(
             optimization_id,
             {
                 PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE: OPTIMIZATION_TYPE_BLACKBOX,
+                **_execution_overview(payload),
                 PAYLOAD_OVERVIEW_COMPOSITION: COMPOSITION_SINGLE,
                 PAYLOAD_OVERVIEW_NAME: payload.name,
                 PAYLOAD_OVERVIEW_DESCRIPTION: payload.description,
@@ -1165,7 +1322,6 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
     def blackbox_engines(
         current_user: AuthenticatedUserDep,
         target: Literal["text", "agent"] = "text",
-        proposer_runtime: Literal["worker", "vercel"] = "worker",
     ) -> BlackboxEngineCatalogResponse:
         """Describe every engine so the wizard can show why one cannot run here.
 
@@ -1175,13 +1331,11 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         Args:
             current_user: Authenticated caller resolved from the bearer token.
             target: The target kind the job will use.
-            proposer_runtime: Execution location for upstream agent proposers.
-
         Returns:
             The catalog in registry order.
         """
         del current_user
-        return engine_catalog(target, proposer_runtime)
+        return engine_catalog(target)
 
     @router.post(
         "/blackbox/scorer/dry-run",
@@ -1192,39 +1346,34 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
     def blackbox_scorer_dry_run(
         payload: ScorerDryRunRequest,
         current_user: AuthenticatedUserDep,
+        idempotency_key: IdempotencyKeyHeader = None,
     ) -> ScorerDryRunResponse:
         """Run the scorer once so a broken one fails here, not in the job.
 
-        Python scorers run in the metric sandbox; remote scorers get a single
-        outbound request. Scorer failures come back as ``ok=False`` with the
-        error text rather than as an HTTP error. A scorer with a model
-        chosen may call ``llm()``; that usage is billed to the caller like an
-        agent turn.
+        Model and sandbox operations reserve shared setup credits before
+        dispatch. Scorer failures remain renderable results, and uncertain
+        usage retains its coverage in the returned budget.
 
         Args:
             payload: The scorer spec, one version and an optional case.
             current_user: Authenticated caller resolved from the bearer token.
+            idempotency_key: Optional replay identity preventing duplicate paid execution.
 
         Returns:
             The score and side information, or the error that stopped it.
 
         Raises:
-            DomainError: 429 when over the submission rate cap; 402 when the
-                scorer has a model and the account has no credits.
+            DomainError: When rate, funding, or budget ownership prevents admission.
         """
         enforce_submission_rate(current_user.username)
-        scorer_model = payload.scorer.model
-        if scorer_model is not None:
-            enforce_llm_credits(job_store, current_user.username)
-        response = dry_run_scorer(payload)
-        if scorer_model is not None and response.usage_by_model:
-            response.credits_charged = meter_llm_usage(
-                getattr(job_store, "engine", None),
-                current_user.username,
-                {usage.model: (usage.input_tokens, usage.output_tokens) for usage in response.usage_by_model},
-                description="Scorer dry run",
-                token_source=scorer_model.token_source or TOKEN_SOURCE_MANAGED,
+        return ScorerDryRunResponse.model_validate(
+            run_protected_preview(
+                payload.model_dump(mode="json"),
+                kind="scorer",
+                user=current_user,
+                job_store=job_store,
+                idempotency_key=idempotency_key,
             )
-        return response
+        )
 
     return router

@@ -13,6 +13,7 @@ a provider key.
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -67,6 +68,15 @@ class HarnessLaunch:
 
 PI_PACKAGE = "@earendil-works/pi-coding-agent"
 PI_VERSION = "0.84.1"
+CODEX_VERSION = "0.153.0"
+OPENCODE_VERSION = "1.18.27"
+CLAUDE_CODE_VERSION = "2.1.259"
+_PINNED_HARNESSES = {
+    BLACKBOX_HARNESS_PI: ("pi", PI_VERSION),
+    BLACKBOX_HARNESS_CODEX: ("codex", CODEX_VERSION),
+    BLACKBOX_HARNESS_CLAUDE_CODE: ("claude", CLAUDE_CODE_VERSION),
+    BLACKBOX_HARNESS_OPENCODE: ("opencode", OPENCODE_VERSION),
+}
 PI_THINKING_LEVEL = "low"
 # The LiteLLM-style routing prefix; the gateway fronts OpenRouter itself and
 # rejects model ids that still carry it.
@@ -93,17 +103,65 @@ def _pi_install() -> str:
     )
 
 
-def _npm_install(binary: str, package: str) -> str:
+def _npm_install(binary: str, package: str, version: str) -> str:
     """Return a command that installs ``package`` globally unless ``binary`` is already on PATH.
 
     Args:
         binary: Executable the package provides.
         package: npm package name.
+        version: Exact release required by the runtime profile.
 
     Returns:
         The shell command.
     """
-    return f"command -v {binary} >/dev/null 2>&1 || npm install -g {package}"
+    return f"{_version_check(binary, version)} || npm install -g {package}@{version}"
+
+
+def _version_check(binary: str, version: str) -> str:
+    """Check the required CLI release without installing packages or invoking a model.
+
+    Args:
+        binary: Built-in harness executable name.
+        version: Exact release recorded in the deployment lockfile.
+
+    Returns:
+        A shell command that fails when the pinned executable is unavailable.
+    """
+    pattern = "(^| )" + version.replace(".", "[.]") + "( |$)"
+    return f"{binary} --version 2>/dev/null | grep -Eq {shlex.quote(pattern)}"
+
+
+def _with_relay_config(command: str, files: dict[str, str], gateway: GatewayConfig) -> str:
+    """Point only generated runtime configuration at the sandbox-local mailbox proxy.
+
+    Args:
+        command: Original built-in harness command.
+        files: Fixed generated harness configuration files.
+        gateway: Parent endpoint replaced only when its guest-local relay is present.
+
+    Returns:
+        The original command preceded by a scoped endpoint substitution.
+    """
+    script = (
+        "import os,pathlib; endpoint=os.environ.get('SKYNET_BUDGET_RELAY_URL'); "
+        f"files={list(files)!r}; old={gateway.url!r}; "
+        "[(lambda p: p.write_text(p.read_text().replace(old,endpoint)))(pathlib.Path(name)) "
+        "for name in files if endpoint]"
+    )
+    return f"python3 -c {shlex.quote(script)} && {command}"
+
+
+def pinned_harness_check(harness: str) -> str | None:
+    """Return the offline exact-version probe for a built-in harness.
+
+    Args:
+        harness: Selected built-in or custom harness identifier.
+
+    Returns:
+        A CLI metadata command, or None for a custom command without a pinned executable.
+    """
+    selected = _PINNED_HARNESSES.get(harness)
+    return _version_check(*selected) if selected else None
 
 
 def _base_env(model: str, gateway: GatewayConfig) -> dict[str, str]:
@@ -326,11 +384,14 @@ def _codex_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
         'name = "Skynet gateway"\n'
         f"base_url = {json.dumps(gateway.url)}\n"
         f'env_key = "{ENV_API_KEY}"\n'
-        'wire_api = "chat"\n'
+        'wire_api = "responses"\n'
+        "request_max_retries = 0\n"
+        "stream_max_retries = 0\n"
+        "supports_websockets = false\n"
     )
     return HarnessLaunch(
         instructions_file="AGENTS.md",
-        install_command=_npm_install("codex", "@openai/codex"),
+        install_command=_npm_install("codex", "@openai/codex", CODEX_VERSION),
         files={".skynet/codex/config.toml": config_toml},
         run_command=(
             'CODEX_HOME="$PWD/.skynet/codex" codex exec --skip-git-repo-check '
@@ -366,7 +427,7 @@ def _claude_code_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     )
     return HarnessLaunch(
         instructions_file="CLAUDE.md",
-        install_command=_npm_install("claude", "@anthropic-ai/claude-code"),
+        install_command=_npm_install("claude", "@anthropic-ai/claude-code", CLAUDE_CODE_VERSION),
         run_command=(
             f'claude -p {_PROMPT_ARG} --model "${ENV_MODEL}" --output-format json --dangerously-skip-permissions'
         ),
@@ -399,7 +460,7 @@ def _opencode_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     }
     return HarnessLaunch(
         instructions_file="AGENTS.md",
-        install_command=_npm_install("opencode", "opencode-ai"),
+        install_command=_npm_install("opencode", "opencode-ai", OPENCODE_VERSION),
         files={"opencode.json": json.dumps(config, indent=2)},
         run_command=f'opencode run --model "{PROVIDER}/${ENV_MODEL}" {_PROMPT_ARG}',
         env=_base_env(model, gateway),
@@ -407,13 +468,14 @@ def _opencode_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     )
 
 
-def _fill(command: str | None, model: str, gateway: GatewayConfig) -> str | None:
+def _fill(command: str | None, model: str, gateway: GatewayConfig, *, protected: bool = False) -> str | None:
     """Substitute the custom-harness placeholders into ``command``.
 
     Args:
         command: A command line that may use :data:`PLACEHOLDERS`.
         model: Target model id.
         gateway: Gateway URL and key.
+        protected: Resolve gateway placeholders from the sandbox-local relay environment.
 
     Returns:
         The command with placeholders replaced, or ``None`` when there is no command.
@@ -422,7 +484,7 @@ def _fill(command: str | None, model: str, gateway: GatewayConfig) -> str | None
         return None
     values = {
         "{model}": model,
-        "{gateway_url}": gateway.url,
+        "{gateway_url}": f"${ENV_GATEWAY_URL}" if protected else gateway.url,
         "{api_key}": gateway.api_key,
         "{prompt_file}": PROMPT_FILE,
         "{answer_file}": ANSWER_FILE,
@@ -440,7 +502,7 @@ _CATALOG: dict[str, Callable[[str, GatewayConfig], HarnessLaunch]] = {
 }
 
 
-def build_launch(target: BlackboxTarget, gateway: GatewayConfig) -> HarnessLaunch:
+def build_launch(target: BlackboxTarget, gateway: GatewayConfig, *, protected: bool = False) -> HarnessLaunch:
     """Resolve the launch for a job's target: catalog harness or custom command.
 
     ``target.install_command`` and ``target.run_command`` override the
@@ -449,6 +511,7 @@ def build_launch(target: BlackboxTarget, gateway: GatewayConfig) -> HarnessLaunc
     Args:
         target: The job's agent target.
         gateway: Gateway URL and key the harness routes its model calls through.
+        protected: Require preinstalled pinned dependencies and the isolated model mailbox.
 
     Returns:
         The launch.
@@ -458,12 +521,12 @@ def build_launch(target: BlackboxTarget, gateway: GatewayConfig) -> HarnessLaunc
     """
     model = str(target.model).removeprefix(_OPENROUTER_PREFIX)
     if target.harness == BLACKBOX_HARNESS_CUSTOM:
-        run_command = _fill(target.run_command, model, gateway)
+        run_command = _fill(target.run_command, model, gateway, protected=protected)
         if run_command is None:
             raise ServiceError("A custom harness needs a run_command.")
         return HarnessLaunch(
             instructions_file="AGENTS.md",
-            install_command=_fill(target.install_command, model, gateway),
+            install_command=_fill(target.install_command, model, gateway, protected=protected),
             run_command=run_command,
             env=_base_env(model, gateway),
             parse_output=_parse_plain_output,
@@ -472,13 +535,27 @@ def build_launch(target: BlackboxTarget, gateway: GatewayConfig) -> HarnessLaunc
     if factory is None:
         raise ServiceError(f"Unknown harness '{target.harness}'.")
     launch = factory(model, gateway)
-    install_command = _fill(target.install_command, model, gateway) or launch.install_command
-    run_command = _fill(target.run_command, model, gateway) or launch.run_command
+    install_command = _fill(target.install_command, model, gateway, protected=protected) or launch.install_command
+    run_command = _fill(target.run_command, model, gateway, protected=protected) or launch.run_command
+    env = dict(launch.env)
+    if protected and not target.install_command:
+        install_command = pinned_harness_check(target.harness)
+    if protected and launch.files:
+        run_command = _with_relay_config(run_command, launch.files, gateway)
+    if protected and target.harness == BLACKBOX_HARNESS_OPENCODE:
+        env.update(
+            {
+                "OPENCODE_DISABLE_AUTOUPDATE": "true",
+                "OPENCODE_DISABLE_MODELS_FETCH": "true",
+                "OPENCODE_DISABLE_DEFAULT_PLUGINS": "true",
+                "OPENCODE_DISABLE_LSP_DOWNLOAD": "true",
+            }
+        )
     return HarnessLaunch(
         instructions_file=launch.instructions_file,
         install_command=install_command,
         run_command=run_command,
         files=launch.files,
-        env=launch.env,
+        env=env,
         parse_output=launch.parse_output,
     )

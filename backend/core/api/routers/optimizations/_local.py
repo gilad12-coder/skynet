@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
+from ....billing.protected_credentials import scrub_execution_credentials
 from ....constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
     PAYLOAD_OVERVIEW_MODEL_NAME,
@@ -134,7 +135,7 @@ async def stream_job_updates(job_store, optimization_id: str) -> AsyncIterator[d
         ``{"event": "message"|"done"|"error", "data": ...}`` dicts.
     """
     loop = asyncio.get_running_loop()
-    terminal = {"success", "failed", "cancelled"}
+    terminal = {"success", "failed", "cancelled", "stopped"}
     while True:
         # Narrow projection: the loop polls every few seconds and only needs
         # status/message/latest_metrics, never the multi-MB payload that
@@ -158,6 +159,10 @@ async def stream_job_updates(job_store, optimization_id: str) -> AsyncIterator[d
                 "status": status,
                 "message": raw.get("message"),
                 "latest_metrics": raw.get("latest_metrics", {}),
+                "recovery": raw.get("recovery"),
+                "terminal_evidence": raw.get("terminal_evidence"),
+                "stop_reason": raw.get("stop_reason"),
+                "result_availability": raw.get("result_availability"),
                 "log_count": log_count,
                 "progress_count": progress_count,
             },
@@ -196,7 +201,14 @@ def clone_payload(
             state condition on the saved resource, not a server fault — surface
             it as a conflict the caller can act on, not an opaque 500.
     """
-    copy = dict(source_payload)
+    source_payload = scrub_execution_credentials(source_payload)
+    copy = {
+        key: value
+        for key, value in source_payload.items()
+        if not key.startswith("_budget")
+        and not key.startswith("execution_budget_")
+        and key not in {"preflight_id", "preflight_fingerprint"}
+    }
     if new_name is not None:
         copy["name"] = new_name
     request_cls: type[GridSearchRequest] | type[RunRequest] = (
@@ -339,9 +351,7 @@ def bulk_set_flag(
         seen.add(oid)
         ordered.append(oid)
     allowed, denied = filter_ids_at_least(job_store, ordered, user, minimum)
-    skipped.extend(
-        BulkMetadataSkipped(optimization_id=oid, reason="not_found") for oid in denied
-    )
+    skipped.extend(BulkMetadataSkipped(optimization_id=oid, reason="not_found") for oid in denied)
     for oid in allowed:
         try:
             job_data = get_job_no_payload(job_store, oid)

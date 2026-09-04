@@ -24,6 +24,7 @@ from typing import Any
 
 from gepa.oa.budget import BudgetTracker
 from gepa.oa.config import OptimizeAnythingConfig
+from gepa.oa.engines.autoresearch import _best_aggregate_candidate
 from gepa.oa.eval_server import EvalServer
 from gepa.oa.registry import get_engine_cls
 from gepa.oa.task import Task
@@ -36,6 +37,10 @@ _PROC_ROOT = Path("/proc")
 
 class EvaluationStopped(BaseException):
     """Unwind infrastructure failures past upstream's ordinary bad-candidate handling."""
+
+
+class BudgetStopped(EvaluationStopped):
+    """Stop admission without converting an unperformed evaluation into feedback."""
 
 
 class EvaluatorMailbox:
@@ -86,7 +91,8 @@ class EvaluatorMailbox:
                     time.sleep(0.05)
                     continue
                 if "error" in response:
-                    self.error = EvaluationStopped(str(response["error"]))
+                    kind = BudgetStopped if response.get("stop_reason") == "budget_reached" else EvaluationStopped
+                    self.error = kind(str(response["error"]))
                     self.stopped.set()
                     raise self.error
                 return float(response["score"]), dict(response.get("info") or {})
@@ -353,6 +359,61 @@ def _has_evaluated_single_result(server: EvalServer, output_dir: Path, candidate
     return False
 
 
+def _budget_incumbent(engine_id: str, engine: Any, task: Task, server: EvalServer, output_dir: Path) -> dict[str, Any]:
+    """Retain an incumbent published by the upstream engine before interruption.
+
+    Args:
+        engine_id: Pinned native engine.
+        engine: Interrupted upstream instance.
+        task: Unchanged task and visible evaluation scope.
+        server: Completed evaluation evidence.
+        output_dir: Full upstream evaluator artifacts.
+
+    Returns:
+        An evaluated candidate envelope, or an empty mapping when none was published.
+    """
+    pending = getattr(engine, "_pending_tempdir", None)
+    work_dir = Path(pending.name) if pending is not None else Path(engine.run_dir)
+    if engine_id == "meta_harness":
+        frontier = engine._read_frontier(work_dir / "state/frontier.json")
+        score = engine._best_score(work_dir / "state/frontier.json")
+        filename = frontier.get("best_candidate_file")
+        if not isinstance(filename, str):
+            return {}
+        candidate_path = (work_dir / filename).resolve()
+        if not candidate_path.is_relative_to(work_dir.resolve()) or not candidate_path.is_file():
+            return {}
+        candidate = candidate_path.read_text(encoding="utf-8")
+    elif task.has_dataset:
+        selected = _best_aggregate_candidate(server)
+        if selected is None:
+            return {}
+        candidate, score = selected
+    else:
+        best_file = work_dir / "best_candidate.txt"
+        if not best_file.is_file():
+            return {}
+        candidate, score = best_file.read_text(encoding="utf-8"), server.best_score
+    if not isinstance(score, int | float) or not math.isfinite(score):
+        return {}
+    if task.has_dataset:
+        candidate_id = server._candidate_registry.get(candidate)
+        supported = candidate_id is not None and any(
+            entry.get("candidate_id") == candidate_id and entry.get("val_score") == score
+            for entry in server.progress_log
+        )
+    else:
+        supported = _has_evaluated_single_result(server, output_dir, candidate, score)
+    if not supported:
+        return {}
+    return {
+        "best_candidate": candidate,
+        "best_score": score,
+        "total_evals": server.budget.used,
+        "metadata": {"selection_source": "upstream_published_incumbent"},
+    }
+
+
 def execute(payload: dict[str, Any]) -> dict[str, Any]:
     """Run the exact upstream engine and capture its result and histories.
 
@@ -423,11 +484,19 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             document["error"] = str(mailbox.error)
     finally:
         server.stop()
+    if isinstance(mailbox.error, BudgetStopped):
+        document.pop("error", None)
+        document.pop("best_candidate", None)
+        document.pop("best_score", None)
+        document["stop_reason"] = "budget_reached"
+        document.update(_budget_incumbent(payload["engine_id"], engine, task, server, output_dir))
+    if document.get("error"):
+        document["interrupted_incumbent"] = _budget_incumbent(payload["engine_id"], engine, task, server, output_dir)
     best_score = document.get("best_score")
     if (
         not document.get("error")
         and not task.has_dataset
-        and isinstance(best_score, (int, float))
+        and isinstance(best_score, int | float)
         and math.isfinite(best_score)
         and not _has_evaluated_single_result(server, output_dir, document.get("best_candidate"), best_score)
     ):

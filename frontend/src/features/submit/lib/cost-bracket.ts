@@ -16,7 +16,7 @@
  * per-model charge. Pure and side-effect-free so it is trivially testable.
  */
 
-import type { CatalogModel, ModelConfig } from "@/shared/types/api";
+import type { CatalogModel, ModelConfig, RuntimeCostProfile } from "@/shared/types/api";
 import {
   creditsForUsage,
   platformFeeCredits,
@@ -67,6 +67,45 @@ export interface CostBracketInput {
   taskModel?: CatalogModel | null;
   /** The reflection model when configured; its presence both prices and widens the bracket. */
   reflectionModel?: CatalogModel | null;
+  /** Explicit physical model roles. Reused model selections remain separate calls. */
+  modelRoles?: ProjectedModelRole[];
+  /** Incremental runtime cost for the selected isolated execution environment. */
+  runtime?: RuntimeCostProjection | null;
+}
+
+export interface ProjectedModelRole {
+  role: "task" | "optimization" | "judge";
+  model: CatalogModel | null;
+  tokenSource: TokenSourceMode;
+  /** Fraction or multiple of the base per-evaluation token projection used by this role. */
+  tokenShare: number;
+}
+
+export interface RuntimeCostProjection {
+  billingBasis: "at_cost" | "included_in_model_markup";
+  minimumSessionCredits: number | null;
+  maximumSessionCredits: number | null;
+  /** Distinct paid preflight scopes on this path plus its submitted run. */
+  expectedSessions: number;
+}
+
+/** Convert the server's authoritative runtime rates without treating missing prices as free. */
+export function runtimeCostProjection(
+  profile: RuntimeCostProfile | null | undefined,
+  expectedSessions: number,
+): RuntimeCostProjection | null {
+  if (!profile) return null;
+  const parse = (value: string | null): number | null => {
+    if (value == null) return null;
+    const amount = Number(value);
+    return Number.isFinite(amount) && amount >= 0 ? amount : null;
+  };
+  return {
+    billingBasis: profile.billing_basis,
+    minimumSessionCredits: parse(profile.minimum_session_credits),
+    maximumSessionCredits: parse(profile.maximum_session_credits),
+    expectedSessions,
+  };
 }
 
 export interface CostBracket {
@@ -74,6 +113,16 @@ export interface CostBracket {
   lowCredits: number;
   /** High end of the projected credit range. */
   highCredits: number;
+  managedModelLowCredits: number;
+  managedModelHighCredits: number;
+  byokModelLowCredits: number;
+  byokModelHighCredits: number;
+  runtimeLowCredits: number;
+  runtimeHighCredits: number;
+  runtimeSessionLowCredits: number;
+  runtimeSessionHighCredits: number;
+  runtimeBillingBasis: RuntimeCostProjection["billingBasis"] | null;
+  expectedRuntimeSessions: number;
 }
 
 /** Resolve the metric-call budget the bracket scales from. */
@@ -95,35 +144,30 @@ function resolveMetricCalls(
   return DEFAULT_METRIC_CALLS;
 }
 
-/**
- * Allocate a projected token total across the run's models and the input/output
- * split each is priced on. With a reflection model, it takes
- * `REFLECTION_TOKEN_SHARE` of the tokens (its passes are fewer but larger); the
- * rest is the task model's rollouts. Unpriced/absent models price at the engine
- * defaults.
- */
-function splitUsage(
-  totalTokens: number,
-  taskModel: CatalogModel | null,
-  reflectionModel: CatalogModel | null,
-): ModelTokenUsage[] {
-  const reflShare = reflectionModel ? REFLECTION_TOKEN_SHARE : 0;
-  const taskShare = 1 - reflShare;
-  const usages: ModelTokenUsage[] = [
-    {
-      model: taskModel,
-      inputTokens: totalTokens * taskShare * INPUT_TOKEN_SHARE,
-      outputTokens: totalTokens * taskShare * (1 - INPUT_TOKEN_SHARE),
-    },
-  ];
-  if (reflectionModel) {
-    usages.push({
-      model: reflectionModel,
-      inputTokens: totalTokens * reflShare * INPUT_TOKEN_SHARE,
-      outputTokens: totalTokens * reflShare * (1 - INPUT_TOKEN_SHARE),
-    });
-  }
-  return usages;
+/** Price explicit roles without collapsing two calls that happen to use the same model. */
+function roleUsage(totalTokens: number, roles: ProjectedModelRole[]): ModelTokenUsage[] {
+  return roles
+    .filter((role) => Number.isFinite(role.tokenShare) && role.tokenShare > 0)
+    .map((role) => ({
+      model: role.model,
+      inputTokens: totalTokens * role.tokenShare * INPUT_TOKEN_SHARE,
+      outputTokens: totalTokens * role.tokenShare * (1 - INPUT_TOKEN_SHARE),
+    }));
+}
+
+/** Convert current runtime metadata into one setup-plus-run estimate category. */
+function runtimeCredits(runtime: RuntimeCostProjection | null | undefined): {
+  low: number;
+  high: number;
+} {
+  if (!runtime || runtime.billingBasis === "included_in_model_markup") return { low: 0, high: 0 };
+  const sessions = Math.max(0, Math.floor(runtime.expectedSessions));
+  const low = runtime.minimumSessionCredits;
+  const high = runtime.maximumSessionCredits;
+  return {
+    low: low == null || !Number.isFinite(low) ? 0 : Math.ceil(Math.max(0, low) * sessions),
+    high: high == null || !Number.isFinite(high) ? 0 : Math.ceil(Math.max(0, high) * sessions),
+  };
 }
 
 /**
@@ -143,6 +187,8 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     pairs = 1,
     taskModel = null,
     reflectionModel = null,
+    modelRoles,
+    runtime,
   } = input;
   const calls = resolveMetricCalls(autoLevel, maxFullEvals, maxMetricCalls);
   // Larger datasets mean longer prompts and more baseline/eval rollouts; fold in
@@ -150,44 +196,92 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
   // exploding it. Clamp the row factor so an empty/tiny dataset still projects.
   const rowFactor = 1 + Math.min(datasetRows, 2000) / 2000;
   const sweep = Math.max(pairs, 1);
-  const hasReflection = !!reflectionModel;
+  const roles =
+    modelRoles && modelRoles.length > 0
+      ? modelRoles
+      : [
+          {
+            role: "task" as const,
+            model: taskModel,
+            tokenSource: "managed" as const,
+            tokenShare: reflectionModel ? (1 - REFLECTION_TOKEN_SHARE) * sweep : sweep,
+          },
+          ...(reflectionModel
+            ? [
+                {
+                  role: "optimization" as const,
+                  model: reflectionModel,
+                  tokenSource: "managed" as const,
+                  tokenShare: REFLECTION_TOKEN_SHARE * sweep,
+                },
+              ]
+            : []),
+        ];
+  const hasReflection = roles.some((role) => role.role === "optimization");
 
-  const lowTokens = calls * TOKENS_PER_CALL_LOW * rowFactor * sweep;
+  const lowTokens = calls * TOKENS_PER_CALL_LOW * rowFactor;
   const highTokens =
-    calls *
-    TOKENS_PER_CALL_HIGH *
-    rowFactor *
-    sweep *
-    (hasReflection ? REFLECTION_HIGH_MULTIPLIER : 1);
-
+    calls * TOKENS_PER_CALL_HIGH * rowFactor * (hasReflection ? REFLECTION_HIGH_MULTIPLIER : 1);
+  const managed = roles.filter((role) => role.tokenSource !== "byok");
+  const byok = roles.filter((role) => role.tokenSource === "byok");
+  const managedModelLowCredits = creditsForUsage(roleUsage(lowTokens, managed));
+  const managedModelHighCredits = creditsForUsage(roleUsage(highTokens, managed));
+  const byokModelLowCredits = creditsForUsage(roleUsage(lowTokens, byok));
+  const byokModelHighCredits = creditsForUsage(roleUsage(highTokens, byok));
+  const runtimeEstimate = runtimeCredits(runtime);
   const lowCredits = Math.max(
     1,
-    creditsForUsage(splitUsage(lowTokens, taskModel, reflectionModel)),
+    managedModelLowCredits + byokModelLowCredits + runtimeEstimate.low,
   );
   const highCredits = Math.max(
     lowCredits,
-    creditsForUsage(splitUsage(highTokens, taskModel, reflectionModel)),
+    managedModelHighCredits + byokModelHighCredits + runtimeEstimate.high,
   );
-  return { lowCredits, highCredits };
+  return {
+    lowCredits,
+    highCredits,
+    managedModelLowCredits,
+    managedModelHighCredits,
+    byokModelLowCredits,
+    byokModelHighCredits,
+    runtimeLowCredits: runtimeEstimate.low,
+    runtimeHighCredits: runtimeEstimate.high,
+    runtimeSessionLowCredits: Math.max(0, runtime?.minimumSessionCredits ?? 0),
+    runtimeSessionHighCredits: Math.max(0, runtime?.maximumSessionCredits ?? 0),
+    runtimeBillingBasis: runtime?.billingBasis ?? null,
+    expectedRuntimeSessions: runtime?.expectedSessions ?? 0,
+  };
 }
 
 /**
  * The credit bracket the user is actually charged, given the token source.
  *
- * A managed run is charged the full per-model cost; a BYOK run pays only
- * Skynet's platform fee (the provider tokens are billed on the user's own key).
- * Centralised so the pre-run estimate, the review-step recap, and the value
- * persisted for the post-run reconciliation all derive the charge the same way
- * and cannot drift apart.
+ * Managed roles are charged at full per-model cost; BYOK roles pay only
+ * Skynet's platform fee because provider tokens use the user's key. At-cost
+ * sandbox usage is added after that model calculation so it is never marked up
+ * or discounted as a BYOK fee. Centralised so every estimate surface derives
+ * the charge the same way and cannot drift apart.
  */
 export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): CostBracket {
-  if (mode === "byok") {
-    return {
-      lowCredits: platformFeeCredits(bracket.lowCredits),
-      highCredits: platformFeeCredits(bracket.highCredits),
-    };
-  }
-  return bracket;
+  const hasRoleSources = bracket.managedModelLowCredits > 0 || bracket.byokModelLowCredits > 0;
+  if (!hasRoleSources && mode !== "byok") return bracket;
+  const managedLow = hasRoleSources ? bracket.managedModelLowCredits : 0;
+  const managedHigh = hasRoleSources ? bracket.managedModelHighCredits : 0;
+  const byokLow = hasRoleSources
+    ? bracket.byokModelLowCredits
+    : bracket.lowCredits - bracket.runtimeLowCredits;
+  const byokHigh = hasRoleSources
+    ? bracket.byokModelHighCredits
+    : bracket.highCredits - bracket.runtimeHighCredits;
+  const lowCredits = Math.max(
+    1,
+    managedLow + platformFeeCredits(byokLow) + bracket.runtimeLowCredits,
+  );
+  const highCredits = Math.max(
+    lowCredits,
+    managedHigh + platformFeeCredits(byokHigh) + bracket.runtimeHighCredits,
+  );
+  return { ...bracket, lowCredits, highCredits };
 }
 
 /** Collapse per-model sources to the conservative job-level billing stamp. */

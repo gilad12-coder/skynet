@@ -15,6 +15,13 @@ from __future__ import annotations
 
 from typing import Any
 
+INFRASTRUCTURE_INTERRUPTION = "infrastructure_interruption"
+DETERMINISTIC_FAILURE = "deterministic_failure"
+
+
+class InfrastructureInterruptionError(RuntimeError):
+    """Identify a temporary failure in trusted provider or sandbox transport."""
+
 
 class AppError(Exception):
     """Base exception for all application errors."""

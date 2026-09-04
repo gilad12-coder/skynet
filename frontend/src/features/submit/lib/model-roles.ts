@@ -44,7 +44,12 @@ export function sameModelConfig(
 /** Native proposers use model defaults; preserve BYOK so validation cannot hide it. */
 export function proposerModelConfig(config: ModelConfig, native: boolean): ModelConfig {
   if (!native) return config;
-  return { name: config.name, token_source: config.token_source ?? "managed" };
+  const tokenSource = config.token_source ?? "managed";
+  return {
+    name: config.name,
+    token_source: tokenSource,
+    byok_provider: tokenSource === "byok" ? (config.byok_provider ?? null) : null,
+  };
 }
 
 export interface ScoringBinding {

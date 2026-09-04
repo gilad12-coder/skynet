@@ -82,6 +82,13 @@ export function DashboardHeader({ stats }: DashboardHeaderProps) {
       value: stats.cancelled,
     },
   ];
+  if (stats.stopped > 0) {
+    cells.push({
+      label: msg("optimization.budget_reached.title"),
+      value: stats.stopped,
+      accent: "warning",
+    });
+  }
   if (stats.shared > 0) {
     cells.push({
       label: msg("dashboard.stat.shared"),

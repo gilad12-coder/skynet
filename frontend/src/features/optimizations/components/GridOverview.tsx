@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowCounterClockwise,
   CaretLeft,
@@ -38,7 +39,7 @@ import { FadeIn, StaggerContainer, StaggerItem, TiltCard } from "@/shared/ui/mot
 import { HelpTip } from "@/shared/ui/help-tip";
 import type { OptimizationStatusResponse, PairResult } from "@/shared/types/api";
 import { formatPercent } from "@/shared/lib";
-import { deleteGridPair, restartGridPair, resumeGridPair } from "@/shared/lib/api";
+import { deleteGridPair, resumeGridPair } from "@/shared/lib/api";
 import { ChartTable } from "@/shared/charts/chart-table";
 import { useLiteMode } from "@/features/settings";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -115,22 +116,20 @@ function GridOverviewImpl({
       setDeleting(false);
     }
   };
+  const router = useRouter();
   const handlePairRerun = async (pairIndex: number, resume: boolean) => {
+    if (!resume) {
+      router.push(`/submit?clone=${job.optimization_id}&pair=${pairIndex}&recipe=program`);
+      return;
+    }
     setRerunningPair(pairIndex);
     try {
-      if (resume) await resumeGridPair(job.optimization_id, pairIndex);
-      else await restartGridPair(job.optimization_id, pairIndex);
-      toast.success(
-        msg(resume ? "optimization.pair.resume.success" : "optimization.pair.restart.success"),
-      );
+      await resumeGridPair(job.optimization_id, pairIndex);
+      toast.success(msg("optimization.pair.resume.success"));
       // The grid re-enters running in place — the parent's poll picks up the change.
       window.dispatchEvent(new Event("optimizations-changed"));
     } catch (err) {
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : msg(resume ? "optimization.pair.resume.failed" : "optimization.pair.restart.failed"),
-      );
+      toast.error(err instanceof Error ? err.message : msg("optimization.pair.resume.failed"));
     } finally {
       setRerunningPair(null);
     }
@@ -1070,7 +1069,7 @@ function GridOverviewImpl({
                     tooltip={msg(
                       pairResumable
                         ? "optimization.pair.resume_tooltip"
-                        : "optimization.pair.restart_tooltip",
+                        : "optimization.configure_new.tooltip",
                     )}
                   >
                     <Button
@@ -1079,7 +1078,9 @@ function GridOverviewImpl({
                       className="size-[44px] shrink-0 text-muted-foreground/50 hover:text-foreground sm:size-7 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
                       disabled={rerunBusy}
                       aria-label={msg(
-                        pairResumable ? "optimization.pair.resume" : "optimization.pair.restart",
+                        pairResumable
+                          ? "optimization.pair.resume"
+                          : "optimization.configure_new.label",
                       )}
                       onClick={(e) => {
                         e.stopPropagation();

@@ -10,10 +10,11 @@ import pytest
 from pydantic import SecretStr
 
 from core.config import settings
-from core.exceptions import ServiceError
+from core.exceptions import InfrastructureInterruptionError, ServiceError
 from core.models import ModelConfig
 from core.service_gateway.language_models import (
     CustomStreamWrapper,
+    GepaRecoverySeedBoundary,
     MeteredLM,
     _apply_managed_gateway,
     _translate_gateway_reasoning,
@@ -53,6 +54,39 @@ class _FakeLM:
         """
         self.history = history
         self.model = model
+
+
+def test_recovery_seed_boundary_marks_exact_iteration_zero_once() -> None:
+    """Publish once after GEPA reports its completed seed valset evaluation."""
+    boundary = GepaRecoverySeedBoundary(object())
+
+    with patch("core.service_gateway.language_models.finish_recovery_seed") as finish:
+        boundary.on_valset_evaluated({"iteration": 1, "candidate_idx": 0})
+        boundary.on_valset_evaluated({"iteration": 0, "candidate_idx": 0})
+        boundary.on_valset_evaluated({"iteration": 0, "candidate_idx": 0})
+
+    finish.assert_called_once()
+    assert boundary(object()) is False
+
+
+def test_recovery_seed_boundary_surfaces_marker_failure_at_stopper() -> None:
+    """Carry a swallowed GEPA callback failure through its next stop check."""
+    failure = InfrastructureInterruptionError("relay interrupted")
+    boundary = GepaRecoverySeedBoundary(object())
+
+    with patch("core.service_gateway.language_models.finish_recovery_seed", side_effect=failure):
+        boundary.on_valset_evaluated({"iteration": 0, "candidate_idx": 0})
+
+    with pytest.raises(InfrastructureInterruptionError, match="relay interrupted"):
+        boundary(object())
+
+
+def test_recovery_seed_boundary_rejects_missing_upstream_callback() -> None:
+    """Fail closed when pinned GEPA reaches its stopper without the seed event."""
+    boundary = GepaRecoverySeedBoundary(object())
+
+    with pytest.raises(ServiceError, match="did not publish"):
+        boundary(object())
 
 
 def test_total_tokens_from_history_sums_total_tokens() -> None:

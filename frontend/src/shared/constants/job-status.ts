@@ -14,6 +14,7 @@
  */
 
 import { perLocale } from "@/shared/lib/per-locale";
+import { msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
 import type { JobStatus, OptimizationType } from "@/shared/types/api";
 
@@ -29,6 +30,7 @@ const STATUS_LIFECYCLE = {
   // Paused is lifecycle-terminal (no worker holds it) but resumable — it carries
   // a Resume affordance, unlike cancelled/failed which offer Resume-or-Restart.
   paused: "terminal",
+  stopped: "terminal",
 } as const satisfies Record<JobStatus, StatusLifecycle>;
 
 const statusesWith = (kind: StatusLifecycle): ReadonlySet<JobStatus> =>
@@ -47,6 +49,7 @@ const STATUS_LABELS: Record<JobStatus, string> = perLocale(() => ({
   failed: TERMS.statusFailed,
   cancelled: TERMS.statusCancelled,
   paused: TERMS.statusPaused,
+  stopped: msg("optimization.budget_reached.title"),
 }));
 
 const JOB_TYPE_LABELS: Record<OptimizationType, string> = perLocale(() => ({

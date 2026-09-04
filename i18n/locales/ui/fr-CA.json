@@ -64,5 +64,8 @@
   "submit.validation.metric_failed": "Metric validation failed",
   "submit.validation.missing_code": "Missing {kind} code",
   "submit.validation.signature_failed": "Signature validation failed",
-  "tagger.page.title": "Text labeling"
+  "tagger.page.title": "Text labeling",
+  "tooltip.submit.blackbox.scorer_install": "S’exécute une fois dans la Vercel Sandbox hors ligne. Utilisez les paquets déjà présents dans l’image épinglée ou les artefacts de paquets gérés par le déploiement ; les dépôts apt et registres de paquets publics sont indisponibles.",
+  "submit.budget.byok_note": "Votre fournisseur facture directement les tokens du modèle sur votre clé. Le total comprend uniquement les frais de plateforme Skynet et l’utilisation de Vercel Sandbox.",
+  "submit.blackbox.roles.optimization.managed_hint": "Utilise les paramètres d’échantillonnage par défaut du modèle ; la facturation peut utiliser les crédits Skynet ou votre clé OpenRouter."
 }

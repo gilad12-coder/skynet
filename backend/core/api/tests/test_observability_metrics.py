@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
+
+from core.billing.operation_pricing import json_fingerprint
 
 from .. import observability as obs
 
@@ -58,6 +62,51 @@ def test_orphan_sweeper_runs_on_non_postgres_dialect() -> None:
     assert store.calls == 1
 
 
+def test_model_reconciliation_uses_original_digest_and_bounded_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep usage recovery on its original credential and advance only a bounded page.
+
+    Args:
+        monkeypatch: Test-owned dependency and settings replacements.
+    """
+    observed: list[tuple[int, str | None]] = []
+
+    def sweep(*, limit: int, after_id: str | None):
+        """Record one non-network reconciliation page.
+
+        Args:
+            limit: Maximum attempts allowed this tick.
+            after_id: Previous tick's continuation identity.
+
+        Returns:
+            A page requiring one subsequent continuation.
+        """
+        observed.append((limit, after_id))
+        return SimpleNamespace(results=[], next_cursor="next")
+
+    def reconciler(service: Any, resolver: Any):
+        """Verify credential resolution before returning the isolated sweep.
+
+        Args:
+            service: Unused fake ledger.
+            resolver: Trusted digest-to-key function.
+
+        Returns:
+            Fake bounded reconciliation implementation.
+        """
+        assert resolver("alice", json_fingerprint("original-managed-key")) == "original-managed-key"
+        assert resolver("alice", json_fingerprint("rotated-key")) is None
+        return SimpleNamespace(sweep=sweep)
+
+    monkeypatch.setattr(obs, "BudgetService", lambda **kwargs: object())
+    monkeypatch.setattr(obs, "OpenRouterUsageReconciler", reconciler)
+    monkeypatch.setattr(obs.settings, "openrouter_api_key", SecretStr("original-managed-key"))
+    monkeypatch.setattr(obs.settings, "vercel_token", None)
+    sweeper = obs.OrphanRecoverySweeper(_OrphanStore())
+    sweeper._reconcile_sandbox_usage(object())
+    sweeper._reconcile_sandbox_usage(object())
+    assert observed == [(4, None), (4, "next")]
+
+
 def test_orphan_sweeper_swallows_recovery_exceptions() -> None:
     """A raising ``recover_orphaned_jobs`` must not propagate out of the loop."""
 
@@ -87,6 +136,7 @@ def test_orphan_sweeper_skips_when_advisory_lock_held() -> None:
     class _Conn:
         def execute(self, _stmt: Any, _params: Any) -> Any:
             """Return a result whose ``scalar()`` reports the lock as not won."""
+
             class _Result:
                 def scalar(self) -> bool:
                     """Report the advisory lock as held by a peer."""

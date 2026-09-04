@@ -1,15 +1,11 @@
-"""Sandbox runtime for agent targets: one throwaway microVM per scorer run.
+"""Sandbox runtimes for optimizers, scorers, and agent targets.
 
-The optimizer never enters a sandbox. For every evaluation it opens a
-fresh Vercel Sandbox, writes the harness under test and the case into it,
-runs the agent there, reads the result back and destroys the box — so
-versions cannot see each other or the worker's filesystem, and nothing
-survives a run. :class:`SandboxRuntime` / :class:`SandboxSession` are the
-seams the tests fake; :class:`VercelSandboxRuntime` is the real one, and
-:class:`LocalSubprocessRuntime` is the development stand-in that runs the
-same commands in a temp directory on the worker host — with no isolation
-from it, which is why :func:`scorer_runtime_from_settings` only picks it
-when a deployment has no Vercel credentials or asks for it outright.
+Protected jobs enter one parent-owned Vercel sandbox before the
+optimizer starts. Scorer and agent commands then use private workspaces inside
+that boundary so they do not create duplicate managed-sandbox charges.
+:class:`SandboxRuntime` / :class:`SandboxSession` are the seams tests fake;
+:class:`VercelSandboxRuntime` is the managed provider implementation, and
+:class:`LocalSubprocessRuntime` remains an explicit test adapter.
 """
 
 from __future__ import annotations
@@ -30,13 +26,16 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
 
+from ....billing.operation_pricing import json_fingerprint
+from ....billing.runtime import BudgetRuntime
+from ....billing.vercel_usage import VercelUsageReservation
 from ....config import Settings
 from ....exceptions import ServiceError
 
@@ -85,6 +84,9 @@ _CREDENTIALS_MISSING = "Agent sandboxes are not configured: set VERCEL_TOKEN, VE
 # so its HTTPS calls verify the same way — never the worker's secrets.
 _LOCAL_ENV_PASSTHROUGH = ("SSL_CERT_FILE", "SSL_CERT_DIR")
 _LOCAL_KILLED_EXIT_CODE = 137
+_BUDGET_RELAY_ENV = "SKYNET_BUDGET_RELAY_URL"
+_TOOL_RELAY_ENV = "SKYNET_TOOL_RELAY_TOKEN"
+_RELAY_ENDPOINT_ENVS = ("OPENAI_BASE_URL", "SKYNET_GATEWAY_URL")
 # A custom network policy denies every host it does not list; this entry keeps the
 # network open, so only the header injection distinguishes it from ``allow-all``.
 _ANY_HOST = "*"
@@ -103,6 +105,9 @@ class SandboxSpec:
     # Host → headers the network edge adds to the box's requests to that host, so a
     # secret reaches a service without ever entering the box.
     inject_headers: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+    network_disabled: bool = False
+    vcpus: int = 2
+    operation_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -164,7 +169,7 @@ class SandboxSession(Protocol):
         ...
 
     def close(self) -> None:
-        """Destroy the sandbox. Never raises."""
+        """Destroy the sandbox and reconcile any protected usage."""
         ...
 
 
@@ -194,6 +199,33 @@ class VercelCredentials:
     token: str
     team_id: str
     project_id: str
+
+
+_RUNTIME_OVERRIDE: contextvars.ContextVar[SandboxRuntime | None] = contextvars.ContextVar(
+    "skynet_sandbox_runtime", default=None
+)
+
+
+def current_sandbox_runtime() -> SandboxRuntime | None:
+    """Return the trusted runtime bound to this isolated child or setup request."""
+    return _RUNTIME_OVERRIDE.get()
+
+
+@contextlib.contextmanager
+def sandbox_runtime_context(runtime: SandboxRuntime) -> Iterator[SandboxRuntime]:
+    """Bind sandbox factories to an authenticated parent without copying its credentials.
+
+    Args:
+        runtime: Parent-controlled runtime or child RPC capability.
+
+    Yields:
+        The bound runtime for this operation context.
+    """
+    token = _RUNTIME_OVERRIDE.set(runtime)
+    try:
+        yield runtime
+    finally:
+        _RUNTIME_OVERRIDE.reset(token)
 
 
 def unique_sandbox_name(stem: str) -> str:
@@ -240,18 +272,28 @@ class _OutputFile:
 class VercelSandboxSession:
     """Session over one Vercel sandbox, bound to the SDK session that created it."""
 
-    def __init__(self, box: Any, api_session: Any, context: contextvars.Context) -> None:
+    def __init__(
+        self, box: Any, api_session: Any, context: contextvars.Context, usage: VercelUsageReservation | None = None
+    ) -> None:
         """Wrap an open sandbox.
 
         Args:
             box: The SDK's managed sandbox handle.
             api_session: The entered ``vercel.api.session`` context that owns it.
             context: The ``contextvars`` context ``api_session`` was entered in.
+            usage: Optional pre-dispatch reservation and trusted provider usage collector.
         """
         self._box = box
+        # The named-sandbox handle silently resumes stopped VMs. An exact session
+        # cannot create another billable lifetime behind the admission boundary.
+        self._session = box.current_session
+        if self._session is None:
+            raise ServiceError("Vercel did not return the sandbox's exact execution session.")
         self._api_session = api_session
         self._context = context
         self._cwd = box.cwd
+        self._usage = usage
+        self._closed = False
 
     def write_files(self, files: Mapping[str, str]) -> None:
         """Write text files at paths relative to the working directory, creating parents.
@@ -262,8 +304,8 @@ class VercelSandboxSession:
         for path, text in files.items():
             parent = posixpath.dirname(path)
             if parent:
-                self._box.fs.mkdir(parent, cwd=self._cwd, recursive=True)
-            self._box.fs.write_text(path, text, cwd=self._cwd)
+                self._session.fs.mkdir(parent, cwd=self._cwd, recursive=True)
+            self._session.fs.write_text(path, text, cwd=self._cwd)
 
     def run(
         self,
@@ -311,7 +353,7 @@ class VercelSandboxSession:
         sentinel = f"{_EXIT_FILE_PREFIX}{token}"
         streams = {name: _OutputFile(f"{_OUTPUT_FILE_PREFIX}{token}.{name}") for name in ("stdout", "stderr")}
         started = time.monotonic()
-        process = self._box.create_process(
+        process = self._session.create_process(
             "bash",
             ["-lc", f"{inner} > {streams['stdout'].path} 2> {streams['stderr'].path}; echo $? > {sentinel}"],
             cwd=self._cwd,
@@ -351,8 +393,8 @@ class VercelSandboxSession:
         for name, stream in streams.items():
             text = stream.text
             with contextlib.suppress(Exception):
-                if self._box.fs.exists(stream.path):
-                    text = self._box.fs.read_text(stream.path) or ""
+                if self._session.fs.exists(stream.path):
+                    text = self._session.fs.read_text(stream.path) or ""
             # A shorter read is a stale replica or a race with the shell; keep what was seen.
             if len(text) <= len(stream.text):
                 continue
@@ -370,10 +412,10 @@ class VercelSandboxSession:
         Returns:
             The exit code once it has landed, else ``None``.
         """
-        if not self._box.fs.exists(sentinel):
+        if not self._session.fs.exists(sentinel):
             return None
         # The shell creates the file before it writes the code, so an empty read is "not yet".
-        text = self._box.fs.read_text(sentinel).strip()
+        text = self._session.fs.read_text(sentinel).strip()
         return int(text) if text.isdigit() else None
 
     def read_file(self, path: str) -> str | None:
@@ -385,16 +427,36 @@ class VercelSandboxSession:
         Returns:
             The file's text, or ``None``.
         """
-        if not self._box.fs.exists(path, cwd=self._cwd):
+        if not self._session.fs.exists(path, cwd=self._cwd):
             return None
-        return self._box.fs.read_text(path, cwd=self._cwd)
+        return self._session.fs.read_text(path, cwd=self._cwd)
 
     def close(self) -> None:
-        """Destroy the sandbox and leave the SDK session. Never raises."""
+        """Stop exactly one session, destroy its sandbox, and settle final usage.
+
+        Raises:
+            UsagePendingError: When paid usage cannot yet be reconciled.
+            BudgetError: When trusted usage violates the reserved bounds.
+        """
+        if self._closed:
+            return
+        self._closed = True
         try:
-            self._box.__exit__(None, None, None)
-        except Exception:
-            logger.exception("failed to destroy sandbox %s", getattr(self._box, "name", "?"))
+            if self._usage is None:
+                try:
+                    self._box.__exit__(None, None, None)
+                except Exception:
+                    logger.exception("failed to destroy sandbox %s", getattr(self._box, "name", "?"))
+            else:
+                try:
+                    self._session.stop()
+                except Exception:
+                    logger.exception("failed to confirm stopped sandbox %s", self._box.name)
+                try:
+                    self._box.destroy()
+                except Exception:
+                    logger.exception("failed to destroy sandbox %s", self._box.name)
+                self._usage.settle()
         finally:
             try:
                 self._context.run(self._api_session.__exit__, None, None, None)
@@ -425,12 +487,13 @@ class VercelSandboxRuntime:
 
     injects_headers = True
 
-    def __init__(self, credentials: VercelCredentials, *, image: str) -> None:
+    def __init__(self, credentials: VercelCredentials, *, image: str, budget: BudgetRuntime | None = None) -> None:
         """Bind the runtime to explicit credentials.
 
         Args:
             credentials: Token, team and project the sandboxes are created under.
             image: Image the boxes boot from unless their spec names one.
+            budget: Shared authoritative budget for protected offline runs.
 
         Raises:
             ServiceError: When the SDK is not installed.
@@ -439,6 +502,9 @@ class VercelSandboxRuntime:
             raise ServiceError(_PACKAGE_MISSING)
         self._credentials = credentials
         self._image = image
+        self._budget = budget
+        self.protected = budget is not None
+        self.injects_headers = budget is None
 
     def open(self, spec: SandboxSpec) -> SandboxSession:
         """Create a sandbox per ``spec``.
@@ -449,6 +515,37 @@ class VercelSandboxRuntime:
         Returns:
             The session over the new sandbox.
         """
+        if not math.isfinite(spec.lifetime_seconds) or spec.lifetime_seconds <= 0:
+            raise ServiceError("The sandbox lifetime must be finite and positive.")
+        if isinstance(spec.vcpus, bool) or spec.vcpus not in {1, *range(2, 33, 2)}:
+            raise ServiceError("The sandbox must use 1 or an even number of vCPUs between 2 and 32.")
+        if spec.network_disabled and spec.inject_headers:
+            raise ServiceError("An offline sandbox cannot inject network credentials.")
+        image = spec.image or self._image
+        name = spec.name
+        usage = None
+        if self._budget is not None:
+            if not spec.operation_key:
+                raise ServiceError("A protected sandbox requires a stable operation identity.")
+            name = (
+                name
+                or "skynet-"
+                + json_fingerprint([self._budget.budget_id, self._budget.generation, spec.operation_key])[:48]
+            )
+            usage = VercelUsageReservation(
+                self._budget,
+                {
+                    "name": name,
+                    "image": image,
+                    "lifetime_ms": math.ceil(spec.lifetime_seconds * 1000),
+                    "vcpus": spec.vcpus,
+                    "network_disabled": spec.network_disabled,
+                    "ports": [],
+                    "persistent": False,
+                    "environment_fingerprint": json_fingerprint(dict(spec.env)),
+                },
+                operation_key=spec.operation_key,
+            )
         creds = self._credentials
         options = vercel_sync.SandboxServiceOptions(
             credentials_factory=lambda: vercel_sync.SandboxCredentials(
@@ -470,23 +567,40 @@ class VercelSandboxRuntime:
         read_ceiling = max(spec.lifetime_seconds, 60.0)
         api_session = vercel_api.session(
             service_options=[options],
-            httpx_client_factory=lambda: httpx.Client(timeout=httpx.Timeout(60.0, read=read_ceiling)),
+            httpx_client_factory=lambda: httpx.Client(
+                timeout=httpx.Timeout(60.0, read=read_ceiling),
+                event_hooks={"response": [usage.capture_response]} if usage is not None else None,
+            ),
         )
-        context.run(api_session.__enter__)
+        box = None
         try:
+            context.run(api_session.__enter__)
             box = context.run(
                 vercel_sync.create_sandbox,
-                name=spec.name,
-                image=spec.image or self._image,
+                name=name,
+                image=image,
                 execution_time_limit=spec.lifetime_seconds,
+                resources=vercel_sync.SandboxResources(vcpus=spec.vcpus, memory=spec.vcpus * 2048),
+                persistent=False,
+                ports=[],
                 env=dict(spec.env) or None,
-                network_policy=_network_policy(spec.inject_headers),
+                network_policy=(
+                    NetworkPolicy.deny_all() if spec.network_disabled else _network_policy(spec.inject_headers)
+                ),
                 tags={**SANDBOX_TAG, **spec.tags},
             )
+            session = VercelSandboxSession(box, api_session, context, usage)
+            if usage is not None:
+                usage.confirm_created(box.current_session)
+            return session
         except BaseException:
+            if box is not None:
+                with contextlib.suppress(Exception):
+                    box.__exit__(None, None, None)
+            if usage is not None:
+                usage.pending()
             context.run(api_session.__exit__, None, None, None)
             raise
-        return VercelSandboxSession(box, api_session, context)
 
     def stop_job_sandboxes(self, job_id: str) -> int:
         """Stop every box still up under ``job_id``'s tag.
@@ -524,6 +638,24 @@ class VercelSandboxRuntime:
         return stopped
 
 
+def _contained_environment(environment: Mapping[str, str], relay: str) -> dict[str, str]:
+    """Route every supported model protocol to the outer sandbox mailbox.
+
+    Args:
+        environment: Command-specific non-secret environment.
+        relay: Sandbox-local OpenAI-compatible relay ending in ``/v1``.
+
+    Returns:
+        Environment with provider endpoints replaced by the local mailbox.
+    """
+    result = dict(environment)
+    result[_BUDGET_RELAY_ENV] = relay
+    result["ANTHROPIC_BASE_URL"] = relay.removesuffix("/v1")
+    for name in _RELAY_ENDPOINT_ENVS:
+        result[name] = relay
+    return result
+
+
 class LocalSubprocessSession:
     """Session over a temp directory on the worker host: a development stand-in, not a security boundary.
 
@@ -531,14 +663,16 @@ class LocalSubprocessSession:
     environment; the directory is removed on :meth:`close`.
     """
 
-    def __init__(self, spec: SandboxSpec) -> None:
+    def __init__(self, spec: SandboxSpec, *, protected_relay: str | None = None) -> None:
         """Create the working directory and the environment commands inherit.
 
         Args:
             spec: Environment for the sandbox; lifetime and labels are ignored
                 because per-command timeouts already bound local work.
+            protected_relay: Outer sandbox mailbox forced onto nested commands.
         """
         self._dir = Path(tempfile.mkdtemp(prefix="skynet-sandbox-")).resolve()
+        self._protected_relay = protected_relay
         (self._dir / "tmp").mkdir()
         # Not .resolve(): in a venv that follows the symlink to the base
         # interpreter, putting a python3 without the venv's packages on PATH.
@@ -606,10 +740,13 @@ class LocalSubprocessSession:
         Returns:
             Exit code, captured output and whether the timeout fired.
         """
+        command_environment = dict(env or {})
+        if self._protected_relay is not None:
+            command_environment = _contained_environment(command_environment, self._protected_relay)
         process = subprocess.Popen(
             ["bash", "-c", command],
             cwd=self._dir,
-            env={**self._env, **(env or {})},
+            env={**self._env, **command_environment},
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -702,6 +839,35 @@ class LocalSubprocessRuntime:
         return LocalSubprocessSession(spec)
 
 
+class ContainedSubprocessRuntime:
+    """Create private command workspaces inside an existing protected sandbox."""
+
+    injects_headers = False
+    protected = True
+    contained = True
+
+    def open(self, spec: SandboxSpec) -> SandboxSession:
+        """Open a local workspace while retaining only parent-issued relay capabilities.
+
+        Args:
+            spec: Command environment and lifetime already covered by the outer sandbox.
+
+        Returns:
+            A temporary subprocess session inside the current sandbox.
+
+        Raises:
+            ServiceError: When the outer supervisor did not install its model mailbox.
+        """
+        relay = os.environ.get(_BUDGET_RELAY_ENV)
+        if not relay:
+            raise ServiceError("Contained execution requires the protected model mailbox.")
+        environment = _contained_environment(spec.env, relay)
+        tool_token = os.environ.get(_TOOL_RELAY_ENV)
+        if tool_token:
+            environment[_TOOL_RELAY_ENV] = tool_token
+        return LocalSubprocessSession(replace(spec, env=environment), protected_relay=relay)
+
+
 def sandbox_unavailable_reason(settings: Settings) -> str | None:
     """Explain why this deployment cannot create agent sandboxes, or return ``None``.
 
@@ -711,6 +877,8 @@ def sandbox_unavailable_reason(settings: Settings) -> str | None:
     Returns:
         A user-facing reason, or ``None`` when sandboxes can be created.
     """
+    if current_sandbox_runtime() is not None:
+        return None
     if vercel_sync is None or vercel_api is None:
         return _PACKAGE_MISSING
     if not (settings.vercel_token and settings.vercel_team_id and settings.vercel_project_id):
@@ -718,7 +886,7 @@ def sandbox_unavailable_reason(settings: Settings) -> str | None:
     return None
 
 
-def sandbox_runtime_from_settings(settings: Settings) -> VercelSandboxRuntime | None:
+def sandbox_runtime_from_settings(settings: Settings) -> SandboxRuntime | None:
     """Build the Vercel runtime from settings, or return ``None`` when unconfigured.
 
     Args:
@@ -727,6 +895,8 @@ def sandbox_runtime_from_settings(settings: Settings) -> VercelSandboxRuntime | 
     Returns:
         A runtime, or ``None`` when :func:`sandbox_unavailable_reason` is set.
     """
+    if current_sandbox_runtime() is not None:
+        return current_sandbox_runtime()
     if sandbox_unavailable_reason(settings) is not None:
         return None
     return VercelSandboxRuntime(
@@ -740,26 +910,20 @@ def sandbox_runtime_from_settings(settings: Settings) -> VercelSandboxRuntime | 
 
 
 def scorer_runtime_from_settings(settings: Settings) -> SandboxRuntime:
-    """Pick where python scorers run, per ``BLACKBOX_SCORER_RUNTIME``.
-
-    ``vercel`` insists on Vercel sandboxes, ``local`` on the worker host, and
-    ``auto`` takes Vercel when it is configured and the host otherwise.
+    """Return the current contained runtime or the managed Vercel sandbox.
 
     Args:
         settings: The backend settings.
 
     Returns:
-        The runtime scorers open their sandboxes with.
+        The managed runtime scorers open their workspaces with.
 
     Raises:
-        ServiceError: When ``vercel`` is required but not configured.
+        ServiceError: When the managed sandbox is not configured.
     """
-    mode = settings.blackbox_scorer_runtime
-    if mode == "local":
-        return LocalSubprocessRuntime()
+    if current_sandbox_runtime() is not None:
+        return current_sandbox_runtime()
     runtime = sandbox_runtime_from_settings(settings)
     if runtime is not None:
         return runtime
-    if mode == "vercel":
-        raise ServiceError(sandbox_unavailable_reason(settings) or _CREDENTIALS_MISSING)
-    return LocalSubprocessRuntime()
+    raise ServiceError(sandbox_unavailable_reason(settings) or _CREDENTIALS_MISSING)

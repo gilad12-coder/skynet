@@ -26,6 +26,7 @@ export interface ValidationToast {
   phase: (text: string) => void;
   succeed: (text: string) => void;
   fail: (text: string) => void;
+  pending: (text: string) => void;
   /** The inputs changed under the check: no success is ever shown for them. */
   obsolete: (text: string) => void;
   /** Another message already reports the outcome: close the loading line. */
@@ -57,6 +58,9 @@ export function beginValidationToast(
     },
     succeed(render) {
       settle(render, "success", SUCCESS_MS);
+    },
+    pending(render) {
+      settle(render, "info", OBSOLETE_MS);
     },
     fail(render) {
       settle(render, "error", FAILURE_MS);

@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "Diese Optimierung hat ihre maximale Anzahl von Versuchen ({attempts}) erreicht — führen Sie sie stattdessen erneut aus.",
     "optimization.resume_not_resumable": "Diese Optimierung hat keinen gespeicherten Fortsetzungspunkt — führen Sie sie stattdessen erneut aus.",
     "optimization.resume_wrong_status": "Nur Optimierungen, die mitten im Durchlauf gestoppt wurden, können fortgesetzt werden — diese befindet sich im Zustand '{status}'.",
+    "optimization.protected_interactive_sandbox_required": "Diese geschützte Optimierung kann nicht im API-Prozess ausgewertet oder bereitgestellt werden. Dafür ist eine separat abgerechnete {runtime}-Sandbox erforderlich, die an diesem Endpunkt noch nicht verfügbar ist.",
     "optimization.retry_no_payload": "Die Quelloptimierung hat keine gespeicherte Nutzlast für einen erneuten Versuch.",
     "optimization.retry_wrong_status": "Nur Optimierungen im Zustand 'failed' oder 'cancelled' können erneut versucht werden — diese befindet sich im Zustand '{status}'. Klonen Sie sie stattdessen.",
     "quota.reached": "Das Limit von {quota} Optimierungen pro Benutzer wurde erreicht. Löschen Sie alte Optimierungen, um neue zu erstellen.",

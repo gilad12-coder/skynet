@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -37,6 +38,7 @@ from gepa.adapters.dspy_adapter.dspy_adapter import DspyAdapter
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
+from core.billing.model_gateway import raise_gateway_stop
 from core.config import Settings
 from core.constants import (
     DETAIL_BASELINE,
@@ -46,6 +48,9 @@ from core.constants import (
     PROGRESS_OPTIMIZED,
 )
 
+from ...language_models import GepaRecoverySeedBoundary
+from ..budget_stop import BudgetReached
+from ..incumbent import completed_gepa_result
 from ..logged_scores import reset_logged_metrics
 from ..optimizers import build_target_score_stopper
 from ..retrying_react import RetryingReActV2
@@ -152,21 +157,32 @@ def _list_live_tools(mcp_url: str, auth_header: str | None) -> list[dspy.Tool]:
         List of dspy.Tool objects, one per MCP-exposed tool, each carrying its
         derived approval severity.
     """
+    relay_token = os.environ.get("SKYNET_TOOL_RELAY_TOKEN")
+    if relay_token:
+        mcp_url = f"{os.environ['SKYNET_BUDGET_RELAY_URL'].rstrip('/')}/_mcp"
+        auth_header = f"Bearer {relay_token}"
     headers = {"Authorization": auth_header} if auth_header else None
-    specs = asyncio.run(_list_live_tool_specs(mcp_url, headers))
+    try:
+        specs = asyncio.run(_list_live_tool_specs(mcp_url, headers))
+    except Exception:
+        _raise_tool_budget_stop()
+        raise
     tools: list[dspy.Tool] = []
     for spec in specs:
         wrapped = _live_mcp_tool(mcp_url, headers, spec)
-        set_tool_severity(
-            wrapped, _severity_from_annotations(getattr(spec, "annotations", None))
-        )
+        set_tool_severity(wrapped, _severity_from_annotations(getattr(spec, "annotations", None)))
         tools.append(wrapped)
     return tools
 
 
-async def _list_live_tool_specs(
-    mcp_url: str, headers: dict[str, str] | None
-) -> list[Any]:
+def _raise_tool_budget_stop() -> None:
+    """Restore authoritative budget stops before ReAct can treat them as tool observations."""
+    token = os.environ.get("SKYNET_TOOL_RELAY_TOKEN")
+    if token:
+        raise_gateway_stop({"url": os.environ["SKYNET_BUDGET_RELAY_URL"], "token": token})
+
+
+async def _list_live_tool_specs(mcp_url: str, headers: dict[str, str] | None) -> list[Any]:
     """Fetch the raw MCP tool listing over one short-lived session.
 
     Args:
@@ -208,9 +224,7 @@ def _mcp_result_content(result: Any) -> Any:
     return content or [c for c in result.content if getattr(c, "text", None) is None]
 
 
-def _live_mcp_tool(
-    mcp_url: str, headers: dict[str, str] | None, spec: Any
-) -> dspy.Tool:
+def _live_mcp_tool(mcp_url: str, headers: dict[str, str] | None, spec: Any) -> dspy.Tool:
     """Build a synchronously callable ``dspy.Tool`` for one live MCP tool.
 
     Args:
@@ -236,7 +250,11 @@ def _live_mcp_tool(
 
     def _call(**kwargs: Any) -> Any:
         """Invoke the MCP tool over a fresh session on a private event loop."""
-        return asyncio.run(_call_async(**kwargs))
+        try:
+            return asyncio.run(_call_async(**kwargs))
+        except Exception:
+            _raise_tool_budget_stop()
+            raise
 
     _call.__name__ = spec.name
     _call.__doc__ = spec.description
@@ -312,14 +330,14 @@ def _as_sequence(value: Any) -> list[Any]:
     Returns:
         A list — empty when the value is missing or not array-shaped.
     """
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return list(value)
     if isinstance(value, str) and value.strip():
         try:
             parsed = json.loads(value)
         except json.JSONDecodeError:
             return []
-        return list(parsed) if isinstance(parsed, (list, tuple)) else []
+        return list(parsed) if isinstance(parsed, list | tuple) else []
     return []
 
 
@@ -387,14 +405,12 @@ def _find_snapshot_specs(
         sidecar = row.get("__tool_snapshot__")
         if isinstance(sidecar, str):
             sidecar = _as_sequence(sidecar)
-        if isinstance(sidecar, (list, tuple)) and sidecar:
+        if isinstance(sidecar, list | tuple) and sidecar:
             return list(sidecar)
     return []
 
 
-def _snapshot_tool(
-    *, name: str, desc: str, args: dict[str, Any], severity: str | None = None
-) -> dspy.Tool:
+def _snapshot_tool(*, name: str, desc: str, args: dict[str, Any], severity: str | None = None) -> dspy.Tool:
     """Construct a ``dspy.Tool`` carrying a snapshot spec's schema.
 
     The serve path reconstructs the roster from these specs; the callable body
@@ -524,9 +540,7 @@ def _snapshot_source(
     return dataset
 
 
-def _apply_tool_filter(
-    tools: list[dspy.Tool], tool_filter: list[str] | None
-) -> list[dspy.Tool]:
+def _apply_tool_filter(tools: list[dspy.Tool], tool_filter: list[str] | None) -> list[dspy.Tool]:
     """Filter and order a tool roster by ``tool_filter``.
 
     When ``tool_filter`` is set the result keeps only the named tools, in the
@@ -546,9 +560,7 @@ def _apply_tool_filter(
     return [by_name[name] for name in tool_filter if name in by_name]
 
 
-def _build_feedback_map(
-    seed_program: dspy.Module, metric: Callable[..., Any]
-) -> dict[str, Callable[..., Any]]:
+def _build_feedback_map(seed_program: dspy.Module, metric: Callable[..., Any]) -> dict[str, Callable[..., Any]]:
     """Build GEPA's per-predictor feedback map from a standard DSPy metric.
 
     Mirrors ``dspy.GEPA``'s ``feedback_fn_creator``: each predictor gets a
@@ -619,9 +631,7 @@ def _best_candidate(result: Any) -> dict[str, str]:
     best = getattr(result, "best_candidate", None) or getattr(result, "candidate", None)
     if isinstance(best, dict):
         return dict(best)
-    raise ValueError(
-        f"Unable to extract best candidate from GEPA result of type {type(result)!r}."
-    )
+    raise ValueError(f"Unable to extract best candidate from GEPA result of type {type(result)!r}.")
 
 
 def _scores_and_outputs(
@@ -668,6 +678,7 @@ def run_react_optimization(
     run_dir: str | None = None,
     progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
     timing_callbacks: Sequence[Any] = (),
+    recovery_seed_model: object | None = None,
 ) -> dict[str, Any]:
     """Optimise a live react program and report baseline-vs-optimized scalars.
 
@@ -705,6 +716,8 @@ def run_react_optimization(
         timing_callbacks: Stage-timing callbacks (typically the generation-LM
             :class:`GenLMTimingCallback`) to attribute student-rollout latency
             to the baseline/training/evaluation stages. Empty by default.
+        recovery_seed_model: Protected student model used to publish the exact
+            upstream seed-evaluation boundary.
 
     Returns:
         A dict with the servable ``program_state``, baseline/optimized scalar
@@ -729,58 +742,74 @@ def run_react_optimization(
     # lets the live score card render as soon as the baseline is known instead
     # of only after the whole loop finishes.
     with track_stage(STAGE_BASELINE, *timing_callbacks):
-        baseline_scalars, baseline_outputs = _scores_and_outputs(
-            adapter, seed_candidate, test
-        )
+        baseline_scalars, baseline_outputs = _scores_and_outputs(adapter, seed_candidate, test)
     if progress_callback:
         progress_callback(PROGRESS_BASELINE, {DETAIL_BASELINE: _mean(baseline_scalars)})
 
     target_stopper = build_target_score_stopper(target_score)
     stop_callbacks = [target_stopper] if target_stopper is not None else None
-    with track_stage(STAGE_TRAINING, *timing_callbacks):
-        result = gepa.optimize(
-            seed_candidate=seed_candidate,
-            trainset=train,
-            valset=val,
-            adapter=adapter,
-            reflection_lm=(lambda x: adapter.stripped_lm_call(x)[0]),
-            max_metric_calls=max_metric_calls,
-            stop_callbacks=stop_callbacks,
-            seed=seed,
-            run_dir=run_dir,
-            # GEPA defaults both off, which left react runs without a score chart
-            # or a progress bar: logger=None prints iteration lines to stdout
-            # (never reaching job_logs), and display_progress_bar=False means no
-            # rollouts bar for capture_tqdm to relay as optimizer_progress.
-            logger=_JobLogGepaLogger(logger),
-            display_progress_bar=True,
+    recovery_boundary = GepaRecoverySeedBoundary(recovery_seed_model) if recovery_seed_model is not None else None
+    if recovery_boundary is not None:
+        stop_callbacks = [recovery_boundary, *(stop_callbacks or [])]
+    budget_stop: BudgetReached | None = None
+    try:
+        with track_stage(STAGE_TRAINING, *timing_callbacks):
+            result = gepa.optimize(
+                seed_candidate=seed_candidate,
+                trainset=train,
+                valset=val,
+                adapter=adapter,
+                reflection_lm=(lambda x: adapter.stripped_lm_call(x)[0]),
+                max_metric_calls=max_metric_calls,
+                stop_callbacks=stop_callbacks,
+                callbacks=[recovery_boundary] if recovery_boundary is not None else None,
+                seed=seed,
+                run_dir=run_dir,
+                # GEPA defaults both off, which left react runs without a score chart
+                # or a progress bar: logger=None prints iteration lines to stdout
+                # (never reaching job_logs), and display_progress_bar=False means no
+                # rollouts bar for capture_tqdm to relay as optimizer_progress.
+                logger=_JobLogGepaLogger(logger),
+                display_progress_bar=True,
+            )
+    except BudgetReached as exc:
+        result = completed_gepa_result(run_dir, seed=seed)
+        if result is None:
+            raise
+        budget_stop = exc
+        exc.evidence.update(
+            selection_scope="validation" if val else "training",
+            selection_score=result.val_aggregate_scores[result.best_idx],
+            candidate_origin="seed" if result.best_idx == 0 else "optimized",
         )
     best_candidate = _best_candidate(result)
     best_program = adapter.build_program(best_candidate)
     program_state = extract_program_state(best_program)
 
-    if progress_callback:
-        progress_callback(PROGRESS_EVALUATION_STARTED, {})
-    with track_stage(STAGE_EVALUATION, *timing_callbacks):
-        optimized_scalars, optimized_outputs = _scores_and_outputs(
-            adapter, best_candidate, test
-        )
-    if progress_callback:
-        progress_callback(
-            PROGRESS_OPTIMIZED, {DETAIL_OPTIMIZED: _mean(optimized_scalars)}
-        )
+    optimized_scalars: list[float] = []
+    optimized_outputs: list[Any] = []
+    if budget_stop is None:
+        try:
+            if progress_callback:
+                progress_callback(PROGRESS_EVALUATION_STARTED, {})
+            with track_stage(STAGE_EVALUATION, *timing_callbacks):
+                optimized_scalars, optimized_outputs = _scores_and_outputs(adapter, best_candidate, test)
+            if progress_callback:
+                progress_callback(PROGRESS_OPTIMIZED, {DETAIL_OPTIMIZED: _mean(optimized_scalars)})
 
-    return {
+        except BudgetReached as exc:
+            budget_stop = exc
+            exc.evidence.setdefault("candidate_origin", "optimized")
+
+    response = {
         "program_state": program_state,
         "baseline_scalar": _mean(baseline_scalars),
-        "optimized_scalar": _mean(optimized_scalars),
+        "optimized_scalar": None if budget_stop is not None else _mean(optimized_scalars),
         "baseline_scalars_per_example": baseline_scalars,
         "optimized_scalars_per_example": optimized_scalars,
         "baseline_outputs_per_example": baseline_outputs,
         "optimized_outputs_per_example": optimized_outputs,
-        "target_score_reached": (
-            bool(target_stopper.reached) if target_stopper is not None else None
-        ),
+        "target_score_reached": (bool(target_stopper.reached) if target_stopper is not None else None),
         "tool_overlay": {
             "tool_descriptions": _candidate_tool_descriptions(best_candidate),
             "tool_arg_descriptions": _candidate_tool_arg_descriptions(best_candidate),
@@ -789,6 +818,11 @@ def run_react_optimization(
             "max_iters": max_iters,
         },
     }
+    if budget_stop is not None:
+        budget_stop.result = response
+        budget_stop.evidence.update(final_evaluation_completed=False, final_evaluation_reason="budget_reached")
+        raise budget_stop
+    return response
 
 
 def _mean(values: list[float]) -> float:

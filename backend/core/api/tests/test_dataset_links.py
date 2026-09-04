@@ -17,6 +17,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -24,6 +25,7 @@ from sqlalchemy.pool import StaticPool
 from ...constants import PAYLOAD_OVERVIEW_SOURCE_DATASET_ID
 from ...storage.models import Base, BillingCustomerModel
 from ...storage.remote import RemoteDBJobStore
+from .. import preflight_execution
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..converters import overview_to_base_fields, parse_overview
 from ..errors import DomainError
@@ -78,6 +80,25 @@ class _FakeService:
         """Accept any grid-search payload (no-op)."""
 
 
+class _PreflightGateway:
+    """Keep real setup persistence while replacing only external transports."""
+
+    def __init__(self, runtime: Any) -> None:
+        """Retain the shared budget authority supplied by the route."""
+        self.runtime = runtime
+
+    def protect_payload(self, payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
+        """Return copied fixture inputs without provisioning external credentials."""
+        return dict(payload)
+
+    def model_routes(self) -> list[dict[str, str]]:
+        """Expose no provider calls for this persistence-only test."""
+        return []
+
+    def close(self) -> None:
+        """Finish the deterministic fixture transport."""
+
+
 def _app_for(store: _MemStore, user: AuthenticatedUser, *, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     """Mount the submissions + library routers on a store, authed as ``user``.
 
@@ -92,6 +113,14 @@ def _app_for(store: _MemStore, user: AuthenticatedUser, *, monkeypatch: pytest.M
     worker = _QueueSignalWorker()
     monkeypatch.setattr(_sub_mod, "get_worker", lambda *a, **kw: worker)
     monkeypatch.setattr(_sub_mod, "notify_job_started", lambda **_: None)
+    monkeypatch.setattr(preflight_execution, "ModelGateway", _PreflightGateway)
+    monkeypatch.setattr(preflight_execution, "bind_protected_sandbox", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        preflight_execution,
+        "_verify_dspy",
+        lambda *args, **kwargs: {"checks": [{"key": "program", "status": "succeeded"}]},
+    )
+    monkeypatch.setattr(preflight_execution.settings, "openrouter_api_key", SecretStr("fixture-only"))
 
     # No free allowance exists, so the authed user is funded explicitly to pass
     # the 402 credit gate on run submissions.
@@ -292,9 +321,7 @@ def test_save_run_dataset_accepts_name_override(monkeypatch: pytest.MonkeyPatch)
     client = _client(store, _ALICE, monkeypatch=monkeypatch)
     optimization_id = client.post("/run", json=_inline_payload()).json()["optimization_id"]
 
-    saved = client.post(
-        f"/datasets/library/from-optimization/{optimization_id}", json={"name": "Renamed"}
-    )
+    saved = client.post(f"/datasets/library/from-optimization/{optimization_id}", json={"name": "Renamed"})
     assert saved.status_code == 200, saved.text
     assert saved.json()["dataset"]["name"] == "Renamed"
 

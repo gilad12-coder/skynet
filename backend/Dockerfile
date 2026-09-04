@@ -17,7 +17,7 @@ RUN if [ -n "$DEBIAN_MIRROR" ]; then \
             sed -i "s|http[s]\?://deb.debian.org|$DEBIAN_MIRROR|g; s|http[s]\?://security.debian.org|$DEBIAN_MIRROR|g" {} \; ; \
     fi \
     && apt-get update \
-    && apt-get install -y --no-install-recommends build-essential ca-certificates curl unzip git bubblewrap \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates curl unzip git \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code 2.1.259 requires Node >=22; Debian's nodejs may be older.
@@ -27,10 +27,17 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 ARG NPM_CONFIG_REGISTRY
-RUN npm install --global --prefix /usr/local \
+COPY sandbox-runtime/package.json sandbox-runtime/package-lock.json /usr/local/lib/skynet-harnesses/
+RUN npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
         ${NPM_CONFIG_REGISTRY:+--registry "$NPM_CONFIG_REGISTRY"} \
-        @anthropic-ai/claude-code@2.1.259 \
+    && for CLI in claude pi codex opencode; do \
+        ln -s "/usr/local/lib/skynet-harnesses/node_modules/.bin/$CLI" "/usr/local/bin/$CLI"; \
+    done \
     && npm cache clean --force
+
+# Deployment builds may COPY integrity-pinned custom wheels into this path in
+# a derived image. Runtime installs stay offline and can only read this cache.
+RUN install -d -m 0755 /opt/skynet/wheels
 
 # PIP_INDEX_URL cannot redirect a VCS dependency. Mirroring the repository
 # preserves the approved commit while keeping air-gap builds off GitHub.

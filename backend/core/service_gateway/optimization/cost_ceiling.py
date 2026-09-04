@@ -11,9 +11,9 @@ reflection LMs, on whichever worker thread the call lands) and raises
 crosses the cap. Pricing per-model — not a flat token budget — keeps the cap
 honest now that a credit means real provider cost: the same N-credit cap stops a
 frontier run far sooner than a mini one. The raise unwinds out of ``service.run``
-and the subprocess reports it as the job's terminal error, so the run fails (and
-is never billed — debiting only happens on success) instead of silently burning
-past the user's cap.
+and the subprocess reports a normal budget stop with any evaluated result.
+Protected execution relies on predispatch admission; this callback is retained
+only for legacy runs without an execution budget.
 """
 
 from __future__ import annotations
@@ -24,14 +24,14 @@ from typing import Any
 from dspy.utils.callback import BaseCallback
 
 from ...billing.pricing import credits_for_usage, usages_from_breakdown
+from ...billing.signals import BudgetReached
 from ..language_models import usage_by_model_from_history
 
 
-class CostCeilingExceededError(RuntimeError):
+class CostCeilingExceededError(BudgetReached):
     """Raised inside a run when accumulated token usage exceeds the cost ceiling.
 
-    Subclasses ``RuntimeError`` so the worker's generic failure handler marks the
-    job ``failed`` with this message, while tests can assert on the specific type.
+    The BaseException control signal escapes optimizer error-to-score handling.
     """
 
 
@@ -65,7 +65,7 @@ class CostCeilingCallback(BaseCallback):
         self._tripped = False
 
     def _check(self) -> None:
-        """Raise once the per-model cost exceeds the cap; latch so it raises once.
+        """Keep raising after the first confirmed ceiling crossing.
 
         Raises:
             CostCeilingExceededError: When the full per-model credit cost across the
@@ -73,6 +73,9 @@ class CostCeilingCallback(BaseCallback):
         """
         if self._max_credits <= 0:
             return
+        with self._lock:
+            if self._tripped:
+                raise CostCeilingExceededError("The run has reached its cost ceiling.")
         breakdown = usage_by_model_from_history(*self._language_models)
         if breakdown is None:
             return
@@ -80,8 +83,6 @@ class CostCeilingCallback(BaseCallback):
         if used <= self._max_credits:
             return
         with self._lock:
-            if self._tripped:
-                return
             self._tripped = True
         raise CostCeilingExceededError(
             f"Run stopped at the cost ceiling: {used} credits used exceeds the "
@@ -102,4 +103,5 @@ class CostCeilingCallback(BaseCallback):
             exception: Exception raised by the LM, if any. A failed call still
                 triggers the check so a run can't slip past the cap on errors.
         """
-        self._check()
+        if exception is None:
+            self._check()

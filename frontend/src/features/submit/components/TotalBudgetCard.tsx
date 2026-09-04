@@ -9,8 +9,10 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
+import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import { chargeableBracket } from "../lib/cost-bracket";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
+import { useExecutionBudget } from "../hooks/use-execution-budget";
 
 /**
  * The one budget surface of both wizards: a single total that covers setup
@@ -18,9 +20,9 @@ import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
  * bracket and what setup has spent so far. Credits are reserved before work
  * starts and settled on actual usage; the run stops when the total is reached.
  *
- * Mode-aware: a managed run shows the full per-model credit cost; a BYOK run
- * shows only the platform fee (the provider tokens are paid on the user's own
- * key), so the figures stay honest in both modes.
+ * Mode-aware: managed model roles show their full credit cost; BYOK roles show
+ * their platform fee. The required Vercel runtime remains an at-cost line in
+ * either mode.
  */
 type BudgetContext = Pick<
   SubmitWizardContext,
@@ -42,10 +44,10 @@ function parseBudget(text: string): number | null {
 
 export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSourceMode }) {
   const { costBracket, suggestedCeiling, maxCostCredits, setMaxCostCredits } = w;
-  const setupSpent = w.setupSpent ?? 0;
-  const availableCredits = w.availableCredits ?? null;
+  const { budget, budgetBusy, budgetError, minimumTotalCredits } = useExecutionBudget();
   const locale = getActiveIntlLocale();
   const displayBracket = chargeableBracket(costBracket, mode);
+  const isFeeOnlyEstimate = mode === "byok" && displayBracket.runtimeBillingBasis !== "at_cost";
 
   // The field owns its text so the user can clear it; an empty total stays
   // unset instead of snapping to zero.
@@ -62,6 +64,7 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
 
   const credits = (value: number) =>
     `${ISOLATE_START}${formatCredits(value, locale)}${ISOLATE_END}`;
+  const preciseCredits = (value: number) => formatBudgetAmount(value.toFixed(9), locale);
 
   return (
     <div className="overflow-hidden rounded-xl border border-[#C8B9A8]/50 bg-[#FAF8F5] shadow-[0_1px_2px_rgba(61,46,34,0.04)]">
@@ -113,21 +116,71 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
           )}
         </div>
 
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-1 border-t border-[#DDD6CC]/60 pt-3 text-[12px] sm:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-[#DDD6CC]/60 pt-3 text-[12px] sm:grid-cols-4">
           <BudgetFigure
-            label={msg("submit.budget.estimated_low")}
-            value={credits(displayBracket.lowCredits)}
+            label={msg(
+              isFeeOnlyEstimate ? "submit.summary.estimate_fee" : "submit.summary.estimate_cost",
+            )}
+            value={formatMsg("submit.summary.estimate_range", {
+              low: credits(displayBracket.lowCredits),
+              high: credits(displayBracket.highCredits),
+            })}
           />
           <BudgetFigure
-            label={msg("submit.budget.estimated_high")}
-            value={credits(displayBracket.highCredits)}
+            label={msg("submit.cost_ceiling.cap_label")}
+            value={
+              maxCostCredits == null
+                ? msg("submit.budget.unset_short")
+                : formatMsg("submit.summary.estimate_capped", {
+                    cap: credits(maxCostCredits),
+                  })
+            }
           />
-          <BudgetFigure label={msg("submit.budget.setup_spent")} value={credits(setupSpent)} />
+          <BudgetFigure
+            label={msg("submit.budget.setup_spent")}
+            value={budget ? formatBudgetAmount(budget.setup_spent_credits, locale) : "—"}
+          />
+          <BudgetFigure
+            label={msg("submit.budget.run_spent")}
+            value={budget ? formatBudgetAmount(budget.run_spent_credits, locale) : "—"}
+          />
+          <BudgetFigure
+            label={msg("submit.budget.reserved")}
+            value={budget ? formatBudgetAmount(budget.reserved_credits, locale) : "—"}
+          />
           <BudgetFigure
             label={msg("submit.budget.available")}
-            value={availableCredits == null ? "—" : credits(availableCredits)}
+            value={budget ? formatBudgetAmount(budget.available_credits, locale) : "—"}
           />
+          {displayBracket.runtimeBillingBasis === "at_cost" &&
+            displayBracket.expectedRuntimeSessions > 0 &&
+            displayBracket.runtimeSessionHighCredits > 0 && (
+              <BudgetFigure
+                label={`${msg("submit.runtime.vercel")} · ${msg("submit.summary.estimate_cost")}`}
+                value={`${ISOLATE_START}≤ ${preciseCredits(displayBracket.runtimeSessionHighCredits)} × ${displayBracket.expectedRuntimeSessions} = ≤ ${preciseCredits(displayBracket.runtimeSessionHighCredits * displayBracket.expectedRuntimeSessions)}${ISOLATE_END}`}
+              />
+            )}
         </dl>
+        {budgetBusy && (
+          <p role="status" className="text-xs">
+            {msg("submit.budget.syncing")}
+          </p>
+        )}
+        {budgetError && (
+          <p role="alert" className="text-xs text-destructive">
+            {budgetError}
+          </p>
+        )}
+        {minimumTotalCredits != null && (
+          <p className="text-xs text-muted-foreground">
+            {formatMsg("submit.budget.minimum_total", {
+              amount: formatCredits(minimumTotalCredits, locale),
+            })}
+          </p>
+        )}
+        {budget && budget.total_credits !== maxCostCredits && (
+          <p className="text-xs text-muted-foreground">{msg("submit.budget.pending_total")}</p>
+        )}
         {mode === "byok" && (
           <p className="text-[11px] leading-relaxed text-[#8C7A6B]" dir="auto">
             {msg("submit.budget.byok_note")}

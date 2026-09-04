@@ -1,4 +1,9 @@
 import type {
+  ExecutionRuntimeCatalog,
+  WizardPreflightRequest,
+  WizardPreflightResponse,
+} from "@/shared/types/wizard-preflight";
+import type {
   BlackboxAgentRunResponse,
   BlackboxEngineCatalogResponse,
   BlackboxRunRequest,
@@ -30,6 +35,7 @@ import type {
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { I18N_KEY, tI18n } from "@/shared/lib/i18n";
 import { reportHandledError } from "@/shared/lib/report-error";
+import type { ExecutionBudget } from "@/shared/types/execution-budget";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { readNdjsonStream, readServerSentEvents, type ServerSentEvent } from "@/shared/lib/sse";
 
@@ -393,10 +399,11 @@ export function postTelemetry(body: unknown): void {
   }
 }
 
-export function submitRun(payload: RunRequest) {
+export function submitRun(payload: RunRequest, idempotencyKey?: string) {
   return request<OptimizationSubmissionResponse>("/run", {
     method: "POST",
     body: JSON.stringify(payload),
+    ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
   });
 }
 
@@ -456,17 +463,19 @@ export async function dryRunWorkflowStream(
   }
 }
 
-export function submitGridSearch(payload: GridSearchRequest) {
+export function submitGridSearch(payload: GridSearchRequest, idempotencyKey?: string) {
   return request<OptimizationSubmissionResponse>("/grid-search", {
     method: "POST",
     body: JSON.stringify(payload),
+    ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
   });
 }
 
-export function submitBlackboxRun(payload: BlackboxRunRequest) {
+export function submitBlackboxRun(payload: BlackboxRunRequest, idempotencyKey?: string) {
   return request<OptimizationSubmissionResponse>("/blackbox/run", {
     method: "POST",
     body: JSON.stringify(payload),
+    ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
   });
 }
 
@@ -477,13 +486,55 @@ export function dryRunScorer(payload: ScorerDryRunRequest) {
   });
 }
 
+export function getExecutionRuntimes(hasImageInputs: boolean, signal?: AbortSignal) {
+  return request<ExecutionRuntimeCatalog>(
+    `/execution-runtimes?has_image_inputs=${hasImageInputs}`,
+    { signal },
+  );
+}
+
+export function runWizardPreflight(payload: WizardPreflightRequest, signal?: AbortSignal) {
+  return request<WizardPreflightResponse>("/wizard/preflight", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function createExecutionBudget(
+  totalCredits: number,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+) {
+  return request<ExecutionBudget>("/execution-budgets", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ total_credits: totalCredits }),
+    signal,
+  });
+}
+
+export function getExecutionBudget(budgetId: string, signal?: AbortSignal) {
+  return request<ExecutionBudget>(`/execution-budgets/${encodeURIComponent(budgetId)}`, { signal });
+}
+
+export function updateExecutionBudget(
+  budgetId: string,
+  totalCredits: number,
+  expectedRevision: number,
+  signal?: AbortSignal,
+) {
+  return request<ExecutionBudget>(`/execution-budgets/${encodeURIComponent(budgetId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ total_credits: totalCredits, expected_revision: expectedRevision }),
+    signal,
+  });
+}
+
 export function getBlackboxEngines(
   target: "text" | "agent",
-  proposerRuntime: "worker" | "vercel" = "worker",
 ) {
-  return request<BlackboxEngineCatalogResponse>(
-    `/blackbox/engines?target=${encodeURIComponent(target)}&proposer_runtime=${proposerRuntime}`,
-  );
+  return request<BlackboxEngineCatalogResponse>(`/blackbox/engines?target=${encodeURIComponent(target)}`);
 }
 
 export function listJobs(params?: {
@@ -513,6 +564,7 @@ export interface OptimizationCounts {
   success: number;
   failed: number;
   cancelled: number;
+  stopped?: number;
   /** Runs shared with the caller (set only when include_shared is requested). */
   shared?: number;
 }
@@ -2071,7 +2123,7 @@ export function validateCode(payload: {
   signature_code?: string;
   metric_code?: string;
   column_mapping: ColumnMapping;
-  sample_row: Record<string, unknown>;
+  sample_row?: Record<string, unknown>;
   optimizer_name?: string;
   module_name?: string;
 }) {

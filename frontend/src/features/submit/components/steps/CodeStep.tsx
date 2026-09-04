@@ -264,6 +264,7 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "module" |
               pickModel: openDryRunModelPicker,
               modelName: modelConfig.name || null,
               sampleInputs: workflowSampleInputs,
+              useSetupSample: true,
               run: runWorkflowDryRun,
             }}
             agentPanel={

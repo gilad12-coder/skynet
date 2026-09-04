@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "Cette optimisation a atteint son nombre maximal de tentatives ({attempts}) — relancez-la plutôt.",
     "optimization.resume_not_resumable": "Cette optimisation n'a aucun point de reprise enregistré — relancez-la plutôt.",
     "optimization.resume_wrong_status": "Seules les optimisations interrompues en cours d'exécution peuvent être reprises — celle-ci est dans l'état '{status}'.",
+    "optimization.protected_interactive_sandbox_required": "Cette optimisation protégée ne peut pas être évaluée ni servie dans le processus API. Un bac à sable {runtime} facturé séparément est requis, mais il n’est pas encore disponible sur ce point de terminaison.",
     "optimization.retry_no_payload": "L'optimisation source n'a aucune charge utile enregistrée à réessayer.",
     "optimization.retry_wrong_status": "Seules les optimisations dans l'état 'failed' ou 'cancelled' peuvent être réessayées — celle-ci est dans l'état '{status}'. Clonez-la plutôt.",
     "quota.reached": "Limite par utilisateur de {quota} optimisations atteinte. Supprimez d'anciennes optimisations pour en créer de nouvelles.",

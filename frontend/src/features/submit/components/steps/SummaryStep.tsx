@@ -12,6 +12,7 @@ import {
   TabsTrigger,
 } from "@/shared/ui/primitives/tabs";
 import { Separator } from "@/shared/ui/primitives/separator";
+import { Button } from "@/shared/ui/primitives/button";
 import {
   User,
   Code,
@@ -40,7 +41,11 @@ import { formatCredits } from "@/features/billing";
 import { useUserPrefs } from "@/features/settings";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
+import { PreflightChecks } from "../PreflightChecks";
+import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import { aggregateTokenSource, chargeableBracket } from "../../lib/cost-bracket";
+import { WIZARD_STAGE, type WizardStageId } from "../../lib/wizard-steps";
+import { focusField } from "../../lib/focus-field";
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
@@ -68,7 +73,13 @@ const SUMMARY_TABS = perLocale(() => [
   },
 ]);
 
-export function SummaryStep({ w }: { w: SubmitWizardContext }) {
+export function SummaryStep({
+  w,
+  onEditStage,
+}: {
+  w: SubmitWizardContext;
+  onEditStage?: (stage: Exclude<WizardStageId, "review">) => void;
+}) {
   const { prefs } = useUserPrefs();
   const advanced = prefs.advancedMode;
   const {
@@ -108,7 +119,7 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
   // per-node code, so the code tab shows only the metric plus a graph line.
   const displaySignatureCode = isWorkflow ? "" : signatureCode;
 
-  // Read-only echo of the pre-run estimate the user set on the model step, so the
+  // Read-only echo of the pre-run estimate the user set in Evaluation, so the
   // final review restates what this run is expected to cost (and any hard cap)
   // without making them step back. BYOK shows the platform fee, not the full
   // per-model cost the provider key absorbs — same chargeable bracket the cost
@@ -116,14 +127,40 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
   const locale = getActiveIntlLocale();
   const selectedConfigs =
     jobType === "run"
-      ? [modelConfig, ...(secondModelConfig ? [secondModelConfig] : [])]
+      ? [
+          modelConfig,
+          ...(w.optimizerName.toLowerCase() === "gepa" && secondModelConfig
+            ? [secondModelConfig]
+            : []),
+        ]
       : [...generationModels, ...reflectionModels];
   const tokenSource = aggregateTokenSource(selectedConfigs);
   const byok = tokenSource === "byok";
   const estimate = chargeableBracket(costBracket, tokenSource);
 
   return (
-    <div className="space-y-4" data-tutorial="wizard-stage-review">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {(["goal", "evaluation", "optimization"] as const).map((stage) => (
+          <Button
+            key={stage}
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (onEditStage) {
+                onEditStage(stage);
+                return;
+              }
+              w.goTo(WIZARD_STAGE[stage]);
+              focusField(`wizard-stage-${stage}`);
+            }}
+          >
+            {msg("submit.blackbox.review.edit")} · {msg(`submit.stage.${stage}`)}
+          </Button>
+        ))}
+      </div>
+      <PreflightChecks preflight={w.preflight} scope="execution" />
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -366,13 +403,13 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
                     <div className="space-y-2">
                       <ModelChip
                         config={modelConfig}
-                        roleLabel={msg("model.generation.label")}
+                        roleLabel={msg("submit.blackbox.roles.task.label")}
                         onClick={() => {}}
                       />
-                      {secondModelConfig?.name && (
+                      {w.optimizerName.toLowerCase() === "gepa" && secondModelConfig?.name && (
                         <ModelChip
                           config={secondModelConfig}
-                          roleLabel={TERMS.reflectionModel}
+                          roleLabel={msg("submit.blackbox.roles.optimization.label")}
                           onClick={() => {}}
                         />
                       )}
@@ -616,6 +653,23 @@ export function SummaryStep({ w }: { w: SubmitWizardContext }) {
             })}
           </span>
         </div>
+        {w.budgetSession.budget && (
+          <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            {(
+              [
+                ["submit.budget.setup_spent", w.budgetSession.budget.setup_spent_credits],
+                ["submit.budget.run_spent", w.budgetSession.budget.run_spent_credits],
+                ["submit.budget.reserved", w.budgetSession.budget.reserved_credits],
+                ["submit.budget.available", w.budgetSession.budget.available_credits],
+              ] as const
+            ).map(([label, amount]) => (
+              <div key={label}>
+                <dt>{msg(label)}</dt>
+                <dd dir="auto">{formatBudgetAmount(amount, locale)}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
         {maxCostCredits != null && (
           <p className="mt-1.5 text-[11px] text-[#8C7A6B]">
             {formatMsg("submit.summary.estimate_capped", {

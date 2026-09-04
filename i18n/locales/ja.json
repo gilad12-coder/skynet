@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "この最適化は最大試行回数（{attempts}）に達しました。代わりに再度実行してください。",
     "optimization.resume_not_resumable": "この最適化には保存された再開ポイントがありません。代わりに再度実行してください。",
     "optimization.resume_wrong_status": "実行途中で停止した最適化のみ再開できます。これは '{status}' の状態です。",
+    "optimization.protected_interactive_sandbox_required": "この保護された最適化は API プロセス内で評価または提供できません。個別に従量課金される {runtime} サンドボックスが必要ですが、このエンドポイントではまだ利用できません。",
     "optimization.retry_no_payload": "再試行元の最適化に、再試行できる保存済みペイロードがありません。",
     "optimization.retry_wrong_status": "'failed' または 'cancelled' 状態の最適化のみ再試行できます。これは '{status}' の状態です。代わりに複製してください。",
     "quota.reached": "ユーザーごとの上限である {quota} 件の最適化に達しました。新しい最適化を作成するには古い最適化を削除してください。",

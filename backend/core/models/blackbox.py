@@ -51,14 +51,16 @@ BLACKBOX_MODULE_NAME = "blackbox"
 BlackboxCandidate = str | dict[str, str]
 
 
-# How a version is scored. ``python`` runs ``metric_code`` inside the worker's
-# metric sandbox; ``remote`` POSTs the version and case to ``url`` with the
+# How a version is scored. ``python`` runs ``metric_code`` inside the managed
+# sandbox; ``remote`` POSTs the version and case to ``url`` through the trusted
+# parent relay with the
 # shared ``secret`` as a bearer token (TODO-1: allow-list + SSRF guard).
 # ``model`` is the model a python scorer may call through the injected
 # ``llm(prompt, input=None)`` helper (e.g. to run the prompt under
 # optimization on a case); its usage is billed with the run.
-# ``install_command`` runs once when a python scorer's sandbox opens, for
-# whatever the scorer imports beyond the stock image (apt-get, pip).
+# ``install_command`` runs inside the offline managed sandbox. It may use
+# dependencies already in the immutable image or deployment-owned package
+# artifacts; it cannot reach a public package registry at run time.
 class BlackboxScorer(BaseModel):
     kind: Literal["python", "remote"] = "python"
     metric_code: str | None = None
@@ -98,14 +100,16 @@ class BlackboxBudget(BaseModel):
 
 
 # What the versions under optimization drive. ``text``: the scorer reads a
-# version directly. ``agent``: every scorer run first launches a coding
-# harness in its own throwaway sandbox with the version as the harness's
-# instruction file(s), and the scorer judges the run record (what the agent
-# produced) instead of the version. The ``(harness, model)`` pair is fixed
+# version directly. ``agent``: every scorer run launches a coding harness in a
+# private workspace inside the run's managed sandbox, with the version as the
+# harness's instruction file(s), and the scorer judges the run record (what
+# the agent produced) instead of the version. The ``(harness, model)`` pair is fixed
 # for the whole run — the optimizer searches harness text only (joint
 # harness + model search is a TODO). ``model`` is the target/worker model
 # id as the agent gateway knows it; the optimizer model is
-# ``reflection_model_config`` on the request.
+# ``reflection_model_config`` on the request. Clients also send the full
+# target role as ``task_model_config`` on the request so its credential source
+# can be metered independently; ``model`` remains for stored-client compatibility.
 class BlackboxTarget(BaseModel):
     kind: Literal["text", "agent"] = BLACKBOX_TARGET_TEXT
     harness: str = BLACKBOX_HARNESS_PI
@@ -186,13 +190,35 @@ class BlackboxRunRequest(BaseModel):
     budget: BlackboxBudget = Field(default_factory=BlackboxBudget)
     strategy: BlackboxStrategy = Field(default_factory=BlackboxStrategy)
     target: BlackboxTarget = Field(default_factory=BlackboxTarget)
-    proposer_runtime: Literal["worker", "vercel"] = "worker"
+    proposer_runtime: Literal["vercel"] = "vercel"
+    task_model_settings: ModelConfig | None = Field(default=None, alias="task_model_config")
     reflection_model_settings: ModelConfig = Field(alias="reflection_model_config")
     token_source: Literal["managed", "byok"] = "managed"
     is_private: bool = False
+    preflight_id: str | None = Field(default=None, min_length=1, max_length=64)
+    preflight_fingerprint: str | None = Field(default=None, min_length=1, max_length=128)
+    execution_budget_id: str | None = Field(default=None, min_length=1, max_length=64)
+    execution_budget_revision: int | None = Field(default=None, ge=1)
+    execution_budget_generation: int | None = Field(default=None, ge=0)
     max_cost_credits: int | None = Field(default=None, ge=1)
     estimated_credits_low: int | None = Field(default=None, ge=0)
     estimated_credits_high: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_proposer_runtime(cls, data: Any) -> Any:
+        """Map the retired worker selection onto the managed sandbox.
+
+        Args:
+            data: Raw request data before field validation.
+
+        Returns:
+            A copied mapping with the canonical Vercel runtime when the
+            retired worker value was supplied, otherwise the input unchanged.
+        """
+        if isinstance(data, dict) and data.get("proposer_runtime") == "worker":
+            return {**data, "proposer_runtime": "vercel"}
+        return data
 
     @model_validator(mode="after")
     def _ensure_starting_point(self) -> BlackboxRunRequest:
@@ -224,6 +250,15 @@ class BlackboxRunRequest(BaseModel):
             raise ValueError("The starting point cannot be blank.")
         if self.target.kind == BLACKBOX_TARGET_AGENT and not self.cases:
             raise ValueError("An agent target needs at least one case: the tasks the agent is run on.")
+        if self.target.kind == BLACKBOX_TARGET_AGENT and self.task_model_settings is not None:
+            task_model = self.task_model_settings.normalized_identifier()
+            if not task_model:
+                raise ValueError("An agent target needs a task model.")
+            if self.target.model and self.target.model.strip("/") != task_model:
+                raise ValueError("target.model and task_model_config.name must identify the same model.")
+            self.target.model = self.task_model_settings.name
+        if self.target.kind != BLACKBOX_TARGET_AGENT and self.task_model_settings is not None:
+            raise ValueError("task_model_config is only used when the evaluated target is an agent.")
         if self.budget.max_iterations is not None and (
             self.strategy.mode != "single" or self.strategy.engine != BLACKBOX_ENGINE_META_HARNESS
         ):
@@ -237,6 +272,8 @@ class ScorerDryRunRequest(BaseModel):
     scorer: BlackboxScorer
     candidate: BlackboxCandidate
     case: dict[str, Any] | None = None
+    execution_budget_id: str | None = Field(default=None, min_length=1, max_length=64)
+    execution_budget_revision: int | None = Field(default=None, ge=1)
 
 
 class ScorerDryRunResponse(BaseModel):
@@ -248,6 +285,9 @@ class ScorerDryRunResponse(BaseModel):
     usage_by_model: list[ModelTokenUsage] = Field(default_factory=list)
     # What this one check debited, so the wizard can show setup spend against the total budget.
     credits_charged: int = 0
+    budget: dict[str, Any] | None = None
+    preview_status: Literal["succeeded", "failed", "pending"] | None = None
+    preflight_id: str | None = None
 
 
 # One engine lane of a run. ``explore`` lanes share the budget; the
@@ -256,7 +296,7 @@ class ScorerDryRunResponse(BaseModel):
 class BlackboxLaneResult(BaseModel):
     engine: str
     phase: Literal["explore", "continue", "single", "relay"]
-    status: Literal["completed", "failed", "unavailable", "budget_exhausted", "plateaued"]
+    status: Literal["completed", "failed", "unavailable", "budget_exhausted", "plateaued", "stopped"]
     best_score: float | None = None
     scorer_runs: int = 0
     error: str | None = None
@@ -355,12 +395,25 @@ class BlackboxEngineInfo(BaseModel):
     unavailable_reason: str | None = None
     requires_agent_target: bool = False
     supports_parts: bool = False
+    checkpoint_recovery_supported: bool = False
+    checkpoint_recovery_reason: str | None = None
+
+
+class SandboxRuntimeCost(BaseModel):
+    billing_basis: Literal["at_cost", "included_in_model_markup"]
+    minimum_session_credits: str | None = None
+    maximum_session_credits: str | None = None
+    maximum_lifetime_seconds: float | None = None
+    vcpus: int | None = None
 
 
 class BlackboxProposerRuntimeInfo(BaseModel):
-    id: Literal["worker", "vercel"]
+    id: Literal["vercel"]
     available: bool
     unavailable_reason: str | None = None
+    cost: SandboxRuntimeCost
+    checkpoint_restore_supported: bool = False
+    checkpoint_restore_reason: str | None = None
 
 
 class BlackboxEngineCatalogResponse(BaseModel):
@@ -373,5 +426,8 @@ class BlackboxEngineCatalogResponse(BaseModel):
     auto_engines: list[str] = Field(default_factory=list)
     auto_available: bool = False
     auto_unavailable_reason: str | None = None
+    auto_checkpoint_recovery_supported: bool = False
+    auto_checkpoint_recovery_reason: str | None = None
     proposer_runtimes: list[BlackboxProposerRuntimeInfo] = Field(default_factory=list)
     upstream_revision: str | None = None
+    run_recovery_eligibility: str = "Requires a supported engine, a compatible saved checkpoint, and funded headroom."

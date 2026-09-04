@@ -16,6 +16,7 @@ def test_optimization_status_complete_set() -> None:
         "running",
         "success",
         "failed",
+        "stopped",
         "cancelled",
         "paused",
     }
@@ -29,10 +30,11 @@ def test_optimization_status_complete_set() -> None:
         ("running", "running"),
         ("success", "success"),
         ("failed", "failed"),
+        ("stopped", "stopped"),
         ("cancelled", "cancelled"),
         ("paused", "paused"),
     ],
-    ids=["pending", "validating", "running", "success", "failed", "cancelled", "paused"],
+    ids=["pending", "validating", "running", "success", "failed", "stopped", "cancelled", "paused"],
 )
 def test_optimization_status_each_value(member: str, value: str) -> None:
     """Verify each OptimizationStatus member maps to its expected string value."""

@@ -13,6 +13,7 @@ EVENT_PROGRESS = "progress"
 EVENT_LOG = "log"
 EVENT_RESULT = "result"
 EVENT_ERROR = "error"
+EVENT_TERMINAL = "terminal"
 # A sandboxed agent run's record or a piece of its live transcript, for the
 # ``blackbox_agent_runs`` table rather than the progress log.
 EVENT_AGENT_RUN = "agent_run"

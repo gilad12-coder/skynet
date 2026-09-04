@@ -9,6 +9,20 @@ jobs:
   backend:
     name: backend · ruff + core tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: budget_test
+          POSTGRES_PASSWORD: budget_test
+          POSTGRES_DB: budget_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U budget_test -d budget_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: backend
@@ -28,6 +42,10 @@ jobs:
       # nightly concern and is intentionally not gated here.
       - name: Core test suite
         run: uv run pytest core/ -q
+      - name: PostgreSQL budget concurrency and migration gates
+        env:
+          SKYNET_BUDGET_TEST_DB_URL: postgresql+psycopg2://budget_test:budget_test@127.0.0.1:5432/budget_test
+        run: uv run pytest core/billing/tests/test_budgets_postgres.py -q
       - name: Load-test release-gate unit tests
         run: uv run pytest tests/unit/test_load_test_slo.py -q
       # requirements.txt is the pip install path's copy of uv.lock. When only
@@ -119,7 +137,6 @@ jobs:
           import subprocess
           assert subprocess.check_output(['node', '--version'], text=True).strip() == 'v22.22.0'
           assert subprocess.check_output(['claude', '--version'], text=True).strip() == '2.1.259 (Claude Code)'
-          subprocess.run(['bwrap', '--version'], check=True)
           "
 
   frontend:

@@ -25,9 +25,9 @@ from .byok_vault import ProviderKeyVault, byok_provider_for_litellm, safe_connec
 
 # Payload keys holding ModelConfig blocks. Runs persist their configs under the
 # field *aliases* (``model_settings`` → ``"model_config"``); grids use the plain
-# list field names. ``task_model_config`` never reaches build_language_model, so
-# it is intentionally omitted.
-_RUN_MODEL_KEYS = ("model_config", "reflection_model_config")
+# list field names. The Anything task role reaches the parent model gateway even
+# though it never reaches ``build_language_model`` directly.
+_RUN_MODEL_KEYS = ("model_config", "task_model_config", "reflection_model_config")
 _GRID_MODEL_LIST_KEYS = ("generation_models", "reflection_models")
 
 

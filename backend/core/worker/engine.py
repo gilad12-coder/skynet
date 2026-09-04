@@ -22,7 +22,9 @@ import tempfile
 import threading
 import time
 import traceback
+from dataclasses import asdict
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +36,17 @@ from ..billing import (
     inject_provisioned_openrouter_key,
     payload_uses_token_source,
 )
+from ..billing.budgets import BudgetService
+from ..billing.model_gateway import ModelGateway
 from ..billing.pricing import ModelUsage
+from ..billing.protected_credentials import (
+    ProtectedCredentialVault,
+    has_exposed_execution_credentials,
+    resolve_execution_credentials,
+)
+from ..billing.protected_execution import bind_protected_sandbox
+from ..billing.recovery_admission import validate_recovery_plan
+from ..billing.runtime import BudgetRuntime, UsagePendingError
 from ..config import settings
 from ..constants import (
     OPTIMIZATION_TYPE_BLACKBOX,
@@ -55,8 +67,10 @@ from ..constants import (
     TOKEN_SOURCE_BYOK,
     TOKEN_SOURCE_MANAGED,
 )
+from ..exceptions import INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
 from ..i18n import CANCELLATION_REASON
 from ..models import BlackboxRunRequest, GridSearchRequest, GridSearchResponse, PairResult, RunRequest, SplitCounts
+from ..models.results import TerminalOutcome
 from ..notifications import notify_job_completed
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
@@ -67,10 +81,18 @@ from ..service_gateway.optimization.core import _merge_usage_rows
 from ..service_gateway.optimization.trajectory import GEPA_STATE_FILENAME, GRID_PAIR_RESULT_FILENAME
 from ..storage import JobStore
 from ..telemetry import record_server_event
-from .constants import EVENT_AGENT_RUN, EVENT_ERROR, EVENT_LOG, EVENT_PROGRESS, EVENT_RESULT
+from .checkpoint_compat import (
+    CheckpointCompatibilityError,
+    checkpoint_manifest,
+    evaluated_incumbent_from_progress,
+    supports_checkpoint,
+    validate_checkpoint,
+)
+from .constants import EVENT_AGENT_RUN, EVENT_ERROR, EVENT_LOG, EVENT_PROGRESS, EVENT_RESULT, EVENT_TERMINAL
 from .memory_guard import memory_usage_fraction
 from .subprocess_runner import run_service_in_subprocess, set_fork_service
 from .tagging_job import TaggingAutotagPayload, run_autotag_job
+from .vercel_dspy import run_vercel_dspy
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +105,7 @@ GRID_ENVELOPE_PAIR_INDEX = -1
 
 # A pair child is terminal only in one of these; ``paused`` never applies to
 # grid children (grids are not pausable).
-_PAIR_TERMINAL_STATUSES = ("success", "failed", "cancelled")
+_PAIR_TERMINAL_STATUSES = ("success", "failed", "cancelled", "stopped")
 
 
 def _usages_from_result(result_dict: dict[str, Any] | None, fallback_model: str | None) -> list[ModelUsage]:
@@ -130,13 +152,12 @@ class CancellationError(Exception):
     """Raised inside a job thread when the job is cancelled by the user."""
 
 
-class JobStalledError(RuntimeError):
-    """Raised when a job subprocess stops emitting events past the stall window.
+class JobStalledError(InfrastructureInterruptionError):
+    """Identify a bounded supervisor stall as a temporary infrastructure interruption."""
 
-    Subclasses ``RuntimeError`` so the generic failure handler in
-    ``_process_job`` marks the job ``failed`` with this message, while tests
-    can still assert on the specific type.
-    """
+
+class WorkerShutdownError(InfrastructureInterruptionError):
+    """Identify a worker shutdown that interrupted an already-running job."""
 
 
 def _raise_if_cancelled(cancel_event: threading.Event | None, optimization_id: str) -> None:
@@ -173,6 +194,7 @@ class BackgroundWorker:
         service: DspyService | None = None,
         pod_name: str | None = None,
         lease_seconds: float = 60.0,
+        _allow_unprotected_test_execution: bool = False,
     ) -> None:
         """Initialize the worker with a job store and concurrency settings.
 
@@ -190,6 +212,9 @@ class BackgroundWorker:
                 The worker loop renews it via ``_touch_activity`` on every
                 cancel-poll tick; should comfortably exceed
                 ``cancel_poll_interval × 3``.
+            _allow_unprotected_test_execution: Permit direct child-process
+                execution only for isolated worker unit tests. Production
+                callers must keep the default managed-sandbox requirement.
         """
         self._job_store = job_store
         self._num_workers = num_workers
@@ -199,6 +224,7 @@ class BackgroundWorker:
         self._service: DspyService | None = service
         self._pod_name = pod_name or os.environ.get("POD_NAME") or socket.gethostname()
         self._lease_seconds = max(float(lease_seconds), 5.0)
+        self._allow_unprotected_test_execution = _allow_unprotected_test_execution
 
         # In-memory queue is retained as a backwards-compat seam: tests and
         # any legacy single-pod callers can still call ``enqueue_job`` directly
@@ -335,6 +361,24 @@ class BackgroundWorker:
             self._claimed_jobs.add(optimization_id)
         return optimization_id
 
+    def _update_owned_job(self, optimization_id: str, generation: int | None, **fields: Any) -> None:
+        """Advance an active job only while this worker owns its publication generation.
+
+        Args:
+            optimization_id: Claimed job identity.
+            generation: Generation captured at claim time.
+            **fields: Status and timing fields to update.
+
+        Raises:
+            CancellationError: When cancellation or another owner has already won.
+        """
+        cas = getattr(self._job_store, "update_job_if_status", None)
+        if generation is not None and callable(cas):
+            if not cas(optimization_id, ("pending", "validating", "running"), expected_generation=generation, **fields):
+                raise CancellationError("The execution generation is no longer active.")
+        else:
+            self._job_store.update_job(optimization_id, **fields)
+
     def _persisted_status(self, optimization_id: str) -> str | None:
         """Read a job's stored status without materializing its payload or result.
 
@@ -354,6 +398,102 @@ class BackgroundWorker:
         if callable(read_status):
             return read_status(optimization_id).get("status")
         return self._job_store.get_job(optimization_id).get("status")
+
+    def _raise_if_interrupted(
+        self,
+        cancel_event: threading.Event | None,
+        optimization_id: str,
+    ) -> None:
+        """Distinguish user cancellation from shutdown of active worker execution.
+
+        Args:
+            cancel_event: Cooperative flag shared with cancellation and worker stop.
+            optimization_id: Existing run identity.
+
+        Raises:
+            WorkerShutdownError: When worker shutdown interrupts an active job.
+            CancellationError: When the user or another owner ended the run.
+        """
+        if cancel_event is None or not cancel_event.is_set():
+            return
+        status = None
+        with contextlib.suppress(Exception):
+            status = self._persisted_status(optimization_id)
+        if not self._running and status in {"pending", "validating", "running"}:
+            raise WorkerShutdownError("Optimization was interrupted by worker shutdown.")
+        _raise_if_cancelled(cancel_event, optimization_id)
+
+    def _recover_temporary_interruption(
+        self,
+        optimization_id: str,
+        *,
+        generation: int | None,
+        attempts: int,
+    ) -> tuple[bool, str]:
+        """Attempt one checkpoint recovery under the same fenced budget.
+
+        Args:
+            optimization_id: Existing interrupted run.
+            generation: Publication generation owned by the interrupted worker.
+            attempts: Persisted recovery-attempt count before this interruption.
+
+        Returns:
+            Whether recovery owns the lifecycle now, plus a precise unavailable reason.
+        """
+        if attempts + 1 >= settings.job_max_attempts:
+            return False, "The interruption recovery attempt limit has been reached."
+        requeue = getattr(self._job_store, "requeue_for_resume", None)
+        engine = getattr(self._job_store, "engine", None)
+        if not callable(requeue) or engine is None:
+            return False, "This worker cannot establish authoritative checkpoint recovery admission."
+        try:
+            resumed_attempt = requeue(
+                optimization_id,
+                automatic=True,
+                expected_generation=generation,
+                budget_service=BudgetService(engine=engine),
+            )
+        except CheckpointCompatibilityError as error:
+            return False, str(error)
+        refreshed = self._job_store.get_job(optimization_id)
+        recovery = refreshed.get("recovery")
+        handled = resumed_attempt is not None or (
+            isinstance(recovery, dict) and recovery.get("state") in {"recovering", "unavailable"}
+        )
+        if not handled:
+            return False, "Another lifecycle change prevented automatic checkpoint recovery."
+        logger.warning(
+            "Optimization %s infrastructure interruption; recovery %s",
+            optimization_id,
+            f"queued at attempt {resumed_attempt}"
+            if resumed_attempt is not None
+            else str((recovery or {}).get("phase") or refreshed.get("status") or "pending"),
+        )
+        return True, ""
+
+    def _active_recovery_plan(self, optimization_id: str, job: dict[str, Any]) -> dict[str, Any] | None:
+        """Reload the single checkpoint plan selected by automatic recovery.
+
+        Args:
+            optimization_id: Existing run identity.
+            job: Claimed persisted job row.
+
+        Returns:
+            Validated recovery admission evidence, or None for an initial/manual run.
+
+        Raises:
+            CheckpointCompatibilityError: When selected recovery evidence disappeared or changed.
+        """
+        recovery = job.get("recovery")
+        if not isinstance(recovery, dict) or recovery.get("phase") != "resuming":
+            return None
+        checkpoints = self._job_store.list_gepa_checkpoints(optimization_id)
+        if len(checkpoints) != 1:
+            raise CheckpointCompatibilityError("Automatic recovery no longer has one independently bounded checkpoint.")
+        manifest = checkpoints[0].manifest or {}
+        if recovery.get("checkpoint_revision") != manifest.get("checkpoint_sha256"):
+            raise CheckpointCompatibilityError("The checkpoint selected for recovery changed before execution.")
+        return validate_recovery_plan(manifest.get("recovery_admission"), manifest)
 
     def _get_next_job(self) -> str | None:
         """Return the next claimable job, picking up through the atomic claim.
@@ -486,9 +626,9 @@ class BackgroundWorker:
     def _process_job(self, optimization_id: str, worker_id: int) -> None:
         """Run one optimization job to completion, handling all error and cancel paths.
 
-        Loads the payload from the job store, validates it, spawns a child process
-        via ``run_service_in_subprocess``, and drains the event queue until the child
-        exits.  The ``BaseException`` handler at the bottom covers cancellation,
+        Loads the payload from the job store, validates its schema, dispatches it
+        through the selected execution boundary, and drains the event queue until
+        the child exits. The ``BaseException`` handler at the bottom covers cancellation,
         shutdown signals (``SystemExit``/``KeyboardInterrupt``), and ordinary errors —
         each path writes the correct terminal status and fires a notification.
         Shutdown signals are re-raised after cleanup so the process can exit;
@@ -510,18 +650,24 @@ class BackgroundWorker:
         # handler reads these to route notifications and finalize the parent.
         pair_parent_id: str | None = None
         pair_index_val = 0
+        execution_generation: int | None = None
+        execution_budget_snapshot: dict[str, Any] | None = None
+        recovery_attempts = 0
 
         with self._queue_lock:
             cancel_event = self._cancel_events.get(optimization_id)
 
         try:
-            _raise_if_cancelled(cancel_event, optimization_id)  # before loading payload
+            self._raise_if_interrupted(cancel_event, optimization_id)
 
             job_data = self._job_store.get_job(optimization_id)
+            execution_generation = job_data.get("execution_generation")
+            recovery_attempts = int(job_data.get("attempts") or 0)
             payload_dict = job_data.get("payload")
 
             if not payload_dict:
                 raise ValueError(f"Optimization {optimization_id} has no payload")
+            recovery_plan = self._active_recovery_plan(optimization_id, job_data)
 
             overview = job_data.get("payload_overview", {})
             if isinstance(overview, str):
@@ -568,8 +714,9 @@ class BackgroundWorker:
             else:
                 run_payload = RunRequest.model_validate(payload_dict)
 
-            self._job_store.update_job(
+            self._update_owned_job(
                 optimization_id,
+                execution_generation,
                 status="validating",
                 message="Validating payload",
             )
@@ -579,24 +726,41 @@ class BackgroundWorker:
             # orphan-recovered + double-run by a peer pod.
             self._touch_activity(worker_id)
 
+            protected_execution = job_data.get("execution_budget_id") is not None
+            if not protected_execution and not self._allow_unprotected_test_execution:
+                raise ValueError(
+                    "This stored job predates protected execution. Submit it again to create a funded Vercel run."
+                )
             service = self._get_service()
-            if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH and hasattr(service, "validate_grid_search_payload"):
+            # Current preflight evidence already proves semantic validity inside
+            # this job's selected sandbox. The legacy validators exec authored
+            # modules in a broader subprocess, before that boundary exists.
+            if (
+                optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH
+                and not protected_execution
+                and hasattr(service, "validate_grid_search_payload")
+            ):
                 service.validate_grid_search_payload(grid_payload)
             elif optimization_type == OPTIMIZATION_TYPE_BLACKBOX:
-                validate_blackbox_payload(blackbox_payload)
-            elif optimization_type == OPTIMIZATION_TYPE_RUN:
+                validate_blackbox_payload(
+                    blackbox_payload,
+                    verify_scorer=not protected_execution,
+                )
+            elif optimization_type == OPTIMIZATION_TYPE_RUN and not protected_execution:
                 service.validate_payload(run_payload)
 
             self._touch_activity(worker_id)
-            _raise_if_cancelled(cancel_event, optimization_id)  # before starting the optimization
+            self._raise_if_interrupted(cancel_event, optimization_id)
 
-            self._job_store.update_job(
+            self._update_owned_job(
                 optimization_id,
+                execution_generation,
                 status="running",
                 message="Running optimization",
                 started_at=datetime.now(UTC).isoformat(),
             )
 
+            budget_gateway: ModelGateway | None = None
             run_process: mp.process.BaseProcess | None = None
             event_queue: Any | None = None
             result_dict: dict[str, Any] | None = None
@@ -610,16 +774,13 @@ class BackgroundWorker:
             # support), keeping every other path unchanged.
             is_grid = optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH
             gepa_dir: Path | None = None
-            checkpoint_tracker: dict[str, Any] = {}
-            if self._checkpoints_enabled(optimization_type):
-                try:
-                    gepa_dir = self._prepare_gepa_dir(optimization_id, is_grid=is_grid)
-                except Exception:
-                    logger.exception(
-                        "Optimization %s: failed to prepare GEPA checkpoint dir; running without resume",
-                        optimization_id,
-                    )
-                    gepa_dir = None
+            checkpoint_tracker: dict[str, Any] = {
+                "payload": dict(payload_dict),
+                "code_version": job_data.get("code_version"),
+                "generation": execution_generation,
+            }
+            if self._checkpoints_enabled(optimization_type) and supports_checkpoint(payload_dict):
+                gepa_dir = self._prepare_gepa_dir(optimization_id, is_grid=is_grid)
                 # Restoring checkpoint blobs from the DB can be slow; renew the
                 # lease so the upcoming subprocess spawn starts with a full window.
                 self._touch_activity(worker_id)
@@ -632,6 +793,7 @@ class BackgroundWorker:
                 # Inject job type so subprocess can dispatch without duck-typing.
                 # Pydantic ignores this unknown key during model_validate.
                 payload_dict["_optimization_type"] = optimization_type
+                payload_dict["_job_id"] = optimization_id
                 if gepa_dir is not None:
                     payload_dict["_gepa_log_dir"] = str(gepa_dir)
                     if is_grid:
@@ -639,7 +801,11 @@ class BackgroundWorker:
                         # it keeps them and runs only the rest. For a pair child
                         # this reads the CHILD's own store — global-indexed, so a
                         # requeued pair resumes exactly like a requeued grid.
-                        payload_dict["_completed_pairs"] = self._job_store.get_grid_pair_results(optimization_id)
+                        payload_dict["_completed_pairs"] = {
+                            index: result
+                            for index, result in self._job_store.get_grid_pair_results(optimization_id).items()
+                            if result.get("stop_reason") != "budget_reached"
+                        }
 
                 # Events (progress, logs, latest metrics) from a pair child land
                 # on the PARENT id the user watches; the child row keeps only
@@ -701,10 +867,90 @@ class BackgroundWorker:
                                 default_token_source=token_source,
                             )
 
-                event_queue = self._mp_ctx.Queue()
-                run_process = self._mp_ctx.Process(  # type: ignore[attr-defined]
-                    target=run_service_in_subprocess,
-                    args=(payload_dict, optimization_id, event_queue, self._mp_start_method),
+                if job_data.get("execution_budget_id") is not None:
+                    execution_runtime = "vercel"
+                    if byok_engine is None:
+                        raise ValueError("Protected execution requires the authoritative ledger.")
+                    uses_managed_models = payload_uses_token_source(
+                        payload_dict,
+                        TOKEN_SOURCE_MANAGED,
+                        default_token_source=token_source,
+                    )
+                    if uses_managed_models and settings.openrouter_api_key is None:
+                        raise ValueError("Managed model roles require the configured provider route.")
+                    recovery = job_data.get("recovery") if recovery_plan is not None else None
+                    headroom_id = recovery.get("headroom_operation_id") if isinstance(recovery, dict) else None
+                    if recovery_plan is not None and not isinstance(headroom_id, str):
+                        raise CheckpointCompatibilityError(
+                            "Automatic recovery lost its pre-authorized budget headroom."
+                        )
+                    execution_headroom = (
+                        (
+                            Decimal(str(recovery_plan["execution_max_credits"])),
+                            Decimal(str(recovery_plan["execution_max_wallet_credits"])),
+                        )
+                        if recovery_plan is not None
+                        else None
+                    )
+                    budget_gateway = ModelGateway(
+                        BudgetRuntime(
+                            BudgetService(engine=byok_engine),
+                            username=execution_payload.username,
+                            budget_id=job_data["execution_budget_id"],
+                            generation=job_data["execution_budget_generation"],
+                            phase="run",
+                            recovery_headroom_operation_id=headroom_id,
+                            recovery_execution_headroom=execution_headroom,
+                        ),
+                        recovery_plan=recovery_plan,
+                    )
+                    bind_protected_sandbox(
+                        budget_gateway,
+                        settings,
+                        workflow="anything" if optimization_type == OPTIMIZATION_TYPE_BLACKBOX else "dspy",
+                        owner_id=optimization_id,
+                    )
+                    budget_gateway.validate_recovery_runtime(execution_runtime)
+                    checkpoint_tracker.update(
+                        recovery_plan_builder=budget_gateway.checkpoint_recovery_plan,
+                        execution_runtime=execution_runtime,
+                    )
+                    parent_payload = resolve_execution_credentials(
+                        payload_dict,
+                        username=execution_payload.username,
+                        binding_id=job_data["execution_budget_id"],
+                        vault=ProtectedCredentialVault(engine=byok_engine),
+                    )
+                    payload_dict = budget_gateway.protect_payload(
+                        parent_payload,
+                        managed_key=(
+                            settings.openrouter_api_key.get_secret_value()
+                            if settings.openrouter_api_key is not None
+                            else ""
+                        ),
+                        allow_private_tools=settings.discover_allow_private,
+                    )
+                if has_exposed_execution_credentials(
+                    payload_dict,
+                    allow_parent_model_routes=budget_gateway is not None,
+                ):
+                    raise ValueError(
+                        "The stored job contains credentials outside the trusted relay; clone and test setup again."
+                    )
+
+                execution_start_method = "spawn" if budget_gateway is not None else self._mp_start_method
+                execution_context = mp.get_context("spawn") if budget_gateway is not None else self._mp_ctx
+                event_queue = execution_context.Queue()
+                run_process = execution_context.Process(  # type: ignore[attr-defined]
+                    target=run_vercel_dspy if budget_gateway is not None else run_service_in_subprocess,
+                    args=(
+                        payload_dict,
+                        f"{optimization_id}-g{execution_generation}"
+                        if execution_generation is not None
+                        else optimization_id,
+                        event_queue,
+                        execution_start_method,
+                    ),
                     name=f"dspy-run-{optimization_id[:8]}",
                     daemon=True,
                 )
@@ -718,7 +964,15 @@ class BackgroundWorker:
                 # sibling job's fork image. ``payload_dict`` itself stays
                 # pinned by ``run_process``'s args tuple; only ``attempts``
                 # is read from ``job_data`` after this point.
-                job_data = {"attempts": job_data.get("attempts")}
+                job_data = {
+                    key: job_data.get(key)
+                    for key in (
+                        "attempts",
+                        "execution_budget_id",
+                        "execution_budget_generation",
+                        "execution_generation",
+                    )
+                }
                 run_payload = grid_payload = blackbox_payload = None
 
                 # Stall watchdog: the lease heartbeat (_touch_activity) renews
@@ -732,12 +986,17 @@ class BackgroundWorker:
                 last_event_at = time.monotonic()
                 progress_rewrite = self._pair_progress_rewrite(pair_parent_id) if pair_parent_id else None
                 while run_process.is_alive():
-                    _raise_if_cancelled(cancel_event, optimization_id)
+                    self._raise_if_interrupted(cancel_event, optimization_id)
                     self._touch_activity(worker_id)
                     self._raise_if_store_cancelled(optimization_id)
                     run_process.join(timeout=self._cancel_poll_interval)
                     drained_result, drained_error, drained_count = self._drain_subprocess_events(
-                        events_target, event_queue, progress_rewrite=progress_rewrite
+                        events_target,
+                        event_queue,
+                        progress_rewrite=progress_rewrite,
+                        source_optimization_id=optimization_id,
+                        generation=execution_generation,
+                        checkpoint_tracker=checkpoint_tracker,
                     )
                     if drained_result is not None:
                         result_dict = drained_result
@@ -755,7 +1014,12 @@ class BackgroundWorker:
                         self._persist_gepa_checkpoint(optimization_id, gepa_dir, checkpoint_tracker, is_grid=is_grid)
 
                 drained_result, drained_error, _ = self._drain_subprocess_events(
-                    events_target, event_queue, progress_rewrite=progress_rewrite
+                    events_target,
+                    event_queue,
+                    progress_rewrite=progress_rewrite,
+                    source_optimization_id=optimization_id,
+                    generation=execution_generation,
+                    checkpoint_tracker=checkpoint_tracker,
                 )
                 if drained_result is not None:
                     result_dict = drained_result
@@ -763,6 +1027,14 @@ class BackgroundWorker:
                     subprocess_error = drained_error
                 if gepa_dir is not None:
                     self._persist_gepa_checkpoint(optimization_id, gepa_dir, checkpoint_tracker, is_grid=is_grid)
+
+                if budget_gateway is not None:
+                    closing_gateway, budget_gateway = budget_gateway, None
+                    execution_budget_snapshot, settlement_error = self._close_budget_gateway(
+                        optimization_id, closing_gateway, execution_generation
+                    )
+                    if settlement_error is not None and subprocess_error is None:
+                        raise settlement_error
 
                 if subprocess_error:
                     traceback_text = subprocess_error.get("traceback")
@@ -777,49 +1049,42 @@ class BackgroundWorker:
                                 logger_name="dspy.subprocess",
                                 message=traceback_text,
                             )
-                    raise RuntimeError(str(subprocess_error.get("error", "Unknown subprocess error")))
+                    error_message = str(subprocess_error.get("error", "Unknown subprocess error"))
+                    if subprocess_error.get("failure_kind") == INFRASTRUCTURE_INTERRUPTION:
+                        raise InfrastructureInterruptionError(error_message)
+                    raise RuntimeError(error_message)
 
                 if run_process.exitcode not in (0, None) and result_dict is None:
-                    requeue = getattr(self._job_store, "requeue_for_resume", None)
-                    attempts = int(job_data.get("attempts") or 0)
-                    if run_process.exitcode == -9 and requeue is not None and attempts + 1 < settings.job_max_attempts:
-                        # SIGKILL with no error event is almost always an OOM kill,
-                        # not a logic failure. Persist the checkpoint and bounded-
-                        # re-queue so a worker resumes from it instead of failing
-                        # the whole run on one transient kill. There is no timed
-                        # backoff (that needs a schedule column); the attempt cap
-                        # bounds retries and the poll interval spaces them out.
-                        if gepa_dir is not None:
-                            with contextlib.suppress(Exception):
-                                self._persist_gepa_checkpoint(
-                                    optimization_id, gepa_dir, checkpoint_tracker, is_grid=is_grid
-                                )
-                        requeue(optimization_id)
-                        logger.warning(
-                            "Optimization %s subprocess killed (exit -9); re-queued (attempt %d)",
-                            optimization_id,
-                            attempts + 1,
+                    if run_process.exitcode == -9:
+                        raise InfrastructureInterruptionError(
+                            "The optimizer process was terminated by temporary infrastructure pressure."
                         )
-                        return
                     raise RuntimeError(f"Optimization subprocess exited with code {run_process.exitcode}")
 
-                if result_dict is None:
+                terminal = None
+                if isinstance(result_dict, dict) and "_terminal_outcome" in result_dict:
+                    terminal = TerminalOutcome.model_validate(result_dict["_terminal_outcome"])
+                    result_dict = terminal.result
+                if result_dict is None and terminal is None:
                     raise RuntimeError("Optimization subprocess finished without a result payload")
 
                 # Check cancel one last time: service.run() may have completed
                 # during a long phase with no progress callbacks, after the
                 # cancel endpoint already marked the job as cancelled.
-                _raise_if_cancelled(cancel_event, optimization_id)
+                self._raise_if_interrupted(cancel_event, optimization_id)
 
                 # Grid search with all pairs failed is a failure, not a success.
                 # A pair child's 1-pair grid rides the same check: its single
                 # failed pair marks the CHILD row failed.
-                final_status = "success"
-                final_message = "Optimization completed successfully"
+                final_status = terminal.status if terminal is not None else "success"
+                final_message = terminal.message if terminal is not None else "Optimization completed successfully"
                 if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH and isinstance(result_dict, dict):
                     completed = result_dict.get("completed_pairs", 0)
                     total = result_dict.get("total_pairs", 0)
-                    if completed == 0 and total > 0:
+                    if result_dict.get("failed_pairs", 0) and result_dict.get("stopped_pairs", 0):
+                        final_status = "failed"
+                        final_message = "Some model pairs failed before the budget stop."
+                    elif completed == 0 and total > 0 and terminal is None:
                         final_status = "failed"
                         final_message = f"All {total} model pairs failed"
                         pair_results = result_dict.get("pair_results") or []
@@ -858,9 +1123,21 @@ class BackgroundWorker:
                         # child row would triple the artifact bytes.
                         "result": None if pair_parent_id is not None else result_dict,
                     }
+                    if terminal is not None:
+                        completion_fields.update(
+                            stop_reason=terminal.stop_reason,
+                            result_availability=terminal.result_availability,
+                            terminal_evidence={
+                                **terminal.evidence,
+                                **(
+                                    {"execution_budget": execution_budget_snapshot} if execution_budget_snapshot else {}
+                                ),
+                            },
+                        )
                     cas = getattr(self._job_store, "update_job_if_status", None)
                     if cas is not None:
-                        if not cas(optimization_id, ("running", "validating"), **completion_fields):
+                        fence = {} if execution_generation is None else {"expected_generation": execution_generation}
+                        if not cas(optimization_id, ("running", "validating"), **fence, **completion_fields):
                             raise CancellationError()
                     else:
                         self._job_store.update_job(optimization_id, **completion_fields)
@@ -901,10 +1178,11 @@ class BackgroundWorker:
                         # The credit debit shares the once-only completion claim so
                         # a redelivered/re-run job is never double-billed. Success
                         # only — a failed (e.g. all-pairs-failed) run is not billed.
-                        if final_status == "success":
+                        if final_status == "success" and not job_data.get("execution_budget_id"):
                             billed = self._debit_run_credits(
                                 _username,
                                 result_dict,
+                                optimization_id=optimization_id,
                                 run_name=overview.get(PAYLOAD_OVERVIEW_NAME) or "",
                                 model=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
                                 token_source=overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE) or TOKEN_SOURCE_MANAGED,
@@ -942,6 +1220,15 @@ class BackgroundWorker:
                         self._stop_blackbox_sandboxes(optimization_id)
                 raise
             finally:
+                if budget_gateway is not None:
+                    execution_budget_snapshot, settlement_error = self._close_budget_gateway(
+                        optimization_id, budget_gateway, execution_generation
+                    )
+                    budget_gateway = None
+                    if settlement_error is not None:
+                        logger.error(
+                            "Optimization %s runtime cleanup needs attention: %s", optimization_id, settlement_error
+                        )
                 # The DB holds the checkpoint bytes for a resumable failure; the
                 # local working copy is always removed.
                 if gepa_dir is not None:
@@ -955,8 +1242,20 @@ class BackgroundWorker:
         # BaseException catches SystemExit/KeyboardInterrupt during graceful shutdown
         # so we still record a terminal status for the in-flight job before propagating.
         except BaseException as exc:
-            is_shutdown = isinstance(exc, (SystemExit, KeyboardInterrupt))
+            is_shutdown = isinstance(exc, SystemExit | KeyboardInterrupt)
             is_cancelled = isinstance(exc, CancellationError)
+            is_temporary = isinstance(exc, InfrastructureInterruptionError) or is_shutdown
+            recovery_unavailable_reason = ""
+            if is_temporary and not is_cancelled:
+                recovered, recovery_unavailable_reason = self._recover_temporary_interruption(
+                    optimization_id,
+                    generation=execution_generation,
+                    attempts=recovery_attempts,
+                )
+                if recovered:
+                    if is_shutdown:
+                        raise
+                    return
             if is_cancelled:
                 final_status, error_message = "cancelled", CANCELLATION_REASON
                 logger.info("Optimization %s cancelled", optimization_id)
@@ -967,6 +1266,8 @@ class BackgroundWorker:
             else:
                 final_status = "failed"
                 error_message = str(exc)
+                if is_temporary and recovery_unavailable_reason:
+                    error_message = f"{error_message} Recovery unavailable: {recovery_unavailable_reason}"
                 logger.exception("Optimization %s failed: %s", optimization_id, error_message)
             _username = overview.get(PAYLOAD_OVERVIEW_USERNAME, "") if isinstance(overview, dict) else ""
             if is_cancelled:
@@ -979,7 +1280,7 @@ class BackgroundWorker:
                     persisted_status = self._persisted_status(optimization_id)
                 if (
                     pair_parent_id is None
-                    and persisted_status != "paused"
+                    and persisted_status == "cancelled"
                     and self._job_store.claim_completion_notification(optimization_id)
                 ):
                     notify_job_completed(optimization_id=optimization_id, username=_username, status="cancelled")
@@ -990,9 +1291,23 @@ class BackgroundWorker:
                 # Failed jobs are retained so users can inspect the error
                 now = datetime.now(UTC).isoformat()
                 try:
-                    self._job_store.update_job(
-                        optimization_id, status=final_status, message=error_message, completed_at=now
-                    )
+                    fields = {"status": final_status, "message": error_message, "completed_at": now}
+                    if is_temporary:
+                        fields.update(
+                            stop_reason="interrupted",
+                            recovery={
+                                "state": "unavailable",
+                                "phase": "admission",
+                                "reason": recovery_unavailable_reason or error_message,
+                            },
+                        )
+                    cas = getattr(self._job_store, "update_job_if_status", None)
+                    if cas is not None:
+                        fence = {} if execution_generation is None else {"expected_generation": execution_generation}
+                        if not cas(optimization_id, ("pending", "running", "validating"), **fence, **fields):
+                            return
+                    else:
+                        self._job_store.update_job(optimization_id, **fields)
                 except Exception:  # isolation boundary: a DB hiccup must not prevent the notification below
                     logger.exception("Optimization %s: failed to update status to %s", optimization_id, final_status)
                 if pair_parent_id is None and self._job_store.claim_completion_notification(optimization_id):
@@ -1013,6 +1328,49 @@ class BackgroundWorker:
                     self._maybe_finalize_grid(pair_parent_id)
             if is_shutdown:
                 raise
+
+    def _close_budget_gateway(
+        self, optimization_id: str, gateway: ModelGateway, generation: int | None
+    ) -> tuple[dict[str, Any] | None, BaseException | None]:
+        """Settle owned runtimes before terminal publication while retaining uncertain usage.
+
+        Args:
+            optimization_id: Stable job owning all covered work.
+            gateway: Trusted parent transport and its cumulative budget.
+            generation: Worker epoch allowed to publish the settlement snapshot.
+
+        Returns:
+            Authoritative snapshot and a genuine cleanup error, if one occurred.
+        """
+        error: BaseException | None = None
+        snapshot: dict[str, Any] | None = None
+        try:
+            gateway.close()
+        except UsagePendingError:
+            logger.info("Optimization %s finished with usage awaiting reconciliation", optimization_id)
+        except BaseException as exc:
+            error = exc
+        try:
+            raw = asdict(gateway.runtime.service.get(gateway.runtime.budget_id, gateway.runtime.username))
+            raw.pop("username", None)
+            raw.pop("account_available_credits", None)
+            snapshot = json.loads(json.dumps(raw, default=str))
+            job = self._job_store.get_job(optimization_id)
+            evidence = {**(job.get("terminal_evidence") or {}), "execution_budget": snapshot}
+            cas = getattr(self._job_store, "update_job_if_status", None)
+            if cas is not None:
+                kwargs = {} if generation is None else {"expected_generation": generation}
+                cas(
+                    optimization_id,
+                    ("pending", "validating", "running", "success", "failed", "stopped", "paused", "cancelled"),
+                    terminal_evidence=evidence,
+                    **kwargs,
+                )
+            else:
+                self._job_store.update_job(optimization_id, terminal_evidence=evidence)
+        except Exception:
+            logger.exception("Optimization %s could not publish its budget snapshot", optimization_id)
+        return snapshot, error
 
     def _process_tagging_job(
         self,
@@ -1260,7 +1618,9 @@ class BackgroundWorker:
             status: Terminal status (``success``, ``failed`` or ``cancelled``).
             overview: The job's ``payload_overview`` mapping.
         """
-        name = {"success": "run_completed", "cancelled": "run_cancelled"}.get(status, "run_failed")
+        name = {"success": "run_completed", "cancelled": "run_cancelled", "stopped": "run_stopped"}.get(
+            status, "run_failed"
+        )
         try:
             record_server_event(
                 getattr(self._job_store, "engine", None),
@@ -1284,6 +1644,7 @@ class BackgroundWorker:
         *,
         run_name: str,
         model: str | None,
+        optimization_id: str | None = None,
         token_source: str = TOKEN_SOURCE_MANAGED,
         token_sources_by_model: dict[str, str] | None = None,
     ) -> int:
@@ -1306,6 +1667,7 @@ class BackgroundWorker:
                 priced per-model into the charge (falling back to ``total_tokens``).
             run_name: Run name for the ledger row's human label.
             model: Model id stamped on the ledger row, or ``None``.
+            optimization_id: Finished legacy job whose own wallet commitment is consumed.
             token_source: ``"managed"`` (full cost) or ``"byok"`` (platform fee
                 only); defaults to managed.
             token_sources_by_model: Optional model-to-source map for mixed jobs.
@@ -1328,6 +1690,8 @@ class BackgroundWorker:
             }
             if token_sources_by_model is not None:
                 billing_kwargs["token_sources_by_model"] = token_sources_by_model
+            if optimization_id is not None:
+                billing_kwargs["optimization_id"] = optimization_id
             return StripeBillingService(engine=engine).debit_run(
                 username,
                 usages,
@@ -1442,6 +1806,9 @@ class BackgroundWorker:
         event_queue: Any,
         *,
         progress_rewrite: Any | None = None,
+        source_optimization_id: str | None = None,
+        generation: int | None = None,
+        checkpoint_tracker: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, int]:
         """Drain all pending events from the subprocess queue, routing each by type.
 
@@ -1460,6 +1827,10 @@ class BackgroundWorker:
             progress_rewrite: Optional ``(event_name, metrics) -> metrics`` hook
                 applied before persisting a progress event; pair children use it
                 to correct grid-wide counters their single-pair view can't know.
+            source_optimization_id: Leased source row when events target a parent grid.
+            generation: Source worker publication epoch.
+            checkpoint_tracker: Mutable checkpoint cursor that receives the best
+                completed candidate for each GEPA pair.
 
         Returns:
             ``(result_dict, error_dict, drained_count)`` — the first two may be
@@ -1486,11 +1857,34 @@ class BackgroundWorker:
                     metrics = event.get("metrics") or {}
                     if progress_rewrite is not None:
                         metrics = progress_rewrite(event.get("event"), metrics)
-                    self._job_store.record_progress(
-                        optimization_id,
-                        event.get("event"),
-                        metrics,
-                    )
+                    if checkpoint_tracker is not None:
+                        incumbent = evaluated_incumbent_from_progress(
+                            event.get("event"),
+                            metrics,
+                            checkpoint_tracker.get("payload", {}),
+                        )
+                        if incumbent is not None:
+                            pair_index = metrics.get("pair_index")
+                            pair_key = (
+                                pair_index
+                                if isinstance(pair_index, int) and not isinstance(pair_index, bool)
+                                else -1
+                            )
+                            incumbents = checkpoint_tracker.setdefault("_incumbents", {})
+                            previous = incumbents.get(pair_key)
+                            if previous is None or incumbent["selection_score"] > previous["selection_score"]:
+                                incumbents[pair_key] = incumbent
+                    fenced_progress = getattr(self._job_store, "record_progress_for_generation", None)
+                    if generation is not None and callable(fenced_progress):
+                        fenced_progress(
+                            optimization_id,
+                            event.get("event"),
+                            metrics,
+                            source_optimization_id=source_optimization_id or optimization_id,
+                            generation=generation,
+                        )
+                    else:
+                        self._job_store.record_progress(optimization_id, event.get("event"), metrics)
                 except Exception:
                     logger.exception("Optimization %s: failed to persist subprocess progress event", optimization_id)
             elif event_type == EVENT_LOG:
@@ -1520,10 +1914,16 @@ class BackgroundWorker:
                 payload = event.get("result")
                 if isinstance(payload, dict):
                     result_payload = payload
+            elif event_type == EVENT_TERMINAL:
+                payload = event.get("outcome")
+                if isinstance(payload, dict):
+                    result_payload = {"_terminal_outcome": payload}
             elif event_type == EVENT_ERROR:
                 payload = {
                     "error": str(event.get("error", "Unknown subprocess error")),
                     "traceback": str(event.get("traceback", "")),
+                    "error_type": str(event.get("error_type", "")),
+                    "failure_kind": str(event.get("failure_kind", "")),
                 }
                 error_payload = payload
 
@@ -1564,9 +1964,11 @@ class BackgroundWorker:
         Returns:
             ``True`` when the run should persist and restore GEPA checkpoints.
         """
-        return optimization_type in (OPTIMIZATION_TYPE_RUN, OPTIMIZATION_TYPE_GRID_SEARCH) and hasattr(
-            self._job_store, "save_gepa_checkpoint"
-        )
+        return optimization_type in (
+            OPTIMIZATION_TYPE_RUN,
+            OPTIMIZATION_TYPE_GRID_SEARCH,
+            OPTIMIZATION_TYPE_BLACKBOX,
+        ) and hasattr(self._job_store, "save_gepa_checkpoint")
 
     def _prepare_gepa_dir(self, optimization_id: str, *, is_grid: bool) -> Path:
         """Allocate a clean worker-owned GEPA base dir, seeding saved checkpoints for resume.
@@ -1585,15 +1987,20 @@ class BackgroundWorker:
         Returns:
             The base path handed to the child as ``_gepa_log_dir``.
         """
-        base = Path(tempfile.gettempdir()) / "skynet-gepa" / optimization_id
+        job = self._job_store.get_job(optimization_id)
+        payload = job.get("payload") or {}
+        base = Path(tempfile.gettempdir()) / "skynet-gepa" / f"{optimization_id}-g{job.get('execution_generation', 0)}"
         shutil.rmtree(base, ignore_errors=True)
         base.mkdir(parents=True, exist_ok=True)
         if is_grid:
             checkpoints = self._job_store.list_gepa_checkpoints(optimization_id)
             for cp in checkpoints:
+                validate_checkpoint(cp.data, cp.manifest, payload, job.get("code_version"))
                 pair_dir = base / f"pair_{cp.pair_index}"
                 pair_dir.mkdir(parents=True, exist_ok=True)
                 (pair_dir / GEPA_STATE_FILENAME).write_bytes(cp.data)
+            if not checkpoints and (job.get("recovery") or {}).get("phase") == "resuming":
+                raise ValueError("The checkpoint selected for recovery is no longer available.")
             if checkpoints:
                 logger.info(
                     "Optimization %s: restored %d in-flight grid pair checkpoint(s) — resuming",
@@ -1602,8 +2009,13 @@ class BackgroundWorker:
                 )
         else:
             checkpoint = self._job_store.get_gepa_checkpoint(optimization_id)
+            if checkpoint is None and (job.get("recovery") or {}).get("phase") == "resuming":
+                raise ValueError("The checkpoint selected for recovery is no longer available.")
             if checkpoint is not None:
-                (base / GEPA_STATE_FILENAME).write_bytes(checkpoint.data)
+                validate_checkpoint(checkpoint.data, checkpoint.manifest, payload, job.get("code_version"))
+                state_base = base / "gepa" if "strategy" in payload else base
+                state_base.mkdir(parents=True, exist_ok=True)
+                (state_base / GEPA_STATE_FILENAME).write_bytes(checkpoint.data)
                 logger.info(
                     "Optimization %s: restored GEPA checkpoint (#%s, %d bytes) — resuming",
                     optimization_id,
@@ -1631,7 +2043,8 @@ class BackgroundWorker:
             is_grid: Whether to scan per-pair subdirs.
         """
         if not is_grid:
-            self._persist_one_checkpoint(optimization_id, gepa_dir / GEPA_STATE_FILENAME, -1, tracker)
+            state_base = gepa_dir / "gepa" if "strategy" in tracker.get("payload", {}) else gepa_dir
+            self._persist_one_checkpoint(optimization_id, state_base / GEPA_STATE_FILENAME, -1, tracker)
             return
         results_done: set[int] = tracker.setdefault("_results", set())
         try:
@@ -1646,7 +2059,13 @@ class BackgroundWorker:
             if idx in results_done:
                 continue
             if (pair_dir / GRID_PAIR_RESULT_FILENAME).exists():
-                if self._store_grid_pair_result(optimization_id, idx, pair_dir / GRID_PAIR_RESULT_FILENAME):
+                if self._store_grid_pair_result(
+                    optimization_id,
+                    idx,
+                    pair_dir / GRID_PAIR_RESULT_FILENAME,
+                    expected_generation=tracker.get("generation"),
+                ):
+                    self._persist_one_checkpoint(optimization_id, pair_dir / GEPA_STATE_FILENAME, idx, tracker)
                     results_done.add(idx)
                 continue
             self._persist_one_checkpoint(optimization_id, pair_dir / GEPA_STATE_FILENAME, idx, tracker)
@@ -1676,22 +2095,42 @@ class BackgroundWorker:
             return
         if not data:
             return
-        next_n = int(cursor.get("n", 0)) + 1
         try:
-            self._job_store.save_gepa_checkpoint(optimization_id, data, next_n, pair_index)
+            manifest = checkpoint_manifest(data, tracker.get("payload", {}), tracker.get("code_version"))
+            incumbent = tracker.get("_incumbents", {}).get(pair_index)
+            if incumbent is not None:
+                manifest["evaluated_incumbent"] = incumbent
+            plan_builder = tracker.get("recovery_plan_builder")
+            if callable(plan_builder):
+                manifest["recovery_admission"] = plan_builder(
+                    manifest,
+                    runtime=str(tracker.get("execution_runtime", "vercel")),
+                )
+            next_n = manifest["iteration"]
+            self._job_store.save_gepa_checkpoint(
+                optimization_id,
+                data,
+                next_n,
+                pair_index,
+                manifest=manifest,
+                expected_generation=tracker.get("generation"),
+            )
         except Exception:
             logger.exception("Optimization %s pair %s: failed to persist GEPA checkpoint", optimization_id, pair_index)
             return
         cursor["mtime"] = mtime
         cursor["n"] = next_n
 
-    def _store_grid_pair_result(self, optimization_id: str, pair_index: int, result_path: Path) -> bool:
+    def _store_grid_pair_result(
+        self, optimization_id: str, pair_index: int, result_path: Path, *, expected_generation: int | None = None
+    ) -> bool:
         """Durably store a finished grid pair's result and drop its checkpoint.
 
         Args:
             optimization_id: The running grid job.
             pair_index: The finished pair's index.
             result_path: The pair's ``result.json`` written by the child.
+            expected_generation: Current worker publication generation.
 
         Returns:
             ``True`` when the result was stored (so the caller stops re-reading it).
@@ -1701,8 +2140,9 @@ class BackgroundWorker:
         except (OSError, json.JSONDecodeError):
             return False
         try:
-            self._job_store.save_grid_pair_result(optimization_id, pair_index, result)
-            self._job_store.delete_gepa_checkpoint(optimization_id, pair_index)
+            self._job_store.save_grid_pair_result(
+                optimization_id, pair_index, result, expected_generation=expected_generation
+            )
         except Exception:
             logger.exception("Optimization %s pair %s: failed to persist pair result", optimization_id, pair_index)
             return False
@@ -1723,6 +2163,8 @@ class BackgroundWorker:
         Returns:
             ``True`` when the grid should run as distributed pair jobs.
         """
+        if grid_payload.execution_budget_id is not None:
+            return False
         if not hasattr(self._job_store, "create_grid_pair_jobs"):
             return False
         total = len(grid_payload.generation_models) * len(grid_payload.reflection_models)
@@ -1939,6 +2381,18 @@ class BackgroundWorker:
             "completed_at": datetime.now(UTC).isoformat(),
             "result": result_dict,
         }
+        if final_status == "stopped":
+            pair_rows = (result_dict or {}).get("pair_results", [])
+            available = any(p.get("result_availability") == "evaluated" or p.get("program_artifact") for p in pair_rows)
+            completion_fields.update(
+                stop_reason="budget_reached",
+                result_availability="evaluated" if available else "none",
+                terminal_evidence={
+                    "candidate_origin": None,
+                    "final_evaluation_completed": False,
+                    "final_evaluation_reason": "budget_reached",
+                },
+            )
         cas = getattr(store, "update_job_if_status", None)
         if cas is not None:
             if not cas(parent_optimization_id, ("running",), **completion_fields):
@@ -1965,10 +2419,11 @@ class BackgroundWorker:
                 message=final_message,
             )
             self._record_run_outcome(parent_optimization_id, _username, final_status, overview)
-            if final_status == "success" and isinstance(result_dict, dict):
+            if final_status == "success" and isinstance(result_dict, dict) and not parent.get("execution_budget_id"):
                 billed = self._debit_run_credits(
                     _username,
                     result_dict,
+                    optimization_id=parent_optimization_id,
                     run_name=overview.get(PAYLOAD_OVERVIEW_NAME) or "",
                     model=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
                     token_source=overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE) or TOKEN_SOURCE_MANAGED,
@@ -2028,6 +2483,19 @@ class BackgroundWorker:
                 gen_name = str(gen_raw.get("name") or "") if isinstance(gen_raw, dict) else ""
                 ref_name = str(ref_raw.get("name") or "") if isinstance(ref_raw, dict) else ""
             child = children_by_index.get(k, {})
+            if child.get("status") == "stopped":
+                availability = child.get("result_availability")
+                pair_results.append(
+                    PairResult(
+                        pair_index=k,
+                        generation_model=gen_name,
+                        reflection_model=ref_name,
+                        stop_reason="budget_reached",
+                        result_availability="evaluated" if availability == "evaluated" else "none",
+                        terminal_evidence=child.get("terminal_evidence"),
+                    )
+                )
+                continue
             if child.get("status") == "cancelled":
                 error = "Pair cancelled"
             else:
@@ -2045,7 +2513,7 @@ class BackgroundWorker:
             if successful
             else None
         )
-        completed_count = len([p for p in pair_results if p.error is None])
+        completed_count = len([p for p in pair_results if p.error is None and p.stop_reason != "budget_reached"])
         failed_count = len([p for p in pair_results if p.error is not None])
         pair_token_counts = [p.total_tokens for p in pair_results if p.total_tokens is not None]
         runtime_seconds: float | None = None
@@ -2071,6 +2539,7 @@ class BackgroundWorker:
             total_pairs=total,
             completed_pairs=completed_count,
             failed_pairs=failed_count,
+            stopped_pairs=sum(p.stop_reason == "budget_reached" for p in pair_results),
             pair_results=pair_results,
             best_pair=best_pair,
             runtime_seconds=runtime_seconds,
@@ -2080,7 +2549,13 @@ class BackgroundWorker:
 
         final_status = "success"
         final_message = "Optimization completed successfully"
-        if completed_count == 0 and total > 0:
+        if response.stopped_pairs and not failed_count:
+            final_status = "stopped"
+            final_message = "The remaining budget cannot cover the requested grid work."
+        elif failed_count and response.stopped_pairs:
+            final_status = "failed"
+            final_message = "Some model pairs failed before the budget stop."
+        elif completed_count == 0 and total > 0:
             final_status = "failed"
             final_message = f"All {total} model pairs failed"
             first_error = next((p.error for p in pair_results if p.error), None)

@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import random
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
@@ -28,6 +29,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from ....billing import ProviderKeyVault, resolve_byok_model_config
+from ....billing.budgets import BudgetService
 from ....config import settings
 from ....constants import (
     OPTIMIZATION_TYPE_BLACKBOX,
@@ -80,6 +82,7 @@ from .._helpers import (
     is_resumable,
     load_job_for_user,
     load_job_with_role,
+    require_unprotected_api_execution,
     stable_seed,
 )
 from ..constants import TERMINAL_STATUSES
@@ -94,7 +97,7 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 # that adds, removes, or renames fields. Mixed into the ETag so cached 304s
 # can't serve a pre-change body that's missing the new fields. Last bump:
 # added progress_offset / logs_offset for delta (tail) stream fetches.
-_RESPONSE_SCHEMA_VERSION = "v5"
+_RESPONSE_SCHEMA_VERSION = "v6"
 
 
 def _delta_offset(raw: str | None, count: int, cap: int) -> int:
@@ -260,9 +263,12 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
             try:
                 if optimization_type == OPTIMIZATION_TYPE_GRID_SEARCH:
                     grid_result = GridSearchResponse.model_validate(result_data)
-                elif status == OptimizationStatus.success and optimization_type == OPTIMIZATION_TYPE_BLACKBOX:
+                elif (
+                    status in {OptimizationStatus.success, OptimizationStatus.stopped}
+                    and optimization_type == OPTIMIZATION_TYPE_BLACKBOX
+                ):
                     blackbox_result = BlackboxRunResponse.model_validate(result_data)
-                elif status == OptimizationStatus.success:
+                elif status in {OptimizationStatus.success, OptimizationStatus.stopped}:
                     result = RunResponse.model_validate(result_data)
             except ValidationError:
                 logger.warning("Optimization %s has corrupted result data", optimization_id)
@@ -292,6 +298,13 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
         )
 
         logger.debug("Returning status for optimization_id=%s state=%s", optimization_id, status)
+        execution_budget = (job_data.get("terminal_evidence") or {}).get("execution_budget")
+        if job_data.get("execution_budget_id") is not None and getattr(job_store, "engine", None) is not None:
+            execution_budget = asdict(
+                BudgetService(engine=job_store.engine).get(job_data["execution_budget_id"], job_data["username"])
+            )
+            execution_budget.pop("username", None)
+            execution_budget.pop("account_available_credits", None)
         response_data = OptimizationStatusResponse(
             optimization_id=optimization_id,
             status=status,
@@ -303,6 +316,11 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
             estimated_remaining=est_remaining,
             **overview_to_base_fields(overview),
             message=job_data.get("message"),
+            stop_reason=job_data.get("stop_reason"),
+            result_availability=job_data.get("result_availability"),
+            terminal_evidence=job_data.get("terminal_evidence"),
+            execution_budget=execution_budget,
+            recovery=job_data.get("recovery"),
             stored_bytes=job_data.get("stored_bytes", 0),
             latest_metrics=latest_metrics,
             completed_pairs=completed_pairs,
@@ -477,12 +495,13 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
         Raises:
             DomainError: 404 (missing/inaccessible optimization or payload),
                 400 (no metric/model/module), 409 (no result available for
-                the optimized program).
+                the optimized program or no protected interactive sandbox).
         """
         indices = req.indices
         program_type = req.program_type
 
         job_data = load_job_for_user(job_store, optimization_id, current_user)
+        require_unprotected_api_execution(job_data)
 
         overview = parse_overview(job_data)
         payload = job_data.get("payload")
@@ -500,10 +519,6 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
         metric_code = payload.get("metric_code", "")
         if not metric_code:
             raise DomainError("optimization.no_metric_code", status=400)
-        # exec() isolation gap: runs user code in the API process. evaluate-examples
-        # calls the metric once per requested row, so ``safe_exec.probe_metric_on_sample``
-        # would spawn a subprocess per row. The payload here was already validated
-        # through the subprocess boundary when the job was submitted.
         metric = load_metric_from_code(metric_code)
 
         model_settings = payload.get("model_config") or overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
@@ -597,7 +612,7 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
 
                     try:
                         score = metric(example, prediction)
-                        score = float(score) if isinstance(score, (int, float, bool)) else 0.0
+                        score = float(score) if isinstance(score, int | float | bool) else 0.0
                     except Exception:
                         score = 0.0
 

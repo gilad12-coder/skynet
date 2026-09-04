@@ -30,6 +30,7 @@ from ...constants import (
     PAYLOAD_OVERVIEW_MODEL_SETTINGS,
     PAYLOAD_OVERVIEW_MODULE_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
+    PAYLOAD_OVERVIEW_WORKFLOW,
     TOKEN_SOURCE_BYOK,
     TOKEN_SOURCE_MANAGED,
 )
@@ -46,7 +47,9 @@ from ._helpers import (
     enforce_llm_credits,
     load_job_for_user,
     load_pair_program,
+    load_pair_program_metadata,
     load_program,
+    load_program_metadata,
     load_react_chat_inputs,
     require_role_at_least,
     sanitize_node_traces,
@@ -207,15 +210,61 @@ def _artifact_prompt_fields(artifact: Any) -> tuple[list[str], list[str], str | 
     Returns:
         ``(input_fields, output_fields, instructions, demo_count)``.
     """
-    prompt = artifact.optimized_prompt
+    prompt = artifact.get("optimized_prompt") if isinstance(artifact, dict) else artifact.optimized_prompt
     if prompt is None:
         return [], [], None, 0
+    if isinstance(prompt, dict):
+        raw_inputs = prompt.get("input_fields")
+        raw_outputs = prompt.get("output_fields")
+        raw_instructions = prompt.get("instructions")
+        raw_demos = prompt.get("demos")
+        return (
+            [value for value in raw_inputs if isinstance(value, str)] if isinstance(raw_inputs, list) else [],
+            [value for value in raw_outputs if isinstance(value, str)] if isinstance(raw_outputs, list) else [],
+            raw_instructions if isinstance(raw_instructions, str) else None,
+            len(raw_demos) if isinstance(raw_demos, list) else 0,
+        )
     return (
         list(prompt.input_fields),
         list(prompt.output_fields),
         prompt.instructions,
         len(prompt.demos),
     )
+
+
+def _workflow_anchor_fields(overview: dict[str, Any]) -> tuple[list[str], list[str]] | None:
+    """Read workflow anchor fields without parsing any authored node code.
+
+    Args:
+        overview: Persisted payload overview containing an optional workflow.
+
+    Returns:
+        ``(input_fields, output_fields)`` for a workflow, or ``None`` when the
+        optimization is not a workflow.
+    """
+    workflow = overview.get(PAYLOAD_OVERVIEW_WORKFLOW)
+    if not isinstance(workflow, dict):
+        return None
+    raw_nodes = workflow.get("nodes")
+    nodes = raw_nodes if isinstance(raw_nodes, list) else []
+
+    def _anchor_names(kind: str) -> list[str]:
+        """Return safe field names from one persisted workflow anchor.
+
+        Args:
+            kind: Anchor kind, either ``input`` or ``output``.
+
+        Returns:
+            Persisted string field names in their original order.
+        """
+        anchor = next((node for node in nodes if isinstance(node, dict) and node.get("kind") == kind), None)
+        if not isinstance(anchor, dict):
+            return []
+        raw_fields = anchor.get("fields")
+        fields = raw_fields if isinstance(raw_fields, list) else []
+        return [field["name"] for field in fields if isinstance(field, dict) and isinstance(field.get("name"), str)]
+
+    return _anchor_names("input"), _anchor_names("output")
 
 
 # Long or multi-line example values make the usage snippet unwieldy and can
@@ -286,9 +335,10 @@ def _sample_inputs(
 ) -> dict[str, str]:
     """Build example input values to prefill the integration snippet.
 
-    Prefers a real example baked into the program (a demo); falls back to the
-    first dataset row so optimizers that carry no demos — GEPA evolves
-    instructions and ships zero — still yield copy-paste-ready values.
+    Prefers a real example baked into the program (a demo). Legacy artifacts
+    may fall back to the first dataset row so optimizers that carry no demos
+    still yield copy-paste-ready values. Protected artifacts never read the
+    unsanitized submission payload from this metadata-only route.
 
     Args:
         job_store: Store used to read the dataset for the fallback path.
@@ -300,13 +350,26 @@ def _sample_inputs(
     Returns:
         A ``{field: value}`` map (possibly partial or empty).
     """
-    prompt = getattr(artifact, "optimized_prompt", None)
-    demos = list(getattr(prompt, "demos", []) or []) if prompt is not None else []
+    prompt = (
+        artifact.get("optimized_prompt") if isinstance(artifact, dict) else getattr(artifact, "optimized_prompt", None)
+    )
+    if isinstance(prompt, dict):
+        raw_demos = prompt.get("demos")
+        demos = raw_demos if isinstance(raw_demos, list) else []
+    else:
+        demos = list(getattr(prompt, "demos", []) or []) if prompt is not None else []
     if demos:
-        demo_inputs = getattr(demos[0], "inputs", None) or {}
+        first_demo = demos[0]
+        demo_inputs = (
+            first_demo.get("inputs", {}) if isinstance(first_demo, dict) else getattr(first_demo, "inputs", None) or {}
+        )
+        if not isinstance(demo_inputs, dict):
+            demo_inputs = {}
         sample = _collect_sample(demo_inputs, input_fields)
         if sample:
             return sample
+    if isinstance(artifact, dict):
+        return {}
     job_data = load_job_for_user(job_store, optimization_id, user)
     payload = job_data.get("payload") or {}
     dataset = payload.get("dataset") or []
@@ -432,10 +495,11 @@ def create_serve_router(*, job_store) -> APIRouter:
         tags=["agent"],
     )
     def serve_info(optimization_id: str, current_user: AuthenticatedUserDep) -> ServeInfoResponse:
-        """Describe a compiled optimized program without running it.
+        """Describe an optimized program without running it.
 
-        Metadata-only — no LLM calls. 404 if unknown or inaccessible to the
-        caller, 409 if not finished.
+        Metadata-only — no LLM calls. Protected jobs are described from their
+        persisted scrubbed prompt metadata without loading authored code. 404
+        if unknown or inaccessible to the caller, 409 if not finished.
 
         Args:
             optimization_id: Optimization id whose artifact should be described.
@@ -449,21 +513,17 @@ def create_serve_router(*, job_store) -> APIRouter:
             DomainError: 404 if unknown or inaccessible, 409 if the
                 optimization is not in a serveable state.
         """
-        _, result, overview = load_program(job_store, optimization_id, current_user)
-        artifact = result.program_artifact
+        artifact, overview, model_name = load_program_metadata(job_store, optimization_id, current_user)
         input_fields, output_fields, instructions, demo_count = _artifact_prompt_fields(artifact)
-        workflow_spec = workflow_spec_from_overview(overview)
-        if workflow_spec is not None:
-            # The artifact prompt reflects a single predictor; a workflow's
-            # servable surface is its anchor fields.
-            input_fields = workflow_spec.input_field_names()
-            output_fields = workflow_spec.output_field_names()
+        workflow_fields = _workflow_anchor_fields(overview)
+        if workflow_fields is not None:
+            input_fields, output_fields = workflow_fields
 
         return ServeInfoResponse(
             optimization_id=optimization_id,
             module_name=overview.get(PAYLOAD_OVERVIEW_MODULE_NAME, ""),
             optimizer_name=overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME, ""),
-            model_name=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, ""),
+            model_name=model_name,
             input_fields=input_fields,
             output_fields=output_fields,
             instructions=truncate_text(instructions, AGENT_MAX_INSTRUCTIONS),
@@ -487,12 +547,12 @@ def create_serve_router(*, job_store) -> APIRouter:
 
         Stateless: the endpoint exists only so the agent can call a named
         tool that the frontend recognizes via its ``tool_start`` SSE event.
-        Access is gated by the same ``load_program`` permission check used
-        by ``serve_info`` / ``serve_program`` so the agent can't render a
-        form for an optimization the caller doesn't own. The card itself
-        hits ``/serve/{id}/info`` for the field schema and ``/serve/{id}``
-        for the actual inference call — the agent never needs to invoke
-        ``serve_program`` directly.
+        Access and artifact readiness are gated by ``load_program_metadata``
+        so the agent can't render a form for an inaccessible optimization.
+        Protected jobs stay metadata-only in the API process; their inference
+        route remains unavailable until it has a metered interactive sandbox.
+        The card itself hits ``/serve/{id}/info`` for the field schema and
+        ``/serve/{id}`` for the actual inference call.
 
         Args:
             optimization_id: Optimization id whose form should be rendered.
@@ -507,7 +567,7 @@ def create_serve_router(*, job_store) -> APIRouter:
             DomainError: 404 if unknown or inaccessible, 409 if the
                 optimization is not in a serveable state.
         """
-        load_program(job_store, optimization_id, current_user)
+        load_program_metadata(job_store, optimization_id, current_user)
         return RequestUserInferenceResponse(
             optimization_id=optimization_id,
             awaiting_inputs=True,
@@ -532,12 +592,12 @@ def create_serve_router(*, job_store) -> APIRouter:
         The grid-search twin of :func:`request_user_inference`: it targets a
         single generation×reflection pair by ``pair_index`` (the agent picks
         one after reading ``serve_pair_info`` / ``get_grid_search_result``).
-        Access and pair existence are gated by ``load_pair_program`` — the
-        same check ``serve_pair_program`` uses — so the agent can't render a
-        form for an inaccessible run or a nonexistent pair. The card fetches
-        the field schema from ``/serve/{id}/pair/{index}/info`` and runs
-        inference via ``/serve/{id}/pair/{index}``; the agent never calls
-        those directly.
+        Access, pair existence, and artifact readiness are gated by
+        ``load_pair_program_metadata`` so the agent can't render a form for an
+        inaccessible run or nonexistent pair. Protected jobs stay
+        metadata-only in the API process. The card fetches the field schema
+        from ``/serve/{id}/pair/{index}/info`` and runs inference via
+        ``/serve/{id}/pair/{index}``.
 
         Args:
             optimization_id: Grid-search optimization id.
@@ -553,7 +613,7 @@ def create_serve_router(*, job_store) -> APIRouter:
             DomainError: 404 if unknown/inaccessible, 409 if not in a
                 serveable state, 400 if the pair index is out of range.
         """
-        load_pair_program(job_store, optimization_id, pair_index, current_user)
+        load_pair_program_metadata(job_store, optimization_id, pair_index, current_user)
         return RequestUserPairInferenceResponse(
             optimization_id=optimization_id,
             pair_index=pair_index,
@@ -782,15 +842,15 @@ def create_serve_router(*, job_store) -> APIRouter:
             DomainError: 404 (unknown / inaccessible), 409 (not finished or
                 pair failed).
         """
-        _program, pair, overview = load_pair_program(job_store, optimization_id, pair_index, current_user)
-        artifact = pair.program_artifact
+        artifact, pair, overview = load_pair_program_metadata(job_store, optimization_id, pair_index, current_user)
         input_fields, output_fields, instructions, demo_count = _artifact_prompt_fields(artifact)
+        model_name = pair.get("generation_model", "") if isinstance(pair, dict) else pair.generation_model
 
         return ServeInfoResponse(
             optimization_id=optimization_id,
             module_name=overview.get(PAYLOAD_OVERVIEW_MODULE_NAME, ""),
             optimizer_name=overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME, ""),
-            model_name=pair.generation_model,
+            model_name=model_name,
             input_fields=input_fields,
             output_fields=output_fields,
             instructions=truncate_text(instructions, AGENT_MAX_INSTRUCTIONS),

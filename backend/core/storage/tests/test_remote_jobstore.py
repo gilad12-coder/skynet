@@ -16,22 +16,29 @@ here with a clear reason:
 from __future__ import annotations
 
 import inspect
+import pickle
 import time
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Any
 
 import pytest
+from gepa.core.state import GEPAState, ValsetEvaluation
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import core.storage.remote as remote_mod
+from core.billing.budgets import BudgetService
+from core.billing.operation_pricing import CreditCharge, OperationQuote
+from core.billing.recovery_admission import build_recovery_plan, model_call_bound, runtime_bound
 from core.constants import OPTIMIZATION_TYPE_TAGGING
 from core.storage.base import JobStore
-from core.storage.models import Base, JobModel, OptimizationShareGrantModel
+from core.storage.models import Base, BillingCustomerModel, JobModel, OptimizationShareGrantModel
 from core.storage.remote import RemoteDBJobStore
+from core.worker.checkpoint_compat import checkpoint_manifest
 
 
 class SQLiteJobStore(RemoteDBJobStore):
@@ -59,6 +66,78 @@ class SQLiteJobStore(RemoteDBJobStore):
         self._checkpoints = remote_mod.PostgresCheckpointBlobStore(self._engine)
         self._grid_pair_results = remote_mod.PostgresGridPairResultStore(self._engine)
         self._agent_runs = remote_mod.PostgresAgentRunStore(self._engine)
+
+
+_RECOVERY_IMAGE = "fixture@sha256:" + "a" * 64
+
+
+def _fund_checkpoint(
+    store: SQLiteJobStore, optimization_id: str, monkeypatch: pytest.MonkeyPatch
+) -> BudgetService:
+    """Attach reconciled funding and a real pinned checkpoint to an existing test run.
+
+    Args:
+        store: Private fixture database.
+        optimization_id: Existing run to make genuinely recoverable.
+        monkeypatch: Pytest fixture used to bind the current sandbox profile.
+
+    Returns:
+        Authoritative budget service for resume admission and generation fencing.
+    """
+    monkeypatch.setattr(remote_mod.settings, "dspy_sandbox_image", _RECOVERY_IMAGE)
+    monkeypatch.setattr(remote_mod.settings, "vercel_sandbox_max_lifetime_seconds", 60.0)
+    with Session(store.engine) as session:
+        session.add(
+            BillingCustomerModel(
+                username="resume-owner", stripe_customer_id="local-resume", credit_balance=50, grant_remaining=0
+            )
+        )
+        session.commit()
+    service = BudgetService(engine=store.engine)
+    budget = service.create("resume-owner", 20, idempotency_key=optimization_id)
+    service.attach_to_job(budget.id, "resume-owner", optimization_id, expected_revision=budget.revision)
+    payload = {
+        "optimizer_name": "GEPA",
+        "dataset": [{"x": "sample"}],
+        "execution_runtime": "vercel",
+        "execution_budget_id": budget.id,
+        "execution_budget_generation": 0,
+    }
+    store.update_job(
+        optimization_id,
+        username="resume-owner",
+        payload=payload,
+        execution_budget_id=budget.id,
+        execution_budget_generation=0,
+    )
+    state = GEPAState({"predict": "seed"}, ValsetEvaluation({0: "answer"}, {0: 0.5}))
+    state.i = 3
+    state.total_num_evals = 12
+    data = pickle.dumps(state.__dict__)
+    manifest = checkpoint_manifest(data, payload, store.get_job(optimization_id)["code_version"])
+    quote = OperationQuote(
+        request_fingerprint="fixture-request",
+        maximum=CreditCharge(total=Decimal(1), wallet=Decimal(1)),
+        price_snapshot={"version": "fixture-prices", "provider": "fixture"},
+    )
+    bound = model_call_bound("task", "fixture/model", quote)
+    manifest["recovery_admission"] = build_recovery_plan(
+        manifest,
+        runtime=runtime_bound(
+            "vercel",
+            {"image": _RECOVERY_IMAGE, "lifetime_seconds": 60},
+        ),
+        seed_bounds=[bound],
+        execution_bound={"model_calls": [bound], "max_credits": "1", "max_wallet_credits": "1"},
+        seed_marker_seen=True,
+    )
+    store.save_gepa_checkpoint(
+        optimization_id,
+        data,
+        3,
+        manifest=manifest,
+    )
+    return service
 
 
 def _parse_iso_datetime(value: str) -> datetime:
@@ -787,22 +866,39 @@ def test_count_jobs_zero_when_empty(store: SQLiteJobStore) -> None:
     assert store.count_jobs() == 0
 
 
-def test_recover_orphaned_jobs_requeues_running_job(store: SQLiteJobStore) -> None:
-    """Recover orphaned jobs requeues a first-attempt running job."""
+def test_recover_orphaned_jobs_requeues_running_job(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recover orphaned jobs requeues a first-attempt running job.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+    """
     store.create_job("r1")
     store.update_job("r1", status="running")
-    store.recover_orphaned_jobs()
+    budget_service = _fund_checkpoint(store, "r1", monkeypatch)
+    store.recover_orphaned_jobs(budget_service=budget_service)
     job = store.get_job("r1")
     assert job["status"] == "pending"
     assert job["attempts"] == 1
-    assert job["message"] == "Re-queued after pod failure (attempt 1)"
+    assert job["recovery"]["state"] == "recovering"
+    assert job["recovery"]["phase"] == "resuming"
 
 
-def test_recover_orphaned_jobs_requeues_validating_job(store: SQLiteJobStore) -> None:
-    """Recover orphaned jobs requeues a first-attempt validating job."""
+def test_recover_orphaned_jobs_requeues_validating_job(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recover orphaned jobs requeues a first-attempt validating job.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+    """
     store.create_job("r2")
     store.update_job("r2", status="validating")
-    store.recover_orphaned_jobs()
+    budget_service = _fund_checkpoint(store, "r2", monkeypatch)
+    store.recover_orphaned_jobs(budget_service=budget_service)
     assert store.get_job("r2")["status"] == "pending"
 
 
@@ -836,8 +932,8 @@ def test_recover_orphaned_jobs_fails_at_max_attempts(store: SQLiteJobStore, monk
     store.recover_orphaned_jobs()
     job = store.get_job("r8")
     assert job["status"] == "failed"
-    assert job["attempts"] == 3
-    assert job["message"] == "Job failed after pod failure (attempt 3)"
+    assert job["attempts"] == 2
+    assert "attempt limit" in job["message"]
     assert job["completed_at"] is not None
 
 
@@ -854,7 +950,7 @@ def test_recover_orphaned_jobs_reports_version_skew_at_max_attempts(
 
     job = store.get_job("r-version")
     assert job["status"] == "failed"
-    assert job["message"] == "No compatible worker version available (job=v1, fleet=v2)"
+    assert job["recovery"]["state"] == "unavailable"
 
 
 def test_recover_orphaned_jobs_returns_zero_when_none_present(store: SQLiteJobStore) -> None:
@@ -1057,7 +1153,7 @@ def test_recover_orphaned_jobs_skips_distributed_parent(store: SQLiteJobStore) -
 
     assert recovered == 1
     assert store.get_job("grid-p")["status"] == "running"
-    assert store.get_job(claimed["optimization_id"])["status"] == "pending"
+    assert store.get_job(claimed["optimization_id"])["status"] == "failed"
 
 
 def test_requeue_for_rerun_drops_pair_children(store: SQLiteJobStore) -> None:
@@ -1406,12 +1502,20 @@ def test_delete_job_removes_its_checkpoint(store: SQLiteJobStore) -> None:
     assert store.has_gepa_checkpoint("ck2") is False
 
 
-def test_requeue_for_resume_flips_to_pending_and_bumps_attempts(store: SQLiteJobStore) -> None:
-    """Resume re-queues in place: same id, pending, claim cleared, attempts+1."""
+def test_requeue_for_resume_flips_to_pending_and_bumps_attempts(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Resume re-queues in place: same id, pending, claim cleared, attempts+1.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+    """
     store.create_job("ck3")
     store.update_job("ck3", status="failed", attempts=0, claimed_by="pod-x", completed_at="2026-01-01T00:00:00Z")
 
-    new_attempt = store.requeue_for_resume("ck3")
+    budget_service = _fund_checkpoint(store, "ck3", monkeypatch)
+    new_attempt = store.requeue_for_resume("ck3", budget_service=budget_service)
     assert new_attempt == 1
     job = store.get_job("ck3")
     assert job["status"] == "pending"
@@ -1425,8 +1529,15 @@ def test_requeue_for_resume_missing_job_returns_none(store: SQLiteJobStore) -> N
     assert store.requeue_for_resume("no-such-job") is None
 
 
-def test_requeue_for_resume_banks_finished_leg_runtime(store: SQLiteJobStore) -> None:
-    """Each resume folds the finished leg's duration in; the paused gap is excluded."""
+def test_requeue_for_resume_banks_finished_leg_runtime(
+    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each resume folds the finished leg's duration in; the paused gap is excluded.
+
+    Args:
+        store: Disposable job store.
+        monkeypatch: Pytest fixture used to bind the sandbox profile.
+    """
     store.create_job("ck-acc")
     store.update_job(
         "ck-acc",
@@ -1436,7 +1547,8 @@ def test_requeue_for_resume_banks_finished_leg_runtime(store: SQLiteJobStore) ->
         completed_at="2026-01-01T00:01:05Z",  # leg 1 = 65s
     )
 
-    store.requeue_for_resume("ck-acc")
+    budget_service = _fund_checkpoint(store, "ck-acc", monkeypatch)
+    store.requeue_for_resume("ck-acc", budget_service=budget_service)
     job = store.get_job("ck-acc")
     assert job["accumulated_runtime_seconds"] == 65.0
     assert job.get("started_at") is None
@@ -1448,7 +1560,7 @@ def test_requeue_for_resume_banks_finished_leg_runtime(store: SQLiteJobStore) ->
         started_at="2026-01-01T00:30:00Z",  # ~29 min paused before this leg
         completed_at="2026-01-01T00:30:30Z",  # leg 2 = 30s
     )
-    store.requeue_for_resume("ck-acc")
+    store.requeue_for_resume("ck-acc", budget_service=budget_service)
     job = store.get_job("ck-acc")
     assert job["accumulated_runtime_seconds"] == 95.0  # 65 + 30, the pause is never counted
 

@@ -21,17 +21,22 @@ import dspy
 from ..config import settings
 from ..constants import OPTIMIZATION_TYPE_BLACKBOX, OPTIMIZATION_TYPE_GRID_SEARCH, OPTIMIZATION_TYPE_RUN
 from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
+from ..models.results import TerminalOutcome
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
 from ..service_gateway.language_models import activate_job_lm_budget
+from ..service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
+from ..service_gateway.optimization.blackbox.sandbox import sandbox_runtime_context
 from ..service_gateway.optimization.blackbox.service import run_blackbox_optimization
+from ..service_gateway.optimization.budget_stop import BudgetReached
 from ..service_gateway.optimization.llm_error import (
     LlmErrorCapture,
     enrich_error_message,
     reset_llm_error,
 )
 from ..service_gateway.react_compat import configure_native_tool_calling
-from .constants import EVENT_AGENT_RUN, EVENT_ERROR, EVENT_LOG, EVENT_PROGRESS, EVENT_RESULT
+from .constants import EVENT_AGENT_RUN, EVENT_LOG, EVENT_PROGRESS, EVENT_RESULT, EVENT_TERMINAL
+from .failure_events import failure_event
 from .log_handler import get_current_pair_index
 
 # Populated by the parent via ``set_fork_service`` before forking so
@@ -165,6 +170,8 @@ def run_service_in_subprocess(
         event_queue: Shared multiprocessing queue back to the parent.
         start_method: The active multiprocessing start method (e.g. ``"fork"``).
     """
+    payload_dict = dict(payload_dict)
+    stable_job_id = payload_dict.pop("_job_id", artifact_id)
     # Disable dspy caching entirely for this child. The in-memory cache pins
     # every response in a process-wide LRU (1M-entry cap — unbounded in
     # practice) for its whole multi-hour lifetime, and the disk cache routes
@@ -213,12 +220,22 @@ def run_service_in_subprocess(
     error_capture = LlmErrorCapture()
     reset_llm_error()
     dspy_logger.addHandler(error_capture)
+    runtime_scope = contextlib.ExitStack()
 
     try:
         payload_dict = dict(payload_dict)
         optimization_type = payload_dict.pop("_optimization_type", OPTIMIZATION_TYPE_RUN)
         gepa_log_dir_path = payload_dict.pop("_gepa_log_dir", None)
         completed_pairs = payload_dict.pop("_completed_pairs", None)
+        target_route = payload_dict.pop("_skynet_target_route", None)
+        evaluator_route = payload_dict.pop("_skynet_evaluator_route", None)
+        budget_gateway_descriptor = payload_dict.pop("_budget_gateway_descriptor", None)
+        if budget_gateway_descriptor is not None:
+            runtime_scope.enter_context(
+                sandbox_runtime_context(
+                    RemoteSandboxRuntime(budget_gateway_descriptor["url"], budget_gateway_descriptor["control_token"])
+                )
+            )
         # Distributed grid pair: this child holds one pair of a larger grid and
         # must report the pair's GLOBAL index / the grid's real pair count.
         pair_index_base = int(payload_dict.pop("_pair_index_base", 0) or 0)
@@ -242,10 +259,12 @@ def run_service_in_subprocess(
             blackbox_payload = BlackboxRunRequest.model_validate(payload_dict)
             result = run_blackbox_optimization(
                 blackbox_payload,
-                artifact_id=artifact_id,
+                artifact_id=stable_job_id,
                 progress_callback=progress_callback,
                 gepa_log_dir_path=gepa_log_dir_path,
                 agent_run_sink=partial(_emit_agent_run_event, event_queue),
+                target_route=target_route,
+                evaluator_route=evaluator_route,
             )
         else:
             run_payload = RunRequest.model_validate(payload_dict)
@@ -264,16 +283,29 @@ def run_service_in_subprocess(
         )
     # subprocess isolation boundary: report any failure (including
     # SystemExit and KeyboardInterrupt) to the parent before the child exits.
-    except BaseException as exc:
-        safe_queue_put(
-            event_queue,
-            {
-                "type": EVENT_ERROR,
-                "error": enrich_error_message(str(exc)),
-                "traceback": traceback.format_exc(),
+    except BudgetReached as exc:
+        result = exc.result
+        serialized = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
+        if not isinstance(serialized, dict):
+            serialized = None
+        outcome = TerminalOutcome(
+            result=serialized,
+            result_availability="evaluated" if serialized is not None else "none",
+            evidence={
+                "candidate_origin": None,
+                "final_evaluation_completed": False,
+                "final_evaluation_reason": "budget_reached",
+                **exc.evidence,
             },
+            message=str(exc),
         )
+        safe_queue_put(event_queue, {"type": EVENT_TERMINAL, "outcome": outcome.model_dump(mode="json")})
+    except BaseException as exc:
+        event = failure_event(exc, traceback_text=traceback.format_exc())
+        event["error"] = enrich_error_message(str(exc))
+        safe_queue_put(event_queue, event)
     finally:
+        runtime_scope.close()
         dspy_logger.removeHandler(error_capture)
         reset_llm_error()
         for lg, saved_level in zip(forwarded_loggers, saved_levels, strict=True):

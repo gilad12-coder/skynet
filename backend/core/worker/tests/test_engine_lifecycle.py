@@ -55,7 +55,12 @@ def store() -> FakeJobStore:
 @pytest.fixture
 def worker(store: FakeJobStore) -> BackgroundWorker:
     """Build an unstarted BackgroundWorker bound to the test store."""
-    return BackgroundWorker(job_store=cast(JobStore, store), num_workers=2, poll_interval=1.0)
+    return BackgroundWorker(
+        job_store=cast(JobStore, store),
+        num_workers=2,
+        poll_interval=1.0,
+        _allow_unprotected_test_execution=True,
+    )
 
 
 def _make_fake_queue(*events: dict) -> queue.Queue:
@@ -472,7 +477,12 @@ def test_dump_thread_stacks_returns_empty_string_when_no_threads_started(
 def test_dump_thread_stacks_includes_thread_name_when_threads_are_running() -> None:
     """A running worker includes its thread names in the dump."""
     store = FakeJobStore()
-    w = BackgroundWorker(job_store=cast(JobStore, store), num_workers=1, poll_interval=0.05)
+    w = BackgroundWorker(
+        job_store=cast(JobStore, store),
+        num_workers=1,
+        poll_interval=0.05,
+        _allow_unprotected_test_execution=True,
+    )
     w.start()
     try:
         result = w.dump_thread_stacks()
@@ -559,7 +569,12 @@ def test_init_falls_back_to_1_0_when_cancel_poll_interval_is_not_a_float(
     monkeypatch.setattr(engine_module, "settings", _FakeSettings())
 
     # Must not raise; must use 1.0 as the fallback.
-    w = BackgroundWorker(job_store=cast(JobStore, store), num_workers=1, poll_interval=1.0)
+    w = BackgroundWorker(
+        job_store=cast(JobStore, store),
+        num_workers=1,
+        poll_interval=1.0,
+        _allow_unprotected_test_execution=True,
+    )
     assert w._cancel_poll_interval == 1.0
 
 
@@ -623,7 +638,12 @@ def test_resolve_mp_context_emits_warning_for_non_fork_method(
 
 def test_stop_sets_all_cancel_events(store: FakeJobStore) -> None:
     """stop() must set every cancel event so running jobs can detect shutdown promptly."""
-    w = BackgroundWorker(job_store=cast(JobStore, store), num_workers=1, poll_interval=0.05)
+    w = BackgroundWorker(
+        job_store=cast(JobStore, store),
+        num_workers=1,
+        poll_interval=0.05,
+        _allow_unprotected_test_execution=True,
+    )
     w.start()
     try:
         # Register several cancel events manually (as submit_job / enqueue_job would).

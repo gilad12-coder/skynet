@@ -42,9 +42,10 @@ export function DraftRestoreToast({
           meta && <p className="mt-0.5 text-xs text-muted-foreground">{meta}</p>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="grid w-full grid-cols-2 gap-2">
         <Button
           size="sm"
+          className="w-full justify-center"
           onClick={onContinue}
           disabled={working}
           aria-busy={working || undefined}
@@ -55,6 +56,7 @@ export function DraftRestoreToast({
         <Button
           size="sm"
           variant="outline"
+          className="w-full justify-center"
           onClick={onStartNew}
           disabled={working}
           data-tutorial="submit-draft-start-new"

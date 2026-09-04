@@ -40,6 +40,8 @@ from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ...billing.credential_safety import scrub_model_config
+from ...billing.protected_credentials import scrub_execution_credentials
 from ...constants import (
     OPTIMIZATION_TYPE_BLACKBOX,
     OPTIMIZATION_TYPE_GRID_SEARCH,
@@ -108,6 +110,7 @@ from ._helpers import (
     get_job_no_payload,
     job_owner,
     load_program,
+    load_program_metadata,
     stable_seed,
 )
 from .constants import TERMINAL_STATUSES
@@ -218,10 +221,8 @@ def _strip_model_secrets(cfg: Any) -> Any:
     """
     if not isinstance(cfg, dict):
         return cfg
-    cleaned = {k: v for k, v in cfg.items() if k != "base_url"}
-    extra = cleaned.get("extra")
-    if isinstance(extra, dict):
-        cleaned["extra"] = {k: v for k, v in extra.items() if k != "api_key"}
+    cleaned = scrub_model_config(cfg)
+    cleaned.pop("base_url", None)
     return cleaned
 
 
@@ -239,6 +240,7 @@ def _scrub_payload(payload: dict[str, Any]) -> dict[str, Any]:
         A new dict safe to expose through a share link.
     """
     out: dict[str, Any] = {}
+    payload = scrub_execution_credentials(payload)
     for key, value in payload.items():
         if key in ("username", "dataset"):
             continue
@@ -372,9 +374,7 @@ def _test_results(job_data: dict[str, Any], optimization_id: str) -> dict[str, l
     }
 
 
-def _build_status_response(
-    job_store, optimization_id: str, job_data: dict[str, Any]
-) -> OptimizationStatusResponse:
+def _build_status_response(job_store, optimization_id: str, job_data: dict[str, Any]) -> OptimizationStatusResponse:
     """Assemble the read-only status response for a shared optimization.
 
     Mirrors the ``OptimizationStatusResponse`` that ``GET /optimizations/{id}``
@@ -466,12 +466,12 @@ def _build_status_response(
 def _serve_info(job_store, optimization_id: str, owner: str) -> ServeInfoResponse | None:
     """Build the program ``ServeInfoResponse`` for a shared optimization.
 
-    Loads the program under the OWNER's identity (the resolver already proved
-    the caller is a viewer+), returning ``None`` when the job is not in a
-    serveable state — the share view simply omits ``serve_info`` then.
+    Loads metadata under the OWNER's identity (the resolver already proved the
+    caller is a viewer+), returning ``None`` when the job is not in a serveable
+    state. Protected artifacts are never materialized in the API process.
 
     Args:
-        job_store: Job-store backing :func:`load_program`.
+        job_store: Job-store backing :func:`load_program_metadata`.
         optimization_id: Optimization whose program is described.
         owner: Job owner username, used to satisfy the ownership check inside
             :func:`load_program` without exposing the real model secrets.
@@ -482,16 +482,26 @@ def _serve_info(job_store, optimization_id: str, owner: str) -> ServeInfoRespons
     """
     owner_user = AuthenticatedUser(username=owner, role="user", groups=())
     try:
-        _program, result, overview = load_program(job_store, optimization_id, owner_user)
+        artifact, overview, model_name = load_program_metadata(job_store, optimization_id, owner_user)
     except DomainError:
         return None
-    artifact = result.program_artifact
-    prompt = artifact.optimized_prompt
+    prompt = artifact.get("optimized_prompt") if isinstance(artifact, dict) else artifact.optimized_prompt
     if prompt is None:
         input_fields: list[str] = []
         output_fields: list[str] = []
         instructions = None
         demo_count = 0
+    elif isinstance(prompt, dict):
+        raw_inputs = prompt.get("input_fields")
+        raw_outputs = prompt.get("output_fields")
+        raw_instructions = prompt.get("instructions")
+        raw_demos = prompt.get("demos")
+        input_fields = [value for value in raw_inputs if isinstance(value, str)] if isinstance(raw_inputs, list) else []
+        output_fields = (
+            [value for value in raw_outputs if isinstance(value, str)] if isinstance(raw_outputs, list) else []
+        )
+        instructions = raw_instructions if isinstance(raw_instructions, str) else None
+        demo_count = len(raw_demos) if isinstance(raw_demos, list) else 0
     else:
         input_fields = list(prompt.input_fields)
         output_fields = list(prompt.output_fields)
@@ -501,7 +511,7 @@ def _serve_info(job_store, optimization_id: str, owner: str) -> ServeInfoRespons
         optimization_id=optimization_id,
         module_name=overview.get("module_name", ""),
         optimizer_name=overview.get("optimizer_name", ""),
-        model_name=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, ""),
+        model_name=model_name,
         input_fields=input_fields,
         output_fields=output_fields,
         instructions=instructions,
@@ -1141,8 +1151,7 @@ def create_share_router(*, job_store) -> APIRouter:
         )
         if (
             optimization_type not in _USER_FACING_OPTIMIZATION_TYPES
-            or status_to_job_status(job_data.get("status", "pending"))
-            != OptimizationStatus.success
+            or status_to_job_status(job_data.get("status", "pending")) != OptimizationStatus.success
         ):
             raise DomainError("share.not_found", status=404)
         if bool(overview.get(PAYLOAD_OVERVIEW_IS_PRIVATE, False)):
@@ -1243,9 +1252,7 @@ def create_share_router(*, job_store) -> APIRouter:
         response_model=ServeResponse,
         summary="Run one inference on a shared optimization (viewer+ only)",
     )
-    def serve_shared_optimization(
-        token: str, req: ServeRequest, current_user: AuthenticatedUserDep
-    ) -> ServeResponse:
+    def serve_shared_optimization(token: str, req: ServeRequest, current_user: AuthenticatedUserDep) -> ServeResponse:
         """Run a single blocking inference using the OWNER's stored model config.
 
         Requires an effective role of editor or higher — it spends the owner's

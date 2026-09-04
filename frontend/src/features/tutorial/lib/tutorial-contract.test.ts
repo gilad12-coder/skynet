@@ -5,6 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { WIZARD_STAGE_ORDER } from "../../submit/lib/wizard-steps.ts";
 import {
   TUTORIAL_DEMO_RUN_MS,
   TUTORIAL_OPTIMIZATION_TOTAL_MS,
@@ -38,11 +39,16 @@ test("every tutorial spotlight target is still declared by the application", () 
   const targets = [...steps.matchAll(/target: "\[data-tutorial='([^']+)'\]"/g)].map(
     (match) => match[1],
   );
+  const stageTargets = appSource.includes("data-tutorial={`wizard-stage-${stageAt(w.step)}`}")
+    ? WIZARD_STAGE_ORDER.map((stage) => `wizard-stage-${stage}`)
+    : [];
 
   assert.ok(targets.length > 0);
   for (const target of targets) {
     assert.ok(
-      appSource.includes(`"${target}"`) || appSource.includes(`'${target}'`),
+      appSource.includes(`"${target}"`) ||
+        appSource.includes(`'${target}'`) ||
+        stageTargets.includes(target),
       `Missing application target for tutorial step: ${target}`,
     );
   }

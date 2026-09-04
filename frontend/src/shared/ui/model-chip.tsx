@@ -176,16 +176,25 @@ export function ModelChip({
           : "border-border/50 bg-card/80 hover:border-primary/40 hover:shadow-sm",
         className,
       )}
-      onClick={onClick}
     >
-      {!isEmpty && (
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border/45 bg-background shadow-sm">
-          <ProviderLogo slug={modelProviderSlug(config.name)} size={20} />
-        </span>
-      )}
-      {/* The explanation tooltip lives only on the Info button below — hovering
-          the card body itself must stay quiet. */}
-      {content}
+      <button
+        type="button"
+        onClick={onClick}
+        aria-haspopup="dialog"
+        aria-label={roleLabel ? `${roleLabel}: ${name}` : name}
+        className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2.5 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-0"
+      >
+        {!isEmpty && (
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border/45 bg-background shadow-sm">
+            <ProviderLogo slug={modelProviderSlug(config.name)} size={20} />
+          </span>
+        )}
+        {content}
+        <Gear
+          className="size-3.5 shrink-0 text-muted-foreground/60 group-hover:text-foreground/70 transition-colors"
+          aria-hidden="true"
+        />
+      </button>
 
       {isEmpty && copyFromLabel && onCopyFrom && (
         <button
@@ -223,6 +232,7 @@ export function ModelChip({
           <TooltipButton tooltip={msg("shared.model_chip.clone")} side="top">
             <button
               type="button"
+              aria-label={msg("shared.model_chip.clone")}
               onClick={(e) => {
                 e.stopPropagation();
                 onClone();
@@ -237,6 +247,7 @@ export function ModelChip({
           <TooltipButton tooltip={msg("shared.model_chip.remove")} side="top">
             <button
               type="button"
+              aria-label={msg("shared.model_chip.remove")}
               onClick={(e) => {
                 e.stopPropagation();
                 onRemove();
@@ -247,7 +258,6 @@ export function ModelChip({
             </button>
           </TooltipButton>
         )}
-        <Gear className="size-3.5 text-muted-foreground/60 group-hover:text-foreground/70 transition-colors" />
       </div>
     </div>
   );

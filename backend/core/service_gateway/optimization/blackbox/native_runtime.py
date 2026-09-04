@@ -1,4 +1,4 @@
-"""Run pinned upstream agent engines in a worker jail or a managed sandbox."""
+"""Run pinned upstream agent engines in a managed sandbox."""
 
 from __future__ import annotations
 
@@ -6,11 +6,9 @@ import base64
 import io
 import json
 import math
-import platform
+import os
 import re
 import shlex
-import shutil
-import subprocess
 import sys
 import tarfile
 import threading
@@ -22,8 +20,11 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
+from ....billing.model_gateway import raise_gateway_stop
+from ....billing.runtime import UsagePendingError
 from ....config import Settings, settings
 from ....exceptions import ServiceError
+from ..budget_stop import BudgetReached
 from . import native_runner
 from .agent_eval import gateway_from_settings
 from .feedback import emit_candidate
@@ -31,10 +32,10 @@ from .harness import GatewayConfig
 from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, Task
 from .runner import side_info_json_default
 from .sandbox import (
-    LocalSubprocessRuntime,
     SandboxRuntime,
     SandboxSession,
     SandboxSpec,
+    current_sandbox_runtime,
     sandbox_runtime_from_settings,
     sandbox_unavailable_reason,
     unique_sandbox_name,
@@ -54,13 +55,14 @@ _UUID = re.compile(r"^[0-9a-f]{32}$")
 
 @dataclass(frozen=True)
 class NativeOptions:
-    """Bind an upstream proposer to its selected runtime and model gateway."""
+    """Bind an upstream proposer to the managed runtime and model gateway."""
 
-    runtime: Literal["worker", "vercel"]
+    runtime: Literal["vercel"]
     model: str
     gateway: GatewayConfig = field(repr=False)
     max_token_cost: float
     timeout_seconds: float = 2400.0
+    budget_route: dict[str, str] | None = field(default=None, repr=False)
     sandbox_runtime: SandboxRuntime | None = None
     usage_by_model: dict[str, dict[str, int]] = field(default_factory=dict)
     usage_lock: Any = field(default_factory=threading.Lock, repr=False, compare=False)
@@ -80,43 +82,20 @@ def native_runtime_unavailable_reason(runtime: str, settings: Settings) -> str |
     """Explain whether the selected native execution environment can launch.
 
     Args:
-        runtime: Requested worker or Vercel execution environment.
+        runtime: Requested execution environment.
         settings: Deployment gateway and managed-sandbox configuration.
 
     Returns:
         An actionable unavailability reason, or ``None`` when checks pass.
     """
-    if runtime not in ("worker", "vercel"):
-        return "Choose a worker or Vercel runtime for this optimizer."
+    if runtime != "vercel":
+        return "Production optimizations run in the managed Vercel sandbox."
+    current = current_sandbox_runtime()
+    if current is not None:
+        return None
     if gateway_from_settings(settings) is None:
         return "Native optimizers require a configured model gateway."
-    if runtime == "vercel":
-        return sandbox_unavailable_reason(settings)
-    if sys.version_info < (3, 11, 8):
-        return "Worker optimizers require Python 3.11.8 or newer."
-    binary = shutil.which("claude")
-    if binary is None:
-        return f"Worker optimizers require Claude Code {CLAUDE_VERSION}."
-    try:
-        version = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=5, check=False)
-        if version.returncode or version.stdout.split(" ", 1)[0] != CLAUDE_VERSION:
-            return f"Worker optimizers require Claude Code {CLAUDE_VERSION}."
-        if platform.system() == "Linux":
-            bwrap = shutil.which("bwrap")
-            if bwrap is None:
-                return "Worker optimizers require bubblewrap for process isolation."
-            jail = subprocess.run(
-                [bwrap, "--ro-bind", "/", "/", "--unshare-uts", "/bin/true"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            if jail.returncode:
-                return "Worker process isolation is unavailable: bubblewrap cannot create a namespace."
-    except (OSError, subprocess.TimeoutExpired):
-        return "The worker native optimizer runtime could not pass its launch checks."
-    return None
+    return sandbox_unavailable_reason(settings)
 
 
 def _source_archive() -> str:
@@ -142,11 +121,12 @@ def _source_archive() -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
-def _bootstrap_command(runtime: str) -> str:
+def _bootstrap_command(runtime: str, *, protected: bool = False) -> str:
     """Build installation and preflight commands with immutable package versions.
 
     Args:
-        runtime: Selected worker or managed execution environment.
+        runtime: Selected managed execution environment.
+        protected: Require dependencies already present in the immutable offline image.
 
     Returns:
         Shell command that prepares the isolated source and runtime.
@@ -155,7 +135,7 @@ def _bootstrap_command(runtime: str) -> str:
         "set -eu; mkdir -p .claude .cache .local native_vendor rpc; "
         "test -f .claude.json || printf '{}' > .claude.json; "
     )
-    if runtime == "vercel":
+    if not protected:
         prepare += (
             'export HOME="$PWD"; '
             'export PATH="$HOME/.local/bin:$PATH"; '
@@ -183,9 +163,99 @@ def _bootstrap_command(runtime: str) -> str:
             "import sys; assert sys.version_info >= (3, 11, 8), 'Native optimizers need Python 3.11.8 or newer'"
         )
     )
-    if runtime == "worker":
-        prepare += '; if [ "$(uname -s)" = Linux ]; then command -v bwrap >/dev/null; fi'
+    if protected:
+        prepare += "; node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'"
     return prepare
+
+
+def _selected_runtime(options: NativeOptions) -> SandboxRuntime:
+    """Bind the selected proposer transport without falling back to an unisolated process.
+
+    Args:
+        options: Fixed runtime selection and scoped model route.
+
+    Returns:
+        The explicit runtime adapter or the matching deployment transport.
+    """
+    if options.sandbox_runtime is not None:
+        return options.sandbox_runtime
+    runtime = sandbox_runtime_from_settings(settings)
+    if runtime is None:
+        raise ServiceError(sandbox_unavailable_reason(settings) or "Vercel runtime is unavailable.")
+    return runtime
+
+
+def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
+    """Verify native dependencies inside the selected protected runtime without proposing a candidate.
+
+    Args:
+        options: Actual runtime selection with a scoped parent gateway capability.
+
+    Returns:
+        Confirmed immutable source, CLI version, engine imports and runtime selection.
+
+    Raises:
+        ServiceError: When the managed runtime or its pinned dependencies cannot launch.
+        UsagePendingError: When the readiness sandbox's usage still requires reconciliation.
+    """
+    if options.budget_route is None or options.runtime != "vercel":
+        raise ServiceError("Native readiness requires the protected Vercel execution authority.")
+    source = _source_archive()
+    runtime = _selected_runtime(options)
+    lifetime = min(180.0, settings.vercel_sandbox_max_lifetime_seconds)
+    session = runtime.open(
+        SandboxSpec(
+            lifetime_seconds=lifetime,
+            network_disabled=True,
+            name=unique_sandbox_name("skynet-native-readiness"),
+            env={"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+    )
+    started = time.monotonic()
+    try:
+        session.write_files(
+            {
+                _RUNNER_FILE: Path(native_runner.__file__).read_text(encoding="utf-8"),
+                "native_source.tar.gz.b64": source,
+            }
+        )
+        installed = session.run(
+            _bootstrap_command(options.runtime, protected=True), timeout_seconds=min(60, lifetime - 1)
+        )
+        if not installed.ok or installed.timed_out:
+            raise ServiceError("The selected native runtime lacks its required pinned offline dependencies.")
+        probe = (
+            "import json,subprocess; import native_runner; "
+            "from gepa.oa.registry import get_engine_cls; "
+            "[get_engine_cls(name) for name in ('meta_harness','autoresearch')]; "
+            "prefix=[]; "
+            "result=subprocess.run([*prefix,'claude','--version'],capture_output=True,text=True,timeout=20,check=True); "
+            f"assert result.stdout.split(' ',1)[0] == {CLAUDE_VERSION!r}; "
+            "print(json.dumps({'ready':True}))"
+        )
+        remaining = lifetime - (time.monotonic() - started) - 1
+        if remaining <= 0:
+            raise ServiceError("The native readiness runtime expired during dependency checks.")
+        checked = session.run(
+            'export HOME="$PWD"; export PYTHONPATH="$PWD/native_vendor"; '
+            f'"$(cat native-python.txt)" -c {shlex.quote(probe)}',
+            timeout_seconds=min(60, remaining),
+            env={"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CI": "1"},
+        )
+        if (
+            not checked.ok
+            or checked.timed_out
+            or not any(line.strip() == '{"ready": true}' for line in checked.stdout.splitlines())
+        ):
+            raise ServiceError("The selected native runtime cannot launch the pinned upstream engine dependencies.")
+        return {"runtime": options.runtime, "gepa_source": GEPA_SOURCE, "claude_version": CLAUDE_VERSION}
+    finally:
+        original_error = sys.exception()
+        try:
+            session.close()
+        except UsagePendingError:
+            if original_error is None:
+                raise
 
 
 class _EvaluatorMailbox:
@@ -213,7 +283,7 @@ class _EvaluatorMailbox:
         self.nonce = nonce
         self.progress_callback = progress_callback
         self.check_budget = check_budget
-        self.error: Exception | None = None
+        self.error: BaseException | None = None
         self._buffer = ""
         self._responses: dict[str, str] = {}
         self._lock = threading.Lock()
@@ -288,9 +358,11 @@ class _EvaluatorMailbox:
                     if self.check_budget is not None:
                         self.check_budget()
                     response = {"score": score, "info": info}
-                except Exception as exc:
+                except (Exception, BudgetReached) as exc:
                     self.error = exc
                     response = {"error": "The parent evaluator stopped this run."}
+                    if isinstance(exc, BudgetReached):
+                        response["stop_reason"] = "budget_reached"
             try:
                 self._responses[request_id] = json.dumps(response, default=side_info_json_default, allow_nan=False)
             except (TypeError, ValueError) as exc:
@@ -346,7 +418,7 @@ def _record_usage(options: NativeOptions, usage: dict[str, Any]) -> None:
 
 
 def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: EngineContext) -> Result:
-    """Execute an unchanged upstream agent engine in the selected isolated process.
+    """Execute an unchanged upstream agent engine inside the managed sandbox.
 
     Args:
         engine_id: Upstream ``meta_harness`` or ``autoresearch`` identifier.
@@ -362,8 +434,8 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         Exception: The original parent evaluator exception, without retrying it.
     """
     options = ctx.native_options
-    if options is None or options.runtime not in ("worker", "vercel"):
-        raise ServiceError("Choose a worker or Vercel runtime for this optimizer.")
+    if options is None or options.runtime != "vercel":
+        raise ServiceError("Native optimizers require the managed Vercel sandbox.")
     if engine_id not in ("meta_harness", "autoresearch") or not task.str_mode:
         raise ServiceError("Native agent engines require a single text candidate.")
     if server.remaining <= 0:
@@ -374,11 +446,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         raise ServiceError("Native optimizers require a positive timeout.")
     if not options.gateway.url or not options.gateway.api_key:
         raise ServiceError("Native optimizers require a configured model gateway.")
-    runtime = options.sandbox_runtime
-    if runtime is None:
-        runtime = LocalSubprocessRuntime() if options.runtime == "worker" else sandbox_runtime_from_settings(settings)
-    if runtime is None:
-        raise ServiceError(sandbox_unavailable_reason(settings) or "Vercel runtime is unavailable.")
+    runtime = _selected_runtime(options)
     nonce = uuid.uuid4().hex
     artifacts_dir = Path(ctx.run_dir) / f"{engine_id}-native-{nonce[:8]}"
     gateway_host = urlsplit(options.gateway.url).hostname
@@ -389,8 +457,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     )
     source = _source_archive()
     lifetime = options.timeout_seconds + _INSTALL_ALLOWANCE
-    if options.runtime == "vercel":
-        lifetime = min(lifetime, settings.vercel_sandbox_max_lifetime_seconds)
+    lifetime = min(lifetime, settings.vercel_sandbox_max_lifetime_seconds)
     spec = SandboxSpec(
         lifetime_seconds=lifetime,
         env={"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
@@ -398,6 +465,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         inject_headers=headers,
     )
     session = runtime.open(spec)
+    final_result: Result | None = None
     opened = time.monotonic()
     mailbox = _EvaluatorMailbox(
         session, server, nonce, getattr(ctx, "progress_callback", None), getattr(ctx, "check_budget", None)
@@ -408,7 +476,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             "source": GEPA_SOURCE,
             "engine_id": engine_id,
             "model": options.model,
-            "sandbox": options.runtime == "worker",
+            "sandbox": False,
             "max_token_cost": options.max_token_cost,
             "max_evals": server.remaining,
             "max_concurrency": ctx.concurrency,
@@ -432,13 +500,15 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             }
         )
         installed = session.run(
-            _bootstrap_command(options.runtime), timeout_seconds=min(_INSTALL_ALLOWANCE, lifetime - 1.0)
+            _bootstrap_command(options.runtime, protected=options.budget_route is not None),
+            timeout_seconds=min(_INSTALL_ALLOWANCE, lifetime - 1.0),
         )
         if not installed.ok or installed.timed_out:
             detail = (installed.stderr or installed.stdout)[-2000:]
             raise ServiceError(f"Native optimizer runtime setup failed: {detail}")
+        relay = os.environ.get("SKYNET_BUDGET_RELAY_URL")
         env = {
-            "ANTHROPIC_BASE_URL": options.gateway.url.removesuffix("/v1"),
+            "ANTHROPIC_BASE_URL": (relay or options.gateway.url).removesuffix("/v1"),
             "ANTHROPIC_AUTH_TOKEN": "skynet-managed" if headers else options.gateway.api_key,
             "DISABLE_AUTOUPDATER": "1",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
@@ -466,11 +536,48 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         except Exception as exc:
             artifact_error = exc
         if mailbox.error is not None:
+            if isinstance(mailbox.error, BudgetReached) and document.get("best_score") is not None:
+                mailbox.error.result = Result(
+                    best_candidate=document["best_candidate"],
+                    best_score=document["best_score"],
+                    total_evals=document.get("total_evals", 0),
+                    metadata={
+                        **document.get("metadata", {}),
+                        "upstream_source": f"git+https://github.com/gepa-ai/gepa@{GEPA_SOURCE}",
+                        "native_artifacts_dir": str(artifacts_dir),
+                        "native_usage_by_model": usage,
+                    },
+                )
+                mailbox.error.evidence.update(
+                    selection_scope="validation",
+                    final_evaluation_completed=False,
+                    final_evaluation_reason="budget_reached",
+                )
             raise mailbox.error
         if artifact_error is not None:
             raise artifact_error
         if completed.timed_out:
             raise ServiceError("Native optimizer exceeded its runtime limit.")
+        if options.budget_route is not None:
+            try:
+                raise_gateway_stop(options.budget_route)
+            except BudgetReached as stop:
+                incumbent = (
+                    document if document.get("best_score") is not None else document.get("interrupted_incumbent", {})
+                )
+                if incumbent.get("best_score") is not None:
+                    stop.result = Result(
+                        best_candidate=incumbent["best_candidate"],
+                        best_score=incumbent["best_score"],
+                        total_evals=incumbent.get("total_evals", 0),
+                        metadata={
+                            **incumbent.get("metadata", {}),
+                            "native_artifacts_dir": str(artifacts_dir),
+                            "native_usage_by_model": usage,
+                        },
+                    )
+                stop.evidence.update(final_evaluation_completed=False, final_evaluation_reason="budget_reached")
+                raise
         if not completed.ok or document.get("error") or not document:
             detail = str(document.get("error") or completed.stderr[-2000:] or "No result was produced.")
             raise ServiceError(f"Native optimizer failed: {detail.replace(options.gateway.api_key, '[redacted]')}")
@@ -491,11 +598,19 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                 "native_usage_complete": document.get("usage_complete", False),
             }
         )
-        return Result(
+        final_result = Result(
             best_candidate=document["best_candidate"],
             best_score=document.get("best_score"),
             total_evals=document.get("total_evals", 0),
             metadata=metadata,
         )
+        return final_result
     finally:
-        session.close()
+        active_error = sys.exception()
+        try:
+            session.close()
+        except UsagePendingError:
+            if final_result is not None:
+                final_result.metadata["runtime_usage_pending"] = True
+            elif active_error is None:
+                raise

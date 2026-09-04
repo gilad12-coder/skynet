@@ -21,6 +21,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 
+from ....billing.budgets import BudgetService
 from ....config import settings
 from ....constants import (
     OPTIMIZATION_TYPE_GRID_SEARCH,
@@ -38,6 +39,7 @@ from ....models import (
     OptimizationSubmissionResponse,
 )
 from ....storage.usage import json_byte_size
+from ....worker.checkpoint_compat import CheckpointCompatibilityError
 from ...auth import AuthenticatedUser, get_authenticated_user
 from ...converters import parse_overview, status_to_job_status
 from ...errors import DomainError
@@ -88,6 +90,34 @@ def _set_terminal_if_active(job_store, optimization_id: str, expected: tuple[str
     return cas(optimization_id, expected, **fields)
 
 
+def _stop_budget_admission(job_store: Any, job: dict[str, Any], reason: str) -> None:
+    """Close paid dispatch before acknowledging cancellation or pause.
+
+    Args:
+        job_store: Store supplying the authoritative database engine.
+        job: Authorized job record containing its cumulative budget reference.
+        reason: Explicit lifecycle action blocking further paid operations.
+    """
+    if job.get("execution_budget_id") is not None:
+        BudgetService(engine=job_store.engine).stop_admission(
+            job["execution_budget_id"], job["username"], reason=reason
+        )
+
+
+def _require_new_budget_configuration(job: dict[str, Any]) -> None:
+    """Require explicit funding authorization before creating a different paid run.
+
+    Args:
+        job: Source job whose budget cannot be transferred to a fresh execution.
+    """
+    if job.get("execution_budget_id") is not None:
+        raise DomainError(
+            "optimization.cannot_resubmit_payload",
+            status=409,
+            detail="Open this configuration in the submission wizard and authorize a new budget before starting a new run.",
+        )
+
+
 def _cancel_grid_pair_children(job_store: Any, worker: Any, parent_optimization_id: str) -> None:
     """Propagate a cancelled distributed grid to its pair-child rows.
 
@@ -112,7 +142,7 @@ def _cancel_grid_pair_children(job_store: Any, worker: Any, parent_optimization_
         return
     now = datetime.now(UTC).isoformat()
     for child in children:
-        if child.get("status") in ("success", "failed", "cancelled"):
+        if child.get("status") in ("success", "failed", "cancelled", "stopped"):
             continue
         child_id = child["optimization_id"]
         with contextlib.suppress(Exception):
@@ -177,6 +207,7 @@ def register_lifecycle_routes(
                 params={"status": status.value},
             )
 
+        _stop_budget_admission(job_store, job_data, "user_cancelled")
         worker = get_worker_ref()
         if worker:
             worker.cancel_job(optimization_id)
@@ -240,6 +271,7 @@ def register_lifecycle_routes(
         if not is_pausable(job_store, job_data):
             raise DomainError("optimization.pause_not_pausable", status=409)
 
+        _stop_budget_admission(job_store, job_data, "user_paused")
         worker = get_worker_ref()
         if worker:
             worker.cancel_job(optimization_id)
@@ -318,14 +350,19 @@ def register_lifecycle_routes(
             now = datetime.now(UTC).isoformat()
             for optimization_id in cancellable:
                 try:
+                    job = job_store.get_job(optimization_id)
+                    _stop_budget_admission(job_store, job, "user_cancelled")
                     if worker:
                         worker.cancel_job(optimization_id)
-                    job_store.update_job(
+                    if not _set_terminal_if_active(
+                        job_store,
                         optimization_id,
+                        ("pending", "validating", "running"),
                         status="cancelled",
                         message=CANCELLATION_REASON,
                         completed_at=now,
-                    )
+                    ):
+                        raise ValueError("The run has already reached a terminal state.")
                     _cancel_grid_pair_children(job_store, worker, optimization_id)
                 except Exception as exc:
                     logger.exception("Bulk cancel failed for %s", optimization_id)
@@ -375,6 +412,7 @@ def register_lifecycle_routes(
                 payload / quota / saved payload no longer resubmittable).
         """
         job_data = load_job_for_user(job_store, optimization_id, current_user)
+        _require_new_budget_configuration(job_data)
 
         source_payload = job_data.get("payload")
         if not source_payload or not isinstance(source_payload, dict):
@@ -434,6 +472,7 @@ def register_lifecycle_routes(
                 use clone instead / saved payload no longer resubmittable).
         """
         job_data, _role = require_role_at_least(job_store, optimization_id, current_user, ShareRole.editor)
+        _require_new_budget_configuration(job_data)
 
         status = status_to_job_status(job_data.get("status", "pending"))
         if status not in {OptimizationStatus.failed, OptimizationStatus.cancelled}:
@@ -528,9 +567,24 @@ def register_lifecycle_routes(
                     params={"attempts": attempts},
                 )
 
-        new_attempt = job_store.requeue_for_resume(optimization_id, bump_attempts=not is_paused)
+        try:
+            if getattr(job_store, "engine", None) is not None:
+                new_attempt = job_store.requeue_for_resume(
+                    optimization_id,
+                    bump_attempts=not is_paused,
+                    expected_generation=job_data.get("execution_generation"),
+                    budget_service=BudgetService(engine=job_store.engine),
+                )
+            else:
+                new_attempt = job_store.requeue_for_resume(optimization_id, bump_attempts=not is_paused)
+        except CheckpointCompatibilityError as exc:
+            raise DomainError("optimization.resume_not_resumable", status=409, detail=str(exc)) from exc
         if new_attempt is None:
-            raise DomainError("optimization.not_found", status=404)
+            raise DomainError(
+                "optimization.resume_not_resumable",
+                status=409,
+                detail="Recovery is waiting for usage settlement or the run changed state.",
+            )
         logger.info("Resumed optimization %s in place (attempt %s)", optimization_id, new_attempt)
         return JobCancelResponse(optimization_id=optimization_id, status=OptimizationStatus.pending.value)
 
@@ -564,6 +618,7 @@ def register_lifecycle_routes(
                 below ``editor``), 409 (not in a failed/cancelled state).
         """
         job_data, _role = require_role_at_least(job_store, optimization_id, current_user, ShareRole.editor)
+        _require_new_budget_configuration(job_data)
 
         status = status_to_job_status(job_data.get("status", "pending"))
         if status not in {OptimizationStatus.failed, OptimizationStatus.cancelled}:
@@ -611,6 +666,8 @@ def register_lifecycle_routes(
         status = status_to_job_status(job_data.get("status", "pending"))
         if status not in TERMINAL_STATUSES:
             raise DomainError("optimization.pair_not_rerunnable", status=409, params={"status": status.value})
+        if not resume:
+            _require_new_budget_configuration(job_data)
 
         result_data = job_data.get("result")
         pair_results = result_data.get("pair_results") if isinstance(result_data, dict) else None
@@ -619,6 +676,25 @@ def register_lifecycle_routes(
         by_index = {pr.get("pair_index"): pr for pr in pair_results if isinstance(pr, dict)}
         if pair_index not in by_index:
             raise DomainError("grid_search.pair_position_missing", status=404, params={"pair_index": pair_index})
+
+        if job_data.get("execution_budget_id") is not None:
+            try:
+                attempt = job_store.requeue_for_resume(
+                    optimization_id,
+                    bump_attempts=False,
+                    expected_generation=job_data.get("execution_generation"),
+                    budget_service=BudgetService(engine=job_store.engine),
+                    pair_index_to_resume=pair_index,
+                )
+            except (CheckpointCompatibilityError, ValueError) as error:
+                raise DomainError("optimization.pair_not_resumable", status=409, detail=str(error)) from error
+            if attempt is None:
+                raise DomainError(
+                    "optimization.pair_not_resumable",
+                    status=409,
+                    detail="Recovery is waiting for usage settlement or the run changed state.",
+                )
+            return JobCancelResponse(optimization_id=optimization_id, status=OptimizationStatus.pending.value)
 
         # Distributed grid: the pair lives in its own child row — re-queue
         # THAT row (its checkpoints are keyed by the child id + global pair

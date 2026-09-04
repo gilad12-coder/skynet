@@ -18,11 +18,14 @@ import threading
 import time
 from typing import Any
 
+from ....billing.budgets import BudgetError
+from ....billing.operation_pricing import UnpricedOperationError
+from ....billing.runtime import UsagePendingError
 from ....config import Settings, settings
 from ....exceptions import ServiceError
 from ....models.blackbox import BlackboxTarget
 from .agent_runs import AgentRun, AgentRunRecorder
-from .harness import ANSWER_FILE, PROMPT_FILE, GatewayConfig, HarnessLaunch, build_launch
+from .harness import ANSWER_FILE, PROMPT_FILE, GatewayConfig, HarnessLaunch, build_launch, pinned_harness_check
 from .heartbeat import heartbeat
 from .protocol import Candidate, ScorerAbortError, ScorerFn, SideInfo
 from .sandbox import (
@@ -192,7 +195,7 @@ def case_name(case: Any) -> str | None:
         The trimmed id or name, or ``None``.
     """
     name = (case.get("id") or case.get("name")) if isinstance(case, dict) else None
-    if isinstance(name, (str, int)) and str(name).strip():
+    if isinstance(name, str | int) and str(name).strip():
         return str(name).strip()
     return None
 
@@ -300,7 +303,7 @@ def _usage_summary(usage: dict[str, Any]) -> str:
         The counts, or a note that the harness reported none.
     """
     counts = [usage.get(key) for key in ("input_tokens", "output_tokens")]
-    if not any(isinstance(count, (int, float)) and count > 0 for count in counts):
+    if not any(isinstance(count, int | float) and count > 0 for count in counts):
         return "no usage reported"
     tokens_in, tokens_out = (int(count or 0) for count in counts)
     return f"{tokens_in:,} in / {tokens_out:,} out tokens"
@@ -350,7 +353,9 @@ class SandboxAgentScorer:
         self._scorer = scorer
         self._runtime = runtime
         self._target = target
-        self._launch: HarnessLaunch = build_launch(target, gateway)
+        self._launch: HarnessLaunch = build_launch(
+            target, gateway, protected=bool(getattr(runtime, "protected", False))
+        )
         self._job_id = job_id
         self._recorder = recorder or AgentRunRecorder()
         self._max_lifetime_seconds = (
@@ -363,6 +368,76 @@ class SandboxAgentScorer:
         self._dead_runs = 0
         self._alive = False
         self._run_ids = itertools.count(1)
+
+    def check_ready(self) -> dict[str, str]:
+        """Verify a seedless agent's offline CLI, dependencies, and command syntax.
+
+        Returns:
+            Explicit readiness evidence, with candidate execution deferred until a real candidate exists.
+
+        Raises:
+            ServiceError: When protected runtime requirements, authored
+                dependencies, or command syntax are invalid.
+        """
+        if not getattr(self._runtime, "protected", False):
+            raise ServiceError("Agent readiness requires a protected sandbox runtime.")
+        lifetime = min(180.0, self._max_lifetime_seconds)
+        spec = SandboxSpec(
+            lifetime_seconds=lifetime,
+            env=self._launch.env,
+            name=self._sandbox_name(),
+            tags={JOB_TAG: self._job_id} if self._job_id else {},
+            network_disabled=True,
+        )
+        session = self._runtime.open(spec)
+        failed = False
+        try:
+            files = {
+                f".skynet/readiness-{index}.sh": command
+                for index, command in enumerate(
+                    (self._launch.run_command, self._target.setup_command, self._target.install_command)
+                )
+                if command
+            }
+            session.write_files({**self._launch.files, **files})
+            checks = [f"bash -n {name}" for name in files]
+            cli = pinned_harness_check(self._target.harness)
+            if cli:
+                checks.append(cli)
+            result = session.run(" && ".join(checks), timeout_seconds=min(120.0, lifetime))
+            if not result.ok:
+                raise ServiceError("The selected agent harness failed its offline version or command syntax check.")
+            if self._target.install_command and self._launch.install_command:
+                result = session.run(
+                    self._launch.install_command,
+                    timeout_seconds=min(_SETUP_ALLOWANCE_SECONDS, lifetime),
+                )
+                if not result.ok:
+                    detail = _tail(result.stderr or result.stdout, 800)
+                    suffix = f": {detail}" if detail else "."
+                    raise ServiceError(
+                        "The agent dependency command failed inside the offline Vercel sandbox" + suffix
+                    )
+            return {
+                "harness": self._target.harness,
+                "readiness": (
+                    "offline_dependencies_and_syntax_verified"
+                    if self._target.install_command
+                    else "pinned_cli_and_syntax_verified"
+                    if cli
+                    else "command_syntax_verified"
+                ),
+                "candidate_execution": "awaiting_first_generated_candidate",
+            }
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            try:
+                session.close()
+            except UsagePendingError:
+                if not failed:
+                    raise
 
     def __call__(self, candidate: Candidate, case: Any = None) -> tuple[float, SideInfo]:
         """Run the agent on ``case`` with ``candidate`` as its harness, then score the record.
@@ -399,7 +474,7 @@ class SandboxAgentScorer:
         Raises:
             AgentHarnessError: When ``_DEAD_RUNS_BEFORE_ABORT`` runs died before any run lived.
         """
-        used = any(isinstance(count, (int, float)) and count > 0 for count in record["usage"].values())
+        used = any(isinstance(count, int | float) and count > 0 for count in record["usage"].values())
         with self._pulse_lock:
             if used or record["error"] is None:
                 self._alive = True
@@ -495,16 +570,22 @@ class SandboxAgentScorer:
         run = self._recorder.begin(run_id=run_id, label=label, case_id=case_name(case), model=self._target.model)
         try:
             record = self._attempt(files, case, label, run)
+        except (BudgetError, UsagePendingError, UnpricedOperationError):
+            raise
         except ServiceError as exc:
             logger.warning("%s: %s", label, exc)
             run.abort(str(exc))
             raise
         except Exception:
+            if getattr(self._runtime, "protected", False):
+                raise
             # The box died under us (host recycled, transport stalled): one fresh box, one more try.
             logger.warning("%s: sandbox failed; retrying in a fresh box", label, exc_info=True)
             run.write("\n[sandbox] the box died; retrying in a fresh one\n")
             try:
                 record = self._attempt(files, case, label, run)
+            except (BudgetError, UsagePendingError, UnpricedOperationError):
+                raise
             except ServiceError as exc:
                 logger.warning("%s: %s", label, exc)
                 run.abort(str(exc))
@@ -581,7 +662,12 @@ class SandboxAgentScorer:
                 session, files, case, record, transcript, run, label=label, deadline=started + spec.lifetime_seconds
             )
         finally:
-            session.close()
+            try:
+                session.close()
+            except UsagePendingError:
+                # The parent publishes the durable pending hold separately from
+                # the completed agent record and the optimizer's original error.
+                record["runtime_usage_pending"] = True
             record["transcript"] = _tail("\n".join(transcript), _TRANSCRIPT_CHARS)
             record["elapsed_seconds"] = round(time.perf_counter() - started, 3)
             logger.debug("%s: sandbox closed after %.1fs", label, record["elapsed_seconds"])

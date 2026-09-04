@@ -1,7 +1,7 @@
-"""Publish pinned engine contracts and contextual execution availability.
+"""Publish pinned engine contracts and managed execution availability.
 
-Native proposers use the selected worker or Vercel runtime independently of
-whether a candidate is scored directly or executed by a task harness.
+Every production proposer runs inside Vercel independently of whether a
+candidate is scored directly or executed by a task harness.
 """
 
 from __future__ import annotations
@@ -58,6 +58,7 @@ class EngineSpec:
     requires_agent_target: bool = False
     supports_parts: bool = False
     requires_proposer: bool = False
+    checkpoint_recovery_supported: bool = False
 
     def unavailable_reason_for(self, caps: EngineCapabilities) -> str | None:
         """Explain why the engine cannot run for ``caps``, or return ``None`` when it can.
@@ -97,6 +98,7 @@ ENGINES: dict[str, EngineSpec] = {
         description="Reflective evolution with a Pareto front of versions.",
         factory=GepaEngine,
         supports_parts=True,
+        checkpoint_recovery_supported=True,
     ),
     BLACKBOX_ENGINE_BEST_OF_N: EngineSpec(
         id=BLACKBOX_ENGINE_BEST_OF_N,

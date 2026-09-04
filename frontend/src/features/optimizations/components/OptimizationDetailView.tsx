@@ -41,7 +41,6 @@ import {
   getJob,
   cancelJob,
   pauseJob,
-  restartJob,
   resumeJob,
   getOptimizationPayload,
   getServeInfo,
@@ -97,6 +96,7 @@ import { ArtifactTab } from "./ArtifactTab";
 import { StageInfoModal } from "./StageInfoModal";
 import { PairSelectionStrip } from "./PairSelectionStrip";
 import { OverviewTab } from "./OverviewTab";
+import { RunLifecycleNotice } from "./RunLifecycleNotice";
 import { RunCreditsChip } from "./RunCreditsChip";
 import { BestVersionTab } from "./BestVersionTab";
 import { GridServeTab } from "./GridServeTab";
@@ -302,7 +302,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   }, [id, isAnyDemoMode, isShare, job?.status, job?.optimization_type]);
   // Re-run mints a brand-new run per call, so guard against a double-click
   // firing two retries (and creating two duplicate runs).
-  const [retrying, setRetrying] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [pausing, setPausing] = useState(false);
 
@@ -527,6 +526,11 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   status: sseData.status ?? p.status,
                   message: sseData.message ?? p.message,
                   latest_metrics: sseData.latest_metrics ?? p.latest_metrics,
+                  stop_reason: sseData.stop_reason ?? p.stop_reason,
+                  result_availability: sseData.result_availability ?? p.result_availability,
+                  terminal_evidence: sseData.terminal_evidence ?? p.terminal_evidence,
+                  execution_budget: sseData.execution_budget ?? p.execution_budget,
+                  recovery: sseData.recovery === undefined ? p.recovery : sseData.recovery,
                 }
               : p,
           );
@@ -575,21 +579,9 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     }
   };
 
-  const handleRetry = async () => {
-    if (skipNetwork || retrying) return;
-    setRetrying(true);
-    try {
-      await restartJob(id);
-      toast.success(msg("optimization.rerun.success"));
-      window.dispatchEvent(new Event("optimizations-changed"));
-      // Restart re-runs the same id in place, so refresh this view rather than
-      // navigating to a new run.
-      void fetchJob();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : msg("optimization.rerun.failed"));
-    } finally {
-      setRetrying(false);
-    }
+  const handleRetry = () => {
+    if (skipNetwork) return;
+    router.push(`/submit?clone=${id}${cloneQuery}`);
   };
 
   const handleResume = async () => {
@@ -1230,18 +1222,15 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                       </Button>
                     </TooltipButton>
                   ) : (
-                    <TooltipButton tooltip={msg("optimization.rerun_tooltip")}>
+                    <TooltipButton tooltip={msg("optimization.configure_new.tooltip")}>
                       <Button
                         variant="ghost"
                         size="icon"
                         className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
                         onClick={handleRetry}
-                        disabled={retrying}
-                        aria-label={msg("optimization.rerun")}
+                        aria-label={msg("optimization.configure_new.label")}
                       >
-                        <ArrowCounterClockwise
-                          className={`size-4${retrying ? " animate-spin" : ""}`}
-                        />
+                        <ArrowCounterClockwise className="size-4" />
                       </Button>
                     </TooltipButton>
                   ))}
@@ -1304,6 +1293,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           </div>
         </div>
       </FadeIn>
+
+      <RunLifecycleNotice job={job} />
 
       {isPairContext && effectiveJob?.grid_result && (
         <PairSelectionStrip

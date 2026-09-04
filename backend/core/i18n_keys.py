@@ -139,6 +139,7 @@ class I18nKey(StrEnum):
     OPTIMIZATION_PAUSE_NOT_PAUSABLE = 'optimization.pause_not_pausable'
     OPTIMIZATION_PAUSE_WRONG_STATUS = 'optimization.pause_wrong_status'
     OPTIMIZATION_PAYLOAD_UNAVAILABLE = 'optimization.payload_unavailable'
+    OPTIMIZATION_PROTECTED_INTERACTIVE_SANDBOX_REQUIRED = 'optimization.protected_interactive_sandbox_required'
     OPTIMIZATION_RESUME_EXHAUSTED = 'optimization.resume_exhausted'
     OPTIMIZATION_RESUME_NOT_RESUMABLE = 'optimization.resume_not_resumable'
     OPTIMIZATION_RESUME_WRONG_STATUS = 'optimization.resume_wrong_status'

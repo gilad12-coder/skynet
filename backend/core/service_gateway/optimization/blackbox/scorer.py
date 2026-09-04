@@ -2,7 +2,7 @@
 
 Both adapters normalize to the engine contract ``(score, side_info)``, carry
 a ``usage`` ledger the run bills (``None`` for remote scorers, whose calls
-cost the run nothing) and a ``close()`` the run calls when it is done.
+are billed by their endpoint outside Skynet Total) and a ``close()`` the run calls when it is done.
 Python scorers run inside a sandbox — see :mod:`.sandbox_scorer`; the
 helpers here are thin wrappers over :mod:`.runner`, the stdlib-only module
 that executes scorer code in the box, translating its errors into the
@@ -21,6 +21,7 @@ from ....exceptions import ServiceError
 from ....models.blackbox import BlackboxScorer
 from . import runner
 from .protocol import Candidate, SideInfo
+from .remote_evaluator import RemoteEvaluatorClient
 from .sandbox import SandboxRuntime, scorer_runtime_from_settings
 from .sandbox_scorer import SandboxPythonScorer, ScorerUsage, scorer_gateway
 
@@ -97,17 +98,23 @@ class RemoteScorer:
 
     usage = None
 
-    def __init__(self, url: str, *, secret: str | None, timeout_seconds: float) -> None:
+    def __init__(
+        self, url: str, *, secret: str | None, timeout_seconds: float, protected_route: dict[str, str] | None = None
+    ) -> None:
         """Create a remote scorer.
 
         Args:
             url: Endpoint that returns a JSON number or ``{"score": ..., ...}``.
             secret: Shared secret sent as a bearer token, if any.
             timeout_seconds: Per-request timeout.
+            protected_route: Parent-issued capability for a protected evaluator endpoint.
         """
         self._url = url
         self._secret = secret
         self._timeout_seconds = timeout_seconds
+        self._relay = (
+            RemoteEvaluatorClient(protected_route, timeout_seconds=timeout_seconds) if protected_route else None
+        )
 
     def __call__(self, candidate: Candidate, case: Any = None) -> tuple[float, SideInfo]:
         """Score ``candidate`` on ``case`` via one HTTP request.
@@ -123,6 +130,8 @@ class RemoteScorer:
             ServiceError: When the request fails, returns an error status,
                 a non-JSON body, or a body without a usable score.
         """
+        if self._relay is not None:
+            return normalize_score(self._relay(candidate, case))
         headers = {"Authorization": f"Bearer {self._secret}"} if self._secret else {}
         try:
             response = httpx.post(
@@ -144,7 +153,11 @@ class RemoteScorer:
 
 
 def build_scorer(
-    spec: BlackboxScorer, *, job_id: str | None = None, runtime: SandboxRuntime | None = None
+    spec: BlackboxScorer,
+    *,
+    job_id: str | None = None,
+    runtime: SandboxRuntime | None = None,
+    protected_route: dict[str, str] | None = None,
 ) -> JobScorer:
     """Build the engine-facing scorer for a request's scorer spec.
 
@@ -153,6 +166,7 @@ def build_scorer(
         job_id: Names the python scorer's sandbox after the job, when known.
         runtime: Where python scorers open their sandbox; the configured
             runtime when unset.
+        protected_route: Fixed parent capability for a remote scorer, when protected.
 
     Returns:
         A scorer over ``(candidate, case)`` → ``(score, side_info)``.
@@ -162,7 +176,9 @@ def build_scorer(
             or the required sandbox runtime is not configured.
     """
     if spec.kind == "remote":
-        return RemoteScorer(str(spec.url), secret=spec.secret, timeout_seconds=spec.timeout_seconds)
+        return RemoteScorer(
+            str(spec.url), secret=spec.secret, timeout_seconds=spec.timeout_seconds, protected_route=protected_route
+        )
     return SandboxPythonScorer(
         str(spec.metric_code),
         runtime=runtime or scorer_runtime_from_settings(settings),

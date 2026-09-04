@@ -242,6 +242,7 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
                     running=buckets.get("running", 0),
                     success=buckets.get("success", 0),
                     failed=buckets.get("failed", 0),
+                    stopped=buckets.get("stopped", 0),
                     cancelled=buckets.get("cancelled", 0),
                     shared=job_store.count_jobs_shared_with(caller),
                 )
@@ -252,6 +253,7 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
                 running=job_store.count_jobs_visible_to(caller, status="running"),
                 success=job_store.count_jobs_visible_to(caller, status="success"),
                 failed=job_store.count_jobs_visible_to(caller, status="failed"),
+                stopped=job_store.count_jobs_visible_to(caller, status="stopped"),
                 cancelled=job_store.count_jobs_visible_to(caller, status="cancelled"),
                 shared=job_store.count_jobs_shared_with(caller),
             )
@@ -265,6 +267,7 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
                 running=buckets.get("running", 0),
                 success=buckets.get("success", 0),
                 failed=buckets.get("failed", 0),
+                stopped=buckets.get("stopped", 0),
                 cancelled=buckets.get("cancelled", 0),
             )
         total = job_store.count_jobs(username=scoped_username)
@@ -275,6 +278,7 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
             running=job_store.count_jobs(status="running", username=scoped_username),
             success=job_store.count_jobs(status="success", username=scoped_username),
             failed=job_store.count_jobs(status="failed", username=scoped_username),
+            stopped=job_store.count_jobs(status="stopped", username=scoped_username),
             cancelled=job_store.count_jobs(status="cancelled", username=scoped_username),
         )
 

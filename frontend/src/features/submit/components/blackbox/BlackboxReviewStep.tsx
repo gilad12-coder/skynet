@@ -9,13 +9,15 @@ import { harnessLabel } from "@/shared/lib/blackbox-harness";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip as tipText, type TooltipKey } from "@/shared/lib/tooltips";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { TERMS } from "@/shared/lib/terms";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { chargeableBracket } from "../../lib/cost-bracket";
 import { focusField } from "../../lib/focus-field";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
 import { WIZARD_STAGE, type WizardStageId } from "../../lib/wizard-steps";
-import { EvidenceChip } from "./EvidenceChip";
+import { PreflightChecks } from "../PreflightChecks";
+import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import { StepCard } from "./shared";
 
 function Row({
@@ -64,7 +66,13 @@ function Mono({ children }: { children: ReactNode }) {
  * owns it; nothing here is edited in place except the name, description and
  * privacy just above.
  */
-export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
+export function BlackboxReviewStep({
+  w,
+  onEditField,
+}: {
+  w: BlackboxWizardContext;
+  onEditField?: (stage: WizardStageId, field?: string) => void;
+}) {
   const {
     goTo,
     jobName,
@@ -86,15 +94,11 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
     scorerUsesModel,
     scorerModelMode,
     resolvedScorerModel,
-    scoringModelPending,
     scorerInstall,
-    evaluatorEvidence,
-    evaluatorStatus,
     strategyMode,
     selectedEngine,
     autoEngineLabels,
     runDisabledReason,
-    proposerRuntime,
     nativeProposer,
     iterationLimitSupported,
     patience,
@@ -106,14 +110,16 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
     costBracket,
     tokenSource,
     maxCostCredits,
-    setupSpent,
-    availableCredits,
   } = w;
   const locale = getActiveIntlLocale();
   const bracket = chargeableBracket(costBracket, tokenSource);
   const credits = (value: number) => `\u2066${formatCredits(value, locale)}\u2069`;
 
   const edit = (stage: WizardStageId, field?: string) => () => {
+    if (onEditField) {
+      onEditField(stage, field);
+      return;
+    }
     goTo(WIZARD_STAGE[stage]);
     if (field) focusField(field);
   };
@@ -137,7 +143,15 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
     >
       <dl className="divide-y divide-border/40">
         {displayName && (
-          <Row label={msg("auto.features.submit.components.steps.basicsstep.3")} tip="submit.name">
+          <Row
+            label={
+              <>
+                {msg("auto.features.submit.components.steps.basicsstep.3")}
+                {TERMS.optimization}
+              </>
+            }
+            tip="submit.name"
+          >
             {displayName}
             {!jobName.trim() && (
               <span className="ms-2 text-xs text-muted-foreground">
@@ -292,16 +306,7 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
           tip="submit.blackbox.evidence"
           onEdit={edit("evaluation", scorerKind === "python" ? "bb-scorer-code" : "bb-scorer-url")}
         >
-          <EvidenceChip
-            status={evaluatorStatus}
-            pending={scoringModelPending}
-            modelName={evaluatorEvidence?.modelName}
-          />
-          {evaluatorStatus === "failed" && evaluatorEvidence?.error && (
-            <p className="mt-1 break-words text-xs text-foreground/80" dir="auto">
-              {evaluatorEvidence.error}
-            </p>
-          )}
+          <PreflightChecks preflight={w.preflight} scope="execution" />
         </Row>
         <Row
           label={msg("submit.blackbox.review.strategy")}
@@ -327,18 +332,6 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
             </span>
           )}
         </Row>
-        {nativeProposer && (
-          <Row
-            label={msg("submit.blackbox.runtime.label")}
-            onEdit={edit("optimization", "bb-proposer-runtime")}
-          >
-            {msg(
-              proposerRuntime === "worker"
-                ? "submit.blackbox.runtime.worker"
-                : "submit.blackbox.runtime.vercel",
-            )}
-          </Row>
-        )}
         <Row
           label={msg("submit.blackbox.review.budget")}
           tip="submit.blackbox.budget"
@@ -363,7 +356,7 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
         <Row
           label={msg("submit.budget.label")}
           tip="submit.budget"
-          onEdit={edit("optimization", "totalBudgetInput")}
+          onEdit={edit("evaluation", "totalBudgetInput")}
         >
           {maxCostCredits != null ? credits(maxCostCredits) : msg("submit.budget.unset_short")}
           <span className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
@@ -373,14 +366,19 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
                 high: credits(bracket.highCredits),
               })}
             </span>
-            <span>
-              {msg("submit.budget.setup_spent")}: {credits(setupSpent)}
-            </span>
-            {availableCredits != null && (
-              <span>
-                {msg("submit.budget.available")}: {credits(availableCredits)}
-              </span>
-            )}
+            {w.budgetSession.budget &&
+              (
+                [
+                  ["submit.budget.setup_spent", w.budgetSession.budget.setup_spent_credits],
+                  ["submit.budget.run_spent", w.budgetSession.budget.run_spent_credits],
+                  ["submit.budget.reserved", w.budgetSession.budget.reserved_credits],
+                  ["submit.budget.available", w.budgetSession.budget.available_credits],
+                ] as const
+              ).map(([label, amount]) => (
+                <span key={label}>
+                  {msg(label)}: {formatBudgetAmount(amount, locale)}
+                </span>
+              ))}
           </span>
         </Row>
         <Row label={msg("submit.basics.privacy.label")} tip="submit.privacy">

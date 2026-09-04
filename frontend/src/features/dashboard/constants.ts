@@ -6,5 +6,6 @@ export const STATUS_COLORS: Record<string, string> = {
   running: "var(--warning)",
   pending: "#8c8c9a",
   cancelled: "#6b6058",
+  stopped: "var(--warning)",
   validating: "var(--warning)",
 };

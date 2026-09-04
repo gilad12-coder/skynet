@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .common import ColumnMapping, ModelConfig, OptimizationStatus, OptimizationType, SplitFractions
+from .results import ModelTokenUsage
 from .serve import WorkflowNodeTrace
 from .workflow import WORKFLOW_MODULE_NAME, WorkflowSpec, workflow_tool_users
 
@@ -109,12 +110,17 @@ class _OptimizationRequestBase(BaseModel):
     token_source: Literal["managed", "byok"] = Field(
         default="managed",
         description=(
-            "How the run's tokens are billed: 'managed' (Skynet credits — any model is runnable, "
-            "and the run's cost ceiling is capped at the account's spendable credits so it can't "
-            "overspend) or 'byok' (the user's own provider key — billed directly, no credits). "
-            "Threaded from the wizard so the credit gate is enforced server-side, not advisory."
+            "How model calls are billed: 'managed' charges the marked-up provider cost to Skynet credits; "
+            "'byok' sends calls through the user's provider key and charges only Skynet's platform fee to "
+            "credits. Billable sandbox usage is charged at cost in both modes."
         ),
     )
+    execution_runtime: Literal["vercel"] = "vercel"
+    preflight_id: str | None = Field(default=None, min_length=1, max_length=64)
+    preflight_fingerprint: str | None = Field(default=None, min_length=1, max_length=128)
+    execution_budget_id: str | None = Field(default=None, min_length=1, max_length=64)
+    execution_budget_revision: int | None = Field(default=None, ge=1)
+    execution_budget_generation: int | None = Field(default=None, ge=0)
     max_cost_credits: int | None = Field(
         default=None,
         ge=1,
@@ -123,7 +129,7 @@ class _OptimizationRequestBase(BaseModel):
             "linear (bootstrapping, compile steps, validation loops), so the wizard shows a "
             "projected bracket rather than a tight estimate and lets the user cap the run here. "
             "The run is hard-stopped server-side once its accumulated credit cost reaches this "
-            "cap; a stopped run fails and is never billed. "
+            "cap; consumed work remains billed and the run preserves any evaluated result. "
             "Omit (null) for no ceiling."
         ),
     )
@@ -156,6 +162,22 @@ class _OptimizationRequestBase(BaseModel):
             "post-run estimate-vs-actual reconciliation. Advisory only."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_execution_runtime(cls, data: Any) -> Any:
+        """Map the retired worker selection onto the managed sandbox.
+
+        Args:
+            data: Raw request data before field validation.
+
+        Returns:
+            A copied mapping with the canonical Vercel runtime when the
+            retired worker value was supplied, otherwise the input unchanged.
+        """
+        if isinstance(data, dict) and data.get("execution_runtime") == "worker":
+            return {**data, "execution_runtime": "vercel"}
+        return data
 
     @model_validator(mode="after")
     def _ensure_dataset(self) -> _OptimizationRequestBase:
@@ -309,6 +331,25 @@ class WorkflowDryRunRequest(BaseModel):
     inputs: dict[str, Any] = Field(description="Values for the workflow's input-anchor fields.")
     model_settings: ModelConfig = Field(alias="model_config")
     tool_source: ToolSource | None = None
+    execution_runtime: Literal["vercel"] = "vercel"
+    execution_budget_id: str | None = Field(default=None, min_length=1, max_length=64)
+    execution_budget_revision: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_execution_runtime(cls, data: Any) -> Any:
+        """Map the retired worker selection onto the managed sandbox.
+
+        Args:
+            data: Raw request data before field validation.
+
+        Returns:
+            A copied mapping with the canonical Vercel runtime when the
+            retired worker value was supplied, otherwise the input unchanged.
+        """
+        if isinstance(data, dict) and data.get("execution_runtime") == "worker":
+            return {**data, "execution_runtime": "vercel"}
+        return data
 
     @model_validator(mode="after")
     def _require_tool_source_for_tools(self) -> WorkflowDryRunRequest:
@@ -340,6 +381,11 @@ class WorkflowDryRunResponse(BaseModel):
     model_used: str
     error: str | None = None
     failed_node_id: str | None = None
+    usage_by_model: list[ModelTokenUsage] = Field(default_factory=list)
+    credits_charged: int = 0
+    budget: dict[str, Any] | None = None
+    preview_status: Literal["succeeded", "failed", "pending"] | None = None
+    preflight_id: str | None = None
 
 
 class OptimizationSubmissionResponse(BaseModel):

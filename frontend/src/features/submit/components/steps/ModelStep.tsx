@@ -17,8 +17,7 @@ import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip, AddModelButton } from "@/shared/ui/model-chip";
 import { useUserPrefs } from "@/features/settings";
-import { TotalBudgetCard } from "../TotalBudgetCard";
-import { aggregateTokenSource } from "../../lib/cost-bracket";
+import { ModelRoleRow } from "../blackbox/ModelRoleRow";
 
 import { emptyModelConfig } from "../../constants";
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
@@ -43,11 +42,7 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
     catalog,
   } = w;
 
-  const selectedConfigs =
-    jobType === "run" || !advanced
-      ? [modelConfig, ...(secondModelConfig ? [secondModelConfig] : [])]
-      : [...generationModels, ...reflectionModels];
-  const tokenSource = aggregateTokenSource(selectedConfigs);
+  const requiresOptimizationModel = w.optimizerName.toLowerCase() === "gepa";
   const availableCount = catalog?.models.length ?? 0;
   const catalogEmpty = catalog != null && availableCount === 0;
 
@@ -74,38 +69,52 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
               </HelpTip>
             </Label>
             <div className="space-y-2">
-              <ModelChip
-                config={modelConfig}
-                className={MOBILE_MODEL_CHIP_CLASS}
-                roleLabel={msg("model.generation.label")}
-                tooltip={msg("model.generation.explainer")}
-                required
-                catalogModels={catalog?.models}
-                onClick={() =>
-                  setEditingModel({
-                    config: modelConfig,
-                    onSave: setModelConfig,
-                    label: msg("model.generation.label"),
-                  })
-                }
-                onRemove={modelConfig.name ? () => setModelConfig(emptyModelConfig()) : undefined}
-              />
-              <ModelChip
-                config={secondModelConfig ?? emptyModelConfig()}
-                className={MOBILE_MODEL_CHIP_CLASS}
-                roleLabel={TERMS.reflectionModel}
-                tooltip={msg("model.reflection.explainer")}
-                required
-                catalogModels={catalog?.models}
-                onClick={() =>
-                  setEditingModel({
-                    config: secondModelConfig ?? emptyModelConfig(),
-                    onSave: setSecondModelConfig,
-                    label: TERMS.reflectionModel,
-                  })
-                }
-                onRemove={secondModelConfig?.name ? () => setSecondModelConfig(null) : undefined}
-              />
+              <ModelRoleRow
+                role={msg("submit.blackbox.roles.task.label")}
+                description={msg("submit.blackbox.roles.task.desc")}
+              >
+                <ModelChip
+                  config={modelConfig}
+                  className={MOBILE_MODEL_CHIP_CLASS}
+                  roleLabel={msg("submit.blackbox.roles.task.label")}
+                  tooltip={msg("model.generation.explainer")}
+                  required
+                  catalogModels={catalog?.models}
+                  onClick={() =>
+                    setEditingModel({
+                      config: modelConfig,
+                      onSave: setModelConfig,
+                      label: msg("submit.blackbox.roles.task.label"),
+                    })
+                  }
+                  onRemove={modelConfig.name ? () => setModelConfig(emptyModelConfig()) : undefined}
+                />
+              </ModelRoleRow>
+              {requiresOptimizationModel && (
+                <ModelRoleRow
+                  role={msg("submit.blackbox.roles.optimization.label")}
+                  description={msg("submit.blackbox.roles.optimization.desc.gepa")}
+                >
+                  <ModelChip
+                    config={secondModelConfig ?? emptyModelConfig()}
+                    className={MOBILE_MODEL_CHIP_CLASS}
+                    roleLabel={msg("submit.blackbox.roles.optimization.label")}
+                    tooltip={msg("model.reflection.explainer")}
+                    required
+                    catalogModels={catalog?.models}
+                    onClick={() =>
+                      setEditingModel({
+                        config: secondModelConfig ?? emptyModelConfig(),
+                        onSave: setSecondModelConfig,
+                        label: msg("submit.blackbox.roles.optimization.label"),
+                      })
+                    }
+                    onRemove={
+                      secondModelConfig?.name ? () => setSecondModelConfig(null) : undefined
+                    }
+                  />
+                </ModelRoleRow>
+              )}
             </div>
           </div>
         ) : (
@@ -226,10 +235,6 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
             </div>
           </div>
         )}
-        {/* Pre-run usage bracket + total budget. Shown in both modes: managed
-            displays the full per-model credit cost, BYOK the platform fee (the
-            provider key absorbs the model cost, but credits still meter it). */}
-        <TotalBudgetCard w={w} mode={tokenSource} />
       </CardContent>
     </Card>
   );

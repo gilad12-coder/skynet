@@ -50,6 +50,8 @@ export function SubmitStepper({ w }: { w: StepperContext }) {
                 type="button"
                 onClick={() => handleTabClick(i)}
                 disabled={!clickable}
+                aria-label={s.label()}
+                aria-current={active ? "step" : undefined}
                 className={cn(
                   "relative z-10 flex items-center justify-center rounded-full transition-all duration-300 cursor-pointer",
                   "size-[44px] text-sm font-semibold",

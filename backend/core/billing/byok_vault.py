@@ -1,8 +1,9 @@
 """Encrypt-at-rest vault for bring-your-own-key (BYOK) provider secrets.
 
-When an account runs in ``byok`` token source, jobs bill the user's own provider
-key instead of Skynet credits. This module is the only place that holds those
-secrets: it encrypts them with Fernet (symmetric AES) under
+When an account runs in ``byok`` token source, the provider bills model tokens
+directly to the user's key while Skynet credits fund the platform fee and
+managed sandbox. This module is the only place that holds those secrets: it
+encrypts them with Fernet under
 ``settings.byok_vault_key`` before they touch the database, decrypts them only
 to run a verify probe or hand them to a run, and never returns plaintext to the
 API surface. The stored row keeps only the ciphertext, a masked tail (``last4``)
@@ -45,13 +46,12 @@ STATUS_VERIFIED = "verified"
 STATUS_INVALID = "invalid"
 
 # Providers a user may bring a key for. Mirrors the frontend ``BYOK_PROVIDERS``
-# catalog; the value is how the verify probe reaches each provider — the models
-# (or equivalent) endpoint plus the auth header shape that lists it. A bare
-# authenticated GET is enough to tell a working key from a rejected one without
-# spending tokens. ``header`` is templated with the secret at probe time.
+# catalog; the value is how the verify probe reaches each provider. The
+# OpenRouter key-introspection endpoint authenticates the credential without
+# spending model tokens. ``header`` is templated with the secret at probe time.
 _PROVIDER_PROBES: dict[str, dict[str, str]] = {
     "openrouter": {
-        "url": "https://openrouter.ai/api/v1/models",
+        "url": "https://openrouter.ai/api/v1/key",
         "header_name": "Authorization",
         "header_value": "Bearer {secret}",
     },
@@ -61,19 +61,101 @@ _PROVIDER_PROBES: dict[str, dict[str, str]] = {
 # treated as "couldn't reach a verdict" (status stays ``unverified``), never as
 # an invalid key.
 _PROBE_TIMEOUT_SECONDS = 8.0
-_RESERVED_CONNECTION_PARAMS = frozenset({"api_key", "api_base", "base_url", "model"})
+_RESERVED_CONNECTION_PARAMS = frozenset({"apikey", "apibase", "baseurl", "model"})
+_CREDENTIAL_PARAM_SUFFIXES = (
+    "apikey",
+    "authorization",
+    "accesstoken",
+    "refreshtoken",
+    "idtoken",
+    "authtoken",
+    "bearertoken",
+    "sessiontoken",
+    "securitytoken",
+    "clientsecret",
+    "secret",
+    "password",
+    "passwd",
+    "passphrase",
+    "privatekey",
+    "secretkey",
+    "sslkey",
+    "clientkey",
+    "signingkey",
+    "accesskey",
+    "accesskeyid",
+    "credential",
+    "credentials",
+    "cookie",
+    "cookies",
+    "auth",
+    "token",
+    "bearer",
+    "jwt",
+)
+_CREDENTIAL_PARAM_PREFIXES = (
+    "authorizationheader",
+    "authheader",
+    "apikeyheader",
+    "xapikeyheader",
+)
+
+
+def _normalized_connection_param_name(name: Any) -> str:
+    """Normalize a connection parameter name for security matching.
+
+    Args:
+        name: Caller-supplied parameter or nested mapping key.
+
+    Returns:
+        Case-folded alphanumeric text without separator differences.
+    """
+    return "".join(character for character in str(name).casefold() if character.isalnum())
+
+
+def _is_credential_param(name: Any) -> bool:
+    """Return whether a parameter name can carry authentication material.
+
+    Args:
+        name: Caller-supplied parameter or nested mapping key.
+
+    Returns:
+        Whether the parameter must stay out of plaintext connection metadata.
+    """
+    normalized = _normalized_connection_param_name(name)
+    return normalized.endswith(_CREDENTIAL_PARAM_SUFFIXES) or normalized.startswith(_CREDENTIAL_PARAM_PREFIXES)
+
+
+def _safe_connection_value(value: Any) -> Any:
+    """Recursively remove credential-shaped keys from a parameter value.
+
+    Args:
+        value: JSON-compatible connection parameter fragment.
+
+    Returns:
+        A copied fragment without nested authentication material.
+    """
+    if isinstance(value, dict):
+        return {key: _safe_connection_value(item) for key, item in value.items() if not _is_credential_param(key)}
+    if isinstance(value, (list, tuple)):
+        return [_safe_connection_value(item) for item in value]
+    return value
 
 
 def safe_connection_params(params: dict[str, Any] | None) -> dict[str, Any]:
-    """Remove fields that could override the encrypted connection or selected model.
+    """Remove connection overrides and nested plaintext credentials.
 
     Args:
         params: Optional extra LiteLLM keyword arguments from the caller.
 
     Returns:
-        A copy containing only non-reserved runtime parameters.
+        A copy containing only non-reserved, credential-free runtime parameters.
     """
-    return {key: value for key, value in (params or {}).items() if key not in _RESERVED_CONNECTION_PARAMS}
+    return {
+        key: _safe_connection_value(value)
+        for key, value in (params or {}).items()
+        if _normalized_connection_param_name(key) not in _RESERVED_CONNECTION_PARAMS and not _is_credential_param(key)
+    }
 
 
 def byok_provider_for_litellm(prefix: str) -> str:
@@ -435,7 +517,9 @@ class ProviderKeyVault:
             if rows:
                 session.commit()
 
-    def resolve_connection(self, username: str, provider: str) -> ResolvedConnection | None:
+    def resolve_connection(
+        self, username: str, provider: str, *, verified_only: bool = False
+    ) -> ResolvedConnection | None:
         """Decrypt the account's best connection for a provider, for the run path.
 
         Picks the connection most likely to work — a ``verified`` one first, then
@@ -446,10 +530,11 @@ class ProviderKeyVault:
         Args:
             username: Account the connection belongs to.
             provider: Provider slug whose connection is resolved.
+            verified_only: Require verification in the same database read that selects the key.
 
         Returns:
             The decrypted :class:`ResolvedConnection`, or ``None`` when the
-            account has no connection for the provider.
+            account has no eligible connection for the provider.
 
         Raises:
             DomainError: 503 when the vault key is unconfigured; 409 when the
@@ -457,21 +542,20 @@ class ProviderKeyVault:
         """
         cipher = self._cipher()
         with Session(self._engine) as session:
-            rows = (
-                session.query(BillingProviderKeyModel)
-                .filter(
-                    BillingProviderKeyModel.username == username,
-                    BillingProviderKeyModel.provider == provider,
-                )
-                .all()
+            query = session.query(BillingProviderKeyModel).filter(
+                BillingProviderKeyModel.username == username,
+                BillingProviderKeyModel.provider == provider,
             )
+            if verified_only:
+                query = query.filter(BillingProviderKeyModel.status == STATUS_VERIFIED)
+            rows = query.all()
             if not rows:
                 return None
             rows.sort(key=lambda r: (r.status != STATUS_VERIFIED, -r.updated_at.timestamp()))
             row = rows[0]
             ciphertext = row.secret_ciphertext
             api_base = row.api_base
-            params = dict(row.params or {})
+            params = safe_connection_params(dict(row.params or {}))
         try:
             secret = cipher.decrypt(ciphertext).decode("utf-8")
         except InvalidToken as exc:
@@ -514,7 +598,10 @@ class ProviderKeyVault:
             provider: Provider slug.
             secret: The plaintext key to authenticate the probe with.
             api_base: Optional custom endpoint to probe instead of the provider's
-                default; required when ``provider`` is unknown.
+        default; required when ``provider`` is unknown. Canonical OpenRouter
+        bases use its credential-specific ``/key`` endpoint; custom compatible
+        hosts use their model-list endpoint because no standard key-introspection
+        operation exists.
 
         Returns:
             One of :data:`STATUS_VERIFIED`, :data:`STATUS_INVALID`, or
@@ -522,7 +609,15 @@ class ProviderKeyVault:
         """
         probe = _PROVIDER_PROBES.get(provider)
         if probe is not None:
-            urls = self._model_probe_urls(api_base) if api_base else [probe["url"]]
+            normalized_base = (api_base or "").rstrip("/")
+            if provider == "openrouter" and normalized_base in {
+                "https://openrouter.ai",
+                "https://openrouter.ai/api/v1",
+            }:
+                root = normalized_base if normalized_base.endswith("/v1") else normalized_base + "/api/v1"
+                urls = [f"{root}/key"]
+            else:
+                urls = self._model_probe_urls(api_base) if api_base else [probe["url"]]
             headers = {probe["header_name"]: probe["header_value"].format(secret=secret)}
             extra_name = probe.get("extra_header_name")
             if extra_name:

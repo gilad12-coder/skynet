@@ -184,6 +184,7 @@
     "optimization.not_finished": "Optimization is not finished.",
     "optimization.not_found": "Optimization not found: '{optimization_id}'.",
     "optimization.agent_run_not_found": "Agent run {run_id} not found for optimization '{optimization_id}'.",
+    "optimization.protected_interactive_sandbox_required": "This protected optimization cannot be evaluated or served in the API process. A separately metered {runtime} sandbox is required and is not available on this endpoint yet.",
     "optimization.not_success_status_for_serve": "Optimization is in state '{status}' — only successfully completed optimizations can be served.",
     "optimization.not_success_status_for_test_results": "Optimization is in state '{status}' — only successfully completed optimizations have test results.",
     "optimization.pair_not_rerunnable": "Cannot re-run a pair while the optimization is in state '{status}'.",

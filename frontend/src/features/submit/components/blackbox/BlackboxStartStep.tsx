@@ -31,7 +31,13 @@ const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m
   ssr: false,
 });
 
-export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
+export function BlackboxStartStep({
+  w,
+  part,
+}: {
+  w: BlackboxWizardContext;
+  part: "objective" | "seed";
+}) {
   const {
     recipe,
     setRecipe,
@@ -108,6 +114,7 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
         {showSeedFormat && (
           <HelpTip text={tipText("submit.blackbox.seed_format")}>
             <Segmented<SeedFormat>
+              label={tipText("submit.blackbox.seed_format")}
               compact
               value={seedFormat}
               onChange={setSeedFormatChoice}
@@ -136,6 +143,7 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
       trailing={seedTrailing}
     >
       <Segmented<SeedMode>
+        label={seedLabel}
         value={seedMode}
         onChange={setSeedMode}
         options={[
@@ -260,43 +268,34 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
   return (
     <BlackboxAuthoringShell
       w={w}
-      title={msg("submit.blackbox.start.title")}
+      title={part === "objective" ? msg("submit.blackbox.start.objective_label") : seedLabel}
       description={msg("submit.blackbox.start.desc")}
     >
-      {/* The kind names what the seed is — it sets the seed's label and editor,
-          the scorer's default and what the copilot writes — so it leads both
-          orderings below. */}
-      <Field label={msg("submit.blackbox.start.kind_label")} tip="submit.blackbox.kind">
-        <Segmented<BlackboxRecipe>
-          value={recipe}
-          onChange={setRecipe}
-          options={[
-            {
-              value: "anything",
-              label: msg("submit.blackbox.start.kind.anything"),
-              desc: msg("submit.blackbox.start.kind.anything_desc"),
-            },
-            {
-              value: "code",
-              label: msg("submit.blackbox.start.kind.code"),
-              desc: msg("submit.blackbox.start.kind.code_desc"),
-            },
-          ]}
-        />
-      </Field>
-
-      {/* Agent-led authoring starts from the objective and the seed follows as
-          the agent's output; hand authoring leads with the seed itself. */}
-      {codeAssistMode === "auto" ? (
+      {part === "objective" ? (
         <>
+          <Field label={msg("submit.blackbox.start.kind_label")} tip="submit.blackbox.kind">
+            <Segmented<BlackboxRecipe>
+              label={msg("submit.blackbox.start.kind_label")}
+              value={recipe}
+              onChange={setRecipe}
+              options={[
+                {
+                  value: "anything",
+                  label: msg("submit.blackbox.start.kind.anything"),
+                  desc: msg("submit.blackbox.start.kind.anything_desc"),
+                },
+                {
+                  value: "code",
+                  label: msg("submit.blackbox.start.kind.code"),
+                  desc: msg("submit.blackbox.start.kind.code_desc"),
+                },
+              ]}
+            />
+          </Field>
           {objectiveFields}
-          {seedFields}
         </>
       ) : (
-        <>
-          {seedFields}
-          {objectiveFields}
-        </>
+        seedFields
       )}
     </BlackboxAuthoringShell>
   );

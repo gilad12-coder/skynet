@@ -17,6 +17,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from ...billing.protected_credentials import scrub_execution_credentials
 from ...constants import (
     OPTIMIZATION_TYPE_RUN,
     PAYLOAD_OVERVIEW_NAME,
@@ -75,7 +76,7 @@ def _sanitize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     Returns:
         A new dict safe to serialise to API consumers.
     """
-    sanitised = dict(payload)
+    sanitised = scrub_execution_credentials(payload)
     for field in _PAYLOAD_MODEL_CONFIG_FIELDS:
         value = sanitised.get(field)
         if isinstance(value, dict):
@@ -191,9 +192,7 @@ def create_optimizations_meta_router(*, job_store) -> APIRouter:
         response_model=OptimizationPayloadResponse,
         summary="Retrieve the original submission payload",
     )
-    def get_job_payload(
-        optimization_id: str, current_user: AuthenticatedUserDep
-    ) -> OptimizationPayloadResponse:
+    def get_job_payload(optimization_id: str, current_user: AuthenticatedUserDep) -> OptimizationPayloadResponse:
         """Return the original submission payload for an optimization.
 
         Useful for re-running or duplicating an optimization. Includes the
@@ -250,9 +249,7 @@ def create_optimizations_meta_router(*, job_store) -> APIRouter:
             DomainError: 404 when the optimization is unknown or inaccessible;
                 403 when the caller's share role is below ``editor``.
         """
-        job_data, _role = require_role_at_least(
-            job_store, optimization_id, current_user, ShareRole.editor
-        )
+        job_data, _role = require_role_at_least(job_store, optimization_id, current_user, ShareRole.editor)
         overview = parse_overview(job_data)
         new_name = req.name.strip()
         overview[PAYLOAD_OVERVIEW_NAME] = new_name
@@ -281,9 +278,7 @@ def create_optimizations_meta_router(*, job_store) -> APIRouter:
             DomainError: 404 when the optimization is unknown or inaccessible;
                 403 when the caller's share role is below ``editor``.
         """
-        job_data, _role = require_role_at_least(
-            job_store, optimization_id, current_user, ShareRole.editor
-        )
+        job_data, _role = require_role_at_least(job_store, optimization_id, current_user, ShareRole.editor)
         overview = parse_overview(job_data)
         current = overview.get("pinned", False)
         overview["pinned"] = not current

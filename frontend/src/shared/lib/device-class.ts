@@ -4,14 +4,14 @@
  * Phones (viewport at most 767px — the same edge below which the sidebar goes
  * off-canvas) get a view-first shell: dashboard, run details, explore, plus the
  * few interactions that make sense on a phone (chat with a finished run, buying
- * credits, the agent panel). Authoring surfaces — new optimization, dataset
- * upload/edit, tagging, storage — are desktop-only and route to a notice.
+ * credits, the agent panel and the submission wizard). Dataset upload/edit,
+ * tagging and storage remain desktop-only and route to a notice.
  */
 export type DeviceClass = "phone" | "desktop";
 
 export const PHONE_MEDIA_QUERY = "(max-width: 767px)";
 
-const DESKTOP_ONLY_PREFIXES = ["/submit", "/datasets", "/tagger", "/storage"] as const;
+const DESKTOP_ONLY_PREFIXES = ["/datasets", "/tagger", "/storage"] as const;
 
 /** Whether `pathname` is an authoring surface the phone shell replaces with a notice. */
 export function isDesktopOnlyPath(pathname: string): boolean {

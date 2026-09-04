@@ -9,20 +9,22 @@ from __future__ import annotations
 import inspect
 import itertools
 import json
+import threading
 from collections.abc import Iterator
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.exceptions import ServiceError
+from core.exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION, ServiceError
 from core.i18n import CANCELLATION_REASON
 from core.models import BlackboxRunRequest
 from core.storage.base import JobStore
 
 from .. import engine as engine_module
-from ..constants import EVENT_RESULT
-from ..engine import BackgroundWorker, reset_worker_for_tests
+from ..checkpoint_compat import CheckpointCompatibilityError
+from ..constants import EVENT_ERROR, EVENT_RESULT
+from ..engine import BackgroundWorker, WorkerShutdownError, reset_worker_for_tests
 from .conftest import FakeJobStore
 from .mocks import (
     REAL_GRID_PAYLOAD,
@@ -52,7 +54,12 @@ def store() -> FakeJobStore:
 @pytest.fixture
 def worker(store: FakeJobStore) -> BackgroundWorker:
     """Build an unstarted BackgroundWorker bound to the test store."""
-    return BackgroundWorker(job_store=cast(JobStore, store), num_workers=1, poll_interval=1.0)
+    return BackgroundWorker(
+        job_store=cast(JobStore, store),
+        num_workers=1,
+        poll_interval=1.0,
+        _allow_unprotected_test_execution=True,
+    )
 
 
 def test_process_job_raises_when_payload_is_none(
@@ -184,25 +191,145 @@ def test_process_job_sets_status_failed_on_nonzero_exit_without_result(
     assert store._jobs["opt-4"]["status"] == "failed"
 
 
-def test_process_job_requeues_on_sigkill_oom(
+def test_process_job_sigkill_without_checkpoint_does_not_restart(
     worker: BackgroundWorker,
     store: FakeJobStore,
 ) -> None:
-    """A SIGKILL (-9) with no result re-queues to ``pending`` under the attempt cap."""
+    """A SIGKILL without a compatible checkpoint fails without spending on a fresh restart."""
     store.seed_job("opt-oom", payload=REAL_RUN_PAYLOAD, attempts=0)
+    store.engine = MagicMock()
     worker.enqueue_job("opt-oom")
 
-    # Exit code -9 (SIGKILL, likely OOM), no result → bounded re-queue, not failed.
     ctx, _proc = make_mp_context(exitcode=-9, result_events=[])
+    worker._mp_ctx = ctx
+    worker._mp_start_method = "spawn"
+
+    with (
+        patch("core.worker.engine.notify_job_completed"),
+        patch.object(worker, "_get_service") as mock_svc,
+        patch.object(
+            store,
+            "requeue_for_resume",
+            side_effect=CheckpointCompatibilityError("No completed compatible checkpoint is available."),
+        ),
+    ):
+        mock_svc.return_value.validate_payload = MagicMock()
+        worker._process_job("opt-oom", 0)
+
+    assert store._jobs["opt-oom"]["status"] == "failed"
+    assert store._jobs["opt-oom"]["attempts"] == 0
+    assert "compatible checkpoint" in store._jobs["opt-oom"]["message"]
+
+
+def test_process_job_recovers_classified_infrastructure_event(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """Route a trusted sandbox/provider transport interruption into automatic recovery."""
+    store.seed_job("opt-transient", payload=REAL_RUN_PAYLOAD, attempts=0)
+    store.engine = MagicMock()
+    worker.enqueue_job("opt-transient")
+    ctx, _proc = make_mp_context(
+        exitcode=1,
+        result_events=[
+            {
+                "type": EVENT_ERROR,
+                "error": "sandbox transport interrupted",
+                "error_type": "InfrastructureInterruptionError",
+                "failure_kind": INFRASTRUCTURE_INTERRUPTION,
+            }
+        ],
+    )
     worker._mp_ctx = ctx
     worker._mp_start_method = "spawn"
 
     with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service") as mock_svc:
         mock_svc.return_value.validate_payload = MagicMock()
-        worker._process_job("opt-oom", 0)
+        worker._process_job("opt-transient", 0)
 
-    assert store._jobs["opt-oom"]["status"] == "pending"
-    assert store._jobs["opt-oom"]["attempts"] == 1
+    assert store._jobs["opt-transient"]["status"] == "pending"
+    assert store._jobs["opt-transient"]["attempts"] == 1
+    assert len(store.requeue_calls) == 1
+    assert store.requeue_calls[0]["automatic"] is True
+
+
+def test_process_job_does_not_recover_deterministic_failure_event(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """Keep user, configuration, and provider HTTP errors terminal."""
+    store.seed_job("opt-deterministic", payload=REAL_RUN_PAYLOAD, attempts=0)
+    store.engine = MagicMock()
+    worker.enqueue_job("opt-deterministic")
+    ctx, _proc = make_mp_context(
+        exitcode=1,
+        result_events=[
+            {
+                "type": EVENT_ERROR,
+                "error": "provider rejected the request with 400",
+                "error_type": "ValueError",
+                "failure_kind": DETERMINISTIC_FAILURE,
+            }
+        ],
+    )
+    worker._mp_ctx = ctx
+    worker._mp_start_method = "spawn"
+
+    with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service") as mock_svc:
+        mock_svc.return_value.validate_payload = MagicMock()
+        worker._process_job("opt-deterministic", 0)
+
+    assert store._jobs["opt-deterministic"]["status"] == "failed"
+    assert store.requeue_calls == []
+
+
+def test_process_job_enforces_recovery_attempt_cap_for_transient_event(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End a repeated infrastructure interruption at the existing attempt cap."""
+    monkeypatch.setattr(engine_module.settings, "job_max_attempts", 3)
+    store.seed_job("opt-transient-cap", payload=REAL_RUN_PAYLOAD, attempts=2)
+    store.engine = MagicMock()
+    worker.enqueue_job("opt-transient-cap")
+    ctx, _proc = make_mp_context(
+        exitcode=1,
+        result_events=[
+            {
+                "type": EVENT_ERROR,
+                "error": "provider stream interrupted",
+                "error_type": "InfrastructureInterruptionError",
+                "failure_kind": INFRASTRUCTURE_INTERRUPTION,
+            }
+        ],
+    )
+    worker._mp_ctx = ctx
+    worker._mp_start_method = "spawn"
+
+    with patch("core.worker.engine.notify_job_completed"), patch.object(worker, "_get_service") as mock_svc:
+        mock_svc.return_value.validate_payload = MagicMock()
+        worker._process_job("opt-transient-cap", 0)
+
+    assert store._jobs["opt-transient-cap"]["status"] == "failed"
+    assert "attempt limit" in store._jobs["opt-transient-cap"]["recovery"]["reason"]
+    assert store.requeue_calls == []
+
+
+def test_worker_shutdown_flag_is_temporary_only_for_active_job(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """Distinguish service shutdown from an explicit persisted cancel."""
+    event = threading.Event()
+    event.set()
+    store.seed_job("opt-shutdown", status="running")
+    worker._running = False
+    with pytest.raises(WorkerShutdownError):
+        worker._raise_if_interrupted(event, "opt-shutdown")
+    store.update_job("opt-shutdown", status="cancelled")
+    with pytest.raises(engine_module.CancellationError):
+        worker._raise_if_interrupted(event, "opt-shutdown")
 
 
 def test_process_job_sets_status_failed_when_subprocess_sends_no_result(
@@ -346,6 +473,7 @@ def test_process_job_cancellation_error_notifies_cancelled(
 
     def _set_cancel_then_validate(*args, **kwargs):
         """Side effect that sets the cancel event from inside validation."""
+        store.update_job("opt-9", status="cancelled")
         worker._cancel_events["opt-9"].set()
 
     with (
@@ -472,6 +600,33 @@ def test_process_job_watchdog_fails_run_that_emits_no_events(
 
     assert store._jobs["opt-stall"]["status"] == "failed"
     assert "stall" in store._jobs["opt-stall"]["message"].lower()
+    assert proc.terminate.called
+
+
+def test_process_job_watchdog_recovers_stall_when_checkpoint_admission_succeeds(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Treat a bounded stall as a recoverable infrastructure interruption."""
+    store.seed_job("opt-stall-recovery", payload=REAL_RUN_PAYLOAD, attempts=0)
+    store.engine = MagicMock()
+    worker.enqueue_job("opt-stall-recovery")
+    ctx, proc = _stall_ctx()
+    worker._mp_ctx = ctx
+    worker._mp_start_method = "spawn"
+    monkeypatch.setattr(engine_module.settings, "job_stall_timeout_seconds", 1.0)
+
+    with (
+        patch("core.worker.engine.notify_job_completed"),
+        patch.object(worker, "_get_service") as mock_svc,
+        patch.object(engine_module.time, "monotonic", side_effect=itertools.count(0.0, 100_000.0)),
+    ):
+        mock_svc.return_value.validate_payload = MagicMock()
+        worker._process_job("opt-stall-recovery", 0)
+
+    assert store._jobs["opt-stall-recovery"]["status"] == "pending"
+    assert store._jobs["opt-stall-recovery"]["attempts"] == 1
     assert proc.terminate.called
 
 

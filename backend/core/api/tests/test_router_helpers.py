@@ -31,7 +31,9 @@ from ..routers._helpers import (
     clear_program_cache,
     enforce_storage_quota,
     enforce_user_quota,
+    load_pair_program,
     load_program,
+    load_react_chat_inputs,
     strip_api_key,
 )
 from ..routers.constants import (
@@ -71,12 +73,13 @@ def test_valid_statuses_match_enum() -> None:
 
 
 def test_terminal_statuses_are_finite() -> None:
-    """Only ``success``/``failed``/``cancelled``/``paused`` are considered terminal."""
+    """Include a normal budget stop among finite terminal states."""
     assert {
         OptimizationStatus.success,
         OptimizationStatus.failed,
         OptimizationStatus.cancelled,
         OptimizationStatus.paused,
+        OptimizationStatus.stopped,
     } == TERMINAL_STATUSES
 
 
@@ -454,6 +457,64 @@ def test_load_program_deleted_job_raises_404_before_cache() -> None:
     with pytest.raises(HTTPException) as exc_info:
         load_program(store, "missing-job", _TEST_USER)
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("loader", "args"),
+    [
+        (load_program, ("protected-completed", _TEST_USER)),
+        (load_pair_program, ("protected-completed", 0, _TEST_USER)),
+        (load_react_chat_inputs, ("protected-completed", _TEST_USER)),
+    ],
+)
+def test_protected_completed_loaders_reject_before_authored_code_materialization(
+    loader,
+    args: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Block every completed-job loader before it can materialize authored code.
+
+    Args:
+        loader: Shared loader under test.
+        args: Loader arguments after the job store.
+        monkeypatch: Pytest patch helper used to replace code-loading seams.
+    """
+    store = _JobStoreWithDelete()
+    job_data = _run_job_data("protected-completed", object())
+    job_data["execution_budget_id"] = "budget-1"
+    job_data["payload"] = {"execution_runtime": "worker"}
+    store.seed("protected-completed", job_data)
+
+    def forbidden(*_args, **_kwargs):
+        """Fail if a protected path reaches any authored-code loader."""
+        raise AssertionError("protected authored code reached the API process")
+
+    monkeypatch.setattr(_helpers_mod, "_materialize_program", forbidden)
+    monkeypatch.setattr(_helpers_mod, "load_signature_from_code", forbidden)
+
+    with pytest.raises(DomainError) as exc_info:
+        loader(store, *args)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "optimization.protected_interactive_sandbox_required"
+    assert exc_info.value.params == {"runtime": "vercel"}
+
+
+def test_protected_loader_recognizes_budget_id_stored_only_in_original_payload() -> None:
+    """Keep migrated protected rows fenced when only their payload carries the budget id."""
+    store = _JobStoreWithDelete()
+    job_data = _run_job_data("payload-budget", object())
+    job_data["payload"] = {
+        "execution_budget_id": "budget-1",
+        "execution_runtime": "vercel",
+    }
+    store.seed("payload-budget", job_data)
+
+    with pytest.raises(DomainError) as exc_info:
+        load_program(store, "payload-budget", _TEST_USER)
+
+    assert exc_info.value.code == "optimization.protected_interactive_sandbox_required"
+    assert exc_info.value.params == {"runtime": "vercel"}
 
 
 def test_load_program_deleted_job_raises_404_even_when_cache_has_entry() -> None:

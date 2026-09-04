@@ -13,6 +13,7 @@ class AnalyticsSummaryResponse(BaseModel):
     total_jobs: int = 0
     success_count: int = 0
     failed_count: int = 0
+    stopped_count: int = 0
     cancelled_count: int = 0
     pending_count: int = 0
     running_count: int = 0

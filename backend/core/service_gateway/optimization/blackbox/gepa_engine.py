@@ -18,6 +18,7 @@ from gepa.utils.stop_condition import ScoreThresholdStopper
 
 from ....constants import OPTIMIZER_NAME_GEPA
 from ....exceptions import ServiceError
+from ..budget_stop import BudgetReached
 from ..trajectory import capture_proposal_prompts, trajectory_watch
 from .feedback import STR_CANDIDATE_KEY, emit_scorer_feedback
 from .protocol import BudgetExhaustedError, Candidate, EngineContext, EvalServer, Result, Task
@@ -61,6 +62,11 @@ class GepaEngine:
             return Result(best_candidate=task.seed_candidate or "", best_score=None, total_evals=0)
         run_dir = str(Path(ctx.run_dir) / self.name)
         Path(run_dir).mkdir(parents=True, exist_ok=True)
+        stop_callbacks: list[Any] = []
+        if ctx.recovery_seed_boundary is not None:
+            stop_callbacks.append(ctx.recovery_seed_boundary)
+        if ctx.stop_at_score is not None:
+            stop_callbacks.append(ScoreThresholdStopper(ctx.stop_at_score))
         config = GEPAConfig(
             engine=EngineConfig(
                 run_dir=run_dir,
@@ -75,7 +81,8 @@ class GepaEngine:
             ),
             reflection=ReflectionConfig(reflection_lm=_LaneReflection(ctx.reflection_lm, ctx.check_budget)),
             tracking=TrackingConfig(logger=_JobLogger()),
-            stop_callbacks=[ScoreThresholdStopper(ctx.stop_at_score)] if ctx.stop_at_score is not None else None,
+            stop_callbacks=stop_callbacks or None,
+            callbacks=[ctx.recovery_seed_boundary] if ctx.recovery_seed_boundary is not None else None,
         )
 
         # GEPA hands the dataset rows back by identity and keys each candidate's
@@ -129,6 +136,23 @@ class GepaEngine:
         with capture_proposal_prompts(OPTIMIZER_NAME_GEPA), trajectory_watch(run_dir, ctx.progress_callback):
             try:
                 gepa_result: GEPAResult[Any, Any] | None = optimize_anything(**kwargs)
+            except BudgetReached as exc:
+                recovered = _load_result_from_state(run_dir, seed=ctx.seed, str_mode=task.str_mode)
+                if recovered is not None:
+                    candidate = recovered.best_candidate
+                    score = float(recovered.val_aggregate_scores[recovered.best_idx])
+                    exc.result = Result(
+                        best_candidate=candidate,
+                        best_score=score,
+                        total_evals=server.used,
+                        metadata={"upstream_source": GEPA_SOURCE, "selection_source": "gepa_checkpoint"},
+                    )
+                    exc.evidence.update(
+                        selection_scope="validation",
+                        final_evaluation_completed=False,
+                        final_evaluation_reason="budget_reached",
+                    )
+                raise
             except BudgetExhaustedError:
                 gepa_result = _load_result_from_state(run_dir, seed=ctx.seed, str_mode=task.str_mode)
 
