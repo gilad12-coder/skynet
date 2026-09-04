@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import Annotated, Any
 
 import dspy
@@ -22,6 +23,7 @@ from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
 from ...billing import ProviderKeyVault, resolve_byok_model_config
+from ...billing.budget_amounts import MAX_CREDITS
 from ...billing.metering import meter_llm_run
 from ...config import settings
 from ...constants import (
@@ -30,6 +32,8 @@ from ...constants import (
     PAYLOAD_OVERVIEW_MODEL_SETTINGS,
     PAYLOAD_OVERVIEW_MODULE_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
+    PAYLOAD_OVERVIEW_SIGNATURE_CODE,
+    PAYLOAD_OVERVIEW_TOOL_SOURCE,
     PAYLOAD_OVERVIEW_WORKFLOW,
     TOKEN_SOURCE_BYOK,
     TOKEN_SOURCE_MANAGED,
@@ -40,10 +44,13 @@ from ...service_gateway.agents.react_serve import run_react_chat
 from ...service_gateway.language_models import build_language_model
 from ...service_gateway.optimization.workflow import capture_node_traces
 from ..auth import AuthenticatedUser, get_authenticated_user
+from ..converters import job_owner
 from ..errors import DomainError
+from ..protected_interaction import run_protected_interaction
 from ..response_limits import AGENT_MAX_INSTRUCTIONS, AGENT_MAX_TEXT, truncate_text
 from ..sharing_access import ShareRole
 from ._helpers import (
+    _protected_api_runtime,
     enforce_llm_credits,
     load_job_for_user,
     load_pair_program,
@@ -165,6 +172,13 @@ class ServeChatRequest(BaseModel):
         default=None,
         description="Optional model override. Uses the run's model if omitted.",
     )
+    max_cost_credits: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_CREDITS,
+        strict=True,
+        description="Maximum credits authorized for this one chat turn; required for protected runs.",
+    )
 
 
 class ServeChatConfirmRequest(BaseModel):
@@ -196,6 +210,250 @@ def _cap_serve_outputs(outputs: dict[str, Any]) -> dict[str, Any]:
     return {
         key: truncate_text(value, AGENT_MAX_TEXT) if isinstance(value, str) else value for key, value in outputs.items()
     }
+
+
+def _interaction_authority(max_cost_credits: int | None, idempotency_key: str | None) -> tuple[int, str]:
+    """Require an explicit one-request maximum and replay key.
+
+    Args:
+        max_cost_credits: Caller-selected maximum credits.
+        idempotency_key: Transport replay identity.
+
+    Returns:
+        Validated maximum and trimmed idempotency key.
+
+    Raises:
+        DomainError: When either required authority field is missing.
+    """
+    if max_cost_credits is None:
+        raise DomainError("serve.request_budget_required", status=400)
+    key = (idempotency_key or "").strip()
+    if not key:
+        raise DomainError("budget.idempotency_required", status=400)
+    return max_cost_credits, key
+
+
+def _protected_payload(
+    job_data: dict[str, Any],
+    artifact: Any,
+    overview: dict[str, Any],
+    model_config: ModelConfig,
+    inputs: dict[str, Any],
+    interaction: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the smallest secret-free guest payload for one interaction.
+
+    Args:
+        job_data: Persisted protected optimization row.
+        artifact: Selected optimized program artifact.
+        overview: Scrubbed program reconstruction metadata.
+        model_config: Caller-selected task model without resolved credentials.
+        inputs: Validated program inputs.
+        interaction: Guest operation descriptor.
+
+    Returns:
+        Payload ready for trusted credential resolution and sandbox routing.
+    """
+    stored = job_data.get("payload") if isinstance(job_data.get("payload"), dict) else {}
+    effective_overview = dict(overview)
+    effective_overview[PAYLOAD_OVERVIEW_SIGNATURE_CODE] = (
+        effective_overview.get(PAYLOAD_OVERVIEW_SIGNATURE_CODE) or stored.get("signature_code")
+    )
+    tool_source = stored.get("tool_source") or effective_overview.get(PAYLOAD_OVERVIEW_TOOL_SOURCE)
+    payload = {
+        "model_config": model_config.model_dump(mode="json"),
+        "token_source": model_config.token_source or TOKEN_SOURCE_MANAGED,
+        "program_artifact": (
+            artifact.model_dump(mode="json") if hasattr(artifact, "model_dump") else artifact
+        ),
+        "payload_overview": effective_overview,
+        "inputs": inputs,
+        "_interaction": interaction,
+    }
+    if tool_source is not None:
+        payload["tool_source"] = tool_source
+    return payload
+
+
+def _protected_result(
+    *,
+    job_store: Any,
+    job_data: dict[str, Any],
+    artifact: Any,
+    overview: dict[str, Any],
+    model_config: ModelConfig,
+    inputs: dict[str, Any],
+    interaction: dict[str, Any],
+    max_cost_credits: int,
+    idempotency_key: str,
+    current_user: AuthenticatedUser,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+    require_tool_approval: bool = False,
+) -> dict[str, Any]:
+    """Execute one protected program call under caller-owned authority.
+
+    Args:
+        job_store: Store backing the program and budget ledger.
+        job_data: Persisted protected optimization row.
+        artifact: Selected program artifact.
+        overview: Program reconstruction metadata.
+        model_config: Requested task model.
+        inputs: Validated program inputs.
+        interaction: Guest operation descriptor.
+        max_cost_credits: Exact request maximum accepted by the caller.
+        idempotency_key: Stable request replay identity.
+        current_user: Authenticated caller who funds this interaction.
+        on_event: Optional live event receiver.
+        require_tool_approval: Whether live tools require an explicit decision.
+
+    Returns:
+        Completed isolated interaction response.
+
+    Raises:
+        DomainError: When the isolated interaction fails.
+    """
+    stored = job_data.get("payload") if isinstance(job_data.get("payload"), dict) else {}
+    result = run_protected_interaction(
+        _protected_payload(job_data, artifact, overview, model_config, inputs, interaction),
+        kind=str(interaction["kind"]),
+        max_cost_credits=max_cost_credits,
+        idempotency_key=idempotency_key,
+        user=current_user,
+        job_store=job_store,
+        credential_owner=job_owner(job_data),
+        credential_binding_id=job_data.get("execution_budget_id") or stored.get("execution_budget_id"),
+        on_event=on_event,
+        require_tool_approval=require_tool_approval,
+    )
+    if result.get("error"):
+        raise DomainError("serve.protected_interaction_failed", status=502, error=result["error"])
+    return result
+
+
+def _protected_program_call(
+    *,
+    job_store: Any,
+    job_data: dict[str, Any],
+    optimization_id: str,
+    req: ServeRequest,
+    current_user: AuthenticatedUser,
+    idempotency_key: str | None,
+    pair_index: int | None = None,
+    stream: bool = False,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """Validate and execute one protected single-program or pair invocation.
+
+    Args:
+        job_store: Store backing artifacts and billing.
+        job_data: Persisted protected optimization row.
+        optimization_id: Program identity.
+        req: Caller inputs, model override, and one-request maximum.
+        current_user: Authenticated spending owner.
+        idempotency_key: Transport replay identity.
+        pair_index: Optional grid pair selection.
+        stream: Whether guest token events should be emitted.
+        on_event: Optional live event receiver.
+
+    Returns:
+        Completed isolated serve response.
+    """
+    maximum, key = _interaction_authority(req.max_cost_credits, idempotency_key)
+    if pair_index is None:
+        artifact, overview, model_name = load_program_metadata(job_store, optimization_id, current_user)
+        model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
+        if req.model_config_override is not None:
+            model_config = req.model_config_override
+        elif model_settings:
+            model_config = ModelConfig.model_validate(model_settings)
+        elif model_name:
+            model_config = ModelConfig(name=model_name)
+        else:
+            raise DomainError("serve.no_model_config", status=400)
+    else:
+        artifact, pair, overview = load_pair_program_metadata(
+            job_store, optimization_id, pair_index, current_user
+        )
+        pair_model = pair.get("generation_model", "") if isinstance(pair, dict) else pair.generation_model
+        model_config = _pair_model_config(pair_model, overview, req.model_config_override)
+    input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
+    workflow = workflow_spec_from_overview(overview)
+    if workflow is not None:
+        input_fields = workflow.input_field_names()
+        output_fields = workflow.output_field_names()
+    if not input_fields:
+        raise DomainError("serve.no_declared_inputs", status=400)
+    missing = [field for field in input_fields if field not in req.inputs]
+    if missing:
+        raise DomainError(
+            "serve.missing_inputs",
+            status=400,
+            missing=missing,
+            input_fields=input_fields,
+        )
+    inputs = {field: req.inputs[field] for field in input_fields}
+    return _protected_result(
+        job_store=job_store,
+        job_data=job_data,
+        artifact=artifact,
+        overview=overview,
+        model_config=model_config,
+        inputs=inputs,
+        interaction={
+            "kind": "serve",
+            "optimization_id": optimization_id,
+            "input_fields": input_fields,
+            "output_fields": output_fields,
+            "stream": stream,
+        },
+        max_cost_credits=maximum,
+        idempotency_key=key,
+        current_user=current_user,
+        on_event=on_event,
+    )
+
+
+async def _protected_sse(
+    run: Callable[[Callable[[dict[str, Any]], None]], dict[str, Any]], *, final_event: str
+):
+    """Bridge blocking sandbox execution and tool approvals into an SSE source.
+
+    Args:
+        run: Blocking protected interaction accepting a thread-safe event sink.
+        final_event: Terminal event name expected by the frontend.
+
+    Yields:
+        Live guest events followed by the reconciled terminal result.
+    """
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+    def emit(event: dict[str, Any]) -> None:
+        """Move one parent or guest event onto the request loop.
+
+        Args:
+            event: SSE-shaped interaction event.
+        """
+        loop.call_soon_threadsafe(queue.put_nowait, event)
+
+    task = asyncio.create_task(asyncio.to_thread(run, emit))
+    try:
+        while not task.done() or not queue.empty():
+            getter = asyncio.create_task(queue.get())
+            done, _pending = await asyncio.wait({task, getter}, return_when=asyncio.FIRST_COMPLETED)
+            if getter in done:
+                yield getter.result()
+            else:
+                getter.cancel()
+            if task in done and queue.empty():
+                break
+        result = await task
+        yield {"event": final_event, "data": result}
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        logger.exception("Protected interaction stream failed")
+        yield {"event": "error", "data": {"error": str(error)}}
 
 
 def _artifact_prompt_fields(artifact: Any) -> tuple[list[str], list[str], str | None, int]:
@@ -627,7 +885,12 @@ def create_serve_router(*, job_store) -> APIRouter:
         summary="Run a single inference through an optimized program",
         tags=["agent"],
     )
-    def serve_program(optimization_id: str, req: ServeRequest, current_user: AuthenticatedUserDep) -> ServeResponse:
+    def serve_program(
+        optimization_id: str,
+        req: ServeRequest,
+        current_user: AuthenticatedUserDep,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ) -> ServeResponse:
         """Run a blocking inference call through the compiled program.
 
         Model resolution: ``model_config_override`` → stored job settings →
@@ -647,6 +910,18 @@ def create_serve_router(*, job_store) -> APIRouter:
                 spendable credits), 404 (unknown or inaccessible), 409 (not
                 in a serveable state).
         """
+        job_data = load_job_for_user(job_store, optimization_id, current_user)
+        if _protected_api_runtime(job_data) is not None:
+            return ServeResponse.model_validate(
+                _protected_program_call(
+                    job_store=job_store,
+                    job_data=job_data,
+                    optimization_id=optimization_id,
+                    req=req,
+                    current_user=current_user,
+                    idempotency_key=idempotency_key,
+                )
+            )
         program, result, overview = load_program(job_store, optimization_id, current_user)
         artifact = result.program_artifact
 
@@ -724,7 +999,12 @@ def create_serve_router(*, job_store) -> APIRouter:
         "/serve/{optimization_id}/stream",
         summary="Run inference and stream partial outputs as SSE",
     )
-    async def serve_program_stream(optimization_id: str, req: ServeRequest, current_user: AuthenticatedUserDep):
+    async def serve_program_stream(
+        optimization_id: str,
+        req: ServeRequest,
+        current_user: AuthenticatedUserDep,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ):
         """Run inference and stream partial outputs as Server-Sent Events.
 
         Emits one ``token`` event per chunk, keyed by output field, then a
@@ -745,6 +1025,36 @@ def create_serve_router(*, job_store) -> APIRouter:
             DomainError: 400, 402, 404 (including inaccessible to caller),
                 or 409 mirroring the non-streaming route.
         """
+        try:
+            job_data = await asyncio.to_thread(load_job_for_user, job_store, optimization_id, current_user)
+        except DomainError as error:
+            if error.status_code != 404:
+                raise
+            job_data = None
+        if job_data is not None and _protected_api_runtime(job_data) is not None:
+            _interaction_authority(req.max_cost_credits, idempotency_key)
+            source = _protected_sse(
+                lambda emit: _protected_program_call(
+                    job_store=job_store,
+                    job_data=job_data,
+                    optimization_id=optimization_id,
+                    req=req,
+                    current_user=current_user,
+                    idempotency_key=idempotency_key,
+                    stream=True,
+                    on_event=emit,
+                ),
+                final_event="final",
+            )
+            return StreamingResponse(
+                sse_from_events(source),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
         # Offload the synchronous DB read + program deserialization so it does
         # not block the single event loop (and every other in-flight request /
         # SSE stream) before the first byte is produced.
@@ -868,6 +1178,7 @@ def create_serve_router(*, job_store) -> APIRouter:
         pair_index: int,
         req: ServeRequest,
         current_user: AuthenticatedUserDep,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> ServeResponse:
         """Run inference through one grid-search pair's compiled program.
 
@@ -889,6 +1200,19 @@ def create_serve_router(*, job_store) -> APIRouter:
                 credits), 404 (unknown / inaccessible), 409 (not finished
                 or pair failed).
         """
+        job_data = load_job_for_user(job_store, optimization_id, current_user)
+        if _protected_api_runtime(job_data) is not None:
+            return ServeResponse.model_validate(
+                _protected_program_call(
+                    job_store=job_store,
+                    job_data=job_data,
+                    optimization_id=optimization_id,
+                    req=req,
+                    current_user=current_user,
+                    idempotency_key=idempotency_key,
+                    pair_index=pair_index,
+                )
+            )
         program, pair, overview = load_pair_program(job_store, optimization_id, pair_index, current_user)
         artifact = pair.program_artifact
 
@@ -950,6 +1274,7 @@ def create_serve_router(*, job_store) -> APIRouter:
         pair_index: int,
         req: ServeRequest,
         current_user: AuthenticatedUserDep,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ):
         """Stream inference from one grid-search pair as Server-Sent Events.
 
@@ -971,6 +1296,37 @@ def create_serve_router(*, job_store) -> APIRouter:
                 credits), 404 (unknown / inaccessible), 409 (not finished
                 or pair failed).
         """
+        try:
+            job_data = await asyncio.to_thread(load_job_for_user, job_store, optimization_id, current_user)
+        except DomainError as error:
+            if error.status_code != 404:
+                raise
+            job_data = None
+        if job_data is not None and _protected_api_runtime(job_data) is not None:
+            _interaction_authority(req.max_cost_credits, idempotency_key)
+            source = _protected_sse(
+                lambda emit: _protected_program_call(
+                    job_store=job_store,
+                    job_data=job_data,
+                    optimization_id=optimization_id,
+                    req=req,
+                    current_user=current_user,
+                    idempotency_key=idempotency_key,
+                    pair_index=pair_index,
+                    stream=True,
+                    on_event=emit,
+                ),
+                final_event="final",
+            )
+            return StreamingResponse(
+                sse_from_events(source),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
         # Offload the synchronous DB read + program deserialization so it does
         # not block the single event loop before the first byte is produced.
         program, pair, overview = await asyncio.to_thread(
@@ -1036,6 +1392,7 @@ def create_serve_router(*, job_store) -> APIRouter:
         req: ServeChatRequest,
         current_user: AuthenticatedUserDep,
         authorization: str | None = Header(default=None),
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> StreamingResponse:
         """Stream one chat turn against a served, optimized ReActV2 agent as SSE.
 
@@ -1062,6 +1419,71 @@ def create_serve_router(*, job_store) -> APIRouter:
                 run, or not served from a live-MCP source), 400 (no model),
                 402 (caller has no spendable credits).
         """
+        try:
+            job_data = await asyncio.to_thread(load_job_for_user, job_store, optimization_id, current_user)
+        except DomainError as error:
+            if error.status_code != 404:
+                raise
+            job_data = None
+        if job_data is not None and _protected_api_runtime(job_data) is not None:
+            maximum, key = _interaction_authority(req.max_cost_credits, idempotency_key)
+            artifact, overview, model_name = await asyncio.to_thread(
+                load_program_metadata, job_store, optimization_id, current_user
+            )
+            raw_artifact = artifact if isinstance(artifact, dict) else artifact.model_dump(mode="json")
+            overlay = raw_artifact.get("react_overlay")
+            if not isinstance(overlay, dict):
+                raise DomainError("serve.chat_not_react", status=409)
+            stored = job_data.get("payload") if isinstance(job_data.get("payload"), dict) else {}
+            tool_source = stored.get("tool_source") or overlay.get("tool_source")
+            if not isinstance(tool_source, dict) or tool_source.get("kind") != "live_mcp":
+                raise DomainError("serve.chat_requires_live_mcp", status=409)
+            model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
+            if req.model_config_override is not None:
+                model_config = req.model_config_override
+            elif model_settings:
+                model_config = ModelConfig.model_validate(model_settings)
+            elif model_name:
+                model_config = ModelConfig(name=model_name)
+            else:
+                raise DomainError("serve.no_model_config", status=400)
+            input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
+            if not input_fields:
+                raise DomainError("serve.no_declared_inputs", status=400)
+            inputs = dict.fromkeys(input_fields, "")
+            inputs[input_fields[0]] = req.user_message
+            source = _protected_sse(
+                lambda emit: _protected_result(
+                    job_store=job_store,
+                    job_data=job_data,
+                    artifact=artifact,
+                    overview=overview,
+                    model_config=model_config,
+                    inputs=inputs,
+                    interaction={
+                        "kind": "react_chat",
+                        "optimization_id": optimization_id,
+                        "input_fields": input_fields,
+                        "output_fields": output_fields,
+                        "stream": True,
+                    },
+                    max_cost_credits=maximum,
+                    idempotency_key=key,
+                    current_user=current_user,
+                    on_event=emit,
+                    require_tool_approval=req.trust_mode != "yolo",
+                ),
+                final_event="done",
+            )
+            return StreamingResponse(
+                sse_from_events(source),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
         # Offload the synchronous DB read + program deserialization so it does
         # not block the single event loop before the first byte is produced.
         signature_cls, program_state_json, react_overlay, overview = await asyncio.to_thread(
@@ -1145,8 +1567,10 @@ def create_serve_router(*, job_store) -> APIRouter:
                 caller's role is below editor; 404 when the call id is unknown
                 or already resolved.
         """
-        require_role_at_least(job_store, optimization_id, current_user, ShareRole.editor)
-        resolved = get_approval_registry().resolve(req.call_id, req.approved)
+        job_data = load_job_for_user(job_store, optimization_id, current_user)
+        if _protected_api_runtime(job_data) is None:
+            require_role_at_least(job_store, optimization_id, current_user, ShareRole.editor)
+        resolved = get_approval_registry().resolve_or_persist(req.call_id, req.approved)
         if not resolved:
             raise DomainError("agent.approval.unknown_call_id", status=404)
         return ServeChatConfirmResponse(resolved=True)

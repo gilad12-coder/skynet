@@ -30,6 +30,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
+import time
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -173,6 +175,8 @@ class ApprovalRegistry:
     def __init__(self) -> None:
         """Initialize the in-memory pending-approvals map."""
         self._pending: dict[str, asyncio.Future[bool]] = {}
+        self._blocking_pending: dict[str, tuple[threading.Event, bool | None]] = {}
+        self._lock = threading.RLock()
         self._engine = None
 
     def bind_engine(self, engine: Any) -> None:
@@ -194,8 +198,23 @@ class ApprovalRegistry:
         """
         loop = asyncio.get_running_loop()
         fut = loop.create_future()
-        self._pending[call_id] = fut
+        with self._lock:
+            self._pending[call_id] = fut
         return fut
+
+    def register_blocking(self, call_id: str) -> threading.Event:
+        """Register a tool approval awaited by a sandbox relay thread.
+
+        Args:
+            call_id: Unique identifier surfaced to the browser.
+
+        Returns:
+            Event set when a local or durable decision arrives.
+        """
+        event = threading.Event()
+        with self._lock:
+            self._blocking_pending[call_id] = (event, None)
+        return event
 
     def resolve(self, call_id: str, approved: bool) -> bool:
         """Complete a pending approval future.
@@ -208,10 +227,17 @@ class ApprovalRegistry:
             True when a matching pending future was resolved; False if the
             id was unknown or already settled.
         """
-        fut = self._pending.pop(call_id, None)
+        with self._lock:
+            fut = self._pending.pop(call_id, None)
+            blocking = self._blocking_pending.get(call_id)
+            if blocking is not None:
+                event, _decision = blocking
+                self._blocking_pending[call_id] = (event, approved)
+                event.set()
+                return True
         if fut is None or fut.done():
             return False
-        fut.set_result(approved)
+        fut.get_loop().call_soon_threadsafe(fut.set_result, approved)
         return True
 
     def cancel(self, call_id: str) -> None:
@@ -220,9 +246,44 @@ class ApprovalRegistry:
         Args:
             call_id: Identifier matching a previous :meth:`register` call.
         """
-        fut = self._pending.pop(call_id, None)
+        with self._lock:
+            fut = self._pending.pop(call_id, None)
+            blocking = self._blocking_pending.pop(call_id, None)
+        if blocking is not None:
+            blocking[0].set()
         if fut is not None and not fut.done():
-            fut.cancel()
+            fut.get_loop().call_soon_threadsafe(fut.cancel)
+
+    def wait_for_blocking_decision(
+        self, call_id: str, event: threading.Event, *, timeout_seconds: float
+    ) -> bool:
+        """Wait for a relayed sandbox tool decision with durable cross-replica polling.
+
+        Args:
+            call_id: Identifier registered by :meth:`register_blocking`.
+            event: Local fast-path event returned by registration.
+            timeout_seconds: Finite approval window bounded by sandbox lifetime.
+
+        Returns:
+            Approved decision, or False after decline or expiry.
+        """
+        deadline = time.monotonic() + timeout_seconds
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                if event.wait(timeout=min(_DURABLE_POLL_SECONDS, remaining)):
+                    with self._lock:
+                        pending = self._blocking_pending.get(call_id)
+                    return bool(pending and pending[1])
+                if self._engine is not None:
+                    decision = self._take_durable(call_id)
+                    if decision is not None:
+                        return decision
+        finally:
+            with self._lock:
+                self._blocking_pending.pop(call_id, None)
 
     def resolve_or_persist(self, call_id: str, approved: bool) -> bool:
         """Resolve locally, else persist the decision for the owning replica.

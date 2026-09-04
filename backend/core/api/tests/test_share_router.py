@@ -2,7 +2,7 @@
 
 Exercises the owner/editor-gated management surface (general-access policy,
 member CRUD, role gating), the access-gated public composite read
-(``GET /share/{token}``), and the editor+-only inference path
+(``GET /share/{token}``), and the caller-funded viewer inference path
 (``POST /share/{token}/serve``).
 
 The store mirrors the in-memory SQLite pattern of the sibling routers: a
@@ -14,7 +14,6 @@ language-model builder on the ``share`` module so it never touches a real model.
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -270,8 +269,8 @@ def _serve_info_stub() -> ServeInfoResponse:
     )
 
 
-def test_member_viewer_sees_owner_but_not_serve_info() -> None:
-    """A viewer member sees the real owner, but serve_info stays null (serve is editor+)."""
+def test_member_viewer_sees_owner_and_caller_funded_serve_info() -> None:
+    """A viewer member sees the owner and the form for caller-funded inference."""
     store = _MemStore()
     _seed_job(store, username="alice")
     token = _enable_anyone(store)
@@ -293,7 +292,7 @@ def test_member_viewer_sees_owner_but_not_serve_info() -> None:
     body = resp.json()
     assert body["role"] == "viewer"
     assert body["owner"] == "alice"
-    assert body["serve_info"] is None
+    assert body["serve_info"]["optimization_id"] == "opt-share-1"
     assert body["status"]["username"] == "alice"
 
 
@@ -372,7 +371,8 @@ def test_protected_shared_metadata_does_not_execute_persisted_signature(
     assert read.status_code == 200
     assert read.json()["serve_info"]["input_fields"] == ["question"]
     assert read.json()["serve_info"]["output_fields"] == ["reasoning", "answer"]
-    assert execution.status_code == 409
+    assert execution.status_code == 400
+    assert "max_cost_credits" in execution.json()["detail"]
     assert not marker.exists()
 
 
@@ -813,12 +813,6 @@ def test_user_search_excludes_synthetic_local_accounts() -> None:
     assert caller.get("/users/search", params={"q": "probe@"}).json()["usernames"] == []
 
 
-class _FakePrediction:
-    """Stub prediction exposing attribute access for the declared output field."""
-
-    answer: str = "shared-answer"
-
-
 def _seed_serveable(store: _MemStore, optimization_id: str = "opt-share-1") -> tuple[object, object, dict]:
     """Return the ``(program, RunResponse, overview)`` triple a fake loader yields.
 
@@ -840,25 +834,43 @@ def _seed_serveable(store: _MemStore, optimization_id: str = "opt-share-1") -> t
         "optimizer_name": "gepa",
         "model_name": "openai/gpt-5.4-nano",
     }
-    program = lambda **_inputs: _FakePrediction()  # noqa: E731 — terse stub program
-    return program, result, overview
+    return object(), result, overview
 
 
 def test_serve_allowed_for_editor_member() -> None:
-    """An editor member can run inference; the owner key is used server-side."""
+    """An editor member can run inference with their own request budget."""
     store = _MemStore()
     _seed_job(store, username="alice")
     token = _enable_anyone(store)
     owner = _client(store, user="alice")
     owner.post("/optimizations/opt-share-1/sharing/members", json={"username": "erin", "role": "editor"})
 
-    program, result, overview = _seed_serveable(store)
+    _program, result, overview = _seed_serveable(store)
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(share_module, "load_program", lambda *_a, **_k: (program, result, overview))
-        mp.setattr(share_module, "build_language_model", lambda _cfg: object())
-        mp.setattr(share_module.dspy, "context", lambda **_kw: nullcontext())
+        mp.setattr(
+            share_module,
+            "load_program_metadata",
+            lambda *_a, **_k: (result.program_artifact, overview, overview["model_name"]),
+        )
+        mp.setattr(
+            share_module,
+            "run_protected_interaction",
+            lambda *_a, **_k: {
+                "optimization_id": "opt-share-1",
+                "outputs": {"answer": "shared-answer"},
+                "input_fields": ["question"],
+                "output_fields": ["answer"],
+                "model_used": "openai/gpt-5.4-nano",
+                "credits_charged": "1.5",
+                "budget": {},
+            },
+        )
         editor = _client(store, user="erin")
-        resp = editor.post(f"/share/{token}/serve", json={"inputs": {"question": "hi"}})
+        resp = editor.post(
+            f"/share/{token}/serve",
+            json={"inputs": {"question": "hi"}, "max_cost_credits": 10},
+            headers={"Idempotency-Key": "editor-call"},
+        )
 
     assert resp.status_code == 200
     body = resp.json()
@@ -870,8 +882,8 @@ def test_serve_allowed_for_editor_member() -> None:
     assert "secret.internal" not in resp.text
 
 
-def test_serve_forbidden_for_viewer_member() -> None:
-    """A viewer member is forbidden from inference (403) — serving is editor+."""
+def test_serve_viewer_requires_a_caller_budget() -> None:
+    """A viewer reaches inference but must authorize a one-request budget."""
     store = _MemStore()
     _seed_job(store, username="alice")
     token = _enable_anyone(store)
@@ -880,7 +892,8 @@ def test_serve_forbidden_for_viewer_member() -> None:
 
     viewer = _client(store, user="carol")
     resp = viewer.post(f"/share/{token}/serve", json={"inputs": {"question": "hi"}})
-    assert resp.status_code == 403
+    assert resp.status_code == 400
+    assert "max_cost_credits" in resp.json()["detail"]
 
 
 def test_serve_unauthorized_for_anonymous() -> None:
@@ -939,17 +952,34 @@ def test_signed_in_stranger_gets_editor_link_role_and_can_serve() -> None:
     assert read.json()["role"] == "editor"
     assert read.json()["owner"] == "alice"
 
-    program, result, overview = _seed_serveable(store)
+    _program, result, overview = _seed_serveable(store)
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(share_module, "load_program", lambda *_a, **_k: (program, result, overview))
-        mp.setattr(share_module, "build_language_model", lambda _cfg: object())
-        mp.setattr(share_module.dspy, "context", lambda **_kw: nullcontext())
-        served = stranger.post(f"/share/{token}/serve", json={"inputs": {"question": "hi"}})
+        mp.setattr(
+            share_module,
+            "load_program_metadata",
+            lambda *_a, **_k: (result.program_artifact, overview, overview["model_name"]),
+        )
+        mp.setattr(
+            share_module,
+            "run_protected_interaction",
+            lambda *_a, **_k: {
+                "optimization_id": "opt-share-1",
+                "outputs": {"answer": "shared-answer"},
+                "input_fields": ["question"],
+                "output_fields": ["answer"],
+                "model_used": "openai/gpt-5.4-nano",
+            },
+        )
+        served = stranger.post(
+            f"/share/{token}/serve",
+            json={"inputs": {"question": "hi"}, "max_cost_credits": 10},
+            headers={"Idempotency-Key": "link-editor-call"},
+        )
     assert served.status_code == 200
 
 
-def test_signed_in_stranger_viewer_link_cannot_serve() -> None:
-    """An ``anyone -> viewer`` link gives a signed-in stranger viewer: read yes, serve no."""
+def test_signed_in_stranger_viewer_link_requires_a_caller_budget() -> None:
+    """An anyone-viewer link permits inference once the caller supplies a budget."""
     store = _MemStore()
     _seed_job(store, username="alice")
     token = _enable_anyone(store, role="viewer")
@@ -960,7 +990,8 @@ def test_signed_in_stranger_viewer_link_cannot_serve() -> None:
     assert read.json()["role"] == "viewer"
 
     served = stranger.post(f"/share/{token}/serve", json={"inputs": {"question": "hi"}})
-    assert served.status_code == 403
+    assert served.status_code == 400
+    assert "max_cost_credits" in served.json()["detail"]
 
 
 def test_public_view_of_public_optimization_is_readable_and_scrubbed() -> None:

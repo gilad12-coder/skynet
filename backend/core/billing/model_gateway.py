@@ -8,7 +8,7 @@ import os
 import re
 import secrets
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -602,7 +602,13 @@ class ModelGateway:
         return snapshot
 
     def protect_payload(
-        self, payload: dict[str, Any], *, managed_key: str, allow_private_tools: bool = False
+        self,
+        payload: dict[str, Any],
+        *,
+        managed_key: str,
+        allow_private_tools: bool = False,
+        authorize_tool: Callable[[str, str, dict[str, Any]], bool] | None = None,
+        on_tool_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         """Replace resolved provider credentials with fixed, metered model-role routes.
 
@@ -610,6 +616,8 @@ class ModelGateway:
             payload: In-memory submission after account-owned credentials are resolved.
             managed_key: Platform OpenRouter credential used only for managed roles.
             allow_private_tools: Explicit deployment opt-in for private MCP destinations.
+            authorize_tool: Optional blocking approval gate for protected chat tools.
+            on_tool_event: Optional lifecycle event receiver for protected chat tools.
 
         Returns:
             A copied payload carrying opaque role routes and no model provider keys.
@@ -645,6 +653,8 @@ class ModelGateway:
                 tool_filter=source.get("tool_filter"),
                 allow_private=allow_private_tools,
                 check_admission=self.runtime.check_admission,
+                authorize_tool=authorize_tool,
+                on_tool_event=on_tool_event,
             )
             source["mcp_url"] = "https://scoped-tools.invalid/mcp"
             result["_skynet_tools_route"] = {"url": self.url, "token": self._tool_token}

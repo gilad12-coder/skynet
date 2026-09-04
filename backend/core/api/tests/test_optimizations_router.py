@@ -33,7 +33,9 @@ from ...models.common import SplitCounts
 from ...models.results import GridSearchResponse, PairResult, RunResponse
 from ...storage.models import Base
 from ..errors import DomainError
+from ..routers import _helpers as helpers_module
 from ..routers.optimizations import create_optimizations_router
+from ..routers.optimizations import detail as detail_module
 from ..routers.optimizations._local import clone_payload
 from ..routers.optimizations_meta import _sanitize_payload
 from .conftest import bypass_auth
@@ -41,6 +43,33 @@ from .mocks import _BaseFakeJobStore, real_grid_response_dict
 
 # _ExtendedFakeJobStore is just _BaseFakeJobStore (which already has bulk-delete).
 _ExtendedFakeJobStore = _BaseFakeJobStore
+
+
+def _legacy_test_runtime(job_data: dict[str, Any]) -> str | None:
+    """Preserve retired host-path coverage for synthetic evaluation fixtures.
+
+    Args:
+        job_data: Synthetic stored job.
+
+    Returns:
+        Vercel for protected fixtures and None for legacy-only fixtures.
+    """
+    payload = job_data.get("payload")
+    payload_budget_id = payload.get("execution_budget_id") if isinstance(payload, dict) else None
+    if job_data.get("execution_budget_id") is None and payload_budget_id is None:
+        return None
+    return "vercel"
+
+
+@pytest.fixture(autouse=True)
+def _preserve_legacy_evaluation_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep legacy evaluation internals covered without enabling them in production.
+
+    Args:
+        monkeypatch: Pytest patch helper.
+    """
+    monkeypatch.setattr(detail_module, "_protected_api_runtime", _legacy_test_runtime)
+    monkeypatch.setattr(helpers_module, "_protected_api_runtime", _legacy_test_runtime)
 
 
 @pytest.fixture
@@ -1194,8 +1223,8 @@ def test_protected_evaluate_examples_never_executes_metric_side_effects_in_api_p
             json={"indices": [0], "program_type": "baseline"},
         )
 
-    assert resp.status_code == 409
-    assert "separately metered vercel sandbox" in resp.json()["detail"]
+    assert resp.status_code == 400
+    assert "max_cost_credits" in resp.json()["detail"]
     assert env_name not in os.environ
     assert not marker.exists()
     urlopen.assert_not_called()

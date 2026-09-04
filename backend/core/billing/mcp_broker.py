@@ -7,6 +7,7 @@ import ipaddress
 import json
 import socket
 import threading
+import uuid
 from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import urlsplit
@@ -98,6 +99,8 @@ class McpToolsBroker:
         tool_filter: list[str] | None = None,
         allow_private: bool = False,
         timeout_seconds: float = 30,
+        authorize_tool: Callable[[str, str, dict[str, Any]], bool] | None = None,
+        on_tool_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         """Retain endpoint credentials and resolve a permitted destination outside the guest.
 
@@ -108,6 +111,8 @@ class McpToolsBroker:
             tool_filter: Selected tool names, or None for the endpoint's exposed roster.
             allow_private: Deployment's existing private-discovery policy.
             timeout_seconds: Per-request timeout without tool-call retries.
+            authorize_tool: Optional blocking approval gate for a live chat call.
+            on_tool_event: Optional sink for tool lifecycle events.
         """
         self.url = url
         self.address = _pinned_address(url, allow_private)
@@ -116,6 +121,8 @@ class McpToolsBroker:
         self.tool_filter = tuple(tool_filter) if tool_filter else None
         self.check_admission = check_admission
         self.timeout_seconds = timeout_seconds
+        self.authorize_tool = authorize_tool
+        self.on_tool_event = on_tool_event
         self._tool_names: set[str] | None = None
         self._roster_lock = threading.Lock()
 
@@ -225,11 +232,52 @@ class McpToolsBroker:
         elif method == "tools/call":
             if self._tool_names is None:
                 self._list()
-            if params.get("name") not in (self._tool_names or set()):
+            tool_name = str(params.get("name") or "")
+            if tool_name not in (self._tool_names or set()):
                 raise ValueError("The requested MCP tool is outside the selected roster.")
             if not isinstance(params.get("arguments") or {}, Mapping):
                 raise ValueError("MCP tool arguments must be a JSON object.")
-            result = self._run_request(method, params)
+            arguments = dict(params.get("arguments") or {})
+            call_id = uuid.uuid4().hex[:12]
+            if self.on_tool_event is not None:
+                self.on_tool_event(
+                    {
+                        "event": "tool_start",
+                        "data": {"id": call_id, "tool": tool_name, "reason": "", "arguments": arguments},
+                    }
+                )
+            approved = self.authorize_tool is None or self.authorize_tool(call_id, tool_name, arguments)
+            if approved:
+                try:
+                    result = self._run_request(method, params)
+                except Exception as error:
+                    if self.on_tool_event is not None:
+                        self.on_tool_event(
+                            {
+                                "event": "tool_end",
+                                "data": {
+                                    "id": call_id,
+                                    "tool": tool_name,
+                                    "status": "error",
+                                    "result": str(error),
+                                },
+                            }
+                        )
+                    raise
+            else:
+                result = {"content": [{"type": "text", "text": "User declined"}], "isError": True}
+            if self.on_tool_event is not None:
+                self.on_tool_event(
+                    {
+                        "event": "tool_end",
+                        "data": {
+                            "id": call_id,
+                            "tool": tool_name,
+                            "status": "ok" if approved else "error",
+                            "result": result,
+                        },
+                    }
+                )
         else:
             raise ValueError("The scoped tool relay does not permit this MCP method.")
         return ModelHTTPResult(

@@ -3625,5 +3625,9 @@
   "submit.runtime.loading": "उपलब्ध निष्पादन वातावरण जाँचे जा रहे हैं…",
   "submit.runtime.vercel": "Vercel Sandbox",
   "submit.runtime.worker": "अलग Linux क्लाउड वर्कर",
-  "workflow.dryrun.setup_sample": "साझा सेटअप बजट में सर्वर द्वारा चुने गए एक प्रशिक्षण या सत्यापन उदाहरण की जाँच करता है। अंतिम परीक्षण के लिए अलग रखे गए डेटा का उपयोग कभी नहीं होता।"
+  "workflow.dryrun.setup_sample": "साझा सेटअप बजट में सर्वर द्वारा चुने गए एक प्रशिक्षण या सत्यापन उदाहरण की जाँच करता है। अंतिम परीक्षण के लिए अलग रखे गए डेटा का उपयोग कभी नहीं होता।",
+  "optimizations.serve.request_budget": "Request budget",
+  "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
+  "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
+  "optimizations.serve.request_spent": "Used {credits} credits"
 }

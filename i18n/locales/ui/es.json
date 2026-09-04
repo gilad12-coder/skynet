@@ -3625,5 +3625,9 @@
   "submit.runtime.loading": "Comprobando los entornos de ejecución disponibles…",
   "submit.runtime.vercel": "Vercel Sandbox",
   "submit.runtime.worker": "Worker de Linux aislado en la nube",
-  "workflow.dryrun.setup_sample": "Prueba un ejemplo de entrenamiento o validación elegido por el servidor, dentro del presupuesto compartido de configuración. Nunca se utilizan datos reservados para la prueba final."
+  "workflow.dryrun.setup_sample": "Prueba un ejemplo de entrenamiento o validación elegido por el servidor, dentro del presupuesto compartido de configuración. Nunca se utilizan datos reservados para la prueba final.",
+  "optimizations.serve.request_budget": "Request budget",
+  "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
+  "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
+  "optimizations.serve.request_spent": "Used {credits} credits"
 }

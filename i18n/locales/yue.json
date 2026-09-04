@@ -235,6 +235,10 @@
     "notifier.email.footer": "呢個係嚟自 Skynet 嘅自動傳送訊息。",
     "optimization.no_program_artifact": "冇程式產物。",
     "optimization.no_program_artifact_scoped": "最佳化冇程式產物。",
-    "wizard.code_via_authoring_only": "{field} 唔可以透過 update_wizard_state 設定。Signature 同 Metric 程式碼只可以透過 request_code_authoring 編寫，系統會喺傳入精靈之前先驗證結果。"
+    "wizard.code_via_authoring_only": "{field} 唔可以透過 update_wizard_state 設定。Signature 同 Metric 程式碼只可以透過 request_code_authoring 編寫，系統會喺傳入精靈之前先驗證結果。",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

@@ -1177,12 +1177,12 @@ def _stable_hash(payload: Any) -> str:
 
 
 def require_unprotected_api_execution(job_data: dict[str, Any]) -> None:
-    """Reject protected authored-code execution in the API process.
+    """Reject authored-code execution when a managed runtime is required.
 
-    Protected optimization runs own a selected sandbox and a shared execution
-    budget, but the completed-job endpoints do not yet have a separately
-    metered interactive sandbox protocol. This guard must run before loading a
-    signature, metric, workflow, ReAct tool roster, or serialized program.
+    Every production job resolves to a managed runtime. The ``None`` branch is
+    retained only for isolated compatibility tests of the retired materializers.
+    This guard runs before loading a signature, metric, workflow, ReAct tool
+    roster, or serialized program.
 
     Args:
         job_data: Stored optimization row, including its protected budget and
@@ -1202,21 +1202,17 @@ def require_unprotected_api_execution(job_data: dict[str, Any]) -> None:
 
 
 def _protected_api_runtime(job_data: dict[str, Any]) -> str | None:
-    """Return the managed runtime for a protected job, if one exists.
+    """Return the mandatory managed runtime for a completed-job interaction.
 
     Args:
-        job_data: Stored optimization row, including its protected budget and
-            original payload when available.
+        job_data: Stored optimization row retained for the shared helper
+            signature and future provider routing.
 
     Returns:
-        ``vercel`` for a protected job, or ``None`` for a legacy unprotected
-        job. Retired payload values do not restore host execution.
+        ``vercel`` for every stored job. A fresh caller-funded interaction
+        budget supplies authority for historical jobs as well, so no stored
+        runtime value can restore API-host execution.
     """
-    payload = job_data.get("payload")
-    payload_budget_id = payload.get("execution_budget_id") if isinstance(payload, dict) else None
-    if job_data.get("execution_budget_id") is None and payload_budget_id is None:
-        return None
-
     return "vercel"
 
 
@@ -1251,18 +1247,26 @@ def load_program_metadata(
     Args:
         job_store: The job store to read the job row from.
         optimization_id: Optimization whose serve metadata should be loaded.
-        user: Authenticated caller; must hold editor-tier access.
+        user: Authenticated caller; protected interactions are viewer-accessible.
 
     Returns:
         ``(artifact, overview, model_name)`` with an unmaterialized artifact.
 
     Raises:
-        DomainError: 404 when the job is unknown or inaccessible; 403 when the
-            caller is below editor; 409 when the job is not successful or has
-            no persisted program artifact.
+        DomainError: 404 when the job is unknown or inaccessible; 403 when a
+            legacy caller is below editor; 409 when the job is not successful
+            or has no persisted program artifact.
     """
-    job_data, _role = require_role_at_least(job_store, optimization_id, user, ShareRole.editor)
+    job_data, role = load_job_with_role(job_store, optimization_id, user)
     if _protected_api_runtime(job_data) is None:
+        if role_rank(role) < role_rank(ShareRole.editor):
+            raise DomainError(
+                "optimization.insufficient_role",
+                status=403,
+                optimization_id=optimization_id,
+                required=str(ShareRole.editor),
+                role=str(role),
+            )
         _program, result, overview = load_program(job_store, optimization_id, user)
         artifact = result.program_artifact
         if not _artifact_has_payload(artifact):
@@ -1312,18 +1316,26 @@ def load_pair_program_metadata(
         job_store: The job store to read the job row from.
         optimization_id: Grid-search optimization whose pair should be read.
         pair_index: Persisted pair index to select.
-        user: Authenticated caller; must hold editor-tier access.
+        user: Authenticated caller; protected interactions are viewer-accessible.
 
     Returns:
         ``(artifact, pair, overview)`` with an unmaterialized artifact.
 
     Raises:
-        DomainError: 404 when the job or pair is unknown; 403 when the caller
-            is below editor; 409 when the job is not a successful grid search,
-            the pair failed, or its artifact is missing.
+        DomainError: 404 when the job or pair is unknown; 403 when a legacy
+            caller is below editor; 409 when the job is not a successful grid
+            search, the pair failed, or its artifact is missing.
     """
-    job_data, _role = require_role_at_least(job_store, optimization_id, user, ShareRole.editor)
+    job_data, role = load_job_with_role(job_store, optimization_id, user)
     if _protected_api_runtime(job_data) is None:
+        if role_rank(role) < role_rank(ShareRole.editor):
+            raise DomainError(
+                "optimization.insufficient_role",
+                status=403,
+                optimization_id=optimization_id,
+                required=str(ShareRole.editor),
+                role=str(role),
+            )
         _program, pair, overview = load_pair_program(job_store, optimization_id, pair_index, user)
         artifact = pair.program_artifact
         if not _artifact_has_payload(artifact):

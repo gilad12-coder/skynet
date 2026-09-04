@@ -27,6 +27,7 @@ from ...billing.byok_vault import ProviderKeyVault
 from ...config import settings
 from ...i18n_keys import I18nKey
 from ...models import ProgramArtifact
+from ...service_gateway.agents.generalist import get_approval_registry
 from ...storage.models import (
     Base,
     BillingCustomerModel,
@@ -35,6 +36,7 @@ from ...storage.models import (
 
 # noinspection PyProtectedMember
 from ..routers import _helpers
+from ..routers import serve as serve_module
 from ..routers.serve import _coerce_sample_value, _collect_sample, create_serve_router
 from .conftest import bypass_auth
 from .mocks import (
@@ -46,6 +48,22 @@ from .mocks import (
 
 # Use the shared base fake store; the serve router only needs get_job + seed_job.
 _FakeJobStore = _BaseFakeJobStore
+
+
+def _legacy_test_runtime(job_data: dict[str, Any]) -> str | None:
+    """Preserve explicit coverage of retired host-only helpers in unit tests.
+
+    Args:
+        job_data: Synthetic stored job.
+
+    Returns:
+        Vercel for protected fixtures and None for legacy-only fixtures.
+    """
+    payload = job_data.get("payload")
+    payload_budget_id = payload.get("execution_budget_id") if isinstance(payload, dict) else None
+    if job_data.get("execution_budget_id") is None and payload_budget_id is None:
+        return None
+    return "vercel"
 
 
 def _write_unpickle_marker(path: str) -> None:
@@ -107,15 +125,19 @@ def _wire_http_handler(app: FastAPI) -> None:
 
 # noinspection PyProtectedMember
 @pytest.fixture(autouse=True)
-def _clear_program_cache() -> Generator[None, None, None]:
+def _clear_program_cache(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """Reset the in-process program cache around every test in this file.
 
     Yields:
         ``None`` once the cache is cleared; the cache is cleared again on teardown.
     """
-    # Reset the module-level program cache before every test to prevent bleed.
+    monkeypatch.setattr(_helpers, "_protected_api_runtime", _legacy_test_runtime)
+    monkeypatch.setattr(serve_module, "_protected_api_runtime", _legacy_test_runtime)
+    registry = get_approval_registry()
+    registry.bind_engine(None)
     _helpers.clear_program_cache()
     yield
+    registry.bind_engine(None)
     _helpers.clear_program_cache()
 
 
@@ -301,9 +323,8 @@ def test_protected_serve_metadata_never_executes_signature_side_effects_in_api_p
         "awaiting_inputs": True,
         "prompt": "Try the optimized prompt",
     }
-    assert execution.status_code == 409
-    assert execution.json()["code"] == "optimization.protected_interactive_sandbox_required"
-    assert execution.json()["params"] == {"runtime": "vercel"}
+    assert execution.status_code == 400
+    assert execution.json()["code"] == "serve.request_budget_required"
     assert env_name not in os.environ
     assert not marker.exists()
     urlopen.assert_not_called()
@@ -659,8 +680,8 @@ def test_protected_pair_metadata_never_deserializes_persisted_program(
         "awaiting_inputs": True,
         "prompt": "Compare this pair",
     }
-    assert execution.status_code == 409
-    assert execution.json()["code"] == "optimization.protected_interactive_sandbox_required"
+    assert execution.status_code == 400
+    assert execution.json()["code"] == "serve.request_budget_required"
     assert not marker.exists()
 
 

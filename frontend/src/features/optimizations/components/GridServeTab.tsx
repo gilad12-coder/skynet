@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Crown, Gauge, Trash, Trophy } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
-import { msg } from "@/shared/lib/messages";
+import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { Button } from "@/shared/ui/primitives/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
@@ -51,6 +51,7 @@ type RunEntry = {
   outputs: Record<string, unknown>;
   model: string;
   ts: number;
+  creditsCharged?: string | null;
 };
 
 export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
@@ -97,6 +98,7 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
   } | null>(null);
   const [serveLoading, setServeLoading] = useState(false);
   const [serveError, setServeError] = useState<string | null>(null);
+  const [requestBudgetCredits, setRequestBudgetCredits] = useState("10");
 
   const streamReqIdRef = useRef(0);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -154,6 +156,11 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
 
   const handleServe = async (overrideInputs?: Record<string, string>) => {
     if (!serveInfo || selectedPair == null) return;
+    const maxCostCredits = Number(requestBudgetCredits);
+    if (!Number.isInteger(maxCostCredits) || maxCostCredits < 1) {
+      toast.error(msg("optimizations.serve.request_budget_invalid"));
+      return;
+    }
     const inputs = overrideInputs ?? readInputs();
     const missing = serveInfo.input_fields.filter((f) => !inputs[f]?.trim());
     if (missing.length > 0) {
@@ -182,33 +189,51 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
       });
     }
     const isStale = () => reqId !== streamReqIdRef.current;
-    await servePairProgramStream(job.optimization_id, selectedPair, inputs, {
-      signal: controller.signal,
-      onToken: (field, chunk) => {
-        if (isStale()) return;
-        setStreamingRun((prev) =>
-          prev
-            ? {
-                ...prev,
-                partial: { ...prev.partial, [field]: (prev.partial[field] ?? "") + chunk },
-              }
-            : prev,
-        );
+    await servePairProgramStream(
+      job.optimization_id,
+      selectedPair,
+      inputs,
+      maxCostCredits,
+      crypto.randomUUID(),
+      {
+        signal: controller.signal,
+        onToken: (field, chunk) => {
+          if (isStale()) return;
+          setStreamingRun((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  partial: { ...prev.partial, [field]: (prev.partial[field] ?? "") + chunk },
+                }
+              : prev,
+          );
+        },
+        onFinal: (res) => {
+          if (isStale()) return;
+          setRunHistory((prev) => [
+            {
+              inputs: { ...inputs },
+              outputs: res.outputs,
+              model: res.model_used,
+              ts: Date.now(),
+              creditsCharged: res.credits_charged,
+            },
+            ...prev,
+          ]);
+          if (res.credits_charged != null) {
+            toast.success(
+              formatMsg("optimizations.serve.request_spent", { credits: res.credits_charged }),
+            );
+          }
+          setStreamingRun(null);
+        },
+        onError: (message) => {
+          if (isStale()) return;
+          setServeError(message);
+          setStreamingRun(null);
+        },
       },
-      onFinal: (res) => {
-        if (isStale()) return;
-        setRunHistory((prev) => [
-          { inputs: { ...inputs }, outputs: res.outputs, model: res.model_used, ts: Date.now() },
-          ...prev,
-        ]);
-        setStreamingRun(null);
-      },
-      onError: (message) => {
-        if (isStale()) return;
-        setServeError(message);
-        setStreamingRun(null);
-      },
-    });
+    );
     if (!isStale()) setServeLoading(false);
   };
 
@@ -351,6 +376,8 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
             chatScrollRef={chatScrollRef}
             handleServe={handleServe}
             handleStopServe={handleStopServe}
+            requestBudgetCredits={requestBudgetCredits}
+            onRequestBudgetCreditsChange={setRequestBudgetCredits}
           />
 
           <Card>

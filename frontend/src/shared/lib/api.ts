@@ -531,10 +531,10 @@ export function updateExecutionBudget(
   });
 }
 
-export function getBlackboxEngines(
-  target: "text" | "agent",
-) {
-  return request<BlackboxEngineCatalogResponse>(`/blackbox/engines?target=${encodeURIComponent(target)}`);
+export function getBlackboxEngines(target: "text" | "agent") {
+  return request<BlackboxEngineCatalogResponse>(
+    `/blackbox/engines?target=${encodeURIComponent(target)}`,
+  );
 }
 
 export function listJobs(params?: {
@@ -1802,14 +1802,19 @@ export function claimSharedOptimization(token: string) {
 }
 
 /**
- * Run one inference through the owner's stored model on a shared optimization.
- * Requires an effective role of editor or higher (it spends the owner's key);
- * viewers and the anonymous `view` role get 403.
+ * Run one inference through a shared optimization with a caller-funded budget.
+ * Any signed-in viewer may serve; the run owner's wallet and BYOK key remain isolated.
  */
-export function serveSharedOptimization(token: string, inputs: Record<string, string>) {
+export function serveSharedOptimization(
+  token: string,
+  inputs: Record<string, string>,
+  maxCostCredits: number,
+  idempotencyKey: string,
+) {
   return request<ServeResponse>(`/share/${encodeURIComponent(token)}/serve`, {
     method: "POST",
-    body: JSON.stringify({ inputs }),
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
   });
 }
 
@@ -2223,10 +2228,16 @@ export function getPairTestResults(optimizationId: string, pairIndex: number) {
   }>(`/optimizations/${optimizationId}/pair/${pairIndex}/test-results`);
 }
 
-export function serveProgram(optimizationId: string, inputs: Record<string, string>) {
+export function serveProgram(
+  optimizationId: string,
+  inputs: Record<string, string>,
+  maxCostCredits: number,
+  idempotencyKey: string,
+) {
   return request<ServeResponse>(`/serve/${optimizationId}`, {
     method: "POST",
-    body: JSON.stringify({ inputs }),
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
   });
 }
 
@@ -2235,10 +2246,13 @@ export function servePairProgram(
   optimizationId: string,
   pairIndex: number,
   inputs: Record<string, string>,
+  maxCostCredits: number,
+  idempotencyKey: string,
 ) {
   return request<ServeResponse>(`/serve/${optimizationId}/pair/${pairIndex}`, {
     method: "POST",
-    body: JSON.stringify({ inputs }),
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
   });
 }
 
@@ -2249,6 +2263,8 @@ export interface StreamServeHandlers {
     model_used: string;
     input_fields: string[];
     output_fields: string[];
+    credits_charged?: string | null;
+    budget?: ExecutionBudget | null;
   }) => void;
   onError: (message: string) => void;
   signal?: AbortSignal;
@@ -2258,14 +2274,20 @@ export interface StreamServeHandlers {
 export async function serveProgramStream(
   optimizationId: string,
   inputs: Record<string, string>,
+  maxCostCredits: number,
+  idempotencyKey: string,
   handlers: StreamServeHandlers,
 ): Promise<void> {
   let res: Response;
   try {
     res = await fetchWithAuthRetry(`${apiBase()}/serve/${optimizationId}/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({ inputs }),
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
       signal: handlers.signal,
     });
   } catch (err) {
@@ -2289,6 +2311,8 @@ export async function serveProgramStream(
         model_used: String(data.model_used ?? ""),
         input_fields: (data.input_fields as string[]) ?? [],
         output_fields: (data.output_fields as string[]) ?? [],
+        credits_charged: typeof data.credits_charged === "string" ? data.credits_charged : null,
+        budget: (data.budget as ExecutionBudget | null) ?? null,
       });
     } else if (event === "error") {
       handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.5")));
@@ -2308,6 +2332,8 @@ export async function servePairProgramStream(
   optimizationId: string,
   pairIndex: number,
   inputs: Record<string, string>,
+  maxCostCredits: number,
+  idempotencyKey: string,
   handlers: StreamServeHandlers,
 ): Promise<void> {
   let res: Response;
@@ -2316,8 +2342,12 @@ export async function servePairProgramStream(
       `${apiBase()}/serve/${optimizationId}/pair/${pairIndex}/stream`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({ inputs }),
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
         signal: handlers.signal,
       },
     );
@@ -2342,6 +2372,8 @@ export async function servePairProgramStream(
         model_used: String(data.model_used ?? ""),
         input_fields: (data.input_fields as string[]) ?? [],
         output_fields: (data.output_fields as string[]) ?? [],
+        credits_charged: typeof data.credits_charged === "string" ? data.credits_charged : null,
+        budget: (data.budget as ExecutionBudget | null) ?? null,
       });
     } else if (event === "error") {
       handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.8")));

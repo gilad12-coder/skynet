@@ -22,6 +22,7 @@ from core.service_gateway.optimization.blackbox.sandbox import (
     sandbox_runtime_context,
 )
 from core.worker.checkpoint_compat import runtime_identity
+from core.worker.interaction import run_interaction
 from core.worker.preflight import run_dspy_preflight
 from core.worker.subprocess_runner import run_service_in_subprocess
 
@@ -94,6 +95,7 @@ def main() -> None:
             raise RuntimeError("The protected tool roster requires its isolated mailbox relay.")
         os.environ["SKYNET_TOOL_RELAY_TOKEN"] = str(tools_route["token"])
     preflight = document["payload"].pop("_preflight", None)
+    interaction = document["payload"].pop("_interaction", None)
     directory = Path(document["payload"].get("_gepa_log_dir") or "checkpoints")
     for relative, encoded in document.get("checkpoints", {}).items():
         if not _CHECKPOINT_PATH.fullmatch(relative):
@@ -120,7 +122,10 @@ def main() -> None:
     )
     try:
         with runtime_scope:
-            if preflight is not None:
+            if interaction is not None:
+                result = run_interaction(document["payload"], interaction, events.put)
+                events.put({"type": "interaction_result", "result": result})
+            elif preflight is not None:
                 if document["payload"].get("_optimization_type") == OPTIMIZATION_TYPE_BLACKBOX:
                     runtime = current_sandbox_runtime()
                     if runtime is None:

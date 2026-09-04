@@ -235,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions는 음수가 아니어야 합니다.",
     "wizard.split_fractions_not_number": "split_fractions 값은 숫자여야 합니다: {error}",
     "wizard.split_fractions_not_object": "split_fractions는 train/val/test 키를 가진 객체여야 합니다.",
-    "wizard.split_fractions_sum": "split_fractions의 합은 1.0이어야 하는데 {total}입니다."
+    "wizard.split_fractions_sum": "split_fractions의 합은 1.0이어야 하는데 {total}입니다.",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

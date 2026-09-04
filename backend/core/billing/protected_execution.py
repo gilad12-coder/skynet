@@ -94,7 +94,12 @@ def runtime_cost_profile(settings: Settings, workflow: str, runtime: str) -> dic
 
 
 def bind_protected_sandbox(
-    gateway: ModelGateway, settings: Settings, *, workflow: str, owner_id: str
+    gateway: ModelGateway,
+    settings: Settings,
+    *,
+    workflow: str,
+    owner_id: str,
+    lifetime_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Keep provider credentials, fixed resource profiles, and metering in the parent.
 
@@ -103,6 +108,7 @@ def bind_protected_sandbox(
         settings: Trusted Vercel account and deployment image configuration.
         workflow: Execution family selecting its immutable prebuilt image.
         owner_id: Stable job or setup identity used for cleanup after interruption.
+        lifetime_seconds: Optional shorter ceiling for one bounded interaction.
 
     Returns:
         Non-secret deployment identity usable in setup evidence.
@@ -116,7 +122,8 @@ def bind_protected_sandbox(
     image = protected_image(settings, workflow)
     assert image is not None
     assert settings.vercel_token is not None
-    lifetime = min(settings.vercel_sandbox_max_lifetime_seconds, 86_400)
+    configured_lifetime = settings.vercel_sandbox_max_lifetime_seconds
+    lifetime = min(lifetime_seconds or configured_lifetime, configured_lifetime, 86_400)
     runtime = VercelSandboxRuntime(
         VercelCredentials(
             token=settings.vercel_token.get_secret_value(),

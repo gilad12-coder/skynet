@@ -235,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions は負の値にできません。",
     "wizard.split_fractions_not_number": "split_fractions の値は数値である必要があります: {error}",
     "wizard.split_fractions_not_object": "split_fractions は train／val／test のキーを持つオブジェクトである必要があります。",
-    "wizard.split_fractions_sum": "split_fractions の合計は 1.0 である必要がありますが、{total} でした。"
+    "wizard.split_fractions_sum": "split_fractions の合計は 1.0 である必要がありますが、{total} でした。",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

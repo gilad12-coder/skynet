@@ -235,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions 不能为负数。",
     "wizard.split_fractions_not_number": "split_fractions 的取值必须是数字：{error}",
     "wizard.split_fractions_not_object": "split_fractions 必须是一个包含 train/val/test 键的对象。",
-    "wizard.split_fractions_sum": "split_fractions 之和必须为 1.0，实际得到 {total}。"
+    "wizard.split_fractions_sum": "split_fractions 之和必须为 1.0，实际得到 {total}。",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

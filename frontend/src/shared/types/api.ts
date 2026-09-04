@@ -1,4 +1,4 @@
-import type { JobExecutionBudget } from "./execution-budget";
+import type { ExecutionBudget, JobExecutionBudget } from "./execution-budget";
 
 export type JobStatus =
   | "pending"
@@ -858,6 +858,8 @@ export interface ServeResponse {
   model_used: string;
   // Per-node execution trace, present only for workflow runs.
   node_traces?: WorkflowNodeTrace[] | null;
+  credits_charged?: string | null;
+  budget?: ExecutionBudget | null;
 }
 
 export interface CatalogModel {

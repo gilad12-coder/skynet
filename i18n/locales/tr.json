@@ -235,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions negatif olmamalıdır.",
     "wizard.split_fractions_not_number": "split_fractions değerleri sayı olmalıdır: {error}",
     "wizard.split_fractions_not_object": "split_fractions, train/val/test anahtarları olan bir nesne olmalıdır.",
-    "wizard.split_fractions_sum": "split_fractions toplamı 1.0 olmalıdır, {total} alındı."
+    "wizard.split_fractions_sum": "split_fractions toplamı 1.0 olmalıdır, {total} alındı.",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

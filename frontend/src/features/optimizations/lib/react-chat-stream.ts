@@ -19,6 +19,7 @@ export interface ReactServeChatRequest {
   user_message: string;
   chat_history: ChatTurn[];
   trust_mode: TrustMode;
+  max_cost_credits: number;
 }
 
 export interface ReactServeChatHandlers {
@@ -28,7 +29,11 @@ export interface ReactServeChatHandlers {
   onPendingApproval?: (ev: PendingApprovalPayload) => void;
   onApprovalResolved?: (ev: ApprovalResolvedPayload) => void;
   onMessagePatch?: (chunk: string) => void;
-  onDone: (result: { assistant_message: string; model: string | null }) => void;
+  onDone: (result: {
+    assistant_message: string;
+    model: string | null;
+    credits_charged: string | null;
+  }) => void;
   onError: (message: string) => void;
   signal?: AbortSignal;
 }
@@ -41,6 +46,7 @@ export interface ReactServeChatHandlers {
 export async function streamReactServeChat(
   optimizationId: string,
   req: ReactServeChatRequest,
+  idempotencyKey: string,
   handlers: ReactServeChatHandlers,
 ): Promise<void> {
   let res: Response;
@@ -50,6 +56,7 @@ export async function streamReactServeChat(
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
+        "Idempotency-Key": idempotencyKey,
       },
       body: JSON.stringify(req),
       signal: handlers.signal,
@@ -116,6 +123,7 @@ export async function streamReactServeChat(
         handlers.onDone({
           assistant_message: String(data.assistant_message ?? ""),
           model: typeof rawModel === "string" && rawModel.length > 0 ? rawModel : null,
+          credits_charged: typeof data.credits_charged === "string" ? data.credits_charged : null,
         });
         break;
       }

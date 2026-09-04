@@ -36,6 +36,9 @@ from ..routers._helpers import (
     load_react_chat_inputs,
     strip_api_key,
 )
+from ..routers._helpers import (
+    _protected_api_runtime as production_interaction_runtime,
+)
 from ..routers.constants import (
     TERMINAL_STATUSES,
     VALID_OPTIMIZATION_TYPES,
@@ -44,6 +47,22 @@ from ..routers.constants import (
 from .mocks import load_fixture
 
 _TEST_USER = AuthenticatedUser(username="alice", role="admin", groups=("skynet-admins",))
+
+
+def _legacy_test_runtime(job_data: dict) -> str | None:
+    """Preserve explicit unit coverage for retired local materializers.
+
+    Args:
+        job_data: Synthetic stored job.
+
+    Returns:
+        Vercel for protected fixtures and None for legacy-only fixtures.
+    """
+    payload = job_data.get("payload")
+    payload_budget_id = payload.get("execution_budget_id") if isinstance(payload, dict) else None
+    if job_data.get("execution_budget_id") is None and payload_budget_id is None:
+        return None
+    return "vercel"
 
 
 def test_strip_api_key_removes_nested() -> None:
@@ -81,6 +100,12 @@ def test_terminal_statuses_are_finite() -> None:
         OptimizationStatus.paused,
         OptimizationStatus.stopped,
     } == TERMINAL_STATUSES
+
+
+def test_every_completed_job_interaction_uses_vercel() -> None:
+    """Route historical and protected artifacts through the managed sandbox."""
+    assert production_interaction_runtime({"payload": {}}) == "vercel"
+    assert production_interaction_runtime({"execution_budget_id": "budget-1"}) == "vercel"
 
 
 def test_valid_job_types_covers_run_and_grid() -> None:
@@ -439,12 +464,13 @@ class _JobStoreWithDelete:
 
 
 @pytest.fixture(autouse=True)
-def _clear_program_cache_helpers() -> Generator[None, None, None]:
+def _clear_program_cache_helpers(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """Reset the in-process program cache around every test in this file.
 
     Yields:
         ``None`` once the cache is cleared; the cache is cleared again on teardown.
     """
+    monkeypatch.setattr(_helpers_mod, "_protected_api_runtime", _legacy_test_runtime)
     clear_program_cache()
     yield
     clear_program_cache()

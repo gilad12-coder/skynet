@@ -40,6 +40,7 @@ export function ServeCodeSnippets({
     .join(", ");
   const inputsJson = JSON.stringify({
     inputs: Object.fromEntries(serveInfo.input_fields.map((f) => [f, valueFor(f)])),
+    max_cost_credits: 10,
   });
   const tokenHint = `# Generate a token in Settings → API, then set it in your environment`;
   const snippets = {
@@ -49,11 +50,13 @@ export function ServeCodeSnippets({
       `# Send a POST request to the optimized program endpoint`,
       `curl -X POST ${url} \\`,
       `  -H "Authorization: Bearer $SKYNET_API_TOKEN" \\`,
+      `  -H "Idempotency-Key: $(uuidgen)" \\`,
       `  -H "Content-Type: application/json" \\`,
       `  -d '${inputsJson}'`,
     ].join("\n"),
     python: [
       `import os`,
+      `import uuid`,
       `import requests`,
       ``,
       `# Generate a token in Settings → API and set SKYNET_API_TOKEN in your env`,
@@ -62,8 +65,11 @@ export function ServeCodeSnippets({
       `# Call the optimized program via the REST API`,
       `response = requests.post(`,
       `    "${url}",`,
-      `    headers={"Authorization": f"Bearer {token}"},`,
-      `    json={"inputs": {${inputsObj}}},`,
+      `    headers={`,
+      `        "Authorization": f"Bearer {token}",`,
+      `        "Idempotency-Key": str(uuid.uuid4()),`,
+      `    },`,
+      `    json={"inputs": {${inputsObj}}, "max_cost_credits": 10},`,
       `)`,
       ``,
       `# Parse and print the results`,
@@ -79,11 +85,12 @@ export function ServeCodeSnippets({
       `  method: "POST",`,
       `  headers: {`,
       `    "Authorization": "Bearer " + token,`,
+      `    "Idempotency-Key": crypto.randomUUID(),`,
       `    "Content-Type": "application/json",`,
       `  },`,
       `  body: JSON.stringify({ inputs: { ${serveInfo.input_fields
         .map((f) => `${f}: ${JSON.stringify(valueFor(f))}`)
-        .join(", ")} } }),`,
+        .join(", ")} }, max_cost_credits: 10 }),`,
       `});`,
       ``,
       `// Parse and use the results`,
@@ -110,11 +117,13 @@ export function ServeCodeSnippets({
       `\t\t"inputs": map[string]string{`,
       ...serveInfo.input_fields.map((f) => `\t\t\t"${f}": ${JSON.stringify(valueFor(f))},`),
       `\t\t},`,
+      `\t\t"max_cost_credits": 10,`,
       `\t})`,
       ``,
       `\t// Send an authenticated POST request to the optimized program`,
       `\treq, _ := http.NewRequest("POST", "${url}", bytes.NewReader(payload))`,
       `\treq.Header.Set("Authorization", "Bearer "+token)`,
+      `\treq.Header.Set("Idempotency-Key", "replace-with-a-unique-request-id")`,
       `\treq.Header.Set("Content-Type", "application/json")`,
       `\tresp, _ := http.DefaultClient.Do(req)`,
       `\tdefer resp.Body.Close()`,

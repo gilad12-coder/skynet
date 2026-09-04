@@ -3625,5 +3625,9 @@
   "submit.runtime.loading": "בודק אילו סביבות הרצה זמינות…",
   "submit.runtime.vercel": "Vercel Sandbox",
   "submit.runtime.worker": "תהליך ענן מבודד ב-Linux",
-  "workflow.dryrun.setup_sample": "בודק דוגמה אחת מנתוני האימון או האימות שנבחרת בשרת, במסגרת תקציב ההגדרה המשותף. נתוני הבדיקה הסופית אינם משמשים כאן."
+  "workflow.dryrun.setup_sample": "בודק דוגמה אחת מנתוני האימון או האימות שנבחרת בשרת, במסגרת תקציב ההגדרה המשותף. נתוני הבדיקה הסופית אינם משמשים כאן.",
+  "optimizations.serve.request_budget": "תקציב לבקשה",
+  "optimizations.serve.request_budget_hint": "המקסימום לבקשה הזאת. קרדיטים ששוריינו ולא נוצלו משתחררים.",
+  "optimizations.serve.request_budget_invalid": "יש להזין תקציב של קרדיט אחד לפחות במספר שלם.",
+  "optimizations.serve.request_spent": "נוצלו {credits} קרדיטים"
 }

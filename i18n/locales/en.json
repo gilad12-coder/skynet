@@ -235,6 +235,10 @@
     "wizard.split_fractions_not_number": "split_fractions values must be numbers: {error}",
     "wizard.split_fractions_not_object": "split_fractions must be an object with train/val/test keys.",
     "wizard.split_fractions_sum": "split_fractions must sum to 1.0, got {total}",
-    "workflow.validation_failed": "Workflow validation failed: {error}"
+    "workflow.validation_failed": "Workflow validation failed: {error}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

@@ -235,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions गैर-ऋणात्मक होना चाहिए।",
     "wizard.split_fractions_not_number": "split_fractions मान संख्याएँ होनी चाहिए: {error}",
     "wizard.split_fractions_not_object": "split_fractions एक ऑब्जेक्ट होना चाहिए जिसमें train/val/test कुंजियाँ हों।",
-    "wizard.split_fractions_sum": "split_fractions का योग 1.0 होना चाहिए, मिला {total}"
+    "wizard.split_fractions_sum": "split_fractions का योग 1.0 होना चाहिए, मिला {total}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

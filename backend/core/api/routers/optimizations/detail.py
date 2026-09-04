@@ -24,11 +24,12 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 import dspy
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from ....billing import ProviderKeyVault, resolve_byok_model_config
+from ....billing.budget_amounts import MAX_CREDITS
 from ....billing.budgets import BudgetService
 from ....config import settings
 from ....constants import (
@@ -43,6 +44,7 @@ from ....constants import (
     PAYLOAD_OVERVIEW_SIGNATURE_CODE,
     PAYLOAD_OVERVIEW_WORKFLOW,
     TOKEN_SOURCE_BYOK,
+    TOKEN_SOURCE_MANAGED,
 )
 from ....models import (
     BlackboxAgentRunResponse,
@@ -65,17 +67,20 @@ from ...auth import AuthenticatedUser, get_authenticated_user
 from ...converters import (
     compute_elapsed,
     extract_estimated_remaining,
+    job_owner,
     overview_to_base_fields,
     parse_overview,
     parse_timestamp,
     status_to_job_status,
 )
 from ...errors import DomainError
+from ...protected_interaction import run_protected_interaction
 from ...sharing_access import ShareRole
 from .._helpers import (
     _artifact_has_payload,
     _materialize_program,
     _program_cache,
+    _protected_api_runtime,
     build_summary,
     grid_resumable_pairs,
     is_pausable,
@@ -150,6 +155,13 @@ class EvaluateExamplesRequest(BaseModel):
     program_type: Literal["optimized", "baseline"] = Field(
         default="optimized",
         description="Which program to run: the optimized result or the baseline.",
+    )
+    max_cost_credits: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_CREDITS,
+        strict=True,
+        description="Maximum credits authorized for this one evaluation request; required for protected runs.",
     )
 
 
@@ -477,7 +489,10 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
         summary="Run the optimized or baseline program on specific dataset rows",
     )
     def evaluate_examples(
-        optimization_id: str, req: EvaluateExamplesRequest, current_user: AuthenticatedUserDep
+        optimization_id: str,
+        req: EvaluateExamplesRequest,
+        current_user: AuthenticatedUserDep,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> dict:
         """Run the optimized or baseline program on specific dataset rows.
 
@@ -501,6 +516,75 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
         program_type = req.program_type
 
         job_data = load_job_for_user(job_store, optimization_id, current_user)
+        if _protected_api_runtime(job_data) is not None:
+            if req.max_cost_credits is None:
+                raise DomainError("serve.request_budget_required", status=400)
+            key = (idempotency_key or "").strip()
+            if not key:
+                raise DomainError("budget.idempotency_required", status=400)
+            payload = job_data.get("payload")
+            if not isinstance(payload, dict):
+                raise DomainError("optimization.no_payload", status=404)
+            overview = parse_overview(job_data)
+            model_settings = payload.get("model_config") or overview.get(
+                PAYLOAD_OVERVIEW_MODEL_SETTINGS, {}
+            )
+            model_name = str(overview.get(PAYLOAD_OVERVIEW_MODEL_NAME) or "")
+            if model_settings:
+                model_config = ModelConfig.model_validate(model_settings)
+            elif model_name:
+                model_config = ModelConfig(name=model_name)
+            else:
+                raise DomainError("optimization.no_model_config", status=400)
+            artifact = None
+            if req.program_type == "optimized":
+                result_data = job_data.get("result")
+                if not isinstance(result_data, dict):
+                    raise DomainError("optimization.no_result_for_artifact", status=409)
+                artifact = result_data.get("program_artifact")
+                if artifact is None and isinstance(result_data.get("best_pair"), dict):
+                    artifact = result_data["best_pair"].get("program_artifact")
+                if not isinstance(artifact, dict):
+                    raise DomainError("optimization.no_program_artifact", status=409)
+            interaction_payload = {
+                "dataset": payload.get("dataset") or [],
+                "column_mapping": payload.get("column_mapping") or {},
+                "metric_code": payload.get("metric_code") or "",
+                "signature_code": payload.get("signature_code")
+                or overview.get(PAYLOAD_OVERVIEW_SIGNATURE_CODE)
+                or "",
+                "module_name": payload.get("module_name")
+                or overview.get(PAYLOAD_OVERVIEW_MODULE_NAME)
+                or "predict",
+                "module_kwargs": payload.get("module_kwargs")
+                or overview.get(PAYLOAD_OVERVIEW_MODULE_KWARGS)
+                or {},
+                "model_config": model_config.model_dump(mode="json"),
+                "token_source": model_config.token_source or TOKEN_SOURCE_MANAGED,
+                "payload_overview": overview,
+                "program_artifact": artifact,
+                "_interaction": {
+                    "kind": "evaluate",
+                    "indices": req.indices,
+                    "program_type": req.program_type,
+                },
+            }
+            if payload.get("tool_source") is not None:
+                interaction_payload["tool_source"] = payload["tool_source"]
+            stored_budget_id = job_data.get("execution_budget_id") or payload.get("execution_budget_id")
+            result = run_protected_interaction(
+                interaction_payload,
+                kind="evaluate",
+                max_cost_credits=req.max_cost_credits,
+                idempotency_key=key,
+                user=current_user,
+                job_store=job_store,
+                credential_owner=job_owner(job_data),
+                credential_binding_id=stored_budget_id,
+            )
+            if result.get("error"):
+                raise DomainError("serve.protected_interaction_failed", status=502, error=result["error"])
+            return result
         require_unprotected_api_execution(job_data)
 
         overview = parse_overview(job_data)

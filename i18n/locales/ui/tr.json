@@ -3625,5 +3625,9 @@
   "submit.runtime.loading": "Kullanılabilir çalıştırma ortamları kontrol ediliyor…",
   "submit.runtime.vercel": "Vercel Sandbox",
   "submit.runtime.worker": "Yalıtılmış Linux bulut çalışanı",
-  "workflow.dryrun.setup_sample": "Ortak kurulum bütçeniz kapsamında sunucunun seçtiği bir eğitim veya doğrulama örneğini test eder. Son test için ayrılmış veriler asla kullanılmaz."
+  "workflow.dryrun.setup_sample": "Ortak kurulum bütçeniz kapsamında sunucunun seçtiği bir eğitim veya doğrulama örneğini test eder. Son test için ayrılmış veriler asla kullanılmaz.",
+  "optimizations.serve.request_budget": "Request budget",
+  "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
+  "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
+  "optimizations.serve.request_spent": "Used {credits} credits"
 }

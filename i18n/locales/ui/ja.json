@@ -3625,5 +3625,9 @@
   "submit.runtime.loading": "利用可能な実行環境を確認中…",
   "submit.runtime.vercel": "Vercel Sandbox",
   "submit.runtime.worker": "隔離された Linux クラウドワーカー",
-  "workflow.dryrun.setup_sample": "共通のセットアップ予算内で、サーバーが選んだ学習または検証用の例を1件テストします。最終テスト用に分離したデータは使用しません。"
+  "workflow.dryrun.setup_sample": "共通のセットアップ予算内で、サーバーが選んだ学習または検証用の例を1件テストします。最終テスト用に分離したデータは使用しません。",
+  "optimizations.serve.request_budget": "Request budget",
+  "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
+  "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
+  "optimizations.serve.request_spent": "Used {credits} credits"
 }

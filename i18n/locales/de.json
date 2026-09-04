@@ -235,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions müssen nicht-negativ sein.",
     "wizard.split_fractions_not_number": "split_fractions-Werte müssen Zahlen sein: {error}",
     "wizard.split_fractions_not_object": "split_fractions muss ein Objekt mit den Schlüsseln train/val/test sein.",
-    "wizard.split_fractions_sum": "split_fractions müssen sich zu 1.0 summieren, ergab {total}"
+    "wizard.split_fractions_sum": "split_fractions müssen sich zu 1.0 summieren, ergab {total}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

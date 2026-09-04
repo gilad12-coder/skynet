@@ -3625,5 +3625,9 @@
   "submit.runtime.loading": "正在檢查可用嘅執行環境…",
   "submit.runtime.vercel": "Vercel Sandbox",
   "submit.runtime.worker": "隔離嘅 Linux 雲端工作節點",
-  "workflow.dryrun.setup_sample": "喺共用設定預算內，測試由伺服器揀選嘅一個訓練或驗證例子。唔會使用預留畀最終測試嘅資料。"
+  "workflow.dryrun.setup_sample": "喺共用設定預算內，測試由伺服器揀選嘅一個訓練或驗證例子。唔會使用預留畀最終測試嘅資料。",
+  "optimizations.serve.request_budget": "單次請求預算",
+  "optimizations.serve.request_budget_hint": "今次請求嘅最高金額。未用嘅預留點數會自動退回。",
+  "optimizations.serve.request_budget_invalid": "請輸入至少 1 點嘅整數預算。",
+  "optimizations.serve.request_spent": "已用 {credits} 點"
 }

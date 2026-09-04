@@ -13,6 +13,10 @@
     "quota.reached": "Atingido o limite por usuário de {quota} otimizações. Elimine otimizações antigas para criar novas.",
     "serve.chat_not_react": "O chat ao vivo só está disponível para otimizações de módulo ReAct.",
     "serve.chat_requires_live_mcp": "O chat ao vivo requer uma fonte de ferramentas MCP ao vivo; esta execução usou um instantâneo do conjunto de dados.",
-    "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' não encontrado para este usuário — volte a carregar o conjunto de dados e tente novamente."
+    "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' não encontrado para este usuário — volte a carregar o conjunto de dados e tente novamente.",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

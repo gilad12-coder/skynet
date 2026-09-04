@@ -235,7 +235,11 @@
     "notifier.share.transfer.subject": "הבעלות הועברה אליך",
     "notifier.share.transfer.body": "הבעלות על ה{term.optimization} הועברה אליך על ידי {actor}.",
     "notifier.email.footer": "הודעה זו נשלחה אוטומטית מ-Skynet.",
-    "notifier.email.ref": "מזהה"
+    "notifier.email.ref": "מזהה",
+    "serve.request_budget_required": "יש להגדיר max_cost_credits לבקשה הזאת.",
+    "budget.idempotency_required": "יש לשלוח Idempotency-Key ייחודי לבקשה הזאת.",
+    "serve.caller_tool_connection_required": "הריצה משתמשת בחיבור כלים של הבעלים. יש לחבר את הכלי לחשבון שלך לפני ההפעלה.",
+    "serve.protected_interaction_failed": "הבקשה בסביבת הבידוד נכשלה: {error}"
   },
   "backend": {
     "constants": {

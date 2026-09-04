@@ -346,6 +346,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const [serveInfo, setServeInfo] = useState<ServeInfoResponse | null>(null);
   const [serveInfoError, setServeInfoError] = useState<string | null>(null);
   const [serveLoading, setServeLoading] = useState(false);
+  const [serveBudgetCredits, setServeBudgetCredits] = useState("10");
   const [runHistory, setRunHistory] = useState<
     Array<{
       inputs: Record<string, string>;
@@ -353,6 +354,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       model: string;
       ts: number;
       nodeTraces?: WorkflowNodeTrace[] | null;
+      creditsCharged?: string | null;
     }>
   >([]);
   const [streamingRun, setStreamingRun] = useState<{
@@ -728,6 +730,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       );
       return;
     }
+    const maxCostCredits = Number(serveBudgetCredits);
+    if (!Number.isInteger(maxCostCredits) || maxCostCredits < 1) {
+      toast.error(msg("optimizations.serve.request_budget_invalid"));
+      return;
+    }
+    const idempotencyKey = crypto.randomUUID();
     // Abort any in-flight stream, then start a new one tagged with a fresh id
     streamAbortRef.current?.abort();
     const reqId = ++streamReqIdRef.current;
@@ -755,16 +763,32 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         return;
       }
       try {
-        const res = await serveSharedOptimization(shareToken, inputs);
+        const res = await serveSharedOptimization(
+          shareToken,
+          inputs,
+          maxCostCredits,
+          idempotencyKey,
+        );
         if (isStale()) return;
         setRunHistory((prev) => {
           const next = [
-            { inputs: { ...inputs }, outputs: res.outputs, model: res.model_used, ts: Date.now() },
+            {
+              inputs: { ...inputs },
+              outputs: res.outputs,
+              model: res.model_used,
+              ts: Date.now(),
+              creditsCharged: res.credits_charged,
+            },
             ...prev,
           ];
           return next.length > 50 ? next.slice(0, 50) : next;
         });
         setStreamingRun(null);
+        if (res.credits_charged != null) {
+          toast.success(
+            formatMsg("optimizations.serve.request_spent", { credits: res.credits_charged }),
+          );
+        }
       } catch (err) {
         if (isStale()) return;
         setServeError(err instanceof Error ? err.message : msg("share.inference_failed"));
@@ -779,7 +803,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     // does not.
     if ((job?.module_name ?? "").toLowerCase() === "workflow" && activePairIndex == null) {
       try {
-        const res = await serveProgram(id, inputs);
+        const res = await serveProgram(id, inputs, maxCostCredits, idempotencyKey);
         if (isStale()) return;
         setRunHistory((prev) => {
           const next = [
@@ -789,12 +813,18 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               model: res.model_used,
               ts: Date.now(),
               nodeTraces: res.node_traces ?? null,
+              creditsCharged: res.credits_charged,
             },
             ...prev,
           ];
           return next.length > 50 ? next.slice(0, 50) : next;
         });
         setStreamingRun(null);
+        if (res.credits_charged != null) {
+          toast.success(
+            formatMsg("optimizations.serve.request_spent", { credits: res.credits_charged }),
+          );
+        }
       } catch (err) {
         if (isStale()) return;
         setServeError(err instanceof Error ? err.message : msg("share.inference_failed"));
@@ -806,10 +836,10 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     }
     const streamFn =
       job?.optimization_type === "grid_search" && activePairIndex != null
-        ? (i: Record<string, string>, h: Parameters<typeof serveProgramStream>[2]) =>
-            servePairProgramStream(id, activePairIndex, i, h)
-        : (i: Record<string, string>, h: Parameters<typeof serveProgramStream>[2]) =>
-            serveProgramStream(id, i, h);
+        ? (i: Record<string, string>, h: Parameters<typeof serveProgramStream>[4]) =>
+            servePairProgramStream(id, activePairIndex, i, maxCostCredits, idempotencyKey, h)
+        : (i: Record<string, string>, h: Parameters<typeof serveProgramStream>[4]) =>
+            serveProgramStream(id, i, maxCostCredits, idempotencyKey, h);
     await streamFn(inputs, {
       signal: controller.signal,
       onToken: (field, chunk) => {
@@ -828,12 +858,23 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         setRunHistory((prev) => {
           // Cap history so the chat panel stays responsive across long sessions.
           const next = [
-            { inputs: { ...inputs }, outputs: res.outputs, model: res.model_used, ts: Date.now() },
+            {
+              inputs: { ...inputs },
+              outputs: res.outputs,
+              model: res.model_used,
+              ts: Date.now(),
+              creditsCharged: res.credits_charged,
+            },
             ...prev,
           ];
           return next.length > 50 ? next.slice(0, 50) : next;
         });
         setStreamingRun(null);
+        if (res.credits_charged != null) {
+          toast.success(
+            formatMsg("optimizations.serve.request_spent", { credits: res.credits_charged }),
+          );
+        }
       },
       onError: (errorMsg) => {
         if (isStale()) return;
@@ -1545,6 +1586,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                     chatScrollRef={chatScrollRef}
                     handleServe={handleServe}
                     handleStopServe={handleStopServe}
+                    requestBudgetCredits={serveBudgetCredits}
+                    onRequestBudgetCreditsChange={setServeBudgetCredits}
                     optimizationId={job.optimization_id}
                     pairIndex={isPairContext ? activePair.pair_index : undefined}
                     onClearHistory={handleClearHistory}

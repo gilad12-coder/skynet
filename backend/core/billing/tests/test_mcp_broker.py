@@ -111,6 +111,37 @@ def test_mcp_response_cannot_echo_parent_authorization_to_guest(remote: list[htt
     assert "[REDACTED]" in response.body.decode()
 
 
+def test_declined_tool_call_never_reaches_remote_endpoint(remote: list[httpx.Request]) -> None:
+    """Return a tool error and lifecycle events without dispatch after caller denial."""
+    events: list[dict[str, Any]] = []
+    approvals: list[tuple[str, str, dict[str, Any]]] = []
+
+    def deny(call_id: str, tool_name: str, arguments: dict[str, Any]) -> bool:
+        """Record the displayed request and deny its physical side effect."""
+        approvals.append((call_id, tool_name, arguments))
+        return False
+
+    broker = mcp_broker.McpToolsBroker(
+        "https://tools.example/mcp",
+        check_admission=lambda: None,
+        tool_filter=["echo"],
+        authorize_tool=deny,
+        on_tool_event=events.append,
+    )
+    result = json.loads(
+        broker.dispatch(_rpc("tools/call", {"name": "echo", "arguments": {"value": "blocked"}})).body
+    )
+
+    calls = [json.loads(request.content) for request in remote if request.method == "POST"]
+    assert sum(body["method"] == "tools/call" for body in calls) == 0
+    assert result["result"]["isError"] is True
+    assert result["result"]["content"][0]["text"] == "User declined"
+    assert approvals[0][1:] == ("echo", {"value": "blocked"})
+    assert [event["event"] for event in events] == ["tool_start", "tool_end"]
+    assert events[0]["data"]["id"] == events[1]["data"]["id"]
+    assert events[1]["data"]["status"] == "error"
+
+
 @pytest.mark.parametrize("address", ["127.0.0.1", "10.0.0.1", "169.254.169.254", "::1", "fd00:ec2::254"])
 def test_private_destinations_are_denied_by_default(monkeypatch: pytest.MonkeyPatch, address: str) -> None:
     """Reject private destinations before creating any MCP session."""

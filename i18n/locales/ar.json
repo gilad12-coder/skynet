@@ -235,6 +235,10 @@
     "wizard.split_fractions_negative": "يجب ألّا تكون split_fractions سالبة.",
     "wizard.split_fractions_not_number": "يجب أن تكون قيم split_fractions أعدادًا: {error}",
     "wizard.split_fractions_not_object": "يجب أن يكون split_fractions كائنًا يحوي المفاتيح train/val/test.",
-    "wizard.split_fractions_sum": "يجب أن يكون مجموع split_fractions مساويًا 1.0، وكان {total}"
+    "wizard.split_fractions_sum": "يجب أن يكون مجموع split_fractions مساويًا 1.0، وكان {total}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }
