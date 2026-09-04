@@ -51,7 +51,12 @@ def store() -> SQLiteJobStore:
 @pytest.fixture
 def worker(store: SQLiteJobStore) -> BackgroundWorker:
     """Build an unstarted worker whose subprocess machinery must never fire."""
-    w = BackgroundWorker(job_store=cast(JobStore, store), num_workers=1, poll_interval=1.0)
+    w = BackgroundWorker(
+        job_store=cast(JobStore, store),
+        num_workers=1,
+        poll_interval=1.0,
+        _allow_unprotected_test_execution=True,
+    )
     w._mp_ctx = MagicMock()
     w._mp_ctx.Process.side_effect = AssertionError("distributed-grid tests must not spawn subprocesses")
     return w

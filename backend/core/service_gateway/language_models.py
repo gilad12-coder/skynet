@@ -4,14 +4,22 @@ Builds ``dspy.LM`` instances from ``ModelConfig`` while filtering out
 ``None`` optional fields so LiteLLM does not reject the call.
 """
 
+import contextlib
 import logging
+import os
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 import dspy
+import httpx
 
+from ..billing.model_gateway import ROUTE_KEY, raise_gateway_stop
+from ..billing.runtime import UsagePendingError
+from ..billing.signals import BudgetReached
 from ..config import settings
-from ..exceptions import ServiceError
+from ..exceptions import InfrastructureInterruptionError, ServiceError
 from ..models import ModelConfig
 
 try:
@@ -29,6 +37,125 @@ parser rejects with a ValidationError."""
 _OPENAI_REASONING_MAX_TOKENS = 16000
 """Mandatory ``max_tokens`` floor for OpenAI reasoning models — dspy validates
 ``max_tokens >= 16000`` (and ``temperature == 1.0``) at ``dspy.LM`` init."""
+
+_TRANSIENT_GATEWAY_CODES = frozenset({"provider_interrupted", "provider_transport_interruption"})
+
+
+def _gateway_failure_code(error: BaseException) -> str | None:
+    """Read only a structured error code returned by Skynet's trusted model relay.
+
+    Args:
+        error: Provider SDK exception, possibly wrapping an HTTP response.
+
+    Returns:
+        Stable relay error code, or None when the provider SDK discarded it.
+    """
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        documents: list[Any] = []
+        if isinstance(response, httpx.Response):
+            with contextlib.suppress(ValueError):
+                documents.append(response.json())
+        for attribute in ("body", "error", "message"):
+            value = getattr(current, attribute, None)
+            if isinstance(value, Mapping):
+                documents.append(value)
+        for document in documents:
+            detail = document.get("error") if isinstance(document.get("error"), Mapping) else document
+            code = detail.get("type") or detail.get("code")
+            if isinstance(code, str):
+                return code
+        pending.extend(
+            nested for nested in (current.__cause__, current.__context__) if isinstance(nested, BaseException)
+        )
+    return None
+
+
+def finish_recovery_seed(language_model: object) -> None:
+    """Tell the trusted parent that mandatory seed evaluation has completed.
+
+    Args:
+        language_model: Task model carrying the parent-issued budget route.
+
+    Raises:
+        ServiceError: When the parent rejects or cannot durably apply the marker.
+    """
+    route = getattr(language_model, "budget_route", None)
+    if not isinstance(route, dict):
+        return
+    try:
+        response = httpx.post(
+            f"{os.environ.get('SKYNET_BUDGET_RELAY_URL', str(route['url'])).rstrip('/')}/_budget/recovery-seed-complete",
+            headers={"Authorization": f"Bearer {route['token']}"},
+            json={},
+            timeout=10,
+            trust_env=False,
+        )
+        response.raise_for_status()
+    except httpx.TransportError as error:
+        raise InfrastructureInterruptionError(
+            "The trusted parent transport was interrupted while finalizing seed evaluation."
+        ) from error
+    except (httpx.HTTPStatusError, KeyError) as error:
+        raise ServiceError("The recovery seed-evaluation bound could not be finalized.") from error
+
+
+class GepaRecoverySeedBoundary:
+    """Publish the recovery marker only after upstream finishes its seed valset evaluation."""
+
+    def __init__(self, language_model: object) -> None:
+        """Bind the model route used to reach the trusted parent.
+
+        Args:
+            language_model: Task or reflection LM carrying the scoped budget route.
+        """
+        self._language_model = language_model
+        self._lock = threading.Lock()
+        self._completed = False
+        self._failure: BaseException | None = None
+
+    def on_valset_evaluated(self, event: Mapping[str, Any]) -> None:
+        """Mark the exact upstream iteration-zero seed evaluation boundary.
+
+        Args:
+            event: Upstream GEPA valset event.
+        """
+        if event.get("iteration") != 0 or event.get("candidate_idx") != 0:
+            return
+        with self._lock:
+            if self._completed or self._failure is not None:
+                return
+            try:
+                finish_recovery_seed(self._language_model)
+                self._completed = True
+            except BaseException as error:
+                self._failure = error
+
+    def __call__(self, _state: object) -> bool:
+        """Surface marker failure through GEPA's stopping boundary.
+
+        Args:
+            _state: Upstream state supplied to every stopper.
+
+        Returns:
+            False because this observer never changes optimizer stopping semantics.
+
+        Raises:
+            BaseException: When the trusted marker transport failed or was rejected.
+            ServiceError: When the pinned upstream callback boundary did not run.
+        """
+        with self._lock:
+            if self._failure is not None:
+                raise self._failure
+            if not self._completed:
+                raise ServiceError("The pinned GEPA runtime did not publish its seed-evaluation boundary.")
+        return False
 
 
 def _is_openai_reasoning_model(model_name: str) -> bool:
@@ -288,11 +415,26 @@ class MeteredLM(dspy.LM):
         Returns:
             The upstream ``dspy.LM.forward`` result.
         """
-        gate = _job_lm_gate
-        if gate is None:
-            return super().forward(*args, **kwargs)
-        with gate:
-            return super().forward(*args, **kwargs)
+        try:
+            gate = _job_lm_gate
+            if gate is None:
+                return super().forward(*args, **kwargs)
+            with gate:
+                return super().forward(*args, **kwargs)
+        except Exception as error:
+            route = getattr(self, "budget_route", None)
+            if route:
+                raise_gateway_stop(route)
+                status = getattr(error, "status_code", None)
+                if status == 424:
+                    raise UsagePendingError("Provider usage must settle before this operation can continue.") from error
+                if status == 402 and "budget_reached" in str(error):
+                    raise BudgetReached() from error
+                if _gateway_failure_code(error) in _TRANSIENT_GATEWAY_CODES:
+                    raise InfrastructureInterruptionError(
+                        "The model provider transport was interrupted."
+                    ) from error
+            raise
 
     def update_history(self, entry: object) -> None:
         """Fold one call's usage into the running totals and discard the entry.
@@ -307,9 +449,7 @@ class MeteredLM(dspy.LM):
             request_model = entry.get("model")
             response_model = entry.get("response_model")
             self.last_request_model = request_model if isinstance(request_model, str) else None
-            self.last_response_model = (
-                response_model if isinstance(response_model, str) else None
-            )
+            self.last_response_model = response_model if isinstance(response_model, str) else None
         usage = entry.get("usage") if isinstance(entry, dict) else None
         total = _usage_total_tokens(usage)
         split = _usage_in_out_tokens(usage)
@@ -392,6 +532,7 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
     if config.max_tokens is not None:
         lm_kwargs["max_tokens"] = config.max_tokens
     lm_kwargs.update(config.extra)
+    budget_route = lm_kwargs.pop(ROUTE_KEY, None)
     _apply_managed_gateway(lm_kwargs)
     _translate_gateway_reasoning(lm_kwargs)
     if disable_cache:
@@ -407,11 +548,17 @@ def build_language_model(config: ModelConfig, *, disable_cache: bool = False) ->
             merged = dict(body) if isinstance(body, dict) else {}
             merged.setdefault("cache", {"no-cache": True})
             lm_kwargs["extra_body"] = merged
+    if isinstance(budget_route, dict):
+        lm_kwargs["model"] = f"litellm_proxy/{budget_route['model']}"
+        lm_kwargs["base_url"] = os.environ.get("SKYNET_BUDGET_RELAY_URL", budget_route["url"])
+        lm_kwargs["api_key"] = budget_route["token"]
+        lm_kwargs.pop("api_base", None)
     try:
         language_model = MeteredLM(**lm_kwargs)
     except ValueError as exc:
         raise ServiceError(f"Failed to build language model '{config.name}': {exc}") from exc
 
+    language_model.budget_route = budget_route
     return language_model
 
 
@@ -430,9 +577,9 @@ def _usage_total_tokens(usage: object) -> int | None:
         return None
     get = usage.get if isinstance(usage, dict) else lambda key: getattr(usage, key, None)
     total = get("total_tokens")
-    if isinstance(total, (int, float)) and total > 0:
+    if isinstance(total, int | float) and total > 0:
         return int(total)
-    parts = [int(p) for p in (get("prompt_tokens"), get("completion_tokens")) if isinstance(p, (int, float))]
+    parts = [int(p) for p in (get("prompt_tokens"), get("completion_tokens")) if isinstance(p, int | float)]
     return sum(parts) if parts else None
 
 
@@ -499,13 +646,13 @@ def _usage_in_out_tokens(usage: object) -> tuple[int, int] | None:
     get = usage.get if isinstance(usage, dict) else lambda key: getattr(usage, key, None)
     prompt = get("prompt_tokens")
     completion = get("completion_tokens")
-    if isinstance(prompt, (int, float)) or isinstance(completion, (int, float)):
-        in_tokens = int(prompt) if isinstance(prompt, (int, float)) and prompt > 0 else 0
-        out_tokens = int(completion) if isinstance(completion, (int, float)) and completion > 0 else 0
+    if isinstance(prompt, int | float) or isinstance(completion, int | float):
+        in_tokens = int(prompt) if isinstance(prompt, int | float) and prompt > 0 else 0
+        out_tokens = int(completion) if isinstance(completion, int | float) and completion > 0 else 0
         if in_tokens or out_tokens:
             return in_tokens, out_tokens
     total = get("total_tokens")
-    if isinstance(total, (int, float)) and total > 0:
+    if isinstance(total, int | float) and total > 0:
         return int(total), 0
     return None
 
@@ -609,8 +756,7 @@ def install_openrouter_served_model_patch() -> None:
         provider = getattr(self, "custom_llm_provider", None)
         requested = getattr(self, "model", None)
         if served and (
-            provider in ("openrouter", "litellm_proxy")
-            or (isinstance(requested, str) and "openrouter/" in requested)
+            provider in ("openrouter", "litellm_proxy") or (isinstance(requested, str) and "openrouter/" in requested)
         ):
             self.model = served
         return handler(self, chunk)

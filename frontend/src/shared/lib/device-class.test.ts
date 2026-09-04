@@ -7,7 +7,6 @@ import { deviceClassFromRequest, isDesktopOnlyPath, isPhoneSettingsTab } from ".
 
 test("isDesktopOnlyPath blocks authoring routes and their descendants", () => {
   for (const p of [
-    "/submit",
     "/datasets",
     "/datasets/abc/edit",
     "/datasets/share/tok",
@@ -22,6 +21,7 @@ test("isDesktopOnlyPath blocks authoring routes and their descendants", () => {
 test("isDesktopOnlyPath lets view routes and lookalike prefixes through", () => {
   for (const p of [
     "/",
+    "/submit",
     "/explore",
     "/optimizations/1",
     "/share/tok",

@@ -189,6 +189,7 @@
     "optimization.resume_exhausted": "呢項優化已經達到嘗試次數上限（{attempts}）——請改為重新執行。",
     "optimization.resume_not_resumable": "呢項優化冇已儲存嘅復原點——請改為重新執行。",
     "optimization.resume_wrong_status": "只有中途停止嘅優化先可以繼續——目前處於「{status}」。",
+    "optimization.protected_interactive_sandbox_required": "呢個受保護嘅最佳化唔可以喺 API 程序入面評估或者提供服務。需要一個獨立計費嘅 {runtime} 沙盒，但呢個端點暫時未支援。",
     "optimization.retry_no_payload": "來源優化冇已儲存嘅 payload 可以重試。",
     "optimization.retry_wrong_status": "只有處於「failed」或「cancelled」狀態嘅優化先可以重試——目前處於「{status}」。請改為複製佢。",
     "quota.concurrent_reached": "你已經有 {limit, plural, other {# 個執行}} 進行緊。請等其中一個完成咗先好開始下一個。",
@@ -234,6 +235,10 @@
     "notifier.email.footer": "呢個係嚟自 Skynet 嘅自動傳送訊息。",
     "optimization.no_program_artifact": "冇程式產物。",
     "optimization.no_program_artifact_scoped": "最佳化冇程式產物。",
-    "wizard.code_via_authoring_only": "{field} 唔可以透過 update_wizard_state 設定。Signature 同 Metric 程式碼只可以透過 request_code_authoring 編寫，系統會喺傳入精靈之前先驗證結果。"
+    "wizard.code_via_authoring_only": "{field} 唔可以透過 update_wizard_state 設定。Signature 同 Metric 程式碼只可以透過 request_code_authoring 編寫，系統會喺傳入精靈之前先驗證結果。",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

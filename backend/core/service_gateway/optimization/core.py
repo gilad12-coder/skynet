@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import dspy
+from dspy.teleprompt.gepa.gepa_utils import DspyAdapter
 
 from ...config import settings as app_settings
 from ...constants import (
@@ -76,6 +77,7 @@ from ..language_models import (
 from ..react_compat import REACT_CLASS
 from ..safe_exec import validate_metric_code, validate_signature_code
 from .artifacts import persist_program
+from .budget_stop import BudgetReached
 from .cost_ceiling import CostCeilingCallback
 from .data import (
     extract_signature_fields,
@@ -85,6 +87,7 @@ from .data import (
     rows_to_examples,
     split_examples,
 )
+from .incumbent import completed_gepa_result
 from .llm_error import enrich_error_message
 from .logged_scores import aggregate_logged_metrics
 from .optimizers import (
@@ -288,7 +291,7 @@ def _react_prediction_outputs(prediction: Any, output_fields: Iterable[str]) -> 
     outputs: dict[str, Any] = {}
     for field_name in output_fields:
         value = getattr(prediction, field_name, None)
-        if value is None or isinstance(value, (str, int, float, bool)):
+        if value is None or isinstance(value, str | int | float | bool):
             outputs[field_name] = value
         else:
             outputs[field_name] = str(value)
@@ -441,6 +444,8 @@ def _run_grid_pair(
         )
 
     pair_start = datetime.now(UTC)
+    baseline: float | None = None
+    baseline_test_results: list[dict] = []
     try:
         program = ctx.module_factory(**dict(ctx.module_kwargs))
         # Caching stays ON here: forcing cache off across the GEPA
@@ -462,7 +467,7 @@ def _run_grid_pair(
         callbacks: list[Any] = list(timing_callbacks)
         # Hard-stop this pair at its share of the Max Cost Ceiling so the grid's
         # concurrent pairs can't collectively overrun the user's job-wide cap.
-        if ctx.pair_max_credits > 0:
+        if ctx.pair_max_credits > 0 and ctx.payload.execution_budget_id is None:
             callbacks.append(CostCeilingCallback(ctx.pair_max_credits, language_model, reflection_lm))
 
         with (
@@ -492,9 +497,8 @@ def _run_grid_pair(
                 log_dir=trajectory_log_dir,
                 target_score=ctx.payload.target_score,
                 stop_state=stop_state,
+                recovery_seed_model=language_model,
             )
-            baseline = None
-            baseline_test_results: list[dict] = []
             if ctx.splits.test:
                 with track_stage(STAGE_BASELINE, *timing_callbacks):
                     baseline, baseline_test_results = evaluate_on_test(
@@ -511,7 +515,6 @@ def _run_grid_pair(
                             "pair_index": i,
                         },
                     )
-
             with (
                 capture_tqdm(ctx.progress_callback),
                 track_stage(STAGE_TRAINING, *timing_callbacks),
@@ -632,6 +635,52 @@ def _run_grid_pair(
                 },
             )
         # Record the finished pair so a resumed grid keeps it instead of re-running.
+        if pair_dir is not None:
+            _write_pair_result_json(pair_dir, result)
+        set_current_pair_index(None)
+        return result
+
+    except BudgetReached:
+        recovered = (
+            completed_gepa_result(pair_dir, seed=ctx.payload.seed)
+            if ctx.payload.optimizer_name.lower() == "gepa"
+            else None
+        )
+        artifact = None
+        evidence: dict[str, Any] = {
+            "candidate_origin": None,
+            "final_evaluation_completed": False,
+            "final_evaluation_reason": "budget_reached",
+        }
+        if recovered is not None:
+            incumbent = DspyAdapter(program, ctx.metric, {}).build_program(recovered.best_candidate)
+            artifact = persist_program(incumbent, f"{ctx.artifact_id}_pair_{i}" if ctx.artifact_id else None)
+            evidence.update(
+                selection_scope="validation" if ctx.splits.val else "training",
+                selection_score=recovered.val_aggregate_scores[recovered.best_idx],
+                candidate_origin="seed" if recovered.best_idx == 0 else "optimized",
+            )
+        elif baseline is not None:
+            artifact = persist_program(program, f"{ctx.artifact_id}_pair_{i}" if ctx.artifact_id else None)
+            evidence.update(
+                selection_scope="test",
+                selection_score=baseline,
+                candidate_origin="seed",
+            )
+        result = PairResult(
+            pair_index=i,
+            generation_model=gen_cfg.name,
+            reflection_model=ref_cfg.name,
+            stop_reason="budget_reached",
+            result_availability="evaluated" if recovered is not None or baseline is not None else "none",
+            terminal_evidence=evidence,
+            program_artifact=artifact,
+            baseline_test_metric=baseline,
+            baseline_test_results=baseline_test_results,
+            baseline_logged_metrics=aggregate_logged_metrics(baseline_test_results),
+            total_tokens=total_tokens_from_history(language_model, reflection_lm),
+            usage_by_model=_usage_by_model_rows(language_model, reflection_lm),
+        )
         if pair_dir is not None:
             _write_pair_result_json(pair_dir, result)
         set_current_pair_index(None)
@@ -848,7 +897,7 @@ class DspyService:
         # Registered alongside the timing callbacks so it sees every LM call on
         # every worker thread; a trip raises out of the run and the worker leaves
         # the job failed (and unbilled — debiting only fires on success).
-        if payload.max_cost_credits is not None:
+        if payload.max_cost_credits is not None and payload.execution_budget_id is None:
             callbacks.append(CostCeilingCallback(payload.max_cost_credits, language_model, reflection_lm))
         with gepa_log_dir(payload.optimizer_name, gepa_log_dir_path) as trajectory_log_dir:
             training_metric = maybe_wrap_minibatch_recorder(
@@ -869,6 +918,7 @@ class DspyService:
                 log_dir=trajectory_log_dir,
                 target_score=payload.target_score,
                 stop_state=stop_state,
+                recovery_seed_model=language_model,
             )
             with dspy.context(lm=language_model, callbacks=callbacks):
                 baseline_test_metric = None
@@ -887,7 +937,6 @@ class DspyService:
                             PROGRESS_BASELINE,
                             {DETAIL_BASELINE: baseline_test_metric},
                         )
-
                 # Fail fast on a structurally broken metric (e.g. wrong field
                 # names or isinstance(gold, dict) gating) before spending the
                 # optimizer budget grinding at 0%. A correct metric always
@@ -900,39 +949,70 @@ class DspyService:
                     payload.module_name,
                     payload.optimizer_name,
                 )
-                with (
-                    capture_tqdm(progress_callback),
-                    track_stage(STAGE_TRAINING, *timing_callbacks),
-                    capture_proposal_prompts(payload.optimizer_name),
-                    trajectory_watch(trajectory_log_dir, progress_callback),
-                ):
-                    compiled_program = compile_program(
-                        optimizer=optimizer,
-                        program=program,
-                        splits=splits,
-                        metric=metric,
-                        compile_kwargs=payload.compile_kwargs,
+                budget_stop: BudgetReached | None = None
+                try:
+                    with (
+                        capture_tqdm(progress_callback),
+                        track_stage(STAGE_TRAINING, *timing_callbacks),
+                        capture_proposal_prompts(payload.optimizer_name),
+                        trajectory_watch(trajectory_log_dir, progress_callback),
+                    ):
+                        compiled_program = compile_program(
+                            optimizer=optimizer,
+                            program=program,
+                            splits=splits,
+                            metric=metric,
+                            compile_kwargs=payload.compile_kwargs,
+                        )
+                except BudgetReached as exc:
+                    recovered = (
+                        completed_gepa_result(trajectory_log_dir, seed=payload.seed)
+                        if payload.optimizer_name.lower() == "gepa"
+                        else None
                     )
+                    if recovered is None and baseline_test_metric is not None:
+                        budget_stop = exc
+                        compiled_program = program
+                        exc.evidence.update(
+                            selection_scope="test",
+                            selection_score=baseline_test_metric,
+                            candidate_origin="seed",
+                        )
+                    elif recovered is None:
+                        raise
+                    else:
+                        budget_stop = exc
+                        compiled_program = DspyAdapter(program, metric, {}).build_program(recovered.best_candidate)
+                        exc.evidence.update(
+                            selection_scope="validation" if splits.val else "training",
+                            selection_score=recovered.val_aggregate_scores[recovered.best_idx],
+                            candidate_origin="seed" if recovered.best_idx == 0 else "optimized",
+                        )
                 logger.info("Optimizer compile completed successfully")
 
                 optimized_test_metric = None
                 optimized_test_results: list[dict] = []
-                if splits.test:
-                    if progress_callback:
-                        progress_callback(PROGRESS_EVALUATION_STARTED, {})
-                    with track_stage(STAGE_EVALUATION, *timing_callbacks):
-                        optimized_test_metric, optimized_test_results = evaluate_on_test(
-                            compiled_program,
-                            splits.test,
-                            metric,
-                            collect_per_example=True,
-                        )
-                    logger.info("Optimized test metric: %s", optimized_test_metric)
-                    if progress_callback and optimized_test_metric is not None:
-                        progress_callback(
-                            PROGRESS_OPTIMIZED,
-                            {DETAIL_OPTIMIZED: optimized_test_metric},
-                        )
+                try:
+                    if splits.test and budget_stop is None:
+                        if progress_callback:
+                            progress_callback(PROGRESS_EVALUATION_STARTED, {})
+                        with track_stage(STAGE_EVALUATION, *timing_callbacks):
+                            optimized_test_metric, optimized_test_results = evaluate_on_test(
+                                compiled_program,
+                                splits.test,
+                                metric,
+                                collect_per_example=True,
+                            )
+                        logger.info("Optimized test metric: %s", optimized_test_metric)
+                        if progress_callback and optimized_test_metric is not None:
+                            progress_callback(
+                                PROGRESS_OPTIMIZED,
+                                {DETAIL_OPTIMIZED: optimized_test_metric},
+                            )
+
+                except BudgetReached as exc:
+                    budget_stop = exc
+                    exc.evidence.setdefault("candidate_origin", "optimized")
 
                 best_program = compiled_program
                 if (
@@ -1013,6 +1093,11 @@ class DspyService:
             baseline_logged_metrics=aggregate_logged_metrics(baseline_test_results),
             optimized_logged_metrics=aggregate_logged_metrics(optimized_test_results),
         )
+
+        if budget_stop is not None:
+            budget_stop.result = response
+            budget_stop.evidence.update(final_evaluation_completed=False, final_evaluation_reason="budget_reached")
+            raise budget_stop
 
         logger.info(
             "DSPy run finished: module=%s optimizer=%s status=success",
@@ -1120,7 +1205,7 @@ class DspyService:
         # Same Max Cost Ceiling hard-stop the scalar path registers. React routes
         # both the student and the reflection LM through ``gepa.optimize``; the
         # ceiling totals usage across both so the cap covers the whole run.
-        if payload.max_cost_credits is not None:
+        if payload.max_cost_credits is not None and payload.execution_budget_id is None:
             react_callbacks.append(CostCeilingCallback(payload.max_cost_credits, student_lm, reflection_lm))
         # Mirror the scalar run's trajectory wiring so react gets the same
         # candidate tree: GEPA persists state into trajectory_log_dir,
@@ -1143,24 +1228,31 @@ class DspyService:
                 progress_callback,
                 payload.module_name,
             )
-            result = run_react.run_react_optimization(
-                signature_cls=signature_cls,
-                tools=tools,
-                schema_hashes=schema_hashes,
-                metric=training_metric,
-                train=splits.train,
-                val=splits.val,
-                test=splits.test,
-                student_lm=student_lm,
-                reflection_lm=reflection_lm,
-                max_metric_calls=max_metric_calls,
-                target_score=payload.target_score,
-                seed=seed,
-                num_threads=num_threads,
-                run_dir=trajectory_log_dir,
-                progress_callback=progress_callback,
-                timing_callbacks=(gen_timing,),
-            )
+            budget_stop: BudgetReached | None = None
+            try:
+                result = run_react.run_react_optimization(
+                    signature_cls=signature_cls,
+                    tools=tools,
+                    schema_hashes=schema_hashes,
+                    metric=training_metric,
+                    train=splits.train,
+                    val=splits.val,
+                    test=splits.test,
+                    student_lm=student_lm,
+                    reflection_lm=reflection_lm,
+                    max_metric_calls=max_metric_calls,
+                    target_score=payload.target_score,
+                    seed=seed,
+                    num_threads=num_threads,
+                    run_dir=trajectory_log_dir,
+                    progress_callback=progress_callback,
+                    timing_callbacks=(gen_timing,),
+                    recovery_seed_model=student_lm,
+                )
+            except BudgetReached as exc:
+                if not isinstance(exc.result, dict) or "program_state" not in exc.result:
+                    raise
+                budget_stop, result = exc, exc.result
 
         overlay = result["tool_overlay"]
         program_artifact = self._persist_react_program(
@@ -1174,7 +1266,7 @@ class DspyService:
 
         baseline_scalar = result["baseline_scalar"]
         optimized_scalar = result["optimized_scalar"]
-        metric_improvement = optimized_scalar - baseline_scalar
+        metric_improvement = None if optimized_scalar is None else optimized_scalar - baseline_scalar
 
         if progress_callback:
             # baseline_evaluated is emitted early inside run_react_optimization
@@ -1248,12 +1340,12 @@ class DspyService:
         ]
 
         logger.info(
-            "React run finished: baseline=%.4f optimized=%.4f delta=%.4f",
+            "React run finished: baseline=%s optimized=%s delta=%s",
             baseline_scalar,
             optimized_scalar,
             metric_improvement,
         )
-        return RunResponse(
+        response = RunResponse(
             module_name=payload.module_name,
             optimizer_name=payload.optimizer_name,
             metric_name=metric_identifier,
@@ -1279,6 +1371,10 @@ class DspyService:
             baseline_test_results=baseline_test_results,
             optimized_test_results=optimized_test_results,
         )
+        if budget_stop is not None:
+            budget_stop.result = response
+            raise budget_stop
+        return response
 
     @staticmethod
     def _persist_react_program(
@@ -1513,7 +1609,7 @@ class DspyService:
         )
 
         grid_runtime = (datetime.now(UTC) - grid_start).total_seconds()
-        completed_count = len([p for p in pair_results if p.error is None])
+        completed_count = len([p for p in pair_results if p.error is None and p.stop_reason != "budget_reached"])
         failed_count = len([p for p in pair_results if p.error is not None])
         pair_token_counts = [p.total_tokens for p in pair_results if p.total_tokens is not None]
         grid_total_tokens = sum(pair_token_counts) if pair_token_counts else None
@@ -1528,7 +1624,7 @@ class DspyService:
             grid_runtime,
         )
 
-        return GridSearchResponse(
+        response = GridSearchResponse(
             module_name=payload.module_name,
             optimizer_name=payload.optimizer_name,
             metric_name=metric_identifier,
@@ -1536,12 +1632,30 @@ class DspyService:
             total_pairs=total_pairs,
             completed_pairs=completed_count,
             failed_pairs=failed_count,
+            stopped_pairs=sum(p.stop_reason == "budget_reached" for p in pair_results),
             pair_results=pair_results,
             best_pair=best_pair,
             runtime_seconds=round(grid_runtime, 2),
             total_tokens=grid_total_tokens,
             usage_by_model=grid_usage_by_model,
         )
+        if response.stopped_pairs and not failed_count:
+            stop = BudgetReached()
+            stop.result = (
+                response
+                if any(p.result_availability == "evaluated" or p.program_artifact is not None for p in pair_results)
+                else None
+            )
+            stop.evidence.update(
+                final_evaluation_completed=False,
+                final_evaluation_reason="budget_reached",
+                candidate_origin=None,
+                stopped_pairs=response.stopped_pairs,
+                completed_pairs=completed_count,
+                pair_results=[p.model_dump(mode="json") for p in pair_results],
+            )
+            raise stop
+        return response
 
     def validate_grid_search_payload(self, payload: GridSearchRequest) -> None:
         """Validate a GridSearchRequest without executing any optimization.

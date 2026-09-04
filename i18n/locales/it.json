@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "Questa ottimizzazione ha raggiunto il numero massimo di tentativi ({attempts}): eseguila di nuovo invece.",
     "optimization.resume_not_resumable": "Questa ottimizzazione non ha alcun punto di ripresa salvato: eseguila di nuovo invece.",
     "optimization.resume_wrong_status": "Possono essere riprese solo le ottimizzazioni che si sono interrotte durante l'esecuzione: questa è nello stato '{status}'.",
+    "optimization.protected_interactive_sandbox_required": "Questa ottimizzazione protetta non può essere valutata o servita nel processo API. È necessario un sandbox {runtime} con tariffazione separata, che non è ancora disponibile su questo endpoint.",
     "optimization.retry_no_payload": "L'ottimizzazione di origine non ha alcun payload salvato da riprovare.",
     "optimization.retry_wrong_status": "Possono essere riprovate solo le ottimizzazioni nello stato 'failed' o 'cancelled': questa è nello stato '{status}'. Clonala invece.",
     "quota.reached": "Limite per utente di {quota} ottimizzazioni raggiunto. Elimina le vecchie ottimizzazioni per crearne di nuove.",
@@ -234,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions deve essere non negativo.",
     "wizard.split_fractions_not_number": "I valori di split_fractions devono essere numeri: {error}",
     "wizard.split_fractions_not_object": "split_fractions deve essere un oggetto con chiavi train/val/test.",
-    "wizard.split_fractions_sum": "split_fractions deve sommare a 1.0, ottenuto {total}"
+    "wizard.split_fractions_sum": "split_fractions deve sommare a 1.0, ottenuto {total}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

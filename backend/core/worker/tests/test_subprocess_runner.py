@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import core.worker.subprocess_runner as sr
+from core.exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
 from core.worker.constants import (
     EVENT_AGENT_RUN,
     EVENT_ERROR,
@@ -279,6 +280,24 @@ def test_run_service_in_subprocess_exception_emits_error_event() -> None:
     assert len(error_events) == 1
     assert "model exploded" in error_events[0]["error"]
     assert "traceback" in error_events[0]
+    assert error_events[0]["failure_kind"] == DETERMINISTIC_FAILURE
+
+
+def test_run_service_in_subprocess_classifies_trusted_transport_interruption() -> None:
+    """Mark a typed model/sandbox interruption recoverable at the child boundary."""
+    q: queue.Queue[dict] = queue.Queue()
+    service = fake_dspy_service()
+    service.run.side_effect = InfrastructureInterruptionError("provider stream ended")
+
+    with (
+        patch("core.worker.subprocess_runner.DspyService", return_value=service),
+        patch("core.worker.subprocess_runner.ServiceRegistry", return_value=fake_service_registry()),
+    ):
+        run_service_in_subprocess(REAL_RUN_PAYLOAD, "art-transient", q, "spawn")
+
+    [event] = [value for value in _drain_queue(q) if value.get("type") == EVENT_ERROR]
+    assert event["failure_kind"] == INFRASTRUCTURE_INTERRUPTION
+    assert event["error_type"] == "InfrastructureInterruptionError"
 
 
 def test_run_service_in_subprocess_exception_no_result_event() -> None:
@@ -426,9 +445,20 @@ def test_run_service_in_subprocess_blackbox_type_calls_run_blackbox_optimization
 def test_run_service_in_subprocess_blackbox_progress_is_forwarded() -> None:
     """Lane events emitted by the black-box run reach the parent as ``EVENT_PROGRESS``."""
     q: queue.Queue[dict] = queue.Queue()
+    relay = {"url": "http://127.0.0.1:9000/v1", "token": "scoped-evaluator"}
 
-    def _fake_run(payload, *, artifact_id, progress_callback, gepa_log_dir_path=None, agent_run_sink=None):
+    def _fake_run(
+        payload,
+        *,
+        artifact_id,
+        progress_callback,
+        gepa_log_dir_path=None,
+        agent_run_sink=None,
+        target_route=None,
+        evaluator_route=None,
+    ):
         """Stand-in for ``run_blackbox_optimization`` that emits one lane event and one run row."""
+        assert evaluator_route == relay
         progress_callback("lane_started", {"engine": "gepa", "phase": "single", "budget": 5})
         agent_run_sink({"run_id": 1, "status": "running"})
         fake_result = MagicMock()
@@ -440,7 +470,7 @@ def test_run_service_in_subprocess_blackbox_progress_is_forwarded() -> None:
         patch("core.worker.subprocess_runner.ServiceRegistry", return_value=fake_service_registry()),
         patch("core.worker.subprocess_runner.run_blackbox_optimization", side_effect=_fake_run),
     ):
-        run_service_in_subprocess(dict(_BLACKBOX_PAYLOAD), "art-10", q, "spawn")
+        run_service_in_subprocess({**_BLACKBOX_PAYLOAD, "_skynet_evaluator_route": relay}, "art-10", q, "spawn")
 
     events = _drain_queue(q)
     progress_events = [e for e in events if e.get("type") == EVENT_PROGRESS]

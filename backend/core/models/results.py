@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from .artifacts import ProgramArtifact
 from .common import SplitCounts
 from .telemetry import JobLogEntry
+
+
+class TerminalOutcome(BaseModel):
+    status: Literal["stopped"] = "stopped"
+    stop_reason: Literal["budget_reached"] = "budget_reached"
+    result_availability: Literal["evaluated", "none"]
+    result: dict[str, Any] | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    message: str
 
 
 # Per-(LM, stage) cell of the LM activity matrix. Pydantic class docstrings
@@ -84,6 +93,8 @@ class PairResult(BaseModel):
     target_score: float | None = None
     target_score_reached: bool | None = None
     stop_reason: str | None = None
+    result_availability: Literal["evaluated", "none"] | None = None
+    terminal_evidence: dict[str, Any] | None = None
     runtime_seconds: float | None = None
     num_lm_calls: int | None = None
     total_tokens: int | None = None
@@ -112,6 +123,7 @@ class GridSearchResponse(BaseModel):
     total_pairs: int
     completed_pairs: int = 0
     failed_pairs: int = 0
+    stopped_pairs: int = 0
     pair_results: list[PairResult] = Field(default_factory=list)
     best_pair: PairResult | None = None
     runtime_seconds: float | None = None

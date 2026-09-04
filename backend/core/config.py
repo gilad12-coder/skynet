@@ -117,18 +117,6 @@ class Settings(BaseSettings):
     smtp_password: SecretStr | None = Field(
         default=None, alias="SMTP_PASSWORD", description="SMTP auth password."
     )
-    blackbox_scorer_runtime: Literal["auto", "local", "vercel"] = Field(
-        default="auto",
-        alias="BLACKBOX_SCORER_RUNTIME",
-        description=(
-            "Where black-box python scorers run. 'vercel': one throwaway Vercel "
-            "sandbox per job (needs the VERCEL_* settings; the scorer's llm() calls "
-            "go to BLACKBOX_AGENT_GATEWAY_URL / LITELLM_PROXY_URL, which must be "
-            "reachable from Vercel's network). 'local': a subprocess on the worker "
-            "host with no isolation from it — development and tests only. 'auto' "
-            "(default): vercel when configured, else local."
-        ),
-    )
     smtp_from: str | None = Field(
         default=None,
         alias="SMTP_FROM",
@@ -165,24 +153,29 @@ class Settings(BaseSettings):
     vercel_token: SecretStr | None = Field(
         default=None,
         alias="VERCEL_TOKEN",
-        description="Vercel access token that creates the throwaway sandboxes black-box agent targets run in (one microVM per scorer run). Unset disables agent targets and the agent engines (Meta-Harness) with a typed error; VERCEL_TEAM_ID and VERCEL_PROJECT_ID must be set alongside it.",
+        description="Vercel access token used by the control plane to create one managed sandbox for each paid setup check and optimization run. Unset disables protected execution with a typed error; VERCEL_TEAM_ID and VERCEL_PROJECT_ID must be set alongside it.",
     )
     vercel_team_id: str | None = Field(
-        default=None, alias="VERCEL_TEAM_ID", description="Vercel team that owns the agent sandboxes."
+        default=None, alias="VERCEL_TEAM_ID", description="Vercel team that owns the optimization sandboxes."
     )
     vercel_project_id: str | None = Field(
-        default=None, alias="VERCEL_PROJECT_ID", description="Vercel project the agent sandboxes are created under."
+        default=None, alias="VERCEL_PROJECT_ID", description="Vercel project the optimization sandboxes are created under."
     )
     vercel_sandbox_image: str = Field(
         default="vercel/sandbox/universal:latest",
         alias="VERCEL_SANDBOX_IMAGE",
-        description="Container image the agent and scorer sandboxes boot from. The SDK's own default (Amazon Linux 2023 with Python 3.9) is too old for the scorer runner.",
+        description="Immutable container image the protected optimization sandbox boots from. The SDK's universal default does not contain Skynet's pinned optimizer, harness, and offline dependency set.",
+    )
+    dspy_sandbox_image: str | None = Field(
+        default=None,
+        alias="DSPY_SANDBOX_IMAGE",
+        description="Immutable prebuilt backend image, addressed by @sha256, containing the exact deployed Python and optimizer dependencies for protected DSPy execution.",
     )
     vercel_sandbox_max_lifetime_seconds: float = Field(
         default=2_700.0,
         alias="VERCEL_SANDBOX_MAX_LIFETIME_SECONDS",
         gt=0.0,
-        description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro teams can raise it to 18000 (5 hours). A job that outlives its box reopens one on its next call.",
+        description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro teams can raise it to 86400 (24 hours). A job that outlives its box reopens one on its next call.",
     )
     blackbox_agent_gateway_url: str | None = Field(
         default=None,

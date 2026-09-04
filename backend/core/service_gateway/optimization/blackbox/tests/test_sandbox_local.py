@@ -22,7 +22,7 @@ from ..sandbox import (
     scorer_runtime_from_settings,
 )
 
-_VERCEL_ENV = ("VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_PROJECT_ID", "BLACKBOX_SCORER_RUNTIME")
+_VERCEL_ENV = ("VERCEL_TOKEN", "VERCEL_TEAM_ID", "VERCEL_PROJECT_ID")
 
 try:
     import vercel.sandbox  # noqa: F401
@@ -150,37 +150,20 @@ def test_local_session_close_removes_the_directory_and_is_idempotent() -> None:
     assert not path.exists()
 
 
-def test_scorer_runtime_defaults_to_the_host_when_vercel_is_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``auto`` and ``local`` both resolve to the host subprocess runtime without credentials."""
-    assert isinstance(scorer_runtime_from_settings(_settings(monkeypatch)), LocalSubprocessRuntime)
-    assert isinstance(
-        scorer_runtime_from_settings(_settings(monkeypatch, blackbox_scorer_runtime="local")),
-        LocalSubprocessRuntime,
-    )
-
-
-def test_scorer_runtime_refuses_vercel_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pinning ``vercel`` without credentials is a configuration error, not a silent fallback."""
+def test_scorer_runtime_refuses_missing_managed_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing managed-sandbox credentials never fall back to the worker host."""
     with pytest.raises(ServiceError) as excinfo:
-        scorer_runtime_from_settings(_settings(monkeypatch, blackbox_scorer_runtime="vercel"))
+        scorer_runtime_from_settings(_settings(monkeypatch))
 
     assert str(excinfo.value) == _CREDENTIALS_MISSING
 
 
 @_needs_sdk
 def test_scorer_runtime_prefers_vercel_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Credentials in settings switch ``auto`` and ``vercel`` to the Vercel runtime; ``local`` still wins."""
+    """Configured production scorers always resolve to the managed Vercel runtime."""
     creds = {"vercel_token": "t", "vercel_team_id": "team", "vercel_project_id": "proj"}
 
     assert isinstance(scorer_runtime_from_settings(_settings(monkeypatch, **creds)), VercelSandboxRuntime)
-    assert isinstance(
-        scorer_runtime_from_settings(_settings(monkeypatch, blackbox_scorer_runtime="vercel", **creds)),
-        VercelSandboxRuntime,
-    )
-    assert isinstance(
-        scorer_runtime_from_settings(_settings(monkeypatch, blackbox_scorer_runtime="local", **creds)),
-        LocalSubprocessRuntime,
-    )
 
 
 def test_local_runtime_has_no_header_injecting_edge() -> None:

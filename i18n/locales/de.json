@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "Diese Optimierung hat ihre maximale Anzahl von Versuchen ({attempts}) erreicht — führen Sie sie stattdessen erneut aus.",
     "optimization.resume_not_resumable": "Diese Optimierung hat keinen gespeicherten Fortsetzungspunkt — führen Sie sie stattdessen erneut aus.",
     "optimization.resume_wrong_status": "Nur Optimierungen, die mitten im Durchlauf gestoppt wurden, können fortgesetzt werden — diese befindet sich im Zustand '{status}'.",
+    "optimization.protected_interactive_sandbox_required": "Diese geschützte Optimierung kann nicht im API-Prozess ausgewertet oder bereitgestellt werden. Dafür ist eine separat abgerechnete {runtime}-Sandbox erforderlich, die an diesem Endpunkt noch nicht verfügbar ist.",
     "optimization.retry_no_payload": "Die Quelloptimierung hat keine gespeicherte Nutzlast für einen erneuten Versuch.",
     "optimization.retry_wrong_status": "Nur Optimierungen im Zustand 'failed' oder 'cancelled' können erneut versucht werden — diese befindet sich im Zustand '{status}'. Klonen Sie sie stattdessen.",
     "quota.reached": "Das Limit von {quota} Optimierungen pro Benutzer wurde erreicht. Löschen Sie alte Optimierungen, um neue zu erstellen.",
@@ -234,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions müssen nicht-negativ sein.",
     "wizard.split_fractions_not_number": "split_fractions-Werte müssen Zahlen sein: {error}",
     "wizard.split_fractions_not_object": "split_fractions muss ein Objekt mit den Schlüsseln train/val/test sein.",
-    "wizard.split_fractions_sum": "split_fractions müssen sich zu 1.0 summieren, ergab {total}"
+    "wizard.split_fractions_sum": "split_fractions müssen sich zu 1.0 summieren, ergab {total}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

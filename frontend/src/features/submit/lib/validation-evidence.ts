@@ -19,7 +19,7 @@ export interface ValidationEvidence {
   /** The scoring model the check ran with, when the evaluator invoked one. */
   modelName: string | null;
   /** Credits the check debited, for the setup-spend line. */
-  creditsCharged: number;
+  creditsCharged?: number;
 }
 
 /** JSON with object keys sorted at every depth, so equal inputs serialize equal. */
@@ -81,4 +81,17 @@ export function evidenceStatus(
   if (!evidence) return "idle";
   if (evidence.identity !== identity) return "stale";
   return evidence.ok ? "passed" : "failed";
+}
+
+/** Cosmetic review edits cannot invalidate execution evidence or repeat paid checks. */
+export function preflightIdentity(workflow: "anything" | "dspy", payload: object): string {
+  const {
+    name: _name,
+    description: _description,
+    is_private: _privacy,
+    estimated_credits_low: _low,
+    estimated_credits_high: _high,
+    ...setup
+  } = payload as Record<string, unknown>;
+  return stableStringify({ workflow, setup });
 }

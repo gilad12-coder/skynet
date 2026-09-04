@@ -31,8 +31,13 @@ from ..routers._helpers import (
     clear_program_cache,
     enforce_storage_quota,
     enforce_user_quota,
+    load_pair_program,
     load_program,
+    load_react_chat_inputs,
     strip_api_key,
+)
+from ..routers._helpers import (
+    _protected_api_runtime as production_interaction_runtime,
 )
 from ..routers.constants import (
     TERMINAL_STATUSES,
@@ -42,6 +47,22 @@ from ..routers.constants import (
 from .mocks import load_fixture
 
 _TEST_USER = AuthenticatedUser(username="alice", role="admin", groups=("skynet-admins",))
+
+
+def _legacy_test_runtime(job_data: dict) -> str | None:
+    """Preserve explicit unit coverage for retired local materializers.
+
+    Args:
+        job_data: Synthetic stored job.
+
+    Returns:
+        Vercel for protected fixtures and None for legacy-only fixtures.
+    """
+    payload = job_data.get("payload")
+    payload_budget_id = payload.get("execution_budget_id") if isinstance(payload, dict) else None
+    if job_data.get("execution_budget_id") is None and payload_budget_id is None:
+        return None
+    return "vercel"
 
 
 def test_strip_api_key_removes_nested() -> None:
@@ -71,13 +92,20 @@ def test_valid_statuses_match_enum() -> None:
 
 
 def test_terminal_statuses_are_finite() -> None:
-    """Only ``success``/``failed``/``cancelled``/``paused`` are considered terminal."""
+    """Include a normal budget stop among finite terminal states."""
     assert {
         OptimizationStatus.success,
         OptimizationStatus.failed,
         OptimizationStatus.cancelled,
         OptimizationStatus.paused,
+        OptimizationStatus.stopped,
     } == TERMINAL_STATUSES
+
+
+def test_every_completed_job_interaction_uses_vercel() -> None:
+    """Route historical and protected artifacts through the managed sandbox."""
+    assert production_interaction_runtime({"payload": {}}) == "vercel"
+    assert production_interaction_runtime({"execution_budget_id": "budget-1"}) == "vercel"
 
 
 def test_valid_job_types_covers_run_and_grid() -> None:
@@ -436,12 +464,13 @@ class _JobStoreWithDelete:
 
 
 @pytest.fixture(autouse=True)
-def _clear_program_cache_helpers() -> Generator[None, None, None]:
+def _clear_program_cache_helpers(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """Reset the in-process program cache around every test in this file.
 
     Yields:
         ``None`` once the cache is cleared; the cache is cleared again on teardown.
     """
+    monkeypatch.setattr(_helpers_mod, "_protected_api_runtime", _legacy_test_runtime)
     clear_program_cache()
     yield
     clear_program_cache()
@@ -454,6 +483,64 @@ def test_load_program_deleted_job_raises_404_before_cache() -> None:
     with pytest.raises(HTTPException) as exc_info:
         load_program(store, "missing-job", _TEST_USER)
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("loader", "args"),
+    [
+        (load_program, ("protected-completed", _TEST_USER)),
+        (load_pair_program, ("protected-completed", 0, _TEST_USER)),
+        (load_react_chat_inputs, ("protected-completed", _TEST_USER)),
+    ],
+)
+def test_protected_completed_loaders_reject_before_authored_code_materialization(
+    loader,
+    args: tuple,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Block every completed-job loader before it can materialize authored code.
+
+    Args:
+        loader: Shared loader under test.
+        args: Loader arguments after the job store.
+        monkeypatch: Pytest patch helper used to replace code-loading seams.
+    """
+    store = _JobStoreWithDelete()
+    job_data = _run_job_data("protected-completed", object())
+    job_data["execution_budget_id"] = "budget-1"
+    job_data["payload"] = {"execution_runtime": "worker"}
+    store.seed("protected-completed", job_data)
+
+    def forbidden(*_args, **_kwargs):
+        """Fail if a protected path reaches any authored-code loader."""
+        raise AssertionError("protected authored code reached the API process")
+
+    monkeypatch.setattr(_helpers_mod, "_materialize_program", forbidden)
+    monkeypatch.setattr(_helpers_mod, "load_signature_from_code", forbidden)
+
+    with pytest.raises(DomainError) as exc_info:
+        loader(store, *args)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.code == "optimization.protected_interactive_sandbox_required"
+    assert exc_info.value.params == {"runtime": "vercel"}
+
+
+def test_protected_loader_recognizes_budget_id_stored_only_in_original_payload() -> None:
+    """Keep migrated protected rows fenced when only their payload carries the budget id."""
+    store = _JobStoreWithDelete()
+    job_data = _run_job_data("payload-budget", object())
+    job_data["payload"] = {
+        "execution_budget_id": "budget-1",
+        "execution_runtime": "vercel",
+    }
+    store.seed("payload-budget", job_data)
+
+    with pytest.raises(DomainError) as exc_info:
+        load_program(store, "payload-budget", _TEST_USER)
+
+    assert exc_info.value.code == "optimization.protected_interactive_sandbox_required"
+    assert exc_info.value.params == {"runtime": "vercel"}
 
 
 def test_load_program_deleted_job_raises_404_even_when_cache_has_entry() -> None:

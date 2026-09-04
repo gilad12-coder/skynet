@@ -62,6 +62,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "billing.not_configured": "Billing is not configured on this deployment.",
     "billing.unknown_pack": "Unknown credit pack '{pack_id}'.",
     "billing.webhook_invalid": "Stripe webhook signature verification failed.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
     "code_agent.upstream_failed": "Code agent failed: {error}",
     "dataset.column_roles_invalid": "Invalid role values (must be 'input', 'output', or 'ignore'): {bad}",
     "dataset.column_roles_need_input": "At least one column must have role 'input'.",
@@ -135,8 +136,12 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "optimization.no_result_pending": "Optimization has no result yet.",
     "optimization.not_finished": "Optimization is not finished.",
     "optimization.not_found": "Optimization not found: '{optimization_id}'.",
+    "optimization.protected_interactive_sandbox_required": "This protected optimization cannot be evaluated or served in the API process. A separately metered {runtime} sandbox is required and is not available on this endpoint yet.",
     "optimization.not_success_status_for_serve": "Optimization is in state '{status}' — only successfully completed optimizations can be served.",
     "optimization.not_success_status_for_test_results": "Optimization is in state '{status}' — only successfully completed optimizations have test results.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
     "optimization.pairs_label": "{count} pairs",
     "optimization.payload_unavailable": "Optimization payload is unavailable.",
     "optimization.retry_no_payload": "Source optimization has no saved payload to retry.",
@@ -172,8 +177,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "transcription.failed": "Transcription failed on every configured provider.",
     "transcription.too_large": "Audio clip exceeds the {max_mb}MB transcription limit.",
     "transcription.unconfigured": (
-        "No transcription provider configured. Set SONIOX_API_KEY, "
-        "ELEVENLABS_API_KEY, or OPENAI_API_KEY."
+        "No transcription provider configured. Set SONIOX_API_KEY, ELEVENLABS_API_KEY, or OPENAI_API_KEY."
     ),
     "user.storage.quota_exceeded": "Storage quota exceeded ({used_mb}MB of {quota_mb}MB used). Free up space and try again.",
     "wizard.column_roles_not_object": "column_roles must be an object.",

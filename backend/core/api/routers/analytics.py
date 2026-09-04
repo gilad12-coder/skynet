@@ -110,7 +110,7 @@ def _summary_to_analytics_job(s: OptimizationSummaryResponse) -> DashboardAnalyt
 
 
 _ACTIVE_STATUSES = frozenset({"pending", "validating", "running"})
-_TERMINAL_SUCCESS_OR_FAILED = frozenset({"success", "failed"})
+_TERMINAL_SUCCESS_OR_FAILED = frozenset({"success", "failed", "stopped"})
 
 # Hard cap on jobs scanned per analytics request. Past this size the
 # response surfaces ``truncated=True`` so the frontend can warn the user
@@ -258,7 +258,15 @@ def create_analytics_router(*, job_store) -> APIRouter:
             filtered_jobs.append((job_data, overview))
 
         total = len(filtered_jobs)
-        status_counts = {"success": 0, "failed": 0, "cancelled": 0, "pending": 0, "running": 0, "validating": 0}
+        status_counts = {
+            "success": 0,
+            "failed": 0,
+            "stopped": 0,
+            "cancelled": 0,
+            "pending": 0,
+            "running": 0,
+            "validating": 0,
+        }
         improvements = []
         runtimes = []
         total_dataset_rows = 0
@@ -292,11 +300,11 @@ def create_analytics_router(*, job_store) -> APIRouter:
                 if isinstance(best_pair, dict):
                     baseline = best_pair.get("baseline_test_metric")
                     optimized = best_pair.get("optimized_test_metric")
-                    if isinstance(baseline, (int, float)) and isinstance(optimized, (int, float)):
+                    if isinstance(baseline, int | float) and isinstance(optimized, int | float):
                         improvements.append(optimized - baseline)
 
                     runtime = best_pair.get("runtime_seconds")
-                    if isinstance(runtime, (int, float)):
+                    if isinstance(runtime, int | float):
                         runtimes.append(runtime)
 
                 comp = result_data.get("completed_pairs")
@@ -308,11 +316,11 @@ def create_analytics_router(*, job_store) -> APIRouter:
             else:
                 baseline = result_data.get("baseline_test_metric")
                 optimized = result_data.get("optimized_test_metric")
-                if isinstance(baseline, (int, float)) and isinstance(optimized, (int, float)):
+                if isinstance(baseline, int | float) and isinstance(optimized, int | float):
                     improvements.append(optimized - baseline)
 
                 runtime = result_data.get("runtime_seconds")
-                if isinstance(runtime, (int, float)):
+                if isinstance(runtime, int | float):
                     runtimes.append(runtime)
 
         success_count = status_counts["success"]
@@ -326,6 +334,7 @@ def create_analytics_router(*, job_store) -> APIRouter:
             total_jobs=total,
             success_count=success_count,
             failed_count=status_counts["failed"],
+            stopped_count=status_counts["stopped"],
             cancelled_count=status_counts["cancelled"],
             pending_count=status_counts["pending"],
             running_count=status_counts.get("running", 0) + status_counts.get("validating", 0),
@@ -410,20 +419,20 @@ def create_analytics_router(*, job_store) -> APIRouter:
                         if isinstance(best_pair, dict):
                             baseline = best_pair.get("baseline_test_metric")
                             optimized = best_pair.get("optimized_test_metric")
-                            if isinstance(baseline, (int, float)) and isinstance(optimized, (int, float)):
+                            if isinstance(baseline, int | float) and isinstance(optimized, int | float):
                                 stats["improvements"].append(optimized - baseline)
 
                             runtime = best_pair.get("runtime_seconds")
-                            if isinstance(runtime, (int, float)):
+                            if isinstance(runtime, int | float):
                                 stats["runtimes"].append(runtime)
                     else:
                         baseline = result_data.get("baseline_test_metric")
                         optimized = result_data.get("optimized_test_metric")
-                        if isinstance(baseline, (int, float)) and isinstance(optimized, (int, float)):
+                        if isinstance(baseline, int | float) and isinstance(optimized, int | float):
                             stats["improvements"].append(optimized - baseline)
 
                         runtime = result_data.get("runtime_seconds")
-                        if isinstance(runtime, (int, float)):
+                        if isinstance(runtime, int | float):
                             stats["runtimes"].append(runtime)
 
         items: list[OptimizerStatsItem] = []
@@ -519,12 +528,12 @@ def create_analytics_router(*, job_store) -> APIRouter:
                         if isinstance(best_pair, dict):
                             baseline = best_pair.get("baseline_test_metric")
                             optimized = best_pair.get("optimized_test_metric")
-                            if isinstance(baseline, (int, float)) and isinstance(optimized, (int, float)):
+                            if isinstance(baseline, int | float) and isinstance(optimized, int | float):
                                 stats["improvements"].append(optimized - baseline)
                     else:
                         baseline = result_data.get("baseline_test_metric")
                         optimized = result_data.get("optimized_test_metric")
-                        if isinstance(baseline, (int, float)) and isinstance(optimized, (int, float)):
+                        if isinstance(baseline, int | float) and isinstance(optimized, int | float):
                             stats["improvements"].append(optimized - baseline)
 
         model_items: list[ModelStatsItem] = []

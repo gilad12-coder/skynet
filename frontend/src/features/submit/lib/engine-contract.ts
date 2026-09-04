@@ -1,7 +1,6 @@
 import type {
   BlackboxEngineCatalogResponse,
   BlackboxEngineId,
-  BlackboxProposerRuntime,
   BlackboxStrategy,
 } from "@/shared/types/api";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
@@ -30,11 +29,10 @@ export function engineSelectionIssue(input: {
   catalog: BlackboxEngineCatalogResponse | null;
   mode: BlackboxStrategy["mode"];
   engine: BlackboxEngineId | null;
-  runtime: BlackboxProposerRuntime;
   hasParts: boolean;
   trainingCaseCount: number | null;
 }): EngineIssue | null {
-  const { catalog, mode, engine, runtime, hasParts } = input;
+  const { catalog, mode, engine, hasParts } = input;
   if (!catalog) return { key: "submit.blackbox.engines.checking" };
   if (input.trainingCaseCount === 0 && (mode !== "single" || engine === "meta_harness"))
     return { key: "submit.blackbox.validation.training_cases" };
@@ -65,7 +63,7 @@ export function engineSelectionIssue(input: {
     }
   }
   if (usesNativeProposer(mode, engine)) {
-    const selectedRuntime = catalog.proposer_runtimes?.find((item) => item.id === runtime);
+    const selectedRuntime = catalog.proposer_runtimes?.find((item) => item.id === "vercel");
     if (!selectedRuntime?.available) {
       return selectedRuntime?.unavailable_reason?.trim()
         ? {

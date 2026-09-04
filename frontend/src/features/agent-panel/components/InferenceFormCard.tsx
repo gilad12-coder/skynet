@@ -67,6 +67,7 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
     initialResult ? initialInputs : null,
   );
   const [runError, setRunError] = React.useState<string | null>(null);
+  const [requestBudgetCredits, setRequestBudgetCredits] = React.useState("10");
 
   // Textarea refs (uncontrolled), keyed by field name. We use refs so the
   // auto-resize logic can run on every change without forcing a re-render
@@ -106,6 +107,11 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
     async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
       if (disabled || running || !optimizationId || fields.length === 0) return;
+      const maxCostCredits = Number(requestBudgetCredits);
+      if (!Number.isInteger(maxCostCredits) || maxCostCredits < 1) {
+        setRunError(msg("optimizations.serve.request_budget_invalid"));
+        return;
+      }
       const values = collectValues();
       if (!fields.every((f) => (values[f] ?? "").trim().length > 0)) return;
       setRunning(true);
@@ -113,8 +119,14 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
       try {
         const response =
           pairIndex == null
-            ? await serveProgram(optimizationId, values)
-            : await servePairProgram(optimizationId, pairIndex, values);
+            ? await serveProgram(optimizationId, values, maxCostCredits, crypto.randomUUID())
+            : await servePairProgram(
+                optimizationId,
+                pairIndex,
+                values,
+                maxCostCredits,
+                crypto.randomUUID(),
+              );
         setResult(response);
         setSubmittedInputs(values);
         for (const f of fields) {
@@ -130,7 +142,7 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
         setRunning(false);
       }
     },
-    [collectValues, disabled, fields, optimizationId, pairIndex, running],
+    [collectValues, disabled, fields, optimizationId, pairIndex, requestBudgetCredits, running],
   );
 
   const outputFields =
@@ -220,6 +232,13 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
                     </span>
                   </div>
                 ))}
+                {result.credits_charged != null && (
+                  <p className="mt-1 text-[0.6875rem] text-muted-foreground">
+                    {formatMsg("optimizations.serve.request_spent", {
+                      credits: result.credits_charged,
+                    })}
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -235,6 +254,31 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
 
           {fields.length > 0 && (
             <form onSubmit={handleSubmit}>
+              <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-[#C8A882]/30 bg-white/45 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-[0.6875rem] font-semibold text-[#3D2E22]">
+                    {msg("optimizations.serve.request_budget")}
+                  </p>
+                  <p className="text-[0.625rem] leading-snug text-[#6B5B4A]">
+                    {msg("optimizations.serve.request_budget_hint")}
+                  </p>
+                </div>
+                <label className="flex shrink-0 items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={requestBudgetCredits}
+                    onChange={(event) => setRequestBudgetCredits(event.target.value)}
+                    disabled={running || disabled}
+                    aria-label={msg("optimizations.serve.request_budget")}
+                    className="h-9 w-20 rounded-lg border border-[#C8A882]/50 bg-white px-2 text-end text-sm font-semibold tabular-nums outline-none focus:ring-2 focus:ring-[#C8A882]/25"
+                  />
+                  <span className="text-[0.6875rem] text-[#6B5B4A]">
+                    {msg("submit.cost_ceiling.cap_unit")}
+                  </span>
+                </label>
+              </div>
               <div className={`flex gap-2 ${fields.length > 1 ? "items-center" : "items-start"}`}>
                 <Button
                   type="submit"

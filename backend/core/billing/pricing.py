@@ -42,6 +42,10 @@ CREDIT_USD_VALUE = 0.01
 # covered (it amortizes to noise on normal pack sizes).
 MARKUP = 1.50
 
+# Share of marked-up model credits charged when the provider usage is paid
+# directly through the user's key. Mirrored by the frontend estimate.
+PLATFORM_FEE_FRACTION = 0.28
+
 # Fallback per-token cost (USD) for a model LiteLLM does not price — a mid-tier
 # standard rate so an unknown model estimates and charges sanely rather than at
 # zero (which would give it away) or at a frontier rate (which would scare).

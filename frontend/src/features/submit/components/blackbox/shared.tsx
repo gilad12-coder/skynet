@@ -12,6 +12,8 @@ import {
 import { Label } from "@/shared/ui/primitives/label";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { cn } from "@/shared/lib/utils";
+import { getActiveDir } from "@/shared/lib/runtime-locale";
+import { radioNavigationIndex } from "../../lib/radio-navigation";
 import { tip as tipText, type TooltipKey } from "@/shared/lib/tooltips";
 
 export const TEXTAREA_CLASS =
@@ -42,7 +44,8 @@ export function StepCard({
         <CardTitle className="text-lg">{title}</CardTitle>
         {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
-      <CardContent className="space-y-5 px-4 sm:px-6">{children}</CardContent>
+      {/* Positioned so an expanded textarea covers the fields, not the page. */}
+      <CardContent className="relative space-y-5 px-4 sm:px-6">{children}</CardContent>
     </Card>
   );
 }
@@ -53,6 +56,7 @@ export function Field({
   hint,
   tip,
   trailing,
+  className,
   children,
 }: {
   label: ReactNode;
@@ -62,11 +66,13 @@ export function Field({
   tip?: TooltipKey;
   // Rendered at the end of the label row (status chips, version steppers).
   trailing?: ReactNode;
+  // Root classes, e.g. to let the field fill a flex column.
+  className?: string;
   children: ReactNode;
 }) {
   const labelNode = tip ? <HelpTip text={tipText(tip)}>{label}</HelpTip> : label;
   return (
-    <div className="space-y-2">
+    <div className={cn("flex flex-col gap-2", className)}>
       {trailing ? (
         <div className="flex items-center justify-between gap-2">
           <Label htmlFor={htmlFor}>{labelNode}</Label>
@@ -101,8 +107,10 @@ export function Segmented<T extends string>({
   onChange,
   options,
   compact = false,
+  label,
 }: {
   value: T;
+  label: string;
   onChange: (v: T) => void;
   options: Array<SegmentedOption<T>>;
   // Sized to sit inside a label row instead of spanning the field.
@@ -118,8 +126,9 @@ export function Segmented<T extends string>({
       )}
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
       role="radiogroup"
+      aria-label={label}
     >
-      {options.map((o) => {
+      {options.map((o, index) => {
         const selected = o.value === value;
         return (
           <button
@@ -127,6 +136,23 @@ export function Segmented<T extends string>({
             type="button"
             role="radio"
             aria-checked={selected}
+            tabIndex={selected ? 0 : -1}
+            onKeyDown={(event) => {
+              const next = radioNavigationIndex(
+                event.key,
+                index,
+                options.length,
+                getActiveDir() === "rtl",
+              );
+              if (next === null) return;
+              event.preventDefault();
+              const option = options[next];
+              if (!option) return;
+              onChange(option.value);
+              event.currentTarget.parentElement
+                ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+                [next]?.focus();
+            }}
             onClick={() => onChange(o.value)}
             className={cn(
               "relative cursor-pointer rounded-md text-center transition-colors duration-200 lg:min-h-0",

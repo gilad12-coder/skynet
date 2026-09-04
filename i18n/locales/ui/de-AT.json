@@ -49,5 +49,12 @@
   "submit.validation.metric_failed": "Metric validation failed",
   "submit.validation.missing_code": "Missing {kind} code",
   "submit.validation.signature_failed": "Signature validation failed",
-  "tagger.page.title": "Text labeling"
+  "tagger.page.title": "Text labeling",
+  "tooltip.submit.blackbox.scorer_install": "Wird einmal in der netzwerkisolierten Vercel Sandbox ausgeführt. Verwenden Sie Pakete aus dem festgeschriebenen Image oder bereitstellungseigene Paketartefakte; öffentliche apt- und Paketquellen sind nicht verfügbar.",
+  "submit.budget.byok_note": "Ihr Anbieter rechnet Modell-Token direkt über Ihren Schlüssel ab. Der Gesamtbetrag enthält nur die Skynet-Plattformgebühr und die Nutzung der Vercel Sandbox.",
+  "submit.blackbox.roles.optimization.managed_hint": "Verwendet die Standard-Sampling-Einstellungen des Modells; die Abrechnung kann über Skynet-Credits oder Ihren OpenRouter-Schlüssel erfolgen.",
+  "optimizations.serve.request_budget": "Request budget",
+  "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
+  "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
+  "optimizations.serve.request_spent": "Used {credits} credits"
 }

@@ -43,6 +43,8 @@ interface ModelConfigModalProps {
    * hidden and never saved. For targets that take nothing but a model id.
    */
   nameOnly?: boolean;
+  /** Keep billing selection, but use the model's own sampling defaults. */
+  modelDefaultsOnly?: boolean;
 }
 
 const TOKEN_SOURCE_SEGMENTS: Array<{
@@ -87,6 +89,7 @@ export function ModelConfigModal({
   recentConfigs,
   onRemoveRecent,
   nameOnly = false,
+  modelDefaultsOnly = false,
 }: ModelConfigModalProps) {
   const { keys } = useByokKeys();
   const { openTo } = useSettingsModal();
@@ -166,7 +169,17 @@ export function ModelConfigModal({
   };
 
   const handleSave = () => {
-    onSave(nameOnly ? { name: draft.name } : withoutInlineConnection(draft));
+    if (nameOnly) {
+      onSave({ name: draft.name });
+    } else if (modelDefaultsOnly) {
+      onSave({
+        name: draft.name,
+        token_source: draft.token_source ?? "managed",
+        byok_provider: draft.token_source === "byok" ? draft.byok_provider : undefined,
+      });
+    } else {
+      onSave(withoutInlineConnection(draft));
+    }
     onOpenChange(false);
   };
 
@@ -203,7 +216,7 @@ export function ModelConfigModal({
                       >
                         <ProviderLogo slug={modelProviderSlug(rc.name)} size={14} />
                         <span className="truncate max-w-[120px]">{rc.name.split("/").pop()}</span>
-                        {!nameOnly && (
+                        {!nameOnly && !modelDefaultsOnly && (
                           <span className="text-[9px] opacity-60">
                             {rc.temperature?.toFixed(1)}
                           </span>
@@ -349,7 +362,7 @@ export function ModelConfigModal({
             />
           </div>
 
-          {!nameOnly && (
+          {!nameOnly && !modelDefaultsOnly && (
             <>
               <Separator />
 

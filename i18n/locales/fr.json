@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "Cette optimisation a atteint son nombre maximal de tentatives ({attempts}) — relancez-la plutôt.",
     "optimization.resume_not_resumable": "Cette optimisation n'a aucun point de reprise enregistré — relancez-la plutôt.",
     "optimization.resume_wrong_status": "Seules les optimisations interrompues en cours d'exécution peuvent être reprises — celle-ci est dans l'état '{status}'.",
+    "optimization.protected_interactive_sandbox_required": "Cette optimisation protégée ne peut pas être évaluée ni servie dans le processus API. Un bac à sable {runtime} facturé séparément est requis, mais il n’est pas encore disponible sur ce point de terminaison.",
     "optimization.retry_no_payload": "L'optimisation source n'a aucune charge utile enregistrée à réessayer.",
     "optimization.retry_wrong_status": "Seules les optimisations dans l'état 'failed' ou 'cancelled' peuvent être réessayées — celle-ci est dans l'état '{status}'. Clonez-la plutôt.",
     "quota.reached": "Limite par utilisateur de {quota} optimisations atteinte. Supprimez d'anciennes optimisations pour en créer de nouvelles.",
@@ -234,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions doit être non négatif.",
     "wizard.split_fractions_not_number": "Les valeurs de split_fractions doivent être des nombres : {error}",
     "wizard.split_fractions_not_object": "split_fractions doit être un objet avec les clés train/val/test.",
-    "wizard.split_fractions_sum": "split_fractions doit totaliser 1.0, obtenu {total}"
+    "wizard.split_fractions_sum": "split_fractions doit totaliser 1.0, obtenu {total}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

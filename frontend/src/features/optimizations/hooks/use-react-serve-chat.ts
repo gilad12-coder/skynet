@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { toast } from "react-toastify";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import type { AgentMessage, AgentStatus, AgentToolCall } from "@/shared/ui/agent/types";
@@ -17,7 +18,7 @@ export interface ReactServeChatState {
   reasoningEndedAt: number | null;
   error: string | null;
   pendingApproval: PendingApprovalPayload | null;
-  send: (message: string) => void;
+  send: (message: string) => boolean;
   editAndResend: (messageIndex: number, content: string) => void;
   retry: () => void;
   stop: () => void;
@@ -28,7 +29,11 @@ export interface ReactServeChatState {
 // Same SSE event handling and message/tool-call assembly so the shared agent
 // primitives render identically, minus the wizard-state, conversation
 // persistence, and dataset/code-authoring concerns the generalist panel owns.
-export function useReactServeChat(optimizationId: string, trustMode: TrustMode): ReactServeChatState {
+export function useReactServeChat(
+  optimizationId: string,
+  trustMode: TrustMode,
+  requestBudgetCredits: string,
+): ReactServeChatState {
   const [status, setStatus] = React.useState<AgentStatus>("idle");
   const [statusLabel, setStatusLabel] = React.useState("");
   const [messages, setMessages] = React.useState<AgentMessage[]>([]);
@@ -50,6 +55,10 @@ export function useReactServeChat(optimizationId: string, trustMode: TrustMode):
   React.useEffect(() => {
     trustRef.current = trustMode;
   }, [trustMode]);
+  const budgetRef = React.useRef(requestBudgetCredits);
+  React.useEffect(() => {
+    budgetRef.current = requestBudgetCredits;
+  }, [requestBudgetCredits]);
 
   React.useEffect(
     () => () => {
@@ -89,7 +98,12 @@ export function useReactServeChat(optimizationId: string, trustMode: TrustMode):
           ...last,
           toolCalls: last.toolCalls.map((t) =>
             t.id === id
-              ? { ...t, status: nextStatus, endedAt: Date.now(), payload: { ...(t.payload ?? {}), result } }
+              ? {
+                  ...t,
+                  status: nextStatus,
+                  endedAt: Date.now(),
+                  payload: { ...(t.payload ?? {}), result },
+                }
               : t,
           ),
         };
@@ -100,7 +114,14 @@ export function useReactServeChat(optimizationId: string, trustMode: TrustMode):
   );
 
   const runAgent = React.useCallback(
-    (userMessage: string, history: AgentMessage[]) => {
+    (userMessage: string, history: AgentMessage[]): boolean => {
+      const maxCostCredits = Number(budgetRef.current);
+      if (!Number.isInteger(maxCostCredits) || maxCostCredits < 1) {
+        setStatus("error");
+        setStatusLabel("");
+        setError(msg("optimizations.serve.request_budget_invalid"));
+        return false;
+      }
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -128,7 +149,13 @@ export function useReactServeChat(optimizationId: string, trustMode: TrustMode):
 
       void streamReactServeChat(
         optimizationId,
-        { user_message: userMessage, chat_history: chatHistory, trust_mode: trustRef.current },
+        {
+          user_message: userMessage,
+          chat_history: chatHistory,
+          trust_mode: trustRef.current,
+          max_cost_credits: maxCostCredits,
+        },
+        crypto.randomUUID(),
         {
           signal: controller.signal,
           onReasoningPatch: (chunk) => {
@@ -181,6 +208,13 @@ export function useReactServeChat(optimizationId: string, trustMode: TrustMode):
             if (controller.signal.aborted) return;
             setStatus("done");
             setStatusLabel("");
+            if (result.credits_charged != null) {
+              toast.success(
+                formatMsg("optimizations.serve.request_spent", {
+                  credits: result.credits_charged,
+                }),
+              );
+            }
             if (reasoningBufRef.current) setReasoningEndedAt(Date.now());
             setMessages((prev) => {
               const last = prev[prev.length - 1];
@@ -222,6 +256,7 @@ export function useReactServeChat(optimizationId: string, trustMode: TrustMode):
           },
         },
       );
+      return true;
     },
     [optimizationId, appendReply, pushToolCall, finishToolCall],
   );
@@ -229,8 +264,8 @@ export function useReactServeChat(optimizationId: string, trustMode: TrustMode):
   const send = React.useCallback(
     (message: string) => {
       const trimmed = message.trim();
-      if (!trimmed) return;
-      runAgent(trimmed, messagesRef.current);
+      if (!trimmed) return false;
+      return runAgent(trimmed, messagesRef.current);
     },
     [runAgent],
   );

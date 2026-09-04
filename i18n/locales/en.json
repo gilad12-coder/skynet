@@ -184,6 +184,7 @@
     "optimization.not_finished": "Optimization is not finished.",
     "optimization.not_found": "Optimization not found: '{optimization_id}'.",
     "optimization.agent_run_not_found": "Agent run {run_id} not found for optimization '{optimization_id}'.",
+    "optimization.protected_interactive_sandbox_required": "This protected optimization cannot be evaluated or served in the API process. A separately metered {runtime} sandbox is required and is not available on this endpoint yet.",
     "optimization.not_success_status_for_serve": "Optimization is in state '{status}' — only successfully completed optimizations can be served.",
     "optimization.not_success_status_for_test_results": "Optimization is in state '{status}' — only successfully completed optimizations have test results.",
     "optimization.pair_not_rerunnable": "Cannot re-run a pair while the optimization is in state '{status}'.",
@@ -234,6 +235,10 @@
     "wizard.split_fractions_not_number": "split_fractions values must be numbers: {error}",
     "wizard.split_fractions_not_object": "split_fractions must be an object with train/val/test keys.",
     "wizard.split_fractions_sum": "split_fractions must sum to 1.0, got {total}",
-    "workflow.validation_failed": "Workflow validation failed: {error}"
+    "workflow.validation_failed": "Workflow validation failed: {error}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

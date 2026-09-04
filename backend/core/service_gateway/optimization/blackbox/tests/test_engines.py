@@ -350,6 +350,36 @@ def test_gepa_engine_routes_evaluations_and_unwraps_text_results(
     assert Path(config.engine.run_dir).is_dir()
 
 
+def test_gepa_engine_binds_recovery_seed_boundary_to_upstream_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pass one trusted seed boundary as GEPA observer and stopper."""
+    captured: dict[str, Any] = {}
+    boundary = MagicMock(return_value=False)
+
+    def fake_optimize(**kwargs: Any) -> Any:
+        """Capture configuration and return one evaluated seed candidate."""
+        captured.update(kwargs)
+        result = MagicMock()
+        result.best_candidate = {"current_candidate": "seed"}
+        result.best_idx = 0
+        result.val_aggregate_scores = [0.5]
+        result.candidates = [{"current_candidate": "seed"}]
+        result.parents = [[None]]
+        result.discovery_eval_counts = [1]
+        result.total_metric_calls = 1
+        return result
+
+    monkeypatch.setattr(gepa_mod, "optimize_anything", fake_optimize)
+    context = make_ctx(str(tmp_path), recovery_seed_boundary=boundary)
+
+    GepaEngine().run(Task(seed_candidate="seed", train_set=[{"i": 0}]), EvalServer(vowel_scorer, max_evals=2), context)
+
+    config = captured["config"]
+    assert config.callbacks == [boundary]
+    assert config.stop_callbacks == [boundary]
+
+
 def test_gepa_engine_keeps_unscored_seed_without_checkpoint_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

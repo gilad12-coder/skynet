@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import dspy
 import pytest
 
+from core.billing.signals import BudgetReached
 from core.constants import PROGRESS_GRID_PAIR_FAILED, PROGRESS_SPLITS_READY
 from core.exceptions import ServiceError
 from core.models import (
@@ -141,6 +142,7 @@ def test_run_calls_progress_callback_for_splits_ready() -> None:
     events: list[str] = []
 
     def _cb(event: str, data: dict) -> None:
+        """Record each reported progress event."""
         events.append(event)
 
     with patch_core_dependencies():
@@ -159,6 +161,7 @@ def test_run_returns_baseline_program_when_optimized_worse() -> None:
 
     # Baseline score = 0.9, optimized score = 0.5 → service should keep baseline
     def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
+        """Score the baseline above the compiled program."""
         if program is original_program:
             return (0.9, [])
         return (0.5, [])
@@ -183,6 +186,7 @@ def test_run_keeps_compiled_program_when_optimized_better() -> None:
     compiled_program = fake_compiled_program()
 
     def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
+        """Score the compiled program above the baseline."""
         if program is original_program:
             return (0.5, [])
         return (0.9, [])
@@ -196,6 +200,57 @@ def test_run_keeps_compiled_program_when_optimized_better() -> None:
 
     assert result.optimized_test_metric == pytest.approx(0.9)
     assert result.metric_improvement == pytest.approx(0.4)
+
+
+def test_run_budget_stop_after_baseline_preserves_original_program() -> None:
+    """Return the fully evaluated seed when the first optimizer call cannot start."""
+    service = _service()
+    payload = _run_request_with_test()
+    original_program = fake_original_program()
+    evaluations: list[object] = []
+
+    def _evaluate(program, *_args, **_kwargs):
+        """Record and complete only the original program's baseline."""
+        evaluations.append(program)
+        return (0.4, [{"score": 0.4}])
+
+    with (
+        patch_core_dependencies(fake_lm=fake_language_model()),
+        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=_evaluate),
+        patch("core.service_gateway.optimization.core.compile_program", side_effect=BudgetReached()),
+        patch.object(service, "_get_module_factory", return_value=(lambda **kw: original_program, True)),
+        pytest.raises(BudgetReached) as caught,
+    ):
+        service.run(payload)
+
+    response = caught.value.result
+    assert response.baseline_test_metric == pytest.approx(0.4)
+    assert response.optimized_test_metric is None
+    assert response.baseline_test_results == [{"score": 0.4}]
+    assert evaluations == [original_program]
+    assert caught.value.evidence == {
+        "selection_scope": "test",
+        "selection_score": 0.4,
+        "candidate_origin": "seed",
+        "final_evaluation_completed": False,
+        "final_evaluation_reason": "budget_reached",
+    }
+
+
+def test_run_budget_stop_during_baseline_has_no_result() -> None:
+    """Do not publish the seed when its test evaluation did not complete."""
+    service = _service()
+    payload = _run_request_with_test()
+
+    with (
+        patch_core_dependencies() as dependencies,
+        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=BudgetReached()),
+        pytest.raises(BudgetReached) as caught,
+    ):
+        service.run(payload)
+
+    assert caught.value.result is None
+    dependencies.compile_program_mock.assert_not_called()
 
 
 def test_run_avg_response_time_is_none_when_lm_has_no_history() -> None:
@@ -234,6 +289,7 @@ def test_run_grid_search_happy_path_returns_two_pair_results() -> None:
     payload = _grid_request()  # 2 gen models × 1 ref model = 2 pairs
 
     def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
+        """Return the deterministic grid-search score."""
         return (0.8, [])
 
     with (
@@ -248,6 +304,69 @@ def test_run_grid_search_happy_path_returns_two_pair_results() -> None:
     assert len(result.pair_results) == 2
     assert result.completed_pairs == 2
     assert result.failed_pairs == 0
+
+
+def test_grid_budget_stop_after_baseline_preserves_original_program() -> None:
+    """Publish a stopped/evaluated pair when its seed test pass completed."""
+    service = _service()
+    payload = _grid_request(
+        generation_models=[ModelConfig(name="openai/gpt-4o-mini")],
+        reflection_models=[ModelConfig(name="openai/gpt-4o-mini")],
+    )
+    original_program = fake_original_program()
+    evaluations: list[object] = []
+
+    def _evaluate(program, *_args, **_kwargs):
+        """Record and complete only the original program's baseline."""
+        evaluations.append(program)
+        return (0.4, [{"score": 0.4}])
+
+    with (
+        patch_core_dependencies(fake_lm=fake_language_model()),
+        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=_evaluate),
+        patch("core.service_gateway.optimization.core.compile_program", side_effect=BudgetReached()),
+        patch("core.worker.log_handler.set_current_pair_index"),
+        patch.object(service, "_get_module_factory", return_value=(lambda **kw: original_program, True)),
+        pytest.raises(BudgetReached) as caught,
+    ):
+        service.run_grid_search(payload)
+
+    result = caught.value.result
+    pair = result.pair_results[0]
+    assert pair.stop_reason == "budget_reached"
+    assert pair.result_availability == "evaluated"
+    assert pair.baseline_test_metric == pytest.approx(0.4)
+    assert pair.baseline_test_results == [{"score": 0.4}]
+    assert pair.optimized_test_metric is None
+    assert pair.terminal_evidence == {
+        "candidate_origin": "seed",
+        "final_evaluation_completed": False,
+        "final_evaluation_reason": "budget_reached",
+        "selection_scope": "test",
+        "selection_score": 0.4,
+    }
+    assert evaluations == [original_program]
+
+
+def test_grid_budget_stop_during_baseline_has_no_result() -> None:
+    """Keep a partially evaluated grid seed out of terminal results."""
+    service = _service()
+    payload = _grid_request(
+        generation_models=[ModelConfig(name="openai/gpt-4o-mini")],
+        reflection_models=[ModelConfig(name="openai/gpt-4o-mini")],
+    )
+
+    with (
+        patch_core_dependencies() as dependencies,
+        patch("core.service_gateway.optimization.core.evaluate_on_test", side_effect=BudgetReached()),
+        patch("core.worker.log_handler.set_current_pair_index"),
+        pytest.raises(BudgetReached) as caught,
+    ):
+        service.run_grid_search(payload)
+
+    assert caught.value.result is None
+    assert caught.value.evidence["pair_results"][0]["result_availability"] == "none"
+    dependencies.compile_program_mock.assert_not_called()
 
 
 def test_run_grid_search_skips_completed_pairs_on_resume() -> None:
@@ -296,6 +415,7 @@ def test_run_grid_search_best_pair_has_highest_score() -> None:
     call_count = [0]
 
     def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
+        """Return deterministic scores for pair selection."""
         # baseline always 0.5; optimized alternates 0.6 and 0.9
         call_count[0] += 1
         if call_count[0] % 2 == 1:
@@ -326,6 +446,7 @@ def test_run_grid_search_per_pair_swaps_when_optimized_worse() -> None:
     compiled_program = fake_compiled_program()
 
     def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
+        """Score the baseline above the compiled program."""
         # baseline > optimized to trigger swap
         if program is original_program:
             return (0.9, [])
@@ -352,18 +473,21 @@ def test_run_grid_search_pair_exception_fires_failed_callback_and_increments_cou
     events: list[str] = []
 
     def _cb(event: str, data: dict) -> None:
+        """Record each reported progress event."""
         events.append(event)
 
     surviving_program = fake_compiled_program()
     compile_call_count = [0]
 
     def _failing_compile(**kwargs):
+        """Fail the first compilation and return the survivor thereafter."""
         compile_call_count[0] += 1
         if compile_call_count[0] == 1:
             raise RuntimeError("optimizer blew up")
         return surviving_program
 
     def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
+        """Return the deterministic surviving-pair score."""
         return (0.8, [])
 
     with (
@@ -388,6 +512,7 @@ def test_run_grid_search_pair_exception_sets_error_field_on_pair_result() -> Non
     )
 
     def _failing_compile(**kwargs):
+        """Raise the compilation failure under test."""
         raise RuntimeError("boom")
 
     with (
@@ -408,6 +533,7 @@ def test_run_grid_search_best_pair_is_none_when_all_pairs_fail() -> None:
     payload = _grid_request()  # 2 pairs — both will fail
 
     def _always_fail(**kwargs):
+        """Raise the compilation failure for every pair."""
         raise RuntimeError("total failure")
 
     with (
@@ -495,6 +621,7 @@ def test_run_grid_search_pair_results_carry_lm_activity() -> None:
     payload = _grid_request()
 
     def _eval_side_effect(program, test_examples, metric, collect_per_example=False):
+        """Return the deterministic per-pair score."""
         return (0.8, [])
 
     with (
@@ -562,7 +689,10 @@ def test_run_react_branch_resolves_tools_and_returns_overlay() -> None:
 
     resolve_mock = MagicMock(return_value=(resolved_tools, resolved_hashes))
 
-    def _fake_optimize(*, signature_cls, tools, schema_hashes, max_iters=run_react.DEFAULT_MAX_ITERS, **_kwargs) -> dict:
+    def _fake_optimize(
+        *, signature_cls, tools, schema_hashes, max_iters=run_react.DEFAULT_MAX_ITERS, **_kwargs
+    ) -> dict:
+        """Return a deterministic ReAct optimization result."""
         seed = REACT_CLASS(signature_cls, tools=tools, max_iters=max_iters)
         return {
             "program_state": seed.dump_state(),
@@ -642,6 +772,7 @@ def test_run_react_branch_passes_auto_budget_to_optimizer() -> None:
     captured: dict = {}
 
     def _fake_optimize(*, signature_cls, tools, schema_hashes, max_iters=run_react.DEFAULT_MAX_ITERS, **kwargs) -> dict:
+        """Capture the budget and return a deterministic ReAct result."""
         captured["max_metric_calls"] = kwargs.get("max_metric_calls")
         seed = REACT_CLASS(signature_cls, tools=tools, max_iters=max_iters)
         return {

@@ -5,6 +5,10 @@
     "modelCatalog": "model catalogue"
   },
   "messages": {
-    "submit.no_models_available": "No models available in the catalogue — configure a provider API key first."
+    "submit.no_models_available": "No models available in the catalogue — configure a provider API key first.",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

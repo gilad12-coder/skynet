@@ -23,11 +23,10 @@ interface ComposerProps {
   streaming?: boolean;
   sendAriaLabel?: string;
   stopAriaLabel?: string;
-  /** Optional model selector chip rendered at the inline end of the control
-   *  row, immediately before the mic and send controls. */
+  /** Optional model selector chip rendered at the inline start of the control row. */
   modelMenu?: React.ReactNode;
-  /** Optional controls docked at the inline start of the control row, such as
-   *  attachment and permission controls. */
+  /** Optional controls rendered after the model selector, such as attachment
+   *  and permission controls. */
   leadingControls?: React.ReactNode;
   /** Keep controls below the draft by default; model-free playgrounds can opt
    *  into a single row. */
@@ -38,11 +37,11 @@ interface ComposerProps {
 /**
  * The shared chat composer, laid out Codex-style: one bordered box holding a
  * borderless textarea with a control row docked under it — attachment and
- * permission controls at the inline start, then the model chip, dictation mic,
- * and circular send/stop button at the inline end. While dictating, the
- * textarea swaps for a recording strip (pulsing dot, timer, cancel) and the mic
- * becomes the finish control; the transcript is appended to the draft for
- * review, never auto-sent.
+ * permission controls follow the model chip at the inline start, while the
+ * dictation mic and circular send/stop button sit at the inline end. While
+ * dictating, the textarea swaps for a recording strip (pulsing dot, timer,
+ * cancel) and the mic becomes the finish control; the transcript is appended
+ * to the draft for review, never auto-sent.
  */
 export function Composer({
   value,
@@ -193,11 +192,11 @@ export function Composer({
             inline ? "shrink-0" : "px-2 pb-2 pt-0.5",
           )}
         >
+          {modelMenu}
           {leadingControls && (
             <div className="flex min-w-0 items-center gap-1">{leadingControls}</div>
           )}
           <div className="ms-auto flex min-w-0 items-center justify-end gap-1.5">
-            {modelMenu}
             {showMic &&
               (dictation.state.kind === "rec" ? (
                 <TooltipButton tooltip={msg("agent.composer.record_finish")} side="top">

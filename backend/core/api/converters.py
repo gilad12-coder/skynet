@@ -7,6 +7,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from ..billing.credential_safety import scrub_model_config
 from ..constants import (
     OPTIMIZATION_TYPE_RUN,
     PAYLOAD_OVERVIEW_COLUMN_MAPPING,
@@ -214,6 +215,9 @@ def overview_to_base_fields(overview: dict) -> dict:
     Returns:
         Dict keyed by response-model field names with values pulled from the overview.
     """
+    model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS)
+    generation_models = overview.get(PAYLOAD_OVERVIEW_GENERATION_MODELS)
+    reflection_models = overview.get(PAYLOAD_OVERVIEW_REFLECTION_MODELS)
     return {
         "optimization_type": overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE, OPTIMIZATION_TYPE_RUN),
         "name": overview.get(PAYLOAD_OVERVIEW_NAME),
@@ -228,11 +232,19 @@ def overview_to_base_fields(overview: dict) -> dict:
         "dataset_rows": overview.get(PAYLOAD_OVERVIEW_DATASET_ROWS),
         "source_dataset_id": overview.get(PAYLOAD_OVERVIEW_SOURCE_DATASET_ID),
         "model_name": overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
-        "model_settings": overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS),
+        "model_settings": scrub_model_config(model_settings) if isinstance(model_settings, dict) else model_settings,
         "reflection_model_name": overview.get(PAYLOAD_OVERVIEW_REFLECTION_MODEL),
         "task_model_name": overview.get(PAYLOAD_OVERVIEW_TASK_MODEL),
         "total_pairs": overview.get(PAYLOAD_OVERVIEW_TOTAL_PAIRS),
-        "generation_models": overview.get(PAYLOAD_OVERVIEW_GENERATION_MODELS),
-        "reflection_models": overview.get(PAYLOAD_OVERVIEW_REFLECTION_MODELS),
+        "generation_models": (
+            [scrub_model_config(model) if isinstance(model, dict) else model for model in generation_models]
+            if isinstance(generation_models, list)
+            else generation_models
+        ),
+        "reflection_models": (
+            [scrub_model_config(model) if isinstance(model, dict) else model for model in reflection_models]
+            if isinstance(reflection_models, list)
+            else reflection_models
+        ),
         "task_fingerprint": overview.get(PAYLOAD_OVERVIEW_TASK_FINGERPRINT),
     }

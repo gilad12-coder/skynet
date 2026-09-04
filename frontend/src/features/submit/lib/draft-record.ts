@@ -2,9 +2,9 @@ import type {
   BlackboxEngineId,
   BlackboxHarness,
   BlackboxProposerRuntime,
+  ExecutionRuntime,
   ModelConfig,
   SplitFractions,
-  ValidateCodeResponse,
   WorkflowSpec,
 } from "@/shared/types/api";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
@@ -12,6 +12,7 @@ import type { ReactConfig, ColumnRole } from "../constants";
 import type { BlackboxRecipe, SeedMode, SeedPart } from "../hooks/use-blackbox-wizard";
 import type { ScoringModelMode } from "./model-roles";
 import type { WizardStageId } from "./wizard-steps";
+import type { WizardBudgetDraft } from "./execution-budget-session";
 
 /**
  * The durable draft of the new-optimization wizard.
@@ -36,14 +37,15 @@ export interface WizardDraftData {
   moduleName: string;
   moduleChosen: boolean;
   optimizerName: string;
+  executionRuntime?: ExecutionRuntime;
+  codeAssistMode?: "auto" | "manual";
+  splitMode?: "auto" | "manual";
   reactConfig: ReactConfig;
   workflowSpec?: WorkflowSpec | null;
   signatureCode: string;
   metricCode: string;
   signatureManuallyEdited: boolean;
   metricManuallyEdited: boolean;
-  signatureValidation?: ValidateCodeResponse | null;
-  metricValidation?: ValidateCodeResponse | null;
   parsedDataset: ParsedDataset | null;
   datasetFileName: string | null;
   columnRoles: Record<string, ColumnRole>;
@@ -125,7 +127,7 @@ export type DraftDataFor<K extends DraftRecipe> = K extends "program"
 
 export const DRAFT_RECORD_VERSION = 1;
 
-export interface WizardDraftRecord {
+export interface WizardDraftRecord extends WizardBudgetDraft {
   version: typeof DRAFT_RECORD_VERSION;
   id: string;
   accountId: string;
@@ -136,12 +138,56 @@ export interface WizardDraftRecord {
   anything: DraftWorkflowState<AnythingDraftData> | null;
 }
 
-/** A model config without its inline API key; the rest of the choice survives. */
+const CREDENTIAL_FIELD =
+  /^(?:api[_-]?key|authorization|proxy[_-]?authorization|access[_-]?token|refresh[_-]?token|gateway[_-]?token|secret|password)$/i;
+
+function withoutCredentials(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutCredentials);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !CREDENTIAL_FIELD.test(key))
+      .map(([key, entry]) => [key, withoutCredentials(entry)]),
+  );
+}
+
+/** Keep model settings and vault references while removing inline credentials. */
 export function stripModelSecrets(config: ModelConfig): ModelConfig {
-  if (!config.extra || !("api_key" in config.extra)) return config;
-  const { api_key: _dropped, ...extra } = config.extra;
-  void _dropped;
-  return Object.keys(extra).length > 0 ? { ...config, extra } : { ...config, extra: undefined };
+  if (!config.extra) return config;
+  const extra = withoutCredentials(config.extra) as ModelConfig["extra"];
+  if (JSON.stringify(extra) === JSON.stringify(config.extra)) return config;
+  return { ...config, extra: extra && Object.keys(extra).length > 0 ? extra : undefined };
+}
+
+/** Stored code checks are never current runtime evidence, including old records. */
+export function sanitizeProgramDraft(raw: WizardDraftData): WizardDraftData {
+  const {
+    signatureValidation: _signature,
+    metricValidation: _metric,
+    ...data
+  } = raw as WizardDraftData & { signatureValidation?: unknown; metricValidation?: unknown };
+  return {
+    ...data,
+    executionRuntime: "vercel",
+    codeAssistMode: data.codeAssistMode ?? "manual",
+    splitMode: data.splitMode ?? "manual",
+    reactConfig: { ...data.reactConfig, mcpAuthHeader: "" },
+    modelConfig: stripModelSecrets(data.modelConfig),
+    secondModelConfig: data.secondModelConfig ? stripModelSecrets(data.secondModelConfig) : null,
+    generationModels: data.generationModels.map(stripModelSecrets),
+    reflectionModels: data.reflectionModels.map(stripModelSecrets),
+  };
+}
+
+/** Defend both the storage boundary and restoration of previously saved models. */
+export function sanitizeAnythingDraft(data: AnythingDraftData): AnythingDraftData {
+  return {
+    ...data,
+    proposerRuntime: "vercel",
+    targetModel: stripModelSecrets(data.targetModel),
+    scorerModel: stripModelSecrets(data.scorerModel),
+    reflectionModel: stripModelSecrets(data.reflectionModel),
+  };
 }
 
 /** Whether a Program snapshot holds anything worth offering back. */
@@ -198,10 +244,17 @@ function shallowEqual(a: object, b: object): boolean {
   return ak.every((k) => Object.is(a[k], (b as Record<string, unknown>)[k as string]));
 }
 
+export interface DraftStoreSnapshot {
+  record: WizardDraftRecord | null;
+  resetGeneration: number;
+}
+
 export interface DraftStore {
-  read(accountId: string): Promise<WizardDraftRecord | null>;
-  write(record: WizardDraftRecord): Promise<void>;
-  remove(accountId: string): Promise<void>;
+  read(accountId: string): Promise<DraftStoreSnapshot>;
+  /** False means a reset in another tab fenced out this snapshot. */
+  write(record: WizardDraftRecord, resetGeneration: number): Promise<boolean>;
+  /** Keep a content-free generation marker to reject pre-reset writers. */
+  remove(accountId: string): Promise<number>;
 }
 
 export interface DraftSaverOptions {
@@ -229,7 +282,9 @@ export class DraftSaver {
   private held = true;
   private generation = 0;
   private timer: unknown = null;
-  private readonly accountId: string;
+  readonly accountId: string;
+  private resetGeneration = 0;
+  private pendingWrite: Promise<void> = Promise.resolve();
   private readonly store: DraftStore;
   private readonly debounceMs: number;
   private readonly now: () => number;
@@ -268,13 +323,18 @@ export class DraftSaver {
     return this.generation;
   }
 
+  get resetFence(): number {
+    return this.resetGeneration;
+  }
+
   /**
    * Take a discovered record (or its absence) as the base for later writes.
    * Snapshots published before discovery finished are live state, so an
    * empty discovery keeps them; a found record is offered or restored by the
    * caller, whose remount publishes afresh.
    */
-  adopt(record: WizardDraftRecord | null): void {
+  adopt(record: WizardDraftRecord | null, resetGeneration = 0): void {
+    this.resetGeneration = resetGeneration;
     if (record === null && this.record !== null && this.record.revision === 0) return;
     this.record = record;
     this.dirty = false;
@@ -320,49 +380,90 @@ export class DraftSaver {
     this.schedule();
   }
 
-  /** Write any pending change now. Resolves once the store has answered. */
-  async flush(): Promise<void> {
-    this.cancelTimer();
-    if (this.held || !this.dirty) return;
-    const generation = this.generation;
-    this.dirty = false;
-    if (!hasMeaningfulDraft(this.record)) {
-      // A blanked-out draft leaves storage but stays in memory at revision 0,
-      // so the next identical snapshot is recognised instead of re-queued.
-      if (this.record && this.record.revision > 0) {
-        this.record = { ...this.record, revision: 0 };
-        await this.removeAt(generation);
-      }
-      return;
-    }
-    const record: WizardDraftRecord = {
-      ...(this.record as WizardDraftRecord),
-      revision: (this.record as WizardDraftRecord).revision + 1,
-      updatedAt: this.now(),
-    };
-    try {
-      await this.store.write(record);
-      if (generation !== this.generation) return;
-      this.record = record;
-      this.onWritten?.(record);
-    } catch (error) {
-      if (generation !== this.generation) return;
-      this.dirty = true;
-      this.onWriteError?.(error);
-    }
+  /** Save shared execution identities before a paid or idempotent request is sent. */
+  async saveExecution(execution: WizardBudgetDraft): Promise<void> {
+    if (this.held || !this.record) throw new Error("draft_not_ready");
+    this.record = { ...this.record, ...execution };
+    this.dirty = true;
+    await this.flush(true);
   }
 
-  /**
-   * Delete the record and forget everything queued before this call. Rejects
-   * when the store cannot commit the delete, in which case nothing was
-   * dropped from memory and the caller must report the failure.
-   */
+  /** Serialize writes so an older completion cannot replace newer edits. */
+  flush(strict = false): Promise<void> {
+    this.cancelTimer();
+    const generation = this.generation;
+    const pending = this.pendingWrite.then(async () => {
+      if (generation !== this.generation || this.held) {
+        if (strict) throw new DOMException("Draft detached", "AbortError");
+        return;
+      }
+      if (!this.dirty) return;
+      this.dirty = false;
+      if (!hasMeaningfulDraft(this.record)) {
+        if (this.record && this.record.revision > 0) {
+          this.record = { ...this.record, revision: 0 };
+          await this.removeAt(generation);
+        }
+        return;
+      }
+      const snapshot = this.record as WizardDraftRecord;
+      const record: WizardDraftRecord = {
+        ...snapshot,
+        revision: snapshot.revision + 1,
+        updatedAt: this.now(),
+      };
+      try {
+        const accepted = await this.store.write(record, this.resetGeneration);
+        if (generation !== this.generation) {
+          if (strict) throw new DOMException("Draft detached", "AbortError");
+          return;
+        }
+        if (!accepted) {
+          this.detach();
+          this.onWriteError?.(new Error("draft_reset_in_another_tab"));
+          if (strict) throw new DOMException("Draft reset in another tab", "AbortError");
+          return;
+        }
+        this.record =
+          this.record === snapshot
+            ? record
+            : {
+                ...(this.record as WizardDraftRecord),
+                revision: record.revision,
+                updatedAt: record.updatedAt,
+              };
+        this.onWritten?.(record);
+      } catch (error) {
+        if (generation !== this.generation) {
+          if (strict) throw error;
+          return;
+        }
+        this.dirty = true;
+        this.onWriteError?.(error);
+        if (strict) throw error;
+      }
+    });
+    this.pendingWrite = pending.catch(() => {});
+    return pending;
+  }
+
+  /** Delete after any active write, retaining a fence against other tabs. */
   async reset(): Promise<void> {
+    const wasHeld = this.held;
+    this.held = true;
     this.cancelTimer();
     this.generation += 1;
     const generation = this.generation;
-    await this.store.remove(this.accountId);
+    let resetGeneration: number;
+    try {
+      await this.pendingWrite;
+      resetGeneration = await this.store.remove(this.accountId);
+    } catch (error) {
+      if (generation === this.generation) this.hold(wasHeld);
+      throw error;
+    }
     if (generation !== this.generation) return;
+    this.resetGeneration = resetGeneration;
     this.record = null;
     this.dirty = false;
     this.onRemoved?.();
@@ -406,8 +507,11 @@ export class DraftSaver {
 
   private async removeAt(generation: number): Promise<void> {
     try {
-      await this.store.remove(this.accountId);
-      if (generation === this.generation) this.onRemoved?.();
+      const resetGeneration = await this.store.remove(this.accountId);
+      if (generation === this.generation) {
+        this.resetGeneration = resetGeneration;
+        this.onRemoved?.();
+      }
     } catch (error) {
       if (generation === this.generation) this.onWriteError?.(error);
     }

@@ -27,6 +27,7 @@ from core.api.observability import (
     start_orphan_recovery_sweeper,
     start_queue_metrics_refresher,
 )
+from core.billing.budgets import BudgetService
 from core.config import settings
 from core.error_reporting import configure_error_reporting
 from core.notifications import configure_notification_preferences
@@ -46,7 +47,7 @@ def run_worker() -> None:
     configure_error_reporting("worker")
     job_store = get_job_store()
     configure_notification_preferences(job_store.engine)
-    job_store.recover_orphaned_jobs()
+    job_store.recover_orphaned_jobs(budget_service=BudgetService(engine=job_store.engine))
     pending_ids = job_store.recover_pending_jobs()
     worker = get_worker(
         job_store,

@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from core.billing.signals import BudgetReached
 from core.constants import (
     DETAIL_BASELINE,
     DETAIL_OPTIMIZED,
@@ -239,7 +240,7 @@ def test_auto_run_hands_off_between_engines(
     assert response.engine_used == "gepa"
     assert {engine for engine, _ in fake_native_proposers} == {"autoresearch", "meta_harness"}
     assert all(ctx.native_options.model == "fake/model" for _, ctx in fake_native_proposers)
-    assert all(ctx.native_options.runtime == "worker" for _, ctx in fake_native_proposers)
+    assert all(ctx.native_options.runtime == "vercel" for _, ctx in fake_native_proposers)
     assert all(ctx.native_options.max_token_cost > 0 for _, ctx in fake_native_proposers)
     assert response.total_scorer_runs <= 24
     assert response.optimized_test_metric >= response.baseline_test_metric
@@ -316,6 +317,17 @@ def test_validate_payload_surfaces_sandbox_errors() -> None:
     """Broken scorer code is caught by the real sandbox before the job is queued."""
     with pytest.raises(ServiceError, match="must define a function named 'score"):
         validate_blackbox_payload(_payload(scorer={"kind": "python", "metric_code": "x = 1"}))
+
+
+def test_protected_contract_validation_never_loads_authored_scorer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep executable scorer verification inside the protected runtime's actual readiness check."""
+
+    def forbid(_code: str) -> None:
+        """Reject scorer execution in contract-only validation."""
+        pytest.fail("The protected parent must not execute authored scorer code.")
+
+    monkeypatch.setattr(service_mod, "validate_scorer_code", forbid)
+    validate_blackbox_payload(_payload(scorer={"kind": "python", "metric_code": "x = 1"}), verify_scorer=False)
 
 
 def test_dry_run_scores_python_scorer_in_the_sandbox() -> None:
@@ -463,6 +475,7 @@ _AGENT_TARGET = {
 
 def test_validate_payload_rejects_agent_targets_this_deployment_cannot_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """An agent target on a deployment with no sandbox is refused before it is queued."""
+    monkeypatch.setattr(service_mod, "current_sandbox_runtime", lambda: None)
     monkeypatch.setattr(
         service_mod, "agent_target_unavailable_reason", lambda settings: "Agent sandboxes are not configured."
     )
@@ -653,7 +666,7 @@ def test_combined_usage_preserves_distinct_native_model_keys() -> None:
     lm = FakeReflectionLM(model="fake/model")
     lm("reflection")
     native = NativeOptions(
-        runtime="worker",
+        runtime="vercel",
         model="fake/model",
         gateway=GatewayConfig(url="https://unused.example/v1", api_key="test-key"),
         max_token_cost=1.0,
@@ -1108,3 +1121,75 @@ def test_run_without_a_test_split_measures_each_pair_once(fake_lm: FakeReflectio
     assert response.optimized_test_metric == response.details["optimizer_best_score"] == 1.0
     assert response.total_scorer_runs == 12
     assert response.versions[1].evals == 2
+
+
+@pytest.mark.parametrize("evaluated", [False, True])
+def test_budget_stop_preserves_only_evaluated_incumbent_and_skips_final_test(fake_lm, tmp_path, monkeypatch, evaluated):
+    """Keep a completed selection without starting a final paid holdout pass.
+
+    Args:
+        fake_lm: Deterministic reflection model.
+        tmp_path: Private optimizer workspace.
+        monkeypatch: Dependency replacement fixture.
+        evaluated: Whether upstream has published a completed aggregate selection.
+    """
+    holdouts = []
+
+    def holdout(*args, **kwargs):
+        """Record which holdout passes were actually requested."""
+        holdouts.append(kwargs["phase"])
+        return 0.3
+
+    def strategy(*args, **kwargs):
+        """Stop after the upstream incumbent publication boundary."""
+        stop = BudgetReached()
+        if evaluated:
+            stop.result = Result(
+                best_candidate="tested candidate",
+                best_score=0.7,
+                total_evals=3,
+                metadata={"selection_source": "upstream_fixture"},
+            )
+            stop.evidence["selection_scope"] = "validation"
+        raise stop
+
+    monkeypatch.setattr(service_mod, "_score_holdout", holdout)
+    monkeypatch.setattr(service_mod, "run_strategy", strategy)
+    with pytest.raises(BudgetReached) as caught:
+        run_blackbox_optimization(_payload(), artifact_id="budget-fixture", gepa_log_dir_path=str(tmp_path))
+    assert holdouts == [PHASE_BASELINE]
+    if evaluated:
+        response = caught.value.result
+        assert response.best_candidate == "tested candidate"
+        assert response.optimized_test_metric is None
+        assert response.details["optimizer_best_score"] == 0.7
+        assert caught.value.evidence["candidate_origin"] == "optimized"
+    else:
+        response = caught.value.result
+        assert response.best_candidate == "hello world"
+        assert response.baseline_test_metric == 0.3
+        assert response.optimized_test_metric is None
+        assert response.details["optimizer_best_score"] == 0.3
+        assert caught.value.evidence["candidate_origin"] == "seed"
+        assert caught.value.evidence["selection_scope"] == "heldout"
+    assert caught.value.evidence["final_evaluation_completed"] is False
+
+
+def test_budget_stop_before_completed_baseline_has_no_result(fake_lm, tmp_path, monkeypatch):
+    """Leave result absent when the baseline holdout did not finish.
+
+    Args:
+        fake_lm: Deterministic reflection model.
+        tmp_path: Private optimizer workspace.
+        monkeypatch: Dependency replacement fixture.
+    """
+
+    def holdout(*_args, **_kwargs):
+        """Stop before returning any complete baseline score."""
+        raise BudgetReached()
+
+    monkeypatch.setattr(service_mod, "_score_holdout", holdout)
+    with pytest.raises(BudgetReached) as caught:
+        run_blackbox_optimization(_payload(), artifact_id="budget-fixture", gepa_log_dir_path=str(tmp_path))
+
+    assert caught.value.result is None

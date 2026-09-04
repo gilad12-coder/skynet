@@ -108,6 +108,7 @@
     "optimization.no_artifact_generic": "ה{term.optimization} לא ייצרה תוצר.",
     "optimization.corrupt_result": "נתוני תוצאת ה{term.optimization} פגומים.",
     "optimization.corrupt_column_mapping": "מיפוי העמודות השמור אינו תקין.",
+    "optimization.protected_interactive_sandbox_required": "לא ניתן להעריך או להגיש {term.optimization} מוגנת מתוך תהליך ה-API. נדרשת סביבת {runtime} נפרדת ומחויבת, והיא עדיין אינה זמינה בנקודת קצה זו.",
     "optimization.not_success_status_for_serve": "ה{term.optimization} במצב '{status}' — רק {term.optimizationPlural} שהושלמו בהצלחה אפשר להגיש.",
     "optimization.not_success_status_for_test_results": "ה{term.optimization} במצב '{status}' — רק ל{term.optimizationPlural} שהושלמו בהצלחה יש תוצאות {term.splitTest}.",
     "optimization.cancelled_no_artifact": "ה{term.optimization} בוטלה ולא ייצרה תוצר.",
@@ -234,7 +235,11 @@
     "notifier.share.transfer.subject": "הבעלות הועברה אליך",
     "notifier.share.transfer.body": "הבעלות על ה{term.optimization} הועברה אליך על ידי {actor}.",
     "notifier.email.footer": "הודעה זו נשלחה אוטומטית מ-Skynet.",
-    "notifier.email.ref": "מזהה"
+    "notifier.email.ref": "מזהה",
+    "serve.request_budget_required": "יש להגדיר max_cost_credits לבקשה הזאת.",
+    "budget.idempotency_required": "יש לשלוח Idempotency-Key ייחודי לבקשה הזאת.",
+    "serve.caller_tool_connection_required": "הריצה משתמשת בחיבור כלים של הבעלים. יש לחבר את הכלי לחשבון שלך לפני ההפעלה.",
+    "serve.protected_interaction_failed": "הבקשה בסביבת הבידוד נכשלה: {error}"
   },
   "backend": {
     "constants": {

@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "بلغ هذا التحسين أقصى عدد من المحاولات ({attempts}) — شغّله من جديد بدلاً من ذلك.",
     "optimization.resume_not_resumable": "لا يملك هذا التحسين أي نقطة استئناف محفوظة — شغّله من جديد بدلاً من ذلك.",
     "optimization.resume_wrong_status": "لا يمكن استئناف سوى عمليات التحسين التي توقّفت في منتصف التشغيل — هذه في الحالة '{status}'.",
+    "optimization.protected_interactive_sandbox_required": "لا يمكن تقييم هذا التحسين المحمي أو تقديمه داخل عملية API. يلزم صندوق تشغيل {runtime} مستقل ومحتسب التكلفة، وهو غير متاح بعد في نقطة النهاية هذه.",
     "optimization.retry_no_payload": "لا يملك التحسين المصدر أي حمولة محفوظة لإعادة المحاولة.",
     "optimization.retry_wrong_status": "لا يمكن إعادة محاولة سوى عمليات التحسين في حالة 'failed' أو 'cancelled' — هذه في الحالة '{status}'. استنسخها بدلاً من ذلك.",
     "quota.reached": "بلغت الحد الأقصى لكل مستخدم وهو {quota} عملية تحسين. احذف عمليات تحسين قديمة لإنشاء عمليات جديدة.",
@@ -234,6 +235,10 @@
     "wizard.split_fractions_negative": "يجب ألّا تكون split_fractions سالبة.",
     "wizard.split_fractions_not_number": "يجب أن تكون قيم split_fractions أعدادًا: {error}",
     "wizard.split_fractions_not_object": "يجب أن يكون split_fractions كائنًا يحوي المفاتيح train/val/test.",
-    "wizard.split_fractions_sum": "يجب أن يكون مجموع split_fractions مساويًا 1.0، وكان {total}"
+    "wizard.split_fractions_sum": "يجب أن يكون مجموع split_fractions مساويًا 1.0، وكان {total}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

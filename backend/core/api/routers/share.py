@@ -13,9 +13,8 @@ Owner/editor-gated management endpoints plus the access-gated public surface:
 * ``GET    /share/{token}`` — **access-gated** composite read of one
   optimization (viewer+ for an invited member or an ``anyone`` link); requires
   a signed-in caller.
-* ``POST   /share/{token}/serve`` — one inference through the owner's stored
-  model (requires an effective role of editor or higher — it spends the
-  owner's API key, so viewers are forbidden).
+* ``POST   /share/{token}/serve`` — one viewer-accessible inference through a
+  fresh budget funded by the signed-in caller.
 
 Two sharing modes coexist per :mod:`core.api.sharing_access`: the active link's
 ``general_access`` (``restricted`` vs ``anyone``) and ``general_role`` (the
@@ -34,12 +33,13 @@ import secrets
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-import dspy
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ...billing.credential_safety import scrub_model_config
+from ...billing.protected_credentials import scrub_execution_credentials
 from ...constants import (
     OPTIMIZATION_TYPE_BLACKBOX,
     OPTIMIZATION_TYPE_GRID_SEARCH,
@@ -47,8 +47,13 @@ from ...constants import (
     PAYLOAD_OVERVIEW_IS_PRIVATE,
     PAYLOAD_OVERVIEW_MODEL_NAME,
     PAYLOAD_OVERVIEW_MODEL_SETTINGS,
+    PAYLOAD_OVERVIEW_MODULE_KWARGS,
+    PAYLOAD_OVERVIEW_MODULE_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
+    PAYLOAD_OVERVIEW_SIGNATURE_CODE,
+    PAYLOAD_OVERVIEW_TOOL_SOURCE,
     PAYLOAD_OVERVIEW_USERNAME,
+    TOKEN_SOURCE_MANAGED,
 )
 from ...models import (
     BlackboxRunResponse,
@@ -71,7 +76,6 @@ from ...notifications import (
 )
 from ...service_gateway.dashboard import invalidate_public_dashboard_cache
 from ...service_gateway.embedding_pipeline import set_embedding_privacy
-from ...service_gateway.language_models import build_language_model
 from ...storage.models import (
     AgentConversationModel,
     ApiTokenModel,
@@ -89,6 +93,7 @@ from ..converters import (
     status_to_job_status,
 )
 from ..errors import DomainError
+from ..protected_interaction import run_protected_interaction
 from ..sharing_access import (
     GENERAL_ACCESS_ANYONE,
     GENERAL_ACCESS_RESTRICTED,
@@ -104,14 +109,15 @@ from ..sharing_access import (
     role_rank,
 )
 from ._helpers import (
-    _artifact_has_payload,
     get_job_no_payload,
     job_owner,
-    load_program,
+    load_program_metadata,
     stable_seed,
+    workflow_spec_from_overview,
 )
 from .constants import TERMINAL_STATUSES
 from .optimizations._local import remap_test_indices
+from .serve import _artifact_prompt_fields
 
 logger = logging.getLogger(__name__)
 
@@ -121,10 +127,9 @@ _USER_FACING_OPTIMIZATION_TYPES = frozenset(
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
-# Serving / chat runs inference through the OWNER's stored API key (real spend),
-# so it is reserved to the editor tier and above. Viewers can read and clone but
-# never spend the owner's key.
-_INFER_ROLES: frozenset[ShareRole] = frozenset({ShareRole.editor, ShareRole.owner})
+_INFER_ROLES: frozenset[ShareRole] = frozenset(
+    {ShareRole.viewer, ShareRole.editor, ShareRole.owner}
+)
 _GENERAL_ACCESS_VALUES = (GENERAL_ACCESS_RESTRICTED, GENERAL_ACCESS_ANYONE)
 _LINK_ROLE_VALUES = tuple(sorted(LINK_ROLES))
 # Cap for the username-autocomplete result set (contract: at most 10).
@@ -218,10 +223,8 @@ def _strip_model_secrets(cfg: Any) -> Any:
     """
     if not isinstance(cfg, dict):
         return cfg
-    cleaned = {k: v for k, v in cfg.items() if k != "base_url"}
-    extra = cleaned.get("extra")
-    if isinstance(extra, dict):
-        cleaned["extra"] = {k: v for k, v in extra.items() if k != "api_key"}
+    cleaned = scrub_model_config(cfg)
+    cleaned.pop("base_url", None)
     return cleaned
 
 
@@ -239,6 +242,7 @@ def _scrub_payload(payload: dict[str, Any]) -> dict[str, Any]:
         A new dict safe to expose through a share link.
     """
     out: dict[str, Any] = {}
+    payload = scrub_execution_credentials(payload)
     for key, value in payload.items():
         if key in ("username", "dataset"):
             continue
@@ -372,9 +376,7 @@ def _test_results(job_data: dict[str, Any], optimization_id: str) -> dict[str, l
     }
 
 
-def _build_status_response(
-    job_store, optimization_id: str, job_data: dict[str, Any]
-) -> OptimizationStatusResponse:
+def _build_status_response(job_store, optimization_id: str, job_data: dict[str, Any]) -> OptimizationStatusResponse:
     """Assemble the read-only status response for a shared optimization.
 
     Mirrors the ``OptimizationStatusResponse`` that ``GET /optimizations/{id}``
@@ -466,15 +468,15 @@ def _build_status_response(
 def _serve_info(job_store, optimization_id: str, owner: str) -> ServeInfoResponse | None:
     """Build the program ``ServeInfoResponse`` for a shared optimization.
 
-    Loads the program under the OWNER's identity (the resolver already proved
-    the caller is a viewer+), returning ``None`` when the job is not in a
-    serveable state — the share view simply omits ``serve_info`` then.
+    Loads metadata under the OWNER's identity (the resolver already proved the
+    caller is a viewer+), returning ``None`` when the job is not in a serveable
+    state. Protected artifacts are never materialized in the API process.
 
     Args:
-        job_store: Job-store backing :func:`load_program`.
+        job_store: Job-store backing :func:`load_program_metadata`.
         optimization_id: Optimization whose program is described.
         owner: Job owner username, used to satisfy the ownership check inside
-            :func:`load_program` without exposing the real model secrets.
+            :func:`load_program_metadata` without exposing model secrets.
 
     Returns:
         A :class:`ServeInfoResponse`, or ``None`` when the program is not
@@ -482,16 +484,26 @@ def _serve_info(job_store, optimization_id: str, owner: str) -> ServeInfoRespons
     """
     owner_user = AuthenticatedUser(username=owner, role="user", groups=())
     try:
-        _program, result, overview = load_program(job_store, optimization_id, owner_user)
+        artifact, overview, model_name = load_program_metadata(job_store, optimization_id, owner_user)
     except DomainError:
         return None
-    artifact = result.program_artifact
-    prompt = artifact.optimized_prompt
+    prompt = artifact.get("optimized_prompt") if isinstance(artifact, dict) else artifact.optimized_prompt
     if prompt is None:
         input_fields: list[str] = []
         output_fields: list[str] = []
         instructions = None
         demo_count = 0
+    elif isinstance(prompt, dict):
+        raw_inputs = prompt.get("input_fields")
+        raw_outputs = prompt.get("output_fields")
+        raw_instructions = prompt.get("instructions")
+        raw_demos = prompt.get("demos")
+        input_fields = [value for value in raw_inputs if isinstance(value, str)] if isinstance(raw_inputs, list) else []
+        output_fields = (
+            [value for value in raw_outputs if isinstance(value, str)] if isinstance(raw_outputs, list) else []
+        )
+        instructions = raw_instructions if isinstance(raw_instructions, str) else None
+        demo_count = len(raw_demos) if isinstance(raw_demos, list) else 0
     else:
         input_fields = list(prompt.input_fields)
         output_fields = list(prompt.output_fields)
@@ -501,7 +513,7 @@ def _serve_info(job_store, optimization_id: str, owner: str) -> ServeInfoRespons
         optimization_id=optimization_id,
         module_name=overview.get("module_name", ""),
         optimizer_name=overview.get("optimizer_name", ""),
-        model_name=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME, ""),
+        model_name=model_name,
         input_fields=input_fields,
         output_fields=output_fields,
         instructions=instructions,
@@ -510,12 +522,12 @@ def _serve_info(job_store, optimization_id: str, owner: str) -> ServeInfoRespons
 
 
 def _owner_model_config(job_data: dict[str, Any], overview: dict[str, Any]) -> ModelConfig:
-    """Resolve the OWNER's stored model config (with the owner key) for inference.
+    """Resolve the stored model selection before caller credential binding.
 
-    Prefers the unscrubbed ``payload['model_config']`` (carries the owner's API
-    key and base_url, server-side only), falling back to the stripped overview
-    settings or the bare model name. The resolved config is never returned to
-    the caller — only used to build the language model.
+    Prefers ``payload['model_config']`` and falls back to the scrubbed overview
+    settings or bare model name. The protected interaction layer removes any
+    legacy inline credential and resolves BYOK only from the paying caller's
+    verified connection.
 
     Args:
         job_data: Raw job row whose ``payload`` carries the owner's model config.
@@ -1045,9 +1057,9 @@ def create_share_router(*, job_store) -> APIRouter:
         """Return the access-gated composite view of a shared optimization.
 
         Requires a signed-in caller; the floor is ``viewer`` (real owner shown).
-        ``serve_info`` (the field schema behind the inference panel) is editor+
-        only, since serving spends the owner's key. Secrets (API keys, base
-        URLs) are stripped from the payload in every case, and the full
+        ``serve_info`` (the field schema behind the inference panel) is available
+        to every viewer because each call spends a fresh caller-owned budget.
+        Secrets (API keys, base URLs) are stripped from the payload, and the full
         train/val/test split plus per-example test results are returned uncapped
         for the read-only detail view.
 
@@ -1076,10 +1088,7 @@ def create_share_router(*, job_store) -> APIRouter:
             raise DomainError("share.not_found", status=404) from None
 
         owner = job_owner(job_data)
-        # Serving is editor+, so only an editor+ caller gets serve_info — the
-        # field schema that drives the inference panel. Viewers read the run
-        # but never see the serve surface (they can't spend the owner's key).
-        can_serve = role_rank(role) >= role_rank(ShareRole.editor)
+        can_serve = role_rank(role) >= role_rank(ShareRole.viewer)
 
         status = _build_status_response(job_store, optimization_id, job_data)
         raw_payload = job_data.get("payload")
@@ -1141,8 +1150,7 @@ def create_share_router(*, job_store) -> APIRouter:
         )
         if (
             optimization_type not in _USER_FACING_OPTIMIZATION_TYPES
-            or status_to_job_status(job_data.get("status", "pending"))
-            != OptimizationStatus.success
+            or status_to_job_status(job_data.get("status", "pending")) != OptimizationStatus.success
         ):
             raise DomainError("share.not_found", status=404)
         if bool(overview.get(PAYLOAD_OVERVIEW_IS_PRIVATE, False)):
@@ -1244,14 +1252,15 @@ def create_share_router(*, job_store) -> APIRouter:
         summary="Run one inference on a shared optimization (viewer+ only)",
     )
     def serve_shared_optimization(
-        token: str, req: ServeRequest, current_user: AuthenticatedUserDep
+        token: str,
+        req: ServeRequest,
+        current_user: AuthenticatedUserDep,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     ) -> ServeResponse:
-        """Run a single blocking inference using the OWNER's stored model config.
+        """Run one shared inference using a fresh caller-owned request budget.
 
-        Requires an effective role of editor or higher — it spends the owner's
-        API key, so viewers get 403 (unknown tokens get 404). The owner's model
-        config (including the owner's API key) is loaded server-side and never
-        returned. Extra inputs beyond the program signature are ignored.
+        Every signed-in viewer funds their own sandbox and model route. A shared
+        caller never spends the run owner's wallet or BYOK model connection.
 
         Args:
             token: The public share token from the URL.
@@ -1263,8 +1272,8 @@ def create_share_router(*, job_store) -> APIRouter:
             model identifier.
 
         Raises:
-            DomainError: 404 when the token is unknown/revoked; 403 when the
-                caller's role is below editor; 400 (bad inputs / no model);
+            DomainError: 404 when the token is unknown/revoked; 400 (bad inputs,
+                missing request budget, or no model);
                 409 when the optimization is not in a serveable state.
         """
         with Session(job_store.engine) as session:
@@ -1275,6 +1284,11 @@ def create_share_router(*, job_store) -> APIRouter:
                 raise DomainError("share.inference_forbidden", status=403)
             link = get_link_by_token(session, token)
             optimization_id = link.optimization_id
+        if req.max_cost_credits is None:
+            raise DomainError("serve.request_budget_required", status=400)
+        key = (idempotency_key or "").strip()
+        if not key:
+            raise DomainError("budget.idempotency_required", status=400)
 
         try:
             job_data = job_store.get_job(optimization_id)
@@ -1285,38 +1299,64 @@ def create_share_router(*, job_store) -> APIRouter:
             raise DomainError("share.not_found", status=404)
 
         owner_user = AuthenticatedUser(username=owner, role="user", groups=())
-        program, result, overview = load_program(job_store, optimization_id, owner_user)
-        artifact = result.program_artifact
-        if not _artifact_has_payload(artifact):
-            raise DomainError("optimization.no_program_artifact_scoped", status=409)
-
+        artifact, overview, _model_name = load_program_metadata(job_store, optimization_id, owner_user)
         model_config = _owner_model_config(job_data, overview)
-
-        prompt = artifact.optimized_prompt
-        input_fields = list(prompt.input_fields) if prompt is not None else []
-        output_fields = list(prompt.output_fields) if prompt is not None else []
+        input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
+        workflow = workflow_spec_from_overview(overview)
+        if workflow is not None:
+            input_fields = workflow.input_field_names()
+            output_fields = workflow.output_field_names()
         if not input_fields:
             raise DomainError("serve.no_declared_inputs", status=400)
         missing = [f for f in input_fields if f not in req.inputs]
         if missing:
             raise DomainError("serve.missing_inputs", status=400, missing=missing, input_fields=input_fields)
         filtered_inputs = {f: req.inputs[f] for f in input_fields}
-
-        lm = build_language_model(model_config)
-        with dspy.context(lm=lm):
-            prediction = program(**filtered_inputs)
-
-        if output_fields:
-            outputs = {field: getattr(prediction, field, None) for field in output_fields}
-        else:
-            outputs = {key: val for key, val in prediction.toDict().items() if key not in req.inputs}
-
-        return ServeResponse(
-            optimization_id=optimization_id,
-            outputs=outputs,
-            input_fields=input_fields,
-            output_fields=output_fields,
-            model_used=model_config.normalized_identifier(),
+        stored = job_data.get("payload") if isinstance(job_data.get("payload"), dict) else {}
+        effective_overview = {
+            **overview,
+            PAYLOAD_OVERVIEW_SIGNATURE_CODE: (
+                overview.get(PAYLOAD_OVERVIEW_SIGNATURE_CODE) or stored.get("signature_code")
+            ),
+            PAYLOAD_OVERVIEW_MODULE_NAME: (
+                overview.get(PAYLOAD_OVERVIEW_MODULE_NAME) or stored.get("module_name")
+            ),
+            PAYLOAD_OVERVIEW_MODULE_KWARGS: (
+                overview.get(PAYLOAD_OVERVIEW_MODULE_KWARGS) or stored.get("module_kwargs", {})
+            ),
+        }
+        tool_source = stored.get("tool_source") or overview.get(PAYLOAD_OVERVIEW_TOOL_SOURCE)
+        interaction_payload = {
+            "model_config": model_config.model_dump(mode="json"),
+            "token_source": model_config.token_source or TOKEN_SOURCE_MANAGED,
+            "program_artifact": (
+                artifact.model_dump(mode="json") if hasattr(artifact, "model_dump") else artifact
+            ),
+            "payload_overview": effective_overview,
+            "inputs": filtered_inputs,
+            "_interaction": {
+                "kind": "serve",
+                "optimization_id": optimization_id,
+                "input_fields": input_fields,
+                "output_fields": output_fields,
+                "stream": False,
+            },
+        }
+        if tool_source is not None:
+            interaction_payload["tool_source"] = tool_source
+        result = run_protected_interaction(
+            interaction_payload,
+            kind="shared_serve",
+            max_cost_credits=req.max_cost_credits,
+            idempotency_key=key,
+            user=current_user,
+            job_store=job_store,
+            credential_owner=owner,
+            credential_binding_id=job_data.get("execution_budget_id")
+            or stored.get("execution_budget_id"),
         )
+        if result.get("error"):
+            raise DomainError("serve.protected_interaction_failed", status=502, error=result["error"])
+        return ServeResponse.model_validate(result)
 
     return router

@@ -14,10 +14,26 @@ const catalog: BlackboxEngineCatalogResponse = {
   auto_engines: ["gepa", "autoresearch", "meta_harness"],
   auto_available: true,
   auto_unavailable_reason: null,
+  auto_checkpoint_recovery_supported: false,
+  auto_checkpoint_recovery_reason: "Auto recovery requires a new search.",
   upstream_revision: "pinned",
+  run_recovery_eligibility:
+    "Recovery also requires a compatible saved checkpoint and enough funded headroom.",
   proposer_runtimes: [
-    { id: "worker", available: true, unavailable_reason: null },
-    { id: "vercel", available: true, unavailable_reason: null },
+    {
+      id: "vercel",
+      available: true,
+      unavailable_reason: null,
+      cost: {
+        billing_basis: "at_cost",
+        minimum_session_credits: "1",
+        maximum_session_credits: "12",
+        maximum_lifetime_seconds: 3600,
+        vcpus: 2,
+      },
+      checkpoint_restore_supported: true,
+      checkpoint_restore_reason: null,
+    },
   ],
   engines: (["gepa", "best_of_n", "autoresearch", "meta_harness"] as BlackboxEngineId[]).map(
     (id) => ({
@@ -28,6 +44,8 @@ const catalog: BlackboxEngineCatalogResponse = {
       unavailable_reason: null,
       supports_parts: id === "gepa",
       requires_agent_target: false,
+      checkpoint_recovery_supported: id === "gepa",
+      checkpoint_recovery_reason: id === "gepa" ? null : `${id} cannot restore checkpoints.`,
     }),
   ),
 };
@@ -36,7 +54,6 @@ const selection = {
   catalog,
   mode: "auto" as const,
   engine: null,
-  runtime: "worker" as const,
   hasParts: false,
   trainingCaseCount: null,
 };
@@ -88,11 +105,9 @@ test("missing or legacy capabilities cannot authorize an Auto run", () => {
   );
 });
 
-test("native engines accept text evaluation and either runtime without an agent target", () => {
+test("native engines accept text evaluation in the managed sandbox without an agent target", () => {
   for (const engine of ["meta_harness", "autoresearch"] as const) {
-    for (const runtime of ["worker", "vercel"] as const) {
-      assert.equal(engineSelectionIssue({ ...selection, mode: "single", engine, runtime }), null);
-    }
+    assert.equal(engineSelectionIssue({ ...selection, mode: "single", engine }), null);
     assert.equal(usesNativeProposer("single", engine), true);
   }
   assert.equal(usesNativeProposer("auto", null), true);
@@ -101,22 +116,21 @@ test("native engines accept text evaluation and either runtime without an agent 
   assert.equal(usesNativeProposer("single", "best_of_n"), false);
 });
 
-test("runtime availability gates native engines without disabling GEPA", () => {
+test("managed sandbox availability gates native engines without disabling GEPA", () => {
   const unavailable: BlackboxEngineCatalogResponse = {
     ...catalog,
     proposer_runtimes: [
-      { id: "worker", available: false, unavailable_reason: "Worker is missing isolation" },
-      { id: "vercel", available: true, unavailable_reason: null },
+      {
+        ...catalog.proposer_runtimes[0],
+        available: false,
+        unavailable_reason: "Managed sandbox is unavailable",
+      },
     ],
   };
   assert.deepEqual(engineSelectionIssue({ ...selection, catalog: unavailable }), {
     key: "submit.blackbox.run_disabled.runtime_reason",
-    params: { reason: "Worker is missing isolation" },
+    params: { reason: "Managed sandbox is unavailable" },
   });
-  assert.equal(
-    engineSelectionIssue({ ...selection, catalog: unavailable, runtime: "vercel" }),
-    null,
-  );
   assert.equal(
     engineSelectionIssue({ ...selection, catalog: unavailable, mode: "single", engine: "gepa" }),
     null,

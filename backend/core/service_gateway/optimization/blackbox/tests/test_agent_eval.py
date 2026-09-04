@@ -92,6 +92,72 @@ def test_safe_relative_path_normalizes_and_rejects_escapes() -> None:
             safe_relative_path(bad)
 
 
+@pytest.mark.parametrize("harness", ["custom", "pi", "codex", "claude_code", "opencode"])
+def test_seedless_agent_readiness_uses_real_runtime_without_candidate(harness: str) -> None:
+    """Check shell syntax and pinned binaries while never launching a model or inventing input."""
+    runtime = FakeSandboxRuntime()
+    runtime.protected = True
+    scorer = _scorer_of(runtime, _target(harness=harness, setup_command="echo prepare"))
+    result = scorer.check_ready()
+    session = runtime.sessions[0]
+    assert runtime.specs[0].network_disabled is True
+    assert session.closed
+    assert len(session.commands) == 1
+    assert "bash -n .skynet/readiness-0.sh" in session.commands[0]
+    assert "--version" in session.commands[0] or harness == "custom"
+    assert "npm install" not in session.commands[0]
+    assert not any(name in session.files for name in (PROMPT_FILE, "AGENTS.md", "CLAUDE.md"))
+    assert result["candidate_execution"] == "awaiting_first_generated_candidate"
+    assert result["readiness"] == (
+        "command_syntax_verified" if harness == "custom" else "pinned_cli_and_syntax_verified"
+    )
+
+
+def test_agent_readiness_rejects_invalid_bootstrap_and_closes() -> None:
+    """Retain an explicit setup failure when a real sandbox version or syntax check fails."""
+    session = FakeSandboxSession(script=lambda _command: CommandResult(exit_code=2))
+    runtime = _runtime_of(session)
+    runtime.protected = True
+    with pytest.raises(ServiceError, match="offline version or command syntax"):
+        _scorer_of(runtime, _target()).check_ready()
+    assert session.closed
+
+
+def test_agent_readiness_executes_authored_dependencies_offline() -> None:
+    """Run an authored install command during Continue before accepting the setup."""
+    runtime = FakeSandboxRuntime()
+    runtime.protected = True
+    scorer = _scorer_of(
+        runtime,
+        _target(install_command="pip install --no-index /opt/skynet/wheels/tool.whl"),
+    )
+
+    result = scorer.check_ready()
+
+    session = runtime.sessions[0]
+    assert runtime.specs[0].network_disabled is True
+    assert session.commands[-1] == "pip install --no-index /opt/skynet/wheels/tool.whl"
+    assert result["readiness"] == "offline_dependencies_and_syntax_verified"
+
+
+def test_agent_readiness_reports_missing_offline_dependency() -> None:
+    """Fail Continue when the pinned image cannot satisfy an install command."""
+
+    def script(command: str) -> CommandResult:
+        """Fail only the dependency installation after syntax validation."""
+        if command.startswith("pip install"):
+            return CommandResult(exit_code=1, stderr="No matching distribution found")
+        return CommandResult(exit_code=0)
+
+    runtime = FakeSandboxRuntime(session_factory=lambda: FakeSandboxSession(script=script))
+    runtime.protected = True
+
+    with pytest.raises(ServiceError, match="offline Vercel sandbox: No matching distribution found"):
+        _scorer_of(runtime, _target(install_command="pip install unavailable-package")).check_ready()
+
+    assert runtime.sessions[0].closed is True
+
+
 def test_candidate_files_maps_text_and_named_parts() -> None:
     """A text version becomes the instructions file; a dict version becomes its safe parts."""
     assert candidate_files("hello", "AGENTS.md") == {"AGENTS.md": "hello"}
@@ -394,6 +460,7 @@ def test_install_failure_short_circuits_the_run() -> None:
     """A failed install stops before the agent runs."""
 
     def script(command: str) -> CommandResult:
+        """Fail only the authored installation command."""
         return CommandResult(exit_code=1, stdout="boom") if command == "install-me" else CommandResult(exit_code=0)
 
     session = FakeSandboxSession(script=script)
@@ -410,6 +477,7 @@ def test_setup_failure_short_circuits_the_run() -> None:
     """A failed case setup stops before the agent runs."""
 
     def script(command: str) -> CommandResult:
+        """Fail only the authored case setup command."""
         return CommandResult(exit_code=2, stdout="nope") if command == "setup-me" else CommandResult(exit_code=0)
 
     session = FakeSandboxSession(script=script)
@@ -425,6 +493,7 @@ def test_check_command_is_recorded() -> None:
     """A case check runs after the agent and its outcome lands in the record."""
 
     def script(command: str) -> CommandResult:
+        """Return visible success output for the case check."""
         return CommandResult(exit_code=0, stdout="checked ok") if command == "verify" else CommandResult(exit_code=0)
 
     session = FakeSandboxSession(script=script, produces={"run-agent": {ANSWER_FILE: "answer"}})
@@ -578,6 +647,7 @@ def test_call_scores_the_record_and_merges_feedback() -> None:
     seen: dict[str, Any] = {}
 
     def scorer_fn(candidate: Any, record: Any) -> tuple[float, dict[str, Any]]:
+        """Capture the run record and return deterministic feedback."""
         seen["record"] = record
         return 0.5, {"note": "x"}
 

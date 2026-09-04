@@ -4,18 +4,25 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion, useReducedMotion } from "framer-motion";
+import { toast } from "react-toastify";
 import { ChartBar, Table } from "@/shared/ui/icons";
 import { DashboardSkeleton } from "./DashboardSkeleton";
 import { Card } from "@/shared/ui/primitives/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/primitives/tabs";
 import { FadeIn } from "@/shared/ui/motion";
-import { msg } from "@/shared/lib/messages";
+import { formatMsg, msg } from "@/shared/lib/messages";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { TERMS } from "@/shared/lib/terms";
 import { useColumnFilters, useColumnResize, type SortDir } from "@/shared/ui/excel-filter";
-import { getJobTypeLabel, getStatusLabel } from "@/shared/constants/job-status";
+import { ACTIVE_STATUSES, getJobTypeLabel, getStatusLabel } from "@/shared/constants/job-status";
 import type { OptimizationSummaryResponse, PaginatedJobsResponse } from "@/shared/types/api";
-import type { DashboardAnalytics } from "@/shared/lib/api";
+import {
+  bulkCancelJobs,
+  bulkPinOptimizations,
+  pauseJob,
+  resumeJob,
+  type DashboardAnalytics,
+} from "@/shared/lib/api";
 import { registerTutorialHook, registerTutorialQuery } from "@/features/tutorial";
 import { transformChartData } from "../lib/transform-chart-data";
 import { useQueueStatus } from "../hooks/use-queue-status";
@@ -182,6 +189,151 @@ export function DashboardView() {
     confirmBulkDelete,
   } = useBulkDelete({ data, setData, setPageOffset, fetchJobs, visibleData: effectiveData });
 
+  const selectedJobs = useMemo(() => {
+    if (!effectiveData || !Array.isArray(effectiveData.items)) return [];
+    return effectiveData.items.filter((job) => selectedIds.has(job.optimization_id));
+  }, [effectiveData, selectedIds]);
+  const hasCompleteSelection = selectedIds.size > 0 && selectedJobs.length === selectedIds.size;
+  const selectedJob = hasCompleteSelection && selectedJobs.length === 1 ? selectedJobs[0] : null;
+  const canEditSelection =
+    hasCompleteSelection &&
+    (isAdmin ||
+      selectedJobs.every(
+        (job) => job.role == null || job.role === "owner" || job.role === "editor",
+      ));
+  const canManageSelectedShare = !!selectedJob && (isAdmin || selectedJob.role == null);
+  const activeSelectedIds = canEditSelection
+    ? selectedJobs
+        .filter((job) => ACTIVE_STATUSES.has(job.status))
+        .map((job) => job.optimization_id)
+    : [];
+  const pausableSelectedIds =
+    canEditSelection && selectedJobs.every((job) => job.pausable)
+      ? selectedJobs.map((job) => job.optimization_id)
+      : [];
+  const resumableSelectedIds =
+    canEditSelection && selectedJobs.every((job) => job.resumable)
+      ? selectedJobs.map((job) => job.optimization_id)
+      : [];
+  const willPinSelection = !selectedJobs.every((job) => job.pinned);
+  const [selectionAction, setSelectionAction] = useState<
+    "pin" | "pause" | "resume" | "stop" | null
+  >(null);
+
+  const handleCloneSelected = () => {
+    if (!selectedJob) return;
+    const recipe = selectedJob.optimization_type === "blackbox" ? "anything" : "program";
+    router.push(`/submit?clone=${selectedJob.optimization_id}&recipe=${recipe}`);
+  };
+
+  const handleTogglePinSelected = async () => {
+    if (!canEditSelection || selectionAction) return;
+    const ids = selectedJobs.map((job) => job.optimization_id);
+    setSelectionAction("pin");
+    try {
+      const result = await bulkPinOptimizations(ids, willPinSelection);
+      if (result.updated.length > 0) {
+        toast.success(
+          result.updated.length === 1
+            ? msg(willPinSelection ? "sidebar.pin.on" : "sidebar.pin.off")
+            : formatMsg(
+                willPinSelection
+                  ? "auto.features.agent.panel.lib.tool.renderers.template.14"
+                  : "auto.features.agent.panel.lib.tool.renderers.template.15",
+                { p1: result.updated.length },
+              ),
+        );
+      }
+      if (result.skipped.length > 0) {
+        toast.warning(msg("auto.features.agent.panel.lib.tool.renderers.literal.16"));
+      }
+      await fetchJobs();
+      window.dispatchEvent(new Event("optimizations-changed"));
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : msg("auto.features.agent.panel.lib.tool.renderers.literal.16"),
+      );
+    } finally {
+      setSelectionAction(null);
+    }
+  };
+
+  const handleStopSelected = async () => {
+    if (activeSelectedIds.length === 0 || selectionAction) return;
+    setSelectionAction("stop");
+    try {
+      const result = await bulkCancelJobs(activeSelectedIds);
+      if (result.cancelled.length > 0) {
+        toast.success(
+          result.cancelled.length === 1
+            ? msg("optimization.cancel.sent")
+            : formatMsg("auto.features.agent.panel.lib.tool.renderers.template.40", {
+                p1: result.cancelled.length,
+              }),
+        );
+      }
+      if (result.skipped.length > 0) {
+        toast.warning(msg("auto.features.agent.panel.lib.tool.renderers.literal.63"));
+      }
+      await fetchJobs();
+      window.dispatchEvent(new Event("optimizations-changed"));
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : msg("auto.features.agent.panel.lib.tool.renderers.literal.63"),
+      );
+    } finally {
+      setSelectionAction(null);
+    }
+  };
+
+  const runSelectedLifecycle = async (
+    action: "pause" | "resume",
+    ids: string[],
+    request: (optimizationId: string) => Promise<unknown>,
+    successMessage: string,
+    failureMessage: string,
+  ) => {
+    if (ids.length === 0 || selectionAction) return;
+    setSelectionAction(action);
+    try {
+      const results = await Promise.allSettled(ids.map((id) => request(id)));
+      const succeeded = results.filter((result) => result.status === "fulfilled").length;
+      const failed = results.length - succeeded;
+      if (succeeded > 0) {
+        toast.success(succeeded === 1 ? successMessage : `${succeeded} · ${successMessage}`);
+      }
+      if (failed > 0) {
+        toast.warning(failed === 1 ? failureMessage : `${failed} · ${failureMessage}`);
+      }
+      await fetchJobs();
+      window.dispatchEvent(new Event("optimizations-changed"));
+    } finally {
+      setSelectionAction(null);
+    }
+  };
+
+  const handlePauseSelected = () =>
+    runSelectedLifecycle(
+      "pause",
+      pausableSelectedIds,
+      pauseJob,
+      msg("optimization.pause.success"),
+      msg("optimization.pause.failed"),
+    );
+
+  const handleResumeSelected = () =>
+    runSelectedLifecycle(
+      "resume",
+      resumableSelectedIds,
+      resumeJob,
+      msg("sidebar.resume.success"),
+      msg("sidebar.resume.failed"),
+    );
+
   // Admins delete anything; everyone else may bulk-delete only runs they own
   // outright (role null/absent) or co-own (role "owner"). Shared viewer/editor
   // grants can't delete. Mirrors the detail page's canDeleteRun (effective_role
@@ -192,10 +344,9 @@ export function DashboardView() {
     if (isAdmin) return true;
     if (!effectiveData || !Array.isArray(effectiveData.items) || selectedIds.size === 0)
       return false;
-    const selected = effectiveData.items.filter((j) => selectedIds.has(j.optimization_id));
-    if (selected.length !== selectedIds.size) return false;
-    return selected.every((j) => j.role == null || j.role === "owner");
-  }, [isAdmin, effectiveData, selectedIds]);
+    if (!hasCompleteSelection) return false;
+    return selectedJobs.every((job) => job.role == null || job.role === "owner");
+  }, [isAdmin, effectiveData, selectedIds.size, hasCompleteSelection, selectedJobs]);
 
   const filteredItems = useMemo(() => {
     if (!effectiveData || !Array.isArray(effectiveData.items)) return [];
@@ -397,8 +548,21 @@ export function DashboardView() {
 
         <BulkActionBar
           canDelete={canBulkDelete}
+          canManageShare={canManageSelectedShare}
+          canPause={pausableSelectedIds.length > 0}
+          canResume={resumableSelectedIds.length > 0}
+          canStop={activeSelectedIds.length > 0}
+          canTogglePin={canEditSelection}
+          selectedJobId={selectedJob?.optimization_id ?? null}
           selectedCount={selectedIds.size}
+          willPin={willPinSelection}
+          actionPending={selectionAction !== null}
           onClear={clearSelection}
+          onClone={handleCloneSelected}
+          onPause={handlePauseSelected}
+          onResume={handleResumeSelected}
+          onStop={handleStopSelected}
+          onTogglePin={handleTogglePinSelected}
           onRequestBulkDelete={() => setBulkDeleteOpen(true)}
         />
         <DeleteDialogs

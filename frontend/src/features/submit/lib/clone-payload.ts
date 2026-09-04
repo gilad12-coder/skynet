@@ -96,3 +96,19 @@ export function cloneColumnRoles(
   for (const column of Object.keys(mapping?.outputs ?? {})) roles[column] = "output";
   return roles;
 }
+
+/**
+ * Restore the run-level MCP permission contract from a cloned payload.
+ *
+ * Missing and null filters are the legacy full-roster contract. An array is
+ * an explicit allow-list and stays exact, including an empty (invalid) list,
+ * so the wizard can explain it instead of widening permissions.
+ */
+export function cloneReactToolFilter(payload: ClonePayload): string[] | null | undefined {
+  const source = payload.tool_source;
+  if (!source || typeof source !== "object" || Array.isArray(source)) return undefined;
+  const record = source as Record<string, unknown>;
+  if (!("tool_filter" in record) || record.tool_filter == null) return null;
+  if (!Array.isArray(record.tool_filter)) return [];
+  return record.tool_filter.filter((name): name is string => typeof name === "string");
+}

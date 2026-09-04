@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ...config import settings
-from ..routers._helpers import is_pausable, is_resumable
+from ..routers._helpers import is_pausable, is_resumable, pausable_id_flags
 from ..routers.optimizations import create_optimizations_router
 from .conftest import bypass_auth
 from .mocks import _BaseFakeJobStore
@@ -258,3 +258,30 @@ def test_is_pausable_discriminator(store: _BaseFakeJobStore) -> None:
     _seed_grid(store, "gp", status="running")
     store.save_gepa_checkpoint("gp", b"x", 1, pair_index=0)
     assert is_pausable(store, store.get_job("gp")) is False  # grids pause per the whole-job rule
+
+
+def test_pausable_id_flags_batches_sidebar_candidates(store: _BaseFakeJobStore) -> None:
+    """Flag only running non-grid rows that already have a checkpoint."""
+    store.seed_job("ready", status="running", username="alice")
+    store.save_gepa_checkpoint("ready", b"x", 1)
+    store.seed_job("waiting", status="running", username="alice")
+    store.seed_job("done", status="success", username="alice")
+
+    rows = [store.get_job(oid) for oid in ("ready", "waiting", "done")]
+
+    assert pausable_id_flags(store, rows) == {"ready"}
+
+
+def test_listings_mark_checkpointed_running_job_pausable(
+    client: TestClient,
+    store: _BaseFakeJobStore,
+) -> None:
+    """Expose Pause capability in dashboard and sidebar responses."""
+    store.seed_job("sidebar-pause", status="running", username="alice")
+    store.save_gepa_checkpoint("sidebar-pause", b"x", 1)
+
+    for path in ("/optimizations", "/optimizations/sidebar"):
+        response = client.get(path)
+        assert response.status_code == 200
+        item = next(row for row in response.json()["items"] if row["optimization_id"] == "sidebar-pause")
+        assert item["pausable"] is True

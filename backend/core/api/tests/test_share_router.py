@@ -2,7 +2,7 @@
 
 Exercises the owner/editor-gated management surface (general-access policy,
 member CRUD, role gating), the access-gated public composite read
-(``GET /share/{token}``), and the editor+-only inference path
+(``GET /share/{token}``), and the caller-funded viewer inference path
 (``POST /share/{token}/serve``).
 
 The store mirrors the in-memory SQLite pattern of the sibling routers: a
@@ -13,8 +13,9 @@ language-model builder on the ``share`` module so it never touches a real model.
 
 from __future__ import annotations
 
-from contextlib import nullcontext
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -23,7 +24,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from ...models import RunResponse, ServeInfoResponse
+from ...models import ProgramArtifact, RunResponse, ServeInfoResponse
 from ...storage.models import Base, JobModel
 from ...storage.remote import RemoteDBJobStore
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -85,11 +86,32 @@ def _seed_job(store: _MemStore, optimization_id: str = "opt-share-1", username: 
                     "model_config": {
                         "name": "openai/gpt-5.4-nano",
                         "base_url": "https://secret.internal",
-                        "extra": {"api_key": "sk-SECRET", "reasoning_effort": "medium"},
+                        "extra": {
+                            "api_key": "sk-SECRET",
+                            "nested": {
+                                "clientSecret": "MODEL-CLIENT-SECRET",
+                                "Authorization": "Bearer MODEL-AUTH-SECRET",
+                            },
+                            "reasoning_effort": "medium",
+                        },
                     },
                     "reflection_model_config": {
                         "name": "openai/gpt-5.4-nano",
                         "extra": {"api_key": "sk-SECRET2"},
+                    },
+                    "tool_source": {
+                        "kind": "live_mcp",
+                        "mcp_url": "https://tools.example/mcp?access_token=MCP-QUERY-SECRET",
+                        "mcp_auth_header": "Bearer MCP-SECRET",
+                        "_mcp_credential_ref": "mcp-opaque-reference",
+                        "_mcp_credential_revision": 1,
+                    },
+                    "scorer": {
+                        "kind": "remote",
+                        "url": "https://evaluator.example/score?api_key=EVALUATOR-QUERY-SECRET",
+                        "secret": "EVALUATOR-SECRET",
+                        "_scorer_credential_ref": "scorer-opaque-reference",
+                        "_scorer_credential_revision": 1,
                     },
                 },
                 username=username,
@@ -208,10 +230,7 @@ def test_put_visibility_non_owner_404() -> None:
     store = _MemStore()
     _seed_job(store, username="alice")
     stranger = _client(store, user="bob")
-    assert (
-        stranger.put("/optimizations/opt-share-1/visibility", json={"is_private": True}).status_code
-        == 404
-    )
+    assert stranger.put("/optimizations/opt-share-1/visibility", json={"is_private": True}).status_code == 404
 
 
 def test_anonymous_get_is_unauthorized() -> None:
@@ -250,16 +269,19 @@ def _serve_info_stub() -> ServeInfoResponse:
     )
 
 
-def test_member_viewer_sees_owner_but_not_serve_info() -> None:
-    """A viewer member sees the real owner, but serve_info stays null (serve is editor+)."""
+def test_member_viewer_sees_owner_and_caller_funded_serve_info() -> None:
+    """A viewer member sees the owner and the form for caller-funded inference."""
     store = _MemStore()
     _seed_job(store, username="alice")
     token = _enable_anyone(store)
 
     owner = _client(store, user="alice")
-    assert owner.post(
-        "/optimizations/opt-share-1/sharing/members", json={"username": "carol", "role": "viewer"}
-    ).status_code == 200
+    assert (
+        owner.post(
+            "/optimizations/opt-share-1/sharing/members", json={"username": "carol", "role": "viewer"}
+        ).status_code
+        == 200
+    )
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(share_module, "_serve_info", lambda *_args, **_kw: _serve_info_stub())
@@ -270,7 +292,7 @@ def test_member_viewer_sees_owner_but_not_serve_info() -> None:
     body = resp.json()
     assert body["role"] == "viewer"
     assert body["owner"] == "alice"
-    assert body["serve_info"] is None
+    assert body["serve_info"]["optimization_id"] == "opt-share-1"
     assert body["status"]["username"] == "alice"
 
 
@@ -281,9 +303,12 @@ def test_member_editor_sees_owner_and_serve_info() -> None:
     token = _enable_anyone(store)
 
     owner = _client(store, user="alice")
-    assert owner.post(
-        "/optimizations/opt-share-1/sharing/members", json={"username": "erin", "role": "editor"}
-    ).status_code == 200
+    assert (
+        owner.post(
+            "/optimizations/opt-share-1/sharing/members", json={"username": "erin", "role": "editor"}
+        ).status_code
+        == 200
+    )
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(share_module, "_serve_info", lambda *_args, **_kw: _serve_info_stub())
@@ -296,6 +321,59 @@ def test_member_editor_sees_owner_and_serve_info() -> None:
     assert body["owner"] == "alice"
     assert body["serve_info"]["input_fields"] == ["question"]
     assert body["status"]["username"] == "alice"
+
+
+def test_protected_shared_metadata_does_not_execute_persisted_signature(
+    tmp_path: Path,
+) -> None:
+    """Expose protected shared form metadata while keeping signature code inert.
+
+    Args:
+        tmp_path: Parent-owned directory the persisted signature must not modify.
+    """
+    store = _MemStore()
+    _seed_job(store, username="alice")
+    marker = tmp_path / "shared-signature-ran-in-api.txt"
+    signature_code = "\n".join(
+        [
+            "import pathlib",
+            "import dspy",
+            f"pathlib.Path({str(marker)!r}).write_text('unsafe')",
+            "class UnsafeSignature(dspy.Signature):",
+            "    question: str = dspy.InputField()",
+            "    answer: str = dspy.OutputField()",
+        ]
+    )
+    prompt = make_artifact().optimized_prompt
+    artifact = ProgramArtifact(program_state_json={}, optimized_prompt=prompt)
+    result = make_run_result(artifact)
+    current = store.get_job("opt-share-1")
+    store.update_job(
+        "opt-share-1",
+        execution_budget_id="budget-1",
+        payload={**current["payload"], "execution_runtime": "vercel"},
+        payload_overview={
+            **current["payload_overview"],
+            "model_name": "openai/gpt-5.4-nano",
+            "signature_code": signature_code,
+        },
+        result=result.model_dump(mode="json"),
+    )
+    token = _enable_anyone(store, role="editor")
+    editor = _client(store, user="bob")
+
+    read = editor.get(f"/share/{token}")
+    execution = editor.post(
+        f"/share/{token}/serve",
+        json={"inputs": {"question": "hello"}},
+    )
+
+    assert read.status_code == 200
+    assert read.json()["serve_info"]["input_fields"] == ["question"]
+    assert read.json()["serve_info"]["output_fields"] == ["reasoning", "answer"]
+    assert execution.status_code == 400
+    assert "max_cost_credits" in execution.json()["detail"]
+    assert not marker.exists()
 
 
 def test_claim_anyone_link_persists_grant_and_makes_run_visible() -> None:
@@ -330,9 +408,7 @@ def test_claim_restricted_link_non_member_404_no_grant() -> None:
     store = _MemStore()
     _seed_job(store, username="alice")
     owner = _client(store, user="alice")
-    token = owner.put(
-        "/optimizations/opt-share-1/sharing", json={"general_access": "restricted"}
-    ).json()["token"]
+    token = owner.put("/optimizations/opt-share-1/sharing", json={"general_access": "restricted"}).json()["token"]
 
     stranger = _client(store, user="mallory")
     assert stranger.post(f"/share/{token}/claim").status_code == 404
@@ -348,9 +424,12 @@ def test_claim_does_not_downgrade_existing_higher_grant() -> None:
     token = _enable_anyone(store, role="viewer")
 
     owner = _client(store, user="alice")
-    assert owner.post(
-        "/optimizations/opt-share-1/sharing/members", json={"username": "frank", "role": "editor"}
-    ).status_code == 200
+    assert (
+        owner.post(
+            "/optimizations/opt-share-1/sharing/members", json={"username": "frank", "role": "editor"}
+        ).status_code
+        == 200
+    )
 
     frank = _client(store, user="frank")
     resp = frank.post(f"/share/{token}/claim")
@@ -398,10 +477,13 @@ def test_link_member_role_tracks_link_downgrade() -> None:
     assert dan.post(f"/share/{token}/claim").json()["role"] == "editor"
 
     owner = _client(store, user="alice")
-    assert owner.put(
-        "/optimizations/opt-share-1/sharing",
-        json={"general_access": "anyone", "general_role": "viewer"},
-    ).status_code == 200
+    assert (
+        owner.put(
+            "/optimizations/opt-share-1/sharing",
+            json={"general_access": "anyone", "general_role": "viewer"},
+        ).status_code
+        == 200
+    )
 
     with Session(store.engine) as session:
         grant = get_grant(session, "opt-share-1", "dan")
@@ -421,9 +503,7 @@ def test_link_member_removed_when_link_restricted() -> None:
     assert dan.post(f"/share/{token}/claim").status_code == 200
 
     owner = _client(store, user="alice")
-    assert owner.put(
-        "/optimizations/opt-share-1/sharing", json={"general_access": "restricted"}
-    ).status_code == 200
+    assert owner.put("/optimizations/opt-share-1/sharing", json={"general_access": "restricted"}).status_code == 200
 
     with Session(store.engine) as session:
         assert get_grant(session, "opt-share-1", "dan") is None
@@ -440,9 +520,12 @@ def test_invited_member_unaffected_by_link_changes() -> None:
     _enable_anyone(store, role="editor")
 
     owner = _client(store, user="alice")
-    assert owner.post(
-        "/optimizations/opt-share-1/sharing/members", json={"username": "carol", "role": "viewer"}
-    ).status_code == 200
+    assert (
+        owner.post(
+            "/optimizations/opt-share-1/sharing/members", json={"username": "carol", "role": "viewer"}
+        ).status_code
+        == 200
+    )
     # Downgrade then restrict the link — carol's named viewer grant must persist.
     owner.put("/optimizations/opt-share-1/sharing", json={"general_access": "anyone", "general_role": "editor"})
     owner.put("/optimizations/opt-share-1/sharing", json={"general_access": "restricted"})
@@ -478,9 +561,10 @@ def test_named_invite_supersedes_link_membership() -> None:
     dan.post(f"/share/{token}/claim")
 
     owner = _client(store, user="alice")
-    assert owner.post(
-        "/optimizations/opt-share-1/sharing/members", json={"username": "dan", "role": "editor"}
-    ).status_code == 200
+    assert (
+        owner.post("/optimizations/opt-share-1/sharing/members", json={"username": "dan", "role": "editor"}).status_code
+        == 200
+    )
     # Restricting the link must NOT drop dan now — his access is a named invite.
     owner.put("/optimizations/opt-share-1/sharing", json={"general_access": "restricted"})
 
@@ -494,7 +578,7 @@ def test_named_invite_supersedes_link_membership() -> None:
 
 
 def test_public_view_payload_is_scrubbed() -> None:
-    """The public payload strips username, raw dataset, api_key and base_url."""
+    """The shared payload strips identity, data, model keys, and relay credentials."""
     store = _MemStore()
     _seed_job(store, username="alice")
     token = _enable_anyone(store)
@@ -510,6 +594,16 @@ def test_public_view_payload_is_scrubbed() -> None:
     assert "api_key" not in payload["model_config"]["extra"]
     assert payload["model_config"]["extra"]["reasoning_effort"] == "medium"
     assert "api_key" not in payload["reflection_model_config"]["extra"]
+    assert "mcp_auth_header" not in payload["tool_source"]
+    assert "_mcp_credential_ref" not in payload["tool_source"]
+    assert "secret" not in payload["scorer"]
+    assert "_scorer_credential_ref" not in payload["scorer"]
+    assert "MCP-SECRET" not in json.dumps(body)
+    assert "EVALUATOR-SECRET" not in json.dumps(body)
+    assert "MCP-QUERY-SECRET" not in json.dumps(body)
+    assert "EVALUATOR-QUERY-SECRET" not in json.dumps(body)
+    assert "MODEL-CLIENT-SECRET" not in json.dumps(body)
+    assert "MODEL-AUTH-SECRET" not in json.dumps(body)
 
 
 def test_public_view_dataset_is_full_not_capped() -> None:
@@ -535,9 +629,7 @@ def test_member_crud_add_patch_remove() -> None:
     _seed_job(store, username="alice")
     owner = _client(store, user="alice")
 
-    added = owner.post(
-        "/optimizations/opt-share-1/sharing/members", json={"username": "Dave", "role": "viewer"}
-    )
+    added = owner.post("/optimizations/opt-share-1/sharing/members", json={"username": "Dave", "role": "viewer"})
     assert added.status_code == 200
     assert {"username": "dave", "role": "viewer"} in added.json()["members"]
 
@@ -555,9 +647,7 @@ def test_member_add_invalid_role_400() -> None:
     store = _MemStore()
     _seed_job(store, username="alice")
     owner = _client(store, user="alice")
-    resp = owner.post(
-        "/optimizations/opt-share-1/sharing/members", json={"username": "dave", "role": "view"}
-    )
+    resp = owner.post("/optimizations/opt-share-1/sharing/members", json={"username": "dave", "role": "view"})
     assert resp.status_code == 400
 
 
@@ -566,9 +656,7 @@ def test_member_patch_unknown_member_404() -> None:
     store = _MemStore()
     _seed_job(store, username="alice")
     owner = _client(store, user="alice")
-    assert owner.patch(
-        "/optimizations/opt-share-1/sharing/members/ghost", json={"role": "editor"}
-    ).status_code == 404
+    assert owner.patch("/optimizations/opt-share-1/sharing/members/ghost", json={"role": "editor"}).status_code == 404
 
 
 def test_member_management_gated_for_non_owner_404() -> None:
@@ -576,9 +664,12 @@ def test_member_management_gated_for_non_owner_404() -> None:
     store = _MemStore()
     _seed_job(store, username="alice")
     stranger = _client(store, user="bob")
-    assert stranger.post(
-        "/optimizations/opt-share-1/sharing/members", json={"username": "dave", "role": "viewer"}
-    ).status_code == 404
+    assert (
+        stranger.post(
+            "/optimizations/opt-share-1/sharing/members", json={"username": "dave", "role": "viewer"}
+        ).status_code
+        == 404
+    )
 
 
 def test_viewer_member_cannot_manage_sharing_404() -> None:
@@ -590,9 +681,12 @@ def test_viewer_member_cannot_manage_sharing_404() -> None:
 
     viewer = _client(store, user="carol")
     assert viewer.get("/optimizations/opt-share-1/sharing").status_code == 404
-    assert viewer.post(
-        "/optimizations/opt-share-1/sharing/members", json={"username": "dave", "role": "viewer"}
-    ).status_code == 404
+    assert (
+        viewer.post(
+            "/optimizations/opt-share-1/sharing/members", json={"username": "dave", "role": "viewer"}
+        ).status_code
+        == 404
+    )
 
 
 def test_editor_member_cannot_manage_sharing_404() -> None:
@@ -604,9 +698,12 @@ def test_editor_member_cannot_manage_sharing_404() -> None:
 
     editor = _client(store, user="erin")
     assert editor.get("/optimizations/opt-share-1/sharing").status_code == 404
-    assert editor.post(
-        "/optimizations/opt-share-1/sharing/members", json={"username": "dave", "role": "viewer"}
-    ).status_code == 404
+    assert (
+        editor.post(
+            "/optimizations/opt-share-1/sharing/members", json={"username": "dave", "role": "viewer"}
+        ).status_code
+        == 404
+    )
 
 
 def test_grant_owner_role_400() -> None:
@@ -614,9 +711,7 @@ def test_grant_owner_role_400() -> None:
     store = _MemStore()
     _seed_job(store, username="alice")
     owner = _client(store, user="alice")
-    resp = owner.post(
-        "/optimizations/opt-share-1/sharing/members", json={"username": "dave", "role": "owner"}
-    )
+    resp = owner.post("/optimizations/opt-share-1/sharing/members", json={"username": "dave", "role": "owner"})
     assert resp.status_code == 400
 
 
@@ -675,9 +770,7 @@ def test_transfer_by_non_owner_404() -> None:
     owner.post("/optimizations/opt-share-1/sharing/members", json={"username": "dave", "role": "editor"})
     owner.post("/optimizations/opt-share-1/sharing/members", json={"username": "erin", "role": "viewer"})
 
-    resp = _client(store, user="dave").post(
-        "/optimizations/opt-share-1/sharing/transfer", json={"username": "erin"}
-    )
+    resp = _client(store, user="dave").post("/optimizations/opt-share-1/sharing/transfer", json={"username": "erin"})
     assert resp.status_code == 404
 
 
@@ -720,12 +813,6 @@ def test_user_search_excludes_synthetic_local_accounts() -> None:
     assert caller.get("/users/search", params={"q": "probe@"}).json()["usernames"] == []
 
 
-class _FakePrediction:
-    """Stub prediction exposing attribute access for the declared output field."""
-
-    answer: str = "shared-answer"
-
-
 def _seed_serveable(store: _MemStore, optimization_id: str = "opt-share-1") -> tuple[object, object, dict]:
     """Return the ``(program, RunResponse, overview)`` triple a fake loader yields.
 
@@ -747,25 +834,43 @@ def _seed_serveable(store: _MemStore, optimization_id: str = "opt-share-1") -> t
         "optimizer_name": "gepa",
         "model_name": "openai/gpt-5.4-nano",
     }
-    program = lambda **_inputs: _FakePrediction()  # noqa: E731 — terse stub program
-    return program, result, overview
+    return object(), result, overview
 
 
 def test_serve_allowed_for_editor_member() -> None:
-    """An editor member can run inference; the owner key is used server-side."""
+    """An editor member can run inference with their own request budget."""
     store = _MemStore()
     _seed_job(store, username="alice")
     token = _enable_anyone(store)
     owner = _client(store, user="alice")
     owner.post("/optimizations/opt-share-1/sharing/members", json={"username": "erin", "role": "editor"})
 
-    program, result, overview = _seed_serveable(store)
+    _program, result, overview = _seed_serveable(store)
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(share_module, "load_program", lambda *_a, **_k: (program, result, overview))
-        mp.setattr(share_module, "build_language_model", lambda _cfg: object())
-        mp.setattr(share_module.dspy, "context", lambda **_kw: nullcontext())
+        mp.setattr(
+            share_module,
+            "load_program_metadata",
+            lambda *_a, **_k: (result.program_artifact, overview, overview["model_name"]),
+        )
+        mp.setattr(
+            share_module,
+            "run_protected_interaction",
+            lambda *_a, **_k: {
+                "optimization_id": "opt-share-1",
+                "outputs": {"answer": "shared-answer"},
+                "input_fields": ["question"],
+                "output_fields": ["answer"],
+                "model_used": "openai/gpt-5.4-nano",
+                "credits_charged": "1.5",
+                "budget": {},
+            },
+        )
         editor = _client(store, user="erin")
-        resp = editor.post(f"/share/{token}/serve", json={"inputs": {"question": "hi"}})
+        resp = editor.post(
+            f"/share/{token}/serve",
+            json={"inputs": {"question": "hi"}, "max_cost_credits": 10},
+            headers={"Idempotency-Key": "editor-call"},
+        )
 
     assert resp.status_code == 200
     body = resp.json()
@@ -777,8 +882,8 @@ def test_serve_allowed_for_editor_member() -> None:
     assert "secret.internal" not in resp.text
 
 
-def test_serve_forbidden_for_viewer_member() -> None:
-    """A viewer member is forbidden from inference (403) — serving is editor+."""
+def test_serve_viewer_requires_a_caller_budget() -> None:
+    """A viewer reaches inference but must authorize a one-request budget."""
     store = _MemStore()
     _seed_job(store, username="alice")
     token = _enable_anyone(store)
@@ -787,7 +892,8 @@ def test_serve_forbidden_for_viewer_member() -> None:
 
     viewer = _client(store, user="carol")
     resp = viewer.post(f"/share/{token}/serve", json={"inputs": {"question": "hi"}})
-    assert resp.status_code == 403
+    assert resp.status_code == 400
+    assert "max_cost_credits" in resp.json()["detail"]
 
 
 def test_serve_unauthorized_for_anonymous() -> None:
@@ -846,17 +952,34 @@ def test_signed_in_stranger_gets_editor_link_role_and_can_serve() -> None:
     assert read.json()["role"] == "editor"
     assert read.json()["owner"] == "alice"
 
-    program, result, overview = _seed_serveable(store)
+    _program, result, overview = _seed_serveable(store)
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(share_module, "load_program", lambda *_a, **_k: (program, result, overview))
-        mp.setattr(share_module, "build_language_model", lambda _cfg: object())
-        mp.setattr(share_module.dspy, "context", lambda **_kw: nullcontext())
-        served = stranger.post(f"/share/{token}/serve", json={"inputs": {"question": "hi"}})
+        mp.setattr(
+            share_module,
+            "load_program_metadata",
+            lambda *_a, **_k: (result.program_artifact, overview, overview["model_name"]),
+        )
+        mp.setattr(
+            share_module,
+            "run_protected_interaction",
+            lambda *_a, **_k: {
+                "optimization_id": "opt-share-1",
+                "outputs": {"answer": "shared-answer"},
+                "input_fields": ["question"],
+                "output_fields": ["answer"],
+                "model_used": "openai/gpt-5.4-nano",
+            },
+        )
+        served = stranger.post(
+            f"/share/{token}/serve",
+            json={"inputs": {"question": "hi"}, "max_cost_credits": 10},
+            headers={"Idempotency-Key": "link-editor-call"},
+        )
     assert served.status_code == 200
 
 
-def test_signed_in_stranger_viewer_link_cannot_serve() -> None:
-    """An ``anyone -> viewer`` link gives a signed-in stranger viewer: read yes, serve no."""
+def test_signed_in_stranger_viewer_link_requires_a_caller_budget() -> None:
+    """An anyone-viewer link permits inference once the caller supplies a budget."""
     store = _MemStore()
     _seed_job(store, username="alice")
     token = _enable_anyone(store, role="viewer")
@@ -867,7 +990,8 @@ def test_signed_in_stranger_viewer_link_cannot_serve() -> None:
     assert read.json()["role"] == "viewer"
 
     served = stranger.post(f"/share/{token}/serve", json={"inputs": {"question": "hi"}})
-    assert served.status_code == 403
+    assert served.status_code == 400
+    assert "max_cost_credits" in served.json()["detail"]
 
 
 def test_public_view_of_public_optimization_is_readable_and_scrubbed() -> None:
@@ -880,8 +1004,8 @@ def test_public_view_of_public_optimization_is_readable_and_scrubbed() -> None:
     store = _MemStore()
     _seed_job(store, username="alice")
 
-    stranger = _client(store, user="bob")
-    resp = stranger.get("/optimizations/opt-share-1/public")
+    public = _client(store, user=None)
+    resp = public.get("/optimizations/opt-share-1/public")
     assert resp.status_code == 200
     body = resp.json()
     assert body["role"] == "viewer"
@@ -891,6 +1015,16 @@ def test_public_view_of_public_optimization_is_readable_and_scrubbed() -> None:
     assert "username" not in payload
     assert "base_url" not in payload["model_config"]
     assert "api_key" not in payload["model_config"]["extra"]
+    assert "mcp_auth_header" not in payload["tool_source"]
+    assert "_mcp_credential_ref" not in payload["tool_source"]
+    assert "secret" not in payload["scorer"]
+    assert "_scorer_credential_ref" not in payload["scorer"]
+    assert "MCP-SECRET" not in resp.text
+    assert "EVALUATOR-SECRET" not in resp.text
+    assert "MCP-QUERY-SECRET" not in resp.text
+    assert "EVALUATOR-QUERY-SECRET" not in resp.text
+    assert "MODEL-CLIENT-SECRET" not in resp.text
+    assert "MODEL-AUTH-SECRET" not in resp.text
 
 
 def test_public_view_of_private_optimization_404() -> None:

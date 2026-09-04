@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "यह ऑप्टिमाइज़ेशन अपने अधिकतम प्रयासों ({attempts}) तक पहुँच गया — इसके बजाय इसे फिर से चलाएँ।",
     "optimization.resume_not_resumable": "इस ऑप्टिमाइज़ेशन का कोई सहेजा गया रिज़्यूम बिंदु नहीं है — इसके बजाय इसे फिर से चलाएँ।",
     "optimization.resume_wrong_status": "केवल वे ऑप्टिमाइज़ेशन ही फिर से शुरू किए जा सकते हैं जो रन के बीच में रुक गए — यह '{status}' में है।",
+    "optimization.protected_interactive_sandbox_required": "इस सुरक्षित ऑप्टिमाइज़ेशन का मूल्यांकन या सर्विंग API प्रक्रिया में नहीं किया जा सकता। अलग से मीटर किया गया {runtime} सैंडबॉक्स आवश्यक है, जो अभी इस एंडपॉइंट पर उपलब्ध नहीं है।",
     "optimization.retry_no_payload": "स्रोत ऑप्टिमाइज़ेशन में पुनः प्रयास करने के लिए कोई सहेजा गया पेलोड नहीं है।",
     "optimization.retry_wrong_status": "केवल 'failed' या 'cancelled' स्थिति वाले ऑप्टिमाइज़ेशन का ही पुनः प्रयास किया जा सकता है — यह '{status}' में है। इसके बजाय इसे क्लोन करें।",
     "quota.reached": "प्रति-उपयोगकर्ता {quota} ऑप्टिमाइज़ेशन की सीमा पहुँच गई। नए बनाने के लिए पुराने ऑप्टिमाइज़ेशन हटाएँ।",
@@ -234,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions गैर-ऋणात्मक होना चाहिए।",
     "wizard.split_fractions_not_number": "split_fractions मान संख्याएँ होनी चाहिए: {error}",
     "wizard.split_fractions_not_object": "split_fractions एक ऑब्जेक्ट होना चाहिए जिसमें train/val/test कुंजियाँ हों।",
-    "wizard.split_fractions_sum": "split_fractions का योग 1.0 होना चाहिए, मिला {total}"
+    "wizard.split_fractions_sum": "split_fractions का योग 1.0 होना चाहिए, मिला {total}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

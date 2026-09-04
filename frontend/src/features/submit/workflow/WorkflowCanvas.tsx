@@ -101,6 +101,7 @@ export interface WorkflowDryRunBinding {
   modelName?: string | null;
   /** Prefill values for the input anchor's fields (first dataset row). */
   sampleInputs: Record<string, string>;
+  useSetupSample?: boolean;
   run: (inputs: Record<string, unknown>, handlers: WorkflowDryRunStreamHandlers) => Promise<void>;
 }
 
@@ -1012,6 +1013,7 @@ function CanvasInner({
           inputFields={inputFieldNames}
           outputFields={outputFieldNames}
           sampleInputs={dryRun.sampleInputs}
+          useSetupSample={dryRun.useSetupSample}
           modelName={dryRun.modelName ?? null}
           onPickModel={dryRun.pickModel}
           run={dryRun.run}

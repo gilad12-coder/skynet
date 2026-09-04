@@ -40,6 +40,10 @@ from sqlalchemy import text
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from ..billing.budgets import BudgetService
+from ..billing.model_reconciliation import OpenRouterUsageReconciler
+from ..billing.operation_pricing import json_fingerprint
+from ..billing.vercel_reconciliation import VercelSessionUsageClient, VercelUsageReconciler
 from ..config import settings
 from ..storage.usage import purge_expired_staged_datasets
 from .alerts import install_alert_log_handler
@@ -98,6 +102,7 @@ def _make_gauge(name: str, documentation: str) -> Any:
             return existing
     return _Gauge(name, documentation)
 
+
 logger = logging.getLogger(__name__)
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -115,12 +120,8 @@ STALE_CONVERSATION_SWEEP_LOCK_KEY = 742137000003
 STAGED_DATASET_SWEEP_LOCK_KEY = 742137000004
 _request_id_ctx: ContextVar[str] = ContextVar("request_id", default="-")
 
-_jobs_pending_gauge = _make_gauge(
-    "skynet_jobs_pending", "Number of Skynet jobs waiting to be claimed"
-)
-_queue_age_gauge = _make_gauge(
-    "skynet_queue_age_seconds", "Age in seconds of the oldest pending Skynet job"
-)
+_jobs_pending_gauge = _make_gauge("skynet_jobs_pending", "Number of Skynet jobs waiting to be claimed")
+_queue_age_gauge = _make_gauge("skynet_queue_age_seconds", "Age in seconds of the oldest pending Skynet job")
 
 
 def _resolve_pod_name() -> str:
@@ -356,9 +357,7 @@ def advisory_lock(engine: Any, key: int) -> Iterator[bool]:
         yield True
         return
     with engine.connect() as conn:
-        acquired = bool(
-            conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": key}).scalar()
-        )
+        acquired = bool(conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": key}).scalar())
         conn.commit()
         try:
             yield acquired
@@ -397,6 +396,8 @@ class OrphanRecoverySweeper:
         self._interval_seconds = max(5.0, float(resolved))
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._vercel_reconciliation_cursor: str | None = None
+        self._model_reconciliation_cursor: str | None = None
 
     def start(self) -> None:
         """Start the background sweep loop."""
@@ -419,7 +420,10 @@ class OrphanRecoverySweeper:
         engine = getattr(self._job_store, "engine", None)
         if engine is None or engine.dialect.name != "postgresql":
             try:
-                return int(self._job_store.recover_orphaned_jobs())
+                kwargs = {"budget_service": BudgetService(engine=engine)} if engine is not None else {}
+                recovered = int(self._job_store.recover_orphaned_jobs(**kwargs))
+                self._reconcile_sandbox_usage(engine)
+                return recovered
             except Exception:
                 logger.warning("Orphan recovery sweep failed", exc_info=True)
                 return 0
@@ -431,10 +435,66 @@ class OrphanRecoverySweeper:
                 ).scalar()
                 if not acquired:
                     return 0
-                return int(self._job_store.recover_orphaned_jobs())
+                recovered = int(self._job_store.recover_orphaned_jobs(budget_service=BudgetService(engine=engine)))
+                self._reconcile_sandbox_usage(engine)
+                return recovered
         except Exception:
             logger.warning("Orphan recovery sweep failed", exc_info=True)
             return 0
+
+    def _reconcile_sandbox_usage(self, engine: Any) -> None:
+        """Reconcile a bounded page under the existing recovery leader's lease.
+
+        Args:
+            engine: Shared ledger database, absent for local stores without billing.
+        """
+        if engine is None:
+            return
+        self._reconcile_model_usage(engine)
+        if not settings.vercel_token or not settings.vercel_team_id:
+            return
+        try:
+            reader = VercelSessionUsageClient(settings.vercel_token.get_secret_value(), str(settings.vercel_team_id))
+            page = VercelUsageReconciler(BudgetService(engine=engine), reader).sweep(
+                limit=4, after_id=self._vercel_reconciliation_cursor
+            )
+            self._vercel_reconciliation_cursor = page.next_cursor
+            settled = sum(result.state == "settled" for result in page.results)
+            if settled:
+                logger.info("Reconciled final usage for %d covered Vercel session(s)", settled)
+        except Exception:
+            logger.warning("Vercel usage reconciliation failed; coverage remains held", exc_info=True)
+
+    def _reconcile_model_usage(self, engine: Any) -> None:
+        """Resolve managed model usage only under its original credential identity.
+
+        Args:
+            engine: Shared ledger database.
+        """
+
+        def resolve_key(username: str, digest: str) -> str | None:
+            """Return the current managed credential only when its original digest matches.
+
+            Args:
+                username: Ledger owner; BYOK lookup is not enabled here.
+                digest: Original admission credential fingerprint.
+
+            Returns:
+                Matching managed credential, or None after rotation or for another key.
+            """
+            key = settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else None
+            return key if key is not None and json_fingerprint(key) == digest else None
+
+        try:
+            page = OpenRouterUsageReconciler(BudgetService(engine=engine), resolve_key).sweep(
+                limit=4, after_id=self._model_reconciliation_cursor
+            )
+            self._model_reconciliation_cursor = page.next_cursor
+            settled = sum(result.state == "settled" for result in page.results)
+            if settled:
+                logger.info("Reconciled final usage for %d covered model request(s)", settled)
+        except Exception:
+            logger.warning("Model usage reconciliation failed; coverage remains held", exc_info=True)
 
     def _run(self) -> None:
         """Run the sweep loop until stopped."""
@@ -479,9 +539,7 @@ class StaleConversationSweeper:
         """
         self._engine = engine
         resolved = (
-            interval_seconds
-            if interval_seconds is not None
-            else settings.stale_conversation_sweep_interval_seconds
+            interval_seconds if interval_seconds is not None else settings.stale_conversation_sweep_interval_seconds
         )
         self._interval_seconds = max(60.0, float(resolved))
         self._threshold_days = int(settings.stale_conversation_threshold_days)
@@ -490,9 +548,7 @@ class StaleConversationSweeper:
 
     def start(self) -> None:
         """Start the background sweep loop."""
-        self._thread = threading.Thread(
-            target=self._run, name="stale-conversation-sweeper", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, name="stale-conversation-sweeper", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
@@ -512,9 +568,7 @@ class StaleConversationSweeper:
             return 0
         if self._engine.dialect.name != "postgresql":
             try:
-                return purge_stale_conversations(
-                    self._engine, threshold_days=self._threshold_days
-                )
+                return purge_stale_conversations(self._engine, threshold_days=self._threshold_days)
             except Exception:
                 logger.warning("Stale conversation sweep failed", exc_info=True)
                 return 0
@@ -526,9 +580,7 @@ class StaleConversationSweeper:
                 ).scalar()
                 if not acquired:
                     return 0
-            return purge_stale_conversations(
-                self._engine, threshold_days=self._threshold_days
-            )
+            return purge_stale_conversations(self._engine, threshold_days=self._threshold_days)
         except Exception:
             logger.warning("Stale conversation sweep failed", exc_info=True)
             return 0
@@ -581,11 +633,7 @@ class StagedDatasetSweeper:
                 ``settings.staged_dataset_sweep_interval_seconds``.
         """
         self._engine = engine
-        resolved = (
-            interval_seconds
-            if interval_seconds is not None
-            else settings.staged_dataset_sweep_interval_seconds
-        )
+        resolved = interval_seconds if interval_seconds is not None else settings.staged_dataset_sweep_interval_seconds
         self._interval_seconds = max(60.0, float(resolved))
         self._ttl_seconds = int(settings.staged_dataset_ttl_seconds)
         self._stop_event = threading.Event()
@@ -593,9 +641,7 @@ class StagedDatasetSweeper:
 
     def start(self) -> None:
         """Start the background sweep loop."""
-        self._thread = threading.Thread(
-            target=self._run, name="staged-dataset-sweeper", daemon=True
-        )
+        self._thread = threading.Thread(target=self._run, name="staged-dataset-sweeper", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
@@ -766,6 +812,7 @@ class RequestIDMiddleware:
         token = _request_id_ctx.set(request_id)
 
         async def send_with_id(message: Message) -> None:
+            """Attach this request's identifier before forwarding the ASGI message."""
             if message["type"] == "http.response.start":
                 MutableHeaders(scope=message)[self._header_name] = request_id
             await send(message)

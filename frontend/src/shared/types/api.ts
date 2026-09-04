@@ -1,3 +1,5 @@
+import type { ExecutionBudget, JobExecutionBudget } from "./execution-budget";
+
 export type JobStatus =
   | "pending"
   | "validating"
@@ -5,7 +7,8 @@ export type JobStatus =
   | "success"
   | "failed"
   | "cancelled"
-  | "paused";
+  | "paused"
+  | "stopped";
 export type OptimizationType = "run" | "grid_search" | "blackbox";
 
 // Levels emitted by the backend (`backend/core/api/routers/optimizations_meta.py`).
@@ -170,7 +173,23 @@ export interface WorkflowDryRunResponse {
   failed_node_id?: string | null;
 }
 
+export type ExecutionRuntime = "vercel";
+
+export interface RuntimeCostProfile {
+  billing_basis: "at_cost" | "included_in_model_markup";
+  minimum_session_credits: string | null;
+  maximum_session_credits: string | null;
+  maximum_lifetime_seconds: number | null;
+  vcpus: number | null;
+}
+
 interface OptimizationRequestBase {
+  execution_budget_id?: string;
+  execution_budget_revision?: number;
+  preflight_id?: string;
+  preflight_fingerprint?: string;
+
+  execution_runtime?: ExecutionRuntime;
   name?: string | null;
   description?: string | null;
   username: string;
@@ -249,10 +268,43 @@ export interface OptimizationSubmissionResponse {
   optimizer_name: string;
 }
 
+export interface RunRecovery {
+  state: "recovering" | "recovered" | "unavailable";
+  phase?: string | null;
+  reason?: string | null;
+  execution_generation?: number;
+  checkpoint_revision?: string | null;
+}
+
+export interface TerminalEvidence {
+  candidate_origin?: "seed" | "optimized" | null;
+  final_evaluation_completed?: boolean;
+  final_evaluation_reason?: string | null;
+  selection_scope?: "validation" | "training" | "single_task" | "test" | null;
+  selection_score?: number | null;
+  completed_lanes?: unknown[];
+  incumbent?: {
+    candidate_id: string;
+    candidate_origin: "seed" | "optimized";
+    candidate: Record<string, string>;
+    selection_score: number;
+    selection_scope: "validation" | "training";
+    evaluated_examples: number;
+    discovered_at_evals: number;
+    iteration?: number | null;
+  };
+  execution_budget?: JobExecutionBudget | null;
+}
+
 export interface OptimizationSummaryResponse {
   optimization_id: string;
   optimization_type: OptimizationType;
   status: JobStatus;
+  stop_reason?: string | null;
+  result_availability?: "evaluated" | "none" | null;
+  terminal_evidence?: TerminalEvidence | null;
+  recovery?: RunRecovery | null;
+  execution_budget?: JobExecutionBudget | null;
   message?: string | null;
   name?: string | null;
   description?: string | null;
@@ -499,7 +551,7 @@ export type BlackboxCandidate = string | Record<string, string>;
 
 export type BlackboxEngineId = "gepa" | "best_of_n" | "autoresearch" | "meta_harness";
 export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "custom";
-export type BlackboxProposerRuntime = "worker" | "vercel";
+export type BlackboxProposerRuntime = "vercel";
 
 export interface BlackboxScorer {
   kind: "python" | "remote";
@@ -541,6 +593,11 @@ export interface BlackboxStrategy {
 }
 
 export interface BlackboxRunRequest {
+  execution_budget_id?: string;
+  execution_budget_revision?: number;
+  preflight_id?: string;
+  preflight_fingerprint?: string;
+
   name?: string;
   description?: string;
   username?: string;
@@ -558,6 +615,7 @@ export interface BlackboxRunRequest {
   strategy: BlackboxStrategy;
   proposer_runtime?: BlackboxProposerRuntime;
   target: BlackboxTarget;
+  task_model_config?: ModelConfig | null;
   reflection_model_config: ModelConfig;
   token_source?: "managed" | "byok";
   is_private?: boolean;
@@ -586,7 +644,7 @@ export interface ScorerDryRunResponse {
   elapsed_ms: number;
   // Per-model token usage when the scorer called the injected `llm()` helper.
   usage_by_model?: ModelTokenUsage[];
-  // Credits this one check debited; the wizard adds it to the setup spend.
+  // Optional per-check attribution; the shared budget owns cumulative setup spending.
   credits_charged?: number;
 }
 
@@ -660,6 +718,8 @@ export interface BlackboxEngineInfo {
   unavailable_reason?: string | null;
   requires_agent_target: boolean;
   supports_parts: boolean;
+  checkpoint_recovery_supported: boolean;
+  checkpoint_recovery_reason: string | null;
 }
 
 export interface BlackboxEngineCatalogResponse {
@@ -670,11 +730,17 @@ export interface BlackboxEngineCatalogResponse {
   auto_engines: BlackboxEngineId[];
   auto_available: boolean;
   auto_unavailable_reason: string | null;
+  auto_checkpoint_recovery_supported: boolean;
+  auto_checkpoint_recovery_reason: string | null;
   upstream_revision: string;
+  run_recovery_eligibility: string;
   proposer_runtimes: Array<{
     id: BlackboxProposerRuntime;
     available: boolean;
     unavailable_reason: string | null;
+    cost: RuntimeCostProfile;
+    checkpoint_restore_supported: boolean;
+    checkpoint_restore_reason: string | null;
   }>;
 }
 
@@ -792,6 +858,8 @@ export interface ServeResponse {
   model_used: string;
   // Per-node execution trace, present only for workflow runs.
   node_traces?: WorkflowNodeTrace[] | null;
+  credits_charged?: string | null;
+  budget?: ExecutionBudget | null;
 }
 
 export interface CatalogModel {

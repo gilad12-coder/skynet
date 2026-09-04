@@ -16,13 +16,14 @@ from typing import Any
 
 import pytest
 
+from core.billing.runtime import UsagePendingError
 from core.exceptions import ServiceError
 from core.service_gateway.language_models import total_tokens_from_history, usage_by_model_from_history
 from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededError
 
 from .. import native_runner, native_runtime
 from ..harness import GatewayConfig
-from ..native_runtime import NativeOptions, run_native_engine
+from ..native_runtime import NativeOptions, check_native_runtime, run_native_engine
 from ..protocol import EvalServer, ScorerAbortError, Task
 from ..sandbox import CommandResult, SandboxSpec
 
@@ -136,6 +137,85 @@ class FakeRuntime:
         return self.session
 
 
+class ReadinessSession(FakeSession):
+    """Report dependency checks without executing an optimizer or an evaluator."""
+
+    def __init__(self, *, fail: bool = False, pending: bool = False) -> None:
+        """Select a runtime readiness failure or unresolved final sandbox usage."""
+        super().__init__()
+        self.fail = fail
+        self.pending = pending
+
+    def run(self, command: str, **kwargs: Any) -> CommandResult:
+        """Capture offline runtime probes and return the required explicit success marker."""
+        self.calls.append((command, kwargs))
+        return CommandResult(exit_code=1 if self.fail else 0, stdout='{"ready": true}\n')
+
+    def close(self) -> None:
+        """Always record closure while preserving an unresolved sandbox usage signal."""
+        self.closed = True
+        if self.pending:
+            raise UsagePendingError("readiness usage pending")
+
+
+def test_native_readiness_checks_selected_isolation_without_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Probe the managed native image without model or scorer requests.
+
+    Args:
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "verified-source")
+    session = ReadinessSession()
+    adapter = FakeRuntime(session)
+    options = NativeOptions(
+        runtime="vercel",
+        model="test/model",
+        gateway=GatewayConfig(url="http://127.0.0.1:9000/v1", api_key="scoped"),
+        budget_route={"url": "http://127.0.0.1:9000/v1", "token": "scoped"},
+        sandbox_runtime=adapter,
+        max_token_cost=1,
+    )
+    assert check_native_runtime(options) == {
+        "runtime": "vercel",
+        "gepa_source": native_runtime.GEPA_SOURCE,
+        "claude_version": native_runtime.CLAUDE_VERSION,
+    }
+    assert adapter.spec.network_disabled is True
+    assert "native_input.json" not in session.files
+    assert "native_result.json" not in session.files
+    assert session.files["native_source.tar.gz.b64"] == "verified-source"
+    commands = "\n".join(command for command, _kwargs in session.calls)
+    assert "npm install" not in commands
+    assert "pip install" not in commands
+    assert "bwrap_prefix" not in commands
+    assert "engine.run" not in commands
+    assert "--print" not in commands
+    assert "scoped" not in str(session.calls)
+    assert session.closed
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_native_readiness_does_not_hide_failure_or_pending_usage(
+    monkeypatch: pytest.MonkeyPatch, pending: bool
+) -> None:
+    """Fail readiness for missing dependencies and keep unresolved usage pending."""
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "verified-source")
+    session = ReadinessSession(fail=not pending, pending=pending)
+    options = NativeOptions(
+        runtime="vercel",
+        model="test/model",
+        gateway=GatewayConfig(url="http://127.0.0.1:9000/v1", api_key="scoped"),
+        budget_route={"url": "http://127.0.0.1:9000/v1", "token": "scoped"},
+        sandbox_runtime=FakeRuntime(session),
+        max_token_cost=1,
+    )
+    with pytest.raises(UsagePendingError if pending else ServiceError):
+        check_native_runtime(options)
+    assert session.closed
+
+
 def _context(tmp_path: Path, runtime: FakeRuntime, kind: str = "vercel") -> SimpleNamespace:
     """Build only the engine context fields this transport needs.
 
@@ -158,11 +238,15 @@ def _context(tmp_path: Path, runtime: FakeRuntime, kind: str = "vercel") -> Simp
     )
 
 
-@pytest.mark.parametrize(("kind", "sandbox"), [("worker", True), ("vercel", False)])
 def test_native_transport_preserves_engine_choice_and_scores_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, sandbox: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Runtime choice changes isolation while duplicate delivery never repeats paid scoring."""
+    """The managed sandbox preserves engine identity and deduplicates paid scoring.
+
+    Args:
+        tmp_path: Artifact destination.
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+    """
     monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
     session = FakeSession()
     runtime = FakeRuntime(session)
@@ -173,7 +257,7 @@ def test_native_transport_preserves_engine_choice_and_scores_once(
         calls.append((candidate, example))
         return 0.75, {"feedback": "improved"}
 
-    ctx = _context(tmp_path, runtime, kind)
+    ctx = _context(tmp_path, runtime)
     progress: list[dict[str, Any]] = []
     ctx.progress_callback = lambda event, metrics: progress.append(metrics)
     result = run_native_engine(
@@ -183,7 +267,7 @@ def test_native_transport_preserves_engine_choice_and_scores_once(
     assert calls == [("better", {"id": "case"})]
     assert result.best_candidate == "better"
     assert result.best_score == 0.75
-    assert json.loads(session.files["native_input.json"])["sandbox"] is sandbox
+    assert json.loads(session.files["native_input.json"])["sandbox"] is False
     assert "test_set" not in json.loads(session.files["native_input.json"])["task"]
     assert "secret" not in session.files["native_input.json"]
     assert session.calls[1][1]["env"]["ANTHROPIC_AUTH_TOKEN"] == "skynet-managed"
@@ -191,6 +275,30 @@ def test_native_transport_preserves_engine_choice_and_scores_once(
     assert ctx.native_options.usage_by_model["claude-test"]["total_tokens"] == 13
     assert progress[0]["score"] == 0.75
     assert progress[0]["parent_id"] is None
+    assert session.closed
+
+
+def test_protected_managed_runtime_does_not_nest_upstream_jail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Use the already isolated outer sandbox as the native engine boundary.
+
+    Args:
+        tmp_path: Artifact destination inside the outer sandbox.
+        monkeypatch: Pinned source fixture.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    session = FakeSession()
+    runtime = FakeRuntime(session)
+    runtime.protected = True
+    runtime.injects_headers = False
+    run_native_engine(
+        "meta_harness",
+        Task("seed", train_set=[{"id": "case"}]),
+        EvalServer(lambda *_: (0.75, {}), max_evals=3),
+        _context(tmp_path, runtime),
+    )
+    assert json.loads(session.files["native_input.json"])["sandbox"] is False
     assert session.closed
 
 
@@ -230,7 +338,7 @@ def test_native_timeout_and_missing_usage_fail_without_fallback(
 
 def test_native_usage_ledger_survives_lane_replacement() -> None:
     """Auto lanes share cumulative proposer usage when their cost caps differ."""
-    options = NativeOptions("worker", "claude-test", GatewayConfig("https://gateway.example", "key"), 1.0)
+    options = NativeOptions("vercel", "claude-test", GatewayConfig("https://gateway.example", "key"), 1.0)
     lane = replace(options, max_token_cost=0.25)
     native_runtime._record_usage(
         lane, {"claude-test": {"prompt_tokens": 8, "completion_tokens": 2, "total_tokens": 10}}

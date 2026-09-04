@@ -1,4 +1,9 @@
 import type {
+  ExecutionRuntimeCatalog,
+  WizardPreflightRequest,
+  WizardPreflightResponse,
+} from "@/shared/types/wizard-preflight";
+import type {
   BlackboxAgentRunResponse,
   BlackboxEngineCatalogResponse,
   BlackboxRunRequest,
@@ -30,6 +35,7 @@ import type {
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { I18N_KEY, tI18n } from "@/shared/lib/i18n";
 import { reportHandledError } from "@/shared/lib/report-error";
+import type { ExecutionBudget } from "@/shared/types/execution-budget";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { readNdjsonStream, readServerSentEvents, type ServerSentEvent } from "@/shared/lib/sse";
 
@@ -393,10 +399,11 @@ export function postTelemetry(body: unknown): void {
   }
 }
 
-export function submitRun(payload: RunRequest) {
+export function submitRun(payload: RunRequest, idempotencyKey?: string) {
   return request<OptimizationSubmissionResponse>("/run", {
     method: "POST",
     body: JSON.stringify(payload),
+    ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
   });
 }
 
@@ -456,17 +463,19 @@ export async function dryRunWorkflowStream(
   }
 }
 
-export function submitGridSearch(payload: GridSearchRequest) {
+export function submitGridSearch(payload: GridSearchRequest, idempotencyKey?: string) {
   return request<OptimizationSubmissionResponse>("/grid-search", {
     method: "POST",
     body: JSON.stringify(payload),
+    ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
   });
 }
 
-export function submitBlackboxRun(payload: BlackboxRunRequest) {
+export function submitBlackboxRun(payload: BlackboxRunRequest, idempotencyKey?: string) {
   return request<OptimizationSubmissionResponse>("/blackbox/run", {
     method: "POST",
     body: JSON.stringify(payload),
+    ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
   });
 }
 
@@ -477,12 +486,54 @@ export function dryRunScorer(payload: ScorerDryRunRequest) {
   });
 }
 
-export function getBlackboxEngines(
-  target: "text" | "agent",
-  proposerRuntime: "worker" | "vercel" = "worker",
+export function getExecutionRuntimes(hasImageInputs: boolean, signal?: AbortSignal) {
+  return request<ExecutionRuntimeCatalog>(
+    `/execution-runtimes?has_image_inputs=${hasImageInputs}`,
+    { signal },
+  );
+}
+
+export function runWizardPreflight(payload: WizardPreflightRequest, signal?: AbortSignal) {
+  return request<WizardPreflightResponse>("/wizard/preflight", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function createExecutionBudget(
+  totalCredits: number,
+  idempotencyKey: string,
+  signal?: AbortSignal,
 ) {
+  return request<ExecutionBudget>("/execution-budgets", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ total_credits: totalCredits }),
+    signal,
+  });
+}
+
+export function getExecutionBudget(budgetId: string, signal?: AbortSignal) {
+  return request<ExecutionBudget>(`/execution-budgets/${encodeURIComponent(budgetId)}`, { signal });
+}
+
+export function updateExecutionBudget(
+  budgetId: string,
+  totalCredits: number,
+  expectedRevision: number,
+  signal?: AbortSignal,
+) {
+  return request<ExecutionBudget>(`/execution-budgets/${encodeURIComponent(budgetId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ total_credits: totalCredits, expected_revision: expectedRevision }),
+    signal,
+  });
+}
+
+export function getBlackboxEngines(target: "text" | "agent") {
   return request<BlackboxEngineCatalogResponse>(
-    `/blackbox/engines?target=${encodeURIComponent(target)}&proposer_runtime=${proposerRuntime}`,
+    `/blackbox/engines?target=${encodeURIComponent(target)}`,
   );
 }
 
@@ -513,6 +564,7 @@ export interface OptimizationCounts {
   success: number;
   failed: number;
   cancelled: number;
+  stopped?: number;
   /** Runs shared with the caller (set only when include_shared is requested). */
   shared?: number;
 }
@@ -1750,14 +1802,19 @@ export function claimSharedOptimization(token: string) {
 }
 
 /**
- * Run one inference through the owner's stored model on a shared optimization.
- * Requires an effective role of editor or higher (it spends the owner's key);
- * viewers and the anonymous `view` role get 403.
+ * Run one inference through a shared optimization with a caller-funded budget.
+ * Any signed-in viewer may serve; the run owner's wallet and BYOK key remain isolated.
  */
-export function serveSharedOptimization(token: string, inputs: Record<string, string>) {
+export function serveSharedOptimization(
+  token: string,
+  inputs: Record<string, string>,
+  maxCostCredits: number,
+  idempotencyKey: string,
+) {
   return request<ServeResponse>(`/share/${encodeURIComponent(token)}/serve`, {
     method: "POST",
-    body: JSON.stringify({ inputs }),
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
   });
 }
 
@@ -1766,6 +1823,18 @@ export async function cancelJob(optimizationId: string) {
     `/optimizations/${optimizationId}/cancel`,
     { method: "POST" },
   );
+  invalidateCache("/optimizations");
+  return res;
+}
+
+export async function bulkCancelJobs(optimizationIds: string[]) {
+  const res = await request<{
+    cancelled: string[];
+    skipped: Array<{ optimization_id: string; reason: string }>;
+  }>("/optimizations/bulk-cancel", {
+    method: "POST",
+    body: JSON.stringify({ optimization_ids: optimizationIds }),
+  });
   invalidateCache("/optimizations");
   return res;
 }
@@ -2034,6 +2103,18 @@ export async function togglePinOptimization(optimizationId: string) {
   return res;
 }
 
+export async function bulkPinOptimizations(optimizationIds: string[], value: boolean) {
+  const res = await request<{
+    updated: string[];
+    skipped: Array<{ optimization_id: string; reason: string }>;
+  }>("/optimizations/bulk-pin", {
+    method: "POST",
+    body: JSON.stringify({ optimization_ids: optimizationIds, value }),
+  });
+  invalidateCache("/optimizations");
+  return res;
+}
+
 export function profileDataset(payload: ProfileDatasetRequest) {
   return request<ProfileDatasetResponse>("/datasets/profile", {
     method: "POST",
@@ -2071,7 +2152,7 @@ export function validateCode(payload: {
   signature_code?: string;
   metric_code?: string;
   column_mapping: ColumnMapping;
-  sample_row: Record<string, unknown>;
+  sample_row?: Record<string, unknown>;
   optimizer_name?: string;
   module_name?: string;
 }) {
@@ -2128,6 +2209,8 @@ export interface SidebarJobItem {
   failed_pairs?: number | null;
   /** True when this run stopped mid-optimization and can be resumed in place; drives Resume vs Restart. */
   resumable?: boolean;
+  /** True when this running job has a checkpoint and can pause without losing progress. */
+  pausable?: boolean;
   /** Caller's share role on a "shared with me" item; absent on own optimizations. */
   role?: ShareRole | null;
 }
@@ -2171,10 +2254,16 @@ export function getPairTestResults(optimizationId: string, pairIndex: number) {
   }>(`/optimizations/${optimizationId}/pair/${pairIndex}/test-results`);
 }
 
-export function serveProgram(optimizationId: string, inputs: Record<string, string>) {
+export function serveProgram(
+  optimizationId: string,
+  inputs: Record<string, string>,
+  maxCostCredits: number,
+  idempotencyKey: string,
+) {
   return request<ServeResponse>(`/serve/${optimizationId}`, {
     method: "POST",
-    body: JSON.stringify({ inputs }),
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
   });
 }
 
@@ -2183,10 +2272,13 @@ export function servePairProgram(
   optimizationId: string,
   pairIndex: number,
   inputs: Record<string, string>,
+  maxCostCredits: number,
+  idempotencyKey: string,
 ) {
   return request<ServeResponse>(`/serve/${optimizationId}/pair/${pairIndex}`, {
     method: "POST",
-    body: JSON.stringify({ inputs }),
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
   });
 }
 
@@ -2197,6 +2289,8 @@ export interface StreamServeHandlers {
     model_used: string;
     input_fields: string[];
     output_fields: string[];
+    credits_charged?: string | null;
+    budget?: ExecutionBudget | null;
   }) => void;
   onError: (message: string) => void;
   signal?: AbortSignal;
@@ -2206,14 +2300,20 @@ export interface StreamServeHandlers {
 export async function serveProgramStream(
   optimizationId: string,
   inputs: Record<string, string>,
+  maxCostCredits: number,
+  idempotencyKey: string,
   handlers: StreamServeHandlers,
 ): Promise<void> {
   let res: Response;
   try {
     res = await fetchWithAuthRetry(`${apiBase()}/serve/${optimizationId}/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({ inputs }),
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
       signal: handlers.signal,
     });
   } catch (err) {
@@ -2237,6 +2337,8 @@ export async function serveProgramStream(
         model_used: String(data.model_used ?? ""),
         input_fields: (data.input_fields as string[]) ?? [],
         output_fields: (data.output_fields as string[]) ?? [],
+        credits_charged: typeof data.credits_charged === "string" ? data.credits_charged : null,
+        budget: (data.budget as ExecutionBudget | null) ?? null,
       });
     } else if (event === "error") {
       handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.5")));
@@ -2256,6 +2358,8 @@ export async function servePairProgramStream(
   optimizationId: string,
   pairIndex: number,
   inputs: Record<string, string>,
+  maxCostCredits: number,
+  idempotencyKey: string,
   handlers: StreamServeHandlers,
 ): Promise<void> {
   let res: Response;
@@ -2264,8 +2368,12 @@ export async function servePairProgramStream(
       `${apiBase()}/serve/${optimizationId}/pair/${pairIndex}/stream`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({ inputs }),
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
         signal: handlers.signal,
       },
     );
@@ -2290,6 +2398,8 @@ export async function servePairProgramStream(
         model_used: String(data.model_used ?? ""),
         input_fields: (data.input_fields as string[]) ?? [],
         output_fields: (data.output_fields as string[]) ?? [],
+        credits_charged: typeof data.credits_charged === "string" ? data.credits_charged : null,
+        budget: (data.budget as ExecutionBudget | null) ?? null,
       });
     } else if (event === "error") {
       handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.8")));

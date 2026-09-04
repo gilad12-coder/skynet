@@ -34,13 +34,19 @@ test("native model configuration drops unsupported sampling without changing tok
   assert.deepEqual(proposerModelConfig(gpt, true), {
     name: gpt.name,
     token_source: "managed",
+    byok_provider: null,
   });
   assert.deepEqual(
     proposerModelConfig(
-      { ...gpt, token_source: "byok", extra: { reasoning_effort: "high" } },
+      {
+        ...gpt,
+        token_source: "byok",
+        byok_provider: "openai",
+        extra: { reasoning_effort: "high" },
+      },
       true,
     ),
-    { name: gpt.name, token_source: "byok" },
+    { name: gpt.name, token_source: "byok", byok_provider: "openai" },
   );
   assert.equal(proposerModelConfig(gpt, false), gpt);
 });

@@ -19,13 +19,15 @@ export type ColumnRole = "input" | "output" | "ignore";
 // UI-side model of the react (ReAct-agent) tool-source configuration. React is
 // generic: scoring is owned by the standard authored metric_code, so no reward
 // knobs live here — only the live tool roster. Tools always come from a live
-// MCP server, unfiltered (the wizard no longer offers dataset snapshots or
-// tool filters; the backend keeps supporting both for old runs).
+// MCP server. An explicit array is the exact allow-list; null preserves the
+// legacy "full live roster" contract; undefined means a fresh endpoint has not
+// returned its first roster yet.
 // `use-submit-wizard` reshapes this into the backend's ToolSource wire model
 // at submit time.
 export interface ReactConfig {
   mcpUrl: string;
   mcpAuthHeader: string;
+  toolFilter?: string[] | null;
 }
 
 export const defaultReactConfig = (): ReactConfig => ({

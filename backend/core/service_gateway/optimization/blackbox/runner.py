@@ -48,6 +48,7 @@ SCORER_FILENAME = "<scorer_code>"
 LLM_HELPER_NAME = "llm"
 # The gateway key rides in the environment so it never touches the box filesystem.
 ENV_API_KEY = "SKYNET_API_KEY"
+ENV_BUDGET_RELAY_URL = "SKYNET_BUDGET_RELAY_URL"
 IMAGE_HELPER_NAME = "Image"
 # The module scorer code imports those helpers from: ``from skynet import llm, Image``.
 HELPER_MODULE_NAME = "skynet"
@@ -85,6 +86,20 @@ SideInfo = dict[str, Any]
 
 class ScorerError(Exception):
     """A mistake in the scorer or its use of the helpers, reported to the user verbatim."""
+
+
+class GatewayControl(BaseException):
+    """Carry a protected admission or reconciliation signal past scorer exception handlers."""
+
+    def __init__(self, code: str, message: str) -> None:
+        """Retain the parent's stable control code and explanation.
+
+        Args:
+            code: Budget exhaustion, insufficient coverage, or pending usage.
+            message: Parent-provided explanation.
+        """
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass
@@ -411,6 +426,7 @@ class GatewayClient:
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
         timeout_seconds: float = 120.0,
+        protected: bool = False,
     ) -> None:
         """Bind the helper to one endpoint and model.
 
@@ -422,8 +438,12 @@ class GatewayClient:
             max_tokens: Completion cap, when the Scorer step set one.
             reasoning_effort: Thinking level (``low``, ``high``, ...), when the Scorer step set one.
             timeout_seconds: Per-request timeout.
+            protected: Whether the trusted parent owns dispatch and retry coverage.
         """
-        self._url = url.rstrip("/") + "/chat/completions"
+        relay = os.environ.get(ENV_BUDGET_RELAY_URL)
+        self._url = (relay or url).rstrip("/") + "/chat/completions"
+        self._protected = protected or bool(relay)
+        self.control: dict[str, str] | None = None
         self._model = model
         self._api_key = api_key
         self._temperature = temperature
@@ -459,6 +479,8 @@ class GatewayClient:
             ScorerError: Without a prompt or messages, with an image the
                 helper cannot read, or when the gateway refuses the call.
         """
+        if self.control is not None:
+            raise GatewayControl(**self.control)
         if messages is None:
             if prompt is None:
                 raise ScorerError("llm() needs a prompt, or messages=[...].")
@@ -485,7 +507,7 @@ class GatewayClient:
         return _completion_text(payload)
 
     def _post(self, data: bytes) -> Any:
-        """Send one request, retrying transient failures a few times.
+        """Send one protected attempt or retry transient legacy gateway failures.
 
         Args:
             data: The JSON request body.
@@ -497,7 +519,8 @@ class GatewayClient:
             ScorerError: When the gateway keeps failing or answers with an error.
         """
         last_error = "llm() request failed."
-        for attempt in range(_ATTEMPTS):
+        attempts = 1 if self._protected else _ATTEMPTS
+        for attempt in range(attempts):
             request = urllib.request.Request(
                 self._url,
                 data=data,
@@ -510,19 +533,44 @@ class GatewayClient:
                 with urllib.request.urlopen(request, timeout=self._timeout_seconds, context=self._ssl) as response:
                     return json.loads(response.read().decode("utf-8"))
             except urllib.error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="replace")[:_ERROR_BODY_CHARS].strip()
+                raw = exc.read().decode("utf-8", errors="replace")
+                if self._protected:
+                    try:
+                        document = json.loads(raw)
+                    except ValueError:
+                        document = {}
+                    error = document.get("error") if isinstance(document, dict) else None
+                    if isinstance(error, dict):
+                        code = error.get("code") or error.get("type")
+                        if code in {
+                            "budget_reached",
+                            "budget_insufficient",
+                            "usage_pending",
+                            "unpriced_operation",
+                            "provider_unavailable",
+                        }:
+                            control_code = "usage_pending" if code == "provider_unavailable" else code
+                            self.control = {"code": control_code, "message": str(error.get("message") or code)}
+                            raise GatewayControl(**self.control) from exc
+                detail = raw[:_ERROR_BODY_CHARS].strip()
                 last_error = "llm() request failed: HTTP {}{}".format(exc.code, ": " + detail if detail else "")
                 if exc.code not in _RETRY_STATUSES:
                     raise ScorerError(last_error) from exc
             except (urllib.error.URLError, OSError, ValueError) as exc:
+                if self._protected:
+                    self.control = {
+                        "code": "usage_pending",
+                        "message": "The protected model request needs reconciliation before retrying.",
+                    }
+                    raise GatewayControl(**self.control) from exc
                 last_error = f"llm() request failed: {exc}"
-            if attempt + 1 < _ATTEMPTS:
+            if attempt + 1 < attempts:
                 time.sleep(_BACKOFF_SECONDS * (2**attempt))
         raise ScorerError(last_error)
 
 
 def run_call(payload: dict[str, Any]) -> dict[str, Any]:
-    """Load the scorer from ``payload`` and score its candidate once.
+    """Load the scorer and either verify readiness or score its real candidate.
 
     Args:
         payload: The decoded ``input.json``.
@@ -541,23 +589,35 @@ def run_call(payload: dict[str, Any]) -> dict[str, Any]:
             max_tokens=gateway.get("max_tokens"),
             reasoning_effort=gateway.get("reasoning_effort"),
             timeout_seconds=float(gateway.get("timeout_seconds") or 120.0),
+            protected=bool(gateway.get("protected")),
         )
     helpers = {LLM_HELPER_NAME: llm if llm is not None else missing_llm, IMAGE_HELPER_NAME: Image}
     result: dict[str, Any] = {"score": None, "side_info": {}, "error": None, "usage": []}
     try:
         fn = load_scorer_from_code(str(payload.get("code") or ""), helpers=helpers)
-        candidate, case = payload.get("candidate"), payload.get("case")
-        raw = fn(candidate, case) if accepts_case(fn) else fn(candidate)
-        score, side_info = normalize_score(raw)
+        if payload.get("mode") == "readiness":
+            result["readiness"] = {
+                "ready": True,
+                "entrypoint": fn.__name__,
+                "accepts_case": accepts_case(fn),
+                "model_configured": llm is not None,
+            }
+        else:
+            candidate, case = payload.get("candidate"), payload.get("case")
+            raw = fn(candidate, case) if accepts_case(fn) else fn(candidate)
+            score, side_info = normalize_score(raw)
+            result["score"] = score
+            result["side_info"] = json.loads(json.dumps(side_info, default=side_info_json_default))
+    except GatewayControl as exc:
+        result["control"] = {"code": exc.code, "message": str(exc)}
     except ScorerError as exc:
         result["error"] = str(exc)
     except BaseException as exc:  # user code is arbitrary — any failure is reported, not raised
         result["error"] = f"{type(exc).__name__}: {exc}"
-    else:
-        result["score"] = score
-        result["side_info"] = json.loads(json.dumps(side_info, default=side_info_json_default))
     if llm is not None:
         result["usage"] = llm.usage
+        if llm.control is not None:
+            result.update(score=None, side_info={}, error=None, control=llm.control)
     return result
 
 

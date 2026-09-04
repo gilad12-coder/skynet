@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import stripe
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..api.errors import DomainError
@@ -36,10 +36,13 @@ from ..storage.models import (
     BillingCustomerModel,
     BillingWebhookEventModel,
     CreditLedgerModel,
+    ExecutionBudgetModel,
+    JobModel,
 )
 from ..telemetry import record_server_event
+from .budget_amounts import wallet_reserved_credits
 from .openrouter_float import check_float
-from .pricing import ModelUsage, credits_for_usage
+from .pricing import PLATFORM_FEE_FRACTION, ModelUsage, credits_for_usage
 
 logger = logging.getLogger("skynet.billing.service")
 
@@ -76,8 +79,6 @@ LOCAL_CUSTOMER_PREFIX = "local:"
 # Stripe's ~2.9% cut of the money behind the fee credits (÷0.971) ≈ 0.28. No
 # OpenRouter deposit fee applies (no managed tokens) — the fee covers compute +
 # storage plus the same margin managed runs carry.
-PLATFORM_FEE_FRACTION = 0.28
-
 # Ceiling handed to fee-less BYOK runs: far above any real run's full cost,
 # small enough to stay a safe int everywhere credits are summed.
 _BYOK_UNCAPPED_CEILING = 10**9
@@ -370,6 +371,66 @@ def committed_spend_credits(budget: int, token_source: str) -> int:
     if fee <= 0:
         return 0
     return max(1, math.ceil(fee))
+
+
+def legacy_job_committed_credits(session: Session, username: str, *, exclude_job_id: str | None = None) -> int:
+    """Retain funding promised to active jobs without an authoritative budget attachment.
+
+    Args:
+        session: Account-locked transaction or a read-only balance snapshot.
+        username: Authoritative wallet owner.
+        exclude_job_id: The same legacy root job currently settling its own usage.
+
+    Returns:
+        Stamped managed ceilings or BYOK platform-fee ceilings for active legacy roots.
+    """
+    attached = (
+        select(ExecutionBudgetModel.id)
+        .where(
+            ExecutionBudgetModel.id == JobModel.execution_budget_id,
+            ExecutionBudgetModel.job_id == JobModel.optimization_id,
+            ExecutionBudgetModel.username == JobModel.username,
+            ExecutionBudgetModel.generation == JobModel.execution_budget_generation,
+        )
+        .exists()
+    )
+    statement = select(
+        JobModel.payload["max_cost_credits"].as_integer().label("payload_ceiling"),
+        JobModel.payload_overview["max_cost_credits"].as_integer().label("overview_ceiling"),
+        JobModel.payload["token_source"].as_string().label("payload_source"),
+        JobModel.payload_overview["token_source"].as_string().label("overview_source"),
+    ).where(
+        JobModel.username == username,
+        JobModel.status.in_(("pending", "validating", "running", "paused")),
+        JobModel.parent_optimization_id.is_(None),
+        ~attached,
+    )
+    if exclude_job_id is not None:
+        statement = statement.where(JobModel.optimization_id != exclude_job_id)
+    total = 0
+    for row in session.execute(statement):
+        ceiling = row.payload_ceiling if row.payload_ceiling is not None else row.overview_ceiling
+        if ceiling is None:
+            continue
+        source = str(row.payload_source or row.overview_source or "")
+        total += committed_spend_credits(int(ceiling), source)
+    return total
+
+
+def account_committed_credits(session: Session, username: str, *, exclude_job_id: str | None = None) -> int:
+    """Combine per-operation holds with legacy job commitments exactly once.
+
+    Args:
+        session: Transaction serialized on the account before a monetary mutation.
+        username: Account whose spending commitments must remain funded.
+        exclude_job_id: Optional finishing legacy job whose own commitment is being consumed.
+
+    Returns:
+        Credits unavailable to unrelated new work.
+    """
+    return wallet_reserved_credits(session, username) + legacy_job_committed_credits(
+        session, username, exclude_job_id=exclude_job_id
+    )
 
 
 class StripeBillingService:
@@ -927,9 +988,10 @@ class StripeBillingService:
             customer = session.get(BillingCustomerModel, username)
             grant_remaining = self._resolve_grant(customer, now)
             paid = int(customer.credit_balance) if customer is not None else 0
+            reserved = account_committed_credits(session, username)
             if customer is not None and session.is_modified(customer):
                 session.commit()
-        return max(grant_remaining + paid, 0)
+        return max(grant_remaining + paid - reserved, 0)
 
     def total_outstanding_credits(self) -> int:
         """Return the total unspent credit liability across every account.
@@ -986,6 +1048,7 @@ class StripeBillingService:
         description: str,
         token_source: str = TOKEN_SOURCE_MANAGED,
         token_sources_by_model: Mapping[str, str] | None = None,
+        optimization_id: str | None = None,
     ) -> int:
         """Charge a finished run's per-model credit cost to the account, grant first.
 
@@ -1020,6 +1083,7 @@ class StripeBillingService:
             token_source: ``"managed"`` (full cost) or ``"byok"`` (platform fee
                 only); defaults to managed.
             token_sources_by_model: Optional per-model source map for a mixed job.
+            optimization_id: Finishing legacy root job, whose own held ceiling may be consumed.
 
         Returns:
             The credit cost actually charged (``0`` when nothing was billed) —
@@ -1055,7 +1119,10 @@ class StripeBillingService:
             self._resolve_grant(customer, now)
             grant = max(int(customer.grant_remaining or 0), 0)
             paid = max(int(customer.credit_balance), 0)
-            charged = min(cost, grant + paid)
+            charged = min(
+                cost,
+                max(0, grant + paid - account_committed_credits(session, username, exclude_job_id=optimization_id)),
+            )
             if charged < cost:
                 logger.warning(
                     "debit for %s clamped to balance: cost=%d charged=%d absorbed=%d (%s)",

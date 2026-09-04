@@ -13,6 +13,7 @@ from gepa.oa.ensemble import optimize_best_of
 from core.exceptions import ServiceError
 from core.models.blackbox import BlackboxStrategy
 
+from ...budget_stop import BudgetReached
 from .. import auto
 from ..protocol import EngineContext, EvalServer, Result, ScorerAbortError, Task
 from ..registry import EngineCapabilities
@@ -72,8 +73,8 @@ def score(candidate: str, example: Any = None) -> tuple[float, dict[str, Any]]:
     return (-1.0 if "meta_harness" in candidate else -2.0), {}
 
 
-@pytest.fixture
-def fixture_engines(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture(name="fixture_engines")
+def _fixture_engines(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace engine work while preserving real upstream scheduling.
 
     Args:
@@ -242,7 +243,7 @@ def test_relay_stops_after_cumulative_spend(tmp_path: Path, monkeypatch: pytest.
     context = make_ctx(
         str(tmp_path), remaining_cost_usd=lambda: max(0.0, 8.0 - spent[0]), proposer_token_budget_usd=8.0
     )
-    with pytest.raises(auto.CostCeilingExceededError, match="budget"):
+    with pytest.raises(BudgetReached, match="budget") as stopped:
         auto.run_strategy(
             BlackboxStrategy(mode="plateau", patience=5),
             Task("seed"),
@@ -250,5 +251,9 @@ def test_relay_stops_after_cumulative_spend(tmp_path: Path, monkeypatch: pytest.
             context,
             caps=CAPS,
         )
+    assert stopped.value.result.best_candidate == "seed:gepa"
+    assert stopped.value.result.best_score == -2.0
+    assert stopped.value.result.metadata["selection_source"] == "completed_lane_incumbent"
+    assert stopped.value.evidence["selection_scope"] == "training"
     assert spent[0] == 8.0
     assert len(starts) == 2

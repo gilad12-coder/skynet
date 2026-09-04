@@ -35,7 +35,6 @@ from ...storage.models import (
     AgentMessageModel,
     Base,
     BillingCustomerModel,
-    CreditLedgerModel,
 )
 from .. import auth as auth_mod
 from .. import model_catalog
@@ -116,16 +115,7 @@ def persistence_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, Eng
         on the persisted rows directly.
     """
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    # Billing tables back the turn's credit gate + usage metering seam.
-    Base.metadata.create_all(
-        engine,
-        tables=[
-            AgentConversationModel.__table__,
-            AgentMessageModel.__table__,
-            BillingCustomerModel.__table__,
-            CreditLedgerModel.__table__,
-        ],
-    )
+    Base.metadata.create_all(engine)
     monkeypatch.setattr(auth_mod.settings, "backend_auth_secret", SecretStr(_SECRET))
     monkeypatch.setattr(agent_mod, "run_generalist_agent", _fake_stream)
     monkeypatch.setattr(agent_mod, "queue_conversation_embed", lambda *a, **k: None)
@@ -366,16 +356,7 @@ def wrapper_engine(monkeypatch: pytest.MonkeyPatch) -> Engine:
         The bound ``Engine`` holding one ``agent_conversations`` row.
     """
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    # Billing tables back the turn's credit gate + usage metering seam.
-    Base.metadata.create_all(
-        engine,
-        tables=[
-            AgentConversationModel.__table__,
-            AgentMessageModel.__table__,
-            BillingCustomerModel.__table__,
-            CreditLedgerModel.__table__,
-        ],
-    )
+    Base.metadata.create_all(engine)
     monkeypatch.setattr(agent_mod, "queue_conversation_embed", lambda *a, **k: None)
     with Session(engine) as session:
         session.add(AgentConversationModel(id=_CONV_ID, username="alice@example.com", title="hi"))

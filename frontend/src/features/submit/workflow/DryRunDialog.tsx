@@ -34,6 +34,7 @@ interface DryRunDialogProps {
   inputFields: string[];
   outputFields: string[];
   sampleInputs: Record<string, string>;
+  useSetupSample?: boolean;
   /** Selected model, surfaced as a chip so the pick made from the canvas is
       visible — and changeable via `onPickModel` — without leaving the dialog. */
   modelName?: string | null;
@@ -84,6 +85,7 @@ export function DryRunDialog({
   inputFields,
   outputFields,
   sampleInputs,
+  useSetupSample = false,
   modelName,
   onPickModel,
   run,
@@ -162,7 +164,9 @@ export function DryRunDialog({
       <DialogContent className="max-h-[calc(100dvh-1rem)] max-w-lg overflow-y-auto px-4 py-5 sm:max-h-[85vh] sm:p-6 [&_[data-slot=dialog-close]]:size-[44px] lg:[&_[data-slot=dialog-close]]:size-8">
         <DialogHeader>
           <DialogTitle>{msg("workflow.dryrun.title")}</DialogTitle>
-          <DialogDescription>{msg("workflow.dryrun.description")}</DialogDescription>
+          <DialogDescription>
+            {msg(useSetupSample ? "workflow.dryrun.setup_sample" : "workflow.dryrun.description")}
+          </DialogDescription>
         </DialogHeader>
         {modelName && onPickModel && (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/40 px-3 py-2">
@@ -187,23 +191,25 @@ export function DryRunDialog({
             </Button>
           </div>
         )}
-        <div className="max-h-80 space-y-3 overflow-y-auto py-1">
-          {inputFields.map((field) => (
-            <div key={field} className="space-y-1.5">
-              <Label className="font-mono text-xs" dir="ltr">
-                {field}
-              </Label>
-              <textarea
-                dir="auto"
-                rows={2}
-                value={values[field] ?? ""}
-                disabled={running}
-                onChange={(e) => setValues((v) => ({ ...v, [field]: e.target.value }))}
-                className="flex min-h-[44px] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60 lg:text-sm"
-              />
-            </div>
-          ))}
-        </div>
+        {!useSetupSample && (
+          <div className="max-h-80 space-y-3 overflow-y-auto py-1">
+            {inputFields.map((field) => (
+              <div key={field} className="space-y-1.5">
+                <Label className="font-mono text-xs" dir="ltr">
+                  {field}
+                </Label>
+                <textarea
+                  dir="auto"
+                  rows={2}
+                  value={values[field] ?? ""}
+                  disabled={running}
+                  onChange={(e) => setValues((v) => ({ ...v, [field]: e.target.value }))}
+                  className="flex min-h-[44px] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60 lg:text-sm"
+                />
+              </div>
+            ))}
+          </div>
+        )}
         {started && (
           <div className="space-y-2 border-t border-border/60 pt-3">
             <div

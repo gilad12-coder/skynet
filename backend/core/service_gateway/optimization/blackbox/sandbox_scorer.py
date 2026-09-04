@@ -17,6 +17,7 @@ import logging
 import shlex
 import threading
 import time
+import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -25,6 +26,11 @@ from urllib.parse import urlsplit
 
 from gepa.image import Image
 
+from ....billing.budgets import BudgetError, BudgetInsufficientError
+from ....billing.model_gateway import ROUTE_KEY
+from ....billing.operation_pricing import UnpricedOperationError
+from ....billing.runtime import UsagePendingError
+from ....billing.signals import BudgetReached
 from ....config import Settings, settings
 from ....exceptions import ServiceError
 from ....models.common import ModelConfig
@@ -76,10 +82,11 @@ class ScorerGateway:
     max_tokens: int | None = None
     reasoning_effort: str | None = None
     timeout_seconds: float = 120.0
+    protected: bool = False
 
     def runner_payload(self) -> dict[str, Any]:
         """Return the ``gateway`` section of a runner call — the key travels separately."""
-        return {
+        payload = {
             "url": self.url,
             "model": self.model,
             "temperature": self.temperature,
@@ -87,6 +94,9 @@ class ScorerGateway:
             "reasoning_effort": self.reasoning_effort,
             "timeout_seconds": self.timeout_seconds,
         }
+        if self.protected:
+            payload["protected"] = True
+        return payload
 
     def injected_headers(self) -> dict[str, dict[str, str]]:
         """Return the headers a network edge adds to the box's requests to the gateway host, keyed by host."""
@@ -136,6 +146,9 @@ def scorer_gateway(config: ModelConfig, settings: Settings) -> ScorerGateway:
         "reasoning_effort": effort if isinstance(effort, str) and effort else None,
         "timeout_seconds": settings.lm_request_timeout_seconds,
     }
+    route = config.extra.get(ROUTE_KEY)
+    if isinstance(route, dict):
+        return ScorerGateway(url=route["url"], model=route["model"], api_key=route["token"], protected=True, **common)
     own_key = config.extra.get("api_key")
     if isinstance(own_key, str) and own_key:
         base_url = config.base_url or config.extra.get("api_base")
@@ -242,6 +255,31 @@ def _sandbox_name(job_id: str | None) -> str | None:
     return unique_sandbox_name(f"skynet-scorer-{job_id}")
 
 
+def _raise_control(result: Mapping[str, Any]) -> None:
+    """Propagate a protected runner stop before interpreting scorer output.
+
+    Args:
+        result: Decoded runner response.
+
+    Raises:
+        BudgetReached: When the parent's run stop latch is set.
+        BudgetError: When the next operation has insufficient coverage.
+        UsagePendingError: When an attempted operation needs reconciliation.
+        UnpricedOperationError: When the parent cannot bound the operation.
+    """
+    control = result.get("control")
+    if not isinstance(control, dict):
+        return
+    code, message = control.get("code"), str(control.get("message") or "Protected scorer stopped.")
+    if code == "budget_reached":
+        raise BudgetReached(message)
+    if code == "budget_insufficient":
+        raise BudgetInsufficientError(message)
+    if code == "unpriced_operation":
+        raise UnpricedOperationError(message)
+    raise UsagePendingError(message)
+
+
 class SandboxPythonScorer:
     """A python scorer that runs inside a sandbox: one box per job, one runner call per evaluation.
 
@@ -275,6 +313,9 @@ class SandboxPythonScorer:
         self._code = code
         self._install_command = (install_command or "").strip() or None
         self._runtime = runtime
+        self._protected = bool(getattr(runtime, "protected", False) or (gateway and gateway.protected))
+        if getattr(runtime, "protected", False) and gateway is not None and not gateway.protected:
+            raise ServiceError("Protected scorers require an opaque model route from the trusted parent.")
         self._gateway = gateway
         self._timeout_seconds = timeout_seconds
         ceiling = settings.vercel_sandbox_max_lifetime_seconds
@@ -287,6 +328,8 @@ class SandboxPythonScorer:
             lifetime_seconds=ceiling if lifetime_seconds is None else min(lifetime_seconds, ceiling),
             tags={JOB_TAG: job_id} if job_id else {},
             inject_headers=injected,
+            network_disabled=self._protected,
+            operation_key=f"scorer:{uuid.uuid4().hex}" if self._protected else None,
         )
         self._session: SandboxSession | None = None
         self._calls = 0
@@ -335,13 +378,16 @@ class SandboxPythonScorer:
         with self._lock:
             try:
                 result = self._invoke(payload)
-            except ServiceError:
+            except (ServiceError, BudgetError, UsagePendingError):
                 raise
             except Exception:
+                if self._protected:
+                    raise
                 # The box died under us (lifetime reached, host recycled): one fresh box, one more try.
                 logger.warning("scorer sandbox failed; reopening", exc_info=True)
                 self._discard()
                 result = self._invoke(payload)
+        _raise_control(result)
         entries = list(result.get("usage") or [])
         if self.usage is not None:
             self.usage.record(entries)
@@ -356,8 +402,32 @@ class SandboxPythonScorer:
             usage_by_model=call_usage.by_model() if call_usage is not None else {},
         )
 
+    def check_ready(self) -> dict[str, Any]:
+        """Load the scorer in its real sandbox without evaluating an invented candidate.
+
+        Returns:
+            The loaded entrypoint and its input/model configuration evidence.
+
+        Raises:
+            ServiceError: When imports or scorer entrypoint loading fail.
+            BudgetError: When sandbox/model admission has insufficient coverage.
+            UsagePendingError: When attempted usage needs reconciliation.
+        """
+        payload = {
+            "mode": "readiness",
+            "code": self._code,
+            "gateway": self._gateway.runner_payload() if self._gateway is not None else None,
+        }
+        with self._lock:
+            result = self._invoke(payload)
+        _raise_control(result)
+        readiness = result.get("readiness")
+        if result.get("error") or not isinstance(readiness, dict) or not readiness.get("ready"):
+            raise ServiceError(str(result.get("error") or "Scorer readiness could not be verified."))
+        return readiness
+
     def close(self) -> None:
-        """Destroy the box, if one is open. Never raises."""
+        """Destroy the box and propagate any unresolved protected usage."""
         with self._lock:
             self._discard()
 
@@ -447,8 +517,9 @@ class SandboxPythonScorer:
     def _discard(self) -> None:
         """Close the box, if any, so the next call opens a fresh one."""
         if self._session is not None:
-            self._session.close()
+            session = self._session
             self._session = None
+            session.close()
             logger.info("scorer sandbox: closed after %d call(s)", self._calls)
 
 
@@ -466,7 +537,7 @@ def probe_scorer(
 
     A scorer that raised on the candidate is reported via
     ``ScorerProbeResult.error`` — not as an exception from this function.
-    Only ``ServiceError`` (no gateway, box failure) escapes.
+    Infrastructure, budget, and pending-usage signals propagate to setup.
 
     Args:
         scorer_code: User-authored scorer source.
@@ -484,6 +555,8 @@ def probe_scorer(
 
     Raises:
         ServiceError: When the gateway cannot be resolved or the box fails.
+        BudgetError: When covered funding does not permit the probe.
+        UsagePendingError: When execution or final runtime billing remains uncertain.
     """
     gateway = scorer_gateway(ModelConfig.model_validate(scorer_model), settings) if scorer_model else None
     scorer = SandboxPythonScorer(

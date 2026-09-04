@@ -9,8 +9,10 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import pickle
 import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -31,7 +33,9 @@ from ...models.common import SplitCounts
 from ...models.results import GridSearchResponse, PairResult, RunResponse
 from ...storage.models import Base
 from ..errors import DomainError
+from ..routers import _helpers as helpers_module
 from ..routers.optimizations import create_optimizations_router
+from ..routers.optimizations import detail as detail_module
 from ..routers.optimizations._local import clone_payload
 from ..routers.optimizations_meta import _sanitize_payload
 from .conftest import bypass_auth
@@ -39,6 +43,33 @@ from .mocks import _BaseFakeJobStore, real_grid_response_dict
 
 # _ExtendedFakeJobStore is just _BaseFakeJobStore (which already has bulk-delete).
 _ExtendedFakeJobStore = _BaseFakeJobStore
+
+
+def _legacy_test_runtime(job_data: dict[str, Any]) -> str | None:
+    """Preserve retired host-path coverage for synthetic evaluation fixtures.
+
+    Args:
+        job_data: Synthetic stored job.
+
+    Returns:
+        Vercel for protected fixtures and None for legacy-only fixtures.
+    """
+    payload = job_data.get("payload")
+    payload_budget_id = payload.get("execution_budget_id") if isinstance(payload, dict) else None
+    if job_data.get("execution_budget_id") is None and payload_budget_id is None:
+        return None
+    return "vercel"
+
+
+@pytest.fixture(autouse=True)
+def _preserve_legacy_evaluation_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep legacy evaluation internals covered without enabling them in production.
+
+    Args:
+        monkeypatch: Pytest patch helper.
+    """
+    monkeypatch.setattr(detail_module, "_protected_api_runtime", _legacy_test_runtime)
+    monkeypatch.setattr(helpers_module, "_protected_api_runtime", _legacy_test_runtime)
 
 
 @pytest.fixture
@@ -1141,6 +1172,64 @@ def test_evaluate_examples_404_when_payload_missing(opt_client: TestClient, stor
     assert resp.status_code == 404
 
 
+def test_protected_evaluate_examples_never_executes_metric_side_effects_in_api_parent(
+    opt_client: TestClient,
+    store: _ExtendedFakeJobStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject protected evaluation before metric code can touch parent resources.
+
+    Args:
+        opt_client: Optimizations route client.
+        store: Fake completed-job store.
+        tmp_path: Parent-owned directory that authored code must not write.
+        monkeypatch: Pytest environment cleanup helper.
+    """
+    marker = tmp_path / "metric-ran-in-api.txt"
+    env_name = "SKYNET_PROTECTED_METRIC_RAN_IN_API"
+    monkeypatch.delenv(env_name, raising=False)
+    metric_code = "\n".join(
+        [
+            "import os",
+            "import pathlib",
+            "import urllib.request",
+            f"os.environ[{env_name!r}] = 'yes'",
+            f"pathlib.Path({str(marker)!r}).write_text('unsafe')",
+            "urllib.request.urlopen('https://parent-network.invalid')",
+            "def metric(example, prediction):",
+            "    return 1.0",
+        ]
+    )
+    store.seed_job(
+        "protected-evaluate",
+        status="success",
+        execution_budget_id="budget-1",
+        payload={
+            "dataset": [{"q": "hello", "a": "world"}],
+            "column_mapping": {"inputs": {"question": "q"}, "outputs": {"answer": "a"}},
+            "metric_code": metric_code,
+            "model_config": {"name": "openai/gpt-4o-mini"},
+            "signature_code": "",
+            "module_name": "predict",
+            "module_kwargs": {},
+            "execution_runtime": "worker",
+        },
+    )
+
+    with patch("urllib.request.urlopen") as urlopen:
+        resp = opt_client.post(
+            "/optimizations/protected-evaluate/evaluate-examples",
+            json={"indices": [0], "program_type": "baseline"},
+        )
+
+    assert resp.status_code == 400
+    assert "max_cost_credits" in resp.json()["detail"]
+    assert env_name not in os.environ
+    assert not marker.exists()
+    urlopen.assert_not_called()
+
+
 def test_evaluate_examples_400_when_metric_code_empty(opt_client: TestClient, store: _ExtendedFakeJobStore) -> None:
     """Evaluation requires metric code; an empty metric returns 400."""
     store.seed_job(
@@ -1673,6 +1762,48 @@ def test_clone_payload_raises_409_when_saved_payload_no_longer_validates() -> No
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.code == "optimization.cannot_resubmit_payload"
+
+
+def test_clone_payload_turns_legacy_credentials_into_missing_setup() -> None:
+    """Clone a dirty legacy row only after removing every reusable credential."""
+    source = {
+        "username": "alice",
+        "module_name": "react",
+        "signature_code": "question -> answer",
+        "metric_code": "def metric(example, pred, trace=None): return 1.0",
+        "optimizer_name": "gepa",
+        "dataset": [{"question": "Q", "answer": "A"}],
+        "column_mapping": {"inputs": {"question": "question"}, "outputs": {"answer": "answer"}},
+        "model_config": {
+            "name": "fixture/model",
+            "extra": {
+                "apiKey": "legacy-model-secret",
+                "nested": {"Authorization": "Bearer legacy-header-secret"},
+            },
+        },
+        "tool_source": {
+            "kind": "live_mcp",
+            "mcp_url": "https://tools.example/mcp?access_token=legacy-query-secret",
+            "mcp_auth_header": "Bearer legacy-mcp-secret",
+        },
+    }
+
+    _identity, payload = clone_payload(source, optimization_type="run", new_name="safe clone")
+    cloned = payload.model_dump(mode="json", by_alias=True)
+
+    serialized = json.dumps(cloned)
+    assert all(
+        secret not in serialized
+        for secret in (
+            "legacy-model-secret",
+            "legacy-header-secret",
+            "legacy-query-secret",
+            "legacy-mcp-secret",
+        )
+    )
+    assert cloned["model_config"]["extra"] == {"nested": {}}
+    assert cloned["tool_source"]["mcp_url"] == "https://tools.example/mcp"
+    assert cloned["tool_source"]["mcp_auth_header"] is None
 
 
 def test_status_surfaces_blackbox_results_under_blackbox_result(

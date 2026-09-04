@@ -75,53 +75,58 @@ export function QuestionChoices({
       aria-label={ariaLabel}
       onKeyDown={handleKeyDown}
       className={cn(
-        "flex flex-col gap-1.5 border-t border-border/40 px-4 pb-1 pt-3",
+        "@container flex flex-col gap-1.5 border-t border-border/40 px-4 pb-1 pt-3",
         "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1",
         className,
       )}
     >
-      {options.map((option, index) => (
-        <button
-          key={`${index}-${option.label}`}
-          ref={(el) => {
-            buttonsRef.current[index] = el;
-          }}
-          type="button"
-          disabled={disabled}
-          tabIndex={index === focusedIndex ? 0 : -1}
-          onFocus={() => setFocusedIndex(index)}
-          onClick={() => onSelect(option.label)}
-          className={cn(
-            "group flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-start",
-            "border-border bg-background transition-colors duration-100 motion-reduce:transition-none",
-            "cursor-pointer hover:border-primary/50 hover:bg-primary/5",
-            "focus-visible:border-primary/60 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
-            "disabled:pointer-events-none disabled:opacity-50",
-          )}
-        >
-          <span
-            aria-hidden
+      {/* Two columns once the surface fits a label and its description side
+          by side, so four options stop stacking into a column that pushes
+          the question itself out of the thread above. */}
+      <div className="grid grid-cols-1 gap-1.5 @md:grid-cols-2">
+        {options.map((option, index) => (
+          <button
+            key={`${index}-${option.label}`}
+            ref={(el) => {
+              buttonsRef.current[index] = el;
+            }}
+            type="button"
+            disabled={disabled}
+            tabIndex={index === focusedIndex ? 0 : -1}
+            onFocus={() => setFocusedIndex(index)}
+            onClick={() => onSelect(option.label)}
             className={cn(
-              "mt-px flex size-5 shrink-0 items-center justify-center rounded-md text-[11px] font-medium tabular-nums",
-              "border border-border/70 bg-muted text-muted-foreground",
-              "transition-colors duration-100 motion-reduce:transition-none",
-              "group-hover:border-primary/40 group-hover:bg-primary/10 group-hover:text-primary",
+              "group flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-start",
+              "border-border bg-background transition-colors duration-100 motion-reduce:transition-none",
+              "cursor-pointer hover:border-primary/50 hover:bg-primary/5",
+              "focus-visible:border-primary/60 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
+              "disabled:pointer-events-none disabled:opacity-50",
             )}
           >
-            {index + 1}
-          </span>
-          <span className="flex min-w-0 flex-col gap-0.5">
-            <span className="text-sm font-medium leading-snug text-foreground" dir="auto">
-              {option.label}
+            <span
+              aria-hidden
+              className={cn(
+                "mt-px flex size-5 shrink-0 items-center justify-center rounded-md text-[11px] font-medium tabular-nums",
+                "border border-border/70 bg-muted text-muted-foreground",
+                "transition-colors duration-100 motion-reduce:transition-none",
+                "group-hover:border-primary/40 group-hover:bg-primary/10 group-hover:text-primary",
+              )}
+            >
+              {index + 1}
             </span>
-            {option.description && (
-              <span className="text-xs leading-snug text-muted-foreground" dir="auto">
-                {option.description}
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-sm font-medium leading-snug text-foreground" dir="auto">
+                {option.label}
               </span>
-            )}
-          </span>
-        </button>
-      ))}
+              {option.description && (
+                <span className="text-xs leading-snug text-muted-foreground" dir="auto">
+                  {option.description}
+                </span>
+              )}
+            </span>
+          </button>
+        ))}
+      </div>
       {hint && <p className="px-0.5 pt-0.5 text-xs text-muted-foreground/70">{hint}</p>}
     </div>
   );
@@ -137,23 +142,25 @@ export function QuestionChoicesSkeleton({ className }: { className?: string }) {
     <div
       aria-hidden
       className={cn(
-        "flex flex-col gap-1.5 border-t border-border/40 px-4 pb-1 pt-3",
+        "@container flex flex-col gap-1.5 border-t border-border/40 px-4 pb-1 pt-3",
         "motion-safe:animate-in motion-safe:fade-in-0",
         className,
       )}
     >
-      {[0, 1].map((index) => (
-        <div
-          key={index}
-          className="flex w-full items-start gap-2.5 rounded-lg border border-border/60 bg-background px-3 py-2.5"
-        >
-          <span className="mt-px size-5 shrink-0 rounded-md bg-muted motion-safe:animate-pulse" />
-          <span className="flex min-w-0 flex-1 flex-col gap-1.5 py-0.5">
-            <span className="h-3.5 w-2/5 rounded bg-muted motion-safe:animate-pulse" />
-            <span className="h-3 w-3/4 rounded bg-muted/70 motion-safe:animate-pulse" />
-          </span>
-        </div>
-      ))}
+      <div className="grid grid-cols-1 gap-1.5 @md:grid-cols-2">
+        {[0, 1].map((index) => (
+          <div
+            key={index}
+            className="flex w-full items-start gap-2.5 rounded-lg border border-border/60 bg-background px-3 py-2.5"
+          >
+            <span className="mt-px size-5 shrink-0 rounded-md bg-muted motion-safe:animate-pulse" />
+            <span className="flex min-w-0 flex-1 flex-col gap-1.5 py-0.5">
+              <span className="h-3.5 w-2/5 rounded bg-muted motion-safe:animate-pulse" />
+              <span className="h-3 w-3/4 rounded bg-muted/70 motion-safe:animate-pulse" />
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

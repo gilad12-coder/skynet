@@ -95,7 +95,6 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
                   setEditingModel({
                     config: targetModel,
                     onSave: setTargetModel,
-                    nameOnly: true,
                     label: msg("submit.blackbox.roles.task.label"),
                   })
                 }

@@ -9,7 +9,7 @@ entry points used by the worker subprocess and the submissions router).
 
 Agent targets — versions that are a coding agent's harness — add
 :mod:`harness` (how each agent is installed, routed and run),
-:mod:`sandbox` (one throwaway Vercel Sandbox per scorer run) and
+:mod:`sandbox` (private workspaces inside the run's outer Vercel Sandbox) and
 :mod:`agent_eval` (the scorer wrapper that runs the agent and hands the
 run record to the user's scorer).
 

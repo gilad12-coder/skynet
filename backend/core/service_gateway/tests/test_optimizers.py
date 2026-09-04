@@ -13,6 +13,7 @@ from gepa.strategies.proposal_sampling import PxNSampling
 from core.config import settings
 from core.exceptions import ServiceError
 from core.models import ModelConfig
+from core.service_gateway.language_models import GepaRecoverySeedBoundary
 from core.service_gateway.optimization.data import DatasetSplits
 from core.service_gateway.optimization.optimizers import (
     TargetScoreStopper,
@@ -158,6 +159,7 @@ def test_compile_program_injects_valset_when_optimizer_accepts_it() -> None:
 
     class _RecordingOpt:
         def compile(self, program: Any, *, trainset: Any, valset: Any = None, **kwargs: Any) -> Any:
+            """Record the validation set supplied for compilation."""
             received["valset"] = valset
             return program
 
@@ -179,6 +181,7 @@ def test_compile_program_does_not_inject_valset_when_optimizer_does_not_accept_i
 
     class _StrictOpt:
         def compile(self, program: Any, *, trainset: Any, **kwargs: Any) -> Any:
+            """Record unexpected compilation arguments."""
             received["extra"] = kwargs
             return program
 
@@ -200,6 +203,7 @@ def test_compile_program_honours_pre_set_trainset_in_compile_kwargs() -> None:
 
     class _RecordingOpt:
         def compile(self, program: Any, *, trainset: Any, **kwargs: Any) -> Any:
+            """Record the train set supplied for compilation."""
             received["trainset"] = trainset
             return program
 
@@ -217,8 +221,10 @@ def test_compile_program_honours_pre_set_trainset_in_compile_kwargs() -> None:
 
 def test_compile_program_type_error_from_optimizer_raises_service_error() -> None:
     """A ``TypeError`` from compile() is wrapped into a ``ServiceError``."""
+
     class _BadOpt:
         def compile(self, program: Any, **kwargs: Any) -> Any:
+            """Raise the optimizer error under test."""
             raise TypeError("bad kwarg")
 
     with pytest.raises(ServiceError, match="rejected the provided arguments"):
@@ -240,8 +246,9 @@ def test_optimizer_requires_metric_returns_true_when_metric_in_init() -> None:
 
 def test_optimizer_requires_metric_returns_false_when_metric_not_present() -> None:
     """A factory whose __init__ has no ``metric`` parameter returns False."""
+
     def _no_metric_factory(num_threads: int = 4) -> None:
-        pass
+        """Provide a factory without a metric parameter."""
 
     result = optimizer_requires_metric(_no_metric_factory)
 
@@ -257,16 +264,18 @@ def test_optimizer_requires_metric_returns_false_for_uninspectable() -> None:
 
 def test_callable_accepts_metric_true_for_metric_param() -> None:
     """A callable whose first parameter is ``metric`` reports True."""
+
     def fn(metric: Any, other: Any = None) -> None:
-        pass
+        """Provide a callable with a metric parameter."""
 
     assert _callable_accepts_metric(fn) is True
 
 
 def test_callable_accepts_metric_false_when_no_metric_param() -> None:
     """A callable without a ``metric`` parameter reports False."""
+
     def fn(foo: Any, bar: Any) -> None:
-        pass
+        """Provide a callable without a metric parameter."""
 
     assert _callable_accepts_metric(fn) is False
 
@@ -278,8 +287,9 @@ def test_callable_accepts_metric_false_for_none() -> None:
 
 def test_extract_factory_targets_includes_factory_itself() -> None:
     """The factory itself is always among the extracted targets."""
+
     def my_factory() -> None:
-        pass
+        """Provide the factory target under test."""
 
     targets = _extract_factory_targets(my_factory)
 
@@ -288,11 +298,12 @@ def test_extract_factory_targets_includes_factory_itself() -> None:
 
 def test_extract_factory_targets_includes_wrapped_when_present() -> None:
     """A function with ``__wrapped__`` exposes the inner callable as a target."""
+
     def inner() -> None:
-        pass
+        """Provide the wrapped callable under test."""
 
     def outer() -> None:
-        pass
+        """Provide the wrapper callable under test."""
 
     outer.__wrapped__ = inner  # type: ignore[attr-defined]
 
@@ -313,10 +324,11 @@ def test_validate_optimizer_kwargs_valid_kwargs_passes() -> None:
 
 def test_validate_optimizer_kwargs_invalid_kwarg_raises_service_error() -> None:
     """A factory with a closed signature rejects unknown kwargs."""
+
     # Use a factory with explicit, closed signature (no **kwargs) so
     # bind_partial can actually reject unknown keys.
     def _strict_factory(num_threads: int = 4, max_rounds: int = 1) -> None:
-        pass
+        """Provide a factory with a closed keyword signature."""
 
     with pytest.raises(ServiceError, match="unsupported entries"):
         validate_optimizer_kwargs(
@@ -345,16 +357,19 @@ def test_instantiate_optimizer_injects_metric_when_factory_requires_it() -> None
 
     class _MetricFactory:
         def __init__(self, metric: Any = None, **kw: Any) -> None:
+            """Capture the metric supplied to the factory."""
             captured["metric"] = metric
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     instantiate_optimizer(
         factory=_MetricFactory,
         optimizer_name="my_opt",
         optimizer_kwargs={},
-        metric=_dummy_metric,        reflection_model=None,
+        metric=_dummy_metric,
+        reflection_model=None,
     )
 
     assert captured["metric"] is _dummy_metric
@@ -365,20 +380,24 @@ def test_instantiate_optimizer_does_not_override_metric_if_already_in_kwargs() -
     captured: dict = {}
 
     def custom_metric(e: Any, p: Any) -> float:
+        """Return the deterministic caller-supplied metric score."""
         return 0.5
 
     class _MetricFactory:
         def __init__(self, metric: Any = None, **kw: Any) -> None:
+            """Capture the metric supplied to the factory."""
             captured["metric"] = metric
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     instantiate_optimizer(
         factory=_MetricFactory,
         optimizer_name="my_opt",
         optimizer_kwargs={"metric": custom_metric},
-        metric=_dummy_metric,        reflection_model=None,
+        metric=_dummy_metric,
+        reflection_model=None,
     )
 
     assert captured["metric"] is custom_metric
@@ -390,10 +409,12 @@ def test_instantiate_optimizer_injects_gepa_num_threads_default() -> None:
 
     class _GepaFactory:
         def __init__(self, num_threads: Any = None, **kw: Any) -> None:
+            """Capture the thread count supplied to the factory."""
             captured["num_threads"] = num_threads
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     instantiate_optimizer(
         factory=_GepaFactory,
@@ -413,10 +434,12 @@ def test_instantiate_optimizer_keeps_user_supplied_gepa_num_threads() -> None:
 
     class _GepaFactory:
         def __init__(self, num_threads: Any = None, **kw: Any) -> None:
+            """Capture the thread count supplied to the factory."""
             captured["num_threads"] = num_threads
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     instantiate_optimizer(
         factory=_GepaFactory,
@@ -436,10 +459,12 @@ def test_instantiate_optimizer_does_not_inject_num_threads_for_non_gepa() -> Non
 
     class _PlainFactory:
         def __init__(self, **kw: Any) -> None:
+            """Capture the keyword arguments supplied to the factory."""
             captured.update(kw)
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     instantiate_optimizer(
         factory=_PlainFactory,
@@ -454,19 +479,22 @@ def test_instantiate_optimizer_does_not_inject_num_threads_for_non_gepa() -> Non
 
 def test_instantiate_optimizer_gepa_requires_reflection_model_or_raises() -> None:
     """The gepa factory raises ``ServiceError`` when no reflection model is provided."""
+
     class _GepaFactory:
         def __init__(self, metric: Any = None, auto: Any = None, reflection_lm: Any = None, **kw: Any) -> None:
-            pass
+            """Accept the optimizer arguments under test."""
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     with pytest.raises(ServiceError, match="reflection_model_config"):
         instantiate_optimizer(
             factory=_GepaFactory,
             optimizer_name="gepa",
             optimizer_kwargs={},
-            metric=_dummy_metric,            reflection_model=None,
+            metric=_dummy_metric,
+            reflection_model=None,
         )
 
 
@@ -477,17 +505,20 @@ def test_instantiate_optimizer_gepa_injects_reflection_lm_when_model_provided() 
 
     class _GepaFactory:
         def __init__(self, metric: Any = None, auto: Any = None, reflection_lm: Any = None, **kw: Any) -> None:
+            """Capture the reflection model supplied to the factory."""
             captured["reflection_lm"] = reflection_lm
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     with patch("core.service_gateway.optimization.optimizers.build_language_model", return_value=fake_lm):
         instantiate_optimizer(
             factory=_GepaFactory,
             optimizer_name="gepa",
             optimizer_kwargs={},
-            metric=_dummy_metric,            reflection_model=_model_cfg("openai/gpt-4o"),
+            metric=_dummy_metric,
+            reflection_model=_model_cfg("openai/gpt-4o"),
         )
 
     assert captured["reflection_lm"] is fake_lm
@@ -500,17 +531,20 @@ def test_instantiate_optimizer_gepa_sets_auto_light_default() -> None:
 
     class _GepaFactory:
         def __init__(self, metric: Any = None, auto: Any = None, reflection_lm: Any = None, **kw: Any) -> None:
+            """Capture the automatic budget supplied to the factory."""
             captured["auto"] = auto
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     with patch("core.service_gateway.optimization.optimizers.build_language_model", return_value=fake_lm):
         instantiate_optimizer(
             factory=_GepaFactory,
             optimizer_name="gepa",
             optimizer_kwargs={},
-            metric=_dummy_metric,            reflection_model=_model_cfg("openai/gpt-4o"),
+            metric=_dummy_metric,
+            reflection_model=_model_cfg("openai/gpt-4o"),
         )
 
     assert captured["auto"] == "light"
@@ -523,10 +557,12 @@ def test_instantiate_optimizer_gepa_injects_target_score_stopper() -> None:
 
     class _GepaFactory:
         def __init__(self, **kw: Any) -> None:
+            """Capture the keyword arguments supplied to the factory."""
             captured.update(kw)
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     instantiate_optimizer(
         factory=_GepaFactory,
@@ -545,16 +581,53 @@ def test_instantiate_optimizer_gepa_injects_target_score_stopper() -> None:
     assert state["target_score_stopper"] is stopper
 
 
+def test_instantiate_optimizer_gepa_binds_recovery_to_seed_event_and_stopper() -> None:
+    """Use one boundary as both the seed observer and fail-closed stopper."""
+    captured: dict[str, Any] = {}
+    observer = object()
+
+    def stopper(_state: object) -> bool:
+        """Keep the configured test optimizer running."""
+        return False
+
+    class _GepaFactory:
+        def __init__(self, **kw: Any) -> None:
+            """Capture the keyword arguments supplied to the factory."""
+            captured.update(kw)
+
+        def compile(self, *a: Any, **kw: Any) -> None:
+            """Provide a no-op optimizer compilation."""
+            return
+
+    instantiate_optimizer(
+        factory=_GepaFactory,
+        optimizer_name="gepa",
+        optimizer_kwargs={"gepa_kwargs": {"callbacks": [observer], "stop_callbacks": [stopper]}},
+        metric=_dummy_metric,
+        reflection_model=None,
+        reflection_lm=object(),
+        recovery_seed_model=object(),
+    )
+
+    gepa_kwargs = captured["gepa_kwargs"]
+    boundary = gepa_kwargs["callbacks"][0]
+    assert isinstance(boundary, GepaRecoverySeedBoundary)
+    assert gepa_kwargs["callbacks"] == [boundary, observer]
+    assert gepa_kwargs["stop_callbacks"] == [boundary, stopper]
+
+
 def test_instantiate_optimizer_gepa_no_sampling_strategy_by_default() -> None:
     """The classic p=n=1 defaults inject no ``sampling_strategy`` — GEPA keeps its own."""
     captured: dict[str, Any] = {}
 
     class _GepaFactory:
         def __init__(self, **kw: Any) -> None:
+            """Capture the keyword arguments supplied to the factory."""
             captured.update(kw)
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     instantiate_optimizer(
         factory=_GepaFactory,
@@ -576,10 +649,12 @@ def test_instantiate_optimizer_gepa_injects_pxn_sampling(monkeypatch: pytest.Mon
 
     class _GepaFactory:
         def __init__(self, **kw: Any) -> None:
+            """Capture the keyword arguments supplied to the factory."""
             captured.update(kw)
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     instantiate_optimizer(
         factory=_GepaFactory,
@@ -606,10 +681,12 @@ def test_instantiate_optimizer_gepa_submission_sampling_strategy_wins(
 
     class _GepaFactory:
         def __init__(self, **kw: Any) -> None:
+            """Capture the keyword arguments supplied to the factory."""
             captured.update(kw)
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     instantiate_optimizer(
         factory=_GepaFactory,
@@ -633,10 +710,12 @@ def test_instantiate_optimizer_gepa_submission_pxn_overrides_settings(
 
     class _GepaFactory:
         def __init__(self, **kw: Any) -> None:
+            """Capture the keyword arguments supplied to the factory."""
             captured.update(kw)
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     instantiate_optimizer(
         factory=_GepaFactory,
@@ -664,10 +743,12 @@ def test_instantiate_optimizer_gepa_submission_pxn_ones_disable_sampling(
 
     class _GepaFactory:
         def __init__(self, **kw: Any) -> None:
+            """Capture the keyword arguments supplied to the factory."""
             captured.update(kw)
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     instantiate_optimizer(
         factory=_GepaFactory,
@@ -688,12 +769,15 @@ def test_instantiate_optimizer_gepa_rejects_out_of_range_pxn(bad: Any) -> None:
 
     class _GepaFactory:
         def __init__(self, **kw: Any) -> None:
-            return None
+            """Accept the optimizer arguments under test."""
+            return
 
         def compile(self, *a: Any, **kw: Any) -> None:
-            return None
+            """Provide a no-op optimizer compilation."""
+            return
 
     def _run() -> None:
+        """Instantiate the optimizer with the parameter under test."""
         instantiate_optimizer(
             factory=_GepaFactory,
             optimizer_name="gepa",
@@ -897,7 +981,9 @@ def test_preflight_aborts_for_isinstance_gold_dict_gate() -> None:
 
 def test_preflight_unwraps_prediction_score_return() -> None:
     """A metric returning a ``dspy.Prediction`` with ``.score`` is unwrapped to that score."""
+
     def scored(example: Any, prediction: Any, trace: Any = None) -> Any:
+        """Return a prediction that carries a numeric score."""
         return dspy.Prediction(score=1.0)
 
     preflight_metric_check(scored, _gold_examples(), ["answer"])
@@ -905,7 +991,9 @@ def test_preflight_unwraps_prediction_score_return() -> None:
 
 def test_preflight_swallows_exceptions_but_surfaces_all_zero() -> None:
     """A metric raising on every example is treated as score 0 and still aborts."""
+
     def raising(example: Any, prediction: Any, trace: Any = None) -> float:
+        """Raise the metric failure under test."""
         raise RuntimeError("boom")
 
     with pytest.raises(ServiceError, match="Pre-flight check failed"):

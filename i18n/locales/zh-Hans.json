@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "该优化已达到最大尝试次数（{attempts}）——请改为重新运行它。",
     "optimization.resume_not_resumable": "该优化没有可保存的恢复点——请改为重新运行它。",
     "optimization.resume_wrong_status": "只有运行中途停止的优化才能被恢复——这个优化处于 '{status}' 状态。",
+    "optimization.protected_interactive_sandbox_required": "此受保护的优化无法在 API 进程中进行评估或提供服务。它需要一个单独计费的 {runtime} 沙盒，但该端点暂不支持。",
     "optimization.retry_no_payload": "源优化没有可重试的已保存载荷。",
     "optimization.retry_wrong_status": "只有处于 'failed' 或 'cancelled' 状态的优化才能重试——这个优化处于 '{status}' 状态。请改为克隆它。",
     "quota.reached": "已达到每位用户 {quota} 个优化的上限。请删除旧的优化以创建新的优化。",
@@ -234,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions 不能为负数。",
     "wizard.split_fractions_not_number": "split_fractions 的取值必须是数字：{error}",
     "wizard.split_fractions_not_object": "split_fractions 必须是一个包含 train/val/test 键的对象。",
-    "wizard.split_fractions_sum": "split_fractions 之和必须为 1.0，实际得到 {total}。"
+    "wizard.split_fractions_sum": "split_fractions 之和必须为 1.0，实际得到 {total}。",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

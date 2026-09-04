@@ -6,6 +6,8 @@ import {
   hasMeaningfulDraft,
   recipeToOpen,
   stripModelSecrets,
+  sanitizeProgramDraft,
+  type WizardDraftData,
   type AnythingDraftData,
   type DraftStore,
   type WizardDraftRecord,
@@ -62,16 +64,20 @@ function fakeStore() {
   let stored: WizardDraftRecord | null = null;
   const log: string[] = [];
   let failWrites = false;
+  let resetGeneration = 0;
   const store: DraftStore = {
-    read: async () => stored,
-    write: async (record) => {
+    read: async () => ({ record: stored, resetGeneration }),
+    write: async (record, fence) => {
+      if (fence !== resetGeneration) return false;
       if (failWrites) throw new Error("quota");
       stored = record;
       log.push(`write:${record.revision}`);
+      return true;
     },
     remove: async () => {
       stored = null;
       log.push("remove");
+      return ++resetGeneration;
     },
   };
   return {
@@ -194,7 +200,8 @@ test("the proposer runtime survives durable draft saving and restoration", async
   );
   await saver.flush();
   const restored = saverWith(s.store, fakeTimers()).saver;
-  restored.adopt(await s.store.read("me@example.com"));
+  const snapshot = await s.store.read("me@example.com");
+  restored.adopt(snapshot.record, snapshot.resetGeneration);
   assert.equal(restored.current?.anything?.data.proposerRuntime, "vercel");
 });
 
@@ -262,4 +269,141 @@ test("detach forgets the record without touching storage", async () => {
   assert.equal(saver.current, null);
   assert.equal(saver.isHeld, true);
   assert.equal(s.stored?.revision, 1);
+});
+
+test("restored Program drafts discard stored green checks and tool/model credentials", () => {
+  const raw = {
+    jobName: "Keep my name",
+    codeAssistMode: "manual",
+    splitMode: "manual",
+    split: { train: 0.7, val: 0.2, test: 0.1 },
+    signatureValidation: { valid: true, errors: [] },
+    metricValidation: { valid: true, errors: [] },
+    reactConfig: {
+      mcpUrl: "https://tools.example.test/mcp",
+      mcpAuthHeader: "Bearer secret",
+      toolFilter: ["lookup", "search"],
+    },
+    modelConfig: { name: "task", extra: { api_key: "secret", temperature: 0.4 } },
+    secondModelConfig: {
+      name: "optimizer",
+      extra: { headers: { Authorization: "secret", region: "eu" } },
+    },
+    generationModels: [],
+    reflectionModels: [],
+  } as unknown as WizardDraftData;
+  const safe = sanitizeProgramDraft(raw);
+  assert.equal("signatureValidation" in safe, false);
+  assert.equal("metricValidation" in safe, false);
+  assert.equal(safe.reactConfig.mcpAuthHeader, "");
+  assert.equal(safe.reactConfig.mcpUrl, raw.reactConfig.mcpUrl);
+  assert.deepEqual(safe.reactConfig.toolFilter, ["lookup", "search"]);
+  assert.equal(JSON.stringify(safe).includes("secret"), false);
+  assert.deepEqual(safe.split, raw.split);
+  assert.equal(safe.splitMode, "manual");
+  assert.equal(safe.codeAssistMode, "manual");
+  assert.equal(safe.jobName, raw.jobName);
+  assert.deepEqual(safe.secondModelConfig?.extra, { headers: { region: "eu" } });
+});
+
+test("a missed cross-tab reset message still fences an old saver out of storage", async () => {
+  const s = fakeStore();
+  const old = saverWith(s.store, fakeTimers()).saver;
+  old.adopt(null);
+  old.hold(false);
+  old.publish("anything", anythingDraft({ objective: "discarded" }), true);
+  await old.flush();
+  const other = saverWith(s.store, fakeTimers()).saver;
+  const snapshot = await s.store.read("me@example.com");
+  other.adopt(snapshot.record, snapshot.resetGeneration);
+  await other.reset();
+  old.publish("anything", anythingDraft({ objective: "stale tab edit" }), true);
+  await old.flush();
+  assert.equal(s.stored, null);
+  assert.equal(old.isHeld, true);
+  other.hold(false);
+  other.publish("anything", anythingDraft({ objective: "new setup" }), true);
+  await other.flush();
+  assert.equal(s.stored?.anything?.data.objective, "new setup");
+});
+
+test("edits made during a write survive its completion and the next flush", async () => {
+  const s = fakeStore();
+  let release!: () => void;
+  let started!: () => void;
+  const began = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const originalWrite = s.store.write;
+  let writes = 0;
+  s.store.write = async (record, fence) => {
+    if (++writes === 1) {
+      started();
+      await gate;
+    }
+    return originalWrite(record, fence);
+  };
+  const { saver } = saverWith(s.store, fakeTimers());
+  saver.hold(false);
+  saver.publish("anything", anythingDraft({ objective: "before" }), true);
+  const first = saver.flush();
+  await began;
+  saver.publish("anything", anythingDraft({ objective: "after" }), true);
+  const second = saver.flush();
+  release();
+  await Promise.all([first, second]);
+  assert.equal(s.stored?.anything?.data.objective, "after");
+  assert.equal(s.stored?.revision, 2);
+  assert.equal(saver.current?.anything?.data.objective, "after");
+});
+
+test("reset waits for an active write and then removes its contents", async () => {
+  const s = fakeStore();
+  let release!: () => void;
+  let started!: () => void;
+  const began = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const originalWrite = s.store.write;
+  s.store.write = async (record, fence) => {
+    started();
+    await gate;
+    return originalWrite(record, fence);
+  };
+  const { saver } = saverWith(s.store, fakeTimers());
+  saver.hold(false);
+  saver.publish("anything", anythingDraft({ objective: "discard me" }), true);
+  const writing = saver.flush();
+  await began;
+  const resetting = saver.reset();
+  release();
+  await Promise.all([writing, resetting]);
+  assert.equal(s.stored, null);
+  assert.deepEqual(s.log, ["write:1", "remove"]);
+});
+
+test("shared budget identities survive workflow changes and reject failed durable saves", async () => {
+  const store = fakeStore();
+  const { saver } = saverWith(store.store, fakeTimers());
+  saver.hold(false);
+  saver.publish("anything", anythingDraft({ objective: "Improve this" }), true);
+  await saver.saveExecution({
+    executionBudgetRef: { id: "budget", revision: 2 },
+    budgetCreateIdempotencyKey: "create-key",
+    submissionIdempotencyKey: "submit-key",
+    budgetTotalCredits: 30,
+  });
+  saver.publish("program", { stage: "goal", maxCostCredits: 5 } as WizardDraftData, true);
+  await saver.flush();
+  assert.deepEqual(store.stored?.executionBudgetRef, { id: "budget", revision: 2 });
+  assert.equal(store.stored?.budgetTotalCredits, 30);
+  assert.equal(store.stored?.submissionIdempotencyKey, "submit-key");
+  store.setFailWrites(true);
+  await assert.rejects(saver.saveExecution({ budgetCreateIdempotencyKey: "next" }), /quota/);
 });

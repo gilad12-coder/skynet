@@ -17,13 +17,8 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from ...models import ValidateCodeRequest, ValidateCodeResponse
-from ...service_gateway import ServiceError
-from ...service_gateway.safe_exec import (
-    probe_metric_on_sample,
-    validate_metric_code,
-    validate_signature_code,
-)
 from ..response_limits import AGENT_MAX_ERROR, truncate_text
+from ..static_code_validation import StaticCodeError, inspect_metric, inspect_signature
 
 
 def _bounded_error(message: str) -> str:
@@ -111,20 +106,18 @@ def create_code_validation_router() -> APIRouter:
     @router.post(
         "/validate-code",
         response_model=ValidateCodeResponse,
-        summary="Pre-submit validation for signature and metric code",
+        summary="Static authoring validation for signature and metric code",
         tags=["agent"],
     )
     def validate_code(payload: ValidateCodeRequest) -> ValidateCodeResponse:
-        """Parse and smoke-test DSPy signature/metric code before enqueue.
+        """Inspect DSPy signature and metric syntax without executing authored code.
 
-        Checks: signature parse → column-mapping consistency → metric parse →
-        GEPA arity (if applicable) → live sample run. Returns ``valid=True`` only
-        when ``errors`` is empty; ``warnings`` lists soft issues that don't block
-        submission.
+        Runtime behavior is checked by protected setup when the user continues.
+        Legacy sample rows are ignored here so held-out data cannot reach a metric.
 
         Args:
             payload: Validation request containing signature/metric code,
-                column mapping, optimizer name, and an optional sample row.
+                column mapping, and optimizer name.
 
         Returns:
             A :class:`ValidateCodeResponse` with ``valid``, signature fields,
@@ -133,24 +126,25 @@ def create_code_validation_router() -> APIRouter:
         errors: list[str] = []
         warnings: list[str] = []
         sig_fields: dict[str, list[str]] | None = None
-        image_input_fields: list[str] = []
 
         if not payload.signature_code and not payload.metric_code:
             errors.append("Provide signature_code and/or metric_code to validate.")
 
         if payload.signature_code:
             try:
-                intro = validate_signature_code(payload.signature_code)
-                sig_fields = {
-                    "inputs": intro.input_fields,
-                    "outputs": intro.output_fields,
-                }
-                image_input_fields = list(intro.image_input_fields)
-            except ServiceError as exc:
+                intro = inspect_signature(payload.signature_code)
+                if intro is None:
+                    warnings.append(
+                        "Signature fields depend on runtime construction. "
+                        "Continue checks the signature and column mapping in protected setup."
+                    )
+                else:
+                    sig_fields = {
+                        "inputs": intro.input_fields,
+                        "outputs": intro.output_fields,
+                    }
+            except StaticCodeError as exc:
                 errors.append(_bounded_error(str(exc)))
-            # Catch-all: user code may raise arbitrary exceptions; surface as validation error.
-            except Exception as exc:
-                errors.append(_bounded_error(f"Signature error: {exc}"))
 
             if sig_fields:
                 missing_inputs = set(sig_fields["inputs"]) - set(payload.column_mapping.inputs.keys())
@@ -172,110 +166,35 @@ def create_code_validation_router() -> APIRouter:
                 if extra_outputs:
                     warnings.append(f"Output columns not in Signature (will be ignored): {sorted(extra_outputs)}")
 
-        metric_ok = False
-        metric_errors_before = len(errors)
         is_react = (payload.module_name or "").lower() == "react"
         if payload.metric_code:
             try:
-                metric_info = validate_metric_code(payload.metric_code)
-                metric_ok = True
-            except ServiceError as exc:
+                metric_info = inspect_metric(payload.metric_code)
+            except StaticCodeError as exc:
                 errors.append(_bounded_error(str(exc)))
-            # Catch-all: user code may raise arbitrary exceptions; surface as validation error.
-            except Exception as exc:
-                errors.append(_bounded_error(f"Metric error: {exc}"))
-
-            if metric_ok and is_react:
-                # A react metric scores the recorded trajectory over
-                # (example, rollout) — the GEPA 5-arg gate and the
-                # (example, prediction) sample probe below do not apply.
-                if len(metric_info.param_names) < 2:
+            else:
+                param_names = metric_info.param_names
+                if is_react and len(param_names) < 2 and not metric_info.accepts_varargs:
                     errors.append(
                         f"A ReAct metric must accept (example, rollout). "
-                        f"Found {len(metric_info.param_names)}: ({', '.join(metric_info.param_names)})."
+                        f"Found {len(param_names)}: ({', '.join(param_names)})."
                     )
-            elif metric_ok and payload.optimizer_name == "gepa":
-                param_names = metric_info.param_names
-                if len(param_names) < 5:
+                elif (
+                    not is_react
+                    and payload.optimizer_name == "gepa"
+                    and len(param_names) < 5
+                    and not metric_info.accepts_varargs
+                ):
                     errors.append(
                         f"GEPA metric must accept 5 arguments: (gold, pred, trace, pred_name, pred_trace). "
                         f"Found {len(param_names)}: ({', '.join(param_names)}). "
                         f"See https://dspy.ai/api/optimizers/GEPA for details."
                     )
 
-            metric_has_errors = len(errors) > metric_errors_before
-            if metric_ok and payload.sample_row and not metric_has_errors and not is_react:
-                mapping = payload.column_mapping
-                ex_data: dict = {}
-                for sig_field, col_name in mapping.inputs.items():
-                    ex_data[sig_field] = payload.sample_row.get(col_name, "")
-                for sig_field, col_name in mapping.outputs.items():
-                    ex_data[sig_field] = payload.sample_row.get(col_name, "")
-                try:
-                    probe = probe_metric_on_sample(
-                        metric_code=payload.metric_code,
-                        example_payload=ex_data,
-                        prediction_payload=ex_data,
-                        input_field_names=list(mapping.inputs.keys()),
-                        image_input_fields=image_input_fields,
-                    )
-                except ServiceError as exc:
-                    errors.append(_bounded_error(str(exc)))
-                except Exception as exc:  # Catch-all: subprocess / dspy setup failure.
-                    errors.append(_bounded_error(f"Error running metric on sample row: {exc}"))
-                else:
-                    is_gepa = payload.optimizer_name == "gepa"
-                    probe_errors_before = len(errors)
-                    if probe.error is not None:
-                        errors.append(_bounded_error(f"Error running metric on sample row: {probe.error}"))
-                    elif probe.result_kind == "none":
-                        errors.append(
-                            "Metric returned None. "
-                            + (
-                                "GEPA requires dspy.Prediction with score and feedback fields."
-                                if is_gepa
-                                else "Expected a numeric (float) or boolean return value."
-                            )
-                        )
-                    elif probe.result_kind == "prediction":
-                        if not is_gepa:
-                            errors.append(
-                                "Metric returns dspy.Prediction but the selected optimizer "
-                                "requires a numeric (float/bool) return value."
-                            )
-                    elif probe.result_kind == "numeric":
-                        if is_gepa:
-                            errors.append(
-                                "GEPA requires the metric to return dspy.Prediction(score=..., feedback=...), "
-                                "not a numeric value."
-                            )
-                    else:
-                        errors.append(
-                            f"Metric returned {probe.result_type_name}. "
-                            + (
-                                "GEPA requires dspy.Prediction with score and feedback fields."
-                                if is_gepa
-                                else "Expected a numeric (float) or boolean return value."
-                            )
-                        )
-
-                    # The probe always runs pred == gold, so a correct prediction must score > 0.
-                    # A <= 0 score means the metric mis-reads the gold/pred fields (e.g. treating
-                    # a dspy.Example as a dict). Only flag if the kind checks did not already fail.
-                    if (
-                        probe.error is None
-                        and probe.score is not None
-                        and probe.score <= 0
-                        and len(errors) == probe_errors_before
-                    ):
-                        errors.append(
-                            _bounded_error(
-                                f"Your metric scored a correct prediction (pred == gold) as {probe.score}. "
-                                "A correct answer must score > 0 — the metric likely mis-reads the gold/pred "
-                                "fields. In GEPA gold is a dspy.Example (NOT a dict, so isinstance(gold, dict) "
-                                "is always False); read fields with dot access like gold.<column> / pred.<field>."
-                            )
-                        )
+        if payload.sample_row is not None:
+            warnings.append(
+                "Sample rows are not executed during authoring validation. Continue runs protected setup checks."
+            )
 
         return ValidateCodeResponse(
             valid=len(errors) == 0,

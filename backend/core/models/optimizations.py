@@ -21,6 +21,11 @@ class _JobResponseBase(BaseModel):
     optimization_type: OptimizationType
     status: OptimizationStatus
     message: str | None = None
+    stop_reason: str | None = None
+    result_availability: str | None = None
+    terminal_evidence: dict[str, Any] | None = None
+    execution_budget: dict[str, Any] | None = None
+    recovery: dict[str, Any] | None = None
     name: str | None = None
     description: str | None = None
     pinned: bool = False
@@ -72,17 +77,13 @@ class _JobResponseBase(BaseModel):
     reflection_model_name: str | None = Field(
         default=None, description="Single-run reflection model name; null for grid searches."
     )
-    task_model_name: str | None = Field(
-        default=None, description="Single-run task model name; null for grid searches."
-    )
+    task_model_name: str | None = Field(default=None, description="Single-run task model name; null for grid searches.")
 
     total_pairs: int | None = Field(default=None, description="Grid-search pair count; null for single runs.")
     completed_pairs: int | None = Field(
         default=None, description="Grid-search pairs that finished; null for single runs."
     )
-    failed_pairs: int | None = Field(
-        default=None, description="Grid-search pairs that errored; null for single runs."
-    )
+    failed_pairs: int | None = Field(default=None, description="Grid-search pairs that errored; null for single runs.")
     generation_models: list[Any] | None = Field(
         default=None, description="Grid-search generation model list; null for single runs."
     )
@@ -117,6 +118,31 @@ class _JobResponseBase(BaseModel):
             mapping = normalized.get(side)
             if isinstance(mapping, list):
                 normalized[side] = {str(name): str(name) for name in mapping}
+        return normalized
+
+    @field_validator("recovery", mode="before")
+    @classmethod
+    def _normalize_recovery_state(cls, value: Any) -> Any:
+        """Keep internal recovery phases out of the public state discriminator.
+
+        Args:
+            value: Persisted recovery activity or outcome evidence.
+
+        Returns:
+            Recovery evidence with a stable public state and preserved phase.
+        """
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        state = normalized.get("state")
+        if state in {"waiting_for_usage", "resuming"}:
+            normalized["state"] = "recovering"
+            normalized.setdefault("phase", state)
+        elif state not in {"recovering", "recovered", "unavailable"}:
+            normalized["state"] = "unavailable"
+            if isinstance(state, str) and state:
+                normalized.setdefault("phase", state)
+            normalized.setdefault("reason", "This run has an unsupported recovery state.")
         return normalized
 
 
@@ -208,6 +234,7 @@ class OptimizationCountsResponse(BaseModel):
     running: int = 0
     success: int = 0
     failed: int = 0
+    stopped: int = 0
     cancelled: int = 0
     # Runs shared with the caller via a member grant (not owned). Powers the
     # control panel's "shared" stat card; 0 for admins and solo users.

@@ -34,7 +34,7 @@ class _StubStore:
 def engine() -> Iterator[Engine]:
     """Yield an in-memory SQLite engine with the billing tables created."""
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(eng, tables=[BillingCustomerModel.__table__, CreditLedgerModel.__table__])
+    Base.metadata.create_all(eng)
     yield eng
     Base.metadata.drop_all(eng)
 
@@ -122,6 +122,7 @@ async def test_stream_with_llm_metering_bills_on_completion(engine: Engine) -> N
     sink = [_FakeLm([{"usage": {"prompt_tokens": 100_000, "completion_tokens": 40_000}}])]
 
     async def source() -> AsyncIterator[dict[str, Any]]:
+        """Yield one complete synthetic stream."""
         yield {"event": "message_patch", "data": {"chunk": "hi"}}
         yield {"event": "done", "data": {}}
 
@@ -149,6 +150,7 @@ async def test_stream_with_llm_metering_bills_on_early_teardown(engine: Engine) 
     sink = [_FakeLm([{"usage": {"prompt_tokens": 50_000, "completion_tokens": 5_000}}])]
 
     async def source() -> AsyncIterator[dict[str, Any]]:
+        """Yield a stream that the caller will close after its first event."""
         yield {"event": "message_patch", "data": {"chunk": "hi"}}
         yield {"event": "done", "data": {}}
 
@@ -170,6 +172,7 @@ async def test_stream_with_llm_metering_skips_empty_sink(engine: Engine) -> None
     """A turn whose run function never built an LM bills nothing."""
 
     async def source() -> AsyncIterator[dict[str, Any]]:
+        """Yield an error without model usage."""
         yield {"event": "error", "data": {"error": "boom"}}
 
     events = [

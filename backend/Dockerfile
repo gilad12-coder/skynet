@@ -4,6 +4,34 @@
 # With those set nothing in this file fetches from public mirrors.
 ARG REGISTRY_PREFIX=docker.io
 FROM ${REGISTRY_PREFIX}/node:22.22.0-bookworm-slim AS node-runtime
+
+FROM node-runtime AS harness-deps
+
+ARG NPM_CONFIG_REGISTRY
+COPY sandbox-runtime/package.json sandbox-runtime/package-lock.json /usr/local/lib/skynet-harnesses/
+RUN npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
+        ${NPM_CONFIG_REGISTRY:+--registry "$NPM_CONFIG_REGISTRY"} \
+    && rm -rf \
+        /usr/local/lib/skynet-harnesses/node_modules/@anthropic-ai/claude-code-linux-x64-musl \
+        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-musl \
+        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-baseline-musl \
+    && mkdir -p \
+        /opt/skynet-harness-layers/anthropic \
+        /opt/skynet-harness-layers/codex \
+        /opt/skynet-harness-layers/opencode \
+        /opt/skynet-harness-layers/pi \
+    && mv /usr/local/lib/skynet-harnesses/node_modules/@anthropic-ai \
+        /opt/skynet-harness-layers/anthropic/ \
+    && mv /usr/local/lib/skynet-harnesses/node_modules/@openai \
+        /opt/skynet-harness-layers/codex/ \
+    && mv /usr/local/lib/skynet-harnesses/node_modules/@earendil-works \
+        /opt/skynet-harness-layers/pi/ \
+    && mv \
+        /usr/local/lib/skynet-harnesses/node_modules/opencode-ai \
+        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64 \
+        /usr/local/lib/skynet-harnesses/node_modules/opencode-linux-x64-baseline \
+        /opt/skynet-harness-layers/opencode/
+
 # 3.12 for PEP 683 immortal objects: core interpreter objects stop taking
 # refcount writes, so job children fork()ed from the fat parent dirty far
 # fewer copy-on-write pages. Full test suite verified green on 3.12.
@@ -12,13 +40,22 @@ FROM ${REGISTRY_PREFIX}/python:3.12-slim
 WORKDIR /app
 
 ARG DEBIAN_MIRROR
+ARG NPM_CONFIG_REGISTRY
 RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -exec \
             sed -i "s|http[s]\?://deb.debian.org|$DEBIAN_MIRROR|g; s|http[s]\?://security.debian.org|$DEBIAN_MIRROR|g" {} \; ; \
     fi \
     && apt-get update \
-    && apt-get install -y --no-install-recommends build-essential ca-certificates curl unzip git bubblewrap \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates curl unzip git \
     && rm -rf /var/lib/apt/lists/*
+
+# Use UID 1001 with GID 0 — works everywhere (Docker, Podman, OpenShift restricted-v2 SCC).
+# OpenShift assigns a random UID at runtime but always with GID 0. The install umask below
+# keeps generated runtime files group-writable without copying them into a second OCI layer.
+RUN groupadd -g 1001 appuser 2>/dev/null || true \
+    && useradd -u 1001 -g 0 -m -s /sbin/nologin appuser \
+    && chown 1001:0 /app \
+    && chmod 0775 /app
 
 # Claude Code 2.1.259 requires Node >=22; Debian's nodejs may be older.
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
@@ -26,11 +63,20 @@ COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-ARG NPM_CONFIG_REGISTRY
-RUN npm install --global --prefix /usr/local \
-        ${NPM_CONFIG_REGISTRY:+--registry "$NPM_CONFIG_REGISTRY"} \
-        @anthropic-ai/claude-code@2.1.259 \
-    && npm cache clean --force
+# VCR limits compressed OCI layers to 500 MB. Keep each pinned harness in its
+# own layer and omit musl binaries because this Debian image uses glibc.
+COPY --from=harness-deps /usr/local/lib/skynet-harnesses /usr/local/lib/skynet-harnesses
+COPY --from=harness-deps /opt/skynet-harness-layers/anthropic/ /usr/local/lib/skynet-harnesses/node_modules/
+COPY --from=harness-deps /opt/skynet-harness-layers/codex/ /usr/local/lib/skynet-harnesses/node_modules/
+COPY --from=harness-deps /opt/skynet-harness-layers/opencode/ /usr/local/lib/skynet-harnesses/node_modules/
+COPY --from=harness-deps /opt/skynet-harness-layers/pi/ /usr/local/lib/skynet-harnesses/node_modules/
+RUN for CLI in claude pi codex opencode; do \
+        ln -s "/usr/local/lib/skynet-harnesses/node_modules/.bin/$CLI" "/usr/local/bin/$CLI"; \
+    done
+
+# Deployment builds may COPY integrity-pinned custom wheels into this path in
+# a derived image. Runtime installs stay offline and can only read this cache.
+RUN install -d -m 0755 /opt/skynet/wheels
 
 # PIP_INDEX_URL cannot redirect a VCS dependency. Mirroring the repository
 # preserves the approved commit while keeping air-gap builds off GitHub.
@@ -62,12 +108,14 @@ ARG PIP_TRUSTED_HOST
 ARG PKG_MANAGER=uv
 ARG DSPY_LINE=preview
 RUN if [ "$PKG_MANAGER" = "pip" ]; then \
+        umask 0002; \
         if [ "$DSPY_LINE" = "stable" ]; then REQ=requirements.stable.txt; else REQ=requirements.txt; fi; \
         pip install --no-cache-dir --no-deps \
             ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
             ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
             -r "$REQ"; \
     else \
+        umask 0002; \
         pip install --no-cache-dir \
             ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
             ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
@@ -93,12 +141,14 @@ ARG DENO_VERSION=2.6.6
 ARG DENO_DOWNLOAD_BASE=https://github.com/denoland/deno/releases/download
 ENV DENO_DIR=/app/.deno
 RUN if [ "$PKG_MANAGER" = "uv" ] || [ "$DSPY_LINE" = "preview" ]; then \
+        umask 0002; \
         case "$(dpkg --print-architecture)" in \
             amd64) DENO_TARGET=x86_64-unknown-linux-gnu ;; \
             arm64) DENO_TARGET=aarch64-unknown-linux-gnu ;; \
             *) echo "unsupported arch for Deno: $(dpkg --print-architecture)" >&2; exit 1 ;; \
         esac \
-        && curl -fsSL --retry 3 "$DENO_DOWNLOAD_BASE/v$DENO_VERSION/deno-$DENO_TARGET.zip" -o /tmp/deno.zip \
+        && curl -fsSL --retry 10 --retry-all-errors --retry-delay 2 --continue-at - \
+            "$DENO_DOWNLOAD_BASE/v$DENO_VERSION/deno-$DENO_TARGET.zip" -o /tmp/deno.zip \
         && unzip -o /tmp/deno.zip -d /usr/local/bin \
         && rm /tmp/deno.zip \
         && chmod +x /usr/local/bin/deno \
@@ -107,29 +157,23 @@ RUN if [ "$PKG_MANAGER" = "uv" ] || [ "$DSPY_LINE" = "preview" ]; then \
         && ${NPM_CONFIG_REGISTRY:+NPM_CONFIG_REGISTRY=$NPM_CONFIG_REGISTRY} deno cache "$RUNNER_JS"; \
     fi
 
-COPY . .
+COPY --chown=1001:0 . .
 
 # Install the project itself. pip does an editable --no-deps install (every
 # dependency is already present from the layer above); uv re-syncs now that the
 # project source is in place.
 RUN if [ "$PKG_MANAGER" = "pip" ]; then \
+        umask 0002; \
         pip install --no-cache-dir --no-deps \
             ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
             ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
             -e .; \
     else \
+        umask 0002; \
         UV_PYTHON_DOWNLOADS=never uv sync --frozen; \
     fi
 
 ARG GIT_SHA=unknown
-
-# Use UID 1001 with GID 0 — works everywhere (Docker, Podman, OpenShift restricted-v2 SCC).
-# OpenShift assigns a random UID at runtime but always with GID 0, so /app must be
-# group-0-owned and group-writable for the editable install metadata to be accessible.
-RUN groupadd -g 1001 appuser 2>/dev/null || true \
-    && useradd -u 1001 -g 0 -m -s /sbin/nologin appuser \
-    && chgrp -R 0 /app \
-    && chmod -R g=u /app
 
 USER 1001
 

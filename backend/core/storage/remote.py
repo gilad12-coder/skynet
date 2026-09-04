@@ -18,6 +18,14 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, defer, sessionmaker
 
+from ..billing.budgets import BudgetInFlightError, BudgetInsufficientError
+from ..billing.recovery_admission import (
+    RecoveryAdmissionError,
+    headroom_price_snapshot,
+    runtime_bound,
+    validate_recovery_plan,
+    validate_recovery_runtime,
+)
 from ..config import settings
 from ..constants import (
     OPTIMIZATION_TYPE_TAGGING,
@@ -29,6 +37,7 @@ from ..constants import (
     STRUCTURAL_PROGRESS_EVENTS,
     TQDM_KEY_PREFIX,
 )
+from ..worker.checkpoint_compat import CheckpointCompatibilityError, checkpoint_incumbent, validate_checkpoint
 from .agent_run_store import PostgresAgentRunStore
 from .base import JobRecord, LogEntryRecord, ProgressEventRecord
 from .checkpoint_store import GepaCheckpoint, PostgresCheckpointBlobStore, PostgresGridPairResultStore
@@ -61,6 +70,69 @@ from .usage import (
     compute_user_storage_items,
     json_byte_size,
 )
+
+
+def _current_recovery_runtime(payload: dict[str, Any], optimization_type: str | None) -> dict[str, Any]:
+    """Build the current bounded outer-runtime evidence for recovery admission.
+
+    Args:
+        payload: Persisted request used to recognize legacy Anything jobs.
+        optimization_type: Stored dispatch family for legacy/default selection.
+
+    Returns:
+        Fresh Vercel resource and price evidence.
+    """
+    try:
+        is_blackbox = optimization_type == "blackbox" or "strategy" in payload
+        workflow = "anything" if is_blackbox else "dspy"
+        image = settings.vercel_sandbox_image if workflow == "anything" else settings.dspy_sandbox_image
+        return runtime_bound(
+            "vercel",
+            {
+                "image": image,
+                "lifetime_seconds": min(settings.vercel_sandbox_max_lifetime_seconds, 86_400),
+            },
+        )
+    except (TypeError, ValueError) as error:
+        if isinstance(error, RecoveryAdmissionError):
+            raise
+        raise RecoveryAdmissionError("The current sandbox runtime cannot provide a bounded recovery profile.") from error
+
+
+def _mark_recovery_budget_stop(job: JobModel, manifest: dict[str, Any], checkpoint_revision: Any) -> None:
+    """Preserve safe evaluated checkpoint evidence when recovery cannot be funded.
+
+    Args:
+        job: Locked run row to terminate.
+        manifest: Verified checkpoint manifest from the interrupted execution.
+        checkpoint_revision: Checkpoint digest shown in recovery evidence.
+    """
+    message = "The remaining authorized budget cannot cover checkpoint recovery."
+    incumbent = checkpoint_incumbent(manifest)
+    evidence: dict[str, Any] = {
+        "candidate_origin": None,
+        "final_evaluation_completed": False,
+        "final_evaluation_reason": "budget_reached",
+    }
+    if incumbent is not None:
+        evidence.update(
+            candidate_origin=incumbent["candidate_origin"],
+            selection_scope=incumbent["selection_scope"],
+            selection_score=incumbent["selection_score"],
+            incumbent=incumbent,
+        )
+    job.status = "stopped"
+    job.stop_reason = "budget_reached"
+    job.result_availability = "evaluated" if incumbent is not None else "none"
+    job.terminal_evidence = {**(job.terminal_evidence or {}), **evidence}
+    job.completed_at = datetime.now(UTC)
+    job.message = message
+    job.recovery = {
+        "state": "unavailable",
+        "phase": "admission",
+        "reason": message,
+        "checkpoint_revision": checkpoint_revision,
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -561,6 +633,13 @@ class RemoteDBJobStore:
                 "username": job.username,
                 "optimization_type": job.optimization_type,
                 "attempts": job.attempts,
+                "execution_generation": job.execution_generation,
+                "execution_budget_id": job.execution_budget_id,
+                "execution_budget_generation": job.execution_budget_generation,
+                "stop_reason": job.stop_reason,
+                "result_availability": job.result_availability,
+                "terminal_evidence": job.terminal_evidence,
+                "recovery": job.recovery,
                 "code_version": job.code_version,
                 "stored_bytes": job.stored_bytes or 0,
                 "accumulated_runtime_seconds": job.accumulated_runtime_seconds or 0.0,
@@ -576,6 +655,14 @@ class RemoteDBJobStore:
         *,
         username: str | None = None,
         idempotency_key: str | None = None,
+        execution_budget_id: str | None = None,
+        execution_budget_revision: int | None = None,
+        budget_service: Any = None,
+        preflight_id: str | None = None,
+        preflight_fingerprint: str | None = None,
+        preflight_payload: dict[str, Any] | None = None,
+        preflight_workflow: str | None = None,
+        preflight_store: Any = None,
     ) -> JobRecord:
         """Create a new job record in the database.
 
@@ -587,6 +674,14 @@ class RemoteDBJobStore:
                 against duplicate POSTs before ``set_payload_overview`` runs.
             idempotency_key: Optional client-supplied dedup key; pairs with
                 ``username`` for the uniqueness check.
+            execution_budget_id: Setup/run budget to attach atomically.
+            execution_budget_revision: Revision the user authorized for submission.
+            budget_service: Injected authoritative budget service, avoiding a storage/billing import cycle.
+            preflight_id: Completed execution-check identity.
+            preflight_fingerprint: Configuration digest approved by those checks.
+            preflight_payload: Canonical current request before runtime mutations.
+            preflight_workflow: Exact request family.
+            preflight_store: Injected verification authority sharing the attachment transaction.
 
         Returns:
             The newly inserted row as a ``JobRecord``.
@@ -607,6 +702,29 @@ class RemoteDBJobStore:
         session = self._get_session()
         try:
             session.add(job)
+            if execution_budget_id is not None:
+                if budget_service is None or username is None or execution_budget_revision is None:
+                    raise ValueError("Budget attachment requires an owner, revision, and budget service.")
+                if preflight_store is None or preflight_payload is None or preflight_workflow is None:
+                    raise ValueError("Protected attachment requires current setup verification.")
+                preflight_store.require_current(
+                    username=username,
+                    budget_id=execution_budget_id,
+                    identity=preflight_id,
+                    fingerprint=preflight_fingerprint,
+                    workflow=preflight_workflow,
+                    payload=preflight_payload,
+                    session=session,
+                )
+                budget = budget_service.attach_to_job(
+                    execution_budget_id,
+                    username,
+                    optimization_id,
+                    expected_revision=execution_budget_revision,
+                    session=session,
+                )
+                job.execution_budget_id = budget.id
+                job.execution_budget_generation = budget.generation
             session.commit()
             session.refresh(job)
             return self._job_to_dict(job)
@@ -745,7 +863,9 @@ class RemoteDBJobStore:
         finally:
             session.close()
 
-    def update_job_if_status(self, optimization_id: str, expected: tuple[str, ...], **kwargs: Any) -> bool:
+    def update_job_if_status(
+        self, optimization_id: str, expected: tuple[str, ...], *, expected_generation: int | None = None, **kwargs: Any
+    ) -> bool:
         """Update a job only while its status is one of ``expected`` (compare-and-set).
 
         The conditional ``WHERE status IN (...)`` closes the last-writer-wins
@@ -758,6 +878,7 @@ class RemoteDBJobStore:
             optimization_id: ID of the job to update.
             expected: Status values the row must currently hold for the write to
                 apply.
+            expected_generation: Execution fence required for worker-owned writes.
             **kwargs: Column values to overwrite.
 
         Returns:
@@ -791,12 +912,14 @@ class RemoteDBJobStore:
                         json_byte_size(update_values[col] if col in update_values else stored_row[i])
                         for i, col in enumerate(_STORED_BYTES_JSON_COLUMNS)
                     )
-            rows = (
+            query = (
                 session.query(JobModel)
                 .filter(JobModel.optimization_id == optimization_id)
                 .filter(JobModel.status.in_(expected))
-                .update(update_values, synchronize_session=False)
             )
+            if expected_generation is not None:
+                query = query.filter(JobModel.execution_generation == expected_generation)
+            rows = query.update(update_values, synchronize_session=False)
             session.commit()
             return rows > 0
         finally:
@@ -850,7 +973,15 @@ class RemoteDBJobStore:
         session = self._get_session()
         try:
             row = (
-                session.query(JobModel.status, JobModel.message, JobModel.latest_metrics)
+                session.query(
+                    JobModel.status,
+                    JobModel.message,
+                    JobModel.latest_metrics,
+                    JobModel.recovery,
+                    JobModel.terminal_evidence,
+                    JobModel.stop_reason,
+                    JobModel.result_availability,
+                )
                 .filter(JobModel.optimization_id == optimization_id)
                 .first()
             )
@@ -858,7 +989,15 @@ class RemoteDBJobStore:
                 raise KeyError(f"Job '{optimization_id}' not found")
             return cast(
                 JobRecord,
-                {"status": row[0], "message": row[1], "latest_metrics": row[2] or {}},
+                {
+                    "status": row[0],
+                    "message": row[1],
+                    "latest_metrics": row[2] or {},
+                    "recovery": row[3],
+                    "terminal_evidence": row[4],
+                    "stop_reason": row[5],
+                    "result_availability": row[6],
+                },
             )
         finally:
             session.close()
@@ -1069,7 +1208,16 @@ class RemoteDBJobStore:
         """
         return self._agent_runs.get(optimization_id, run_id)
 
-    def save_gepa_checkpoint(self, optimization_id: str, data: bytes, iteration: int, pair_index: int = -1) -> None:
+    def save_gepa_checkpoint(
+        self,
+        optimization_id: str,
+        data: bytes,
+        iteration: int,
+        pair_index: int = -1,
+        *,
+        manifest: dict[str, Any] | None = None,
+        expected_generation: int | None = None,
+    ) -> bool:
         """Persist (or replace) the latest GEPA state blob for one run or grid pair.
 
         Args:
@@ -1077,8 +1225,20 @@ class RemoteDBJobStore:
             data: Raw ``gepa_state.bin`` bytes for the latest iteration.
             iteration: The iteration index the state was saved at.
             pair_index: Grid pair index, or ``-1`` for a single run.
+            manifest: Exact engine and task evidence for compatible restoration.
+            expected_generation: Current worker epoch authorizing publication.
+
+        Returns:
+            Whether the checkpoint was accepted.
         """
-        self._checkpoints.put(optimization_id, data=data, iteration=iteration, pair_index=pair_index)
+        return self._checkpoints.put(
+            optimization_id,
+            data=data,
+            iteration=iteration,
+            pair_index=pair_index,
+            manifest=manifest,
+            expected_generation=expected_generation,
+        )
 
     def get_gepa_checkpoint(self, optimization_id: str, pair_index: int = -1) -> GepaCheckpoint | None:
         """Return the saved GEPA checkpoint for one run/pair, or ``None``.
@@ -1134,15 +1294,21 @@ class RemoteDBJobStore:
         """
         return self._checkpoints.has_any(optimization_id)
 
-    def save_grid_pair_result(self, optimization_id: str, pair_index: int, result: dict[str, Any]) -> None:
+    def save_grid_pair_result(
+        self, optimization_id: str, pair_index: int, result: dict[str, Any], *, expected_generation: int | None = None
+    ) -> bool:
         """Persist (or replace) one completed grid pair's result so resume can skip it.
 
         Args:
             optimization_id: Owning grid job id.
             pair_index: The completed pair's index.
             result: The pair's serialized ``PairResult``.
+            expected_generation: Worker epoch authorizing this pair publication.
+
+        Returns:
+            Whether the current generation stored the result.
         """
-        self._grid_pair_results.put(optimization_id, pair_index, result)
+        return self._grid_pair_results.put(optimization_id, pair_index, result, expected_generation=expected_generation)
 
     def get_grid_pair_results(self, optimization_id: str) -> dict[int, dict[str, Any]]:
         """Return ``{pair_index: result}`` for every completed pair of a grid.
@@ -1199,7 +1365,7 @@ class RemoteDBJobStore:
                 session.query(live_child.optimization_id)
                 .filter(
                     live_child.parent_optimization_id == JobModel.optimization_id,
-                    live_child.status.notin_(["success", "failed", "cancelled"]),
+                    live_child.status.notin_(["success", "failed", "cancelled", "stopped"]),
                 )
                 .exists()
             )
@@ -1337,29 +1503,51 @@ class RemoteDBJobStore:
         """
         return self._grid_pair_results.has_any(optimization_id)
 
-    def resumable_state_ids(self, optimization_ids: list[str]) -> set[str]:
-        """Return the subset of ids holding any resumable state.
-
-        The batch counterpart of :meth:`has_gepa_checkpoint` /
-        :meth:`has_grid_pair_results`: two ``IN (...)`` round trips replace a
-        per-row existence probe when a list page annotates its ``resumable``
-        flags.
+    def has_compatible_gepa_checkpoint(self, optimization_id: str) -> bool:
+        """Expose recovery only after source, task, runtime, and integrity checks pass.
 
         Args:
-            optimization_ids: Job ids to test.
+            optimization_id: Job whose checkpoint evidence is inspected.
 
         Returns:
-            The ids with a saved checkpoint or at least one finished grid pair.
+            Whether the current worker can restore every saved state blob.
         """
-        if not optimization_ids:
-            return set()
-        found = self._checkpoints.has_any_batch(optimization_ids)
-        remaining = [oid for oid in optimization_ids if oid not in found]
-        if remaining:
-            found |= self._grid_pair_results.has_any_batch(remaining)
-        return found
+        try:
+            job = self.get_job(optimization_id)
+            if job.get("execution_budget_id") is None:
+                return False
+            checkpoints = self._checkpoints.list_for_optimization(optimization_id)
+            if not checkpoints or job.get("code_version") != self._current_code_version:
+                return False
+            for checkpoint in checkpoints:
+                validate_checkpoint(
+                    checkpoint.data, checkpoint.manifest, job.get("payload") or {}, job.get("code_version")
+                )
+            return True
+        except (KeyError, CheckpointCompatibilityError):
+            return False
 
-    def requeue_for_resume(self, optimization_id: str, *, bump_attempts: bool = True) -> int | None:
+    def resumable_state_ids(self, optimization_ids: list[str]) -> set[str]:
+        """Return only jobs with fully compatible persisted recovery evidence.
+
+        Args:
+            optimization_ids: Candidate job ids after cheap status checks.
+
+        Returns:
+            The subset with a supported, intact checkpoint for this runtime.
+        """
+        return {identifier for identifier in optimization_ids if self.has_compatible_gepa_checkpoint(identifier)}
+
+    def requeue_for_resume(
+        self,
+        optimization_id: str,
+        *,
+        bump_attempts: bool = True,
+        automatic: bool = False,
+        expected_generation: int | None = None,
+        budget_service: Any = None,
+        pair_index_to_resume: int | None = None,
+    ) -> int | None:
         """Re-queue a terminal job in place so a worker resumes it from its checkpoint.
 
         Flips the existing row back to ``pending`` — same id, payload, seed and
@@ -1378,15 +1566,205 @@ class RemoteDBJobStore:
         Args:
             optimization_id: The job to resume.
             bump_attempts: Whether to count this re-queue against the attempt cap.
+            automatic: Whether interruption recovery, rather than an explicit user action, requested resume.
+            expected_generation: Fenced publication generation observed by the caller.
+            budget_service: Authoritative funding and dispatch fence for a protected job.
+            pair_index_to_resume: Explicit pair whose stored result is cleared atomically for recovery.
 
         Returns:
             The new attempt count, or ``None`` when the job row is missing.
         """
         session = self._get_session()
         try:
-            job = session.get(JobModel, optimization_id)
+            job = (
+                session.query(JobModel)
+                .filter(JobModel.optimization_id == optimization_id)
+                .with_for_update()
+                .one_or_none()
+            )
             if job is None:
                 return None
+            expected_statuses = (
+                {"running", "validating"} if automatic else {"failed", "cancelled", "paused", "success", "stopped"}
+            )
+            if job.status not in expected_statuses or (
+                expected_generation is not None and job.execution_generation != expected_generation
+            ):
+                return None
+            if automatic and job.stop_reason == "budget_reached":
+                return None
+            checkpoints = self._checkpoints.list_for_optimization(optimization_id)
+            if not checkpoints:
+                raise CheckpointCompatibilityError(
+                    "No completed compatible checkpoint is available; automatic fresh restart is disabled."
+                )
+            if pair_index_to_resume is not None and not any(
+                checkpoint.pair_index == pair_index_to_resume for checkpoint in checkpoints
+            ):
+                raise CheckpointCompatibilityError("The selected pair has no compatible checkpoint.")
+            for checkpoint in checkpoints:
+                validate_checkpoint(checkpoint.data, checkpoint.manifest, job.payload or {}, job.code_version)
+            if job.code_version != self._current_code_version:
+                raise CheckpointCompatibilityError("No compatible worker version is available for this checkpoint.")
+            if job.execution_budget_id is None:
+                raise CheckpointCompatibilityError(
+                    "This run has no verified cumulative execution budget; authorize a new run instead."
+                )
+            current_attempt = int(job.attempts or 0)
+            if bump_attempts and current_attempt + 1 >= settings.job_max_attempts:
+                raise CheckpointCompatibilityError("This run has reached its automatic recovery attempt limit.")
+            recovery_plan = None
+            checkpoint_revision = None
+            headroom_operation_id = None
+            if automatic:
+                if len(checkpoints) != 1:
+                    raise CheckpointCompatibilityError(
+                        "Automatic recovery requires one independently bounded GEPA checkpoint per job."
+                    )
+                checkpoint = checkpoints[0]
+                manifest = checkpoint.manifest or {}
+                checkpoint_revision = manifest.get("checkpoint_sha256")
+                try:
+                    recovery_plan = validate_recovery_plan(manifest.get("recovery_admission"), manifest)
+                    validate_recovery_runtime(
+                        recovery_plan,
+                        _current_recovery_runtime(job.payload or {}, job.optimization_type),
+                    )
+                except RecoveryAdmissionError as error:
+                    raise CheckpointCompatibilityError(str(error)) from error
+            if job.execution_budget_id is not None:
+                if budget_service is None:
+                    raise CheckpointCompatibilityError("Recovery requires the authoritative budget service.")
+                waiting_for_usage = (
+                    isinstance(job.recovery, dict)
+                    and job.recovery.get("state") == "recovering"
+                    and job.recovery.get("phase") == "waiting_for_usage"
+                )
+                if not waiting_for_usage:
+                    fenced = budget_service.fence_generation(
+                        job.execution_budget_id,
+                        job.username,
+                        expected_generation=job.execution_budget_generation,
+                        session=session,
+                    )
+                    job.execution_budget_generation = fenced.generation
+                    job.execution_generation = int(job.execution_generation or 0) + 1
+                    job.payload = {**(job.payload or {}), "execution_budget_generation": fenced.generation}
+                    job.recovery = {
+                        "state": "recovering",
+                        "phase": "waiting_for_usage",
+                        "reason": "Reconciling interrupted requests before recovery.",
+                        "execution_generation": int(job.execution_generation or 0) + 1,
+                        "checkpoint_revision": checkpoint_revision,
+                    }
+                    fenced_generation = job.execution_generation
+                    previous_status = job.status
+                    session.commit()
+                    job = (
+                        session.query(JobModel)
+                        .filter(
+                            JobModel.optimization_id == optimization_id,
+                            JobModel.execution_generation == fenced_generation,
+                            JobModel.status == previous_status,
+                        )
+                        .populate_existing()
+                        .with_for_update()
+                        .one_or_none()
+                    )
+                    if job is None:
+                        return None
+                budget = budget_service.get(job.execution_budget_id, job.username)
+                if budget.pending_operations or budget.reserved_credits:
+                    return None
+                if not automatic and budget.state == "closed" and budget.available_credits > 0:
+                    budget = budget_service.resume_admission(
+                        job.execution_budget_id, job.username, expected_generation=job.execution_budget_generation
+                    )
+                if budget.available_credits <= 0 or budget.blocked_reason is not None:
+                    if budget.blocked_reason is None:
+                        budget_service.stop_admission(
+                            job.execution_budget_id,
+                            job.username,
+                            reason="budget_reached",
+                        )
+                    _mark_recovery_budget_stop(job, manifest, checkpoint_revision)
+                    session.commit()
+                    return None
+                if automatic and recovery_plan is not None:
+                    try:
+                        headroom = budget_service.reserve(
+                            job.execution_budget_id,
+                            job.username,
+                            operation_key=(
+                                f"recovery:{optimization_id}:{recovery_plan['checkpoint_sha256']}:"
+                                f"g{job.execution_budget_generation}"
+                            ),
+                            generation=job.execution_budget_generation,
+                            phase="run",
+                            cost_kind="recovery_headroom",
+                            request_fingerprint=recovery_plan["fingerprint"],
+                            price_snapshot=headroom_price_snapshot(recovery_plan),
+                            max_credits=recovery_plan["max_credits"],
+                            max_wallet_credits=recovery_plan["max_wallet_credits"],
+                            role="recovery",
+                            session=session,
+                        )
+                        headroom_operation_id = headroom.id
+                    except BudgetInFlightError:
+                        job.recovery = {
+                            **(job.recovery or {}),
+                            "state": "recovering",
+                            "phase": "waiting_for_usage",
+                            "reason": "Waiting for covered account work to settle before recovery.",
+                            "checkpoint_revision": checkpoint_revision,
+                        }
+                        session.commit()
+                        return None
+                    except BudgetInsufficientError:
+                        budget_service.stop_admission(
+                            job.execution_budget_id,
+                            job.username,
+                            reason="budget_reached",
+                            session=session,
+                        )
+                        _mark_recovery_budget_stop(job, manifest, checkpoint_revision)
+                        session.commit()
+                        return None
+            if pair_index_to_resume is not None:
+                result = job.result if isinstance(job.result, dict) else {}
+                for pair in result.get("pair_results", []):
+                    index = pair.get("pair_index")
+                    if not isinstance(index, int) or index == pair_index_to_resume:
+                        continue
+                    row = session.get(GridPairResultModel, (optimization_id, index))
+                    if row is None:
+                        session.add(
+                            GridPairResultModel(
+                                optimization_id=optimization_id,
+                                pair_index=index,
+                                result=pair,
+                                stored_bytes=json_byte_size(pair),
+                            )
+                        )
+                selected = session.get(GridPairResultModel, (optimization_id, pair_index_to_resume))
+                if selected is not None:
+                    session.delete(selected)
+            job.execution_generation = int(job.execution_generation or 0) + 1
+            job.stop_reason = None
+            job.recovery = {
+                "state": "recovering",
+                "phase": "resuming",
+                "attempt": int(job.attempts or 0) + int(bump_attempts),
+                "checkpoint_iteration": max(cp.iteration for cp in checkpoints),
+                "seed_reevaluation_required": True,
+                "execution_generation": int(job.execution_generation or 0),
+                "checkpoint_revision": checkpoint_revision,
+                "headroom_operation_id": headroom_operation_id,
+                "execution_max_credits": recovery_plan.get("execution_max_credits") if recovery_plan else None,
+                "execution_max_wallet_credits": (
+                    recovery_plan.get("execution_max_wallet_credits") if recovery_plan else None
+                ),
+            }
             current = int(job.attempts or 0)
             next_attempt = current + 1 if bump_attempts else current
             job.attempts = next_attempt  # type: ignore[assignment]
@@ -1844,71 +2222,72 @@ class RemoteDBJobStore:
         finally:
             session.close()
 
-    def recover_orphaned_jobs(self) -> int:
-        """Re-queue or fail jobs whose worker lease has expired.
+    def recover_orphaned_jobs(self, *, budget_service: Any = None) -> int:
+        """Recover only compatible interrupted runs with reconciled remaining funding.
 
-        With the DB-backed claim queue, a "stuck" job is one whose
-        ``lease_expires_at`` is in the past — the previous worker is presumed
-        dead. Such jobs are moved back to ``pending`` until they reach the
-        configured retry cap, letting a healthy peer pod claim the work.
-
-        Rows that have *no* claim at all (``claimed_by IS NULL`` while still
-        somehow in ``running``/``validating``) are also recovered, covering
-        the bootstrapping case of a fleet that just upgraded from the legacy
-        in-memory queue.
+        Args:
+            budget_service: Authoritative dispatch fence and cumulative funding service.
 
         Returns:
-            The number of orphaned jobs handled.
+            Number of expired jobs handled; unsupported jobs become explicit failures.
         """
         session = self._get_session()
         try:
             now = datetime.now(UTC)
-            # A distributed grid parent sits at ``running`` with NO lease by
-            # design — its pair children carry the leases. Sweeping it would
-            # re-pend a job no worker should ever claim, so any row that has
-            # children is excluded; the children themselves are ordinary
-            # leased rows and recover through this same sweep.
             child = aliased(JobModel)
             has_children = (
                 session.query(child.optimization_id)
                 .filter(child.parent_optimization_id == JobModel.optimization_id)
                 .exists()
             )
-            orphaned = (
-                session.query(JobModel)
-                .options(defer(JobModel.payload), defer(JobModel.result))
-                .filter(JobModel.status.in_(["running", "validating"]))
-                .filter((JobModel.lease_expires_at.is_(None)) | (JobModel.lease_expires_at < now))
-                .filter(~has_children)
+            candidates = [
+                self._job_to_dict(job)
+                for job in session.query(JobModel)
+                .filter(
+                    JobModel.status.in_(["running", "validating"]),
+                    (JobModel.lease_expires_at.is_(None)) | (JobModel.lease_expires_at < now),
+                    ~has_children,
+                )
                 .all()
-            )
-            for job in orphaned:
-                next_attempt = int(job.attempts or 0) + 1
-                job.attempts = next_attempt  # type: ignore[assignment]
-                job.claimed_by = None  # type: ignore[assignment]
-                job.claimed_at = None  # type: ignore[assignment]
-                job.lease_expires_at = None  # type: ignore[assignment]
-                if next_attempt >= settings.job_max_attempts:
-                    job.status = "failed"  # type: ignore[assignment]
-                    job.completed_at = now  # type: ignore[assignment]
-                    if job.code_version and job.code_version != self._current_code_version:
-                        job.message = (  # type: ignore[assignment]
-                            "No compatible worker version available "
-                            f"(job={job.code_version}, fleet={self._current_code_version})"
-                        )
-                    else:
-                        job.message = f"Job failed after pod failure (attempt {next_attempt})"  # type: ignore[assignment]
-                else:
-                    job.status = "pending"  # type: ignore[assignment]
-                    job.completed_at = None  # type: ignore[assignment]
-                    job.message = f"Re-queued after pod failure (attempt {next_attempt})"  # type: ignore[assignment]
-            session.commit()
-            count = len(orphaned)
-            if count:
-                logger.warning("Handled %d orphaned jobs (expired lease)", count)
-            return count
+            ]
         finally:
             session.close()
+        for job in candidates:
+            identifier = job["optimization_id"]
+            generation = int(job.get("execution_generation") or 0)
+            reason = "The interruption recovery attempt limit has been reached."
+            if int(job.get("attempts") or 0) + 1 < settings.job_max_attempts:
+                try:
+                    if (
+                        self.requeue_for_resume(
+                            identifier, automatic=True, expected_generation=generation, budget_service=budget_service
+                        )
+                        is not None
+                    ):
+                        continue
+                except (CheckpointCompatibilityError, RuntimeError, ValueError) as exc:
+                    reason = str(exc)
+                refreshed = self.get_job(identifier)
+                if (
+                    isinstance(refreshed.get("recovery"), dict)
+                    and refreshed["recovery"].get("state") == "recovering"
+                    and refreshed["recovery"].get("phase") == "waiting_for_usage"
+                ):
+                    continue
+            self.update_job_if_status(
+                identifier,
+                ("running", "validating"),
+                expected_generation=generation,
+                status="failed",
+                stop_reason="interrupted",
+                completed_at=now.isoformat(),
+                message=reason,
+                recovery={"state": "unavailable", "reason": reason},
+                claimed_by=None,
+                claimed_at=None,
+                lease_expires_at=None,
+            )
+        return len(candidates)
 
     def claim_next_job(
         self,
@@ -1965,6 +2344,7 @@ class RemoteDBJobStore:
             """
             UPDATE jobs
             SET status = 'validating',
+                execution_generation = execution_generation + 1,
                 claimed_by = :worker_id,
                 claimed_at = :now,
                 lease_expires_at = :lease_until
@@ -2037,6 +2417,7 @@ class RemoteDBJobStore:
             )
             job = min(candidates, key=lambda row: in_flight.get(row.username, 0))
             job.status = "validating"  # type: ignore[assignment]
+            job.execution_generation = int(job.execution_generation or 0) + 1
             job.claimed_by = worker_id  # type: ignore[assignment]
             job.claimed_at = now  # type: ignore[assignment]
             job.lease_expires_at = lease_until  # type: ignore[assignment]
@@ -2151,6 +2532,61 @@ class RemoteDBJobStore:
                     json_byte_size(job.payload) + json_byte_size(job.result) + json_byte_size(overview or {})
                 )
                 session.commit()
+        finally:
+            session.close()
+
+    def record_progress_for_generation(
+        self,
+        optimization_id: str,
+        message: str | None,
+        metrics: dict[str, Any],
+        *,
+        source_optimization_id: str,
+        generation: int,
+    ) -> bool:
+        """Publish progress only while its source worker owns the active generation.
+
+        Args:
+            optimization_id: Job or parent grid receiving the event.
+            message: Event name.
+            metrics: Completed progress evidence from the child.
+            source_optimization_id: Actual leased job that emitted the event.
+            generation: Publication epoch captured when the worker claimed it.
+
+        Returns:
+            Whether this still-current event was published.
+        """
+        session = self._get_session()
+        try:
+            source = (
+                session.query(JobModel)
+                .filter(
+                    JobModel.optimization_id == source_optimization_id,
+                    JobModel.execution_generation == generation,
+                    JobModel.status.in_(["running", "validating"]),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if source is None:
+                return False
+            target = source if source_optimization_id == optimization_id else session.get(JobModel, optimization_id)
+            if target is None or target.status not in {"running", "validating"}:
+                return False
+            session.add(
+                ProgressEventModel(
+                    optimization_id=optimization_id, timestamp=datetime.now(UTC), event=message, metrics=metrics
+                )
+            )
+            target.latest_metrics = {**(target.latest_metrics or {}), **metrics}
+            if (
+                isinstance(source.recovery, dict)
+                and source.recovery.get("state") == "recovering"
+                and source.recovery.get("phase") == "resuming"
+            ):
+                source.recovery = {**source.recovery, "state": "recovered", "phase": "complete"}
+            session.commit()
+            return True
         finally:
             session.close()
 

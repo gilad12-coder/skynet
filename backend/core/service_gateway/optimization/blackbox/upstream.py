@@ -18,6 +18,7 @@ from gepa.oa.engine import Result as UpstreamResult
 from gepa.oa.eval_server import EvalServer as UpstreamEvalServer
 from gepa.oa.task import Task as UpstreamTask
 
+from ..budget_stop import BudgetReached
 from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, Task
 
 GEPA_REVISION = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
@@ -57,6 +58,8 @@ def upstream_server(task: Task, server: EvalServer, ctx: EngineContext) -> Upstr
         An unstarted upstream server for an in-process engine.
     """
 
+    stops: list[BudgetReached] = []
+
     def evaluate(candidate: Any, example: Any = None) -> tuple[float, dict[str, Any]]:
         """Translate the admission stop into the exception upstream engines handle.
 
@@ -69,16 +72,21 @@ def upstream_server(task: Task, server: EvalServer, ctx: EngineContext) -> Upstr
         """
         try:
             return server.evaluate(candidate, example)
+        except BudgetReached as exc:
+            stops.append(exc)
+            raise BudgetExhausted(str(exc)) from exc
         except BudgetExhaustedError as exc:
             raise BudgetExhausted(str(exc)) from exc
 
-    return UpstreamEvalServer(
+    upstream = UpstreamEvalServer(
         upstream_task(task, Path(ctx.run_dir).name),
         evaluate,
         BudgetTracker(max_evals=server.remaining),
         max_concurrency=ctx.concurrency,
         output_dir=Path(ctx.run_dir),
     )
+    upstream.platform_budget_stops = stops
+    return upstream
 
 
 def local_result(result: UpstreamResult, server: EvalServer) -> Result:
@@ -117,7 +125,7 @@ def _finite_metadata(value: Any) -> Any:
         return None
     if isinstance(value, dict):
         return {key: _finite_metadata(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
+    if isinstance(value, tuple | list):
         return [_finite_metadata(item) for item in value]
     return value
 

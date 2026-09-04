@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "این بهینه‌سازی به حداکثر تعداد تلاش‌های خود ({attempts}) رسید — به جای آن دوباره آن را اجرا کنید.",
     "optimization.resume_not_resumable": "این بهینه‌سازی هیچ نقطه‌ی ازسرگیری ذخیره‌شده‌ای ندارد — به جای آن دوباره آن را اجرا کنید.",
     "optimization.resume_wrong_status": "تنها بهینه‌سازی‌هایی که در میانه‌ی اجرا متوقف شده‌اند قابل ازسرگیری هستند — این یکی در وضعیت '{status}' است.",
+    "optimization.protected_interactive_sandbox_required": "این بهینه‌سازی محافظت‌شده را نمی‌توان در فرایند API ارزیابی یا اجرا کرد. یک محیط ایزولهٔ {runtime} با محاسبهٔ هزینهٔ جداگانه لازم است که هنوز در این نقطهٔ پایانی در دسترس نیست.",
     "optimization.retry_no_payload": "بهینه‌سازی مبدأ هیچ بار ذخیره‌شده‌ای برای تلاش مجدد ندارد.",
     "optimization.retry_wrong_status": "تنها بهینه‌سازی‌هایی که در وضعیت 'failed' یا 'cancelled' هستند قابل تلاش مجدد هستند — این یکی در وضعیت '{status}' است. به جای آن آن را کلون کنید.",
     "quota.reached": "محدودیت هر کاربر برابر {quota} بهینه‌سازی به پایان رسید. برای ایجاد بهینه‌سازی‌های جدید، بهینه‌سازی‌های قدیمی را حذف کنید.",
@@ -234,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions باید نامنفی باشد.",
     "wizard.split_fractions_not_number": "مقادیر split_fractions باید عدد باشند: {error}",
     "wizard.split_fractions_not_object": "split_fractions باید شیئی با کلیدهای train/val/test باشد.",
-    "wizard.split_fractions_sum": "split_fractions باید جمعاً برابر 1.0 شود، {total} دریافت شد."
+    "wizard.split_fractions_sum": "split_fractions باید جمعاً برابر 1.0 شود، {total} دریافت شد.",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import os
+import pickle
 from collections.abc import Generator
 from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,15 +27,16 @@ from ...billing.byok_vault import ProviderKeyVault
 from ...config import settings
 from ...i18n_keys import I18nKey
 from ...models import ProgramArtifact
+from ...service_gateway.agents.generalist import get_approval_registry
 from ...storage.models import (
     Base,
     BillingCustomerModel,
-    BillingProviderKeyModel,
     CreditLedgerModel,
 )
 
 # noinspection PyProtectedMember
 from ..routers import _helpers
+from ..routers import serve as serve_module
 from ..routers.serve import _coerce_sample_value, _collect_sample, create_serve_router
 from .conftest import bypass_auth
 from .mocks import (
@@ -42,6 +48,65 @@ from .mocks import (
 
 # Use the shared base fake store; the serve router only needs get_job + seed_job.
 _FakeJobStore = _BaseFakeJobStore
+
+
+def _legacy_test_runtime(job_data: dict[str, Any]) -> str | None:
+    """Preserve explicit coverage of retired host-only helpers in unit tests.
+
+    Args:
+        job_data: Synthetic stored job.
+
+    Returns:
+        Vercel for protected fixtures and None for legacy-only fixtures.
+    """
+    payload = job_data.get("payload")
+    payload_budget_id = payload.get("execution_budget_id") if isinstance(payload, dict) else None
+    if job_data.get("execution_budget_id") is None and payload_budget_id is None:
+        return None
+    return "vercel"
+
+
+def _write_unpickle_marker(path: str) -> None:
+    """Write a marker when an adversarial pickle is deserialized.
+
+    Args:
+        path: File path whose creation records unsafe deserialization.
+    """
+    Path(path).write_text("unsafe")
+
+
+class _MarkerOnUnpickle:
+    """Adversarial payload that records any attempted pickle load."""
+
+    def __init__(self, path: Path) -> None:
+        """Store the marker destination.
+
+        Args:
+            path: File to create if the payload is deserialized.
+        """
+        self.path = path
+
+    def __reduce__(self) -> tuple[Any, tuple[str]]:
+        """Return a callable that creates the marker during unpickling.
+
+        Returns:
+            The marker-writing callable and its serialized argument.
+        """
+        return _write_unpickle_marker, (str(self.path),)
+
+
+def _adversarial_pickle_artifact(marker: Path) -> ProgramArtifact:
+    """Build a serveable-looking artifact with an active pickle payload.
+
+    Args:
+        marker: File that unpickling the payload would create.
+
+    Returns:
+        An artifact with safe prompt metadata and an adversarial legacy pickle.
+    """
+    encoded = base64.b64encode(pickle.dumps(_MarkerOnUnpickle(marker))).decode("ascii")
+    prompt = make_artifact().optimized_prompt
+    return ProgramArtifact(program_pickle_base64=encoded, optimized_prompt=prompt)
 
 
 def _wire_http_handler(app: FastAPI) -> None:
@@ -60,15 +125,19 @@ def _wire_http_handler(app: FastAPI) -> None:
 
 # noinspection PyProtectedMember
 @pytest.fixture(autouse=True)
-def _clear_program_cache() -> Generator[None, None, None]:
+def _clear_program_cache(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """Reset the in-process program cache around every test in this file.
 
     Yields:
         ``None`` once the cache is cleared; the cache is cleared again on teardown.
     """
-    # Reset the module-level program cache before every test to prevent bleed.
+    monkeypatch.setattr(_helpers, "_protected_api_runtime", _legacy_test_runtime)
+    monkeypatch.setattr(serve_module, "_protected_api_runtime", _legacy_test_runtime)
+    registry = get_approval_registry()
+    registry.bind_engine(None)
     _helpers.clear_program_cache()
     yield
+    registry.bind_engine(None)
     _helpers.clear_program_cache()
 
 
@@ -179,6 +248,86 @@ def test_serve_program_returns_409_for_failed_job(serve_client: TestClient, serv
     resp = serve_client.post("/serve/f", json={"inputs": {"q": "hello"}})
 
     assert resp.status_code == 409
+
+
+def test_protected_serve_metadata_never_executes_signature_side_effects_in_api_parent(
+    serve_client: TestClient,
+    serve_store: _FakeJobStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Read protected form metadata without executing its signature in the API.
+
+    Args:
+        serve_client: Serve route client.
+        serve_store: Fake completed-job store.
+        tmp_path: Parent-owned directory that authored code must not write.
+        monkeypatch: Pytest environment cleanup helper.
+    """
+    marker = tmp_path / "signature-ran-in-api.txt"
+    env_name = "SKYNET_PROTECTED_SIGNATURE_RAN_IN_API"
+    monkeypatch.delenv(env_name, raising=False)
+    signature_code = "\n".join(
+        [
+            "import os",
+            "import pathlib",
+            "import urllib.request",
+            "import dspy",
+            f"os.environ[{env_name!r}] = 'yes'",
+            f"pathlib.Path({str(marker)!r}).write_text('unsafe')",
+            "urllib.request.urlopen('https://parent-network.invalid')",
+            "class UnsafeSignature(dspy.Signature):",
+            "    question: str = dspy.InputField()",
+            "    answer: str = dspy.OutputField()",
+        ]
+    )
+    default_artifact = make_artifact()
+    artifact = ProgramArtifact(
+        program_state_json={},
+        optimized_prompt=default_artifact.optimized_prompt,
+    )
+    _seed_run_job(
+        serve_store,
+        "protected-serve",
+        artifact=artifact,
+        overview_extra={
+            "signature_code": signature_code,
+            "module_name": "predict",
+            "module_kwargs": {},
+        },
+    )
+    serve_store.update_job(
+        "protected-serve",
+        execution_budget_id="budget-1",
+        payload={"execution_runtime": "vercel"},
+    )
+    _helpers.clear_program_cache()
+
+    with patch("urllib.request.urlopen") as urlopen:
+        info = serve_client.get("/serve/protected-serve/info")
+        form = serve_client.post(
+            "/serve/protected-serve/request-form",
+            json={"prompt": "Try the optimized prompt"},
+        )
+        execution = serve_client.post(
+            "/serve/protected-serve",
+            json={"inputs": {"question": "hello"}},
+        )
+
+    assert info.status_code == 200
+    assert info.json()["input_fields"] == ["question"]
+    assert info.json()["output_fields"] == ["reasoning", "answer"]
+    assert form.status_code == 200
+    assert form.json() == {
+        "optimization_id": "protected-serve",
+        "awaiting_inputs": True,
+        "prompt": "Try the optimized prompt",
+    }
+    assert execution.status_code == 400
+    assert execution.json()["code"] == "serve.request_budget_required"
+    assert env_name not in os.environ
+    assert not marker.exists()
+    urlopen.assert_not_called()
 
 
 class _FakePrediction:
@@ -492,6 +641,50 @@ def test_serve_pair_info_returns_409_for_non_success_job(grid_client: TestClient
     assert resp.status_code == 409
 
 
+def test_protected_pair_metadata_never_deserializes_persisted_program(
+    grid_client: TestClient,
+    grid_store: _FakeJobStore,
+    tmp_path: Path,
+) -> None:
+    """Read protected pair metadata while keeping its pickle inert.
+
+    Args:
+        grid_client: Grid-pair serve route client.
+        grid_store: Fake store backing the client.
+        tmp_path: Parent-owned directory the pickle must not modify.
+    """
+    marker = tmp_path / "pair-pickle-ran-in-api.txt"
+    artifact = _adversarial_pickle_artifact(marker)
+    job = make_grid_job("protected-grid", artifact=artifact)
+    job["execution_budget_id"] = "budget-1"
+    job["payload"] = {"execution_runtime": "worker"}
+    grid_store.seed_raw("protected-grid", job=job)
+    _helpers.clear_program_cache()
+
+    info = grid_client.get("/serve/protected-grid/pair/0/info")
+    form = grid_client.post(
+        "/serve/protected-grid/pair/0/request-form",
+        json={"prompt": "Compare this pair"},
+    )
+    execution = grid_client.post(
+        "/serve/protected-grid/pair/0",
+        json={"inputs": {"question": "hello"}},
+    )
+
+    assert info.status_code == 200
+    assert info.json()["model_name"] == "openai/gpt-4o-mini"
+    assert form.status_code == 200
+    assert form.json() == {
+        "optimization_id": "protected-grid",
+        "pair_index": 0,
+        "awaiting_inputs": True,
+        "prompt": "Compare this pair",
+    }
+    assert execution.status_code == 400
+    assert execution.json()["code"] == "serve.request_budget_required"
+    assert not marker.exists()
+
+
 @pytest.fixture
 def stream_store(serve_store: _FakeJobStore) -> _FakeJobStore:
     """Provide a fake job store seeded with a single ``stream_job`` run.
@@ -708,14 +901,7 @@ def metered_store(serve_store: _FakeJobStore) -> _FakeJobStore:
         The store with ``engine`` set and both jobs seeded.
     """
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(
-        engine,
-        tables=[
-            BillingCustomerModel.__table__,
-            BillingProviderKeyModel.__table__,
-            CreditLedgerModel.__table__,
-        ],
-    )
+    Base.metadata.create_all(engine)
     serve_store.engine = engine
     _seed_run_job(serve_store, "ok")
     serve_store.seed_raw("grid1", job=make_grid_job("grid1", pair_index=0))

@@ -57,7 +57,9 @@ def test_debit_hook_charges_credits_for_successful_run() -> None:
     engine = object()
     worker = _worker(_Store(engine=engine))
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
-        worker._debit_run_credits("u@x.com", {"total_tokens": 5000}, run_name="sentiment v3", model="m1")
+        worker._debit_run_credits(
+            "u@x.com", {"total_tokens": 5000}, run_name="sentiment v3", model="m1", optimization_id="legacy-job"
+        )
     billing_cls.assert_called_once_with(engine=engine)
     # No usage_by_model on the result → legacy fallback prices the total on the
     # run's model, attributed to input.
@@ -67,6 +69,7 @@ def test_debit_hook_charges_credits_for_successful_run() -> None:
         model="m1",
         description="sentiment v3",
         token_source="managed",
+        optimization_id="legacy-job",
     )
 
 

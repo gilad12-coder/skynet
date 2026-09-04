@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "Esta optimización alcanzó su número máximo de intentos ({attempts}); ejecútala de nuevo en su lugar.",
     "optimization.resume_not_resumable": "Esta optimización no tiene ningún punto de reanudación guardado; ejecútala de nuevo en su lugar.",
     "optimization.resume_wrong_status": "Solo se pueden reanudar las optimizaciones que se detuvieron a mitad de ejecución; esta está en '{status}'.",
+    "optimization.protected_interactive_sandbox_required": "Esta optimización protegida no se puede evaluar ni servir en el proceso de la API. Se requiere un entorno aislado {runtime} con medición independiente, que aún no está disponible en este endpoint.",
     "optimization.retry_no_payload": "La optimización de origen no tiene ninguna carga útil guardada para reintentar.",
     "optimization.retry_wrong_status": "Solo se pueden reintentar las optimizaciones en estado 'failed' o 'cancelled'; esta está en '{status}'. Clónala en su lugar.",
     "quota.reached": "Se alcanzó el límite de {quota} optimizaciones por usuario. Elimina optimizaciones antiguas para crear nuevas.",
@@ -234,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions no debe ser negativo.",
     "wizard.split_fractions_not_number": "Los valores de split_fractions deben ser números: {error}",
     "wizard.split_fractions_not_object": "split_fractions debe ser un objeto con claves train/val/test.",
-    "wizard.split_fractions_sum": "split_fractions debe sumar 1.0, pero se obtuvo {total}"
+    "wizard.split_fractions_sum": "split_fractions debe sumar 1.0, pero se obtuvo {total}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

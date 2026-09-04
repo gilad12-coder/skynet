@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -127,7 +130,9 @@ def test_codex_launch_writes_a_gateway_config_toml() -> None:
     assert launch.instructions_file == "AGENTS.md"
     config = launch.files[".skynet/codex/config.toml"]
     assert 'env_key = "SKYNET_API_KEY"' in config
-    assert 'wire_api = "chat"' in config
+    assert 'wire_api = "responses"' in config
+    assert "request_max_retries = 0" in config
+    assert "stream_max_retries = 0" in config
     assert json.dumps(_GATEWAY.url) in config
     assert 'CODEX_HOME="$PWD/.skynet/codex" codex exec' in launch.run_command
     assert launch.parse_output is _parse_codex_output
@@ -157,6 +162,30 @@ def test_opencode_launch_names_the_gateway_model() -> None:
     assert launch.parse_output is _parse_plain_output
 
 
+@pytest.mark.parametrize("harness", [BLACKBOX_HARNESS_PI, BLACKBOX_HARNESS_CODEX, BLACKBOX_HARNESS_OPENCODE])
+def test_protected_harness_uses_offline_dependencies_and_local_relay(tmp_path: Path, harness: str) -> None:
+    """Execute generated config substitution without invoking a CLI or contacting a provider."""
+    launch = build_launch(_target(harness, run_command="true"), _GATEWAY, protected=True)
+    assert "npm install" not in launch.install_command
+    assert "--version" in launch.install_command
+    for name, content in launch.files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    subprocess.run(
+        launch.run_command,
+        shell=True,
+        cwd=tmp_path,
+        env={"PATH": os.defpath, "SKYNET_BUDGET_RELAY_URL": "http://127.0.0.1:3210/v1"},
+        timeout=10,
+        check=True,
+    )
+    for name in launch.files:
+        content = (tmp_path / name).read_text()
+        assert _GATEWAY.url not in content
+        assert "http://127.0.0.1:3210/v1" in content
+
+
 def test_custom_launch_fills_placeholders() -> None:
     """A custom harness substitutes the model/gateway/file placeholders into its commands."""
     target = _target(
@@ -183,6 +212,30 @@ def test_catalog_overrides_replace_the_default_commands() -> None:
     assert launch.run_command == f"my-run {PROMPT_FILE}"
     assert ".skynet/pi/models.json" in launch.files
     assert launch.parse_output is _parse_pi_output
+
+
+def test_protected_custom_gateway_placeholder_uses_guest_endpoint() -> None:
+    """Keep the parent-only origin out of custom commands after mailbox isolation."""
+    target = _target(BLACKBOX_HARNESS_CUSTOM, run_command='printf "%s" "{gateway_url}"')
+    launch = build_launch(target, _GATEWAY, protected=True)
+    result = subprocess.run(
+        launch.run_command,
+        shell=True,
+        env={"PATH": os.defpath, "SKYNET_GATEWAY_URL": "http://127.0.0.1:3210/v1"},
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout == "http://127.0.0.1:3210/v1"
+    assert _GATEWAY.url not in launch.run_command
+
+
+def test_protected_opencode_disables_startup_dependency_downloads() -> None:
+    """Use the bundled provider without network-fetched metadata, plugins, or language servers."""
+    launch = build_launch(_target(BLACKBOX_HARNESS_OPENCODE), _GATEWAY, protected=True)
+    for flag in ("AUTOUPDATE", "MODELS_FETCH", "DEFAULT_PLUGINS", "LSP_DOWNLOAD"):
+        assert launch.env[f"OPENCODE_DISABLE_{flag}"] == "true"
 
 
 def test_custom_without_run_command_is_a_typed_error() -> None:

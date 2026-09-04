@@ -1,10 +1,11 @@
 /**
  * Bring-your-own-key (BYOK) provider-key domain model.
  *
- * When an account runs in `byok` token mode, jobs are billed to the user's own
- * provider key instead of Skynet credits. A key is saved once per provider,
- * shown only masked afterwards, and carries a verification state so the UI can
- * tell a typo'd key from a working one before a job ever runs.
+ * When an account runs in `byok` token mode, the provider bills model tokens
+ * directly to the user's key. Skynet credits still fund the platform fee and
+ * managed sandbox. A key is saved once per provider, shown only masked
+ * afterwards, and carries a verification state so the UI can tell a typo'd
+ * key from a working one before a job ever runs.
  *
  * The store is backed by the real encrypt-at-rest vault (`/billing/byok/keys`):
  * the secret is encrypted before it touches the database and verified on entry,

@@ -85,6 +85,24 @@ def test_save_key_verified_on_2xx(engine: object, vault_key: str) -> None:
     assert view.status == STATUS_VERIFIED
 
 
+@pytest.mark.parametrize("api_base", [None, "https://openrouter.ai", "https://openrouter.ai/api/v1"])
+def test_save_openrouter_key_uses_credential_specific_probe(
+    engine: object, vault_key: str, api_base: str | None
+) -> None:
+    """Verify an OpenRouter secret through its authenticated key endpoint.
+
+    Args:
+        engine: Local vault database.
+        vault_key: Configured encryption key fixture.
+        api_base: Default or canonical saved provider endpoint.
+    """
+    vault = ProviderKeyVault(engine=engine)
+    with patch("core.billing.byok_vault.httpx.get", return_value=_probe_response(200)) as get:
+        view = vault.save_key("u@x.com", "openrouter", "sk-or-1234", api_base=api_base)
+    assert view.status == STATUS_VERIFIED
+    assert [call.args[0] for call in get.call_args_list] == ["https://openrouter.ai/api/v1/key"]
+
+
 def test_save_key_invalid_on_auth_rejection(engine: object, vault_key: str) -> None:
     """A 401 probe response marks the key invalid."""
     vault = ProviderKeyVault(engine=engine)
@@ -275,13 +293,25 @@ def test_resolve_connection_round_trips_api_base_and_params(engine: object, vaul
             "custom",
             "sk-resolve-9999",
             api_base="https://host.example/v1",
-            params={"organization": "org-1"},
+            params={
+                "organization": "org-1",
+                "timeout": 30,
+                "max_tokens": 512,
+                "metadata": {"tenant": "tenant-1", "model": "routing-label"},
+                "extra_headers": {"X-Request-Id": "trace-1"},
+            },
         )
     resolved = vault.resolve_connection("u@x.com", "custom")
     assert resolved is not None
     assert resolved.secret == "sk-resolve-9999"
     assert resolved.api_base == "https://host.example/v1"
-    assert resolved.params == {"organization": "org-1"}
+    assert resolved.params == {
+        "organization": "org-1",
+        "timeout": 30,
+        "max_tokens": 512,
+        "metadata": {"tenant": "tenant-1", "model": "routing-label"},
+        "extra_headers": {"X-Request-Id": "trace-1"},
+    }
 
 
 def test_save_key_drops_connection_overrides_from_plaintext_params(
@@ -308,6 +338,96 @@ def test_save_key_drops_connection_overrides_from_plaintext_params(
     resolved = vault.resolve_connection("u@x.com", "custom")
     assert resolved is not None
     assert resolved.params == {"organization": "org-1"}
+
+
+def test_save_key_recursively_drops_case_varied_plaintext_credentials(
+    engine: object,
+    vault_key: str,
+) -> None:
+    """Credential-shaped params never persist, regardless of nesting or casing."""
+    vault = ProviderKeyVault(engine=engine)
+    with patch("core.billing.byok_vault.httpx.get", return_value=_probe_response(200)):
+        vault.save_key(
+            "u@x.com",
+            "custom",
+            "sk-resolve-9999",
+            api_base="https://host.example/v1",
+            params={
+                "ClIeNt-SeCrEt": "top-client-secret",
+                "AUTHORIZATION": "Bearer top-authorization",
+                "accessToken": "top-access-token",
+                "token": "top-generic-token",
+                "API_KEY": "top-api-key",
+                "MODEL": "openai/different-model",
+                "BaseURL": "https://untrusted.example/v1",
+                "API-Base": "https://also-untrusted.example/v1",
+                "organization": "org-1",
+                "max_tokens": 256,
+                "extra_headers": {
+                    "X-API-Key": "nested-api-key",
+                    "Authorization": "Bearer nested-authorization",
+                    "Authorization-Header": "Bearer alternate-authorization",
+                    "X-Request-Id": "trace-1",
+                },
+                "transport": {
+                    "options": [
+                        {
+                            "refresh_token": "nested-refresh-token",
+                            "PrivateKey": "nested-private-key",
+                            "region": "us-east-1",
+                        }
+                    ]
+                },
+            },
+        )
+
+    expected = {
+        "organization": "org-1",
+        "max_tokens": 256,
+        "extra_headers": {"X-Request-Id": "trace-1"},
+        "transport": {"options": [{"region": "us-east-1"}]},
+    }
+    with Session(engine) as session:
+        row = session.query(BillingProviderKeyModel).filter_by(username="u@x.com", provider="custom").one()
+        assert row.params == expected
+    resolved = vault.resolve_connection("u@x.com", "custom")
+    assert resolved is not None
+    assert resolved.params == expected
+
+
+def test_resolve_connection_redacts_credentials_from_legacy_params(
+    engine: object,
+    vault_key: str,
+) -> None:
+    """Resolution strips unsafe fields from rows saved before recursive filtering."""
+    vault = ProviderKeyVault(engine=engine)
+    with patch("core.billing.byok_vault.httpx.get", return_value=_probe_response(200)):
+        vault.save_key(
+            "u@x.com",
+            "custom",
+            "sk-resolve-9999",
+            api_base="https://host.example/v1",
+            params={"organization": "org-1"},
+        )
+    with Session(engine) as session:
+        row = session.query(BillingProviderKeyModel).filter_by(username="u@x.com", provider="custom").one()
+        row.params = {
+            "organization": "org-1",
+            "Default-Headers": {
+                "aUtHoRiZaTiOn": "Bearer legacy-secret",
+                "X-Trace-Id": "trace-legacy",
+            },
+            "nested": [{"CLIENT_SECRET": "legacy-client-secret", "timeout": 10}],
+        }
+        session.commit()
+
+    resolved = vault.resolve_connection("u@x.com", "custom")
+    assert resolved is not None
+    assert resolved.params == {
+        "organization": "org-1",
+        "Default-Headers": {"X-Trace-Id": "trace-legacy"},
+        "nested": [{"timeout": 10}],
+    }
 
 
 def test_resolve_connection_missing_returns_none(engine: object, vault_key: str) -> None:

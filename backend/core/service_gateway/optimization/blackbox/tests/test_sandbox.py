@@ -168,6 +168,7 @@ class _FakeBox:
     def __init__(self, returncode: int = 0, stdout: str = "", stderr: str = "", polls_to_finish: int = 0) -> None:
         """Configure the process result the box returns."""
         self.cwd = "/work"
+        self.current_session = self
         self.fs = _FakeFs()
         self.name = "box"
         self.runs: list[dict[str, Any]] = []
@@ -411,6 +412,10 @@ class _FakeSync:
         """Return the credentials as a dict."""
         return {"token": token, "team_id": team_id, "project_id": project_id}
 
+    def SandboxResources(self, vcpus: int, memory: int) -> dict[str, int]:  # noqa: N802
+        """Return explicit resource limits without contacting Vercel."""
+        return {"vcpus": vcpus, "memory": memory}
+
     def create_sandbox(
         self,
         name: str | None,
@@ -419,6 +424,9 @@ class _FakeSync:
         env: dict[str, str] | None,
         network_policy: Any,
         tags: dict[str, str],
+        resources: Any,
+        persistent: bool,
+        ports: list[int],
     ) -> _FakeBox:
         """Record the sandbox request and return the box."""
         self.created = {
@@ -428,6 +436,9 @@ class _FakeSync:
             "env": env,
             "network_policy": network_policy,
             "tags": tags,
+            "resources": resources,
+            "persistent": persistent,
+            "ports": ports,
         }
         return self._box
 
@@ -472,8 +483,39 @@ def test_runtime_open_creates_a_tagged_sandbox(monkeypatch: pytest.MonkeyPatch) 
     assert fake_sync.created["tags"] == {**SANDBOX_TAG, "skynet_job": "1"}
     assert fake_sync.created["image"] == "img"
     assert fake_sync.created["network_policy"] is None
+    assert fake_sync.created["resources"] == {"vcpus": 2, "memory": 4096}
+    assert fake_sync.created["persistent"] is False
+    assert fake_sync.created["ports"] == []
     assert fake_sync.credentials == {"token": "t", "team_id": "team", "project_id": "proj"}
     assert isinstance(session, VercelSandboxSession)
+
+
+def test_runtime_commands_use_the_original_session_without_implicit_recovery() -> None:
+    """Keep command and filesystem calls on the funded session after a named handle changes."""
+    original = _FakeBox(stdout="original")
+    named = _FakeBox(stdout="replacement")
+    named.current_session = original
+    session = VercelSandboxSession(named, _FakeApiSession(), contextvars.copy_context())
+    named.current_session = _FakeBox(stdout="resumed")
+
+    session.write_files({"candidate.py": "print('ok')"})
+    assert session.run("true").stdout == "original"
+    assert session.read_file("candidate.py") == "print('ok')"
+    assert named.runs == []
+    assert named.fs.files == {}
+
+
+@_needs_sdk
+def test_runtime_explicitly_denies_network_for_offline_model_broker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use the provider firewall without a guest-visible exception for model traffic."""
+    fake_sync = _FakeSync(_FakeBox())
+    monkeypatch.setattr(sandbox_mod, "vercel_sync", fake_sync)
+    monkeypatch.setattr(sandbox_mod, "vercel_api", _FakeApi(_FakeApiSession()))
+    runtime = VercelSandboxRuntime(VercelCredentials(token="t", team_id="team", project_id="proj"), image="img")
+    runtime.open(SandboxSpec(lifetime_seconds=60, network_disabled=True))
+    assert fake_sync.created["network_policy"].mode == "deny-all"
+    with pytest.raises(ServiceError, match="cannot inject"):
+        runtime.open(SandboxSpec(lifetime_seconds=60, network_disabled=True, inject_headers={"host": {"key": "value"}}))
 
 
 @_needs_sdk

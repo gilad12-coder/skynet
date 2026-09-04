@@ -25,7 +25,8 @@ export interface ReactServeChatProps {
 // (`/serve/{id}/chat`) and the absence of wizard concerns differ.
 export function ReactServeChat({ optimizationId }: ReactServeChatProps) {
   const { mode: trustMode, next: cycleTrust } = useTrustMode();
-  const agent = useReactServeChat(optimizationId, trustMode);
+  const [requestBudgetCredits, setRequestBudgetCredits] = React.useState("10");
+  const agent = useReactServeChat(optimizationId, trustMode, requestBudgetCredits);
   const [draft, setDraft] = React.useState("");
   const streaming = agent.status === "streaming";
 
@@ -46,8 +47,7 @@ export function ReactServeChat({ optimizationId }: ReactServeChatProps) {
   const handleSubmit = () => {
     const trimmed = draft.trim();
     if (!trimmed || streaming) return;
-    agent.send(trimmed);
-    setDraft("");
+    if (agent.send(trimmed)) setDraft("");
   };
 
   const emptyState = (
@@ -62,7 +62,32 @@ export function ReactServeChat({ optimizationId }: ReactServeChatProps) {
 
   return (
     <div className="flex flex-col min-w-0 max-h-[560px] pt-2">
-      <div className="flex items-center justify-end pb-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-2">
+        <div className="flex min-w-0 items-center gap-2 rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-foreground">
+              {msg("optimizations.serve.request_budget")}
+            </p>
+            <p className="text-[0.6875rem] leading-snug text-muted-foreground">
+              {msg("optimizations.serve.request_budget_hint")}
+            </p>
+          </div>
+          <label className="flex shrink-0 items-center gap-1.5">
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={requestBudgetCredits}
+              onChange={(event) => setRequestBudgetCredits(event.target.value)}
+              disabled={streaming}
+              aria-label={msg("optimizations.serve.request_budget")}
+              className="h-9 w-20 rounded-lg border border-input bg-background px-2 text-end text-sm font-semibold tabular-nums outline-none focus:border-[#C8A882] focus:ring-2 focus:ring-[#C8A882]/20"
+            />
+            <span className="text-xs text-muted-foreground">
+              {msg("submit.cost_ceiling.cap_unit")}
+            </span>
+          </label>
+        </div>
         <TrustToggle mode={trustMode} onCycle={cycleTrust} />
       </div>
 

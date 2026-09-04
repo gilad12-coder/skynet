@@ -279,6 +279,40 @@ def test_run_react_optimization_passes_target_score_stopper(
     assert stopper.threshold == pytest.approx(0.85)
 
 
+def test_run_react_optimization_binds_recovery_seed_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bind the same recovery boundary to GEPA's seed event and stop check."""
+    captured: dict[str, object] = {}
+
+    def _spy_optimize(**kwargs: object) -> None:
+        """Record the optimize kwargs, then abort before the scoring tail."""
+        captured.update(kwargs)
+        raise _StopAfterOptimizeError
+
+    _stub_optimize_prelude(monkeypatch)
+    monkeypatch.setattr(run_react_mod, "_scores_and_outputs", lambda *a, **k: ([1.0], [{}]))
+    monkeypatch.setattr(run_react_mod.gepa, "optimize", _spy_optimize)
+
+    with pytest.raises(_StopAfterOptimizeError):
+        run_react_optimization(
+            signature_cls=object,
+            tools=[],
+            schema_hashes={},
+            metric=MagicMock(),
+            train=[],
+            val=[],
+            test=[],
+            student_lm=MagicMock(),
+            reflection_lm=MagicMock(),
+            recovery_seed_model=object(),
+        )
+
+    boundary = captured["callbacks"][0]
+    assert captured["callbacks"] == [boundary]
+    assert captured["stop_callbacks"] == [boundary]
+
+
 def test_run_react_optimization_buckets_lm_activity_per_stage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

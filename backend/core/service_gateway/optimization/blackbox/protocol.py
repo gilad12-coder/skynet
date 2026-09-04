@@ -188,6 +188,7 @@ class EngineContext:
 
     reflection_lm: Callable[[str | list[dict[str, Any]]], str]
     run_dir: str
+    recovery_seed_boundary: Any | None = None
     native_options: NativeOptions | None = None
     proposer_token_budget_usd: float | None = None
     check_budget: Callable[[], None] | None = None

@@ -13,6 +13,7 @@ import {
   ShareNetwork,
   PencilSimple,
   PushPin,
+  Pause,
   CircleNotch,
   GridFour,
   CaretLeft,
@@ -21,6 +22,7 @@ import {
   Database,
   ArrowCounterClockwise,
   Play,
+  XCircle,
   User,
   Users,
 } from "@/shared/ui/icons";
@@ -41,6 +43,8 @@ import {
   deleteJob,
   renameOptimization,
   togglePinOptimization,
+  cancelJob,
+  pauseJob,
   restartJob,
   resumeJob,
 } from "@/shared/lib/api";
@@ -879,6 +883,30 @@ function JobRow({
     }
   };
 
+  const handlePause = async () => {
+    setMenuOpen(false);
+    try {
+      await pauseJob(job.optimization_id);
+      toast.success(msg("optimization.pause.success"));
+      window.dispatchEvent(new Event("optimizations-changed"));
+      onRefresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : msg("optimization.pause.failed"));
+    }
+  };
+
+  const handleCancel = async () => {
+    setMenuOpen(false);
+    try {
+      await cancelJob(job.optimization_id);
+      toast.success(msg("optimization.cancel.sent"));
+      window.dispatchEvent(new Event("optimizations-changed"));
+      onRefresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : msg("optimization.cancel.failed"));
+    }
+  };
+
   // Enter triggers handleRename, then setRenaming(false) blurs the input,
   // which fires onBlur → handleRename again. Guard against the double-fire.
   const renameSubmittedRef = React.useRef(false);
@@ -1081,7 +1109,9 @@ function JobRow({
               </PopoverPrimitive.Close>
 
               {canEdit &&
-                (job.status === "failed" || job.status === "cancelled") &&
+                (job.status === "failed" ||
+                  job.status === "cancelled" ||
+                  job.status === "paused") &&
                 (job.resumable ? (
                   <PopoverPrimitive.Close asChild>
                     <button
@@ -1111,6 +1141,38 @@ function JobRow({
                     </button>
                   </PopoverPrimitive.Close>
                 ))}
+
+              {canEdit && isActiveStatus(job.status) && (
+                <>
+                  {job.pausable && (
+                    <PopoverPrimitive.Close asChild>
+                      <button
+                        type="button"
+                        onClick={handlePause}
+                        className={COMPACT_POPOVER_ITEM_CLASS}
+                      >
+                        <Pause className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
+                        <span className="flex-1 text-start">{msg("optimization.pause")}</span>
+                      </button>
+                    </PopoverPrimitive.Close>
+                  )}
+                  <PopoverPrimitive.Close asChild>
+                    <button
+                      type="button"
+                      onClick={handleCancel}
+                      className={cn(
+                        COMPACT_POPOVER_ITEM_CLASS,
+                        "text-destructive hover:bg-destructive/10 hover:text-destructive",
+                      )}
+                    >
+                      <XCircle className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
+                      <span className="flex-1 text-start">
+                        {msg("auto.app.optimizations.id.page.literal.5")}
+                      </span>
+                    </button>
+                  </PopoverPrimitive.Close>
+                </>
+              )}
 
               {canEdit && (
                 <>

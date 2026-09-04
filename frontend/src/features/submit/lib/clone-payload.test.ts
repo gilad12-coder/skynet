@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { cloneBasics, cloneColumnRoles, cloneRows, cloneSourceRecipe } from "./clone-payload.ts";
+import {
+  cloneBasics,
+  cloneColumnRoles,
+  cloneReactToolFilter,
+  cloneRows,
+  cloneSourceRecipe,
+} from "./clone-payload.ts";
 
 const programPayload = {
   name: "spam-filter",
@@ -88,4 +94,18 @@ test("cloneBasics reports absent fields as null", () => {
     shuffle: null,
     seed: null,
   });
+});
+
+test("cloneReactToolFilter preserves explicit MCP permissions exactly", () => {
+  assert.deepEqual(
+    cloneReactToolFilter({ tool_source: { kind: "live_mcp", tool_filter: ["lookup", "search"] } }),
+    ["lookup", "search"],
+  );
+  assert.deepEqual(cloneReactToolFilter({ tool_source: { tool_filter: [] } }), []);
+});
+
+test("cloneReactToolFilter keeps the legacy full-roster contract distinct from no source", () => {
+  assert.equal(cloneReactToolFilter({ tool_source: { kind: "live_mcp" } }), null);
+  assert.equal(cloneReactToolFilter({ tool_source: { tool_filter: null } }), null);
+  assert.equal(cloneReactToolFilter({}), undefined);
 });

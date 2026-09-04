@@ -202,6 +202,7 @@
     "optimization.resume_exhausted": "Эта оптимизация достигла максимального числа попыток ({attempts}) — запустите её заново.",
     "optimization.resume_not_resumable": "У этой оптимизации нет сохранённой точки возобновления — запустите её заново.",
     "optimization.resume_wrong_status": "Возобновить можно только оптимизации, остановленные во время выполнения — эта находится в состоянии '{status}'.",
+    "optimization.protected_interactive_sandbox_required": "Эту защищённую оптимизацию нельзя оценивать или обслуживать в процессе API. Требуется отдельно тарифицируемая песочница {runtime}, которая пока недоступна в этой конечной точке.",
     "optimization.retry_no_payload": "У исходной оптимизации нет сохранённых данных для повторной попытки.",
     "optimization.retry_wrong_status": "Повторить можно только оптимизации в состоянии 'failed' или 'cancelled' — эта находится в состоянии '{status}'. Вместо этого клонируйте её.",
     "quota.reached": "Достигнут лимит в {quota} оптимизаций на пользователя. Удалите старые оптимизации, чтобы создать новые.",
@@ -234,6 +235,10 @@
     "wizard.split_fractions_negative": "split_fractions должны быть неотрицательными.",
     "wizard.split_fractions_not_number": "Значения split_fractions должны быть числами: {error}",
     "wizard.split_fractions_not_object": "split_fractions должен быть объектом с ключами train/val/test.",
-    "wizard.split_fractions_sum": "Сумма split_fractions должна быть равна 1.0, получено {total}"
+    "wizard.split_fractions_sum": "Сумма split_fractions должна быть равна 1.0, получено {total}",
+    "serve.request_budget_required": "Set max_cost_credits for this one request.",
+    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
+    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
   }
 }

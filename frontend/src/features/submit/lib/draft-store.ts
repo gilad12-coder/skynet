@@ -1,6 +1,11 @@
+import { committedDraftTransaction } from "./draft-transaction";
+import { readBudgetDraft } from "./execution-budget-session";
 import {
   DRAFT_RECORD_VERSION,
+  sanitizeAnythingDraft,
+  sanitizeProgramDraft,
   type DraftStore,
+  type DraftStoreSnapshot,
   type WizardDraftData,
   type WizardDraftRecord,
 } from "./draft-record";
@@ -26,14 +31,14 @@ type StoredProgramDraft = Omit<WizardDraftData, "stage" | "furthestStage"> &
 export function normalizeProgramDraft(raw: StoredProgramDraft): WizardDraftData | null {
   const { step, furthestReachedStep, stage, furthestStage, ...rest } = raw;
   if (isWizardStageId(stage) && isWizardStageId(furthestStage)) {
-    return { ...rest, stage, furthestStage };
+    return sanitizeProgramDraft({ ...rest, stage, furthestStage });
   }
   if (typeof step === "number") {
-    return {
+    return sanitizeProgramDraft({
       ...rest,
       stage: migrateLegacyProgramStep(step),
       furthestStage: migrateLegacyProgramFurthest(furthestReachedStep ?? step),
-    };
+    });
   }
   return null;
 }
@@ -55,9 +60,10 @@ export function normalizeDraftRecord(raw: unknown): WizardDraftRecord | null {
       : null;
   const anything =
     r.anything && r.anything.data && isWizardStageId(r.anything.data.stage)
-      ? r.anything.data
+      ? sanitizeAnythingDraft(r.anything.data)
       : null;
   return {
+    ...readBudgetDraft(r),
     version: DRAFT_RECORD_VERSION,
     id: r.id,
     accountId: r.accountId,
@@ -111,40 +117,62 @@ function openDatabase(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-function runRequest<T>(
+/** Only a completed transaction proves a save or reset is durable. */
+function runTransaction<T>(
   mode: IDBTransactionMode,
-  op: (store: IDBObjectStore) => IDBRequest<T>,
+  op: (store: IDBObjectStore, result: (value: T) => void) => void,
 ): Promise<T> {
-  return openDatabase().then(
-    (db) =>
-      new Promise<T>((resolve, reject) => {
-        let request: IDBRequest<T>;
-        try {
-          const tx = db.transaction(STORE_NAME, mode);
-          request = op(tx.objectStore(STORE_NAME));
-          tx.onabort = () => reject(tx.error ?? new Error("indexeddb_aborted"));
-          tx.onerror = () => reject(tx.error ?? new Error("indexeddb_failed"));
-        } catch (error) {
-          reject(error);
-          return;
-        }
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error ?? new Error("indexeddb_failed"));
-      }),
-  );
+  return openDatabase().then((db) => committedDraftTransaction(db, STORE_NAME, mode, op));
 }
 
-/** The durable draft store: one IndexedDB row per account in this browser profile. */
+function storedSnapshot(raw: unknown): DraftStoreSnapshot {
+  if (raw && typeof raw === "object" && "resetGeneration" in raw) {
+    const stored = raw as { resetGeneration: number; record?: unknown };
+    return {
+      record: normalizeDraftRecord(stored.record),
+      resetGeneration: stored.resetGeneration,
+    };
+  }
+  return { record: normalizeDraftRecord(raw), resetGeneration: 0 };
+}
+
+/** One account row; reset removes content but retains a cross-tab write fence. */
 export const indexedDbDraftStore: DraftStore = {
   read: (accountId) =>
-    runRequest<unknown>("readonly", (s) => s.get(accountId)).then(normalizeDraftRecord),
-  write: (record: WizardDraftRecord) =>
-    runRequest("readwrite", (s) => s.put(record)).then(() => undefined),
-  remove: (accountId) => runRequest("readwrite", (s) => s.delete(accountId)).then(() => undefined),
+    runTransaction("readonly", (store, result) => {
+      const request = store.get(accountId);
+      request.onsuccess = () => result(storedSnapshot(request.result));
+    }),
+  write: (record, resetGeneration) =>
+    runTransaction("readwrite", (store, result) => {
+      const request = store.get(record.accountId);
+      request.onsuccess = () => {
+        const current = storedSnapshot(request.result);
+        if (current.resetGeneration !== resetGeneration) {
+          result(false);
+          return;
+        }
+        store.put({
+          accountId: record.accountId,
+          resetGeneration,
+          record: normalizeDraftRecord(record),
+        });
+        result(true);
+      };
+    }),
+  remove: (accountId) =>
+    runTransaction("readwrite", (store, result) => {
+      const request = store.get(accountId);
+      request.onsuccess = () => {
+        const resetGeneration = storedSnapshot(request.result).resetGeneration + 1;
+        store.put({ accountId, resetGeneration, record: null });
+        result(resetGeneration);
+      };
+    }),
 };
 
 export type DraftChannelMessage =
-  | { type: "reset"; accountId: string }
+  | { type: "reset"; accountId: string; resetGeneration: number }
   | { type: "written"; accountId: string; id: string; revision: number };
 
 /**

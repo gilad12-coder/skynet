@@ -4,7 +4,7 @@ The GEPA engine writes its full state (``gepa_state.bin``) at every iteration:
 the candidate population, per-candidate validation scores, the Pareto front, the
 iteration counter and the consumed metric-call budget. Persisting the latest
 copy lets a run that died mid-optimization resume from its last completed
-iteration with no budget double-spend, instead of restarting from scratch.
+iteration while charging every physical request, including upstream's resumed seed evaluation.
 
 Both seams are keyed by ``(optimization_id, pair_index)``: a single run uses the
 sentinel ``pair_index = -1``; a grid search runs one GEPA optimization per model
@@ -26,7 +26,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from .models import GepaCheckpointModel, GridPairResultModel
+from .models import GepaCheckpointModel, GridPairResultModel, JobModel
 
 SINGLE_RUN_PAIR_INDEX = -1
 
@@ -40,6 +40,7 @@ class GepaCheckpoint:
     iteration: int
     data: bytes
     stored_bytes: int
+    manifest: dict[str, Any] | None = None
 
 
 def _json_bytes(value: dict[str, Any]) -> int:
@@ -58,7 +59,16 @@ class PostgresCheckpointBlobStore:
         """
         self._engine = engine
 
-    def put(self, optimization_id: str, *, data: bytes, iteration: int, pair_index: int = SINGLE_RUN_PAIR_INDEX) -> None:
+    def put(
+        self,
+        optimization_id: str,
+        *,
+        data: bytes,
+        iteration: int,
+        pair_index: int = SINGLE_RUN_PAIR_INDEX,
+        manifest: dict[str, Any] | None = None,
+        expected_generation: int | None = None,
+    ) -> bool:
         """Insert or replace the GEPA state bytes for one run or grid pair.
 
         Args:
@@ -66,9 +76,27 @@ class PostgresCheckpointBlobStore:
             data: The raw ``gepa_state.bin`` bytes for the latest iteration.
             iteration: The iteration index the state was saved at.
             pair_index: Grid pair index, or ``-1`` for a single run.
+            manifest: Exact source, task, runtime, and integrity evidence for recovery.
+            expected_generation: Worker epoch allowed to replace this checkpoint.
+
+        Returns:
+            Whether the current generation stored the checkpoint.
         """
         now = datetime.now(UTC)
         with Session(self._engine) as session:
+            if (
+                expected_generation is not None
+                and session.scalar(
+                    select(JobModel)
+                    .where(
+                        JobModel.optimization_id == optimization_id,
+                        JobModel.execution_generation == expected_generation,
+                    )
+                    .with_for_update()
+                )
+                is None
+            ):
+                return False
             existing = session.get(GepaCheckpointModel, (optimization_id, pair_index))
             if existing is None:
                 session.add(
@@ -77,6 +105,7 @@ class PostgresCheckpointBlobStore:
                         pair_index=pair_index,
                         iteration=iteration,
                         data=data,
+                        manifest=manifest,
                         stored_bytes=len(data),
                         updated_at=now,
                     )
@@ -84,9 +113,11 @@ class PostgresCheckpointBlobStore:
             else:
                 existing.iteration = iteration
                 existing.data = data
+                existing.manifest = manifest
                 existing.stored_bytes = len(data)
                 existing.updated_at = now
             session.commit()
+            return True
 
     def get(self, optimization_id: str, pair_index: int = SINGLE_RUN_PAIR_INDEX) -> GepaCheckpoint | None:
         """Return the saved checkpoint for one run/pair, or ``None``.
@@ -140,9 +171,7 @@ class PostgresCheckpointBlobStore:
             optimization_id: Job whose checkpoints are dropped.
         """
         with Session(self._engine) as session:
-            session.execute(
-                delete(GepaCheckpointModel).where(GepaCheckpointModel.optimization_id == optimization_id)
-            )
+            session.execute(delete(GepaCheckpointModel).where(GepaCheckpointModel.optimization_id == optimization_id))
             session.commit()
 
     def has_any(self, optimization_id: str) -> bool:
@@ -194,6 +223,7 @@ class PostgresCheckpointBlobStore:
             iteration=row.iteration,
             data=row.data,
             stored_bytes=row.stored_bytes,
+            manifest=row.manifest,
         )
 
 
@@ -208,16 +238,35 @@ class PostgresGridPairResultStore:
         """
         self._engine = engine
 
-    def put(self, optimization_id: str, pair_index: int, result: dict[str, Any]) -> None:
+    def put(
+        self, optimization_id: str, pair_index: int, result: dict[str, Any], *, expected_generation: int | None = None
+    ) -> bool:
         """Insert or replace the result for one completed grid pair.
 
         Args:
             optimization_id: Owning grid job id.
             pair_index: The completed pair's index.
             result: The pair's serialized :class:`PairResult`.
+            expected_generation: Worker epoch allowed to publish the result.
+
+        Returns:
+            Whether the current generation stored the result.
         """
         now = datetime.now(UTC)
         with Session(self._engine) as session:
+            if (
+                expected_generation is not None
+                and session.scalar(
+                    select(JobModel)
+                    .where(
+                        JobModel.optimization_id == optimization_id,
+                        JobModel.execution_generation == expected_generation,
+                    )
+                    .with_for_update()
+                )
+                is None
+            ):
+                return False
             existing = session.get(GridPairResultModel, (optimization_id, pair_index))
             if existing is None:
                 session.add(
@@ -234,6 +283,7 @@ class PostgresGridPairResultStore:
                 existing.stored_bytes = _json_bytes(result)
                 existing.updated_at = now
             session.commit()
+            return True
 
     def get_all(self, optimization_id: str) -> dict[int, dict[str, Any]]:
         """Return ``{pair_index: result}`` for every completed pair of a grid.
@@ -257,9 +307,7 @@ class PostgresGridPairResultStore:
             optimization_id: Grid job whose pair results are dropped.
         """
         with Session(self._engine) as session:
-            session.execute(
-                delete(GridPairResultModel).where(GridPairResultModel.optimization_id == optimization_id)
-            )
+            session.execute(delete(GridPairResultModel).where(GridPairResultModel.optimization_id == optimization_id))
             session.commit()
 
     def delete_one(self, optimization_id: str, pair_index: int) -> None:

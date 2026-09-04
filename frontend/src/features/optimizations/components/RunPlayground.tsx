@@ -34,6 +34,8 @@ export function RunPlayground({
   chatScrollRef,
   handleServe,
   handleStopServe,
+  requestBudgetCredits,
+  onRequestBudgetCreditsChange,
   optimizationId,
   pairIndex,
   onClearHistory,
@@ -89,6 +91,8 @@ export function RunPlayground({
           chatScrollRef={chatScrollRef}
           handleServe={handleServe}
           handleStopServe={handleStopServe}
+          requestBudgetCredits={requestBudgetCredits}
+          onRequestBudgetCreditsChange={onRequestBudgetCreditsChange}
         />
       </div>
 

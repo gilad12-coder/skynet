@@ -24,6 +24,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -327,6 +328,8 @@ class CreditLedgerModel(Base):
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     description: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    budget_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    settlement_key: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     # Measured usage behind a run row's charge; None on top-ups/grants and on
     # rows written before token metering landed.
     input_tokens: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
@@ -340,6 +343,93 @@ class CreditLedgerModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC), index=True
     )
+
+
+class ExecutionBudgetModel(Base):
+    """Account-owned spending authority shared by setup and its eventual root job."""
+
+    __tablename__ = "execution_budgets"
+    __table_args__ = (
+        UniqueConstraint("username", "creation_key", name="uq_execution_budget_creation"),
+        CheckConstraint("total_credits > 0", name="ck_execution_budget_total"),
+        CheckConstraint(
+            "settled_units >= 0 AND wallet_settled_units >= 0 AND reserved_units >= 0 "
+            "AND wallet_reserved_units >= 0 AND billed_credits >= 0",
+            name="ck_execution_budget_amounts",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    creation_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    creation_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    total_credits: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="open")
+    blocked_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True)
+    settled_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    wallet_settled_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    reserved_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    wallet_reserved_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    billed_credits: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExecutionOperationModel(Base):
+    """One bounded physical attempt whose outstanding coverage survives lost responses."""
+
+    __tablename__ = "execution_operations"
+    __table_args__ = (
+        UniqueConstraint("budget_id", "operation_key", "attempt", name="uq_execution_operation_attempt"),
+        CheckConstraint("phase IN ('setup', 'run')", name="ck_execution_operation_phase"),
+        CheckConstraint(
+            "max_units >= 0 AND max_wallet_units >= 0 AND actual_units >= 0 AND actual_wallet_units >= 0",
+            name="ck_execution_operation_amounts",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    budget_id: Mapped[str] = mapped_column(ForeignKey("execution_budgets.id"), nullable=False, index=True)
+    operation_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    phase: Mapped[str] = mapped_column(String(8), nullable=False)
+    cost_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    role: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
+    admission_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    price_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="reserved")
+    max_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    max_wallet_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    actual_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    actual_wallet_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    provider_request_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExecutionUsageEvidenceModel(Base):
+    """Append-only provider evidence and its once-only incremental wallet settlement."""
+
+    __tablename__ = "execution_usage_evidence"
+    __table_args__ = (UniqueConstraint("operation_id", "evidence_key", name="uq_execution_usage_evidence"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    operation_id: Mapped[str] = mapped_column(ForeignKey("execution_operations.id"), nullable=False, index=True)
+    evidence_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    actual_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    actual_wallet_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    billed_credits: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    final: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    issue: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class BillingWebhookEventModel(Base):
@@ -363,8 +453,8 @@ class BillingWebhookEventModel(Base):
 class BillingProviderKeyModel(Base):
     """One stored BYOK provider connection for an account, encrypted at rest.
 
-    Backs BYOK mode: when an account runs in ``byok`` token source, jobs bill the
-    user's own provider key instead of Skynet credits. The secret is never stored
+    Backs BYOK mode: the user's provider key pays model usage while Skynet credits
+    cover only the platform fee and sandbox usage. The secret is never stored
     in plaintext — only ``secret_ciphertext`` (the Fernet-encrypted bytes) is
     persisted, so a database dump never leaks a usable key. ``last4`` is the
     recognizable tail kept for masked display, and ``status`` records whether the
@@ -397,6 +487,38 @@ class BillingProviderKeyModel(Base):
     )
 
     __table_args__ = (Index("ix_billing_provider_keys_username_provider", "username", "provider"),)
+
+
+class ProtectedCredentialModel(Base):
+    """One execution-scoped secret encrypted for use by a trusted parent relay.
+
+    Public submission payloads retain only ``id`` and ``revision``. The raw
+    credential is encrypted before job or preflight persistence and decrypted
+    only in the API/worker parent immediately before it configures the scoped
+    relay. ``audience_hash`` prevents a reference saved for one endpoint from
+    being reused against another endpoint, while ``binding_id`` confines it to
+    the execution budget that introduced it.
+    """
+
+    __tablename__ = "protected_credentials"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid4().hex)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    binding_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("execution_budgets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    audience_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    secret_ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    __table_args__ = (UniqueConstraint("username", "binding_id", "purpose", name="uq_protected_credential_binding"),)
 
 
 class BillingOpenRouterKeyModel(Base):
@@ -607,6 +729,13 @@ class JobModel(Base):
     composition: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     code_version: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    execution_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    execution_budget_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    execution_budget_generation: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stop_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    result_availability: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    terminal_evidence: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
+    recovery: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
     claimed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -712,6 +841,7 @@ class GepaCheckpointModel(Base):
     pair_index: Mapped[int] = mapped_column(Integer, primary_key=True, default=-1)
     iteration: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    manifest: Mapped[dict[str, Any] | None] = mapped_column(JSON_STORE, nullable=True)
     stored_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)

@@ -14,11 +14,13 @@ import { CodeInterviewPanel } from "../steps/CodeInterviewPanel";
 // empty one disables it with a reason.
 export function BlackboxAuthoringShell({
   w,
+  start,
   title,
   description,
   children,
 }: {
   w: BlackboxWizardContext;
+  start?: ReactNode;
   title: ReactNode;
   description?: ReactNode;
   children: ReactNode;
@@ -41,6 +43,7 @@ export function BlackboxAuthoringShell({
       value={codeAssistMode}
       onChange={setCodeAssistMode}
       disabledReason={disabledReason}
+      start={start}
       title={title}
       description={description}
       sidePanel={
@@ -49,6 +52,10 @@ export function BlackboxAuthoringShell({
         ) : (
           <CodeAgentPanel
             agent={agent}
+            model={interview.model}
+            onModelChange={interview.setModel}
+            reasoningEffort={interview.reasoningEffort}
+            onReasoningEffortChange={interview.setReasoningEffort}
             disabled={!!disabledReason}
             disabledReason={disabledReason}
             blackbox
@@ -57,7 +64,12 @@ export function BlackboxAuthoringShell({
         )
       }
     >
-      <div className="space-y-4 px-4 py-4 sm:px-6">{children}</div>
+      {/* The body grows with the card, so a field that asks to fill it (the
+          brief, the seed) takes the room instead of leaving it empty. It is
+          also the box an expanded textarea covers. */}
+      <div className="relative flex min-h-0 flex-1 flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6">
+        {children}
+      </div>
     </AuthoringShell>
   );
 }

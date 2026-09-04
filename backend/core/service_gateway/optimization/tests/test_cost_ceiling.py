@@ -77,14 +77,14 @@ def test_trips_once_cost_exceeds_budget() -> None:
 
 
 def test_latches_after_tripping() -> None:
-    """Once tripped the callback stays tripped but raises only on the first cross."""
+    """Once tripped every later boundary continues unwinding the stopped run."""
     lm = _FakeLM()
     cb = CostCeilingCallback(5, lm)
     lm.record(100_000)  # ~15 credits > 5
     with pytest.raises(CostCeilingExceededError):
         cb.on_lm_end("c1", outputs={})
-    # A later boundary does not re-raise: the run is already unwinding.
-    cb.on_lm_end("c2", outputs={})
+    with pytest.raises(CostCeilingExceededError):
+        cb.on_lm_end("c2", outputs={})
 
 
 def test_totals_cost_across_generation_and_reflection() -> None:

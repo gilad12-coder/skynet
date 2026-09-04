@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -14,6 +15,7 @@ from ...service_gateway.optimization.workflow import build_workflow_program
 
 # noinspection PyProtectedMember
 from ..routers import _helpers
+from ..routers import serve as serve_module
 from ..routers.serve import create_serve_router
 from .conftest import bypass_auth
 from .mocks import _BaseFakeJobStore, make_run_result
@@ -55,14 +57,32 @@ _MCP_SPEC = {
 }
 
 
+def _legacy_test_runtime(job_data: dict) -> str | None:
+    """Preserve retired host-path coverage for synthetic legacy fixtures.
+
+    Args:
+        job_data: Synthetic stored job.
+
+    Returns:
+        Vercel for protected fixtures and None for legacy-only fixtures.
+    """
+    payload = job_data.get("payload")
+    payload_budget_id = payload.get("execution_budget_id") if isinstance(payload, dict) else None
+    if job_data.get("execution_budget_id") is None and payload_budget_id is None:
+        return None
+    return "vercel"
+
+
 # noinspection PyProtectedMember
 @pytest.fixture(autouse=True)
-def _clear_program_cache() -> Generator[None, None, None]:
+def _clear_program_cache(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
     """Reset the in-process program cache around every test in this file.
 
     Yields:
         ``None`` once the cache is cleared; cleared again on teardown.
     """
+    monkeypatch.setattr(_helpers, "_protected_api_runtime", _legacy_test_runtime)
+    monkeypatch.setattr(serve_module, "_protected_api_runtime", _legacy_test_runtime)
     _helpers.clear_program_cache()
     yield
     _helpers.clear_program_cache()
@@ -168,6 +188,54 @@ def test_workflow_serve_info_reports_anchor_fields(
     assert body["output_fields"] == ["shout"]
 
 
+def test_protected_workflow_metadata_never_executes_transform_code(
+    serve_client: TestClient,
+    serve_store: _BaseFakeJobStore,
+    tmp_path: Path,
+) -> None:
+    """Read protected workflow anchors while keeping transform code inert.
+
+    Args:
+        serve_client: Workflow serve route client.
+        serve_store: Fake job store backing the client.
+        tmp_path: Parent-owned directory the transform must not modify.
+    """
+    marker = tmp_path / "workflow-transform-ran-in-api.txt"
+    spec = json.loads(json.dumps(_TRANSFORM_SPEC))
+    spec["nodes"][1]["transform_code"] = "\n".join(
+        [
+            "import pathlib",
+            f"pathlib.Path({str(marker)!r}).write_text('unsafe')",
+            "def transform(text):",
+            "    return {'shout': text.upper()}",
+        ]
+    )
+    _seed_workflow_job(serve_store, "protected-wf", spec, {})
+    serve_store.update_job(
+        "protected-wf",
+        execution_budget_id="budget-1",
+        payload={"execution_runtime": "vercel"},
+    )
+
+    info = serve_client.get("/serve/protected-wf/info")
+    form = serve_client.post(
+        "/serve/protected-wf/request-form",
+        json={"prompt": "Try the workflow"},
+    )
+    execution = serve_client.post(
+        "/serve/protected-wf",
+        json={"inputs": {"text": "quiet"}},
+    )
+
+    assert info.status_code == 200
+    assert info.json()["input_fields"] == ["text"]
+    assert info.json()["output_fields"] == ["shout"]
+    assert form.status_code == 200
+    assert execution.status_code == 400
+    assert "max_cost_credits" in execution.json()["detail"]
+    assert not marker.exists()
+
+
 def test_workflow_serve_rejects_tool_graph_without_tool_source(
     serve_client: TestClient, serve_store: _BaseFakeJobStore
 ) -> None:
@@ -179,9 +247,7 @@ def test_workflow_serve_rejects_tool_graph_without_tool_source(
     assert resp.status_code == 409
 
 
-def test_workflow_serve_rejects_snapshot_tool_source(
-    serve_client: TestClient, serve_store: _BaseFakeJobStore
-) -> None:
+def test_workflow_serve_rejects_snapshot_tool_source(serve_client: TestClient, serve_store: _BaseFakeJobStore) -> None:
     """dataset_snapshot tool sources are not yet servable for workflows."""
     _seed_workflow_job(
         serve_store,
