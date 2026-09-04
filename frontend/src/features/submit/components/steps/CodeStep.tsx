@@ -172,7 +172,16 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "module" |
     : undefined;
 
   // The picker lives on the Goal stage now, so switching modules is a hop back
-  // rather than an in-place swap.
+  // rather than an in-place swap. Committing a module completes that stage and
+  // opens Evaluation; otherwise the full-card Workflow action appears inert
+  // because Goal intentionally keeps rendering the picker.
+  const handleModuleChoose = React.useCallback(
+    (name: string) => {
+      chooseModule(name);
+      if (part === "module") goTo(WIZARD_STAGE.evaluation);
+    },
+    [chooseModule, goTo, part],
+  );
   const moduleChip = {
     label: moduleLabel(moduleName),
     onChangeModule: () => goTo(WIZARD_STAGE.goal),
@@ -243,7 +252,7 @@ export function CodeStep({ w, part }: { w: SubmitWizardContext; part: "module" |
 
   let content: React.ReactNode;
   if (view === "picker") {
-    content = <ModulePicker current={moduleName} onChoose={chooseModule} />;
+    content = <ModulePicker current={moduleName} onChoose={handleModuleChoose} />;
   } else if (view === "workflow") {
     content = (
       <AuthoringShell
