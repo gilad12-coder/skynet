@@ -734,15 +734,46 @@ def is_pausable(job_store: Any, job_data: dict) -> bool:
     Returns:
         ``True`` when the run should offer a Pause control.
     """
-    status = status_to_job_status(job_data.get("status", "pending"))
-    if status != OptimizationStatus.running:
-        return False
-    if parse_overview(job_data).get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_GRID_SEARCH:
-        return False
-    optimization_id = job_data.get("optimization_id")
+    optimization_id = _pause_candidate_id(job_data)
     if not optimization_id:
         return False
     return _has_resumable_state(job_store, optimization_id)
+
+
+def _pause_candidate_id(job_data: dict) -> str | None:
+    """Apply the cheap pause gates and return the job id when they pass.
+
+    Args:
+        job_data: Raw job row from the store.
+
+    Returns:
+        The optimization id for a running non-grid row, else ``None``.
+    """
+    status = status_to_job_status(job_data.get("status", "pending"))
+    if status != OptimizationStatus.running:
+        return None
+    if parse_overview(job_data).get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_GRID_SEARCH:
+        return None
+    return job_data.get("optimization_id") or None
+
+
+def pausable_id_flags(job_store: Any, rows: list[dict]) -> set[str]:
+    """Return the ids in ``rows`` that can offer Pause, in one batch.
+
+    Args:
+        job_store: The job store used to test for saved checkpoints.
+        rows: Raw job rows from the store.
+
+    Returns:
+        The set of pausable optimization ids.
+    """
+    candidates = [oid for row in rows if (oid := _pause_candidate_id(row))]
+    if not candidates:
+        return set()
+    batch = getattr(job_store, "resumable_state_ids", None)
+    if callable(batch):
+        return set(batch(candidates))
+    return {oid for oid in candidates if _has_resumable_state(job_store, oid)}
 
 
 def _has_resumable_state(job_store: Any, optimization_id: str) -> bool:

@@ -33,7 +33,7 @@ from ...auth import AuthenticatedUser, get_authenticated_user, is_admin
 from ...converters import parse_overview, parse_timestamp
 from ...errors import DomainError
 from ...response_limits import AGENT_DEFAULT_LIST, AGENT_MAX_LIST, clamp_limit
-from .._helpers import build_summary, grant_roles_for, resumable_id_flags
+from .._helpers import build_summary, grant_roles_for, pausable_id_flags, resumable_id_flags
 from ..constants import VALID_OPTIMIZATION_TYPES, VALID_STATUSES
 from .schemas import SidebarJobItem, SidebarJobsResponse
 
@@ -317,6 +317,7 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
         total = job_store.count_jobs(username=scoped_username)
         rows = job_store.list_jobs(username=scoped_username, limit=limit, offset=offset)
         resumable_ids = resumable_id_flags(job_store, rows)
+        pausable_ids = pausable_id_flags(job_store, rows)
         items = []
         for row in rows:
             overview = parse_overview(row)
@@ -334,6 +335,7 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
                     optimization_type=overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE),
                     total_pairs=overview.get(PAYLOAD_OVERVIEW_TOTAL_PAIRS),
                     resumable=row["optimization_id"] in resumable_ids,
+                    pausable=row["optimization_id"] in pausable_ids,
                 )
             )
         return SidebarJobsResponse(items=items, total=total)
@@ -375,6 +377,7 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
         rows = job_store.list_jobs_shared_with(username, limit=limit, offset=offset)
         roles = grant_roles_for(job_store, [row["optimization_id"] for row in rows], username)
         resumable_ids = resumable_id_flags(job_store, rows)
+        pausable_ids = pausable_id_flags(job_store, rows)
         items = []
         for row in rows:
             overview = parse_overview(row)
@@ -392,6 +395,7 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
                     optimization_type=overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE),
                     total_pairs=overview.get(PAYLOAD_OVERVIEW_TOTAL_PAIRS),
                     resumable=row["optimization_id"] in resumable_ids,
+                    pausable=row["optimization_id"] in pausable_ids,
                     role=roles.get(row["optimization_id"]),
                 )
             )

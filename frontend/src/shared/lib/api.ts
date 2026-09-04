@@ -2209,6 +2209,8 @@ export interface SidebarJobItem {
   failed_pairs?: number | null;
   /** True when this run stopped mid-optimization and can be resumed in place; drives Resume vs Restart. */
   resumable?: boolean;
+  /** True when this running job has a checkpoint and can pause without losing progress. */
+  pausable?: boolean;
   /** Caller's share role on a "shared with me" item; absent on own optimizations. */
   role?: ShareRole | null;
 }

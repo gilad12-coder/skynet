@@ -27,6 +27,7 @@ class SidebarJobItem(BaseModel):
     # True when this run stopped mid-optimization with a saved checkpoint and can
     # be resumed in place; drives the sidebar Resume-vs-Restart menu item.
     resumable: bool = False
+    pausable: bool = False
     # Caller's share role on this run ("viewer"/"editor"/"owner"); only set on
     # the "shared with me" listing, None for the caller's own optimizations.
     role: str | None = None
