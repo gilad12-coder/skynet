@@ -147,7 +147,8 @@ RUN if [ "$PKG_MANAGER" = "uv" ] || [ "$DSPY_LINE" = "preview" ]; then \
             arm64) DENO_TARGET=aarch64-unknown-linux-gnu ;; \
             *) echo "unsupported arch for Deno: $(dpkg --print-architecture)" >&2; exit 1 ;; \
         esac \
-        && curl -fsSL --retry 3 "$DENO_DOWNLOAD_BASE/v$DENO_VERSION/deno-$DENO_TARGET.zip" -o /tmp/deno.zip \
+        && curl -fsSL --retry 10 --retry-all-errors --retry-delay 2 --continue-at - \
+            "$DENO_DOWNLOAD_BASE/v$DENO_VERSION/deno-$DENO_TARGET.zip" -o /tmp/deno.zip \
         && unzip -o /tmp/deno.zip -d /usr/local/bin \
         && rm /tmp/deno.zip \
         && chmod +x /usr/local/bin/deno \
