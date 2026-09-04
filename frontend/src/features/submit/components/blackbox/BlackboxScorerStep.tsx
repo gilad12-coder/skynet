@@ -192,11 +192,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               </HelpTip>
             </Label>
             <div className="flex items-center gap-3">
-              <EvidenceChip
-                status={evaluatorStatus}
-                pending={scoringModelPending}
-                modelName={evaluatorEvidence?.modelName}
-              />
+              <EvidenceChip status={evaluatorStatus} modelName={evaluatorEvidence?.modelName} />
               {codeAssistMode === "auto" && (
                 <div className="flex items-center gap-2">
                   <VersionStepper agent={agent} artifact="metric" />
@@ -290,7 +286,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                   : "submit.blackbox.scorer.test",
               )}
             </Button>
-            <EvidenceChip status={evaluatorStatus} pending={false} />
+            <EvidenceChip status={evaluatorStatus} />
           </div>
         </div>
       )}
