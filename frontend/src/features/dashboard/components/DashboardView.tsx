@@ -16,7 +16,13 @@ import { TERMS } from "@/shared/lib/terms";
 import { useColumnFilters, useColumnResize, type SortDir } from "@/shared/ui/excel-filter";
 import { ACTIVE_STATUSES, getJobTypeLabel, getStatusLabel } from "@/shared/constants/job-status";
 import type { OptimizationSummaryResponse, PaginatedJobsResponse } from "@/shared/types/api";
-import { bulkCancelJobs, bulkPinOptimizations, type DashboardAnalytics } from "@/shared/lib/api";
+import {
+  bulkCancelJobs,
+  bulkPinOptimizations,
+  pauseJob,
+  resumeJob,
+  type DashboardAnalytics,
+} from "@/shared/lib/api";
 import { registerTutorialHook, registerTutorialQuery } from "@/features/tutorial";
 import { transformChartData } from "../lib/transform-chart-data";
 import { useQueueStatus } from "../hooks/use-queue-status";
@@ -201,8 +207,18 @@ export function DashboardView() {
         .filter((job) => ACTIVE_STATUSES.has(job.status))
         .map((job) => job.optimization_id)
     : [];
+  const pausableSelectedIds =
+    canEditSelection && selectedJobs.every((job) => job.pausable)
+      ? selectedJobs.map((job) => job.optimization_id)
+      : [];
+  const resumableSelectedIds =
+    canEditSelection && selectedJobs.every((job) => job.resumable)
+      ? selectedJobs.map((job) => job.optimization_id)
+      : [];
   const willPinSelection = !selectedJobs.every((job) => job.pinned);
-  const [selectionAction, setSelectionAction] = useState<"pin" | "stop" | null>(null);
+  const [selectionAction, setSelectionAction] = useState<
+    "pin" | "pause" | "resume" | "stop" | null
+  >(null);
 
   const handleCloneSelected = () => {
     if (!selectedJob) return;
@@ -273,6 +289,50 @@ export function DashboardView() {
       setSelectionAction(null);
     }
   };
+
+  const runSelectedLifecycle = async (
+    action: "pause" | "resume",
+    ids: string[],
+    request: (optimizationId: string) => Promise<unknown>,
+    successMessage: string,
+    failureMessage: string,
+  ) => {
+    if (ids.length === 0 || selectionAction) return;
+    setSelectionAction(action);
+    try {
+      const results = await Promise.allSettled(ids.map((id) => request(id)));
+      const succeeded = results.filter((result) => result.status === "fulfilled").length;
+      const failed = results.length - succeeded;
+      if (succeeded > 0) {
+        toast.success(succeeded === 1 ? successMessage : `${succeeded} · ${successMessage}`);
+      }
+      if (failed > 0) {
+        toast.warning(failed === 1 ? failureMessage : `${failed} · ${failureMessage}`);
+      }
+      await fetchJobs();
+      window.dispatchEvent(new Event("optimizations-changed"));
+    } finally {
+      setSelectionAction(null);
+    }
+  };
+
+  const handlePauseSelected = () =>
+    runSelectedLifecycle(
+      "pause",
+      pausableSelectedIds,
+      pauseJob,
+      msg("optimization.pause.success"),
+      msg("optimization.pause.failed"),
+    );
+
+  const handleResumeSelected = () =>
+    runSelectedLifecycle(
+      "resume",
+      resumableSelectedIds,
+      resumeJob,
+      msg("sidebar.resume.success"),
+      msg("sidebar.resume.failed"),
+    );
 
   // Admins delete anything; everyone else may bulk-delete only runs they own
   // outright (role null/absent) or co-own (role "owner"). Shared viewer/editor
@@ -489,6 +549,8 @@ export function DashboardView() {
         <BulkActionBar
           canDelete={canBulkDelete}
           canManageShare={canManageSelectedShare}
+          canPause={pausableSelectedIds.length > 0}
+          canResume={resumableSelectedIds.length > 0}
           canStop={activeSelectedIds.length > 0}
           canTogglePin={canEditSelection}
           selectedJobId={selectedJob?.optimization_id ?? null}
@@ -497,6 +559,8 @@ export function DashboardView() {
           actionPending={selectionAction !== null}
           onClear={clearSelection}
           onClone={handleCloneSelected}
+          onPause={handlePauseSelected}
+          onResume={handleResumeSelected}
           onStop={handleStopSelected}
           onTogglePin={handleTogglePinSelected}
           onRequestBulkDelete={() => setBulkDeleteOpen(true)}

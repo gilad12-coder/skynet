@@ -272,16 +272,16 @@ def test_pausable_id_flags_batches_sidebar_candidates(store: _BaseFakeJobStore) 
     assert pausable_id_flags(store, rows) == {"ready"}
 
 
-def test_sidebar_marks_checkpointed_running_job_pausable(
+def test_listings_mark_checkpointed_running_job_pausable(
     client: TestClient,
     store: _BaseFakeJobStore,
 ) -> None:
-    """Expose Pause capability in the compact sidebar response."""
+    """Expose Pause capability in dashboard and sidebar responses."""
     store.seed_job("sidebar-pause", status="running", username="alice")
     store.save_gepa_checkpoint("sidebar-pause", b"x", 1)
 
-    response = client.get("/optimizations/sidebar")
-
-    assert response.status_code == 200
-    item = next(row for row in response.json()["items"] if row["optimization_id"] == "sidebar-pause")
-    assert item["pausable"] is True
+    for path in ("/optimizations", "/optimizations/sidebar"):
+        response = client.get(path)
+        assert response.status_code == 200
+        item = next(row for row in response.json()["items"] if row["optimization_id"] == "sidebar-pause")
+        assert item["pausable"] is True

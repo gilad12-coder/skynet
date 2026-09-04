@@ -1,6 +1,16 @@
 import { AnimatePresence, motion } from "framer-motion";
 import * as React from "react";
-import { Copy, PushPin, PushPinSlash, Square, Trash, Users, X } from "@/shared/ui/icons";
+import {
+  Copy,
+  Pause,
+  Play,
+  PushPin,
+  PushPinSlash,
+  Square,
+  Trash,
+  Users,
+  X,
+} from "@/shared/ui/icons";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
@@ -10,6 +20,8 @@ import { ShareDialog } from "@/features/optimizations";
 type BulkActionBarProps = {
   canDelete: boolean;
   canManageShare: boolean;
+  canPause: boolean;
+  canResume: boolean;
   canStop: boolean;
   canTogglePin: boolean;
   selectedJobId: string | null;
@@ -18,6 +30,8 @@ type BulkActionBarProps = {
   actionPending: boolean;
   onClear: () => void;
   onClone: () => void;
+  onPause: () => void;
+  onResume: () => void;
   onStop: () => void;
   onTogglePin: () => void;
   onRequestBulkDelete: () => void;
@@ -59,6 +73,8 @@ function SelectionAction({
 export function BulkActionBar({
   canDelete,
   canManageShare,
+  canPause,
+  canResume,
   canStop,
   canTogglePin,
   selectedJobId,
@@ -67,6 +83,8 @@ export function BulkActionBar({
   actionPending,
   onClear,
   onClone,
+  onPause,
+  onResume,
   onStop,
   onTogglePin,
   onRequestBulkDelete,
@@ -159,6 +177,24 @@ export function BulkActionBar({
                 disabled={actionPending}
               >
                 {willPin ? <PushPin className="size-4" /> : <PushPinSlash className="size-4" />}
+              </SelectionAction>
+            )}
+            {canResume && (
+              <SelectionAction
+                label={msg("sidebar.resume")}
+                onClick={onResume}
+                disabled={actionPending}
+              >
+                <Play className="size-4 rtl:-scale-x-100" />
+              </SelectionAction>
+            )}
+            {canPause && (
+              <SelectionAction
+                label={msg("optimization.pause")}
+                onClick={onPause}
+                disabled={actionPending}
+              >
+                <Pause className="size-4" />
               </SelectionAction>
             )}
             {canStop && (

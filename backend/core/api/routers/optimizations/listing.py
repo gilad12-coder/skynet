@@ -182,8 +182,10 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
             )
         items = [build_summary(job_data) for job_data in rows]
         resumable_ids = resumable_id_flags(job_store, rows)
+        pausable_ids = pausable_id_flags(job_store, rows)
         for summary in items:
             summary.resumable = summary.optimization_id in resumable_ids
+            summary.pausable = summary.optimization_id in pausable_ids
         if use_shared:
             caller_norm = current_user.username.strip().lower()
             roles = grant_roles_for(job_store, [s.optimization_id for s in items], caller_norm)
