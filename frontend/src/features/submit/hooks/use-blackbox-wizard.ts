@@ -920,6 +920,17 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     if (!interview.objective) return;
     setObjective((prev) => (prev.trim().length > 0 ? prev : interview.objective));
   }, [interview.objective]);
+  // The confirmed brief is the interview's reading of what matters; it lands
+  // in Background so the run and the drafting agent work from the same
+  // constraints. Typed background always wins.
+  useEffect(() => {
+    if (interview.confirmedBrief.length === 0) return;
+    setBackground((prev) =>
+      prev.trim().length > 0
+        ? prev
+        : interview.confirmedBrief.map((line) => `- ${line}`).join("\n"),
+    );
+  }, [interview.confirmedBrief]);
   // Resolving the interview (confirm or skip) is an explicit ask to draft, so
   // it lifts the hand-edit guard: a starting point typed while the interview
   // was open reaches the seed pass as the prior to build on.

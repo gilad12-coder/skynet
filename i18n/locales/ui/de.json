@@ -165,6 +165,7 @@
   "submit.blackbox.start.agent_model_label": "Agent-Modell",
   "submit.blackbox.start.background_label": "Hintergrund (optional)",
   "submit.blackbox.start.background_placeholder": "Kontext, Einschränkungen oder Beispiele, die dem Optimierer helfen",
+  "submit.blackbox.start.background_toggle": "Hintergrund und Einschränkungen",
   "submit.blackbox.start.concurrency_label": "Gleichzeitige Durchläufe",
   "submit.blackbox.start.desc": "Was optimiert wird und wie Erfolg aussieht.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",

@@ -165,6 +165,7 @@
   "submit.blackbox.start.agent_model_label": "에이전트 모델",
   "submit.blackbox.start.background_label": "배경 정보 (선택)",
   "submit.blackbox.start.background_placeholder": "옵티마이저에 도움이 되는 컨텍스트, 제약 조건 또는 예시",
+  "submit.blackbox.start.background_toggle": "배경 및 제약",
   "submit.blackbox.start.concurrency_label": "동시 실행",
   "submit.blackbox.start.desc": "무엇을 최적화하고 성공이 어떤 모습인지 정의합니다.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",

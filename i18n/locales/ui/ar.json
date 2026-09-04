@@ -165,6 +165,7 @@
   "submit.blackbox.start.agent_model_label": "نموذج الوكيل",
   "submit.blackbox.start.background_label": "الخلفية (اختياري)",
   "submit.blackbox.start.background_placeholder": "سياق أو قيود أو أمثلة تساعد المُحسِّن",
+  "submit.blackbox.start.background_toggle": "الخلفية والقيود",
   "submit.blackbox.start.concurrency_label": "عمليات التشغيل المتزامنة",
   "submit.blackbox.start.desc": "ما الذي يخضع للتحسين وكيف يبدو النجاح.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",

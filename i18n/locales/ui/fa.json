@@ -165,6 +165,7 @@
   "submit.blackbox.start.agent_model_label": "مدل عامل",
   "submit.blackbox.start.background_label": "پیش‌زمینه (اختیاری)",
   "submit.blackbox.start.background_placeholder": "بافت، محدودیت‌ها یا نمونه‌هایی که به بهینه‌ساز کمک می‌کنند",
+  "submit.blackbox.start.background_toggle": "پیش‌زمینه و محدودیت‌ها",
   "submit.blackbox.start.concurrency_label": "اجراهای هم‌زمان",
   "submit.blackbox.start.desc": "چه چیزی بهینه می‌شود و موفقیت چه شکلی است.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",

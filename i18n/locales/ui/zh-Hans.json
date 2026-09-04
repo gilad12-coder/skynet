@@ -165,6 +165,7 @@
   "submit.blackbox.start.agent_model_label": "智能体模型",
   "submit.blackbox.start.background_label": "背景信息（可选）",
   "submit.blackbox.start.background_placeholder": "有助于优化器的上下文、约束或示例",
+  "submit.blackbox.start.background_toggle": "背景与约束",
   "submit.blackbox.start.concurrency_label": "并发运行数",
   "submit.blackbox.start.desc": "要优化什么，以及成功的标准是什么。",
   "submit.blackbox.start.harness.claude_code": "Claude Code",

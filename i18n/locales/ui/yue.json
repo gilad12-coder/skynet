@@ -165,6 +165,7 @@
   "submit.blackbox.start.agent_model_label": "Agent 模型",
   "submit.blackbox.start.background_label": "背景資料（選填）",
   "submit.blackbox.start.background_placeholder": "有助最佳化器嘅背景、限制或範例",
+  "submit.blackbox.start.background_toggle": "背景同限制",
   "submit.blackbox.start.concurrency_label": "並行執行次數",
   "submit.blackbox.start.desc": "邊啲嘢會被最佳化，以及成功係點樣嘅。",
   "submit.blackbox.start.harness.claude_code": "Claude Code",

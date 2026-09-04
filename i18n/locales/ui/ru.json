@@ -165,6 +165,7 @@
   "submit.blackbox.start.agent_model_label": "Модель агента",
   "submit.blackbox.start.background_label": "Контекст (необязательно)",
   "submit.blackbox.start.background_placeholder": "Контекст, ограничения или примеры, которые помогут оптимизатору",
+  "submit.blackbox.start.background_toggle": "Контекст и ограничения",
   "submit.blackbox.start.concurrency_label": "Параллельные запуски",
   "submit.blackbox.start.desc": "Что оптимизируется и как выглядит успех.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",

@@ -165,6 +165,7 @@
   "submit.blackbox.start.agent_model_label": "Aracı modeli",
   "submit.blackbox.start.background_label": "Arka plan (isteğe bağlı)",
   "submit.blackbox.start.background_placeholder": "Optimize ediciye yardımcı olan bağlam, kısıtlar veya örnekler",
+  "submit.blackbox.start.background_toggle": "Arka plan ve kısıtlar",
   "submit.blackbox.start.concurrency_label": "Eşzamanlı çalıştırmalar",
   "submit.blackbox.start.desc": "Neyin optimize edileceği ve başarının neye benzediği.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",

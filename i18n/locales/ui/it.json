@@ -165,6 +165,7 @@
   "submit.blackbox.start.agent_model_label": "Modello dell'agente",
   "submit.blackbox.start.background_label": "Contesto (facoltativo)",
   "submit.blackbox.start.background_placeholder": "Contesto, vincoli o esempi che aiutano l'ottimizzatore",
+  "submit.blackbox.start.background_toggle": "Contesto e vincoli",
   "submit.blackbox.start.concurrency_label": "Esecuzioni simultanee",
   "submit.blackbox.start.desc": "Cosa viene ottimizzato e come si presenta un buon risultato.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",

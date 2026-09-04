@@ -165,6 +165,7 @@
   "submit.blackbox.start.agent_model_label": "エージェントモデル",
   "submit.blackbox.start.background_label": "背景情報（任意）",
   "submit.blackbox.start.background_placeholder": "オプティマイザに役立つ文脈、制約、または例",
+  "submit.blackbox.start.background_toggle": "背景と制約",
   "submit.blackbox.start.concurrency_label": "同時実行数",
   "submit.blackbox.start.desc": "何を最適化し、成功とはどのような状態かを設定します。",
   "submit.blackbox.start.harness.claude_code": "Claude Code",

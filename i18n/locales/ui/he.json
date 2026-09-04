@@ -2633,6 +2633,7 @@
   "submit.blackbox.start.agent_model_label": "מודל הסוכן",
   "submit.blackbox.start.background_label": "רקע (לא חובה)",
   "submit.blackbox.start.background_placeholder": "הקשר, אילוצים או דוגמאות שיעזרו לאופטימייזר",
+  "submit.blackbox.start.background_toggle": "רקע ואילוצים",
   "submit.blackbox.start.concurrency_label": "הרצות במקביל",
   "submit.blackbox.start.desc": "מה משפרים ואיך נראית הצלחה.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",

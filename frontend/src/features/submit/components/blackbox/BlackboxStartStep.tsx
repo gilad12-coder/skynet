@@ -1,18 +1,19 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { msg } from "@/shared/lib/messages";
+import { tip } from "@/shared/lib/tooltips";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
 import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
-import { Field, MOBILE_INPUT_CLASS, TEXTAREA_CLASS } from "./shared";
+import { Disclosure, Field, MOBILE_INPUT_CLASS, TEXTAREA_CLASS } from "./shared";
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
   ssr: false,
@@ -61,6 +62,13 @@ export function BlackboxStartStep({
     background,
     setBackground,
   } = w;
+
+  // Background is optional, so it folds away until it has something to say:
+  // opening by itself when a clone, a draft or the interview's brief fills it.
+  const [backgroundOpen, setBackgroundOpen] = useState(() => background.trim() !== "");
+  useEffect(() => {
+    if (background.trim()) setBackgroundOpen(true);
+  }, [background]);
 
   const updatePart = (i: number, patch: { key?: string; value?: string }) =>
     setSeedParts(seedParts.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
@@ -278,14 +286,16 @@ export function BlackboxStartStep({
         className={TEXTAREA_CLASS}
       >
         {({ textarea, trigger }) => (
-          <Field
-            label={msg("submit.blackbox.start.background_label")}
-            htmlFor="bb-background"
-            tip="submit.blackbox.background"
+          <Disclosure
+            id="bb-background-panel"
+            label={msg("submit.blackbox.start.background_toggle")}
+            tip={tip("submit.blackbox.background")}
+            open={backgroundOpen}
+            onOpenChange={setBackgroundOpen}
             trailing={trigger}
           >
             {textarea}
-          </Field>
+          </Disclosure>
         )}
       </ExpandableTextarea>
     </BlackboxAuthoringShell>

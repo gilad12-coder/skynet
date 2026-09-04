@@ -3376,6 +3376,7 @@
   "submit.blackbox.start.objective_placeholder": "e.g. Short, accurate answers that cite the source",
   "submit.blackbox.start.background_label": "Background (optional)",
   "submit.blackbox.start.background_placeholder": "Context, constraints or examples that help the optimizer",
+  "submit.blackbox.start.background_toggle": "Background and constraints",
   "submit.blackbox.start.target_label": "Target",
   "submit.blackbox.start.target.text": "Scored directly",
   "submit.blackbox.start.target.text_desc": "The scorer receives the candidate as is",

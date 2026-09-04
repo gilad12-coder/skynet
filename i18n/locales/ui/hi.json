@@ -165,6 +165,7 @@
   "submit.blackbox.start.agent_model_label": "एजेंट मॉडल",
   "submit.blackbox.start.background_label": "पृष्ठभूमि (वैकल्पिक)",
   "submit.blackbox.start.background_placeholder": "संदर्भ, बाधाएँ या उदाहरण जो ऑप्टिमाइज़र की मदद करें",
+  "submit.blackbox.start.background_toggle": "पृष्ठभूमि और सीमाएँ",
   "submit.blackbox.start.concurrency_label": "समवर्ती रन",
   "submit.blackbox.start.desc": "क्या ऑप्टिमाइज़ होता है और सफलता कैसी दिखती है।",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
