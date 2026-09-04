@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import { CaretDown } from "@/shared/ui/icons";
 import {
   Card,
@@ -20,6 +22,7 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { useUserPrefs } from "@/features/settings";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
+import { Disclosure } from "../Disclosure";
 
 export function BasicsStep({ w }: { w: SubmitWizardContext }) {
   const { prefs } = useUserPrefs();
@@ -35,7 +38,13 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
     setIsPrivate,
     optimizationTypeOpen,
     setOptimizationTypeOpen,
+    suggestedName,
   } = w;
+  // The description is optional, so it stays folded until it holds text.
+  const [descriptionOpen, setDescriptionOpen] = useState(() => jobDescription.trim() !== "");
+  useEffect(() => {
+    if (jobDescription.trim()) setDescriptionOpen(true);
+  }, [jobDescription]);
 
   return (
     <Card
@@ -61,7 +70,9 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
             </HelpTip>
           </Label>
           <Input
-            placeholder={msg("auto.features.submit.components.steps.basicsstep.literal.1")}
+            placeholder={
+              suggestedName || msg("auto.features.submit.components.steps.basicsstep.literal.1")
+            }
             value={jobName}
             onChange={(e) => setJobName(e.target.value)}
             className="min-h-[44px] text-base lg:min-h-0 lg:text-sm"
@@ -82,14 +93,14 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
           className="flex min-h-[44px] w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 lg:text-sm"
         >
           {({ textarea, trigger }) => (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label>
-                  <HelpTip text={tip("submit.description")}>
-                    {msg("auto.features.submit.components.steps.basicsstep.4")}
-                  </HelpTip>
-                </Label>
-                <div className="flex items-center gap-2">
+            <Disclosure
+              id="job-description-panel"
+              label={msg("auto.features.submit.components.steps.basicsstep.4")}
+              tip={tip("submit.description")}
+              open={descriptionOpen}
+              onOpenChange={setDescriptionOpen}
+              trailing={
+                <>
                   <span
                     className={cn(
                       "text-[0.625rem] tabular-nums transition-colors",
@@ -102,10 +113,11 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
                     {msg("auto.features.submit.components.steps.basicsstep.5")}
                   </span>
                   {trigger}
-                </div>
-              </div>
+                </>
+              }
+            >
               {textarea}
-            </div>
+            </Disclosure>
           )}
         </ExpandableTextarea>
         <div className="space-y-3">

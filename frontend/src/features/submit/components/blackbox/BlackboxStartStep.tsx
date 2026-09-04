@@ -13,7 +13,8 @@ import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
 import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
-import { Disclosure, Field, MOBILE_INPUT_CLASS, TEXTAREA_CLASS } from "./shared";
+import { Disclosure } from "../Disclosure";
+import { Field, MOBILE_INPUT_CLASS, TEXTAREA_CLASS } from "./shared";
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
   ssr: false,

@@ -59,6 +59,7 @@ import {
 } from "../lib/clone-payload";
 import { buildLiveMcpToolSource } from "../lib/react-tool-filter";
 import { buildSignatureTemplate } from "../lib/build-signature";
+import { suggestedDspyRunName } from "../lib/budget";
 import { buildMetricTemplate } from "../lib/build-metric";
 import { buildOptimizerKwargs } from "../lib/build-kwargs";
 import {
@@ -256,6 +257,19 @@ export function useSubmitWizard() {
 
   const [parsedDataset, setParsedDataset] = useState<ParsedDataset | null>(null);
   const [datasetFileName, setDatasetFileName] = useState<string | null>(null);
+  // Suggested without a paid call; the name follows it until the user types one.
+  const suggestedName = useMemo(
+    () => suggestedDspyRunName(signatureCode, datasetFileName),
+    [signatureCode, datasetFileName],
+  );
+  const [jobNameTouched, setJobNameTouched] = useState(false);
+  useEffect(() => {
+    if (!jobNameTouched) setJobName(suggestedName);
+  }, [jobNameTouched, suggestedName]);
+  const editJobName = useCallback((value: string) => {
+    setJobNameTouched(true);
+    setJobName(value);
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // A by-reference submit (source_dataset_id) is only valid while the on-screen
   // rows are still the ones we loaded from the library. Every other dataset
@@ -669,6 +683,10 @@ export function useSubmitWizard() {
     setOptimizationType(advancedMode ? d.jobType : "run");
     setIsPrivate(d.isPrivate);
     setJobName(d.jobName);
+    setJobNameTouched(
+      d.jobName.trim() !== "" &&
+        d.jobName !== suggestedDspyRunName(d.signatureCode, d.datasetFileName),
+    );
     setJobDescription(d.jobDescription);
     setModuleName(d.moduleName);
     setModuleChosen(d.moduleChosen);
@@ -1624,7 +1642,7 @@ export function useSubmitWizard() {
     // surface and review recap showed (managed: full per-model; byok: fee).
     const estimate = chargeableBracket(costBracket, tokenSource);
     const base = {
-      name: jobName.trim() || undefined,
+      name: jobName.trim() || suggestedName || undefined,
       description: jobDescription.trim() || undefined,
       username: username.trim(),
       module_name: moduleName,
@@ -1908,7 +1926,7 @@ export function useSubmitWizard() {
           if (showToast) toast.error(msg("submit.validation.username_required"));
           return false;
         }
-        if (!jobName.trim()) {
+        if (!jobName.trim() && !suggestedName) {
           if (showToast) toast.error(msg("submit.validation.name_required"));
           return false;
         }
@@ -2556,7 +2574,8 @@ export function useSubmitWizard() {
     setIsPrivate,
     username,
     jobName,
-    setJobName,
+    setJobName: editJobName,
+    suggestedName,
     jobDescription,
     setJobDescription,
     moduleName,

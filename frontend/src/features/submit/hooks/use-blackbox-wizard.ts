@@ -211,6 +211,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [submitPhase, setSubmitPhase] = useState<"idle" | "sending" | "splash" | "done">("idle");
 
   const [jobName, setJobName] = useState("");
+  // The name follows the objective's suggestion until the user types one.
+  const [jobNameTouched, setJobNameTouched] = useState(false);
   const [jobDescription, setJobDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(true);
 
@@ -406,6 +408,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     }
     setPendingRestore({ stage: d.stage, furthest: d.furthestStage });
     setJobName(d.jobName);
+    setJobNameTouched(d.jobName.trim() !== "" && d.jobName !== suggestedRunName(d.objective));
     setJobDescription(d.jobDescription);
     setIsPrivate(d.isPrivate);
     setRecipeState(d.recipe);
@@ -1222,6 +1225,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // Suggested from the objective without a paid call; a typed or cloned name
   // always wins.
   const suggestedName = useMemo(() => suggestedRunName(objective), [objective]);
+  useEffect(() => {
+    if (!jobNameTouched) setJobName(suggestedName);
+  }, [jobNameTouched, suggestedName]);
+  const editJobName = useCallback((value: string) => {
+    setJobNameTouched(true);
+    setJobName(value);
+  }, []);
 
   const handleSubmit = async () => {
     if (advancingRef.current || submitting) return;
@@ -1376,7 +1386,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     saveToRecent,
     removeRecentConfig,
     jobName,
-    setJobName,
+    setJobName: editJobName,
     jobDescription,
     setJobDescription,
     isPrivate,
