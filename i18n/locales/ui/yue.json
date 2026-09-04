@@ -3547,5 +3547,15 @@
   "submit.budget.byok_note": "模型 token 由你自己嘅供應商密鑰付費；呢啲數字係平台費用。",
   "tooltip.submit.budget": "今次執行可能用到嘅所有開支嘅一個總額：設定檢查、最佳化本身同計費嘅 sandbox 時間。Credits 會喺開始工作之前預留，並按實際用量結算；達到總額時執行就會停止。",
   "tooltip.submit.blackbox.roles": "執行分派俾模型嘅每個角色。最佳化模型提出改良；評分模型喺你嘅評分器呼叫佢時判斷輸出；任務模型推動編碼代理。",
-  "tooltip.submit.blackbox.evidence": "通過嘅檢查只對執行時所用嘅確切評分器、範例、模型同設定負責。改變其中任何一項，檢查就要重新執行。"
+  "tooltip.submit.blackbox.evidence": "通過嘅檢查只對執行時所用嘅確切評分器、範例、模型同設定負責。改變其中任何一項，檢查就要重新執行。",
+  "submit.draft.restore.title": "要唔要繼續上次嘅設定？",
+  "submit.draft.restore.meta": "{workflow} · {stage} · 最近修改 {time}",
+  "submit.draft.restore.continue": "繼續草稿",
+  "submit.draft.restore.start_new": "重新開始",
+  "submit.draft.restore.retry": "再試一次",
+  "submit.draft.restore.failed": "無法還原已儲存嘅設定。可以再試一次或者重新開始。",
+  "submit.draft.restore.gone": "已儲存嘅設定喺呢個瀏覽器已經冇咗。",
+  "submit.draft.save_failed": "無法喺呢個瀏覽器儲存設定。請保持呢個分頁打開，以免遺失。",
+  "submit.draft.reset_failed": "無法清除已儲存嘅設定。之前嘅草稿仍然可用。",
+  "submit.recipe.choose_new": "開始新嘅{p1}設定"
 }

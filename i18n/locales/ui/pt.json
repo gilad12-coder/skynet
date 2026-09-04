@@ -3547,5 +3547,15 @@
   "submit.budget.byok_note": "Sua própria chave de provedor paga os tokens do modelo; estes valores são a taxa da plataforma.",
   "tooltip.submit.budget": "Um único total para tudo que esta execução pode gastar: verificações de configuração, a própria otimização e o tempo faturável de sandbox. Os créditos são reservados antes de o trabalho começar e acertados pelo uso real; a execução para quando o total é atingido.",
   "tooltip.submit.blackbox.roles": "Cada papel que a execução atribui a um modelo. O modelo de otimização propõe melhorias; o modelo de pontuação, quando seu pontuador chama um, julga as saídas; o modelo de tarefa conduz o agente de codificação.",
-  "tooltip.submit.blackbox.evidence": "Uma verificação aprovada vale apenas para o pontuador, o exemplo, os modelos e as configurações exatos com que foi executada. Altere qualquer um deles e a verificação precisa ser executada de novo."
+  "tooltip.submit.blackbox.evidence": "Uma verificação aprovada vale apenas para o pontuador, o exemplo, os modelos e as configurações exatos com que foi executada. Altere qualquer um deles e a verificação precisa ser executada de novo.",
+  "submit.draft.restore.title": "Continuar a configuração anterior?",
+  "submit.draft.restore.meta": "{workflow} · {stage} · editada {time}",
+  "submit.draft.restore.continue": "Continuar rascunho",
+  "submit.draft.restore.start_new": "Começar de novo",
+  "submit.draft.restore.retry": "Tentar novamente",
+  "submit.draft.restore.failed": "Não foi possível restaurar a configuração salva. Tente novamente ou comece de novo.",
+  "submit.draft.restore.gone": "A configuração salva não está mais disponível neste navegador.",
+  "submit.draft.save_failed": "Não foi possível salvar a configuração neste navegador. Mantenha esta aba aberta para não perdê-la.",
+  "submit.draft.reset_failed": "Não foi possível limpar a configuração salva. O rascunho anterior continua disponível.",
+  "submit.recipe.choose_new": "Começar uma nova configuração de {p1}"
 }

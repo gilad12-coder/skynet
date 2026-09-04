@@ -3547,5 +3547,15 @@
   "submit.budget.byok_note": "Ihr eigener Anbieter-Schlüssel zahlt die Modell-Tokens; diese Beträge sind die Plattformgebühr.",
   "tooltip.submit.budget": "Ein Gesamtbetrag für alles, was dieser Lauf ausgeben darf: Setup-Prüfungen, die Optimierung selbst und kostenpflichtige Sandbox-Zeit. Credits werden vor Arbeitsbeginn reserviert und nach tatsächlicher Nutzung abgerechnet; der Lauf stoppt, wenn der Gesamtbetrag erreicht ist.",
   "tooltip.submit.blackbox.roles": "Jede Rolle, die der Lauf einem Modell gibt. Das Optimierungsmodell schlägt Verbesserungen vor; das Scoring-Modell beurteilt Ausgaben, wenn Ihr Scorer eines aufruft; das Aufgabenmodell steuert den Coding-Agenten.",
-  "tooltip.submit.blackbox.evidence": "Eine bestandene Prüfung gilt nur für genau den Scorer, das Beispiel, die Modelle und Einstellungen, mit denen sie lief. Ändern Sie etwas davon, muss die Prüfung erneut laufen."
+  "tooltip.submit.blackbox.evidence": "Eine bestandene Prüfung gilt nur für genau den Scorer, das Beispiel, die Modelle und Einstellungen, mit denen sie lief. Ändern Sie etwas davon, muss die Prüfung erneut laufen.",
+  "submit.draft.restore.title": "Mit der vorherigen Einrichtung fortfahren?",
+  "submit.draft.restore.meta": "{workflow} · {stage} · bearbeitet {time}",
+  "submit.draft.restore.continue": "Entwurf fortsetzen",
+  "submit.draft.restore.start_new": "Neu beginnen",
+  "submit.draft.restore.retry": "Erneut versuchen",
+  "submit.draft.restore.failed": "Die gespeicherte Einrichtung konnte nicht wiederhergestellt werden. Versuche es erneut oder beginne neu.",
+  "submit.draft.restore.gone": "Die gespeicherte Einrichtung ist in diesem Browser nicht mehr verfügbar.",
+  "submit.draft.save_failed": "Deine Einrichtung konnte in diesem Browser nicht gespeichert werden. Lass diesen Tab offen, damit sie nicht verloren geht.",
+  "submit.draft.reset_failed": "Die gespeicherte Einrichtung konnte nicht gelöscht werden. Dein vorheriger Entwurf ist weiterhin verfügbar.",
+  "submit.recipe.choose_new": "Neue {p1}-Einrichtung beginnen"
 }

@@ -3547,5 +3547,15 @@
   "submit.budget.byok_note": "Tu propia clave de proveedor paga los tokens del modelo; estas cifras son la tarifa de la plataforma.",
   "tooltip.submit.budget": "Un único total para todo lo que esta ejecución puede gastar: comprobaciones de configuración, la propia optimización y el tiempo facturable de sandbox. Los créditos se reservan antes de empezar y se liquidan según el uso real; la ejecución se detiene al alcanzar el total.",
   "tooltip.submit.blackbox.roles": "Cada rol que la ejecución asigna a un modelo. El modelo de optimización propone mejoras; el modelo de puntuación, cuando tu evaluador llama a uno, juzga las salidas; el modelo de tarea impulsa al agente de código.",
-  "tooltip.submit.blackbox.evidence": "Una comprobación superada solo avala el evaluador, el ejemplo, los modelos y los ajustes exactos con los que se ejecutó. Cambia cualquiera de ellos y la comprobación tendrá que ejecutarse de nuevo."
+  "tooltip.submit.blackbox.evidence": "Una comprobación superada solo avala el evaluador, el ejemplo, los modelos y los ajustes exactos con los que se ejecutó. Cambia cualquiera de ellos y la comprobación tendrá que ejecutarse de nuevo.",
+  "submit.draft.restore.title": "¿Continuar con tu configuración anterior?",
+  "submit.draft.restore.meta": "{workflow} · {stage} · editada {time}",
+  "submit.draft.restore.continue": "Continuar borrador",
+  "submit.draft.restore.start_new": "Empezar de nuevo",
+  "submit.draft.restore.retry": "Reintentar",
+  "submit.draft.restore.failed": "No se pudo restaurar la configuración guardada. Reintenta o empieza de nuevo.",
+  "submit.draft.restore.gone": "La configuración guardada ya no está disponible en este navegador.",
+  "submit.draft.save_failed": "No se pudo guardar la configuración en este navegador. Mantén esta pestaña abierta para no perderla.",
+  "submit.draft.reset_failed": "No se pudo borrar la configuración guardada. Tu borrador anterior sigue disponible.",
+  "submit.recipe.choose_new": "Empezar una nueva configuración de {p1}"
 }

@@ -3547,5 +3547,15 @@
   "submit.budget.byok_note": "모델 토큰 비용은 사용자의 프로바이더 키로 결제됩니다. 여기 표시된 금액은 플랫폼 수수료입니다.",
   "tooltip.submit.budget": "이 실행이 사용할 수 있는 모든 것에 대한 하나의 총액: 설정 확인, 최적화 자체, 과금되는 sandbox 시간. 크레딧은 작업 시작 전에 예약되고 실제 사용량으로 정산되며, 총액에 도달하면 실행이 중단됩니다.",
   "tooltip.submit.blackbox.roles": "실행이 모델에 부여하는 각 역할입니다. 최적화 모델은 개선을 제안하고, 채점 모델은 채점기가 호출할 때 출력을 판정하며, 작업 모델은 코딩 에이전트를 구동합니다.",
-  "tooltip.submit.blackbox.evidence": "통과한 확인은 실행 당시의 채점기, 예시, 모델, 설정에 대해서만 유효합니다. 이 중 하나라도 변경하면 확인을 다시 실행해야 합니다."
+  "tooltip.submit.blackbox.evidence": "통과한 확인은 실행 당시의 채점기, 예시, 모델, 설정에 대해서만 유효합니다. 이 중 하나라도 변경하면 확인을 다시 실행해야 합니다.",
+  "submit.draft.restore.title": "이전 설정에서 이어서 진행할까요?",
+  "submit.draft.restore.meta": "{workflow} · {stage} · {time} 수정",
+  "submit.draft.restore.continue": "초안 이어가기",
+  "submit.draft.restore.start_new": "새로 시작",
+  "submit.draft.restore.retry": "다시 시도",
+  "submit.draft.restore.failed": "저장된 설정을 복원할 수 없습니다. 다시 시도하거나 새로 시작하세요.",
+  "submit.draft.restore.gone": "저장된 설정을 이 브라우저에서 더 이상 사용할 수 없습니다.",
+  "submit.draft.save_failed": "설정을 이 브라우저에 저장할 수 없습니다. 잃지 않도록 이 탭을 열어 두세요.",
+  "submit.draft.reset_failed": "저장된 설정을 지울 수 없습니다. 이전 초안은 그대로 사용할 수 있습니다.",
+  "submit.recipe.choose_new": "새 {p1} 설정 시작"
 }

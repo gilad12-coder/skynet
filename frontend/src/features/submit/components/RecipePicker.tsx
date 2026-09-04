@@ -52,9 +52,12 @@ function recipeTitle(id: Recipe): string {
 export function RecipePicker({
   current,
   onChoose,
+  startsNew = false,
 }: {
   current: Recipe | null;
   onChoose: (recipe: Recipe) => void;
+  /** A saved draft awaits its offer: choosing here is labelled as starting a new setup. */
+  startsNew?: boolean;
 }) {
   const currentIndex = RECIPES.findIndex((r) => r.id === current);
   return (
@@ -68,7 +71,12 @@ export function RecipePicker({
         items={RECIPES}
         itemKey={(r) => r.id}
         renderItem={(r) => (
-          <RecipeSlide recipe={r} selected={r.id === current} onChoose={onChoose} />
+          <RecipeSlide
+            recipe={r}
+            selected={r.id === current}
+            onChoose={onChoose}
+            startsNew={startsNew}
+          />
         )}
         // The question rides the carousel's own header row, opposite the
         // position counter, rather than sitting above it as a second block.
@@ -87,10 +95,12 @@ function RecipeSlide({
   recipe,
   selected,
   onChoose,
+  startsNew,
 }: {
   recipe: (typeof RECIPES)[number];
   selected: boolean;
   onChoose: (recipe: Recipe) => void;
+  startsNew: boolean;
 }) {
   const { id, Icon, Banner } = recipe;
   const title = recipeTitle(id);
@@ -101,7 +111,9 @@ function RecipeSlide({
       label={title}
       tagline={msg(`submit.recipe.tagline.${id}` as MessageKey)}
       description={msg(`submit.recipe.${id}.desc` as MessageKey)}
-      chooseName={formatMsg("submit.recipe.choose", { p1: title })}
+      chooseName={formatMsg(startsNew ? "submit.recipe.choose_new" : "submit.recipe.choose", {
+        p1: title,
+      })}
       selected={selected}
       onChoose={() => onChoose(id)}
     />

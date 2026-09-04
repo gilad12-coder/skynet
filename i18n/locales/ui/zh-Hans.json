@@ -3547,5 +3547,15 @@
   "submit.budget.byok_note": "模型 token 由您自己的提供商密钥付费；此处的数字是平台费用。",
   "tooltip.submit.budget": "本次运行可能花费的一切的总额：设置检查、优化本身以及计费的 sandbox 时间。额度在工作开始前预留，并按实际用量结算；达到总额时运行停止。",
   "tooltip.submit.blackbox.roles": "运行分配给模型的每个角色。优化模型提出改进；评分模型在您的评分器调用时评判输出；任务模型驱动编码智能体。",
-  "tooltip.submit.blackbox.evidence": "通过的检查仅对其运行时所用的确切评分器、示例、模型和设置负责。任一项更改后，检查都需要重新运行。"
+  "tooltip.submit.blackbox.evidence": "通过的检查仅对其运行时所用的确切评分器、示例、模型和设置负责。任一项更改后，检查都需要重新运行。",
+  "submit.draft.restore.title": "从上次的设置继续？",
+  "submit.draft.restore.meta": "{workflow} · {stage} · 编辑于 {time}",
+  "submit.draft.restore.continue": "继续草稿",
+  "submit.draft.restore.start_new": "重新开始",
+  "submit.draft.restore.retry": "重试",
+  "submit.draft.restore.failed": "无法恢复已保存的设置。请重试或重新开始。",
+  "submit.draft.restore.gone": "已保存的设置在此浏览器中已不可用。",
+  "submit.draft.save_failed": "无法在此浏览器中保存设置。请保持此标签页打开以免丢失。",
+  "submit.draft.reset_failed": "无法清除已保存的设置。之前的草稿仍然可用。",
+  "submit.recipe.choose_new": "开始新的{p1}设置"
 }

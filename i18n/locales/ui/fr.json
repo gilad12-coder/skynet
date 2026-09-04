@@ -3547,5 +3547,15 @@
   "submit.budget.byok_note": "Votre propre clé de fournisseur paie les tokens du modèle ; ces montants correspondent aux frais de la plateforme.",
   "tooltip.submit.budget": "Un seul total pour tout ce que cette exécution peut dépenser : vérifications de configuration, optimisation elle-même et temps de sandbox facturable. Les crédits sont réservés avant le début du travail et réglés selon l'utilisation réelle ; l'exécution s'arrête quand le total est atteint.",
   "tooltip.submit.blackbox.roles": "Chaque rôle que l'exécution confie à un modèle. Le modèle d'optimisation propose des améliorations ; le modèle de scoring, quand votre évaluateur en appelle un, juge les sorties ; le modèle de tâche pilote l'agent de codage.",
-  "tooltip.submit.blackbox.evidence": "Une vérification réussie ne vaut que pour l'évaluateur, l'exemple, les modèles et les réglages exacts avec lesquels elle a été exécutée. Modifiez l'un d'eux et la vérification doit être relancée."
+  "tooltip.submit.blackbox.evidence": "Une vérification réussie ne vaut que pour l'évaluateur, l'exemple, les modèles et les réglages exacts avec lesquels elle a été exécutée. Modifiez l'un d'eux et la vérification doit être relancée.",
+  "submit.draft.restore.title": "Reprendre votre configuration précédente ?",
+  "submit.draft.restore.meta": "{workflow} · {stage} · modifiée {time}",
+  "submit.draft.restore.continue": "Reprendre le brouillon",
+  "submit.draft.restore.start_new": "Recommencer",
+  "submit.draft.restore.retry": "Réessayer",
+  "submit.draft.restore.failed": "La configuration enregistrée n'a pas pu être restaurée. Réessayez ou recommencez.",
+  "submit.draft.restore.gone": "La configuration enregistrée n'est plus disponible dans ce navigateur.",
+  "submit.draft.save_failed": "Votre configuration n'a pas pu être enregistrée dans ce navigateur. Gardez cet onglet ouvert pour ne pas la perdre.",
+  "submit.draft.reset_failed": "La configuration enregistrée n'a pas pu être effacée. Votre brouillon précédent reste disponible.",
+  "submit.recipe.choose_new": "Commencer une nouvelle configuration {p1}"
 }
