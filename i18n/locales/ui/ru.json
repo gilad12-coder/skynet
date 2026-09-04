@@ -2874,6 +2874,8 @@
   "shared.excel_filter.search_placeholder": "Поиск…",
   "shared.excel_filter.select_all": "Выбрать всё",
   "shared.excel_filter.sort_by": "Сортировать по {label}",
+  "shared.expandable_textarea.expand": "Развернуть",
+  "shared.expandable_textarea.collapse": "Свернуть",
   "shared.inline_error.dismiss": "Dismiss",
   "shared.language.auto_detect": "Автоопределение",
   "shared.language.no_results": "Языки не найдены",

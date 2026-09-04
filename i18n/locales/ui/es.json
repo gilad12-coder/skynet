@@ -2874,6 +2874,8 @@
   "shared.excel_filter.search_placeholder": "Buscar…",
   "shared.excel_filter.select_all": "Seleccionar todo",
   "shared.excel_filter.sort_by": "Ordenar por {label}",
+  "shared.expandable_textarea.expand": "Expandir",
+  "shared.expandable_textarea.collapse": "Contraer",
   "shared.inline_error.dismiss": "Dismiss",
   "shared.language.auto_detect": "Detección automática",
   "shared.language.no_results": "No se encontraron idiomas",

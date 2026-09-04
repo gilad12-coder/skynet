@@ -2874,6 +2874,8 @@
   "shared.excel_filter.search_placeholder": "Ara…",
   "shared.excel_filter.select_all": "Tümünü seç",
   "shared.excel_filter.sort_by": "{label} ölçütüne göre sırala",
+  "shared.expandable_textarea.expand": "Genişlet",
+  "shared.expandable_textarea.collapse": "Daralt",
   "shared.inline_error.dismiss": "Dismiss",
   "shared.language.auto_detect": "Otomatik algıla",
   "shared.language.no_results": "Dil bulunamadı",

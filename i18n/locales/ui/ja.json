@@ -2874,6 +2874,8 @@
   "shared.excel_filter.search_placeholder": "検索…",
   "shared.excel_filter.select_all": "すべて選択",
   "shared.excel_filter.sort_by": "{label} で並べ替え",
+  "shared.expandable_textarea.expand": "展開",
+  "shared.expandable_textarea.collapse": "折りたたむ",
   "shared.inline_error.dismiss": "Dismiss",
   "shared.language.auto_detect": "自動検出",
   "shared.language.no_results": "言語が見つかりません",
