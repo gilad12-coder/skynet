@@ -1,35 +1,22 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from "react";
-
-import {
-  ArrowCounterClockwise,
-  ArrowRight,
-  CircleNotch,
-  ClockCounterClockwise,
-  Plus,
-  WarningCircle,
-} from "@/shared/ui/icons";
+import { CircleNotch, ClockCounterClockwise, WarningCircle } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/shared/ui/primitives/tooltip";
 
 export type DraftRestoreState = "offer" | "working" | "failed";
 
 /**
- * The body of the restore offer: a question and the two choices D06 names,
- * each an icon whose label is its tooltip and accessible name. It never
- * closes on its own, so the row is the only way out of the offer, and both
- * are real buttons for the keyboard. The width is fixed so a failure line
- * appearing, or a spinner entering the primary button, never resizes the
- * toast under the cursor.
+ * The body of the restore offer: the question, one line saying which setup
+ * and which stage it reopens, and the two choices as labelled buttons,
+ * secondary before primary and end-aligned like the wizard's own footer. It
+ * never closes on its own, so the buttons are the only way out of the offer.
+ * The width is fixed so the failure line replacing the summary, or the
+ * spinner entering the primary button, never resizes the toast under the
+ * cursor.
  */
 export function DraftRestoreToast({
   title,
+  summary,
   state,
   failureText,
   continueLabel,
@@ -39,6 +26,8 @@ export function DraftRestoreToast({
   onStartNew,
 }: {
   title: string;
+  /** Recipe and stage of the saved setup, or null when unknown. */
+  summary: string | null;
   state: DraftRestoreState;
   failureText: string | null;
   continueLabel: string;
@@ -49,6 +38,7 @@ export function DraftRestoreToast({
 }) {
   const working = state === "working";
   const failed = state === "failed";
+  const supporting = failed ? failureText : summary;
 
   return (
     <div className="flex w-72 max-w-full flex-col gap-3" data-tutorial="submit-draft-offer">
@@ -62,70 +52,41 @@ export function DraftRestoreToast({
           />
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-pretty font-semibold text-foreground">{title}</p>
-          {failed && failureText && (
-            <p className="mt-1 text-pretty text-xs leading-relaxed text-destructive">
-              {failureText}
+          <p className="text-pretty font-semibold leading-snug text-foreground">{title}</p>
+          {supporting && (
+            <p
+              className={`mt-1 text-pretty text-xs leading-relaxed ${
+                failed ? "text-destructive" : "text-muted-foreground"
+              }`}
+            >
+              {supporting}
             </p>
           )}
         </div>
       </div>
-      {/* Secondary before primary and end-aligned, as in the wizard's dialogs. */}
-      <div className="flex justify-end gap-2">
-        <IconAction
-          label={startNewLabel}
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button
+          size="sm"
           variant="outline"
           onClick={onStartNew}
           disabled={working}
           data-tutorial="submit-draft-start-new"
         >
-          <Plus aria-hidden="true" />
-        </IconAction>
-        <IconAction
-          label={failed ? retryLabel : continueLabel}
+          {startNewLabel}
+        </Button>
+        <Button
+          size="sm"
           onClick={onContinue}
           disabled={working}
           aria-busy={working || undefined}
           data-tutorial="submit-draft-continue"
         >
-          {working ? (
+          {working && (
             <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-          ) : failed ? (
-            <ArrowCounterClockwise aria-hidden="true" />
-          ) : (
-            <ArrowRight className="rtl:rotate-180" aria-hidden="true" />
           )}
-        </IconAction>
+          {failed ? retryLabel : continueLabel}
+        </Button>
       </div>
     </div>
-  );
-}
-
-/**
- * An icon-only button whose label is both its tooltip and its accessible
- * name. The toast mounts outside the app's tooltip provider and on
- * react-toastify's layer above everything else, so the tooltip brings its
- * own provider and joins that layer, where its later place in the DOM paints
- * it over the toast instead of behind it.
- */
-function IconAction({
-  label,
-  children,
-  ...props
-}: Omit<ComponentProps<typeof Button>, "aria-label" | "children" | "size"> & {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button size="icon-sm" aria-label={label} {...props}>
-            {children}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent style={{ zIndex: "var(--toastify-z-index, 9999)" }}>{label}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
   );
 }
