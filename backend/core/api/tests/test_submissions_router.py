@@ -1861,6 +1861,7 @@ def test_blackbox_scorer_dry_run_returns_the_probe_result(monkeypatch: pytest.Mo
         "error": None,
         "elapsed_ms": 4,
         "usage_by_model": [],
+        "credits_charged": 0,
     }
     assert len(seen) == 1
     assert seen[0].candidate == "hello"
@@ -1925,10 +1926,12 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     assert by_id["autoresearch"]["unavailable_reason"]
     assert by_id["meta_harness"]["available"] is False
     assert by_id["meta_harness"]["requires_agent_target"] is True
+    assert text.json()["auto_engines"] == ["gepa", "best_of_n"]
     assert agent.status_code == 200
     agent_by_id = {engine["id"]: engine for engine in agent.json()["engines"]}
     assert agent_by_id["meta_harness"]["available"] is True
     assert agent_by_id["meta_harness"]["unavailable_reason"] is None
+    assert agent.json()["auto_engines"] == ["gepa", "best_of_n", "meta_harness"]
 
 
 def test_blackbox_engine_catalog_surfaces_the_missing_sandbox_reason(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2031,6 +2034,7 @@ def test_blackbox_scorer_dry_run_bills_what_llm_consumed(monkeypatch: pytest.Mon
 
     assert resp.status_code == 200
     assert resp.json()["usage_by_model"] == usage
+    assert resp.json()["credits_charged"] == 1
     assert len(metered) == 1
     (engine, username, breakdown), kwargs = metered[0]
     assert engine is store.engine
@@ -2055,4 +2059,5 @@ def test_blackbox_scorer_dry_run_skips_billing_without_usage(monkeypatch: pytest
     resp = client.post("/blackbox/scorer/dry-run", json=_JUDGE_DRY_RUN_BODY)
 
     assert resp.status_code == 200
+    assert resp.json()["credits_charged"] == 0
     assert metered == []

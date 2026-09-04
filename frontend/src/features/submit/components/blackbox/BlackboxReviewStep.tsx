@@ -1,34 +1,74 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Warning } from "@/shared/ui/icons";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { formatCredits } from "@/features/billing";
-import { TERMS } from "@/shared/lib/terms";
+import { harnessLabel } from "@/shared/lib/blackbox-harness";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip as tipText, type TooltipKey } from "@/shared/lib/tooltips";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { chargeableBracket } from "../../lib/cost-bracket";
+import { focusField } from "../../lib/focus-field";
+import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
+import { WIZARD_STAGE, type WizardStageId } from "../../lib/wizard-steps";
+import { EvidenceChip } from "./EvidenceChip";
 import { StepCard } from "./shared";
 
-function Row({ label, tip, children }: { label: ReactNode; tip: TooltipKey; children: ReactNode }) {
+function Row({
+  label,
+  tip,
+  onEdit,
+  children,
+}: {
+  label: ReactNode;
+  tip: TooltipKey;
+  onEdit?: () => void;
+  children: ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-1 py-2.5 sm:flex-row sm:items-start sm:gap-4">
       <dt className="shrink-0 text-xs font-medium text-muted-foreground sm:w-36">
         <HelpTip text={tipText(tip)}>{label}</HelpTip>
       </dt>
-      <dd className="min-w-0 text-sm text-foreground" dir="auto">
+      <dd className="min-w-0 flex-1 text-sm text-foreground" dir="auto">
         {children}
       </dd>
+      {onEdit && (
+        <button
+          type="button"
+          onClick={onEdit}
+          className="min-h-[44px] shrink-0 self-start text-xs font-medium text-primary underline-offset-2 hover:underline lg:min-h-0"
+        >
+          {msg("submit.blackbox.review.edit")}
+        </button>
+      )}
     </div>
   );
 }
 
+function Mono({ children }: { children: ReactNode }) {
+  return (
+    <span className="font-mono text-xs" dir="ltr">
+      {children}
+    </span>
+  );
+}
+
+/**
+ * Everything the run will be submitted with, read from the same values the
+ * payload is built from. Each row links back to the stage and field that
+ * owns it; nothing here is edited in place except the name, description and
+ * privacy just above.
+ */
 export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
   const {
+    goTo,
     jobName,
+    suggestedName,
     isPrivate,
     seedMode,
     seedText,
@@ -43,22 +83,37 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
     shuffle,
     scorerKind,
     scorerUrl,
-    scorerModel,
     scorerUsesModel,
+    scorerModelMode,
+    resolvedScorerModel,
+    scoringModelPending,
     scorerInstall,
+    evaluatorEvidence,
+    evaluatorStatus,
     strategyMode,
     selectedEngine,
+    autoEngineLabels,
+    runDisabledReason,
     patience,
     maxScorerRuns,
     maxIterations,
     stopAtScore,
     reflectionModel,
+    optimizationFamily,
     costBracket,
     tokenSource,
     maxCostCredits,
+    setupSpent,
+    availableCredits,
   } = w;
   const locale = getActiveIntlLocale();
   const bracket = chargeableBracket(costBracket, tokenSource);
+  const credits = (value: number) => `\u2066${formatCredits(value, locale)}\u2069`;
+
+  const edit = (stage: WizardStageId, field?: string) => () => {
+    goTo(WIZARD_STAGE[stage]);
+    if (field) focusField(field);
+  };
 
   const startSummary =
     seedMode === "none"
@@ -69,22 +124,38 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
             n: seedParts.filter((p) => p.key.trim() && p.value.trim()).length,
           });
 
+  const displayName = jobName.trim() || suggestedName;
+  const notChosen = msg("submit.blackbox.roles.not_chosen");
+
   return (
     <StepCard
       title={msg("auto.features.submit.constants.literal.4")}
       description={msg("submit.blackbox.review.desc")}
     >
       <dl className="divide-y divide-border/40">
-        {jobName.trim() && (
+        {displayName && (
           <Row label={msg("auto.features.submit.components.steps.basicsstep.3")} tip="submit.name">
-            {jobName}
+            {displayName}
+            {!jobName.trim() && (
+              <span className="ms-2 text-xs text-muted-foreground">
+                {msg("submit.blackbox.review.name_suggested")}
+              </span>
+            )}
           </Row>
         )}
-        <Row label={msg("submit.blackbox.review.start")} tip="submit.blackbox.review_start">
+        <Row
+          label={msg("submit.blackbox.review.start")}
+          tip="submit.blackbox.review_start"
+          onEdit={edit("goal", "bb-seed")}
+        >
           {startSummary}
         </Row>
         {objective.trim() && (
-          <Row label={msg("submit.blackbox.start.objective_label")} tip="submit.blackbox.objective">
+          <Row
+            label={msg("submit.blackbox.start.objective_label")}
+            tip="submit.blackbox.objective"
+            onEdit={edit("goal", "bb-objective")}
+          >
             <span className="line-clamp-3 whitespace-pre-wrap">{objective}</span>
           </Row>
         )}
@@ -92,16 +163,16 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
           <Row
             label={msg("submit.blackbox.start.background_label")}
             tip="submit.blackbox.background"
+            onEdit={edit("goal", "bb-background")}
           >
             <span className="line-clamp-3 whitespace-pre-wrap">{background}</span>
           </Row>
         )}
-        <Row label={msg("submit.blackbox.start.target_label")} tip="submit.blackbox.target">
-          {targetKind === "text"
-            ? msg("submit.blackbox.start.target.text")
-            : `${msg("submit.blackbox.start.target.agent")} · ${harness} · ${targetModel.name}`}
-        </Row>
-        <Row label={msg("submit.blackbox.cases.title")} tip="submit.blackbox.review_cases">
+        <Row
+          label={msg("submit.blackbox.cases.title")}
+          tip="submit.blackbox.review_cases"
+          onEdit={edit("evaluation", "bb-cases")}
+        >
           {parsedCases ? (
             <span>
               {formatMsg("submit.blackbox.cases.loaded", {
@@ -123,42 +194,141 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
             msg("submit.blackbox.review.cases_none")
           )}
         </Row>
-        <Row label={msg("submit.blackbox.scorer.title")} tip="submit.blackbox.review_scorer">
+        <Row
+          label={msg("submit.blackbox.scorer.title")}
+          tip="submit.blackbox.review_scorer"
+          onEdit={edit("evaluation", scorerKind === "python" ? "bb-scorer-code" : "bb-scorer-url")}
+        >
           {scorerKind === "python" ? (
-            scorerUsesModel ? (
-              <span>
-                {msg("submit.blackbox.scorer.kind.python")} ·{" "}
-                <span className="font-mono text-xs" dir="ltr">
-                  {scorerModel.name}
-                </span>
-              </span>
-            ) : (
-              msg("submit.blackbox.scorer.kind.python")
-            )
+            msg("submit.blackbox.scorer.kind.python")
           ) : (
-            <span className="font-mono text-xs" dir="ltr">
-              {scorerUrl}
-            </span>
+            <Mono>{scorerUrl}</Mono>
           )}
         </Row>
         {scorerKind === "python" && scorerInstall.trim() !== "" && (
           <Row
             label={msg("submit.blackbox.scorer.install_label")}
             tip="submit.blackbox.scorer_install"
+            onEdit={edit("evaluation", "bb-scorer-install")}
           >
-            <span className="font-mono text-xs" dir="ltr">
-              {scorerInstall.trim()}
-            </span>
+            <Mono>{scorerInstall.trim()}</Mono>
           </Row>
         )}
-        <Row label={msg("submit.blackbox.review.strategy")} tip="submit.blackbox.strategy">
+        <Row
+          label={msg("submit.blackbox.review.execution")}
+          tip="submit.blackbox.target"
+          onEdit={edit("evaluation", "bb-execution-agent")}
+        >
+          {targetKind === "agent"
+            ? `${msg("submit.blackbox.start.target.agent")} · ${harnessLabel(harness)}`
+            : msg("submit.blackbox.start.target.text")}
+        </Row>
+        <Row
+          label={msg("submit.blackbox.review.models")}
+          tip="submit.blackbox.roles"
+          onEdit={edit("optimization", "bb-optimization-model")}
+        >
+          <ul className="space-y-1.5">
+            {targetKind === "agent" && (
+              <li>
+                <span className="font-medium">{msg("submit.blackbox.roles.task.label")}</span>
+                {" · "}
+                {targetModel.name.trim() ? <Mono>{targetModel.name}</Mono> : notChosen}
+                <span className="block text-xs text-muted-foreground">
+                  {msg("submit.blackbox.roles.task.desc")}
+                </span>
+              </li>
+            )}
+            <li>
+              <span className="font-medium">{msg("submit.blackbox.roles.optimization.label")}</span>
+              {" · "}
+              {reflectionModel.name.trim() ? <Mono>{reflectionModel.name}</Mono> : notChosen}
+              <span className="block text-xs text-muted-foreground">
+                {msg(OPTIMIZATION_MODEL_DESCRIPTION[optimizationFamily])}
+              </span>
+            </li>
+            <li>
+              {scorerUsesModel ? (
+                <>
+                  <span className="font-medium">{msg("submit.blackbox.roles.scoring.label")}</span>
+                  {" · "}
+                  {resolvedScorerModel?.name.trim() ? (
+                    <Mono>{resolvedScorerModel.name}</Mono>
+                  ) : (
+                    notChosen
+                  )}
+                  {" · "}
+                  {msg(
+                    scorerModelMode === "inherit"
+                      ? "submit.blackbox.roles.scoring.inherited"
+                      : "submit.blackbox.roles.scoring.custom",
+                  )}
+                  <span className="block text-xs text-muted-foreground">
+                    {msg(
+                      scorerModelMode === "inherit"
+                        ? "submit.blackbox.roles.scoring.inherited_desc"
+                        : "submit.blackbox.roles.scoring.custom_desc",
+                    )}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="font-medium">
+                    {msg("submit.blackbox.roles.scoring.deterministic_label")}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {msg("submit.blackbox.roles.scoring.deterministic_desc")}
+                  </span>
+                </>
+              )}
+            </li>
+          </ul>
+        </Row>
+        <Row
+          label={msg("submit.blackbox.review.evidence")}
+          tip="submit.blackbox.evidence"
+          onEdit={edit("evaluation", scorerKind === "python" ? "bb-scorer-code" : "bb-scorer-url")}
+        >
+          <EvidenceChip
+            status={evaluatorStatus}
+            pending={scoringModelPending}
+            modelName={evaluatorEvidence?.modelName}
+          />
+          {evaluatorStatus === "failed" && evaluatorEvidence?.error && (
+            <p className="mt-1 break-words text-xs text-foreground/80" dir="auto">
+              {evaluatorEvidence.error}
+            </p>
+          )}
+        </Row>
+        <Row
+          label={msg("submit.blackbox.review.strategy")}
+          tip="submit.blackbox.strategy"
+          onEdit={edit("optimization", "bb-engines")}
+        >
           {strategyMode === "auto"
             ? msg("submit.blackbox.strategy.auto")
             : strategyMode === "plateau"
               ? formatMsg("submit.blackbox.review.strategy_plateau", { n: patience })
               : (selectedEngine?.label ?? msg("submit.blackbox.strategy.single"))}
+          {strategyMode !== "single" && autoEngineLabels.length > 0 && (
+            <span className="ms-2 text-xs text-muted-foreground">
+              {formatMsg("submit.blackbox.engines.auto_can_run", {
+                engines: autoEngineLabels.join(" · "),
+              })}
+            </span>
+          )}
+          {runDisabledReason && (
+            <span className="mt-1 flex items-start gap-1.5 text-xs text-amber-700" role="status">
+              <Warning className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              <span>{runDisabledReason}</span>
+            </span>
+          )}
         </Row>
-        <Row label={msg("submit.blackbox.review.budget")} tip="submit.blackbox.budget">
+        <Row
+          label={msg("submit.blackbox.review.budget")}
+          tip="submit.blackbox.budget"
+          onEdit={edit("optimization", "bb-max-runs")}
+        >
           <span className="flex flex-wrap gap-1.5">
             <Badge variant="outline">
               {formatMsg("submit.blackbox.review.budget_runs", { runs: maxScorerRuns })}
@@ -175,21 +345,28 @@ export function BlackboxReviewStep({ w }: { w: BlackboxWizardContext }) {
             )}
           </span>
         </Row>
-        <Row label={TERMS.reflectionModel} tip="blackbox.config.reflection_model">
-          <span className="font-mono text-xs" dir="ltr">
-            {reflectionModel.name}
-          </span>
-        </Row>
-        <Row label={msg("submit.cost_ceiling.label")} tip="submit.cost_ceiling">
-          {formatMsg("submit.cost_ceiling.bracket", {
-            low: formatCredits(bracket.lowCredits, locale),
-            high: formatCredits(bracket.highCredits, locale),
-          })}
-          {maxCostCredits != null && (
-            <span className="ms-2 text-xs text-muted-foreground">
-              {formatMsg("submit.nav.run_cap", { credits: formatCredits(maxCostCredits, locale) })}
+        <Row
+          label={msg("submit.budget.label")}
+          tip="submit.budget"
+          onEdit={edit("optimization", "totalBudgetInput")}
+        >
+          {maxCostCredits != null ? credits(maxCostCredits) : msg("submit.budget.unset_short")}
+          <span className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+            <span>
+              {formatMsg("submit.budget.estimated_range", {
+                low: credits(bracket.lowCredits),
+                high: credits(bracket.highCredits),
+              })}
             </span>
-          )}
+            <span>
+              {msg("submit.budget.setup_spent")}: {credits(setupSpent)}
+            </span>
+            {availableCredits != null && (
+              <span>
+                {msg("submit.budget.available")}: {credits(availableCredits)}
+              </span>
+            )}
+          </span>
         </Row>
         <Row label={msg("submit.basics.privacy.label")} tip="submit.privacy">
           {msg(isPrivate ? "submit.basics.privacy.private" : "submit.basics.privacy.public")}

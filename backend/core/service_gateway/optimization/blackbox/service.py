@@ -71,7 +71,7 @@ from .agent_runs import PHASE_BASELINE, PHASE_FINAL, AgentRunRecorder, AgentRunS
 from .auto import LaneOutcome, run_strategy
 from .feedback import without_images
 from .protocol import Candidate, EngineContext, EvalServer, ScorerFn, Task, candidate_key
-from .registry import ENGINES, EngineCapabilities, get_engine
+from .registry import ENGINES, EngineCapabilities, available_engine_ids, get_engine
 from .runner import side_info_json_default
 from .sandbox import sandbox_runtime_from_settings
 from .sandbox_scorer import probe_scorer
@@ -132,6 +132,7 @@ def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
             )
             for spec in ENGINES.values()
         ],
+        auto_engines=available_engine_ids(caps),
     )
 
 

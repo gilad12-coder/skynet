@@ -584,6 +584,8 @@ export interface ScorerDryRunResponse {
   elapsed_ms: number;
   // Per-model token usage when the scorer called the injected `llm()` helper.
   usage_by_model?: ModelTokenUsage[];
+  // Credits this one check debited; the wizard adds it to the setup spend.
+  credits_charged?: number;
 }
 
 export interface BlackboxLaneResult {
@@ -663,6 +665,10 @@ export interface BlackboxEngineCatalogResponse {
   sandbox_available: boolean;
   sandbox_reason?: string | null;
   engines: BlackboxEngineInfo[];
+  // Ids of the engines Auto's execution recipe can invoke here — a visible
+  // catalog entry is not the same as one Auto may run. Optional only for
+  // responses from a backend that predates the field.
+  auto_engines?: string[];
 }
 
 /** One sandboxed agent run of a black-box optimization, with a transcript tail. */

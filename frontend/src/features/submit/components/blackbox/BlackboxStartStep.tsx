@@ -5,23 +5,9 @@ import dynamic from "next/dynamic";
 import { Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
-import { Separator } from "@/shared/ui/primitives/separator";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/shared/ui/primitives/select";
-import { NumberInput } from "@/shared/ui/number-input";
-import { ModelChip } from "@/shared/ui/model-chip";
-import { cn } from "@/shared/lib/utils";
-import { HarnessLogo } from "@/shared/ui/harness-logo";
-import { BLACKBOX_HARNESSES, harnessLabel } from "@/shared/lib/blackbox-harness";
 import { msg } from "@/shared/lib/messages";
 import { tip as tipText } from "@/shared/lib/tooltips";
 import { HelpTip } from "@/shared/ui/help-tip";
-import type { BlackboxHarness } from "@/shared/types/api";
 
 import type {
   BlackboxRecipe,
@@ -32,13 +18,7 @@ import { detectLanguage, looksLikeCode, type SeedLanguage } from "../../lib/seed
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
-import {
-  Field,
-  MOBILE_INPUT_CLASS,
-  MOBILE_NUMBER_INPUT_CLASS,
-  Segmented,
-  TEXTAREA_CLASS,
-} from "./shared";
+import { Field, MOBILE_INPUT_CLASS, Segmented, TEXTAREA_CLASS } from "./shared";
 
 type SeedFormat = "text" | "code";
 interface SeedGuess {
@@ -46,9 +26,6 @@ interface SeedGuess {
   language: SeedLanguage | null;
 }
 const NO_GUESS: SeedGuess = { code: false, language: null };
-
-const MOBILE_MODEL_CHIP_CLASS =
-  "min-h-[44px] max-lg:[&_button]:min-h-[44px] max-lg:[&_button]:min-w-[44px] max-lg:[&_button]:opacity-100";
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
   ssr: false,
@@ -72,18 +49,6 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
     setObjective,
     background,
     setBackground,
-    targetKind,
-    setTargetKind,
-    harness,
-    setHarness,
-    targetModel,
-    setTargetModel,
-    targetTimeout,
-    setTargetTimeout,
-    targetConcurrency,
-    setTargetConcurrency,
-    setEditingModel,
-    catalog,
   } = w;
 
   const updatePart = (i: number, patch: { key?: string; value?: string }) =>
@@ -332,108 +297,6 @@ export function BlackboxStartStep({ w }: { w: BlackboxWizardContext }) {
           {seedFields}
           {objectiveFields}
         </>
-      )}
-
-      <Separator />
-
-      <Field label={msg("submit.blackbox.start.target_label")} tip="submit.blackbox.target">
-        <Segmented<"text" | "agent">
-          value={targetKind}
-          onChange={setTargetKind}
-          options={[
-            {
-              value: "text",
-              label: msg("submit.blackbox.start.target.text"),
-              desc: msg("submit.blackbox.start.target.text_desc"),
-            },
-            {
-              value: "agent",
-              label: msg("submit.blackbox.start.target.agent"),
-              desc: msg("submit.blackbox.start.target.agent_desc"),
-            },
-          ]}
-        />
-      </Field>
-
-      {targetKind === "agent" && (
-        <div className="space-y-4 rounded-lg border border-border/50 bg-muted/20 p-4">
-          <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
-            <Field
-              label={msg("submit.blackbox.start.agent_model_label")}
-              tip="blackbox.config.agent_model"
-            >
-              <ModelChip
-                config={targetModel}
-                className={MOBILE_MODEL_CHIP_CLASS}
-                required
-                catalogModels={catalog?.models}
-                onClick={() =>
-                  setEditingModel({
-                    config: targetModel,
-                    onSave: setTargetModel,
-                    nameOnly: true,
-                    label: msg("submit.blackbox.start.agent_model_label"),
-                  })
-                }
-                onRemove={targetModel.name ? () => setTargetModel({ name: "" }) : undefined}
-              />
-            </Field>
-            <Field label={msg("submit.blackbox.start.harness_label")} tip="submit.blackbox.harness">
-              <Select value={harness} onValueChange={(v) => setHarness(v as BlackboxHarness)}>
-                {/* Same box as the model chip beside it: py-2 around a 2rem row. */}
-                <SelectTrigger
-                  className={cn(
-                    MOBILE_INPUT_CLASS,
-                    "data-[size=default]:h-auto *:data-[slot=select-value]:min-h-8",
-                  )}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {BLACKBOX_HARNESSES.map((h) => (
-                    <SelectItem key={h} value={h}>
-                      <span className="flex items-center gap-2">
-                        <HarnessLogo harness={h} size={18} />
-                        {harnessLabel(h)}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label={msg("submit.blackbox.start.timeout_label")}
-              htmlFor="bb-target-timeout"
-              tip="submit.blackbox.target_timeout"
-            >
-              <NumberInput
-                id="bb-target-timeout"
-                value={targetTimeout}
-                onChange={setTargetTimeout}
-                min={30}
-                max={2700}
-                step={30}
-                className={MOBILE_NUMBER_INPUT_CLASS}
-              />
-            </Field>
-            <Field
-              label={msg("submit.blackbox.start.concurrency_label")}
-              htmlFor="bb-concurrency"
-              tip="submit.blackbox.concurrency"
-            >
-              <NumberInput
-                id="bb-concurrency"
-                value={targetConcurrency}
-                onChange={setTargetConcurrency}
-                min={1}
-                max={8}
-                className={MOBILE_NUMBER_INPUT_CLASS}
-              />
-            </Field>
-          </div>
-        </div>
       )}
     </BlackboxAuthoringShell>
   );

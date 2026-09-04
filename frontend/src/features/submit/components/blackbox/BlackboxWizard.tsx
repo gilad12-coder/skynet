@@ -16,9 +16,11 @@ import { BlackboxBasicsStep } from "./BlackboxBasicsStep";
 import { BlackboxStartStep } from "./BlackboxStartStep";
 import { BlackboxCasesStep } from "./BlackboxCasesStep";
 import { BlackboxScorerStep } from "./BlackboxScorerStep";
+import { BlackboxExecutionSection } from "./BlackboxExecutionSection";
 import { BlackboxOptimizerStep } from "./BlackboxOptimizerStep";
 import { BlackboxReviewStep } from "./BlackboxReviewStep";
 import { SplitSection } from "../steps/SplitSection";
+import { TotalBudgetCard } from "../TotalBudgetCard";
 
 export function BlackboxWizard({
   header,
@@ -35,12 +37,16 @@ export function BlackboxWizard({
     goal: <BlackboxStartStep w={w} />,
     evaluation: (
       <div className="space-y-4 md:space-y-6">
-        <div className="mx-auto w-full max-w-2xl">
+        <div id="bb-cases" tabIndex={-1} className="mx-auto w-full max-w-2xl outline-none">
           <BlackboxCasesStep w={w} />
         </div>
         <BlackboxScorerStep w={w} />
-        <div className="mx-auto w-full max-w-2xl">
-          <SplitSection w={w} />
+        <div className="mx-auto w-full max-w-2xl space-y-4 md:space-y-6">
+          <BlackboxExecutionSection w={w} />
+          <div id="bb-split" tabIndex={-1} className="outline-none">
+            <SplitSection w={w} />
+          </div>
+          <TotalBudgetCard w={w} mode={w.tokenSource} />
         </div>
       </div>
     ),

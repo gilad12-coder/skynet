@@ -12,7 +12,15 @@ import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { Field, MOBILE_INPUT_CLASS, Segmented, StepCard, TEXTAREA_CLASS } from "./shared";
 
 export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
-  const { jobName, setJobName, jobDescription, setJobDescription, isPrivate, setIsPrivate } = w;
+  const {
+    jobName,
+    setJobName,
+    jobDescription,
+    setJobDescription,
+    isPrivate,
+    setIsPrivate,
+    suggestedName,
+  } = w;
 
   return (
     <StepCard
@@ -33,9 +41,13 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
           </>
         }
         tip="submit.name"
+        hint={suggestedName ? msg("submit.blackbox.basics.name_suggested_hint") : undefined}
       >
         <Input
-          placeholder={msg("auto.features.submit.components.steps.basicsstep.literal.1")}
+          id="bb-job-name"
+          placeholder={
+            suggestedName || msg("auto.features.submit.components.steps.basicsstep.literal.1")
+          }
           value={jobName}
           onChange={(e) => setJobName(e.target.value)}
           className={MOBILE_INPUT_CLASS}
