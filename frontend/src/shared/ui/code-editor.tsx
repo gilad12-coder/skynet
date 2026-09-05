@@ -342,7 +342,7 @@ function dedupeIssues(res: ValidationResult | null): ValidationResult | null {
   return { ...res, errors, warnings };
 }
 
-interface CodeEditorProps {
+export interface CodeEditorProps {
   value: string;
   onChange: (value: string) => void;
   height?: string;
@@ -574,7 +574,10 @@ export function CodeEditor({
           >
             <div
               className="relative overflow-y-auto [&_.cm-editor]:!outline-none"
-              style={readOnly ? undefined : { maxHeight: "calc(60vh - 4rem)" }}
+              style={{
+                minHeight: readOnly ? height : `min(${height}, calc(60vh - 4rem))`,
+                maxHeight: readOnly ? undefined : "calc(60vh - 4rem)",
+              }}
             >
               {lite ? (
                 readOnly ? (

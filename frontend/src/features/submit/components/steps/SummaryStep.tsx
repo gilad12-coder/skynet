@@ -1,6 +1,7 @@
 "use client";
 
-import dynamic from "next/dynamic";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
+
 import { motion, AnimatePresence } from "framer-motion";
 import {
   SLIDING_PILL_TABS_INDICATOR_CLASS,
@@ -40,7 +41,6 @@ import { moduleLabel } from "@/shared/lib/formatters";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip } from "@/shared/ui/model-chip";
-import { Skeleton } from "@/shared/ui/skeleton";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { formatCredits } from "@/features/billing";
 import { useUserPrefs } from "@/features/settings";
@@ -52,11 +52,6 @@ import { WIZARD_STAGE, type WizardStageId } from "../../lib/wizard-steps";
 import { focusField } from "../../lib/focus-field";
 import { workflowUsesTools } from "../../workflow/model";
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={200} borderRadius={8} />,
-});
 
 const SUMMARY_TABS = perLocale(() => [
   {

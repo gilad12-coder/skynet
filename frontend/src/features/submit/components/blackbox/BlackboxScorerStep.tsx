@@ -1,7 +1,8 @@
 "use client";
 
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
+
 import { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
 import { CheckCircle, CircleNotch, Play, XCircle } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
@@ -23,10 +24,6 @@ import { Field, MOBILE_INPUT_CLASS, Segmented } from "./shared";
 
 const MOBILE_MODEL_CHIP_CLASS =
   "min-h-[44px] max-lg:[&_button]:min-h-[44px] max-lg:[&_button]:min-w-[44px] max-lg:[&_button]:opacity-100";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-});
 
 function isDataImage(entry: [string, unknown]): entry is [string, string] {
   return typeof entry[1] === "string" && entry[1].startsWith("data:image/");

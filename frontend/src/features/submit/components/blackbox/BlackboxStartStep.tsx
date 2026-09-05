@@ -1,7 +1,8 @@
 "use client";
 
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
+
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import dynamic from "next/dynamic";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -15,10 +16,6 @@ import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
 import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
 import { Disclosure } from "../Disclosure";
 import { Field, TEXTAREA_CLASS } from "./shared";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-});
 
 export function BlackboxStartStep({
   w,

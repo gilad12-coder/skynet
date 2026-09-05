@@ -1,5 +1,7 @@
 "use client";
 
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
+
 import * as React from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer-motion";
@@ -96,11 +98,6 @@ function moduleLabel(value: string): string {
   if (v === WORKFLOW_META.value) return WORKFLOW_META.label;
   return ATOMIC_MODULES.find((m) => m.value === v)?.label ?? value;
 }
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-  loading: () => <Skeleton height={200} borderRadius={8} />,
-});
 
 // React Flow ships ~100KB of canvas code; only workflow runs pay for it.
 const WorkflowCanvas = dynamic(
