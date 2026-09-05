@@ -3037,6 +3037,7 @@
   "submit.module.picker_title": "Выберите модуль",
   "submit.nav.run_cap": "Лимит: {credits} кредитов",
   "submit.nav.validating": "Проверка…",
+  "submit.issue.fix": "Перейти к полю",
   "submit.react.auth_label": "Заголовок авторизации (необязательно)",
   "submit.react.mcp_checking": "Проверка подключения…",
   "submit.react.mcp_connected": "Подключено — доступно инструментов: {p1}",

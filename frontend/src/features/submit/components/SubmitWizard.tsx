@@ -1,17 +1,17 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { toast } from "react-toastify";
 
 import { msg } from "@/shared/lib/messages";
 
-import { PreflightChecks } from "./PreflightChecks";
 import { TotalBudgetCard } from "./TotalBudgetCard";
+import { WizardIssueNotice } from "./WizardIssueNotice";
 import { WizardSubsteps } from "./WizardSubsteps";
 import { aggregateTokenSource } from "../lib/cost-bracket";
 import { useSubmitWizard } from "../hooks/use-submit-wizard";
 import { emptyModelConfig, slideVariants } from "../constants";
+import { focusField } from "../lib/focus-field";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { SubmitStepper } from "./SubmitStepper";
 import { SubmitNav } from "./SubmitNav";
@@ -25,21 +25,57 @@ import { ParamsStep } from "./steps/ParamsStep";
 import { SummaryStep } from "./steps/SummaryStep";
 import { SplitSection } from "./steps/SplitSection";
 
-const REVIEW_STEPS = ["details", "summary"] as const;
+const EVALUATION_STEPS = ["budget", "dataset", "code", "split"] as const;
+const OPTIMIZATION_STEPS = ["parameters", "models"] as const;
+const REVIEW_STEPS = ["review"] as const;
+const CODE_FIELDS = new Set(["signature-editor", "metric-editor", "react-config"]);
+
+/** The evaluation substep that holds a field, so a problem opens where it is fixed. */
+function evaluationPartFor(field?: string): number | null {
+  if (!field) return null;
+  if (field === "totalBudgetInput") return 0;
+  if (CODE_FIELDS.has(field)) return 2;
+  if (field === "data-splits") return 3;
+  return 1;
+}
 
 export function SubmitWizard({ header }: { header?: ReactNode }) {
   const w = useSubmitWizard();
   const [evaluationPart, setEvaluationPart] = useState(0);
   const [optimizationPart, setOptimizationPart] = useState(0);
-  const [reviewPart, setReviewPart] = useState(0);
 
-  const evaluationSteps = ["budget", "dataset", "code", "split", "checks"] as const;
-  const optimizationSteps = ["parameters", "models", "checks"] as const;
-
-  // A clone lands on the summary: its details are cloned too.
+  const routeSubstep = useCallback((stage: WizardStageId, field?: string) => {
+    if (stage === "evaluation") {
+      const part = evaluationPartFor(field);
+      if (part != null) setEvaluationPart(part);
+    }
+    if (stage === "optimization") setOptimizationPart(field === "model-catalog" ? 1 : 0);
+  }, []);
+  const goToField = (stage: WizardStageId, field?: string) => {
+    // The total budget lives in Evaluation even when a later stage reports it.
+    const target: WizardStageId = field === "totalBudgetInput" ? "evaluation" : stage;
+    routeSubstep(target, field);
+    w.goTo(WIZARD_STAGE[target]);
+    if (field) focusField(field);
+  };
+  // A reported problem opens the substep that holds its field and lands focus there.
   useEffect(() => {
-    if (w.cloned) setReviewPart(REVIEW_STEPS.length - 1);
-  }, [w.cloned]);
+    if (!w.issue) return;
+    routeSubstep(w.issue.stage, w.issue.fieldId);
+    if (w.issue.fieldId) focusField(w.issue.fieldId);
+  }, [w.issue, routeSubstep]);
+
+  const stage = stageAt(w.step);
+  // Validation problems stay live: they follow the stage's current state until
+  // it validates. Setup-check problems hold until the checked setup changes.
+  const issue =
+    w.issue && w.issue.stage === stage
+      ? w.issue.identity
+        ? w.preflight.identity === w.issue.identity
+          ? w.issue
+          : null
+        : w.stageIssue(w.step, true)
+      : null;
 
   const budgetMode = aggregateTokenSource(
     w.jobType === "grid_search"
@@ -54,76 +90,23 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
     <DatasetStep key="dataset" w={w} />,
     <CodeStep key="code" w={w} part="code" />,
     <SplitSection key="split" w={w} />,
-    <PreflightChecks key="checks" preflight={w.preflight} scope="evaluation" />,
   ];
   const optimizationPanels: readonly ReactNode[] = [
     <ParamsStep key="parameters" w={w} />,
     <ModelStep key="models" w={w} />,
-    <PreflightChecks key="checks" preflight={w.preflight} scope="execution" />,
-  ];
-  const reviewPanels: readonly ReactNode[] = [
-    <BasicsStep key="details" w={w} />,
-    <SummaryStep
-      key="summary"
-      w={w}
-      onEditStage={(stage) => {
-        if (stage === "evaluation") setEvaluationPart(0);
-        if (stage === "optimization") setOptimizationPart(0);
-        w.goTo(WIZARD_STAGE[stage]);
-      }}
-    />,
   ];
 
   const handleEvaluationNext = async () => {
-    if (evaluationPart < evaluationSteps.length - 1) {
+    if (evaluationPart < EVALUATION_STEPS.length - 1) {
       setEvaluationPart((current) => current + 1);
-      return;
-    }
-    if (w.maxCostCredits == null) {
-      setEvaluationPart(0);
-      toast.error(msg("budget.invalid"));
-      return;
-    }
-    if (!w.parsedDataset?.rowCount) {
-      setEvaluationPart(1);
-      toast.error(msg("submit.validation.dataset_required"));
-      return;
-    }
-    if (!Object.values(w.columnRoles).includes("input")) {
-      setEvaluationPart(1);
-      toast.error(msg("submit.validation.input_column_required"));
-      return;
-    }
-    if (!Object.values(w.columnRoles).includes("output")) {
-      setEvaluationPart(1);
-      toast.error(msg("submit.validation.output_column_required"));
-      return;
-    }
-    if (!w.validateStep(WIZARD_STAGE.evaluation, true, true)) {
-      setEvaluationPart(2);
-      return;
-    }
-    if (w.splitSum !== 1) {
-      setEvaluationPart(3);
-      toast.error(msg("submit.validation.split_must_sum_to_one"));
       return;
     }
     await w.handleNext();
   };
 
   const handleOptimizationNext = async () => {
-    if (optimizationPart < optimizationSteps.length - 1) {
+    if (optimizationPart < OPTIMIZATION_STEPS.length - 1) {
       setOptimizationPart((current) => current + 1);
-      return;
-    }
-    if (!w.validateStep(WIZARD_STAGE.optimization, true)) {
-      const modelMissing =
-        w.jobType === "run"
-          ? !w.modelConfig.name.trim() ||
-            (w.optimizerName.toLowerCase() === "gepa" && !w.secondModelConfig?.name?.trim())
-          : w.generationModels.every((model) => !model.name.trim()) ||
-            w.reflectionModels.every((model) => !model.name.trim());
-      setOptimizationPart(modelMissing ? 1 : w.runtimeUnavailableReason ? 2 : 0);
       return;
     }
     await w.handleNext();
@@ -135,7 +118,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       <WizardSubsteps
         active={evaluationPart}
         ariaLabel={msg("submit.stage.evaluation")}
-        steps={evaluationSteps}
+        steps={EVALUATION_STEPS}
       >
         {evaluationPanels[evaluationPart]}
       </WizardSubsteps>
@@ -144,18 +127,24 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       <WizardSubsteps
         active={optimizationPart}
         ariaLabel={msg("submit.stage.optimization")}
-        steps={optimizationSteps}
+        steps={OPTIMIZATION_STEPS}
       >
         {optimizationPanels[optimizationPart]}
       </WizardSubsteps>
     ),
     review: (
-      <WizardSubsteps
-        active={reviewPart}
-        ariaLabel={msg("submit.stage.review")}
-        steps={REVIEW_STEPS}
-      >
-        {reviewPanels[reviewPart]}
+      <WizardSubsteps active={0} ariaLabel={msg("submit.stage.review")} steps={REVIEW_STEPS}>
+        <div className="space-y-4 md:space-y-6">
+          <BasicsStep w={w} />
+          <SummaryStep
+            w={w}
+            onEditStage={(target) => {
+              if (target === "evaluation") setEvaluationPart(0);
+              if (target === "optimization") setOptimizationPart(0);
+              w.goTo(WIZARD_STAGE[target]);
+            }}
+          />
+        </div>
       </WizardSubsteps>
     ),
   };
@@ -169,10 +158,6 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       setOptimizationPart((current) => current - 1);
       return;
     }
-    if (w.step === WIZARD_STAGE.review && reviewPart > 0) {
-      setReviewPart((current) => current - 1);
-      return;
-    }
     w.goPrev();
   };
   const onNext =
@@ -180,18 +165,8 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       ? handleEvaluationNext
       : w.step === WIZARD_STAGE.optimization
         ? handleOptimizationNext
-        : w.step === WIZARD_STAGE.review && reviewPart < REVIEW_STEPS.length - 1
-          ? () => setReviewPart((current) => current + 1)
-          : w.handleNext;
-  const onSubmit = () => {
-    if (!w.jobName.trim()) {
-      setReviewPart(0);
-      toast.error(msg("submit.validation.name_required"));
-      return;
-    }
-    void w.handleSubmit();
-  };
-  const showSubmit = w.step === WIZARD_STAGE.review && reviewPart === REVIEW_STEPS.length - 1;
+        : w.handleNext;
+  const showSubmit = w.step === WIZARD_STAGE.review;
   const containerWidthClass =
     w.step === WIZARD_STAGE.evaluation && evaluationPart === 2 && w.codeAssistMode === "auto"
       ? "max-w-6xl"
@@ -207,7 +182,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
         <AnimatePresence mode="wait" custom={w.direction}>
           <motion.div
             key={w.step}
-            data-tutorial={`wizard-stage-${stageAt(w.step)}`}
+            data-tutorial={`wizard-stage-${stage}`}
             custom={w.direction}
             variants={slideVariants}
             initial="enter"
@@ -215,7 +190,13 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
             exit="exit"
             transition={{ duration: 0.1 }}
           >
-            {stageViews[stageAt(w.step)]}
+            {issue && (
+              <WizardIssueNotice
+                issue={issue}
+                onFix={() => goToField(issue.stage, issue.fieldId)}
+              />
+            )}
+            {stageViews[stage]}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -224,7 +205,6 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
         w={w}
         onBack={onBack}
         onNext={onNext}
-        onSubmit={onSubmit}
         backDisabled={w.step === WIZARD_STAGE.goal}
         showSubmit={showSubmit}
       />

@@ -3037,6 +3037,7 @@
   "submit.module.picker_title": "Modul auswählen",
   "submit.nav.run_cap": "Obergrenze: {credits} Credits",
   "submit.nav.validating": "Wird validiert…",
+  "submit.issue.fix": "Zum Feld",
   "submit.react.auth_label": "Auth-Header (optional)",
   "submit.react.mcp_checking": "Verbindung wird geprüft…",
   "submit.react.mcp_connected": "Verbunden — {p1} Tools verfügbar",

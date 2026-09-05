@@ -3037,6 +3037,7 @@
   "submit.module.picker_title": "یک ماژول انتخاب کنید",
   "submit.nav.run_cap": "سقف: {credits} اعتبار",
   "submit.nav.validating": "در حال اعتبارسنجی…",
+  "submit.issue.fix": "رفتن به فیلد",
   "submit.react.auth_label": "سرایند احراز هویت (اختیاری)",
   "submit.react.mcp_checking": "در حال بررسی اتصال…",
   "submit.react.mcp_connected": "متصل شد — {p1} ابزار در دسترس",

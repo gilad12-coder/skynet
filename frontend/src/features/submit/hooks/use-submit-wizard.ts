@@ -46,7 +46,7 @@ import { readPref, useUserPrefs } from "@/features/settings";
 import { emptyModelConfig, defaultSplit, defaultReactConfig } from "../constants";
 import type { ReactConfig, ColumnRole } from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
-import { focusField } from "../lib/focus-field";
+import type { WizardIssue } from "../lib/wizard-issue";
 import { preflightDestination } from "../lib/preflight-destination";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import { beginValidationToast, type ValidationToast } from "../lib/validation-toast";
@@ -506,7 +506,7 @@ export function useSubmitWizard() {
   const validationCacheRef = useRef(new Map<string, Promise<ValidateCodeResponse>>());
 
   const [cloneLoading, setCloneLoading] = useState(false);
-  const [cloned, setCloned] = useState(false);
+  const [issue, setIssue] = useState<WizardIssue | null>(null);
   const cloneRan = useRef(false);
 
   // Register setters with the typed tutorial bridge so the tutorial system
@@ -1573,7 +1573,6 @@ export function useSubmitWizard() {
       // answered. An Anything clone still drafts its signature and metric
       // on the Start step, so it keeps the walk.
       if (fromProgram) {
-        setCloned(true);
         setPendingRestore({ stage: "review", furthest: "review" });
       }
       toast.success(msg("submit.clone.success"));
@@ -1752,19 +1751,18 @@ export function useSubmitWizard() {
     setFurthestReachedStep((prev) => Math.max(prev, idx));
   };
 
-  const validateTargetScore = (showToast: boolean): boolean => {
-    if (!advancedMode || optimizerName.toLowerCase() !== "gepa" || !targetScore.trim()) return true;
-    if (parseTargetScore(targetScore) == null) {
-      if (showToast) toast.error(msg("submit.validation.target_score_invalid"));
-      return false;
-    }
+  const targetScoreIssue = (): string | null => {
+    if (!advancedMode || optimizerName.toLowerCase() !== "gepa" || !targetScore.trim()) return null;
+    if (parseTargetScore(targetScore) == null) return msg("submit.validation.target_score_invalid");
     const effectiveFractions =
       splitModeRef.current === "auto" && splitPlan ? splitPlan.fractions : split;
-    if (effectiveFractions.val <= 0) {
-      if (showToast) toast.error(msg("submit.validation.target_score_requires_val"));
-      return false;
-    }
-    return true;
+    if (effectiveFractions.val <= 0) return msg("submit.validation.target_score_requires_val");
+    return null;
+  };
+  const validateTargetScore = (showToast: boolean): boolean => {
+    const problem = targetScoreIssue();
+    if (problem && showToast) toast.error(problem);
+    return problem == null;
   };
 
   useDatasetProfiling({
@@ -1810,96 +1808,70 @@ export function useSubmitWizard() {
   useEffect(() => {
     evaluationIdentityRef.current = evaluationIdentity;
   }, [evaluationIdentity]);
-  /** Validates a wizard step; optionally surfaces toast errors. */
-  const validateStep = (s: number, showToast = false, structureOnly = false): boolean => {
+  /** The first problem holding a stage back, or null when it validates. */
+  const stageIssue = (s: number, structureOnly = false): WizardIssue | null => {
+    const fail = (message: string, fieldId?: string): WizardIssue => ({
+      stage: stageAt(s),
+      fieldId,
+      message,
+    });
     switch (s) {
       case WIZARD_STAGE.goal:
-        if (moduleSelectionRequired) {
-          if (showToast) toast.error(msg("submit.validation.module_required"));
-          return false;
-        }
-        return true;
+        if (moduleSelectionRequired)
+          return fail(msg("submit.validation.module_required"), "module-selector");
+        return null;
       case WIZARD_STAGE.evaluation: {
-        if (!parsedDataset || parsedDataset.rowCount === 0) {
-          if (showToast) toast.error(msg("submit.validation.dataset_required"));
-          return false;
-        }
+        if (maxCostCredits == null) return fail(msg("budget.invalid"), "totalBudgetInput");
+        if (!parsedDataset || parsedDataset.rowCount === 0)
+          return fail(msg("submit.validation.dataset_required"), "dataset-upload");
         const m = currentColumnMapping();
-        if (Object.keys(m.inputs).length === 0) {
-          if (showToast) toast.error(msg("submit.validation.input_column_required"));
-          return false;
-        }
-        if (Object.keys(m.outputs).length === 0) {
-          if (showToast) toast.error(msg("submit.validation.output_column_required"));
-          return false;
-        }
+        if (Object.keys(m.inputs).length === 0)
+          return fail(msg("submit.validation.input_column_required"), "column-mapping");
+        if (Object.keys(m.outputs).length === 0)
+          return fail(msg("submit.validation.output_column_required"), "column-mapping");
         // Tool-using runs (react, or a workflow with react/mcp nodes) need a
         // live tool endpoint; the tool config lives in this stage's code section.
         const needsTools =
           isReact || (isWorkflow && !!workflowSpec && workflowUsesTools(workflowSpec));
-        if (needsTools && !reactConfig.mcpUrl.trim()) {
-          if (showToast) toast.error(msg("submit.validation.mcp_url_required"));
-          return false;
-        }
-        if (needsTools && reactToolSelectionEmpty) {
-          if (showToast) toast.error(msg("submit.validation.mcp_tool_required"));
-          return false;
-        }
+        if (needsTools && !reactConfig.mcpUrl.trim())
+          return fail(msg("submit.validation.mcp_url_required"), "react-config");
+        if (needsTools && reactToolSelectionEmpty)
+          return fail(msg("submit.validation.mcp_tool_required"), "react-config");
         if (isWorkflow) {
-          if (!workflowSpec) return false;
-          if (validateWorkflowSpec(workflowSpec, workflowIssueText).length > 0) {
-            if (showToast) toast.error(msg("submit.validation.workflow_invalid"));
-            return false;
-          }
-        } else {
-          if (!signatureCode.trim()) {
-            if (showToast) toast.error(msg("submit.validation.signature_required"));
-            return false;
-          }
+          if (!workflowSpec || validateWorkflowSpec(workflowSpec, workflowIssueText).length > 0)
+            return fail(msg("submit.validation.workflow_invalid"), "signature-editor");
+        } else if (!signatureCode.trim()) {
+          return fail(msg("submit.validation.signature_required"), "signature-editor");
         }
-        if (!metricCode.trim()) {
-          if (showToast) toast.error(msg("submit.validation.metric_required"));
-          return false;
-        }
+        if (!metricCode.trim())
+          return fail(msg("submit.validation.metric_required"), "metric-editor");
+        if (Math.abs(split.train + split.val + split.test - 1) > 0.001)
+          return fail(msg("submit.validation.split_must_sum_to_one"), "data-splits");
         // Server-side validation covers the signature and the metric together;
         // handleNext runs it before this check when the stage is left.
-        if (!structureOnly && evaluationStatus !== "passed") return false;
-        if (!structureOnly && datasetValidation && datasetValidation.errors.length > 0) {
-          if (showToast) toast.error(msg("submit.validation.split_too_small"));
-          return false;
-        }
-        return true;
+        if (!structureOnly && evaluationStatus !== "passed")
+          return fail(msg("submit.preflight.idle"));
+        if (!structureOnly && datasetValidation && datasetValidation.errors.length > 0)
+          return fail(msg("submit.validation.split_too_small"), "data-splits");
+        return null;
       }
       case WIZARD_STAGE.optimization: {
-        if (!structureOnly && runtimeUnavailableReason) {
-          if (showToast) toast.error(runtimeUnavailableReason);
-          return false;
-        }
-        if (!validateTargetScore(showToast)) return false;
+        if (!structureOnly && runtimeUnavailableReason) return fail(runtimeUnavailableReason);
+        const targetProblem = targetScoreIssue();
+        if (targetProblem) return fail(targetProblem, "target-score");
         if (effectiveJobType === "run") {
-          if (!modelConfig.name.trim()) {
-            if (showToast) toast.error(msg("submit.validation.model_required"));
-            return false;
-          }
-          if (!structureOnly && modelConfig.token_source !== "byok" && !anyProviderHasEnvKey) {
-            if (showToast) toast.error(msg("submit.validation.api_key_required"));
-            return false;
-          }
-          const secondModel = secondModelConfig;
-          if (optimizerName.toLowerCase() === "gepa" && !secondModel?.name?.trim()) {
-            if (showToast) toast.error(msg("submit.validation.reflection_model_required"));
-            return false;
-          }
+          if (!modelConfig.name.trim())
+            return fail(msg("submit.validation.model_required"), "model-catalog");
+          if (!structureOnly && modelConfig.token_source !== "byok" && !anyProviderHasEnvKey)
+            return fail(msg("submit.validation.api_key_required"), "model-catalog");
+          if (optimizerName.toLowerCase() === "gepa" && !secondModelConfig?.name?.trim())
+            return fail(msg("submit.validation.reflection_model_required"), "model-catalog");
         }
         if (effectiveJobType === "grid_search") {
-          if (generationModels.every((m) => !m.name.trim())) {
-            if (showToast) toast.error(msg("submit.validation.generation_model_required"));
-            return false;
-          }
-          if (reflectionModels.every((m) => !m.name.trim())) {
-            if (showToast) toast.error(msg("submit.validation.reflection_models_required"));
-            return false;
-          }
+          if (generationModels.every((m) => !m.name.trim()))
+            return fail(msg("submit.validation.generation_model_required"), "model-catalog");
+          if (reflectionModels.every((m) => !m.name.trim()))
+            return fail(msg("submit.validation.reflection_models_required"), "model-catalog");
         }
         // Vision gate: if any input column is image-typed, every chosen
         // generation model must support vision. Mirrors the backend's
@@ -1916,33 +1888,31 @@ export function useSubmitWizard() {
               ? [modelConfig.name].filter((n) => n.trim())
               : generationModels.map((m) => m.name).filter((n) => n.trim());
           const offenders = candidates.filter((id) => !isVision(id));
-          if (offenders.length > 0) {
-            if (showToast) {
-              toast.error(
-                formatMsg("submit.validation.vision_required", {
-                  fields: imageInputs.join(", "),
-                  model: offenders.join(", "),
-                }),
-              );
-            }
-            return false;
-          }
+          if (offenders.length > 0)
+            return fail(
+              formatMsg("submit.validation.vision_required", {
+                fields: imageInputs.join(", "),
+                model: offenders.join(", "),
+              }),
+              "model-catalog",
+            );
         }
-        return true;
+        return null;
       }
       case WIZARD_STAGE.review:
-        if (!username.trim()) {
-          if (showToast) toast.error(msg("submit.validation.username_required"));
-          return false;
-        }
-        if (!jobName.trim() && !suggestedName) {
-          if (showToast) toast.error(msg("submit.validation.name_required"));
-          return false;
-        }
-        return true;
+        if (!username.trim()) return fail(msg("submit.validation.username_required"));
+        if (!jobName.trim() && !suggestedName)
+          return fail(msg("submit.validation.name_required"), "job-name");
+        return null;
       default:
-        return true;
+        return null;
     }
+  };
+  /** Validates a stage; `report` records its first problem for inline display. */
+  const validateStep = (s: number, report = false, structureOnly = false): boolean => {
+    const found = stageIssue(s, structureOnly);
+    if (found && report) setIssue(found);
+    return found == null;
   };
 
   const maxReachableStep = furthestReachedStep;
@@ -2095,19 +2065,11 @@ export function useSubmitWizard() {
     if (advancingRef.current) return;
     advancingRef.current = true;
     setAdvancing(true);
+    setIssue(null);
     try {
       for (let i = 0; i < target; i++) {
         if (!validateStep(i, true, true)) {
           goTo(i);
-          focusField(
-            i === WIZARD_STAGE.goal
-              ? "module-picker"
-              : i === WIZARD_STAGE.evaluation
-                ? "dataset-upload"
-                : runtimeUnavailableReason
-                  ? "execution-preflight-checks"
-                  : "model-catalog",
-          );
           return;
         }
       }
@@ -2277,7 +2239,11 @@ export function useSubmitWizard() {
       if (preserveWorkflowResult && response.workflow_result) return response;
       const destination = preflightDestination("dspy", failure?.field ?? failure?.key, scope);
       goTo(WIZARD_STAGE[destination.stage]);
-      focusField(destination.fieldId);
+      setIssue({
+        ...destination,
+        message: failure?.message ?? msg("submit.preflight.failed"),
+        identity,
+      });
       return null;
     } catch (error) {
       if (mountedRef.current && navigation === navigationRevisionRef.current) {
@@ -2285,7 +2251,12 @@ export function useSubmitWizard() {
         t.fail(message.startsWith("budget.") ? msg(message as MessageKey) : message);
         if (message.startsWith("budget.")) {
           goTo(WIZARD_STAGE.evaluation);
-          focusField("totalBudgetInput");
+          setIssue({
+            stage: "evaluation",
+            fieldId: "totalBudgetInput",
+            message: msg(message as MessageKey),
+            identity,
+          });
         }
       }
       return null;
@@ -2296,7 +2267,8 @@ export function useSubmitWizard() {
 
   const handleSubmit = async () => {
     if (advancingRef.current || submitting) return;
-    for (let i = 0; i < LAST_WIZARD_STAGE; i++) {
+    setIssue(null);
+    for (let i = 0; i <= LAST_WIZARD_STAGE; i++) {
       if (!validateStep(i, true, true)) {
         goTo(i);
         return;
@@ -2573,6 +2545,8 @@ export function useSubmitWizard() {
     goTo,
     maxReachableStep,
     validateStep,
+    stageIssue,
+    issue,
     handleNext,
     evaluationStatus,
     preflight,
@@ -2696,7 +2670,6 @@ export function useSubmitWizard() {
     advancing,
     handleSubmit,
     cloneLoading,
-    cloned,
     agent,
     interview,
     interviewEligible,

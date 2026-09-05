@@ -2773,6 +2773,7 @@
   "submit.module.tagline.workflow": "כמה צעדים מחוברים על קנבס אחד",
   "submit.nav.run_cap": "תקרה: {credits} קרדיטים",
   "submit.nav.validating": "מאמת…",
+  "submit.issue.fix": "לשדה",
   "submit.pxn.batch_hint": "{total} מועמדים נבדקים בכל סבב",
   "submit.pxn.parents": "מועמדים לשיפור (p)",
   "submit.pxn.proposals": "הצעות לכל מועמד (n)",

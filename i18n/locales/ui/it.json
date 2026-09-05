@@ -3037,6 +3037,7 @@
   "submit.module.picker_title": "Scegli un modulo",
   "submit.nav.run_cap": "Limite: {credits} crediti",
   "submit.nav.validating": "In convalida…",
+  "submit.issue.fix": "Vai al campo",
   "submit.react.auth_label": "Header di autenticazione (facoltativo)",
   "submit.react.mcp_checking": "Verifica della connessione…",
   "submit.react.mcp_connected": "Connesso — {p1} strumenti disponibili",

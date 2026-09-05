@@ -2712,6 +2712,7 @@
   "submit.module.tagline.workflow": "喺同一個畫布上連接多個步驟",
   "submit.nav.run_cap": "上限：{credits} credits",
   "submit.nav.validating": "驗證緊…",
+  "submit.issue.fix": "去該欄位",
   "submit.pxn.batch_hint": "每輪評估 {total} 個候選項目",
   "submit.pxn.parents": "待改進候選項目 (p)",
   "submit.pxn.proposals": "每個候選項目嘅建議數量 (n)",

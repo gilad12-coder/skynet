@@ -3037,6 +3037,7 @@
   "submit.module.picker_title": "モジュールを選択",
   "submit.nav.run_cap": "上限: {credits}クレジット",
   "submit.nav.validating": "検証中…",
+  "submit.issue.fix": "フィールドへ移動",
   "submit.react.auth_label": "認証ヘッダー（任意）",
   "submit.react.mcp_checking": "接続を確認しています…",
   "submit.react.mcp_connected": "接続しました — {p1} 個のツールが利用可能",

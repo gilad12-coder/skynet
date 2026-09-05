@@ -17,7 +17,7 @@ test("execution failures return to the stage that owns the failed field", () => 
   });
   assert.deepEqual(preflightDestination("dspy", "runtime", "evaluation"), {
     stage: "optimization",
-    fieldId: "execution-preflight-checks",
+    fieldId: "wizard-stage-optimization",
   });
   assert.deepEqual(preflightDestination("dspy", "usage", "execution"), {
     stage: "evaluation",

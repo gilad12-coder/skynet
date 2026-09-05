@@ -63,13 +63,14 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
       {/* Positioned so an expanded textarea covers the fields, not the page. */}
       <CardContent className="relative space-y-4 px-4 sm:px-6">
         <div className="space-y-2">
-          <Label>
+          <Label htmlFor="job-name">
             <HelpTip text={tip("submit.name")}>
               {msg("auto.features.submit.components.steps.basicsstep.3")}
               {TERMS.optimization}
             </HelpTip>
           </Label>
           <Input
+            id="job-name"
             placeholder={
               suggestedName || msg("auto.features.submit.components.steps.basicsstep.literal.1")
             }

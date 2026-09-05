@@ -2519,6 +2519,7 @@
   "submit.composition.back": "Back",
   "submit.nav.run_cap": "Cap: {credits} credits",
   "submit.nav.validating": "Validating…",
+  "submit.issue.fix": "Go to field",
   "submit.pxn.batch_hint": "{total} candidates evaluated per round",
   "submit.pxn.parents": "Candidates to improve (p)",
   "submit.pxn.proposals": "Proposals per candidate (n)",

@@ -3037,6 +3037,7 @@
   "submit.module.picker_title": "모듈 선택",
   "submit.nav.run_cap": "상한: {credits} 크레딧",
   "submit.nav.validating": "검증 중…",
+  "submit.issue.fix": "필드로 이동",
   "submit.react.auth_label": "Auth 헤더 (선택 사항)",
   "submit.react.mcp_checking": "연결 확인 중…",
   "submit.react.mcp_connected": "연결됨 — 도구 {p1}개 사용 가능",

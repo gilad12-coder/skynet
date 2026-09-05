@@ -52,7 +52,7 @@ import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "..
 import { suggestedRunName } from "../lib/budget";
 import { detectLanguage, looksLikeCode, type SeedLanguage } from "../lib/seed-format";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
-import { focusField } from "../lib/focus-field";
+import type { WizardIssue } from "../lib/wizard-issue";
 import { preflightDestination } from "../lib/preflight-destination";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import {
@@ -491,6 +491,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // optimizer all come from the payload.
   const cloneRan = useRef(false);
   const [cloned, setCloned] = useState(false);
+  const [issue, setIssue] = useState<WizardIssue | null>(null);
   useEffect(() => {
     const cloneId = searchParams.get("clone");
     // A restored draft owns the form; the clone URL it was continued past must
@@ -1042,14 +1043,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   }, [engineCatalog, engineCatalogFailed, strategyMode, engine, seedMode, trainingCaseCount]);
   const optimizationFamily = optimizationModelFamily(strategyMode, engine);
 
-  const validateStep = (s: number, showToast = false): boolean => {
-    const fail = (key: MessageKey, fieldId?: string) => {
-      if (showToast) {
-        toast.error(msg(key));
-        if (fieldId) focusField(fieldId);
-      }
-      return false;
-    };
+  /** The first problem holding a stage back, or null when it validates. */
+  const stageIssue = (s: number): WizardIssue | null => {
+    const fail = (key: MessageKey, fieldId?: string): WizardIssue => ({
+      stage: stageAt(s),
+      fieldId,
+      message: msg(key),
+    });
     switch (s) {
       case WIZARD_STAGE.goal: {
         const partsIssue = seedMode === "parts" ? seedPartsIssue(seedParts) : null;
@@ -1061,9 +1061,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return fail("submit.blackbox.validation.objective_required", "bb-objective");
         if (seedMode !== "none" && !agentDrafts && seedCandidate == null)
           return fail("submit.blackbox.validation.seed_required", "bb-seed");
-        return true;
+        return null;
       }
       case WIZARD_STAGE.evaluation: {
+        if (maxCostCredits == null) return fail("budget.invalid", "totalBudgetInput");
         if (targetKind === "agent") {
           if (!parsedCases?.rowCount)
             return fail("submit.blackbox.validation.cases_required", "bb-cases");
@@ -1078,11 +1079,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return fail("submit.blackbox.validation.scorer_url_required", "bb-scorer-url");
         if (parsedCases && Math.abs(split.train + split.val + split.test - 1) > 0.001)
           return fail("submit.blackbox.validation.split_sum", "bb-split");
-        return true;
+        return null;
       }
       case WIZARD_STAGE.optimization: {
         if (trainingCaseCount === 0 && (strategyMode !== "single" || engine === "meta_harness"))
-          return fail("submit.blackbox.validation.training_cases");
+          return fail("submit.blackbox.validation.training_cases", "bb-cases");
         // Availability is not a validation failure: an unavailable engine is a
         // configuration state that holds Run back with its reason.
         if (strategyMode === "single") {
@@ -1104,11 +1105,18 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return fail("submit.blackbox.validation.auto_budget", "bb-max-runs");
         if (maxScorerRuns < 1)
           return fail("submit.blackbox.validation.budget_required", "bb-max-runs");
-        return true;
+        return null;
       }
       default:
-        return true;
+        return null;
     }
+  };
+
+  /** Validates a stage; `report` records its first problem for inline display. */
+  const validateStep = (s: number, report = false): boolean => {
+    const found = stageIssue(s);
+    if (found && report) setIssue(found);
+    return found == null;
   };
 
   // Walk the restored stage's prerequisites against the restored state: a
@@ -1182,7 +1190,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       t.fail(failure?.message ?? msg("submit.preflight.failed"));
       const destination = preflightDestination("anything", failure?.field ?? failure?.key, scope);
       goTo(WIZARD_STAGE[destination.stage]);
-      focusField(destination.fieldId);
+      setIssue({
+        ...destination,
+        message: failure?.message ?? msg("submit.preflight.failed"),
+        identity,
+      });
       return null;
     } catch (error) {
       if (mountedRef.current && navigation === navigationRevisionRef.current) {
@@ -1190,7 +1202,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         t.fail(message.startsWith("budget.") ? msg(message as MessageKey) : message);
         if (message.startsWith("budget.")) {
           goTo(WIZARD_STAGE.evaluation);
-          focusField("totalBudgetInput");
+          setIssue({
+            stage: "evaluation",
+            fieldId: "totalBudgetInput",
+            message: msg(message as MessageKey),
+            identity,
+          });
         }
       }
       return null;
@@ -1202,6 +1219,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     if (advancingRef.current) return;
     advancingRef.current = true;
     setAdvancing(true);
+    setIssue(null);
     try {
       for (let i = 0; i < target; i++) {
         if (!validateStep(i, true)) {
@@ -1246,6 +1264,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const handleSubmit = async () => {
     if (advancingRef.current || submitting) return;
+    setIssue(null);
     for (let i = 0; i < LAST_WIZARD_STAGE; i++) {
       if (!validateStep(i, true)) {
         goTo(i);
@@ -1383,11 +1402,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     step,
     direction,
     maxReachableStep: furthestReachedStep,
-    cloned,
     advancing,
     submitting,
     submitPhase,
     validateStep,
+    stageIssue,
+    issue,
     goTo,
     goPrev,
     handleNext,

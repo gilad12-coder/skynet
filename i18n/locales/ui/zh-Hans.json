@@ -3037,6 +3037,7 @@
   "submit.module.picker_title": "选择模块",
   "submit.nav.run_cap": "上限：{credits} 个额度",
   "submit.nav.validating": "正在验证…",
+  "submit.issue.fix": "前往该字段",
   "submit.react.auth_label": "Auth 标头（可选）",
   "submit.react.mcp_checking": "正在检查连接…",
   "submit.react.mcp_connected": "已连接 — 可使用 {p1} 个工具",
