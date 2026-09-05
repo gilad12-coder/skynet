@@ -223,8 +223,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [jobDescription, setJobDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(true);
 
-  // The kind of starting point — a prompt, code or any other text. It follows
-  // what the seed reads as; the picker's link, a draft or a clone only seeds it.
+  // Execution intent comes from the entry point, draft or clone, never from
+  // syntax detection: code-shaped text may be a config or a prompt example.
   const [recipe, setRecipeState] = useState<BlackboxRecipe>(initialRecipe);
 
   const [codeAssistMode, setCodeAssistMode] = useState<"auto" | "manual">(() =>
@@ -311,16 +311,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const [scorerKind, setScorerKind] = useState<"python" | "remote">("python");
   const [metricCode, setMetricCode] = useState(scorerTemplateFor(initialRecipe));
-  // The kind only seeds the scorer: a scorer still on the outgoing kind's
-  // template follows the switch, while anything the user or the agent wrote
-  // stays put.
-  const setRecipe = useCallback(
-    (next: BlackboxRecipe) => {
-      if (metricCode === scorerTemplateFor(recipe)) setMetricCode(scorerTemplateFor(next));
-      setRecipeState(next);
-    },
-    [metricCode, recipe],
-  );
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
   const [scorerInstall, setScorerInstall] = useState("");
@@ -677,8 +667,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   // What the seed reads as, latched until the seed is cleared so the editor
   // never swaps out from under the caret while a snippet is typed or trimmed.
-  // The kind follows the same reading, so an agent-written seed and a pasted
-  // one land on the same scorer template.
+  // This controls editor presentation only, not the recipe or evaluator.
   const seedSample = seedMode === "text" ? seedText : seedParts.map((p) => p.value).join("\n");
   const [seedGuess, setSeedGuess] = useState<SeedGuess>(NO_GUESS);
   useEffect(() => {
@@ -695,10 +684,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           : { code: true, language: language ?? prev.language },
       );
     }
-    if (seedMode === "none") return;
-    const detected: BlackboxRecipe = code || seedGuess.code ? "code" : "anything";
-    if (detected !== recipe) setRecipe(detected);
-  }, [seedSample, seedMode, seedGuess.code, recipe, setRecipe]);
+  }, [seedSample]);
   const seedIsCode = recipe === "code" || seedGuess.code;
 
   const seedCandidate = useMemo<BlackboxCandidate | null>(() => {
@@ -1466,7 +1452,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   return {
     recipe,
-    setRecipe,
     step,
     direction,
     maxReachableStep: furthestReachedStep,

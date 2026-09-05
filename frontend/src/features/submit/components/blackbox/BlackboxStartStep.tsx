@@ -74,15 +74,14 @@ export function BlackboxStartStep({
   const updatePart = (i: number, patch: { key?: string; value?: string }) =>
     setSeedParts(seedParts.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
 
-  // Splitting a whole text keeps it as the first part.
+  // Restore authored parts before seeding from the separate whole-text draft.
   const addPart = () => {
     if (seedMode === "parts") {
       setSeedParts([...seedParts, { key: "", value: "" }]);
       return;
     }
-    const kept = seedText.trim()
-      ? [{ key: "", value: seedText }]
-      : seedParts.filter((p) => p.key.trim() || p.value.trim());
+    const saved = seedParts.filter((p) => p.key.trim() || p.value.trim());
+    const kept = saved.length ? saved : seedText.trim() ? [{ key: "", value: seedText }] : [];
     setSeedParts([...kept, { key: "", value: "" }]);
     setSeedMode("parts");
   };
