@@ -41,6 +41,7 @@ function evaluationPartFor(field?: string): number | null {
 export function SubmitWizard({ header }: { header?: ReactNode }) {
   const w = useSubmitWizard();
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
+  const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
   const [optimizationPart, setOptimizationPart] = useState(0);
 
@@ -92,6 +93,8 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       w={w}
       previewOpen={dataPreviewOpen}
       onPreviewOpenChange={setDataPreviewOpen}
+      previewExpanded={dataPreviewExpanded}
+      onPreviewExpandedChange={setDataPreviewExpanded}
     />,
     <CodeStep key="code" w={w} part="code" />,
     <SplitSection key="split" w={w} />,
@@ -177,7 +180,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
   const containerWidthClass =
     w.step === WIZARD_STAGE.evaluation &&
     ((evaluationPart === 1 && w.codeAssistMode === "auto") ||
-      (evaluationPart === 0 && dataPreviewOpen && !!w.parsedDataset))
+      (evaluationPart === 0 && dataPreviewOpen && dataPreviewExpanded && !!w.parsedDataset))
       ? "max-w-6xl"
       : "max-w-2xl";
 

@@ -56,6 +56,7 @@ export function BlackboxWizard({
 }) {
   const w = useBlackboxWizard(initialRecipe);
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
+  const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
   const [optimizationPart, setOptimizationPart] = useState(0);
 
@@ -117,6 +118,8 @@ export function BlackboxWizard({
           w={w}
           previewOpen={dataPreviewOpen}
           onPreviewOpenChange={setDataPreviewOpen}
+          previewExpanded={dataPreviewExpanded}
+          onPreviewExpandedChange={setDataPreviewExpanded}
         />
       </div>
     ),
@@ -213,6 +216,7 @@ export function BlackboxWizard({
     w.step === WIZARD_STAGE.evaluation &&
     activeEvaluationStep === "cases" &&
     dataPreviewOpen &&
+    dataPreviewExpanded &&
     !!w.parsedCases;
   const containerWidthClass = wideAuthoringPanel || wideDataPreview ? "max-w-6xl" : "max-w-2xl";
 

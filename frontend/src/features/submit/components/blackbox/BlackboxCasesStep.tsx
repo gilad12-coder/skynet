@@ -16,10 +16,14 @@ export function BlackboxCasesStep({
   w,
   previewOpen,
   onPreviewOpenChange,
+  previewExpanded,
+  onPreviewExpandedChange,
 }: {
   w: BlackboxWizardContext;
   previewOpen: boolean;
   onPreviewOpenChange: (open: boolean) => void;
+  previewExpanded: boolean;
+  onPreviewExpandedChange: (expanded: boolean) => void;
 }) {
   const {
     parsedCases,
@@ -41,6 +45,9 @@ export function BlackboxCasesStep({
     >
       <DatasetPreviewLayout
         data={parsedCases}
+        filename={casesName}
+        expanded={previewExpanded}
+        onExpandedChange={onPreviewExpandedChange}
         open={previewOpen}
         onOpenChange={onPreviewOpenChange}
       >

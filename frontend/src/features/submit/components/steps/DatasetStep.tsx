@@ -29,10 +29,14 @@ export function DatasetStep({
   w,
   previewOpen,
   onPreviewOpenChange,
+  previewExpanded,
+  onPreviewExpandedChange,
 }: {
   w: SubmitWizardContext;
   previewOpen: boolean;
   onPreviewOpenChange: (open: boolean) => void;
+  previewExpanded: boolean;
+  onPreviewExpandedChange: (expanded: boolean) => void;
 }) {
   const {
     parsedDataset,
@@ -75,6 +79,9 @@ export function DatasetStep({
       <CardContent className="space-y-5 px-4 sm:px-6">
         <DatasetPreviewLayout
           data={parsedDataset}
+          filename={datasetFileName}
+          expanded={previewExpanded}
+          onExpandedChange={onPreviewExpandedChange}
           open={previewOpen}
           onOpenChange={onPreviewOpenChange}
         >
