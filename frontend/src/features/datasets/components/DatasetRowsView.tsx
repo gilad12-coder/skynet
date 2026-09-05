@@ -50,9 +50,11 @@ export function DatasetRowsView({
   filename,
   readerIndex,
   setReaderIndex,
+  toolbarActions,
 }: {
   rows: Pick<ParsedDataset, "columns" | "rows"> | null;
   filename?: string;
+  toolbarActions?: React.ReactNode;
   readerIndex: number | null;
   setReaderIndex: React.Dispatch<React.SetStateAction<number | null>>;
 }) {
@@ -292,6 +294,7 @@ export function DatasetRowsView({
                       filename: filename || "dataset",
                     })}
                   />
+                  {toolbarActions}
                 </div>
               </div>
               {filtered.length === 0 ? (

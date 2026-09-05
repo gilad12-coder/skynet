@@ -63,24 +63,6 @@ export function DatasetPreviewLayout({
               </button>
             ))}
           </div>
-          {visible && (
-            <Button
-              ref={expandButton}
-              type="button"
-              variant="ghost"
-              className="min-h-11 gap-2"
-              aria-expanded={expanded}
-              aria-controls={id}
-              onClick={() => onExpandedChange(!expanded)}
-            >
-              {expanded ? <ArrowsIn className="size-4" /> : <ArrowsOut className="size-4" />}
-              {msg(
-                expanded
-                  ? "shared.expandable_textarea.collapse"
-                  : "shared.expandable_textarea.expand",
-              )}
-            </Button>
-          )}
         </div>
       )}
       <div
@@ -111,6 +93,25 @@ export function DatasetPreviewLayout({
               filename={filename ?? undefined}
               readerIndex={readerIndex}
               setReaderIndex={setReaderIndex}
+              toolbarActions={
+                <Button
+                  ref={expandButton}
+                  type="button"
+                  variant="ghost"
+                  className="min-h-11 gap-2"
+                  style={{ width: "auto" }}
+                  aria-expanded={expanded}
+                  aria-controls={id}
+                  onClick={() => onExpandedChange(!expanded)}
+                >
+                  {expanded ? <ArrowsIn className="size-4" /> : <ArrowsOut className="size-4" />}
+                  {msg(
+                    expanded
+                      ? "shared.expandable_textarea.collapse"
+                      : "shared.expandable_textarea.expand",
+                  )}
+                </Button>
+              }
             />
           </div>
         )}
