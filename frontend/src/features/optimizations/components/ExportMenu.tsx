@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { CaretDown, DownloadSimple, FileCode, FileText, FileXls, Package } from "@/shared/ui/icons";
+import { DownloadSimple, FileCode, FileText, FileXls, Package } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 import { Button } from "@/shared/ui/primitives/button";
 import { downloadProgramExport } from "@/shared/lib/api";
@@ -141,16 +141,16 @@ export function ExportMenu({
   return (
     <div className="relative" ref={ref}>
       <Button
-        size="sm"
+        size="icon-sm"
+        variant="ghost"
+        aria-label={msg("auto.features.optimizations.components.exportmenu.1")}
+        aria-expanded={open}
+        aria-haspopup="menu"
         onClick={() => setOpen((o) => !o)}
         data-telemetry="results-export-menu"
-        className="min-h-[44px] gap-1.5 sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
+        className="max-lg:size-[44px]"
       >
-        <DownloadSimple className="size-4" />
-        {msg("auto.features.optimizations.components.exportmenu.1")}
-        <CaretDown
-          className={`size-3.5 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
-        />
+        <DownloadSimple className="size-[1.05rem] text-primary" aria-hidden="true" />
       </Button>
       <AnimatePresence>
         {open && (

@@ -190,12 +190,12 @@ export function DatasetRowsView({
           <div className="mb-3 flex shrink-0 items-center gap-2">
             <Button
               variant="ghost"
-              size="sm"
+              size="icon-sm"
               onClick={() => setReaderIndex(null)}
-              className="min-h-[44px] gap-1.5 text-muted-foreground hover:text-foreground lg:min-h-0"
+              className="max-lg:size-[44px]"
+              aria-label={msg("datasets.detail.row_reader.back")}
             >
               <ArrowLeft className="size-4 rtl:rotate-180" />
-              {msg("datasets.detail.row_reader.back")}
             </Button>
             <div className="ms-auto flex items-center gap-2">
               <Button

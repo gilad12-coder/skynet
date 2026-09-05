@@ -110,14 +110,14 @@ export function ExpandableTextarea({
     <Button
       type="button"
       variant="ghost"
-      size="xs"
+      size="icon-sm"
       onClick={() => toggle(true)}
       aria-expanded={expanded}
       aria-controls={expanded ? surfaceId : undefined}
-      className="min-h-[44px] gap-1 text-muted-foreground hover:text-foreground lg:min-h-0"
+      className="max-lg:size-[44px]"
+      aria-label={msg("shared.expandable_textarea.expand")}
     >
       <ArrowsOut className="size-3.5" />
-      {msg("shared.expandable_textarea.expand")}
     </Button>
   );
 
@@ -142,12 +142,12 @@ export function ExpandableTextarea({
               ref={collapseRef}
               type="button"
               variant="ghost"
-              size="xs"
+              size="icon-sm"
               onClick={() => toggle(false)}
-              className="min-h-[44px] gap-1 text-muted-foreground hover:text-foreground lg:min-h-0"
+              className="max-lg:size-[44px]"
+              aria-label={msg("shared.expandable_textarea.collapse")}
             >
               <ArrowsIn className="size-3.5" />
-              {msg("shared.expandable_textarea.collapse")}
             </Button>
           </div>
           <textarea

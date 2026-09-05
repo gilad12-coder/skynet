@@ -98,17 +98,20 @@ export function DatasetPreviewLayout({
                   ref={expandButton}
                   type="button"
                   variant="ghost"
-                  className="min-h-11 gap-2"
-                  style={{ width: "auto" }}
+                  size="icon-sm"
+                  aria-label={msg(
+                    expanded
+                      ? "shared.expandable_textarea.collapse"
+                      : "shared.expandable_textarea.expand",
+                  )}
                   aria-expanded={expanded}
                   aria-controls={id}
                   onClick={() => onExpandedChange(!expanded)}
                 >
-                  {expanded ? <ArrowsIn className="size-4" /> : <ArrowsOut className="size-4" />}
-                  {msg(
-                    expanded
-                      ? "shared.expandable_textarea.collapse"
-                      : "shared.expandable_textarea.expand",
+                  {expanded ? (
+                    <ArrowsIn className="size-[1.05rem] text-primary" aria-hidden="true" />
+                  ) : (
+                    <ArrowsOut className="size-[1.05rem] text-primary" aria-hidden="true" />
                   )}
                 </Button>
               }

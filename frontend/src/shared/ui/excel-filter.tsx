@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUp, ArrowDown, ArrowsDownUp, Funnel, MagnifyingGlass, ArrowCounterClockwise } from "@/shared/ui/icons";
+import {
+  ArrowUp,
+  ArrowDown,
+  ArrowsDownUp,
+  Funnel,
+  MagnifyingGlass,
+  ArrowCounterClockwise,
+  FunnelX,
+} from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -464,15 +472,16 @@ export function ResetColumnsButton({
 }) {
   if (!resize.hasResized) return null;
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon-sm"
       type="button"
       onClick={resize.resetAll}
-      className="inline-flex items-center gap-1 text-[0.625rem] text-muted-foreground/60 hover:text-foreground transition-colors cursor-pointer underline underline-offset-2 decoration-muted-foreground/30 hover:decoration-foreground/40"
-      title={msg("shared.excel_filter.reset_width_title")}
+      className="max-lg:size-[44px]"
+      aria-label={msg("shared.excel_filter.reset_width_title")}
     >
-      <ArrowCounterClockwise className="size-3" />
-      <span>{msg("shared.excel_filter.reset_width_label")}</span>
-    </button>
+      <ArrowCounterClockwise className="size-4" aria-hidden="true" />
+    </Button>
   );
 }
 
@@ -483,14 +492,15 @@ export function ResetFiltersButton({
 }) {
   if (filters.activeCount === 0) return null;
   return (
-    <button
+    <Button
+      variant="ghost"
+      size="icon-sm"
       type="button"
       onClick={filters.clearAll}
-      className="inline-flex items-center gap-1 text-[0.625rem] text-muted-foreground/60 hover:text-foreground transition-colors cursor-pointer underline underline-offset-2 decoration-muted-foreground/30 hover:decoration-foreground/40"
-      title={msg("shared.excel_filter.reset_filters_title")}
+      className="max-lg:size-[44px]"
+      aria-label={msg("shared.excel_filter.reset_filters_title")}
     >
-      <ArrowCounterClockwise className="size-3" />
-      <span>{msg("shared.excel_filter.reset_filters_label")}</span>
-    </button>
+      <FunnelX className="size-4" aria-hidden="true" />
+    </Button>
   );
 }

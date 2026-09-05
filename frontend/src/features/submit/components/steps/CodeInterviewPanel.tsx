@@ -71,13 +71,13 @@ export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
             one click away from the brief too — mirroring the tagger. */}
         <Button
           variant="ghost"
-          size="sm"
+          size="icon-sm"
           onClick={interview.reset}
           disabled={interview.busy || (interview.messages.length === 0 && !interview.done)}
-          className="min-h-[44px] shrink-0 gap-1.5 self-end text-muted-foreground sm:self-auto lg:min-h-0"
+          className="max-lg:size-[44px]"
+          aria-label={msg("submit.code.interview.restart")}
         >
           <ArrowCounterClockwise className="size-3.5" />
-          {msg("submit.code.interview.restart")}
         </Button>
       </div>
 

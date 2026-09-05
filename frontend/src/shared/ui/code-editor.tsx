@@ -1,4 +1,5 @@
 "use client";
+import { Button } from "@/shared/ui/primitives/button";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -478,8 +479,8 @@ export function CodeEditor({
       style={readOnly ? undefined : { maxHeight: "60vh" }}
       dir="ltr"
     >
-      <div className="flex items-center gap-1 px-3 py-1.5 bg-[#F3ECE3] text-[0.6875rem] text-[#8C7A6B] border-b border-[#E5DDD4] rounded-t-xl">
-        <span className="flex-1 font-semibold text-[#7C6350] tracking-wide flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 bg-[#F3ECE3] text-[0.6875rem] text-[#8C7A6B] border-b border-[#E5DDD4] rounded-t-xl">
+        <span className="min-w-0 flex-1 break-words font-semibold text-[#7C6350] tracking-wide flex items-center gap-1.5">
           {shownLabel}
         </span>
 
@@ -487,66 +488,78 @@ export function CodeEditor({
           <TooltipButton
             tooltip={formatMsg("shared.code_editor.find.open_tip", { shortcut: FIND_SHORTCUT })}
           >
-            <button
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={msg("shared.code_editor.find.open")}
               type="button"
               onClick={handleFind}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 transition-colors cursor-pointer"
+              className="max-lg:size-[44px]"
             >
               <MagnifyingGlass className="size-3" />
-              {msg("shared.code_editor.find.open")}
-            </button>
+            </Button>
           </TooltipButton>
         )}
 
-        <button
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={
+            collapsed
+              ? `${msg("shared.expandable_textarea.expand")} · ${formatMsg("shared.code_editor.lines_count", { count: lineCount })}`
+              : msg("shared.code_editor.collapse")
+          }
           type="button"
           onClick={() => setCollapsed((c) => !c)}
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 transition-colors cursor-pointer"
+          className="max-lg:size-[44px]"
         >
           {collapsed ? <CaretDown className="size-3" /> : <CaretUp className="size-3" />}
-          {collapsed
-            ? formatMsg("shared.code_editor.lines_count", { count: lineCount })
-            : msg("shared.code_editor.collapse")}
-        </button>
+        </Button>
 
         {onRun && (
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={running ? runningLabel : runLabel}
             type="button"
             onClick={handleRun}
             disabled={running || !value.trim()}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            className="max-lg:size-[44px]"
           >
             {running ? (
               <CircleNotch className="size-3 animate-spin" />
             ) : (
               <Play className="size-3" />
             )}
-            {running ? runningLabel : runLabel}
-          </button>
+          </Button>
         )}
 
-        <button
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={msg("shared.code_editor.format")}
           type="button"
           onClick={handleFormat}
           disabled={formatting || !value.trim()}
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          className="max-lg:size-[44px]"
         >
           {formatting ? (
             <CircleNotch className="size-3 animate-spin" />
           ) : (
             <Eraser className="size-3" />
           )}
-          {msg("shared.code_editor.format")}
-        </button>
+        </Button>
 
-        <button
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={copied ? msg("shared.code_editor.copied") : msg("shared.code_editor.copy")}
           type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 transition-colors cursor-pointer"
+          className="max-lg:size-[44px]"
         >
           <CopyGlyph copied={copied} className="size-3" checkClassName="text-[#3D2E22]" />
-          {copied ? msg("shared.code_editor.copied") : msg("shared.code_editor.copy")}
-        </button>
+        </Button>
       </div>
 
       <AnimatePresence initial={false}>
