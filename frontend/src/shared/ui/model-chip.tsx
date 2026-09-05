@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import {
-  Gear,
   Copy,
   Trash,
   Plus,
@@ -188,10 +187,6 @@ export function ModelChip({
           </span>
         )}
         {content}
-        <Gear
-          className="size-3.5 shrink-0 text-muted-foreground/60 group-hover:text-foreground/70 transition-colors"
-          aria-hidden="true"
-        />
       </button>
 
       <div className="flex shrink-0 items-center gap-1">
