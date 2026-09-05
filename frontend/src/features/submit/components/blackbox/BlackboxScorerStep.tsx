@@ -110,6 +110,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                   different one is one click on the chip, and its × returns
                   the role to the optimization model. */}
               <ModelChip
+                roleLabel={msg("submit.blackbox.roles.scoring.label")}
                 showDetails={false}
                 config={
                   scorerModelMode === "explicit"
