@@ -600,6 +600,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         // A Program run's seed still has to be drafted here, so only an
         // Anything clone rules the interview out.
         setCloned(source != null);
+        // A full clone is a decided setup: open the summary with every
+        // earlier stage unlocked instead of walking the questions it already
+        // answered. The restore walk still stops at a stage that no longer
+        // validates, so a stale clone lands where it needs repair.
+        if (source) setPendingRestore({ stage: "review", furthest: "review" });
         toast.success(msg("submit.clone.success"));
       })
       .catch(() => {
@@ -1378,6 +1383,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     step,
     direction,
     maxReachableStep: furthestReachedStep,
+    cloned,
     advancing,
     submitting,
     submitPhase,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "react-toastify";
 
@@ -25,6 +25,8 @@ import { ParamsStep } from "./steps/ParamsStep";
 import { SummaryStep } from "./steps/SummaryStep";
 import { SplitSection } from "./steps/SplitSection";
 
+const REVIEW_STEPS = ["details", "summary"] as const;
+
 export function SubmitWizard({ header }: { header?: ReactNode }) {
   const w = useSubmitWizard();
   const [evaluationPart, setEvaluationPart] = useState(0);
@@ -33,7 +35,11 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
 
   const evaluationSteps = ["budget", "dataset", "code", "split", "checks"] as const;
   const optimizationSteps = ["parameters", "models", "checks"] as const;
-  const reviewSteps = ["details", "summary"] as const;
+
+  // A clone lands on the summary: its details are cloned too.
+  useEffect(() => {
+    if (w.cloned) setReviewPart(REVIEW_STEPS.length - 1);
+  }, [w.cloned]);
 
   const budgetMode = aggregateTokenSource(
     w.jobType === "grid_search"
@@ -147,7 +153,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       <WizardSubsteps
         active={reviewPart}
         ariaLabel={msg("submit.stage.review")}
-        steps={reviewSteps}
+        steps={REVIEW_STEPS}
       >
         {reviewPanels[reviewPart]}
       </WizardSubsteps>
@@ -174,7 +180,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       ? handleEvaluationNext
       : w.step === WIZARD_STAGE.optimization
         ? handleOptimizationNext
-        : w.step === WIZARD_STAGE.review && reviewPart < reviewSteps.length - 1
+        : w.step === WIZARD_STAGE.review && reviewPart < REVIEW_STEPS.length - 1
           ? () => setReviewPart((current) => current + 1)
           : w.handleNext;
   const onSubmit = () => {
@@ -185,7 +191,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
     }
     void w.handleSubmit();
   };
-  const showSubmit = w.step === WIZARD_STAGE.review && reviewPart === reviewSteps.length - 1;
+  const showSubmit = w.step === WIZARD_STAGE.review && reviewPart === REVIEW_STEPS.length - 1;
   const containerWidthClass =
     w.step === WIZARD_STAGE.evaluation && evaluationPart === 2 && w.codeAssistMode === "auto"
       ? "max-w-6xl"

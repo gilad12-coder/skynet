@@ -506,6 +506,7 @@ export function useSubmitWizard() {
   const validationCacheRef = useRef(new Map<string, Promise<ValidateCodeResponse>>());
 
   const [cloneLoading, setCloneLoading] = useState(false);
+  const [cloned, setCloned] = useState(false);
   const cloneRan = useRef(false);
 
   // Register setters with the typed tutorial bridge so the tutorial system
@@ -1566,6 +1567,14 @@ export function useSubmitWizard() {
           ...(ts.mcp_url != null ? { mcpUrl: String(ts.mcp_url) } : {}),
           ...(toolFilter !== undefined ? { toolFilter } : {}),
         }));
+      }
+      // A Program clone is a decided setup: open the summary with every
+      // earlier stage unlocked instead of walking the questions it already
+      // answered. An Anything clone still drafts its signature and metric
+      // on the Start step, so it keeps the walk.
+      if (fromProgram) {
+        setCloned(true);
+        setPendingRestore({ stage: "review", furthest: "review" });
       }
       toast.success(msg("submit.clone.success"));
     };
@@ -2687,6 +2696,7 @@ export function useSubmitWizard() {
     advancing,
     handleSubmit,
     cloneLoading,
+    cloned,
     agent,
     interview,
     interviewEligible,

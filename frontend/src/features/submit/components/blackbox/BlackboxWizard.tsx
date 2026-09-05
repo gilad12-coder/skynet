@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "react-toastify";
 
@@ -28,6 +28,7 @@ import { BlackboxOptimizerStep } from "./BlackboxOptimizerStep";
 import { BlackboxReviewStep } from "./BlackboxReviewStep";
 
 type EvaluationStep = "budget" | "cases" | "scorer" | "execution" | "split" | "checks";
+const REVIEW_STEPS = ["details", "summary"] as const;
 
 export function BlackboxWizard({
   header,
@@ -56,7 +57,6 @@ export function BlackboxWizard({
   const goToEvaluation = (key: EvaluationStep) =>
     setEvaluationPart(Math.max(0, evaluationSteps.indexOf(key)));
   const optimizationSteps = ["strategy", "model", "checks"] as const;
-  const reviewSteps = ["details", "summary"] as const;
 
   const goalPanels: readonly ReactNode[] = [<BlackboxStartStep key="goal" w={w} header={header} />];
   const evaluationPanels: Record<EvaluationStep, ReactNode> = {
@@ -97,6 +97,10 @@ export function BlackboxWizard({
     w.goTo(WIZARD_STAGE[stage]);
     if (field) window.setTimeout(() => focusField(field), 0);
   };
+  // A clone lands on the summary: its details are cloned too.
+  useEffect(() => {
+    if (w.cloned) setReviewPart(REVIEW_STEPS.length - 1);
+  }, [w.cloned]);
   const reviewPanels: readonly ReactNode[] = [
     <BlackboxBasicsStep key="details" w={w} />,
     <BlackboxReviewStep key="summary" w={w} onEditField={handleEditField} />,
@@ -183,7 +187,7 @@ export function BlackboxWizard({
       <WizardSubsteps
         active={reviewPart}
         ariaLabel={msg("submit.stage.review")}
-        steps={reviewSteps}
+        steps={REVIEW_STEPS}
       >
         {reviewPanels[reviewPart]}
       </WizardSubsteps>
@@ -212,10 +216,10 @@ export function BlackboxWizard({
         ? handleEvaluationNext
         : w.step === WIZARD_STAGE.optimization
           ? handleOptimizationNext
-          : w.step === WIZARD_STAGE.review && reviewPart < reviewSteps.length - 1
+          : w.step === WIZARD_STAGE.review && reviewPart < REVIEW_STEPS.length - 1
             ? () => setReviewPart((current) => current + 1)
             : w.handleNext;
-  const showSubmit = w.step === WIZARD_STAGE.review && reviewPart === reviewSteps.length - 1;
+  const showSubmit = w.step === WIZARD_STAGE.review && reviewPart === REVIEW_STEPS.length - 1;
   // Auto mode seats the agent pane beside the form on the Goal stage and the
   // scorer, so those take the wide column; plain forms keep the narrow one.
   const wideAuthoringPanel =
