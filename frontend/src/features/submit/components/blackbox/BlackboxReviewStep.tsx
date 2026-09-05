@@ -16,7 +16,6 @@ import { chargeableBracket } from "../../lib/cost-bracket";
 import { focusField } from "../../lib/focus-field";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
 import { WIZARD_STAGE, type WizardStageId } from "../../lib/wizard-steps";
-import { PreflightChecks } from "../PreflightChecks";
 import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import { StepCard } from "./shared";
 
@@ -137,10 +136,7 @@ export function BlackboxReviewStep({
   const notChosen = msg("submit.blackbox.roles.not_chosen");
 
   return (
-    <StepCard
-      title={msg("auto.features.submit.constants.literal.4")}
-      description={msg("submit.blackbox.review.desc")}
-    >
+    <StepCard title={msg("auto.features.submit.constants.literal.4")}>
       <dl className="divide-y divide-border/40">
         {displayName && (
           <Row
@@ -300,13 +296,6 @@ export function BlackboxReviewStep({
               )}
             </li>
           </ul>
-        </Row>
-        <Row
-          label={msg("submit.blackbox.review.evidence")}
-          tip="submit.blackbox.evidence"
-          onEdit={edit("evaluation", scorerKind === "python" ? "bb-scorer-code" : "bb-scorer-url")}
-        >
-          <PreflightChecks preflight={w.preflight} scope="execution" />
         </Row>
         <Row
           label={msg("submit.blackbox.review.strategy")}

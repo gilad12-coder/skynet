@@ -46,7 +46,6 @@ import { formatCredits } from "@/features/billing";
 import { useUserPrefs } from "@/features/settings";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
-import { PreflightChecks } from "../PreflightChecks";
 import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import { aggregateTokenSource, chargeableBracket } from "../../lib/cost-bracket";
 import { WIZARD_STAGE, type WizardStageId } from "../../lib/wizard-steps";
@@ -169,7 +168,6 @@ export function SummaryStep({
           </Button>
         ))}
       </div>
-      <PreflightChecks preflight={w.preflight} scope="execution" />
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}

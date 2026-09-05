@@ -1759,11 +1759,6 @@ export function useSubmitWizard() {
     if (effectiveFractions.val <= 0) return msg("submit.validation.target_score_requires_val");
     return null;
   };
-  const validateTargetScore = (showToast: boolean): boolean => {
-    const problem = targetScoreIssue();
-    if (problem && showToast) toast.error(problem);
-    return problem == null;
-  };
 
   useDatasetProfiling({
     parsedDataset,
@@ -2285,63 +2280,6 @@ export function useSubmitWizard() {
       if (mountedRef.current) setAdvancing(false);
     }
     if (!mountedRef.current) return;
-    if (!username.trim()) {
-      toast.error(msg("submit.validation.username_required"));
-      goTo(WIZARD_STAGE.review);
-      return;
-    }
-    if (!parsedDataset || parsedDataset.rowCount === 0) {
-      toast.error(msg("submit.validation.dataset_required_short"));
-      goTo(WIZARD_STAGE.evaluation);
-      return;
-    }
-    if (isWorkflow) {
-      if (!workflowSpec || validateWorkflowSpec(workflowSpec, workflowIssueText).length > 0) {
-        toast.error(msg("submit.validation.workflow_invalid"));
-        goTo(WIZARD_STAGE.evaluation);
-        return;
-      }
-    } else if (!signatureCode.trim()) {
-      toast.error(msg("submit.validation.signature_required"));
-      goTo(WIZARD_STAGE.evaluation);
-      return;
-    }
-    if (!metricCode.trim()) {
-      toast.error(msg("submit.validation.metric_required"));
-      goTo(WIZARD_STAGE.evaluation);
-      return;
-    }
-    if (!validateTargetScore(true)) {
-      goTo(WIZARD_STAGE.optimization);
-      return;
-    }
-    const needsToolSource =
-      isReact || (isWorkflow && !!workflowSpec && workflowUsesTools(workflowSpec));
-    if (needsToolSource && !reactConfig.mcpUrl.trim()) {
-      toast.error(msg("submit.validation.mcp_url_required"));
-      // The tool-source config lives in the Evaluation code section (it
-      // appears once the module choice reveals a tool-using run).
-      goTo(WIZARD_STAGE.evaluation);
-      return;
-    }
-    if (needsToolSource && reactToolSelectionEmpty) {
-      toast.error(msg("submit.validation.mcp_tool_required"));
-      goTo(WIZARD_STAGE.evaluation);
-      return;
-    }
-
-    const columnMapping = currentColumnMapping();
-    if (Object.keys(columnMapping.inputs).length === 0) {
-      toast.error(msg("submit.validation.input_column_required"));
-      goTo(WIZARD_STAGE.evaluation);
-      return;
-    }
-    if (Object.keys(columnMapping.outputs).length === 0) {
-      toast.error(msg("submit.validation.output_column_required"));
-      goTo(WIZARD_STAGE.evaluation);
-      return;
-    }
-
     setSubmitting(true);
     setSubmitPhase("sending");
     try {
