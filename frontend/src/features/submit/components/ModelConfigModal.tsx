@@ -256,7 +256,7 @@ export function ModelConfigModal({
                   role="group"
                   aria-label={msg("billing.mode.aria")}
                   data-tutorial="model-billing-source"
-                  className="flex w-full rounded-lg bg-muted p-0.5 sm:w-fit"
+                  className="flex w-full rounded-lg bg-muted p-0.5"
                 >
                   {TOKEN_SOURCE_SEGMENTS.map(({ mode: value, icon: Icon, labelKey }) => (
                     <button
@@ -274,7 +274,7 @@ export function ModelConfigModal({
                       }
                       aria-pressed={mode === value}
                       className={cn(
-                        "relative flex min-h-[44px] flex-1 cursor-pointer items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:flex-none lg:min-h-0",
+                        "relative flex min-h-[44px] flex-1 cursor-pointer items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors lg:min-h-0",
                         mode === value
                           ? "text-foreground"
                           : "text-muted-foreground hover:text-foreground",
