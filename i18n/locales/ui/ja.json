@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "モデル使用量",
   "submit.budget.details.fee": "プラットフォーム手数料",
   "submit.budget.details.runtime": "実行環境",
-  "submit.budget.details.runtime_sessions": "{provider}、最大{perSession}クレジット × {sessions}セッション",
   "submit.budget.details.up_to": "最大{amount}クレジット",
   "submit.budget.details.runtime_included": "モデル料金に含まれます",
   "submit.budget.details.assumptions": "下限値は毎回の呼び出しで短いプロンプトと出力を、上限値は長いものに加え、最適化モデル使用時のリフレクションパスを想定しています。データセットが大きいほど範囲は広がります。",

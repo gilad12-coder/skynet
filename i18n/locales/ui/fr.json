@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "Utilisation des modèles",
   "submit.budget.details.fee": "Frais de plateforme",
   "submit.budget.details.runtime": "Environnement d'exécution",
-  "submit.budget.details.runtime_sessions": "{provider}, jusqu'à {perSession} crédits × {sessions} sessions",
   "submit.budget.details.up_to": "jusqu'à {amount} crédits",
   "submit.budget.details.runtime_included": "Inclus dans le tarif du modèle",
   "submit.budget.details.assumptions": "La borne basse suppose des prompts et des sorties courts à chaque appel ; la borne haute suppose des longs, plus une passe de réflexion quand un modèle d'optimisation est utilisé. Les grands jeux de données élargissent la fourchette.",

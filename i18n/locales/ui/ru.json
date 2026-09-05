@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "Использование моделей",
   "submit.budget.details.fee": "Комиссия платформы",
   "submit.budget.details.runtime": "Среда выполнения",
-  "submit.budget.details.runtime_sessions": "{provider}, до {perSession} кредитов × {sessions} сеансов",
   "submit.budget.details.up_to": "до {amount} кредитов",
   "submit.budget.details.runtime_included": "Включено в стоимость модели",
   "submit.budget.details.assumptions": "Нижняя граница предполагает короткие промпты и ответы при каждом вызове; верхняя — длинные, плюс проход рефлексии, если используется модель оптимизации. Большие наборы данных расширяют диапазон.",

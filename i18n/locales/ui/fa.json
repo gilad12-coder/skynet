@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "مصرف مدل‌ها",
   "submit.budget.details.fee": "کارمزد پلتفرم",
   "submit.budget.details.runtime": "محیط اجرا",
-  "submit.budget.details.runtime_sessions": "{provider}، تا {perSession} اعتبار × {sessions} نشست",
   "submit.budget.details.up_to": "تا {amount} اعتبار",
   "submit.budget.details.runtime_included": "در قیمت مدل لحاظ شده",
   "submit.budget.details.assumptions": "حد پایین پرامپت‌ها و خروجی‌های کوتاه در هر فراخوانی را فرض می‌کند؛ حد بالا موارد طولانی را، به‌علاوه یک گذر بازتاب هنگام استفاده از مدل بهینه‌سازی. مجموعه‌داده‌های بزرگ‌تر بازه را گسترده‌تر می‌کنند.",

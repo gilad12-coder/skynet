@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "Використання моделей",
   "submit.budget.details.fee": "Комісія платформи",
   "submit.budget.details.runtime": "Середовище виконання",
-  "submit.budget.details.runtime_sessions": "{provider}, до {perSession} кредитів × {sessions} сеансів",
   "submit.budget.details.up_to": "до {amount} кредитів",
   "submit.budget.details.runtime_included": "Включено у вартість моделі",
   "submit.budget.details.assumptions": "Нижня межа передбачає короткі промпти й відповіді на кожен виклик; верхня — довгі, плюс прохід рефлексії, якщо використовується модель оптимізації. Більші набори даних розширюють діапазон.",

@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "Model kullanımı",
   "submit.budget.details.fee": "Platform ücreti",
   "submit.budget.details.runtime": "Yürütme ortamı",
-  "submit.budget.details.runtime_sessions": "{provider}, oturum başına en fazla {perSession} kredi × {sessions} oturum",
   "submit.budget.details.up_to": "en fazla {amount} kredi",
   "submit.budget.details.runtime_included": "Model fiyatına dahil",
   "submit.budget.details.assumptions": "Alt sınır her çağrıda kısa istem ve çıktılar varsayar; üst sınır uzun olanları, ayrıca bir optimizasyon modeli kullanıldığında bir yansıtma geçişini varsayar. Daha büyük veri kümeleri aralığı genişletir.",

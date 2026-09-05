@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "模型用量",
   "submit.budget.details.fee": "平台費用",
   "submit.budget.details.runtime": "執行環境",
-  "submit.budget.details.runtime_sessions": "{provider}，每次工作階段最多 {perSession} credits × {sessions} 次工作階段",
   "submit.budget.details.up_to": "最多 {amount} credits",
   "submit.budget.details.runtime_included": "已經包括喺模型定價入面",
   "submit.budget.details.assumptions": "下限值假設每次調用都用短嘅提示同輸出；上限值假設長嘅，用優化模型嘅時候仲會加一次反思過程。數據集越大，範圍越闊。",

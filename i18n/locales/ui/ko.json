@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "모델 사용량",
   "submit.budget.details.fee": "플랫폼 수수료",
   "submit.budget.details.runtime": "실행 환경",
-  "submit.budget.details.runtime_sessions": "{provider}, 최대 {perSession}크레딧 × {sessions}세션",
   "submit.budget.details.up_to": "최대 {amount}크레딧",
   "submit.budget.details.runtime_included": "모델 요금에 포함",
   "submit.budget.details.assumptions": "하한은 모든 호출에서 짧은 프롬프트와 출력을, 상한은 긴 프롬프트와 출력에 더해 최적화 모델 사용 시 리플렉션 패스를 가정합니다. 데이터셋이 클수록 범위가 넓어집니다.",

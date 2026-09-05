@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "Uso de modelos",
   "submit.budget.details.fee": "Comisión de la plataforma",
   "submit.budget.details.runtime": "Entorno de ejecución",
-  "submit.budget.details.runtime_sessions": "{provider}, hasta {perSession} créditos × {sessions} sesiones",
   "submit.budget.details.up_to": "hasta {amount} créditos",
   "submit.budget.details.runtime_included": "Incluido en el precio del modelo",
   "submit.budget.details.assumptions": "El extremo bajo supone prompts y salidas cortos en cada llamada; el alto supone largos, más una pasada de reflexión cuando se usa un modelo de optimización. Los conjuntos de datos grandes amplían el rango.",

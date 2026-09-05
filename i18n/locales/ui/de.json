@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "Modellnutzung",
   "submit.budget.details.fee": "Plattformgebühr",
   "submit.budget.details.runtime": "Ausführungsumgebung",
-  "submit.budget.details.runtime_sessions": "{provider}, bis zu {perSession} Credits × {sessions} Sitzungen",
   "submit.budget.details.up_to": "bis zu {amount} Credits",
   "submit.budget.details.runtime_included": "Im Modellpreis enthalten",
   "submit.budget.details.assumptions": "Das untere Ende geht von kurzen Prompts und Ausgaben bei jedem Aufruf aus; das obere Ende von langen, plus einem Reflexionsdurchlauf, wenn ein Optimierungsmodell verwendet wird. Größere Datensätze weiten den Bereich aus.",

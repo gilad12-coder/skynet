@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "Utilizzo dei modelli",
   "submit.budget.details.fee": "Commissione della piattaforma",
   "submit.budget.details.runtime": "Ambiente di esecuzione",
-  "submit.budget.details.runtime_sessions": "{provider}, fino a {perSession} crediti × {sessions} sessioni",
   "submit.budget.details.up_to": "fino a {amount} crediti",
   "submit.budget.details.runtime_included": "Incluso nel prezzo del modello",
   "submit.budget.details.assumptions": "L'estremo basso presuppone prompt e output brevi a ogni chiamata; quello alto li presuppone lunghi, più un passaggio di riflessione quando si usa un modello di ottimizzazione. Dataset più grandi ampliano l'intervallo.",

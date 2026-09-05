@@ -210,6 +210,9 @@ export function TotalBudgetCard({
   const estimateNotes = [
     preliminary ? msg("submit.budget.estimate_preliminary_note") : null,
     msg(runtimeAtCost ? "submit.budget.estimate_note_runtime" : "submit.budget.estimate_note"),
+    overLimit === "possible"
+      ? formatMsg("submit.budget.over_limit", { limit: credits(maxCostCredits ?? 0) })
+      : null,
   ]
     .filter(Boolean)
     .join(" ");
@@ -521,15 +524,6 @@ export function TotalBudgetCard({
             {formatMsg("submit.budget.over_limit_low", { limit: credits(maxCostCredits ?? 0) })}
           </p>
         )}
-        {overLimit === "possible" && (
-          <p
-            className="mt-2 flex items-start gap-2 text-xs leading-snug text-muted-foreground"
-            dir="auto"
-          >
-            <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-            {formatMsg("submit.budget.over_limit", { limit: credits(maxCostCredits ?? 0) })}
-          </p>
-        )}
       </div>
 
       {(showLedger || showStatus) && (
@@ -605,14 +599,6 @@ export function TotalBudgetCard({
               <Row
                 icon={Terminal}
                 label={msg("submit.budget.details.runtime")}
-                sub={formatMsg("submit.budget.details.runtime_sessions", {
-                  provider: msg("submit.runtime.vercel"),
-                  perSession: formatBudgetAmount(
-                    bracket.runtimeSessionHighCredits.toFixed(9),
-                    locale,
-                  ),
-                  sessions: bracket.expectedRuntimeSessions,
-                })}
                 value={formatMsg("submit.budget.details.up_to", {
                   amount: credits(bracket.runtimeHighCredits),
                 })}

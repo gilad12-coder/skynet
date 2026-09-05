@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "استخدام النماذج",
   "submit.budget.details.fee": "رسوم المنصة",
   "submit.budget.details.runtime": "بيئة التنفيذ",
-  "submit.budget.details.runtime_sessions": "{provider}، حتى {perSession} رصيدًا × {sessions} جلسات",
   "submit.budget.details.up_to": "حتى {amount} رصيدًا",
   "submit.budget.details.runtime_included": "مشمول في تسعير النموذج",
   "submit.budget.details.assumptions": "الحد الأدنى يفترض مطالبات ومخرجات قصيرة في كل استدعاء؛ والحد الأعلى يفترضها طويلة، مع تمريرة تأمل عند استخدام نموذج تحسين. مجموعات البيانات الأكبر توسّع النطاق.",

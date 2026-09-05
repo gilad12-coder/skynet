@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "Model usage",
   "submit.budget.details.fee": "Platform fee",
   "submit.budget.details.runtime": "Execution environment",
-  "submit.budget.details.runtime_sessions": "{provider}, up to {perSession} credits × {sessions} sessions",
   "submit.budget.details.up_to": "up to {amount} credits",
   "submit.budget.details.runtime_included": "Included in model pricing",
   "submit.budget.details.assumptions": "The low end assumes short prompts and outputs on every call; the high end assumes long ones, plus a reflection pass when an optimization model is used. Larger datasets widen the range.",

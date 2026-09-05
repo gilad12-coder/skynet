@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "模型用量",
   "submit.budget.details.fee": "平台费用",
   "submit.budget.details.runtime": "执行环境",
-  "submit.budget.details.runtime_sessions": "{provider}，每次会话最多 {perSession} 额度 × {sessions} 次会话",
   "submit.budget.details.up_to": "最多 {amount} 额度",
   "submit.budget.details.runtime_included": "已包含在模型定价中",
   "submit.budget.details.assumptions": "下限值假设每次调用都使用较短的提示和输出；上限值假设较长的提示和输出，并在使用优化模型时增加一次反思过程。数据集越大，范围越宽。",

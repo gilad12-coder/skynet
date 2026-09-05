@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "שימוש במודלים",
   "submit.budget.details.fee": "עמלת פלטפורמה",
   "submit.budget.details.runtime": "סביבת הרצה",
-  "submit.budget.details.runtime_sessions": "{provider}, עד {perSession} קרדיטים × {sessions} הפעלות",
   "submit.budget.details.up_to": "עד {amount} קרדיטים",
   "submit.budget.details.runtime_included": "כלול בתמחור המודל",
   "submit.budget.details.assumptions": "הקצה הנמוך מניח פרומפטים ופלטים קצרים בכל קריאה; הקצה הגבוה מניח ארוכים, בתוספת מעבר רפלקציה כשמשתמשים במודל אופטימיזציה. מערכי נתונים גדולים מרחיבים את הטווח.",

@@ -3566,7 +3566,6 @@
   "submit.budget.details.models": "मॉडल उपयोग",
   "submit.budget.details.fee": "प्लेटफ़ॉर्म शुल्क",
   "submit.budget.details.runtime": "एग्ज़ीक्यूशन एनवायरनमेंट",
-  "submit.budget.details.runtime_sessions": "{provider}, प्रति सेशन अधिकतम {perSession} क्रेडिट × {sessions} सेशन",
   "submit.budget.details.up_to": "अधिकतम {amount} क्रेडिट",
   "submit.budget.details.runtime_included": "मॉडल की कीमत में शामिल",
   "submit.budget.details.assumptions": "निचली सीमा हर कॉल में छोटे प्रॉम्प्ट और आउटपुट मानती है; ऊपरी सीमा लंबे मानती है, और ऑप्टिमाइज़ेशन मॉडल इस्तेमाल होने पर एक रिफ्लेक्शन पास भी। बड़े डेटासेट रेंज को बढ़ाते हैं।",
