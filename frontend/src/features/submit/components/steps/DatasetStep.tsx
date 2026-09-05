@@ -19,12 +19,21 @@ import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
+import { DatasetPreviewLayout } from "../DatasetPreviewLayout";
 import { DatasetPickerDialog } from "@/features/datasets";
 import { useUserPrefs } from "@/features/settings";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 
-export function DatasetStep({ w }: { w: SubmitWizardContext }) {
+export function DatasetStep({
+  w,
+  previewOpen,
+  onPreviewOpenChange,
+}: {
+  w: SubmitWizardContext;
+  previewOpen: boolean;
+  onPreviewOpenChange: (open: boolean) => void;
+}) {
   const {
     parsedDataset,
     datasetFileName,
@@ -64,70 +73,83 @@ export function DatasetStep({ w }: { w: SubmitWizardContext }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5 px-4 sm:px-6">
-        <label
-          data-tutorial="dataset-upload"
-          className={cn(
-            "group block cursor-pointer rounded-xl border-2 border-dashed p-6 text-center transition-all duration-300 sm:p-10",
-            parsedDataset
-              ? "border-primary/40 bg-primary/5"
-              : "hover:border-primary/50 hover:bg-muted/30",
-          )}
+        <DatasetPreviewLayout
+          data={parsedDataset}
+          open={previewOpen}
+          onOpenChange={onPreviewOpenChange}
         >
-          <UploadSimple className="h-10 w-10 mx-auto mb-3 text-muted-foreground group-hover:text-primary/70 transition-colors duration-300" />
-          <p
-            className="text-sm font-medium truncate max-w-full px-4"
-            title={datasetFileName ?? undefined}
+          <label
+            data-tutorial="dataset-upload"
+            className={cn(
+              "group relative block cursor-pointer rounded-xl focus-within:ring-2 focus-within:ring-ring border-2 border-dashed text-center transition-colors duration-200",
+              parsedDataset
+                ? "border-primary/40 bg-primary/5 p-4"
+                : "p-6 hover:border-primary/50 hover:bg-muted/30 sm:p-10",
+            )}
           >
-            {datasetFileName ?? msg("auto.features.submit.components.steps.datasetstep.literal.1")}
-          </p>
-          {parsedDataset && (
-            <Badge variant="secondary" className="mt-2">
-              {parsedDataset.rowCount}
-              {msg("auto.features.submit.components.steps.datasetstep.2")}
-              {parsedDataset.columns.length}
-              {msg("auto.features.submit.components.steps.datasetstep.3")}
-            </Badge>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.json,.xlsx,.xls"
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-        </label>
-        {parsedDataset && prefs.advancedMode && (
-          <div className="flex items-center justify-between">
-            <Label htmlFor="shuffle" className="cursor-pointer text-sm">
-              <HelpTip text={tip("data.shuffle_explanation")}>
-                {msg("auto.features.submit.components.steps.paramsstep.10")}
-              </HelpTip>
-            </Label>
-            <Switch
-              id="shuffle"
-              checked={shuffle}
-              onCheckedChange={setShuffle}
-              className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
+            <UploadSimple className="h-10 w-10 mx-auto mb-3 text-muted-foreground group-hover:text-primary/70 transition-colors duration-300" />
+            <p
+              className="text-sm font-medium truncate max-w-full px-4"
+              title={datasetFileName ?? undefined}
+            >
+              {datasetFileName ??
+                msg("auto.features.submit.components.steps.datasetstep.literal.1")}
+            </p>
+            {parsedDataset && (
+              <Badge variant="secondary" className="mt-2">
+                {parsedDataset.rowCount}
+                {msg("auto.features.submit.components.steps.datasetstep.2")}
+                {parsedDataset.columns.length}
+                {msg("auto.features.submit.components.steps.datasetstep.3")}
+              </Badge>
+            )}
+            {parsedDataset && (
+              <span className="mt-3 block text-sm underline underline-offset-4">
+                {msg("auto.features.agent.panel.components.datasetuploadcard.replace")}
+              </span>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.json,.xlsx,.xls"
+              className="sr-only"
+              onChange={handleFileUpload}
             />
+          </label>
+          {parsedDataset && prefs.advancedMode && (
+            <div className="flex items-center justify-between">
+              <Label htmlFor="shuffle" className="cursor-pointer text-sm">
+                <HelpTip text={tip("data.shuffle_explanation")}>
+                  {msg("auto.features.submit.components.steps.paramsstep.10")}
+                </HelpTip>
+              </Label>
+              <Switch
+                id="shuffle"
+                checked={shuffle}
+                onCheckedChange={setShuffle}
+                className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
+              />
+            </div>
+          )}
+
+          <div className="flex items-center gap-3">
+            <Separator className="flex-1" />
+            <span className="text-xs text-muted-foreground">
+              {msg("submit.dataset.library_or")}
+            </span>
+            <Separator className="flex-1" />
           </div>
-        )}
 
-        <div className="flex items-center gap-3">
-          <Separator className="flex-1" />
-          <span className="text-xs text-muted-foreground">{msg("submit.dataset.library_or")}</span>
-          <Separator className="flex-1" />
-        </div>
-
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setPickerOpen(true)}
-          className="min-h-[44px] w-full justify-center gap-2 lg:min-h-0"
-        >
-          <Books className="size-4" />
-          {msg("submit.dataset.library_pick")}
-        </Button>
-
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setPickerOpen(true)}
+            className="min-h-[44px] w-full justify-center gap-2 lg:min-h-0"
+          >
+            <Books className="size-4" />
+            {msg("submit.dataset.library_pick")}
+          </Button>
+        </DatasetPreviewLayout>
         <DatasetPickerDialog
           open={pickerOpen}
           onOpenChange={setPickerOpen}

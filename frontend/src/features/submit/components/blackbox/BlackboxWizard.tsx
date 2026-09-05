@@ -55,6 +55,7 @@ export function BlackboxWizard({
   initialRecipe: BlackboxRecipe;
 }) {
   const w = useBlackboxWizard(initialRecipe);
+  const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
   const [optimizationPart, setOptimizationPart] = useState(0);
 
@@ -112,7 +113,11 @@ export function BlackboxWizard({
   const evaluationPanels: Record<EvaluationStep, ReactNode> = {
     cases: (
       <div id="bb-cases" tabIndex={-1} className="outline-none">
-        <BlackboxCasesStep w={w} />
+        <BlackboxCasesStep
+          w={w}
+          previewOpen={dataPreviewOpen}
+          onPreviewOpenChange={setDataPreviewOpen}
+        />
       </div>
     ),
     scorer: <BlackboxScorerStep w={w} />,
@@ -204,7 +209,12 @@ export function BlackboxWizard({
     w.codeAssistMode === "auto" &&
     (w.step === WIZARD_STAGE.goal ||
       (w.step === WIZARD_STAGE.evaluation && activeEvaluationStep === "scorer"));
-  const containerWidthClass = wideAuthoringPanel ? "max-w-6xl" : "max-w-2xl";
+  const wideDataPreview =
+    w.step === WIZARD_STAGE.evaluation &&
+    activeEvaluationStep === "cases" &&
+    dataPreviewOpen &&
+    !!w.parsedCases;
+  const containerWidthClass = wideAuthoringPanel || wideDataPreview ? "max-w-6xl" : "max-w-2xl";
 
   return (
     <div

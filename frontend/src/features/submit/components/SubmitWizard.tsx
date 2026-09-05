@@ -40,6 +40,7 @@ function evaluationPartFor(field?: string): number | null {
 
 export function SubmitWizard({ header }: { header?: ReactNode }) {
   const w = useSubmitWizard();
+  const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
   const [optimizationPart, setOptimizationPart] = useState(0);
 
@@ -86,7 +87,12 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
         ],
   );
   const evaluationPanels: readonly ReactNode[] = [
-    <DatasetStep key="dataset" w={w} />,
+    <DatasetStep
+      key="dataset"
+      w={w}
+      previewOpen={dataPreviewOpen}
+      onPreviewOpenChange={setDataPreviewOpen}
+    />,
     <CodeStep key="code" w={w} part="code" />,
     <SplitSection key="split" w={w} />,
   ];
@@ -169,7 +175,9 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
         : w.handleNext;
   const showSubmit = w.step === WIZARD_STAGE.review;
   const containerWidthClass =
-    w.step === WIZARD_STAGE.evaluation && evaluationPart === 1 && w.codeAssistMode === "auto"
+    w.step === WIZARD_STAGE.evaluation &&
+    ((evaluationPart === 1 && w.codeAssistMode === "auto") ||
+      (evaluationPart === 0 && dataPreviewOpen && !!w.parsedDataset))
       ? "max-w-6xl"
       : "max-w-2xl";
 
