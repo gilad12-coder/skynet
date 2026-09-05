@@ -23,7 +23,6 @@ import type { BlackboxHarness } from "@/shared/types/api";
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { DEFAULT_TARGET_CONCURRENCY, DEFAULT_TARGET_TIMEOUT } from "../../constants";
 import { Disclosure } from "../Disclosure";
-import { ModelRoleRow } from "./ModelRoleRow";
 import { Field, MOBILE_INPUT_CLASS, MOBILE_NUMBER_INPUT_CLASS, StepCard, cnGrid } from "./shared";
 
 const MOBILE_MODEL_CHIP_CLASS =
@@ -87,15 +86,16 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
 
       <div className={cnGrid(agent)}>
         <div className="overflow-hidden">
-          <div className="space-y-4 pt-1">
-            <ModelRoleRow
+          <div className="space-y-5 pt-2">
+            <div
               id="bb-task-model"
-              description={msg("submit.blackbox.roles.task.desc")}
-              tip={tip("blackbox.config.agent_model")}
+              tabIndex={-1}
+              className="min-w-0 rounded-lg outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               <ModelChip
                 config={targetModel}
-                className={MOBILE_MODEL_CHIP_CLASS}
+                className={`w-full ${MOBILE_MODEL_CHIP_CLASS}`}
+                tooltip={`${tip("blackbox.config.agent_model")} ${msg("submit.blackbox.roles.task.desc")}`}
                 roleLabel={msg("submit.blackbox.roles.task.label")}
                 required
                 catalogModels={catalog?.models}
@@ -108,13 +108,18 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
                 }
                 onRemove={targetModel.name ? () => setTargetModel({ name: "" }) : undefined}
               />
-            </ModelRoleRow>
-            <Field label={msg("submit.blackbox.start.harness_label")} tip="submit.blackbox.harness">
+            </div>
+            <Field
+              label={msg("submit.blackbox.start.harness_label")}
+              tip="submit.blackbox.harness"
+              htmlFor="bb-agent-harness"
+            >
               <Select value={harness} onValueChange={(v) => setHarness(v as BlackboxHarness)}>
                 <SelectTrigger
+                  id="bb-agent-harness"
                   className={cn(
                     MOBILE_INPUT_CLASS,
-                    "data-[size=default]:h-auto *:data-[slot=select-value]:min-h-8",
+                    "w-full data-[size=default]:h-auto *:data-[slot=select-value]:min-h-8",
                   )}
                 >
                   <SelectValue />
@@ -131,44 +136,46 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
                 </SelectContent>
               </Select>
             </Field>
-            <Disclosure
-              id="bb-execution-limits"
-              label={msg("submit.blackbox.execution.limits_toggle")}
-              open={limitsOpen}
-              onOpenChange={setLimitsOpen}
-            >
-              <div className="grid gap-4 pt-1 sm:grid-cols-2">
-                <Field
-                  label={msg("submit.blackbox.start.timeout_label")}
-                  htmlFor="bb-target-timeout"
-                  tip="submit.blackbox.target_timeout"
-                >
-                  <NumberInput
-                    id="bb-target-timeout"
-                    value={targetTimeout}
-                    onChange={setTargetTimeout}
-                    min={30}
-                    max={2700}
-                    step={30}
-                    className={MOBILE_NUMBER_INPUT_CLASS}
-                  />
-                </Field>
-                <Field
-                  label={msg("submit.blackbox.start.concurrency_label")}
-                  htmlFor="bb-concurrency"
-                  tip="submit.blackbox.concurrency"
-                >
-                  <NumberInput
-                    id="bb-concurrency"
-                    value={targetConcurrency}
-                    onChange={setTargetConcurrency}
-                    min={1}
-                    max={8}
-                    className={MOBILE_NUMBER_INPUT_CLASS}
-                  />
-                </Field>
-              </div>
-            </Disclosure>
+            <div className="border-t border-border/50 pt-4">
+              <Disclosure
+                id="bb-execution-limits"
+                label={msg("submit.blackbox.execution.limits_toggle")}
+                open={limitsOpen}
+                onOpenChange={setLimitsOpen}
+              >
+                <div className="grid gap-4 pt-1 sm:grid-cols-2">
+                  <Field
+                    label={msg("submit.blackbox.start.timeout_label")}
+                    htmlFor="bb-target-timeout"
+                    tip="submit.blackbox.target_timeout"
+                  >
+                    <NumberInput
+                      id="bb-target-timeout"
+                      value={targetTimeout}
+                      onChange={setTargetTimeout}
+                      min={30}
+                      max={2700}
+                      step={30}
+                      className={MOBILE_NUMBER_INPUT_CLASS}
+                    />
+                  </Field>
+                  <Field
+                    label={msg("submit.blackbox.start.concurrency_label")}
+                    htmlFor="bb-concurrency"
+                    tip="submit.blackbox.concurrency"
+                  >
+                    <NumberInput
+                      id="bb-concurrency"
+                      value={targetConcurrency}
+                      onChange={setTargetConcurrency}
+                      min={1}
+                      max={8}
+                      className={MOBILE_NUMBER_INPUT_CLASS}
+                    />
+                  </Field>
+                </div>
+              </Disclosure>
+            </div>
           </div>
         </div>
       </div>
