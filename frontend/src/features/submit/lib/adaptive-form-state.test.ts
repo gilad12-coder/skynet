@@ -110,9 +110,14 @@ test("removing either of two parts retains the surviving content as whole text",
     let remaining = seedParts;
     evaluate(variable(start, "removePart"), {
       seedParts,
-      editSeed: (value: string) => { text = value; },
+      setSeedManuallyEdited: () => {},
       setSeedParts: (parts: typeof seedParts) => { remaining = parts; },
     })(index);
+    evaluate(variable(start, "finishRemoval"), {
+      seedParts: remaining,
+      editSeed: (value: string) => { text = value; },
+      setSeedParts: (parts: typeof seedParts) => { remaining = parts; },
+    })();
     assert.equal(text, seedParts[1 - index]?.value);
     assert.equal(remaining.length, 0);
   }

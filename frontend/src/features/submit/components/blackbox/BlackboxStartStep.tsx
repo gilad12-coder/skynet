@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { msg } from "@/shared/lib/messages";
@@ -47,6 +48,18 @@ export function BlackboxStartStep({
     setBackground,
   } = w;
 
+  const reducedMotion = useReducedMotion();
+  const partIds = useRef(new WeakMap<object, number>());
+  const nextPartId = useRef(0);
+  const partKey = (part: object) => {
+    let id = partIds.current.get(part);
+    if (id == null) {
+      id = nextPartId.current++;
+      partIds.current.set(part, id);
+    }
+    return id;
+  };
+
   const editSeed = (value: string) => {
     setSeedText(value);
     setSeedMode("text");
@@ -60,7 +73,14 @@ export function BlackboxStartStep({
   }, [background]);
 
   const updatePart = (i: number, patch: { key?: string; value?: string }) =>
-    setSeedParts(seedParts.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
+    setSeedParts(
+      seedParts.map((part, index) => {
+        if (index !== i) return part;
+        const updated = { ...part, ...patch };
+        partIds.current.set(updated, partKey(part));
+        return updated;
+      }),
+    );
 
   const addPart = () => {
     const current =
@@ -70,13 +90,15 @@ export function BlackboxStartStep({
   };
 
   const removePart = (index: number) => {
-    const remaining = seedParts.filter((_, i) => i !== index);
-    if (remaining.length === 1) {
-      editSeed(remaining[0]!.value);
+    setSeedParts(seedParts.filter((_, i) => i !== index));
+    setSeedManuallyEdited(true);
+  };
+
+  // Keep the outgoing card mounted until its collapse finishes.
+  const finishRemoval = () => {
+    if (seedParts.length === 1) {
+      editSeed(seedParts[0]!.value);
       setSeedParts([]);
-    } else {
-      setSeedParts(remaining);
-      setSeedManuallyEdited(true);
     }
   };
 
@@ -169,46 +191,60 @@ export function BlackboxStartStep({
             ))}
 
           {seedMode === "parts" && (
-            <div className="space-y-3">
-              {seedParts.map((part, i) => (
-                <ExpandableTextarea
-                  key={i}
-                  id={`bb-seed-part-${i}`}
-                  label={part.key.trim() || msg("submit.blackbox.start.part_label", { n: i + 1 })}
-                  value={part.value}
-                  onChange={(value) => updatePart(i, { value })}
-                  placeholder={msg("submit.blackbox.start.part_value")}
-                  rows={4}
-                  className={`${TEXTAREA_CLASS} min-h-32 rounded-none border-0 bg-transparent text-base shadow-none focus-visible:ring-inset md:text-sm`}
-                >
-                  {({ textarea: partTextarea, trigger: partTrigger }) => (
-                    <div className="overflow-hidden rounded-xl border border-border bg-background">
-                      <div className="flex min-h-12 items-center gap-2 border-b border-border bg-muted/30 px-3">
-                        <label
-                          htmlFor={`bb-seed-part-${i}`}
-                          className="min-w-0 flex-1 truncate text-sm font-medium"
-                          title={part.key || undefined}
-                        >
-                          {part.key.trim() || msg("submit.blackbox.start.part_label", { n: i + 1 })}
-                        </label>
-                        {partTrigger}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          aria-label={msg("submit.blackbox.start.remove_part")}
-                          disabled={seedParts.length === 1}
-                          onClick={() => removePart(i)}
-                          className="size-11 shrink-0 text-muted-foreground hover:text-destructive"
-                        >
-                          <Trash className="size-4" />
-                        </Button>
-                      </div>
-                      {partTextarea}
+            <div>
+              <AnimatePresence onExitComplete={finishRemoval}>
+                {seedParts.map((part, i) => (
+                  <motion.div
+                    key={partKey(part)}
+                    initial={reducedMotion ? false : { height: 0, opacity: 0, overflow: "hidden" }}
+                    animate={{ height: "auto", opacity: 1, transitionEnd: { overflow: "visible" } }}
+                    exit={{ height: 0, opacity: 0, overflow: "hidden", pointerEvents: "none" }}
+                    transition={{ duration: reducedMotion ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <div className={i > 0 ? "pt-3" : undefined}>
+                      <ExpandableTextarea
+                        id={`bb-seed-part-${partKey(part)}`}
+                        label={
+                          part.key.trim() || msg("submit.blackbox.start.part_label", { n: i + 1 })
+                        }
+                        value={part.value}
+                        onChange={(value) => updatePart(i, { value })}
+                        placeholder={msg("submit.blackbox.start.part_value")}
+                        rows={4}
+                        className={`${TEXTAREA_CLASS} min-h-32 rounded-none border-0 bg-transparent text-base shadow-none focus-visible:ring-inset md:text-sm`}
+                      >
+                        {({ textarea: partTextarea, trigger: partTrigger }) => (
+                          <div className="overflow-hidden rounded-xl border border-border bg-background">
+                            <div className="flex min-h-12 items-center gap-2 border-b border-border bg-muted/30 px-3">
+                              <label
+                                htmlFor={`bb-seed-part-${partKey(part)}`}
+                                className="min-w-0 flex-1 truncate text-sm font-medium"
+                                title={part.key || undefined}
+                              >
+                                {part.key.trim() ||
+                                  msg("submit.blackbox.start.part_label", { n: i + 1 })}
+                              </label>
+                              {partTrigger}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                aria-label={msg("submit.blackbox.start.remove_part")}
+                                disabled={seedParts.length === 1}
+                                onClick={() => removePart(i)}
+                                className="size-11 shrink-0 text-muted-foreground hover:text-destructive"
+                              >
+                                <Trash className="size-4" />
+                              </Button>
+                            </div>
+                            {partTextarea}
+                          </div>
+                        )}
+                      </ExpandableTextarea>
                     </div>
-                  )}
-                </ExpandableTextarea>
-              ))}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             </div>
           )}
 
