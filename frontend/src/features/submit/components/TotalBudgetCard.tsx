@@ -609,7 +609,6 @@ export function TotalBudgetCard({
               <Row
                 icon={Terminal}
                 label={msg("submit.budget.details.runtime")}
-                sub={msg("submit.runtime.vercel")}
                 value={msg("submit.budget.details.runtime_included")}
               />
             )}
@@ -757,14 +756,12 @@ function Row({
   icon: Icon,
   label,
   value,
-  sub,
   tip,
   sections,
 }: {
   icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
-  sub?: string;
   tip?: string;
   /** When given, the value opens these steps in a layer over the card. */
   sections?: CalcSection[];
@@ -779,14 +776,7 @@ function Row({
     "max-w-[55%] shrink-0 text-end text-sm font-medium wrap-break-word tabular-nums text-foreground";
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border/40 py-2.5">
-      <dt className="min-w-0">
-        {tip ? <HelpTip text={tip}>{name}</HelpTip> : name}
-        {sub && (
-          <span className="mt-0.5 block ps-5.5 text-[11px] text-muted-foreground/80" dir="auto">
-            {sub}
-          </span>
-        )}
-      </dt>
+      <dt className="min-w-0">{tip ? <HelpTip text={tip}>{name}</HelpTip> : name}</dt>
       <dd className={cn(valueClass, "flex justify-end")}>
         {sections && sections.length > 0 ? (
           <Figure label={label} value={value} sections={sections} className="text-sm" />
