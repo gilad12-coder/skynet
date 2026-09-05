@@ -116,7 +116,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                     : (resolvedScorerModel ?? emptyModelConfig())
                 }
                 className={`w-full min-w-0 ${MOBILE_MODEL_CHIP_CLASS}`}
-                roleLabel={msg("submit.blackbox.roles.scoring.label")}
                 tooltip={msg("submit.blackbox.scorer.model_explainer")}
                 required
                 emptyLabel={
