@@ -236,6 +236,37 @@ export function draftStage(record: WizardDraftRecord | null): WizardStageId | nu
   return recipe ? (record?.[recipe]?.data.stage ?? null) : null;
 }
 
+/** Compare configurations without treating wizard navigation as an edit. */
+export function matchesClonedDraft<K extends DraftRecipe>(
+  record: WizardDraftRecord | null,
+  recipe: K,
+  clone: DraftDataFor<K>,
+): boolean {
+  if (recipeToOpen(record) !== recipe) return false;
+  const saved = record?.[recipe]?.data;
+  if (!saved) return false;
+  const configuration = (data: WizardDraftData | AnythingDraftData) => {
+    const {
+      stage: _stage,
+      furthestStage: _furthest,
+      summaryTab: _tab,
+      summaryCodeTab: _codeTab,
+      setupSpent: _spent,
+      ...config
+    } = data as (WizardDraftData | AnythingDraftData) & {
+      summaryTab?: number;
+      summaryCodeTab?: string;
+      setupSpent?: number;
+    };
+    return JSON.stringify(config, (_key, value: unknown) =>
+      value && typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)))
+        : value,
+    );
+  };
+  return configuration(saved) === configuration(clone);
+}
+
 function shallowEqual(a: object, b: object): boolean {
   const ak = Object.keys(a) as Array<keyof typeof a>;
   const bk = Object.keys(b);

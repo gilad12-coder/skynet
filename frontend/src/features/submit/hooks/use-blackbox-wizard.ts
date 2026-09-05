@@ -548,6 +548,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // optimizer all come from the payload.
   const cloneRan = useRef(false);
   const [cloned, setCloned] = useState(false);
+  const [cloneReady, setCloneReady] = useState(false);
+  const cloneCompared = useRef(false);
   const [issue, setIssue] = useState<WizardIssue | null>(null);
   useEffect(() => {
     const cloneId = searchParams.get("clone");
@@ -668,9 +670,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         // answered. The restore walk still stops at a stage that no longer
         // validates, so a stale clone lands where it needs repair.
         if (source) setPendingRestore({ stage: "review", furthest: "review" });
+        setCloneReady(true);
         toast.success(msg("submit.clone.success"));
       })
       .catch(() => {
+        draftsRef.current.compareClone("anything", null);
         toast.error(msg("submit.clone.failed"));
       });
   }, [searchParams]);
@@ -967,6 +971,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   // Restored or cloned authored artifacts must survive the first render before hydration.
   const interviewPossible =
+    !drafts.offerPending &&
     codeAssistMode === "auto" &&
     !cloned &&
     !seedManuallyEdited &&
@@ -1043,7 +1048,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     metricValidation: scorerValidation,
     runSignatureValidation: noSeedValidation,
     runMetricValidation: noSeedValidation,
-    seedEnabled: interview.resolved,
+    seedEnabled: !drafts.offerPending && interview.resolved,
     interviewBrief: interview.confirmedBrief,
     blackbox: authoringContext,
     model: interview.model,
@@ -1443,6 +1448,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       maxCostCredits,
       setupSpent,
     };
+    if (cloneReady && !pendingRestore && !cloneCompared.current) {
+      cloneCompared.current = true;
+      draftsRef.current.compareClone("anything", snapshot);
+    }
     draftsRef.current.publish("anything", snapshot, isMeaningfulAnythingDraft(snapshot));
   });
   // Stage boundaries are the one place the debounce is skipped: a refresh right
