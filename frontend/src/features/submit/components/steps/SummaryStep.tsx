@@ -27,6 +27,11 @@ import {
   Database,
   Cpu,
   Gauge,
+  Lock,
+  Globe,
+  Coins,
+  Key,
+  Wrench,
 } from "@/shared/ui/icons";
 import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -46,6 +51,7 @@ import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import { aggregateTokenSource, chargeableBracket } from "../../lib/cost-bracket";
 import { WIZARD_STAGE, type WizardStageId } from "../../lib/wizard-steps";
 import { focusField } from "../../lib/focus-field";
+import { workflowUsesTools } from "../../workflow/model";
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
@@ -89,6 +95,7 @@ export function SummaryStep({
     setSummaryCodeTab,
     jobName,
     jobType,
+    isPrivate,
     moduleName,
     isReact,
     reactConfig,
@@ -137,6 +144,8 @@ export function SummaryStep({
   const tokenSource = aggregateTokenSource(selectedConfigs);
   const byok = tokenSource === "byok";
   const estimate = chargeableBracket(costBracket, tokenSource);
+  const usesTools =
+    isReact || (isWorkflow && workflowSpec != null && workflowUsesTools(workflowSpec));
 
   return (
     <div className="space-y-4">
@@ -248,6 +257,34 @@ export function SummaryStep({
                     </HelpTip>
                     <span className="text-sm font-medium font-mono" dir="ltr">
                       {msg("auto.features.submit.components.steps.summarystep.6")}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-2.5 border-b border-border/40">
+                    <HelpTip text={tip("submit.privacy")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        {isPrivate ? <Lock className="size-3.5" /> : <Globe className="size-3.5" />}
+                        {msg("submit.basics.privacy.label")}
+                      </span>
+                    </HelpTip>
+                    <span className="text-sm font-medium">
+                      {msg(
+                        isPrivate
+                          ? "submit.basics.privacy.private"
+                          : "submit.basics.privacy.public",
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-2.5 border-b border-border/40">
+                    <HelpTip
+                      text={msg(byok ? "billing.mode.byok_hint" : "billing.mode.managed_hint")}
+                    >
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        {byok ? <Key className="size-3.5" /> : <Coins className="size-3.5" />}
+                        {msg("submit.budget.billing_source")}
+                      </span>
+                    </HelpTip>
+                    <span className="text-sm font-medium">
+                      {msg(byok ? "billing.mode.byok" : "billing.mode.managed")}
                     </span>
                   </div>
                 </div>
@@ -474,22 +511,39 @@ export function SummaryStep({
 
               {summaryTab === 3 && (
                 <div className="space-y-0 [&>div]:min-w-0 [&>div]:gap-3 [&>div>span:first-child]:min-w-0 [&>div>span:last-child]:max-w-[55%] [&>div>span:last-child]:break-words [&>div>span:last-child]:text-end">
-                  {isReact && (
-                    <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                      <HelpTip text={tip("react.mcp_url")}>
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Stack className="size-3.5" />
-                          {msg("submit.react.mcp_url_label")}
+                  {usesTools && (
+                    <>
+                      <div className="flex items-center justify-between py-2.5 border-b border-border/40">
+                        <HelpTip text={tip("react.mcp_url")}>
+                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Stack className="size-3.5" />
+                            {msg("submit.react.mcp_url_label")}
+                          </span>
+                        </HelpTip>
+                        <span
+                          className="text-sm font-medium font-mono truncate max-w-[60%]"
+                          dir="ltr"
+                          title={reactConfig.mcpUrl}
+                        >
+                          {reactConfig.mcpUrl || "—"}
                         </span>
-                      </HelpTip>
-                      <span
-                        className="text-sm font-medium font-mono truncate max-w-[60%]"
-                        dir="ltr"
-                        title={reactConfig.mcpUrl}
-                      >
-                        {reactConfig.mcpUrl || "—"}
-                      </span>
-                    </div>
+                      </div>
+                      <div className="flex items-center justify-between py-2.5 border-b border-border/40">
+                        <HelpTip text={tip("submit.react_section")}>
+                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Wrench className="size-3.5" />
+                            {msg("submit.react.tools_access")}
+                          </span>
+                        </HelpTip>
+                        <span className="text-sm font-medium">
+                          {reactConfig.toolFilter == null
+                            ? msg("submit.react.tools_all")
+                            : formatMsg("submit.react.tools_count", {
+                                p1: reactConfig.toolFilter.length,
+                              })}
+                        </span>
+                      </div>
+                    </>
                   )}
                   <div className="flex items-center justify-between py-2.5 border-b border-border/40">
                     <HelpTip text={tip("submit.depth")}>

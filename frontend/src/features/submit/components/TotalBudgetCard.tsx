@@ -115,6 +115,12 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
 
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-[#DDD6CC]/60 pt-3 text-[12px] sm:grid-cols-4">
           <BudgetFigure
+            label={msg("submit.budget.billing_source")}
+            tip={`${msg(mode === "byok" ? "billing.mode.byok_hint" : "billing.mode.managed_hint")} ${msg("submit.budget.billing_source_tip")}`}
+            value={msg(mode === "byok" ? "billing.mode.byok" : "billing.mode.managed")}
+            mono={false}
+          />
+          <BudgetFigure
             label={msg(
               isFeeOnlyEstimate ? "submit.summary.estimate_fee" : "submit.summary.estimate_cost",
             )}
@@ -189,13 +195,26 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
   );
 }
 
-function BudgetFigure({ label, value, tip }: { label: string; value: string; tip?: string }) {
+function BudgetFigure({
+  label,
+  value,
+  tip,
+  mono = true,
+}: {
+  label: string;
+  value: string;
+  tip?: string;
+  mono?: boolean;
+}) {
   return (
     <div className="min-w-0">
       <dt className="text-[10px] font-medium uppercase tracking-wide text-[#8C7A6B]">
         {tip ? <HelpTip text={tip}>{label}</HelpTip> : label}
       </dt>
-      <dd className="font-mono text-xs font-semibold tabular-nums text-[#3D2E22]" dir="auto">
+      <dd
+        className={`${mono ? "font-mono tabular-nums" : ""} text-xs font-semibold text-[#3D2E22]`}
+        dir="auto"
+      >
         {value}
       </dd>
     </div>

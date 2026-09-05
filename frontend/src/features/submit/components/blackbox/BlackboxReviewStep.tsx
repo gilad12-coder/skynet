@@ -381,6 +381,12 @@ export function BlackboxReviewStep({
               ))}
           </span>
         </Row>
+        <Row label={msg("submit.budget.billing_source")}>
+          {msg(tokenSource === "byok" ? "billing.mode.byok" : "billing.mode.managed")}
+          <span className="block text-xs text-muted-foreground">
+            {msg(tokenSource === "byok" ? "billing.mode.byok_hint" : "billing.mode.managed_hint")}
+          </span>
+        </Row>
         <Row label={msg("submit.basics.privacy.label")} tip="submit.privacy">
           {msg(isPrivate ? "submit.basics.privacy.private" : "submit.basics.privacy.public")}
         </Row>
