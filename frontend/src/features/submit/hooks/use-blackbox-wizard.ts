@@ -30,6 +30,7 @@ import {
   type BlackboxAuthoringContext,
   type DatasetSummary,
 } from "@/shared/lib/api";
+import { useWizardStateOptional } from "@/features/agent-panel";
 import { readPref, useUserPrefs } from "@/features/settings";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
@@ -41,11 +42,18 @@ import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import type { ValidationResult } from "@/shared/ui/code-editor";
 
-import { defaultSplit, emptyModelConfig, type ColumnRole } from "../constants";
+import {
+  DEFAULT_TARGET_CONCURRENCY,
+  DEFAULT_TARGET_TIMEOUT,
+  defaultSplit,
+  emptyModelConfig,
+  type ColumnRole,
+} from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { suggestedRunName } from "../lib/budget";
+import { detectLanguage, looksLikeCode, type SeedLanguage } from "../lib/seed-format";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
-import { focusField } from "../lib/focus-field";
+import type { WizardIssue } from "../lib/wizard-issue";
 import { preflightDestination } from "../lib/preflight-destination";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import {
@@ -96,6 +104,12 @@ export type SeedMode = "text" | "parts" | "none";
 // The wizard offers two kinds of starting point. Runs saved before the
 // prompt kind folded into text still carry "prompt"; they land on text.
 export type BlackboxRecipe = "code" | "anything";
+
+interface SeedGuess {
+  code: boolean;
+  language: SeedLanguage | null;
+}
+const NO_GUESS: SeedGuess = { code: false, language: null };
 
 /** Maps a stored or linked recipe onto the kinds the wizard offers. */
 export function wizardRecipe(value: string | null | undefined): BlackboxRecipe {
@@ -204,11 +218,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [submitPhase, setSubmitPhase] = useState<"idle" | "sending" | "splash" | "done">("idle");
 
   const [jobName, setJobName] = useState("");
+  // The name follows the objective's suggestion until the user types one.
+  const [jobNameTouched, setJobNameTouched] = useState(false);
   const [jobDescription, setJobDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(true);
 
-  // The kind of starting point — a prompt, code or any other text. Chosen in
-  // the Starting point step; the picker's link only seeds it.
+  // The kind of starting point — a prompt, code or any other text. It follows
+  // what the seed reads as; the picker's link, a draft or a clone only seeds it.
   const [recipe, setRecipeState] = useState<BlackboxRecipe>(initialRecipe);
 
   const [codeAssistMode, setCodeAssistMode] = useState<"auto" | "manual">(() =>
@@ -232,8 +248,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // through the platform gateway, so the rest of the config would be dead
   // weight.
   const [targetModel, setTargetModel] = useState<ModelConfig>({ name: "" });
-  const [targetTimeout, setTargetTimeout] = useState(600);
-  const [targetConcurrency, setTargetConcurrency] = useState(2);
+  const [targetTimeout, setTargetTimeout] = useState(DEFAULT_TARGET_TIMEOUT);
+  const [targetConcurrency, setTargetConcurrency] = useState(DEFAULT_TARGET_CONCURRENCY);
 
   const [parsedCases, setParsedCases] = useState<ParsedDataset | null>(null);
   const [casesName, setCasesName] = useState("");
@@ -298,23 +314,23 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // The kind only seeds the scorer: a scorer still on the outgoing kind's
   // template follows the switch, while anything the user or the agent wrote
   // stays put.
-  const setRecipe = (next: BlackboxRecipe) => {
-    if (metricCode === scorerTemplateFor(recipe)) setMetricCode(scorerTemplateFor(next));
-    setRecipeState(next);
-  };
+  const setRecipe = useCallback(
+    (next: BlackboxRecipe) => {
+      if (metricCode === scorerTemplateFor(recipe)) setMetricCode(scorerTemplateFor(next));
+      setRecipeState(next);
+    },
+    [metricCode, recipe],
+  );
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
   const [scorerInstall, setScorerInstall] = useState("");
-  // A metric is any function; only one that calls `llm()` needs a model.
-  // The Scorer step asks whether it does, and code that already calls
-  // `llm()` answers for itself.
+  // A metric is any function; only one that calls `llm()` needs a model, and
+  // the code says whether it does.
   const [scorerModel, setScorerModel] = useState<ModelConfig>(emptyModelConfig());
-  const [scorerModelDeclared, setScorerModelDeclared] = useState(false);
   // The scoring model inherits the optimization model until the user picks
   // one of its own; `scorerModel` only speaks when the mode is explicit.
   const [scorerModelMode, setScorerModelMode] = useState<ScoringModelMode>("inherit");
-  const scorerCodeCallsModel = scorerCallsModel(metricCode);
-  const scorerUsesModel = scorerKind === "python" && (scorerModelDeclared || scorerCodeCallsModel);
+  const scorerUsesModel = scorerKind === "python" && scorerCallsModel(metricCode);
   const [dryRun, setDryRun] = useState<DryRunState>({ status: "idle" });
   const dryRunAttemptRef = useRef(0);
   const updateScorerSecret = useCallback((value: string) => {
@@ -384,6 +400,62 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [draftSnapshot] = useState(() => drafts.takeSnapshot("anything"));
   const hydratedRef = useRef(false);
   const submittedRef = useRef(false);
+
+  // Shared wizard-state bridge (see use-submit-wizard): the panel agent's
+  // recipe-independent fields land here, and local edits go back so the agent
+  // sees the form it is talking about. The seed, target, scorer and optimizer
+  // are authored in-wizard and stay local.
+  const wizardCtx = useWizardStateOptional();
+  const wizardCtxRef = useRef(wizardCtx);
+  useEffect(() => {
+    wizardCtxRef.current = wizardCtx;
+  }, [wizardCtx]);
+  const agentPulseTick = wizardCtx?.agentPulseTick ?? 0;
+  useEffect(() => {
+    const shared = wizardCtx?.state;
+    const keys = wizardCtx?.agentPulseKeys ?? [];
+    if (!shared || keys.length === 0) return;
+    for (const key of keys) {
+      if (key === "job_name" && typeof shared.job_name === "string") {
+        // An agent-given name is decided: the suggestion must not overwrite it.
+        setJobName(shared.job_name);
+        setJobNameTouched(true);
+      } else if (key === "job_description" && typeof shared.job_description === "string") {
+        setJobDescription(shared.job_description);
+      } else if (key === "is_private" && typeof shared.is_private === "boolean") {
+        setIsPrivate(shared.is_private);
+      } else if (key === "split_fractions" && shared.split_fractions) {
+        setSplit(shared.split_fractions);
+      } else if (
+        key === "split_mode" &&
+        (shared.split_mode === "auto" || shared.split_mode === "manual")
+      ) {
+        splitModeRef.current = shared.split_mode;
+        setSplitModeState(shared.split_mode);
+      } else if (key === "seed" && typeof shared.seed === "number") {
+        setSeed(shared.seed);
+      } else if (key === "shuffle" && typeof shared.shuffle === "boolean") {
+        setShuffle(shared.shuffle);
+      }
+    }
+    // Runs once per agent pulse; the keys and state are read from that render.
+  }, [agentPulseTick]);
+  useEffect(() => {
+    if (!wizardCtx) return;
+    const s = wizardCtx.state;
+    if (s.job_name !== jobName) wizardCtx.setField("job_name", jobName, "user");
+    if (s.job_description !== jobDescription) {
+      wizardCtx.setField("job_description", jobDescription, "user");
+    }
+    if (s.is_private !== isPrivate) wizardCtx.setField("is_private", isPrivate, "user");
+    if (s.split_mode !== splitMode) wizardCtx.setField("split_mode", splitMode, "user");
+    if (s.seed !== seed) wizardCtx.setField("seed", seed, "user");
+    if (s.shuffle !== shuffle) wizardCtx.setField("shuffle", shuffle, "user");
+    const sf = s.split_fractions;
+    if (!sf || sf.train !== split.train || sf.val !== split.val || sf.test !== split.test) {
+      wizardCtx.setField("split_fractions", split, "user");
+    }
+  }, [wizardCtx, jobName, jobDescription, isPrivate, splitMode, seed, shuffle, split]);
   // The draft's stage is applied one render after its fields, so the
   // prerequisite walk (below validateStep) checks the restored state rather
   // than the empty initial one.
@@ -399,6 +471,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     }
     setPendingRestore({ stage: d.stage, furthest: d.furthestStage });
     setJobName(d.jobName);
+    setJobNameTouched(d.jobName.trim() !== "" && d.jobName !== suggestedRunName(d.objective));
     setJobDescription(d.jobDescription);
     setIsPrivate(d.isPrivate);
     setRecipeState(d.recipe);
@@ -431,7 +504,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerUrl(d.scorerUrl);
     setScorerInstall(d.scorerInstall);
     setScorerModel(d.scorerModel);
-    setScorerModelDeclared(d.scorerModelDeclared);
     setScorerModelMode(d.scorerModelMode);
     setStrategyMode(d.strategyMode);
     setEngine(d.engine);
@@ -460,12 +532,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     let cancelled = false;
     getBlackboxEngines(targetKind)
       .then((res) => {
-        if (!cancelled)
-          setEngineCatalogResult({ target: targetKind, data: res });
+        if (!cancelled) setEngineCatalogResult({ target: targetKind, data: res });
       })
       .catch(() => {
-        if (!cancelled)
-          setEngineCatalogResult({ target: targetKind, data: null });
+        if (!cancelled) setEngineCatalogResult({ target: targetKind, data: null });
       });
     return () => {
       cancelled = true;
@@ -478,6 +548,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // optimizer all come from the payload.
   const cloneRan = useRef(false);
   const [cloned, setCloned] = useState(false);
+  const [issue, setIssue] = useState<WizardIssue | null>(null);
   useEffect(() => {
     const cloneId = searchParams.get("clone");
     // A restored draft owns the form; the clone URL it was continued past must
@@ -495,7 +566,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             ? (payload as Partial<BlackboxRunRequest>)
             : null;
         const basics = cloneBasics(stored, jobData?.name);
-        if (basics.name) setJobName(basics.name);
+        // A cloned run's name is decided; the suggestion must not replace it
+        // once the cloned objective lands.
+        if (basics.name) {
+          setJobName(basics.name);
+          setJobNameTouched(true);
+        }
         if (basics.description) setJobDescription(basics.description);
         if (basics.isPrivate != null) setIsPrivate(basics.isPrivate);
 
@@ -563,7 +639,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             // the optimization model: the field alone cannot say it was inherited.
             if (scorer.kind === "python" && scorer.model?.name) {
               setScorerModel({ ...emptyModelConfig(), ...scorer.model });
-              setScorerModelDeclared(true);
               setScorerModelMode("explicit");
             }
           }
@@ -588,12 +663,43 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         // A Program run's seed still has to be drafted here, so only an
         // Anything clone rules the interview out.
         setCloned(source != null);
+        // A full clone is a decided setup: open the summary with every
+        // earlier stage unlocked instead of walking the questions it already
+        // answered. The restore walk still stops at a stage that no longer
+        // validates, so a stale clone lands where it needs repair.
+        if (source) setPendingRestore({ stage: "review", furthest: "review" });
         toast.success(msg("submit.clone.success"));
       })
       .catch(() => {
         toast.error(msg("submit.clone.failed"));
       });
   }, [searchParams]);
+
+  // What the seed reads as, latched until the seed is cleared so the editor
+  // never swaps out from under the caret while a snippet is typed or trimmed.
+  // The kind follows the same reading, so an agent-written seed and a pasted
+  // one land on the same scorer template.
+  const seedSample = seedMode === "text" ? seedText : seedParts.map((p) => p.value).join("\n");
+  const [seedGuess, setSeedGuess] = useState<SeedGuess>(NO_GUESS);
+  useEffect(() => {
+    if (!seedSample.trim()) {
+      setSeedGuess(NO_GUESS);
+      return;
+    }
+    const language = detectLanguage(seedSample);
+    const code = language !== null || looksLikeCode(seedSample);
+    if (code) {
+      setSeedGuess((prev) =>
+        prev.code && (!language || prev.language === language)
+          ? prev
+          : { code: true, language: language ?? prev.language },
+      );
+    }
+    if (seedMode === "none") return;
+    const detected: BlackboxRecipe = code || seedGuess.code ? "code" : "anything";
+    if (detected !== recipe) setRecipe(detected);
+  }, [seedSample, seedMode, seedGuess.code, recipe, setRecipe]);
+  const seedIsCode = recipe === "code" || seedGuess.code;
 
   const seedCandidate = useMemo<BlackboxCandidate | null>(() => {
     if (seedMode === "none") return null;
@@ -626,7 +732,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
             install_command: scorerInstall.trim() || null,
             model:
-              (scorerModelDeclared || scorerCallsModel(code)) && resolvedScorerModel?.name.trim()
+              scorerCallsModel(code) && resolvedScorerModel?.name.trim()
                 ? prepareModelConfig(resolvedScorerModel)
                 : null,
           }
@@ -636,15 +742,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             secret: scorerSecret.trim() || undefined,
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
           },
-    [
-      scorerKind,
-      metricCode,
-      scorerUrl,
-      scorerSecret,
-      scorerInstall,
-      scorerModelDeclared,
-      resolvedScorerModel,
-    ],
+    [scorerKind, metricCode, scorerUrl, scorerSecret, scorerInstall, resolvedScorerModel],
   );
 
   const buildTarget = (): BlackboxTarget =>
@@ -753,8 +851,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             : { mode: "auto" },
       proposer_runtime: proposerRuntime,
       target: buildTarget(),
-      task_model_config:
-        targetKind === "agent" ? prepareModelConfig(targetModel) : undefined,
+      task_model_config: targetKind === "agent" ? prepareModelConfig(targetModel) : undefined,
       reflection_model_config: reflection,
       token_source: tokenSource,
       is_private: isPrivate,
@@ -900,6 +997,17 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     if (!interview.objective) return;
     setObjective((prev) => (prev.trim().length > 0 ? prev : interview.objective));
   }, [interview.objective]);
+  // The confirmed brief is the interview's reading of what matters; it lands
+  // in Background so the run and the drafting agent work from the same
+  // constraints. Typed background always wins.
+  useEffect(() => {
+    if (interview.confirmedBrief.length === 0) return;
+    setBackground((prev) =>
+      prev.trim().length > 0
+        ? prev
+        : interview.confirmedBrief.map((line) => `- ${line}`).join("\n"),
+    );
+  }, [interview.confirmedBrief]);
   // Resolving the interview (confirm or skip) is an explicit ask to draft, so
   // it lifts the hand-edit guard: a starting point typed while the interview
   // was open reaches the seed pass as the prior to build on.
@@ -994,24 +1102,16 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       trainingCaseCount,
     });
     return issue ? msg(issue.key, issue.params) : null;
-  }, [
-    engineCatalog,
-    engineCatalogFailed,
-    strategyMode,
-    engine,
-    seedMode,
-    trainingCaseCount,
-  ]);
+  }, [engineCatalog, engineCatalogFailed, strategyMode, engine, seedMode, trainingCaseCount]);
   const optimizationFamily = optimizationModelFamily(strategyMode, engine);
 
-  const validateStep = (s: number, showToast = false): boolean => {
-    const fail = (key: MessageKey, fieldId?: string) => {
-      if (showToast) {
-        toast.error(msg(key));
-        if (fieldId) focusField(fieldId);
-      }
-      return false;
-    };
+  /** The first problem holding a stage back, or null when it validates. */
+  const stageIssue = (s: number): WizardIssue | null => {
+    const fail = (key: MessageKey, fieldId?: string): WizardIssue => ({
+      stage: stageAt(s),
+      fieldId,
+      message: msg(key),
+    });
     switch (s) {
       case WIZARD_STAGE.goal: {
         const partsIssue = seedMode === "parts" ? seedPartsIssue(seedParts) : null;
@@ -1023,9 +1123,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return fail("submit.blackbox.validation.objective_required", "bb-objective");
         if (seedMode !== "none" && !agentDrafts && seedCandidate == null)
           return fail("submit.blackbox.validation.seed_required", "bb-seed");
-        return true;
+        return null;
       }
       case WIZARD_STAGE.evaluation: {
+        if (maxCostCredits == null) return fail("budget.invalid", "totalBudgetInput");
         if (targetKind === "agent") {
           if (!parsedCases?.rowCount)
             return fail("submit.blackbox.validation.cases_required", "bb-cases");
@@ -1036,17 +1137,15 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return fail("submit.blackbox.validation.scorer_code_required", "bb-scorer-code");
         if (scorerUsesModel && scorerModelMode === "explicit" && !scorerModel.name.trim())
           return fail("submit.blackbox.validation.scorer_model_required", "bb-scoring-model");
-        if (scorerKind === "python" && scorerModelDeclared && !scorerCodeCallsModel)
-          return fail("submit.blackbox.validation.scorer_llm_unused", "bb-scorer-uses-model");
         if (scorerKind === "remote" && !/^https?:\/\/\S+$/.test(scorerUrl.trim()))
           return fail("submit.blackbox.validation.scorer_url_required", "bb-scorer-url");
         if (parsedCases && Math.abs(split.train + split.val + split.test - 1) > 0.001)
           return fail("submit.blackbox.validation.split_sum", "bb-split");
-        return true;
+        return null;
       }
       case WIZARD_STAGE.optimization: {
         if (trainingCaseCount === 0 && (strategyMode !== "single" || engine === "meta_harness"))
-          return fail("submit.blackbox.validation.training_cases");
+          return fail("submit.blackbox.validation.training_cases", "bb-cases");
         // Availability is not a validation failure: an unavailable engine is a
         // configuration state that holds Run back with its reason.
         if (strategyMode === "single") {
@@ -1068,11 +1167,18 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return fail("submit.blackbox.validation.auto_budget", "bb-max-runs");
         if (maxScorerRuns < 1)
           return fail("submit.blackbox.validation.budget_required", "bb-max-runs");
-        return true;
+        return null;
       }
       default:
-        return true;
+        return null;
     }
+  };
+
+  /** Validates a stage; `report` records its first problem for inline display. */
+  const validateStep = (s: number, report = false): boolean => {
+    const found = stageIssue(s);
+    if (found && report) setIssue(found);
+    return found == null;
   };
 
   // Walk the restored stage's prerequisites against the restored state: a
@@ -1146,7 +1252,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       t.fail(failure?.message ?? msg("submit.preflight.failed"));
       const destination = preflightDestination("anything", failure?.field ?? failure?.key, scope);
       goTo(WIZARD_STAGE[destination.stage]);
-      focusField(destination.fieldId);
+      setIssue({
+        ...destination,
+        message: failure?.message ?? msg("submit.preflight.failed"),
+        identity,
+      });
       return null;
     } catch (error) {
       if (mountedRef.current && navigation === navigationRevisionRef.current) {
@@ -1154,7 +1264,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         t.fail(message.startsWith("budget.") ? msg(message as MessageKey) : message);
         if (message.startsWith("budget.")) {
           goTo(WIZARD_STAGE.evaluation);
-          focusField("totalBudgetInput");
+          setIssue({
+            stage: "evaluation",
+            fieldId: "totalBudgetInput",
+            message: msg(message as MessageKey),
+            identity,
+          });
         }
       }
       return null;
@@ -1166,6 +1281,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     if (advancingRef.current) return;
     advancingRef.current = true;
     setAdvancing(true);
+    setIssue(null);
     try {
       for (let i = 0; i < target; i++) {
         if (!validateStep(i, true)) {
@@ -1200,9 +1316,17 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // Suggested from the objective without a paid call; a typed or cloned name
   // always wins.
   const suggestedName = useMemo(() => suggestedRunName(objective), [objective]);
+  useEffect(() => {
+    if (!jobNameTouched) setJobName(suggestedName);
+  }, [jobNameTouched, suggestedName]);
+  const editJobName = useCallback((value: string) => {
+    setJobNameTouched(true);
+    setJobName(value);
+  }, []);
 
   const handleSubmit = async () => {
     if (advancingRef.current || submitting) return;
+    setIssue(null);
     for (let i = 0; i < LAST_WIZARD_STAGE; i++) {
       if (!validateStep(i, true)) {
         goTo(i);
@@ -1307,7 +1431,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       scorerUrl,
       scorerInstall,
       scorerModel: safeScorerModel,
-      scorerModelDeclared,
       scorerModelMode,
       strategyMode,
       engine,
@@ -1329,8 +1452,14 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   }, [step]);
   useEffect(
     () => () => {
+      if (submittedRef.current) {
+        // A submit leaves on purpose: reset the shared agent state; the draft
+        // was already consumed when the job was accepted.
+        wizardCtxRef.current?.reset();
+        return;
+      }
       // Leaving mid-setup keeps the draft: write whatever the debounce still holds.
-      if (!submittedRef.current) draftsRef.current.flush();
+      draftsRef.current.flush();
     },
     [],
   );
@@ -1345,6 +1474,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     submitting,
     submitPhase,
     validateStep,
+    stageIssue,
+    issue,
     goTo,
     goPrev,
     handleNext,
@@ -1355,7 +1486,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     saveToRecent,
     removeRecentConfig,
     jobName,
-    setJobName,
+    setJobName: editJobName,
     jobDescription,
     setJobDescription,
     isPrivate,
@@ -1374,6 +1505,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     seedParts,
     setSeedParts,
     seedCandidate,
+    seedIsCode,
+    seedLanguage: seedGuess.language,
     objective,
     setObjective,
     background,
@@ -1417,9 +1550,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerInstall,
     scorerModel,
     setScorerModel,
-    scorerModelDeclared,
-    setScorerModelDeclared,
-    scorerCodeCallsModel,
     scorerUsesModel,
     scorerModelMode,
     setScorerModelMode,

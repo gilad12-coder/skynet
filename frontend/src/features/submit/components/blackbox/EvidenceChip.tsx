@@ -9,17 +9,15 @@ import type { EvidenceStatus } from "../../lib/validation-evidence";
 /**
  * Where the evaluator check stands for the setup as it is right now. Passed
  * evidence names the model it ran with; anything edited since shows as stale
- * rather than as a failure, and an inherited scoring model that has no
- * optimization model yet explains when its check will run.
+ * rather than as a failure. Before any check has run there is nothing to
+ * report, so the chip stays out of the way.
  */
 export function EvidenceChip({
   status,
-  pending,
   modelName,
   className,
 }: {
   status: EvidenceStatus;
-  pending: boolean;
   modelName?: string | null;
   className?: string;
 }) {
@@ -58,9 +56,5 @@ export function EvidenceChip({
       </span>
     );
   }
-  return (
-    <span className={cn(base, "font-normal text-muted-foreground", className)}>
-      {msg(pending ? "submit.blackbox.evidence.pending" : "submit.blackbox.evidence.idle")}
-    </span>
-  );
+  return null;
 }

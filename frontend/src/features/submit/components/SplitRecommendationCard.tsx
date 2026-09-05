@@ -47,14 +47,8 @@ function rationaleKey({ counts, engine }: SplitPlan): MessageKey {
   return "submit.split.rationale.large";
 }
 
-export function SplitRecommendationCard({
-  w,
-  readOnly = false,
-}: {
-  w: SplitPlanControls;
-  readOnly?: boolean;
-}) {
-  const { splitPlan, splitMode, setSplitMode, profileLoading } = w;
+export function SplitRecommendationCard({ w }: { w: SplitPlanControls }) {
+  const { splitPlan, splitMode, profileLoading } = w;
   // The rationale/warning copy is portaled into a Radix tooltip, where the `rtl:`
   // variant doesn't fire — drive direction off the locale explicitly instead.
   const { locale } = useLocale();
@@ -124,16 +118,13 @@ export function SplitRecommendationCard({
               </Tooltip>
             )}
           </div>
-          {!readOnly && <ModeToggle value={splitMode} onChange={setSplitMode} />}
         </div>
       </div>
 
       <div
         className={cn(
           "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
-          readOnly || splitMode === "auto"
-            ? "grid-rows-[1fr] opacity-100"
-            : "grid-rows-[0fr] opacity-0",
+          splitMode === "auto" ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
         )}
       >
         <div className="overflow-hidden">
@@ -175,43 +166,6 @@ export function SplitRecommendationCard({
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ModeToggle({
-  value,
-  onChange,
-}: {
-  value: "auto" | "manual";
-  onChange: (mode: "auto" | "manual") => void;
-}) {
-  return (
-    <div className="relative inline-grid w-full [grid-template-columns:repeat(2,minmax(0,1fr))] gap-0.5 rounded-lg bg-[#EFE7DC]/70 p-0.5 sm:w-auto">
-      <div
-        aria-hidden
-        className="absolute top-0.5 bottom-0.5 w-[calc(50%-4px)] rounded-md bg-white shadow-[0_1px_2px_rgba(61,46,34,0.08)] transition-[inset-inline-start] duration-200 ease-out pointer-events-none"
-        style={{ insetInlineStart: value === "auto" ? 2 : "calc(50% + 2px)" }}
-      />
-      {(
-        [
-          ["auto", msg("submit.split.mode_auto")],
-          ["manual", msg("submit.split.mode_manual")],
-        ] as const
-      ).map(([mode, label]) => (
-        <button
-          key={mode}
-          type="button"
-          onClick={() => onChange(mode)}
-          aria-pressed={value === mode}
-          className={cn(
-            "relative z-[1] min-h-[44px] cursor-pointer rounded-md px-3 py-1 text-center text-[11px] font-medium leading-none transition-colors lg:min-h-0",
-            value === mode ? "text-[#3D2E22]" : "text-[#8C7A6B] hover:text-[#3D2E22]",
-          )}
-        >
-          {label}
-        </button>
-      ))}
     </div>
   );
 }

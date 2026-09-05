@@ -6,42 +6,48 @@ import { Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { msg } from "@/shared/lib/messages";
+import { tip } from "@/shared/lib/tooltips";
 
-import type {
-  BlackboxRecipe,
-  BlackboxWizardContext,
-  SeedMode,
-} from "../../hooks/use-blackbox-wizard";
-import { detectLanguage, looksLikeCode, type SeedLanguage } from "../../lib/seed-format";
+import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
 import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
-import { Field, MOBILE_INPUT_CLASS, Segmented, TEXTAREA_CLASS } from "./shared";
-
-interface SeedGuess {
-  code: boolean;
-  language: SeedLanguage | null;
-}
-const NO_GUESS: SeedGuess = { code: false, language: null };
+import { Disclosure } from "../Disclosure";
+import { Field, MOBILE_INPUT_CLASS, TEXTAREA_CLASS } from "./shared";
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
   ssr: false,
 });
 
+// The seed's shape is a side choice, not a question the form asks: each
+// alternative is a quiet text action under the editor.
+function SeedAction({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <Button
+      type="button"
+      variant="link"
+      size="sm"
+      onClick={onClick}
+      className="min-h-[44px] gap-1 px-0 text-xs text-muted-foreground hover:text-foreground lg:min-h-0"
+    >
+      {children}
+    </Button>
+  );
+}
+
 export function BlackboxStartStep({
   w,
-  part,
   header,
 }: {
   w: BlackboxWizardContext;
-  part: "objective" | "seed";
   // The recipe chip, seated in the card's header band on the Goal stage.
   header?: ReactNode;
 }) {
   const {
     recipe,
-    setRecipe,
+    seedIsCode,
+    seedLanguage,
     codeAssistMode,
     interviewEligible,
     agent,
@@ -58,28 +64,30 @@ export function BlackboxStartStep({
     setBackground,
   } = w;
 
+  // Background is optional, so it folds away until it has something to say:
+  // opening by itself when a clone, a draft or the interview's brief fills it.
+  const [backgroundOpen, setBackgroundOpen] = useState(() => background.trim() !== "");
+  useEffect(() => {
+    if (background.trim()) setBackgroundOpen(true);
+  }, [background]);
+
   const updatePart = (i: number, patch: { key?: string; value?: string }) =>
     setSeedParts(seedParts.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
 
-  // What the seed reads as, latched until the seed is cleared so the editor
-  // never swaps out from under the caret while a snippet is typed or trimmed.
-  // The code kind is always code.
-  const [seedGuess, setSeedGuess] = useState<SeedGuess>(NO_GUESS);
-  useEffect(() => {
-    if (!seedText.trim()) {
-      setSeedGuess(NO_GUESS);
+  // Splitting a whole text keeps it as the first part.
+  const addPart = () => {
+    if (seedMode === "parts") {
+      setSeedParts([...seedParts, { key: "", value: "" }]);
       return;
     }
-    const language = detectLanguage(seedText);
-    if (!language && !looksLikeCode(seedText)) return;
-    setSeedGuess((prev) =>
-      prev.code && (!language || prev.language === language)
-        ? prev
-        : { code: true, language: language ?? prev.language },
-    );
-  }, [seedText]);
-  const seedIsCode = recipe === "code" || seedGuess.code;
-  const seedLanguage = seedGuess.language ?? (recipe === "code" ? "Python" : "text");
+    const kept = seedText.trim()
+      ? [{ key: "", value: seedText }]
+      : seedParts.filter((p) => p.key.trim() || p.value.trim());
+    setSeedParts([...kept, { key: "", value: "" }]);
+    setSeedMode("parts");
+  };
+
+  const editorLanguage = seedLanguage ?? (recipe === "code" ? "Python" : "text");
 
   // The code kind names its starting point in its own words; text keeps the
   // generic copy.
@@ -93,18 +101,45 @@ export function BlackboxStartStep({
       : msg("submit.blackbox.start.seed_placeholder");
   // One line of guidance at most: what the interview does while it is live,
   // otherwise only the code recipe needs a nudge about what to paste.
-  const seedHint = interviewEligible
-    ? seedMode === "text"
-      ? msg("submit.blackbox.start.seed_hint_auto")
-      : msg("submit.blackbox.start.seed_mode_hint_auto")
-    : seedMode === "text" && recipe === "code"
-      ? seedPlaceholder
-      : undefined;
+  const seedHint =
+    seedMode !== "text"
+      ? undefined
+      : interviewEligible
+        ? msg("submit.blackbox.start.seed_hint_auto")
+        : recipe === "code"
+          ? seedPlaceholder
+          : undefined;
 
   const showSeedTextarea = seedMode === "text" && !seedIsCode;
   // The stepper and status chip mean nothing until the agent has touched the
   // seed; idle they render empty and would leave a hollow label row.
   const showSeedAgent = interviewEligible && agent.signatureStatus !== "idle";
+
+  const seedActions = (
+    <div className="flex flex-wrap items-center gap-x-5">
+      {seedMode === "none" ? (
+        <SeedAction onClick={() => setSeedMode("text")}>
+          <Plus className="size-3.5" />
+          {msg("submit.blackbox.start.seed_add_action")}
+        </SeedAction>
+      ) : (
+        <>
+          <SeedAction onClick={addPart}>
+            <Plus className="size-3.5" />
+            {msg("submit.blackbox.start.add_part")}
+          </SeedAction>
+          {seedMode === "parts" && (
+            <SeedAction onClick={() => setSeedMode("text")}>
+              {msg("submit.blackbox.start.seed_whole_action")}
+            </SeedAction>
+          )}
+          <SeedAction onClick={() => setSeedMode("none")}>
+            {msg("submit.blackbox.start.seed_none_action")}
+          </SeedAction>
+        </>
+      )}
+    </div>
+  );
 
   const seedFields = (
     <ExpandableTextarea
@@ -140,17 +175,6 @@ export function BlackboxStartStep({
           }
           className="min-h-0 flex-1"
         >
-          <Segmented<SeedMode>
-            label={seedLabel}
-            value={seedMode}
-            onChange={setSeedMode}
-            options={[
-              { value: "text", label: msg("submit.blackbox.start.seed_mode.text") },
-              { value: "parts", label: msg("submit.blackbox.start.seed_mode.parts") },
-              { value: "none", label: msg("submit.blackbox.start.seed_mode.none") },
-            ]}
-          />
-
           {seedMode === "text" &&
             (seedIsCode ? (
               <CodeEditor
@@ -160,8 +184,8 @@ export function BlackboxStartStep({
                   setSeedManuallyEdited(true);
                 }}
                 height="420px"
-                language={seedLanguage}
-                label={seedGuess.language ?? msg("submit.blackbox.start.seed_editor_label")}
+                language={editorLanguage}
+                label={seedLanguage ?? msg("submit.blackbox.start.seed_editor_label")}
                 streaming={codeAssistMode === "auto" && agent.signatureStatus === "writing"}
                 flashLines={codeAssistMode === "auto" ? agent.signatureFlashLines : undefined}
               />
@@ -209,31 +233,36 @@ export function BlackboxStartStep({
                   )}
                 </ExpandableTextarea>
               ))}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setSeedParts([...seedParts, { key: "", value: "" }])}
-                className="min-h-[44px] gap-2 lg:min-h-0"
-              >
-                <Plus className="size-4" />
-                {msg("submit.blackbox.start.add_part")}
-              </Button>
             </div>
           )}
+
+          {seedMode === "none" && (
+            <p className="text-sm text-muted-foreground" dir="auto">
+              {msg("submit.blackbox.start.seed_none_note")}
+            </p>
+          )}
+
+          {seedActions}
         </Field>
       )}
     </ExpandableTextarea>
   );
 
-  const objectiveFields = (
-    <>
+  return (
+    <BlackboxAuthoringShell
+      w={w}
+      start={header}
+      title={msg("submit.blackbox.start.title")}
+      description={msg("submit.blackbox.start.desc")}
+    >
+      {seedFields}
       <ExpandableTextarea
         id="bb-objective"
         label={msg("submit.blackbox.start.objective_label")}
         value={objective}
         onChange={setObjective}
         placeholder={msg("submit.blackbox.start.objective_placeholder")}
-        rows={5}
+        rows={3}
         className={TEXTAREA_CLASS}
       >
         {({ textarea, trigger }) => (
@@ -254,57 +283,22 @@ export function BlackboxStartStep({
         value={background}
         onChange={setBackground}
         placeholder={msg("submit.blackbox.start.background_placeholder")}
-        rows={6}
-        className={`${TEXTAREA_CLASS} flex-1`}
+        rows={3}
+        className={TEXTAREA_CLASS}
       >
         {({ textarea, trigger }) => (
-          <Field
-            label={msg("submit.blackbox.start.background_label")}
-            htmlFor="bb-background"
-            tip="submit.blackbox.background"
+          <Disclosure
+            id="bb-background-panel"
+            label={msg("submit.blackbox.start.background_toggle")}
+            tip={tip("submit.blackbox.background")}
+            open={backgroundOpen}
+            onOpenChange={setBackgroundOpen}
             trailing={trigger}
-            className="min-h-0 flex-1"
           >
             {textarea}
-          </Field>
+          </Disclosure>
         )}
       </ExpandableTextarea>
-    </>
-  );
-
-  return (
-    <BlackboxAuthoringShell
-      w={w}
-      start={header}
-      title={part === "objective" ? msg("submit.blackbox.start.objective_label") : seedLabel}
-      description={msg("submit.blackbox.start.desc")}
-    >
-      {part === "objective" ? (
-        <>
-          <Field label={msg("submit.blackbox.start.kind_label")} tip="submit.blackbox.kind">
-            <Segmented<BlackboxRecipe>
-              label={msg("submit.blackbox.start.kind_label")}
-              value={recipe}
-              onChange={setRecipe}
-              options={[
-                {
-                  value: "anything",
-                  label: msg("submit.blackbox.start.kind.anything"),
-                  desc: msg("submit.blackbox.start.kind.anything_desc"),
-                },
-                {
-                  value: "code",
-                  label: msg("submit.blackbox.start.kind.code"),
-                  desc: msg("submit.blackbox.start.kind.code_desc"),
-                },
-              ]}
-            />
-          </Field>
-          {objectiveFields}
-        </>
-      ) : (
-        seedFields
-      )}
     </BlackboxAuthoringShell>
   );
 }

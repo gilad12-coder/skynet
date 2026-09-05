@@ -100,7 +100,6 @@ export interface AnythingDraftData {
   scorerUrl: string;
   scorerInstall: string;
   scorerModel: ModelConfig;
-  scorerModelDeclared: boolean;
   scorerModelMode: ScoringModelMode;
   strategyMode: "auto" | "single" | "plateau";
   engine: BlackboxEngineId | null;

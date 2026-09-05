@@ -1,8 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import { Input } from "@/shared/ui/primitives/input";
-import { Label } from "@/shared/ui/primitives/label";
-import { HelpTip } from "@/shared/ui/help-tip";
 import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
@@ -10,6 +10,7 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
+import { Disclosure } from "../Disclosure";
 import { Field, MOBILE_INPUT_CLASS, Segmented, StepCard, TEXTAREA_CLASS } from "./shared";
 
 export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
@@ -22,6 +23,11 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
     setIsPrivate,
     suggestedName,
   } = w;
+  // The description is optional, so it stays folded until it holds text.
+  const [descriptionOpen, setDescriptionOpen] = useState(() => jobDescription.trim() !== "");
+  useEffect(() => {
+    if (jobDescription.trim()) setDescriptionOpen(true);
+  }, [jobDescription]);
 
   return (
     <StepCard
@@ -41,6 +47,7 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
             {TERMS.optimization}
           </>
         }
+        htmlFor="bb-job-name"
         tip="submit.name"
         hint={suggestedName ? msg("submit.blackbox.basics.name_suggested_hint") : undefined}
       >
@@ -68,14 +75,14 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
         className={TEXTAREA_CLASS}
       >
         {({ textarea, trigger }) => (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <Label>
-                <HelpTip text={tip("submit.description")}>
-                  {msg("auto.features.submit.components.steps.basicsstep.4")}
-                </HelpTip>
-              </Label>
-              <div className="flex items-center gap-2">
+          <Disclosure
+            id="bb-job-description-panel"
+            label={msg("auto.features.submit.components.steps.basicsstep.4")}
+            tip={tip("submit.description")}
+            open={descriptionOpen}
+            onOpenChange={setDescriptionOpen}
+            trailing={
+              <>
                 <span
                   className={cn(
                     "text-[0.625rem] tabular-nums transition-colors",
@@ -88,10 +95,11 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
                   {msg("auto.features.submit.components.steps.basicsstep.5")}
                 </span>
                 {trigger}
-              </div>
-            </div>
+              </>
+            }
+          >
             {textarea}
-          </div>
+          </Disclosure>
         )}
       </ExpandableTextarea>
       <Field label={msg("submit.basics.privacy.label")} tip="submit.privacy">

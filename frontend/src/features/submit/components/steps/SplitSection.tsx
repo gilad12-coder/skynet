@@ -14,9 +14,9 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
-import { useUserPrefs } from "@/features/settings";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
+import { Disclosure } from "../Disclosure";
 import { SplitRecommendationCard, type SplitPlanControls } from "../SplitRecommendationCard";
 
 export type SplitControls = SplitPlanControls &
@@ -25,12 +25,12 @@ export type SplitControls = SplitPlanControls &
 const MOBILE_NUMBER_INPUT_CLASS =
   "h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm";
 
-// Simple mode shows the recommendation read-only; advanced mode adds the
-// manual toggle and inputs.
+// The recommendation always shows. The manual fractions fold behind a
+// disclosure whose open state is the split mode itself: closing it hands the
+// numbers back to the planner, and a clone or draft that brought its own
+// split arrives with the panel already open.
 export function SplitSection({ w }: { w: SplitControls }) {
-  const { prefs } = useUserPrefs();
-  const { split, updateSplit, splitSum, splitMode, splitPlan, profileLoading } = w;
-  const advanced = prefs.advancedMode;
+  const { split, updateSplit, splitSum, splitMode, setSplitMode, splitPlan, profileLoading } = w;
 
   return (
     <Card
@@ -58,9 +58,15 @@ export function SplitSection({ w }: { w: SplitControls }) {
         {!splitPlan && !profileLoading && (
           <p className="text-sm text-muted-foreground">{msg("submit.split.empty")}</p>
         )}
-        <SplitRecommendationCard w={w} readOnly={!advanced} />
-        {advanced && splitMode === "manual" && (
-          <div className="space-y-3">
+        <SplitRecommendationCard w={w} />
+        <Disclosure
+          id="split-adjust"
+          label={msg("submit.split.adjust_toggle")}
+          tip={msg("submit.split.adjust_hint")}
+          open={splitMode === "manual"}
+          onOpenChange={(open) => setSplitMode(open ? "manual" : "auto")}
+        >
+          <div className="space-y-3 pt-1">
             <div className="flex h-3 rounded-full overflow-hidden">
               <div
                 className="bg-[#3D2E22] transition-all"
@@ -129,7 +135,7 @@ export function SplitSection({ w }: { w: SplitControls }) {
               </div>
             </div>
           </div>
-        )}
+        </Disclosure>
       </CardContent>
     </Card>
   );

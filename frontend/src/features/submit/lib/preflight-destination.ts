@@ -12,7 +12,7 @@ export function preflightDestination(
         stage: "optimization",
         fieldId: /model|optimization|reflection/.test(key) ? "bb-optimization-model" : "bb-engines",
       };
-    if (/runtime/.test(key)) return { stage: "optimization", fieldId: "execution-preflight-checks" };
+    if (/runtime/.test(key)) return { stage: "optimization", fieldId: "wizard-stage-optimization" };
     if (/scor|evaluation/.test(key))
       return {
         stage: "evaluation",
@@ -23,7 +23,7 @@ export function preflightDestination(
     if (/task|target/.test(key))
       return { stage: "optimization", fieldId: "wizard-stage-optimization" };
   } else {
-    if (/runtime/.test(key)) return { stage: "optimization", fieldId: "execution-preflight-checks" };
+    if (/runtime/.test(key)) return { stage: "optimization", fieldId: "wizard-stage-optimization" };
     if (/model|task|optimization|reflection|generation/.test(key))
       return { stage: "optimization", fieldId: "model-catalog" };
     if (/metric|scor/.test(key)) return { stage: "evaluation", fieldId: "metric-editor" };

@@ -45,7 +45,6 @@ function anythingDraft(overrides: Partial<AnythingDraftData> = {}): AnythingDraf
     scorerUrl: "",
     scorerInstall: "",
     scorerModel: { name: "" },
-    scorerModelDeclared: false,
     scorerModelMode: "inherit",
     strategyMode: "auto",
     engine: null,

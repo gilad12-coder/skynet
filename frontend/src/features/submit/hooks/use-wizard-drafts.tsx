@@ -21,6 +21,7 @@ import { sessionIdentity } from "@/shared/lib/session-identity";
 import { DraftRestoreToast, type DraftRestoreState } from "../components/DraftRestoreToast";
 import {
   DraftSaver,
+  draftStage,
   hasMeaningfulDraft,
   recipeToOpen,
   type DraftDataFor,
@@ -82,6 +83,14 @@ const SAVE_FAILED_TOAST = "wizard-draft-save-failed";
 
 function offerToastId(draftId: string): string {
   return `draft-restore:${draftId}`;
+}
+
+/** "Anything · Evaluation": what the draft is and where it reopens. */
+function draftSummary(record: WizardDraftRecord): string | null {
+  const recipe = recipeToOpen(record);
+  const stage = draftStage(record);
+  if (!recipe || !stage) return null;
+  return `${msg(`submit.recipe.${recipe}.title`)} · ${msg(`submit.stage.${stage}`)}`;
 }
 
 /**
@@ -165,6 +174,7 @@ export function useWizardDraftController({
     (record: WizardDraftRecord, continueDraft: () => void) => (
       <DraftRestoreToast
         title={msg("submit.draft.restore.title")}
+        summary={draftSummary(record)}
         state={offerStateRef.current.state}
         failureText={offerStateRef.current.failure}
         continueLabel={msg("submit.draft.restore.continue")}

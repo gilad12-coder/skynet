@@ -27,11 +27,14 @@ export const MOBILE_NUMBER_INPUT_CLASS =
 export function StepCard({
   title,
   description,
+  tip,
   children,
   tutorial,
 }: {
   title: ReactNode;
   description?: ReactNode;
+  // Guidance that used to sit in the body; hovering the title shows it.
+  tip?: string;
   children: ReactNode;
   tutorial?: string;
 }) {
@@ -41,7 +44,9 @@ export function StepCard({
       data-tutorial={tutorial}
     >
       <CardHeader className="px-4 sm:px-6">
-        <CardTitle className="text-lg">{title}</CardTitle>
+        <CardTitle className="text-lg">
+          {tip ? <HelpTip text={tip}>{title}</HelpTip> : title}
+        </CardTitle>
         {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
       {/* Positioned so an expanded textarea covers the fields, not the page. */}
@@ -61,7 +66,9 @@ export function Field({
 }: {
   label: ReactNode;
   htmlFor?: string;
-  hint?: ReactNode;
+  // Extra guidance; it joins the label tooltip rather than taking a line
+  // under the control.
+  hint?: string;
   // Tooltip catalog key; hovering the label explains what the field controls.
   tip?: TooltipKey;
   // Rendered at the end of the label row (status chips, version steppers).
@@ -70,7 +77,8 @@ export function Field({
   className?: string;
   children: ReactNode;
 }) {
-  const labelNode = tip ? <HelpTip text={tipText(tip)}>{label}</HelpTip> : label;
+  const help = [tip ? tipText(tip) : null, hint].filter(Boolean).join(" ");
+  const labelNode = help ? <HelpTip text={help}>{label}</HelpTip> : label;
   return (
     <div className={cn("flex flex-col gap-2", className)}>
       {trailing ? (
@@ -82,9 +90,6 @@ export function Field({
         <Label htmlFor={htmlFor}>{labelNode}</Label>
       )}
       {children}
-      {hint ? (
-        <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">{hint}</p>
-      ) : null}
     </div>
   );
 }

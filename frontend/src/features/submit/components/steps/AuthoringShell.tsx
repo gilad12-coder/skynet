@@ -4,6 +4,7 @@ import * as React from "react";
 import { Check, Repeat } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
+import { HelpTip } from "@/shared/ui/help-tip";
 import type { ArtifactStatus } from "@/shared/hooks/use-code-agent";
 
 export function ArtifactStatusChip({ status }: { status: ArtifactStatus }) {
@@ -107,7 +108,8 @@ export interface AuthoringShellProps extends ModeToggleProps {
   // The agent chat or interview, shown in the start pane while in auto mode.
   sidePanel: React.ReactNode;
   title: React.ReactNode;
-  description?: React.ReactNode;
+  // Guidance for the step; hovering the title shows it.
+  description?: string;
   children: React.ReactNode;
 }
 
@@ -155,9 +157,8 @@ export function AuthoringShell({
         <div className="flex min-w-0 flex-col self-stretch">
           <div className="shrink-0 border-b border-border/30 px-4 py-3 sm:px-6">
             <h3 className="inline-flex text-lg font-semibold tracking-tight text-foreground">
-              {title}
+              {description ? <HelpTip text={description}>{title}</HelpTip> : title}
             </h3>
-            {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
           </div>
           {children}
         </div>

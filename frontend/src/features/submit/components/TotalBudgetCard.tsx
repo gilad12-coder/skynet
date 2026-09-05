@@ -74,7 +74,7 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
             <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
               <Gauge className="h-3 w-3" />
             </span>
-            <HelpTip text={tip("submit.budget")}>
+            <HelpTip text={`${tip("submit.budget")} ${msg("submit.budget.supporting")}`}>
               <label
                 htmlFor="totalBudgetInput"
                 className="text-[13px] font-semibold tracking-tight"
@@ -83,9 +83,6 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
               </label>
             </HelpTip>
           </div>
-          <p className="mt-1 text-[12px] leading-relaxed text-[#3D2E22]/80" dir="auto">
-            {msg("submit.budget.supporting")}
-          </p>
         </div>
 
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -118,9 +115,21 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
 
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-[#DDD6CC]/60 pt-3 text-[12px] sm:grid-cols-4">
           <BudgetFigure
+            label={msg("submit.budget.billing_source")}
+            tip={`${msg(mode === "byok" ? "billing.mode.byok_hint" : "billing.mode.managed_hint")} ${msg("submit.budget.billing_source_tip")}`}
+            value={msg(mode === "byok" ? "billing.mode.byok" : "billing.mode.managed")}
+            mono={false}
+          />
+          <BudgetFigure
             label={msg(
               isFeeOnlyEstimate ? "submit.summary.estimate_fee" : "submit.summary.estimate_cost",
             )}
+            tip={[
+              msg("submit.budget.reservation_copy"),
+              mode === "byok" ? msg("submit.budget.byok_note") : null,
+            ]
+              .filter(Boolean)
+              .join(" ")}
             value={formatMsg("submit.summary.estimate_range", {
               low: credits(displayBracket.lowCredits),
               high: credits(displayBracket.highCredits),
@@ -181,24 +190,31 @@ export function TotalBudgetCard({ w, mode }: { w: BudgetContext; mode: TokenSour
         {budget && budget.total_credits !== maxCostCredits && (
           <p className="text-xs text-muted-foreground">{msg("submit.budget.pending_total")}</p>
         )}
-        {mode === "byok" && (
-          <p className="text-[11px] leading-relaxed text-[#8C7A6B]" dir="auto">
-            {msg("submit.budget.byok_note")}
-          </p>
-        )}
-        <p className="text-[11px] leading-relaxed text-[#8C7A6B]" dir="auto">
-          {msg("submit.budget.reservation_copy")}
-        </p>
       </div>
     </div>
   );
 }
 
-function BudgetFigure({ label, value }: { label: string; value: string }) {
+function BudgetFigure({
+  label,
+  value,
+  tip,
+  mono = true,
+}: {
+  label: string;
+  value: string;
+  tip?: string;
+  mono?: boolean;
+}) {
   return (
     <div className="min-w-0">
-      <dt className="text-[10px] font-medium uppercase tracking-wide text-[#8C7A6B]">{label}</dt>
-      <dd className="font-mono text-xs font-semibold tabular-nums text-[#3D2E22]" dir="auto">
+      <dt className="text-[10px] font-medium uppercase tracking-wide text-[#8C7A6B]">
+        {tip ? <HelpTip text={tip}>{label}</HelpTip> : label}
+      </dt>
+      <dd
+        className={`${mono ? "font-mono tabular-nums" : ""} text-xs font-semibold text-[#3D2E22]`}
+        dir="auto"
+      >
         {value}
       </dd>
     </div>

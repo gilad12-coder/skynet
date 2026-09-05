@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Label } from "@/shared/ui/primitives/label";
 import { Switch } from "@/shared/ui/primitives/switch";
 import {
@@ -20,6 +21,8 @@ import { tip } from "@/shared/lib/tooltips";
 import type { BlackboxHarness } from "@/shared/types/api";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
+import { DEFAULT_TARGET_CONCURRENCY, DEFAULT_TARGET_TIMEOUT } from "../../constants";
+import { Disclosure } from "../Disclosure";
 import { ModelRoleRow } from "./ModelRoleRow";
 import { Field, MOBILE_INPUT_CLASS, MOBILE_NUMBER_INPUT_CLASS, StepCard, cnGrid } from "./shared";
 
@@ -47,6 +50,14 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
     catalog,
   } = w;
   const agent = targetKind === "agent";
+  // The limits stay folded on the defaults and open by themselves when a
+  // clone or draft arrives with its own numbers.
+  const customLimits =
+    targetTimeout !== DEFAULT_TARGET_TIMEOUT || targetConcurrency !== DEFAULT_TARGET_CONCURRENCY;
+  const [limitsOpen, setLimitsOpen] = useState(customLimits);
+  useEffect(() => {
+    if (customLimits) setLimitsOpen(true);
+  }, [customLimits]);
 
   return (
     <StepCard
@@ -56,17 +67,16 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
       <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
         <div className="min-w-0 space-y-0.5">
           <Label htmlFor="bb-execution-agent">
-            <HelpTip text={tip("submit.blackbox.target")}>
+            <HelpTip
+              text={`${tip("submit.blackbox.target")} ${msg(
+                agent
+                  ? "submit.blackbox.start.target.agent_desc"
+                  : "submit.blackbox.start.target.text_desc",
+              )}`}
+            >
               {msg("submit.blackbox.execution.label")}
             </HelpTip>
           </Label>
-          <p className="text-xs text-muted-foreground">
-            {msg(
-              agent
-                ? "submit.blackbox.start.target.agent_desc"
-                : "submit.blackbox.start.target.text_desc",
-            )}
-          </p>
         </div>
         <Switch
           id="bb-execution-agent"
@@ -81,7 +91,6 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
             <ModelRoleRow
               id="bb-task-model"
               role={msg("submit.blackbox.roles.task.label")}
-              modelName={targetModel.name.trim() || null}
               description={msg("submit.blackbox.roles.task.desc")}
               tip={tip("blackbox.config.agent_model")}
             >
@@ -123,37 +132,44 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
                 </SelectContent>
               </Select>
             </Field>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field
-                label={msg("submit.blackbox.start.timeout_label")}
-                htmlFor="bb-target-timeout"
-                tip="submit.blackbox.target_timeout"
-              >
-                <NumberInput
-                  id="bb-target-timeout"
-                  value={targetTimeout}
-                  onChange={setTargetTimeout}
-                  min={30}
-                  max={2700}
-                  step={30}
-                  className={MOBILE_NUMBER_INPUT_CLASS}
-                />
-              </Field>
-              <Field
-                label={msg("submit.blackbox.start.concurrency_label")}
-                htmlFor="bb-concurrency"
-                tip="submit.blackbox.concurrency"
-              >
-                <NumberInput
-                  id="bb-concurrency"
-                  value={targetConcurrency}
-                  onChange={setTargetConcurrency}
-                  min={1}
-                  max={8}
-                  className={MOBILE_NUMBER_INPUT_CLASS}
-                />
-              </Field>
-            </div>
+            <Disclosure
+              id="bb-execution-limits"
+              label={msg("submit.blackbox.execution.limits_toggle")}
+              open={limitsOpen}
+              onOpenChange={setLimitsOpen}
+            >
+              <div className="grid gap-4 pt-1 sm:grid-cols-2">
+                <Field
+                  label={msg("submit.blackbox.start.timeout_label")}
+                  htmlFor="bb-target-timeout"
+                  tip="submit.blackbox.target_timeout"
+                >
+                  <NumberInput
+                    id="bb-target-timeout"
+                    value={targetTimeout}
+                    onChange={setTargetTimeout}
+                    min={30}
+                    max={2700}
+                    step={30}
+                    className={MOBILE_NUMBER_INPUT_CLASS}
+                  />
+                </Field>
+                <Field
+                  label={msg("submit.blackbox.start.concurrency_label")}
+                  htmlFor="bb-concurrency"
+                  tip="submit.blackbox.concurrency"
+                >
+                  <NumberInput
+                    id="bb-concurrency"
+                    value={targetConcurrency}
+                    onChange={setTargetConcurrency}
+                    min={1}
+                    max={8}
+                    className={MOBILE_NUMBER_INPUT_CLASS}
+                  />
+                </Field>
+              </div>
+            </Disclosure>
           </div>
         </div>
       </div>
