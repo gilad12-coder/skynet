@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleNotch, ClockCounterClockwise, WarningCircle } from "@/shared/ui/icons";
+import { CircleNotch } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 
 export type DraftRestoreState = "offer" | "working" | "failed";
@@ -34,19 +34,7 @@ export function DraftRestoreToast({
 
   return (
     <div className="flex w-96 min-w-0 max-w-full flex-col gap-3" data-tutorial="submit-draft-offer">
-      <div className="flex items-center gap-2.5">
-        {failed ? (
-          <WarningCircle className="hidden size-5 shrink-0 text-destructive sm:block" aria-hidden="true" />
-        ) : (
-          <ClockCounterClockwise
-            className="hidden size-5 shrink-0 text-muted-foreground sm:block"
-            aria-hidden="true"
-          />
-        )}
-        <p className="min-w-0 flex-1 text-[14px] font-semibold leading-5 text-foreground">
-          {title}
-        </p>
-      </div>
+      <p className="text-[14px] font-semibold leading-5 text-foreground">{title}</p>
       {failed && failureText && (
         <p role="alert" className="text-pretty text-[14px] leading-relaxed text-destructive">
           {failureText}
