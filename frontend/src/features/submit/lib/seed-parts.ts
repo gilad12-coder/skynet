@@ -13,3 +13,16 @@ export function seedPartsIssue(
   }
   return null;
 }
+
+/** Give unnamed parts collision-free identifiers while retaining authored names. */
+export function namedSeedParts(parts: ReadonlyArray<{ key: string; value: string }>) {
+  const names = new Set(parts.map((part) => part.key.trim()).filter(Boolean));
+  return parts.map((part, index) => {
+    if (part.key.trim() || !part.value.trim()) return part;
+    let number = index + 1;
+    while (names.has(`part_${number}`)) number += 1;
+    const key = `part_${number}`;
+    names.add(key);
+    return { ...part, key };
+  });
+}

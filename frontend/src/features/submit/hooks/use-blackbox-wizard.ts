@@ -75,7 +75,7 @@ import {
 import type { PreflightScope, WizardPreflightResponse } from "@/shared/types/wizard-preflight";
 import { useWizardPreflight } from "./use-wizard-preflight";
 import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
-import { seedPartsIssue } from "../lib/seed-parts";
+import { namedSeedParts, seedPartsIssue } from "../lib/seed-parts";
 import { beginValidationToast, type ValidationToast } from "../lib/validation-toast";
 import {
   aggregateTokenSource,
@@ -690,7 +690,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const seedCandidate = useMemo<BlackboxCandidate | null>(() => {
     if (seedMode === "none") return null;
     if (seedMode === "text") return seedText.trim() ? seedText : null;
-    const parts = seedParts.filter((p) => p.key.trim() && p.value.trim());
+    const parts = namedSeedParts(seedParts).filter((p) => p.key.trim() && p.value.trim());
     return parts.length ? Object.fromEntries(parts.map((p) => [p.key.trim(), p.value])) : null;
   }, [seedMode, seedText, seedParts]);
 
@@ -1100,7 +1100,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     });
     switch (s) {
       case WIZARD_STAGE.goal: {
-        const partsIssue = seedMode === "parts" ? seedPartsIssue(seedParts) : null;
+        const partsIssue = seedMode === "parts" ? seedPartsIssue(namedSeedParts(seedParts)) : null;
         if (partsIssue) return fail(`submit.parts.${partsIssue}`, "bb-seed");
         // In auto mode the agent drafts the text seed from the objective, so
         // the objective is the required input and the seed may stay blank.

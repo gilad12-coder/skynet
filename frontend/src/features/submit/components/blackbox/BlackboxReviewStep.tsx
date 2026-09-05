@@ -129,7 +129,7 @@ export function BlackboxReviewStep({
       : seedMode === "text"
         ? formatMsg("submit.blackbox.review.start_text", { chars: seedText.length })
         : formatMsg("submit.blackbox.review.start_parts", {
-            n: seedParts.filter((p) => p.key.trim() && p.value.trim()).length,
+            n: seedParts.filter((p) => p.value.trim()).length,
           });
 
   const displayName = jobName.trim() || suggestedName;

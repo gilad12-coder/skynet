@@ -293,15 +293,3 @@ test("typing into a restored no-seed draft makes the starting point active", () 
   assert.equal(seedText, "My starting point");
   assert.equal(edited, true);
 });
-
-test("adding a text file preserves existing starting content", async () => {
-  let seedText = "Existing prompt";
-  let fileError = false;
-  await evaluate(variable(start, "addFile"), {
-    seedMode: "text", seedText,
-    setFileError: (value: boolean) => { fileError = value; },
-    editSeed: (value: string) => { seedText = value; },
-  })({ name: "rules.txt", text: async () => "Extra rules" });
-  assert.equal(seedText, "Existing prompt\n\nExtra rules");
-  assert.equal(fileError, false);
-});

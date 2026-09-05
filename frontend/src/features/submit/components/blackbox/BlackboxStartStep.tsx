@@ -1,16 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/shared/ui/primitives/dropdown-menu";
-import { Input } from "@/shared/ui/primitives/input";
 import { msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 
@@ -20,7 +13,7 @@ import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
 import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
 import { Disclosure } from "../Disclosure";
-import { Field, MOBILE_INPUT_CLASS, TEXTAREA_CLASS } from "./shared";
+import { Field, TEXTAREA_CLASS } from "./shared";
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
   ssr: false,
@@ -54,28 +47,11 @@ export function BlackboxStartStep({
     setBackground,
   } = w;
 
-  const fileInput = useRef<HTMLInputElement>(null);
-  const [fileError, setFileError] = useState(false);
   const editSeed = (value: string) => {
     setSeedText(value);
     setSeedMode("text");
     setSeedManuallyEdited(true);
   };
-  const addFile = async (file: File) => {
-    setFileError(false);
-    try {
-      const value = await file.text();
-      if (seedMode === "parts") {
-        setSeedParts([...seedParts, { key: file.name, value }]);
-        setSeedManuallyEdited(true);
-      } else {
-        editSeed(seedMode === "text" && seedText.trim() ? `${seedText}\n\n${value}` : value);
-      }
-    } catch {
-      setFileError(true);
-    }
-  };
-
   // Background is optional, so it folds away until it has something to say:
   // opening by itself when a clone, a draft or the interview's brief fills it.
   const [backgroundOpen, setBackgroundOpen] = useState(() => background.trim() !== "");
@@ -127,50 +103,27 @@ export function BlackboxStartStep({
   const showSeedAgent = interviewEligible && agent.signatureStatus !== "idle";
 
   const seedActions = (
-    <>
-      <input
-        ref={fileInput}
-        type="file"
-        accept="text/*,.md,.txt,.json,.yaml,.yml,.toml,.xml,.csv,.py,.js,.jsx,.ts,.tsx,.html,.css,.sh"
-        className="hidden"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = "";
-          if (file) void addFile(file);
-        }}
-      />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="min-h-[44px] w-fit gap-1 self-start text-muted-foreground"
-          >
-            <Plus className="size-3.5" />
-            {msg("submit.blackbox.start.add_menu")}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem onSelect={() => fileInput.current?.click()}>
-            {msg("submit.blackbox.start.add_file")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={addPart}>
-            {msg("submit.blackbox.start.add_part")}
-          </DropdownMenuItem>
-          {seedMode === "parts" && (
-            <DropdownMenuItem onSelect={() => setSeedMode("text")}>
-              {msg("submit.blackbox.start.seed_whole_action")}
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {fileError && (
-        <p role="alert" className="text-sm text-destructive">
-          {msg("submit.dataset.file_error")}
-        </p>
+    <div className="flex w-full flex-col gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={addPart}
+        className="min-h-11 w-full gap-2 rounded-lg border-dashed bg-transparent shadow-none"
+      >
+        <Plus className="size-4" aria-hidden="true" />
+        {msg("submit.blackbox.start.add_part")}
+      </Button>
+      {seedMode === "parts" && (
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => setSeedMode("text")}
+          className="min-h-11 w-full text-muted-foreground"
+        >
+          {msg("submit.blackbox.start.seed_whole_action")}
+        </Button>
       )}
-    </>
+    </div>
   );
 
   const seedFields = (
@@ -225,22 +178,23 @@ export function BlackboxStartStep({
                 <ExpandableTextarea
                   key={i}
                   id={`bb-seed-part-${i}`}
-                  label={part.key.trim() || seedLabel}
+                  label={part.key.trim() || msg("submit.blackbox.start.part_label", { n: i + 1 })}
                   value={part.value}
                   onChange={(value) => updatePart(i, { value })}
                   placeholder={msg("submit.blackbox.start.part_value")}
                   rows={4}
-                  className={`${TEXTAREA_CLASS} font-mono text-sm`}
+                  className={`${TEXTAREA_CLASS} min-h-32 rounded-none border-0 bg-transparent text-base shadow-none focus-visible:ring-inset md:text-sm`}
                 >
                   {({ textarea: partTextarea, trigger: partTrigger }) => (
-                    <div className="space-y-2 rounded-lg border border-border/50 p-3">
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={part.key}
-                          onChange={(e) => updatePart(i, { key: e.target.value })}
-                          placeholder={msg("submit.blackbox.start.part_key")}
-                          className={`${MOBILE_INPUT_CLASS} font-mono`}
-                        />
+                    <div className="overflow-hidden rounded-xl border border-border bg-background">
+                      <div className="flex min-h-12 items-center gap-2 border-b border-border bg-muted/30 px-3">
+                        <label
+                          htmlFor={`bb-seed-part-${i}`}
+                          className="min-w-0 flex-1 truncate text-sm font-medium"
+                          title={part.key || undefined}
+                        >
+                          {part.key.trim() || msg("submit.blackbox.start.part_label", { n: i + 1 })}
+                        </label>
                         {partTrigger}
                         <Button
                           type="button"
@@ -249,7 +203,7 @@ export function BlackboxStartStep({
                           aria-label={msg("submit.blackbox.start.remove_part")}
                           disabled={seedParts.length === 1}
                           onClick={() => setSeedParts(seedParts.filter((_, idx) => idx !== i))}
-                          className="shrink-0"
+                          className="size-11 shrink-0 text-muted-foreground hover:text-destructive"
                         >
                           <Trash className="size-4" />
                         </Button>
