@@ -246,7 +246,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               variant="outline"
               onClick={() => void runDryRun()}
               disabled={dryRun.status === "running"}
-              className="min-h-[44px] gap-2 lg:min-h-0"
+              className="min-h-[44px] w-full gap-2 lg:min-h-0"
             >
               {dryRun.status === "running" ? (
                 <CircleNotch className="size-4 animate-spin" />
