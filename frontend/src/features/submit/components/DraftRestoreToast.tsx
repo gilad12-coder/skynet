@@ -33,30 +33,30 @@ export function DraftRestoreToast({
   const failed = state === "failed";
 
   return (
-    <div className="flex w-72 max-w-full flex-col gap-3" data-tutorial="submit-draft-offer">
-      <div className="flex items-start gap-2.5">
+    <div className="flex w-96 min-w-0 max-w-full flex-col gap-3" data-tutorial="submit-draft-offer">
+      <div className="flex items-center gap-2.5">
         {failed ? (
-          <WarningCircle className="size-5 shrink-0 text-destructive" aria-hidden="true" />
+          <WarningCircle className="hidden size-5 shrink-0 text-destructive sm:block" aria-hidden="true" />
         ) : (
           <ClockCounterClockwise
-            className="size-5 shrink-0 text-muted-foreground"
+            className="hidden size-5 shrink-0 text-muted-foreground sm:block"
             aria-hidden="true"
           />
         )}
-        <div className="min-w-0 flex-1">
-          <p className="text-pretty font-semibold leading-snug text-foreground">{title}</p>
-          {failed && failureText && (
-            <p className="mt-1 text-pretty text-xs leading-relaxed text-destructive">
-              {failureText}
-            </p>
-          )}
-        </div>
+        <p className="min-w-0 flex-1 text-[14px] font-semibold leading-5 text-foreground">
+          {title}
+        </p>
       </div>
+      {failed && failureText && (
+        <p role="alert" className="text-pretty text-[14px] leading-relaxed text-destructive">
+          {failureText}
+        </p>
+      )}
       <div className="grid w-full grid-cols-2 gap-2">
         <Button
           size="sm"
           variant="outline"
-          className="h-auto min-h-8 min-w-0 whitespace-normal text-center"
+          className="h-auto min-h-[44px]! min-w-0 py-2 text-[14px] whitespace-normal text-center"
           onClick={onStartNew}
           disabled={working}
           data-tutorial="submit-draft-start-new"
@@ -65,7 +65,7 @@ export function DraftRestoreToast({
         </Button>
         <Button
           size="sm"
-          className="h-auto min-h-8 min-w-0 whitespace-normal text-center"
+          className="h-auto min-h-[44px]! min-w-0 py-2 text-[14px] whitespace-normal text-center"
           onClick={onContinue}
           disabled={working}
           aria-busy={working || undefined}

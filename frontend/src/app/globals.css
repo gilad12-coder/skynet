@@ -413,6 +413,23 @@ h3 {
   max-width: 320px !important;
   min-width: 120px !important;
 }
+/* The restore question needs more room than transient status messages. */
+.Toastify__toast-container:has([data-tutorial="submit-draft-offer"]) {
+  max-width: calc(100vw - 2rem) !important;
+}
+.Toastify__toast:has([data-tutorial="submit-draft-offer"]) {
+  max-width: 100%;
+}
+.Toastify__toast-container:has([data-tutorial="submit-draft-offer"])
+  > .Toastify__toast:not(:has([data-tutorial="submit-draft-offer"])) {
+  max-width: 320px;
+}
+@media (max-width: 480px) {
+  .Toastify__toast-container:has([data-tutorial="submit-draft-offer"]) {
+    inset-inline: 1rem;
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+}
 .Toastify__toast {
   min-height: 0 !important;
   border-radius: 12px !important;
