@@ -121,7 +121,14 @@ export function BlackboxWizard({
         />
       </div>
     ),
-    budget: <TotalBudgetCard w={w} mode={w.tokenSource} />,
+    // Cases and the optimization model both move the estimate and come later.
+    budget: (
+      <TotalBudgetCard
+        w={w}
+        mode={w.tokenSource}
+        preliminary={!hasCases || !w.reflectionModel.name.trim()}
+      />
+    ),
     scorer: <BlackboxScorerStep w={w} />,
     execution: <BlackboxExecutionSection w={w} />,
     split: (
