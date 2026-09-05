@@ -1128,8 +1128,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5"
           data-tutorial="detail-header"
         >
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2 min-w-0">
+          <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
+            <div className="space-y-2 min-w-0 sm:flex-1">
               <div className="flex flex-col items-start gap-1.5">
                 <StatusBadge status={job.status} />
                 {job.name && (
@@ -1216,7 +1216,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             </div>
             {!isShare && (
               <div
-                className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:gap-2"
+                className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:shrink-0 sm:flex-nowrap sm:gap-2"
                 data-tutorial="result-actions"
               >
                 {canManageShare && <ShareDialog optimizationId={job.optimization_id} />}
@@ -1307,7 +1307,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               </div>
             )}
             {shareCanInteract && !isPhone && (
-              <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+              <div className="flex w-full items-center justify-end gap-2 sm:w-auto sm:shrink-0">
                 <TooltipButton tooltip={msg("share.clone_tooltip")}>
                   <Button
                     variant="ghost"
