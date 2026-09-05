@@ -185,6 +185,8 @@
   "submit.blackbox.start.remove_part": "حذف بخش",
   "submit.blackbox.start.seed_none_action": "شروع بدون نقطهٔ آغاز",
   "submit.blackbox.start.seed_none_note": "نقطهٔ آغازی نیست: بهینه‌ساز نامزد اول را از هدف شما می‌نویسد.",
+  "submit.blackbox.start.add_menu": "افزودن",
+  "submit.blackbox.start.add_file": "افزودن فایل متنی",
   "submit.blackbox.start.seed_add_action": "افزودن نقطهٔ آغاز",
   "submit.blackbox.start.seed_whole_action": "استفاده از یک متن یکپارچه",
   "submit.blackbox.start.seed_hint_auto": "توسط عامل از روی مصاحبه‌ی کناری پیش‌نویس می‌شود — یا نسخه‌ی خودتان را جای‌گذاری کنید.",

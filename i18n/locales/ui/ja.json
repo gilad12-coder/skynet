@@ -185,6 +185,8 @@
   "submit.blackbox.start.remove_part": "パーツを削除",
   "submit.blackbox.start.seed_none_action": "開始点なしで始める",
   "submit.blackbox.start.seed_none_note": "開始点なし：オプティマイザーが目的から最初の候補を作成します。",
+  "submit.blackbox.start.add_menu": "追加",
+  "submit.blackbox.start.add_file": "テキストファイルを追加",
   "submit.blackbox.start.seed_add_action": "開始点を追加",
   "submit.blackbox.start.seed_whole_action": "1つの全体テキストを使う",
   "submit.blackbox.start.seed_hint_auto": "横のインタビューをもとにエージェントが下書きします。ご自身の内容を貼り付けることもできます。",

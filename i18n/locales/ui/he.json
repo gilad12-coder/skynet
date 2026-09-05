@@ -2653,6 +2653,8 @@
   "submit.blackbox.start.remove_part": "הסרת חלק",
   "submit.blackbox.start.seed_none_action": "התחלה בלי נקודת פתיחה",
   "submit.blackbox.start.seed_none_note": "אין נקודת פתיחה: האופטימייזר כותב את המועמד הראשון מתוך היעד.",
+  "submit.blackbox.start.add_menu": "הוספה",
+  "submit.blackbox.start.add_file": "הוספת קובץ טקסט",
   "submit.blackbox.start.seed_add_action": "הוספת נקודת פתיחה",
   "submit.blackbox.start.seed_whole_action": "טקסט שלם אחד",
   "submit.blackbox.start.seed_hint_auto": "הסוכן ינסח את זה מתוך הראיון שלצד — או שתדביקו גרסה משלכם.",

@@ -185,6 +185,8 @@
   "submit.blackbox.start.remove_part": "Teil entfernen",
   "submit.blackbox.start.seed_none_action": "Ohne Ausgangspunkt starten",
   "submit.blackbox.start.seed_none_note": "Kein Ausgangspunkt: Der Optimierer schreibt den ersten Kandidaten aus deinem Ziel.",
+  "submit.blackbox.start.add_menu": "Hinzufügen",
+  "submit.blackbox.start.add_file": "Textdatei hinzufügen",
   "submit.blackbox.start.seed_add_action": "Ausgangspunkt hinzufügen",
   "submit.blackbox.start.seed_whole_action": "Einen ganzen Text verwenden",
   "submit.blackbox.start.seed_hint_auto": "Vom Agenten aus dem Interview nebenan entworfen — oder fügen Sie Ihren eigenen ein.",

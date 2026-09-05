@@ -266,3 +266,42 @@ for (const path of ["../components/SubmitWizard.tsx", "../components/blackbox/Bl
     assert.equal(steps[part], "budget");
   });
 }
+
+for (const codeAssistMode of ["manual", "auto"]) {
+  test(`${codeAssistMode}: an empty starting point uses the goal without a mode switch`, () => {
+    const validate = (objective: string, seedCandidate: string | null) =>
+      evaluate(variable(wizard, "stageIssue"), {
+        WIZARD_STAGE, stageAt, seedMode: "text", codeAssistMode,
+        objective, seedCandidate, msg: (key: string) => key,
+      })(WIZARD_STAGE.goal);
+    assert.equal(validate("Improve answer accuracy", null), null);
+    assert.equal(validate("", null)?.fieldId, "bb-objective");
+    if (codeAssistMode === "manual") assert.equal(validate("", "Existing prompt"), null);
+  });
+}
+
+test("typing into a restored no-seed draft makes the starting point active", () => {
+  let seedMode = "none";
+  let seedText = "";
+  let edited = false;
+  evaluate(variable(start, "editSeed"), {
+    setSeedText: (value: string) => { seedText = value; },
+    setSeedMode: (value: string) => { seedMode = value; },
+    setSeedManuallyEdited: (value: boolean) => { edited = value; },
+  })("My starting point");
+  assert.equal(seedMode, "text");
+  assert.equal(seedText, "My starting point");
+  assert.equal(edited, true);
+});
+
+test("adding a text file preserves existing starting content", async () => {
+  let seedText = "Existing prompt";
+  let fileError = false;
+  await evaluate(variable(start, "addFile"), {
+    seedMode: "text", seedText,
+    setFileError: (value: boolean) => { fileError = value; },
+    editSeed: (value: string) => { seedText = value; },
+  })({ name: "rules.txt", text: async () => "Extra rules" });
+  assert.equal(seedText, "Existing prompt\n\nExtra rules");
+  assert.equal(fileError, false);
+});

@@ -185,6 +185,8 @@
   "submit.blackbox.start.remove_part": "Удалить часть",
   "submit.blackbox.start.seed_none_action": "Начать без отправной точки",
   "submit.blackbox.start.seed_none_note": "Без отправной точки: оптимизатор напишет первого кандидата по вашей цели.",
+  "submit.blackbox.start.add_menu": "Добавить",
+  "submit.blackbox.start.add_file": "Добавить текстовый файл",
   "submit.blackbox.start.seed_add_action": "Добавить отправную точку",
   "submit.blackbox.start.seed_whole_action": "Один цельный текст",
   "submit.blackbox.start.seed_hint_auto": "Составлено агентом на основе интервью сбоку — или вставьте своё.",

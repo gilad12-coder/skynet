@@ -1105,10 +1105,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         // In auto mode the agent drafts the text seed from the objective, so
         // the objective is the required input and the seed may stay blank.
         const agentDrafts = codeAssistMode === "auto" && seedMode === "text";
-        if ((seedMode === "none" || agentDrafts) && !objective.trim())
+        if ((seedCandidate == null || agentDrafts) && !objective.trim())
           return fail("submit.blackbox.validation.objective_required", "bb-objective");
-        if (seedMode !== "none" && !agentDrafts && seedCandidate == null)
-          return fail("submit.blackbox.validation.seed_required", "bb-seed");
         return null;
       }
       case WIZARD_STAGE.evaluation: {

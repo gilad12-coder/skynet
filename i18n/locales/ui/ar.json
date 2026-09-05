@@ -185,6 +185,8 @@
   "submit.blackbox.start.remove_part": "إزالة الجزء",
   "submit.blackbox.start.seed_none_action": "البدء بدون نقطة انطلاق",
   "submit.blackbox.start.seed_none_note": "لا توجد نقطة انطلاق: يكتب المُحسِّن المرشح الأول من هدفك.",
+  "submit.blackbox.start.add_menu": "إضافة",
+  "submit.blackbox.start.add_file": "إضافة ملف نصي",
   "submit.blackbox.start.seed_add_action": "إضافة نقطة انطلاق",
   "submit.blackbox.start.seed_whole_action": "استخدام نص كامل واحد",
   "submit.blackbox.start.seed_hint_auto": "يصوغه الوكيل من المقابلة الجانبية — أو الصق نقطتك الخاصة.",

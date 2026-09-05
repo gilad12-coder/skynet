@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/shared/ui/primitives/dropdown-menu";
 import { Input } from "@/shared/ui/primitives/input";
 import { msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
@@ -19,22 +25,6 @@ import { Field, MOBILE_INPUT_CLASS, TEXTAREA_CLASS } from "./shared";
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
   ssr: false,
 });
-
-// The seed's shape is a side choice, not a question the form asks: each
-// alternative is a quiet text action under the editor.
-function SeedAction({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return (
-    <Button
-      type="button"
-      variant="link"
-      size="sm"
-      onClick={onClick}
-      className="min-h-[44px] gap-1 px-0 text-xs text-muted-foreground hover:text-foreground lg:min-h-0"
-    >
-      {children}
-    </Button>
-  );
-}
 
 export function BlackboxStartStep({
   w,
@@ -63,6 +53,28 @@ export function BlackboxStartStep({
     background,
     setBackground,
   } = w;
+
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [fileError, setFileError] = useState(false);
+  const editSeed = (value: string) => {
+    setSeedText(value);
+    setSeedMode("text");
+    setSeedManuallyEdited(true);
+  };
+  const addFile = async (file: File) => {
+    setFileError(false);
+    try {
+      const value = await file.text();
+      if (seedMode === "parts") {
+        setSeedParts([...seedParts, { key: file.name, value }]);
+        setSeedManuallyEdited(true);
+      } else {
+        editSeed(seedMode === "text" && seedText.trim() ? `${seedText}\n\n${value}` : value);
+      }
+    } catch {
+      setFileError(true);
+    }
+  };
 
   // Background is optional, so it folds away until it has something to say:
   // opening by itself when a clone, a draft or the interview's brief fills it.
@@ -101,7 +113,7 @@ export function BlackboxStartStep({
   // One line of guidance at most: what the interview does while it is live,
   // otherwise only the code recipe needs a nudge about what to paste.
   const seedHint =
-    seedMode !== "text"
+    seedMode === "parts"
       ? undefined
       : interviewEligible
         ? msg("submit.blackbox.start.seed_hint_auto")
@@ -109,46 +121,64 @@ export function BlackboxStartStep({
           ? seedPlaceholder
           : undefined;
 
-  const showSeedTextarea = seedMode === "text" && !seedIsCode;
+  const showSeedTextarea = seedMode !== "parts" && !seedIsCode;
   // The stepper and status chip mean nothing until the agent has touched the
   // seed; idle they render empty and would leave a hollow label row.
   const showSeedAgent = interviewEligible && agent.signatureStatus !== "idle";
 
   const seedActions = (
-    <div className="flex flex-wrap items-center gap-x-5">
-      {seedMode === "none" ? (
-        <SeedAction onClick={() => setSeedMode("text")}>
-          <Plus className="size-3.5" />
-          {msg("submit.blackbox.start.seed_add_action")}
-        </SeedAction>
-      ) : (
-        <>
-          <SeedAction onClick={addPart}>
+    <>
+      <input
+        ref={fileInput}
+        type="file"
+        accept="text/*,.md,.txt,.json,.yaml,.yml,.toml,.xml,.csv,.py,.js,.jsx,.ts,.tsx,.html,.css,.sh"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void addFile(file);
+        }}
+      />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-[44px] w-fit gap-1 self-start text-muted-foreground"
+          >
             <Plus className="size-3.5" />
+            {msg("submit.blackbox.start.add_menu")}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          <DropdownMenuItem onSelect={() => fileInput.current?.click()}>
+            {msg("submit.blackbox.start.add_file")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={addPart}>
             {msg("submit.blackbox.start.add_part")}
-          </SeedAction>
+          </DropdownMenuItem>
           {seedMode === "parts" && (
-            <SeedAction onClick={() => setSeedMode("text")}>
+            <DropdownMenuItem onSelect={() => setSeedMode("text")}>
               {msg("submit.blackbox.start.seed_whole_action")}
-            </SeedAction>
+            </DropdownMenuItem>
           )}
-          <SeedAction onClick={() => setSeedMode("none")}>
-            {msg("submit.blackbox.start.seed_none_action")}
-          </SeedAction>
-        </>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {fileError && (
+        <p role="alert" className="text-sm text-destructive">
+          {msg("submit.dataset.file_error")}
+        </p>
       )}
-    </div>
+    </>
   );
 
   const seedFields = (
     <ExpandableTextarea
       id="bb-seed"
       label={seedLabel}
-      value={seedText}
-      onChange={(value) => {
-        setSeedText(value);
-        setSeedManuallyEdited(true);
-      }}
+      value={seedMode === "none" ? "" : seedText}
+      onChange={editSeed}
       placeholder={seedPlaceholder}
       rows={8}
       className={`${TEXTAREA_CLASS} flex-1 font-mono text-sm`}
@@ -174,14 +204,11 @@ export function BlackboxStartStep({
           }
           className="min-h-0 flex-1"
         >
-          {seedMode === "text" &&
+          {seedMode !== "parts" &&
             (seedIsCode ? (
               <CodeEditor
-                value={seedText}
-                onChange={(v) => {
-                  setSeedText(v);
-                  setSeedManuallyEdited(true);
-                }}
+                value={seedMode === "none" ? "" : seedText}
+                onChange={editSeed}
                 height="420px"
                 language={editorLanguage}
                 label={seedLanguage ?? msg("submit.blackbox.start.seed_editor_label")}
@@ -233,12 +260,6 @@ export function BlackboxStartStep({
                 </ExpandableTextarea>
               ))}
             </div>
-          )}
-
-          {seedMode === "none" && (
-            <p className="text-sm text-muted-foreground" dir="auto">
-              {msg("submit.blackbox.start.seed_none_note")}
-            </p>
           )}
 
           {seedActions}

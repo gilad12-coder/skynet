@@ -124,7 +124,7 @@ export function BlackboxReviewStep({
   };
 
   const startSummary =
-    seedMode === "none"
+    seedMode === "none" || (seedMode === "text" && !seedText.trim())
       ? msg("submit.blackbox.review.start_none")
       : seedMode === "text"
         ? formatMsg("submit.blackbox.review.start_text", { chars: seedText.length })

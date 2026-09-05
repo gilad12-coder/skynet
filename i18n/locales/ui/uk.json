@@ -185,6 +185,8 @@
   "submit.blackbox.start.remove_part": "Видалити частину",
   "submit.blackbox.start.seed_none_action": "Почати без відправної точки",
   "submit.blackbox.start.seed_none_note": "Без відправної точки: оптимізатор напише першого кандидата за вашою ціллю.",
+  "submit.blackbox.start.add_menu": "Додати",
+  "submit.blackbox.start.add_file": "Додати текстовий файл",
   "submit.blackbox.start.seed_add_action": "Додати відправну точку",
   "submit.blackbox.start.seed_whole_action": "Один цілісний текст",
   "submit.blackbox.start.seed_hint_auto": "Підготовлено агентом на основі опитування збоку — або вставте власне.",
