@@ -176,7 +176,7 @@ export function JobsTab({
           )}
           <ResetFiltersButton filters={{ activeCount, clearAll: clearAllFilters }} />
           <ResetColumnsButton resize={colResize} />
-          {!isPhone && filteredItems.length > 0 && (
+          {filteredItems.length > 0 && (
             <ExportTableMenu
               iconOnly
               className="ms-auto"
@@ -214,9 +214,7 @@ export function JobsTab({
             iconWrap="tile"
             title={`${msg("auto.features.dashboard.components.jobstab.4")}${TERMS.optimizationPlural}`}
             description={msg("auto.features.dashboard.components.jobstab.5")}
-            action={
-              isPhone ? undefined : { label: TERMS.notificationNewOpt, href: "/submit", icon: Plus }
-            }
+            action={{ label: TERMS.notificationNewOpt, href: "/submit", icon: Plus }}
           />
         )}
 

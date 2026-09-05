@@ -121,7 +121,6 @@ import {
 import { useUserPrefs } from "../hooks/use-user-prefs";
 import { useSettingsModal } from "../hooks/use-settings-modal";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
-import { isPhoneSettingsTab } from "@/shared/lib/device-class";
 import { ShortcutRecorder } from "./ShortcutRecorder";
 import { PrivacyTab } from "./PrivacyTab";
 import { SecurityTab } from "./SecurityTab";
@@ -425,9 +424,6 @@ function AgentTab() {
 function AccountTab() {
   const { data: session } = useSession();
   const { prefs, setPref } = useUserPrefs();
-  // Advanced/expand/lite toggles shape the wizard and the desktop sidebar,
-  // neither of which exists in the phone shell.
-  const isPhone = useIsPhone();
   const username = session?.user?.name ?? "";
   const role = (session?.user as Record<string, unknown> | undefined)?.role;
   const isAdmin = role === "admin";
@@ -450,39 +446,37 @@ function AccountTab() {
         <LanguageSwitcher />
       </SettingsRow>
 
-      {!isPhone && (
-        <>
-          <SettingsRow
-            icon={FadersHorizontal}
-            label={msg("settings.account.advanced_mode.label")}
-            description={msg("settings.account.advanced_mode.description")}
-          >
-            <Switch
-              checked={prefs.advancedMode}
-              onCheckedChange={(v) => setPref("advancedMode", v)}
-            />
-          </SettingsRow>
+      <>
+        <SettingsRow
+          icon={FadersHorizontal}
+          label={msg("settings.account.advanced_mode.label")}
+          description={msg("settings.account.advanced_mode.description")}
+        >
+          <Switch
+            checked={prefs.advancedMode}
+            onCheckedChange={(v) => setPref("advancedMode", v)}
+          />
+        </SettingsRow>
 
-          <SettingsRow
-            icon={Sparkle}
-            label={msg("settings.account.expand_advanced.label")}
-            description={msg("settings.account.expand_advanced.description")}
-          >
-            <Switch
-              checked={prefs.expandAdvanced}
-              onCheckedChange={(v) => setPref("expandAdvanced", v)}
-            />
-          </SettingsRow>
+        <SettingsRow
+          icon={Sparkle}
+          label={msg("settings.account.expand_advanced.label")}
+          description={msg("settings.account.expand_advanced.description")}
+        >
+          <Switch
+            checked={prefs.expandAdvanced}
+            onCheckedChange={(v) => setPref("expandAdvanced", v)}
+          />
+        </SettingsRow>
 
-          <SettingsRow
-            icon={Feather}
-            label={msg("settings.account.lite.label")}
-            description={msg("settings.account.lite.description")}
-          >
-            <Switch checked={prefs.liteMode} onCheckedChange={(v) => setPref("liteMode", v)} />
-          </SettingsRow>
-        </>
-      )}
+        <SettingsRow
+          icon={Feather}
+          label={msg("settings.account.lite.label")}
+          description={msg("settings.account.lite.description")}
+        >
+          <Switch checked={prefs.liteMode} onCheckedChange={(v) => setPref("liteMode", v)} />
+        </SettingsRow>
+      </>
     </div>
   );
 }
@@ -1558,11 +1552,8 @@ export function SettingsModal() {
     track(TelemetryEvent.SettingsTabChanged, { tab });
   }, []);
   const tabs = React.useMemo(
-    () =>
-      SETTINGS_TAB_ORDER.filter(
-        (tab) => (isAdmin || tab !== "admin") && (!isPhone || isPhoneSettingsTab(tab)),
-      ),
-    [isAdmin, isPhone],
+    () => SETTINGS_TAB_ORDER.filter((tab) => isAdmin || tab !== "admin"),
+    [isAdmin],
   );
   React.useEffect(() => {
     if (!tabs.includes(activeTab)) setActiveTab(isPhone ? "account" : "wizard");

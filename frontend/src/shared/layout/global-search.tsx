@@ -19,8 +19,6 @@ import {
 import type { Icon } from "@/shared/ui/icons";
 
 import { useSettingsModal } from "@/features/settings";
-import { useIsPhone } from "@/shared/hooks/use-device-class";
-import { isDesktopOnlyPath, isPhoneSettingsTab } from "@/shared/lib/device-class";
 import { useLocale } from "@/shared/providers";
 import { dirForLocale } from "@/shared/lib/locale";
 import { msg } from "@/shared/lib/messages";
@@ -146,7 +144,6 @@ export function GlobalSearch() {
   const dir = dirForLocale(locale);
   const { data: session } = useSession();
   const { open: settingsOpen, openTo } = useSettingsModal();
-  const isPhone = useIsPhone();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [activeIndex, setActiveIndex] = React.useState(0);
@@ -257,16 +254,8 @@ export function GlobalSearch() {
       description: msg("app.shell.search.settings_description"),
     }));
     const all: SearchItem[] = [...quickActions, ...navigation, ...settings];
-    // The phone shell replaces authoring routes with a notice and hides the
-    // desk-work settings tabs; don't offer either.
-    return isPhone
-      ? all.filter(
-          (item) =>
-            (!item.href || !isDesktopOnlyPath(item.href)) &&
-            (!item.settingsTab || isPhoneSettingsTab(item.settingsTab)),
-        )
-      : all;
-  }, [session?.user?.role, isPhone]);
+    return all;
+  }, [session?.user?.role]);
 
   const filteredItems = React.useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();

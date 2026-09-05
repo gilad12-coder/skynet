@@ -22,7 +22,6 @@ import { tip } from "@/shared/lib/tooltips";
 import { msg } from "@/shared/lib/messages";
 import { CopyButton } from "@/shared/ui/copy-button";
 import { ExportMenu } from "./ExportMenu";
-import { useIsPhone } from "@/shared/hooks/use-device-class";
 
 const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
   ssr: false,
@@ -92,7 +91,6 @@ export function ArtifactTab({
   // whenever it carries data.
   const isWorkflowArtifact = !!optimizedNodes && Object.keys(optimizedNodes).length > 0;
   // Downloads (pickle/program JSON/logs) are desk work; phones read and copy only.
-  const isPhone = useIsPhone();
 
   return (
     <div className="space-y-6" data-tutorial="artifact-output">
@@ -100,7 +98,7 @@ export function ArtifactTab({
         <p className="text-sm text-muted-foreground">{msg("optimization.artifact.description")}</p>
       </FadeIn>
 
-      {hasExports && !isPhone && (
+      {hasExports && (
         <div className="flex flex-col items-stretch gap-3 rounded-xl border border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10 p-4 shadow-[0_0_20px_rgba(var(--primary),0.06)] sm:flex-row sm:items-center sm:p-5">
           <p className="flex-1 text-sm font-medium">
             {activePair
