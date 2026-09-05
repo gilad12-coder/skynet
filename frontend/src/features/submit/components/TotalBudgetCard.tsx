@@ -1,16 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CaretDown } from "@phosphor-icons/react/dist/ssr/CaretDown";
-import { Coins } from "@phosphor-icons/react/dist/ssr/Coins";
-import { Gauge } from "@phosphor-icons/react/dist/ssr/Gauge";
-import { Hourglass } from "@phosphor-icons/react/dist/ssr/Hourglass";
-import { Info } from "@phosphor-icons/react/dist/ssr/Info";
-import { Warning } from "@phosphor-icons/react/dist/ssr/Warning";
-import { WarningCircle } from "@phosphor-icons/react/dist/ssr/WarningCircle";
+import { useEffect, useState, type ComponentType } from "react";
 
 import { Input } from "@/shared/ui/primitives/input";
+import { Label } from "@/shared/ui/primitives/label";
 import { HelpTip } from "@/shared/ui/help-tip";
+import {
+  ClockCounterClockwise,
+  Cpu,
+  Gauge,
+  Hourglass,
+  Info,
+  ListChecks,
+  Lock,
+  Play,
+  Terminal,
+  Wallet,
+  Warning,
+  WarningCircle,
+} from "@/shared/ui/icons";
 import { formatCredits, type TokenSourceMode } from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
@@ -21,6 +29,8 @@ import { parseBudgetInput } from "../lib/budget-input";
 import { chargeableBracket } from "../lib/cost-bracket";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
+import { Disclosure } from "./Disclosure";
+import { StepCard } from "./blackbox/shared";
 
 /**
  * The one budget surface of both wizards: a spending limit that covers setup
@@ -77,6 +87,7 @@ export function TotalBudgetCard({
     bracket.runtimeSessionHighCredits > 0;
   const mixedBilling =
     costBracket.managedModelHighCredits > 0 && costBracket.byokModelHighCredits > 0;
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   // The field owns its text so the user can clear it or leave a typo visible
   // with its error; an unreadable value stays unset instead of snapping to zero.
@@ -131,74 +142,72 @@ export function TotalBudgetCard({
   const modelHigh = Math.max(modelLow, bracket.highCredits - bracket.runtimeHighCredits);
 
   const spent = budget ? sumDecimals(budget.setup_spent_credits, budget.run_spent_credits) : null;
+  const showLedger = budget != null && spent != null;
+  const showStatus =
+    budgetBusy || budgetError || (budget && budget.total_credits !== maxCostCredits);
 
   return (
-    <div className="@container rounded-xl border border-border bg-card p-4 text-[14px] text-foreground">
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <label htmlFor="totalBudgetInput" className="flex items-center gap-2 font-medium">
-            <Coins className="size-4 shrink-0 text-foreground/70" aria-hidden="true" />
-            {msg("submit.budget.label")}
-          </label>
-          <div
-            dir="ltr"
-            className={cn(
-              "flex h-12 items-center overflow-hidden rounded-lg border bg-background transition-[border-color,box-shadow] focus-within:ring-[3px]",
-              fieldError
-                ? "border-destructive focus-within:border-destructive focus-within:ring-destructive/20"
-                : "border-input focus-within:border-ring focus-within:ring-ring/50",
-            )}
-          >
-            <Input
-              id="totalBudgetInput"
-              inputMode="numeric"
-              autoComplete="off"
-              aria-invalid={fieldError ? true : undefined}
-              aria-describedby={cn(
-                fieldMessage && "totalBudgetMessage",
-                "totalBudgetExplainer totalBudgetUnit",
-              )}
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value);
-                const next = parseBudgetInput(e.target.value, locale);
-                setMaxCostCredits(next.kind === "value" ? next.value : null);
-              }}
-              placeholder={formatMsg("submit.budget.placeholder", { suggested })}
-              dir="ltr"
-              className="h-full rounded-none border-0 bg-transparent px-4 text-lg tabular-nums shadow-none backdrop-blur-none md:text-lg focus-visible:border-transparent focus-visible:ring-0"
-            />
-            <span id="totalBudgetUnit" className="shrink-0 px-4 text-foreground/70" dir="auto">
-              {unit}
-            </span>
-          </div>
-          {fieldMessage && (
-            <p
-              id="totalBudgetMessage"
-              aria-live="polite"
-              className={cn(
-                "flex items-start gap-1.5 leading-snug",
-                fieldError ? "text-destructive" : "text-foreground/70",
-              )}
-              dir="auto"
-            >
-              {fieldError ? (
-                <WarningCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              ) : (
-                <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              )}
-              {fieldMessage}
-            </p>
+    <StepCard title={msg("submit.budget.label")} description={msg("submit.budget.explainer")}>
+      <div className="space-y-2">
+        <Label htmlFor="totalBudgetInput" className="sr-only">
+          {msg("submit.budget.label")}
+        </Label>
+        <div
+          dir="ltr"
+          className={cn(
+            "flex h-12 items-center overflow-hidden rounded-lg border bg-background transition-[border-color,box-shadow] focus-within:ring-[3px]",
+            fieldError
+              ? "border-destructive focus-within:border-destructive focus-within:ring-destructive/20"
+              : "border-input focus-within:border-ring focus-within:ring-ring/50",
           )}
-          <p id="totalBudgetExplainer" className="text-foreground/70" dir="auto">
-            {msg("submit.budget.explainer")}
-          </p>
+        >
+          <Input
+            id="totalBudgetInput"
+            inputMode="numeric"
+            autoComplete="off"
+            aria-invalid={fieldError ? true : undefined}
+            aria-describedby={cn(fieldMessage && "totalBudgetMessage", "totalBudgetUnit")}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              const next = parseBudgetInput(e.target.value, locale);
+              setMaxCostCredits(next.kind === "value" ? next.value : null);
+            }}
+            placeholder={formatMsg("submit.budget.placeholder", { suggested })}
+            dir="ltr"
+            className="h-full rounded-none border-0 bg-transparent px-4 text-lg tabular-nums shadow-none backdrop-blur-none md:text-lg focus-visible:border-transparent focus-visible:ring-0"
+          />
+          <span id="totalBudgetUnit" className="shrink-0 px-4 text-muted-foreground" dir="auto">
+            {unit}
+          </span>
         </div>
+        {fieldMessage && (
+          <p
+            id="totalBudgetMessage"
+            aria-live="polite"
+            className={cn(
+              "flex items-start gap-1.5 text-xs leading-snug",
+              fieldError ? "text-destructive" : "text-muted-foreground",
+            )}
+            dir="auto"
+          >
+            {fieldError ? (
+              <WarningCircle className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+            ) : (
+              <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+            )}
+            {fieldMessage}
+          </p>
+        )}
+      </div>
 
-        <div className="space-y-1.5 border-t border-border pt-4">
-          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-foreground/70" dir="auto">
-            <Gauge className="size-4 shrink-0" aria-hidden="true" />
-            <span>
+      <div className="space-y-2">
+        <div className="rounded-xl border border-[#C8B9A8]/50 bg-background px-3.5 py-3 shadow-[0_1px_2px_rgba(61,46,34,0.04)]">
+          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3D2E22]">
+              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
+                <Gauge className="h-3 w-3" aria-hidden="true" />
+              </span>
               {msg(
                 preliminary
                   ? "submit.budget.estimate_preliminary"
@@ -207,180 +216,192 @@ export function TotalBudgetCard({
                     : "submit.summary.estimate_cost",
               )}
             </span>
-            <span className="font-medium tabular-nums text-foreground">
+            <span
+              className="text-[13px] font-medium tabular-nums text-[#3D2E22] sm:text-end"
+              dir="auto"
+            >
               {formatMsg("submit.summary.estimate_range", {
                 low: credits(bracket.lowCredits),
                 high: credits(bracket.highCredits),
               })}
             </span>
-          </p>
-          <p className="text-[13px] leading-snug text-foreground/60" dir="auto">
+          </div>
+          <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">
             {estimateNotes}
           </p>
-          {overLimit === "likely" && (
-            <p
-              className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[13px] leading-snug text-amber-700"
-              dir="auto"
-            >
-              <Warning className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              {formatMsg("submit.budget.over_limit_low", { limit: credits(maxCostCredits ?? 0) })}
-            </p>
-          )}
-          {overLimit === "possible" && (
-            <p
-              className="flex items-start gap-2 text-[13px] leading-snug text-foreground/70"
-              dir="auto"
-            >
-              <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-              {formatMsg("submit.budget.over_limit", { limit: credits(maxCostCredits ?? 0) })}
-            </p>
-          )}
         </div>
-
-        {budget && spent && (
-          <dl className="grid gap-x-8 gap-y-2 border-t border-border pt-4 @md:grid-cols-2">
-            <Figure
-              label={msg("submit.budget.remaining")}
-              value={withUnit(formatBudgetAmount(budget.available_credits, locale))}
-            />
-            {!isZero(spent) && (
-              <Figure
-                label={msg("submit.budget.spent")}
-                value={withUnit(formatBudgetAmount(spent, locale))}
-              />
-            )}
-            {!isZero(budget.reserved_credits) && (
-              <Figure
-                label={msg("submit.budget.reserved")}
-                tip={msg("submit.budget.reserved_tip")}
-                value={withUnit(formatBudgetAmount(budget.reserved_credits, locale))}
-              />
-            )}
-          </dl>
-        )}
-        {budgetBusy && (
-          <p role="status" className="flex items-center gap-2 text-[13px] text-foreground/70">
-            <Hourglass className="size-4 shrink-0" aria-hidden="true" />
-            {msg("submit.budget.syncing")}
-          </p>
-        )}
-        {budgetError && (
+        {overLimit === "likely" && (
           <p
-            role="alert"
-            className="flex items-start gap-2 text-[13px] text-destructive"
+            className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs leading-snug text-amber-700"
             dir="auto"
           >
-            <WarningCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-            {budgetError}
+            <Warning className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+            {formatMsg("submit.budget.over_limit_low", { limit: credits(maxCostCredits ?? 0) })}
           </p>
         )}
-        {budget && budget.total_credits !== maxCostCredits && (
-          <p className="text-[13px] text-foreground/70" dir="auto">
-            {msg("submit.budget.pending_total")}
+        {overLimit === "possible" && (
+          <p
+            className="flex items-start gap-2 px-1 text-xs leading-snug text-muted-foreground"
+            dir="auto"
+          >
+            <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+            {formatMsg("submit.budget.over_limit", { limit: credits(maxCostCredits ?? 0) })}
           </p>
         )}
+      </div>
 
-        <details className="group border-t border-border pt-3">
-          <summary className="flex cursor-pointer list-none items-center gap-2 text-[13px] font-medium text-foreground/80 [&::-webkit-details-marker]:hidden">
-            <CaretDown
-              className="size-3.5 shrink-0 transition-transform duration-200 group-open:rotate-180"
-              aria-hidden="true"
-            />
-            {msg("submit.budget.details.summary")}
-          </summary>
-          <div className="mt-3 space-y-3 text-[13px]">
-            <dl className="space-y-2">
-              <Figure
-                label={msg(
-                  mode === "byok" ? "submit.budget.details.fee" : "submit.budget.details.models",
-                )}
-                value={formatMsg("submit.summary.estimate_range", {
-                  low: credits(modelLow),
-                  high: credits(modelHigh),
-                })}
+      {(showLedger || showStatus) && (
+        <div className="space-y-2">
+          {showLedger && (
+            <dl>
+              <Row
+                icon={Wallet}
+                label={msg("submit.budget.remaining")}
+                value={withUnit(formatBudgetAmount(budget.available_credits, locale))}
               />
-              {runtimeAtCost && (
-                <Figure
-                  label={msg("submit.budget.details.runtime")}
-                  sub={formatMsg("submit.budget.details.runtime_sessions", {
-                    provider: msg("submit.runtime.vercel"),
-                    perSession: formatBudgetAmount(
-                      bracket.runtimeSessionHighCredits.toFixed(9),
-                      locale,
-                    ),
-                    sessions: bracket.expectedRuntimeSessions,
-                  })}
-                  value={formatMsg("submit.budget.details.up_to", {
-                    amount: credits(bracket.runtimeHighCredits),
-                  })}
+              {!isZero(spent) && (
+                <Row
+                  icon={ClockCounterClockwise}
+                  label={msg("submit.budget.spent")}
+                  value={withUnit(formatBudgetAmount(spent, locale))}
                 />
               )}
-              {bracket.runtimeBillingBasis === "included_in_model_markup" && (
-                <Figure
-                  label={msg("submit.budget.details.runtime")}
-                  sub={msg("submit.runtime.vercel")}
-                  value={msg("submit.budget.details.runtime_included")}
-                />
-              )}
-              {budget && !isZero(budget.setup_spent_credits) && (
-                <Figure
-                  label={msg("submit.budget.setup_spent")}
-                  value={withUnit(formatBudgetAmount(budget.setup_spent_credits, locale))}
-                />
-              )}
-              {budget && !isZero(budget.run_spent_credits) && (
-                <Figure
-                  label={msg("submit.budget.run_spent")}
-                  value={withUnit(formatBudgetAmount(budget.run_spent_credits, locale))}
+              {!isZero(budget.reserved_credits) && (
+                <Row
+                  icon={Lock}
+                  label={msg("submit.budget.reserved")}
+                  tip={msg("submit.budget.reserved_tip")}
+                  value={withUnit(formatBudgetAmount(budget.reserved_credits, locale))}
                 />
               )}
             </dl>
-            <p className="leading-relaxed text-foreground/70" dir="auto">
-              {msg("submit.budget.details.assumptions")}
+          )}
+          {budgetBusy && (
+            <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Hourglass className="size-3.5 shrink-0" aria-hidden="true" />
+              {msg("submit.budget.syncing")}
             </p>
-            <p className="leading-relaxed text-foreground/70" dir="auto">
-              {msg("submit.budget.details.reservation")}
+          )}
+          {budgetError && (
+            <p
+              role="alert"
+              className="flex items-start gap-2 text-xs leading-snug text-destructive"
+              dir="auto"
+            >
+              <WarningCircle className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+              {budgetError}
             </p>
-            {mixedBilling && (
-              <p className="leading-relaxed text-foreground/70" dir="auto">
-                {msg("submit.budget.details.mixed_billing")}
-              </p>
+          )}
+          {budget && budget.total_credits !== maxCostCredits && (
+            <p className="text-xs text-muted-foreground" dir="auto">
+              {msg("submit.budget.pending_total")}
+            </p>
+          )}
+        </div>
+      )}
+
+      <Disclosure
+        id="totalBudgetDetails"
+        label={msg("submit.budget.details.summary")}
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+      >
+        <div className="space-y-3">
+          <dl>
+            <Row
+              icon={Cpu}
+              label={msg(
+                mode === "byok" ? "submit.budget.details.fee" : "submit.budget.details.models",
+              )}
+              value={formatMsg("submit.summary.estimate_range", {
+                low: credits(modelLow),
+                high: credits(modelHigh),
+              })}
+            />
+            {runtimeAtCost && (
+              <Row
+                icon={Terminal}
+                label={msg("submit.budget.details.runtime")}
+                sub={formatMsg("submit.budget.details.runtime_sessions", {
+                  provider: msg("submit.runtime.vercel"),
+                  perSession: formatBudgetAmount(
+                    bracket.runtimeSessionHighCredits.toFixed(9),
+                    locale,
+                  ),
+                  sessions: bracket.expectedRuntimeSessions,
+                })}
+                value={formatMsg("submit.budget.details.up_to", {
+                  amount: credits(bracket.runtimeHighCredits),
+                })}
+              />
             )}
-            {mode === "byok" && (
-              <p className="leading-relaxed text-foreground/70" dir="auto">
-                {msg("submit.budget.byok_note")}
-              </p>
+            {bracket.runtimeBillingBasis === "included_in_model_markup" && (
+              <Row
+                icon={Terminal}
+                label={msg("submit.budget.details.runtime")}
+                sub={msg("submit.runtime.vercel")}
+                value={msg("submit.budget.details.runtime_included")}
+              />
             )}
+            {budget && !isZero(budget.setup_spent_credits) && (
+              <Row
+                icon={ListChecks}
+                label={msg("submit.budget.setup_spent")}
+                value={withUnit(formatBudgetAmount(budget.setup_spent_credits, locale))}
+              />
+            )}
+            {budget && !isZero(budget.run_spent_credits) && (
+              <Row
+                icon={Play}
+                label={msg("submit.budget.run_spent")}
+                value={withUnit(formatBudgetAmount(budget.run_spent_credits, locale))}
+              />
+            )}
+          </dl>
+          <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
+            <p dir="auto">{msg("submit.budget.details.assumptions")}</p>
+            <p dir="auto">{msg("submit.budget.details.reservation")}</p>
+            {mixedBilling && <p dir="auto">{msg("submit.budget.details.mixed_billing")}</p>}
+            {mode === "byok" && <p dir="auto">{msg("submit.budget.byok_note")}</p>}
           </div>
-        </details>
-      </div>
-    </div>
+        </div>
+      </Disclosure>
+    </StepCard>
   );
 }
 
-function Figure({
+/** One hairline row in the summary step's style: small icon, muted label, value at the end. */
+function Row({
+  icon: Icon,
   label,
   value,
   sub,
   tip,
 }: {
+  icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
   sub?: string;
   tip?: string;
 }) {
+  const name = (
+    <span className="flex items-center gap-2 text-xs text-muted-foreground">
+      <Icon className="size-3.5 shrink-0" />
+      {label}
+    </span>
+  );
   return (
-    <div className="flex min-w-0 items-baseline justify-between gap-4">
-      <dt className="min-w-0 text-foreground/70">
-        {tip ? <HelpTip text={tip}>{label}</HelpTip> : label}
+    <div className="flex items-center justify-between gap-3 border-b border-border/40 py-2.5">
+      <dt className="min-w-0">
+        {tip ? <HelpTip text={tip}>{name}</HelpTip> : name}
         {sub && (
-          <span className="block text-xs text-foreground/50" dir="auto">
+          <span className="mt-0.5 block ps-5.5 text-[11px] text-muted-foreground/80" dir="auto">
             {sub}
           </span>
         )}
       </dt>
       <dd
-        className="min-w-0 shrink-0 text-end font-medium wrap-break-word tabular-nums text-foreground"
+        className="max-w-[55%] shrink-0 text-end text-sm font-medium wrap-break-word tabular-nums text-foreground"
         dir="auto"
       >
         {value}
