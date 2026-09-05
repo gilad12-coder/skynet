@@ -26,14 +26,15 @@ import { BlackboxExecutionSection } from "./BlackboxExecutionSection";
 import { BlackboxOptimizerStep } from "./BlackboxOptimizerStep";
 import { BlackboxReviewStep } from "./BlackboxReviewStep";
 
-type EvaluationStep = "cases" | "scorer" | "execution" | "split";
+type EvaluationStep = "cases" | "scorer" | "execution" | "split" | "budget";
 const GOAL_STEPS = ["goal"] as const;
-const OPTIMIZATION_STEPS = ["strategy", "model", "budget"] as const;
+const OPTIMIZATION_STEPS = ["strategy", "model"] as const;
 const REVIEW_STEPS = ["review"] as const;
 
 /** The evaluation substep that holds a field, so a problem opens where it is fixed. */
 function evaluationStepFor(field: string | undefined, hasCases: boolean): EvaluationStep | null {
   if (!field) return null;
+  if (field === "totalBudgetInput") return "budget";
   if (field === "bb-cases" || field === "wizard-stage-evaluation") return "cases";
   if (field.startsWith("bb-scor")) return "scorer";
   if (field === "bb-execution-agent" || field === "bb-task-model") return "execution";
@@ -43,7 +44,7 @@ function evaluationStepFor(field: string | undefined, hasCases: boolean): Evalua
 
 /** Resolve the owning stage when a different stage reports a field error. */
 function stageOwning(stage: WizardStageId, field?: string): WizardStageId {
-  if (field === "totalBudgetInput") return "optimization";
+  if (field === "totalBudgetInput") return "evaluation";
   return field === "bb-cases" ? "evaluation" : stage;
 }
 
@@ -63,7 +64,10 @@ export function BlackboxWizard({
   // The split only exists once there are cases to divide.
   const hasCases = Boolean(w.parsedCases?.rowCount);
   const evaluationSteps = useMemo<readonly EvaluationStep[]>(
-    () => (hasCases ? ["cases", "scorer", "execution", "split"] : ["cases", "scorer", "execution"]),
+    () =>
+      hasCases
+        ? ["budget", "cases", "scorer", "execution", "split"]
+        : ["budget", "cases", "scorer", "execution"],
     [hasCases],
   );
   const activeEvaluationPart = Math.min(evaluationPart, evaluationSteps.length - 1);
@@ -76,13 +80,7 @@ export function BlackboxWizard({
         if (key) setEvaluationPart(Math.max(0, evaluationSteps.indexOf(key)));
       }
       if (stage === "optimization")
-        setOptimizationPart(
-          field === "totalBudgetInput"
-            ? 2
-            : field === "bb-optimization-model" || field === "bb-max-runs"
-              ? 1
-              : 0,
-        );
+        setOptimizationPart(field === "bb-optimization-model" || field === "bb-max-runs" ? 1 : 0);
     },
     [evaluationSteps, hasCases],
   );
@@ -123,6 +121,7 @@ export function BlackboxWizard({
         />
       </div>
     ),
+    budget: <TotalBudgetCard w={w} mode={w.tokenSource} />,
     scorer: <BlackboxScorerStep w={w} />,
     execution: <BlackboxExecutionSection w={w} />,
     split: (
@@ -134,7 +133,6 @@ export function BlackboxWizard({
   const optimizationPanels: readonly ReactNode[] = [
     <BlackboxOptimizerStep key="strategy" w={w} part="strategy" />,
     <BlackboxOptimizerStep key="model" w={w} part="model" />,
-    <TotalBudgetCard key="budget" w={w} mode={w.tokenSource} />,
   ];
 
   const handleEvaluationNext = async () => {

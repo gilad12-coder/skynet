@@ -5,7 +5,11 @@ export function preflightDestination(
   scope: "evaluation" | "execution",
 ): { stage: "evaluation" | "optimization"; fieldId: string } {
   const key = field?.replace(/^model\./, "") ?? "";
-  if (/budget|usage/.test(key)) return { stage: "optimization", fieldId: "totalBudgetInput" };
+  if (/budget|usage/.test(key))
+    return {
+      stage: workflow === "anything" ? "evaluation" : "optimization",
+      fieldId: "totalBudgetInput",
+    };
   if (workflow === "anything") {
     if (/optimization|reflection|optimizer|strategy/.test(key))
       return {

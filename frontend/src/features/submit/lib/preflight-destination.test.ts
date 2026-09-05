@@ -31,3 +31,10 @@ test("unrecognized checks focus a real stage instead of a nonexistent API field"
     fieldId: "wizard-stage-optimization",
   });
 });
+
+test("Anything budget failures return to Evaluation", () => {
+  assert.deepEqual(preflightDestination("anything", "budget", "evaluation"), {
+    stage: "evaluation",
+    fieldId: "totalBudgetInput",
+  });
+});

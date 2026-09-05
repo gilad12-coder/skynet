@@ -345,7 +345,7 @@ export function BlackboxReviewStep({
         <Row
           label={msg("submit.budget.label")}
           tip="submit.budget"
-          onEdit={edit("optimization", "totalBudgetInput")}
+          onEdit={edit("evaluation", "totalBudgetInput")}
         >
           {maxCostCredits != null ? credits(maxCostCredits) : msg("submit.budget.unset_short")}
           <span className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">

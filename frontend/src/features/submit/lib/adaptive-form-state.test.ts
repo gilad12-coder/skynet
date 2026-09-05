@@ -192,7 +192,7 @@ for (const field of ["train", "val", "test"] as const) {
   });
 }
 
-for (const path of ["../hooks/use-submit-wizard.ts", "../hooks/use-blackbox-wizard.ts"]) {
+for (const path of ["../hooks/use-submit-wizard.ts"]) {
   const hook = source(path);
   test(`${path}: configuration advances without paid preflight until the budget is set`, async () => {
     const visited: number[] = [];
@@ -234,7 +234,7 @@ for (const path of ["../hooks/use-submit-wizard.ts", "../hooks/use-blackbox-wiza
   });
 }
 
-for (const path of ["../components/SubmitWizard.tsx", "../components/blackbox/BlackboxWizard.tsx"]) {
+for (const path of ["../components/SubmitWizard.tsx"]) {
   const component = source(path);
   test(`${path}: budget is the last panel before summary and Back returns to it`, async () => {
     const steps = evaluate(variable(component, "OPTIMIZATION_STEPS"), {});
@@ -297,4 +297,52 @@ test("typing into a restored no-seed draft makes the starting point active", () 
   assert.equal(seedMode, "text");
   assert.equal(seedText, "My starting point");
   assert.equal(edited, true);
+});
+
+for (const success of [true, false]) {
+  test(`Anything Evaluation waits for a successful scorer check: ${success}`, async () => {
+    const visited: number[] = [];
+    const scopes: string[] = [];
+    const advance = evaluate(variable(wizard, "advance"), {
+      WIZARD_STAGE, advancingRef: { current: false }, mountedRef: { current: true },
+      setAdvancing: () => {}, setIssue: () => {}, validateStep: () => true,
+      goTo: (stage: number) => visited.push(stage),
+      ensureEvaluatorChecked: async (scope: string) => { scopes.push(scope); return success ? {} : null; },
+    });
+    await advance(WIZARD_STAGE.optimization);
+    assert.deepEqual(scopes, ["evaluation"]);
+    assert.deepEqual(visited, success ? [WIZARD_STAGE.optimization] : []);
+  });
+}
+
+test("Anything missing budget blocks Evaluation before execution", () => {
+  const stageIssue = evaluate(variable(wizard, "stageIssue"), {
+    WIZARD_STAGE, stageAt, maxCostCredits: null, msg: (key: string) => key,
+  });
+  assert.deepEqual({ ...stageIssue(WIZARD_STAGE.evaluation) }, {
+    stage: "evaluation", fieldId: "totalBudgetInput", message: "budget.invalid",
+  });
+});
+
+test("Anything missing evaluator model blocks Continue even without an explicit override", () => {
+  const stageIssue = evaluate(variable(wizard, "stageIssue"), {
+    WIZARD_STAGE, stageAt, maxCostCredits: 120, targetKind: "text", scorerKind: "python",
+    metricCode: "def score(c): return llm(c)", scorerUsesModel: true,
+    resolvedScorerModel: null, msg: (key: string) => key,
+  });
+  const issue = stageIssue(WIZARD_STAGE.evaluation);
+  assert.equal(issue.fieldId, "bb-scoring-model");
+  assert.equal(issue.message, "submit.blackbox.validation.scorer_model_required");
+});
+
+test("Test scorer rejects missing models before running paid preflight", async () => {
+  let validation: { valid: boolean; errors: string[] } | undefined;
+  const run = evaluate(variable(wizard, "performDryRun"), {
+    metricCode: "def score(c): return llm(c)", scorerKind: "python",
+    scorerCallsModel: () => true, resolvedScorerModel: null,
+    msg: (key: string) => key,
+    setScorerValidation: (value: typeof validation) => { validation = value; },
+  });
+  await assert.rejects(run(), /scorer_model_required/);
+  assert.equal(validation?.valid, false);
 });

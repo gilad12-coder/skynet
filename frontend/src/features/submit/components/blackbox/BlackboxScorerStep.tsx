@@ -1,5 +1,7 @@
 "use client";
 
+import { withScorerImports } from "../../lib/scorer-dependencies";
+
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 
 import { useEffect, useState } from "react";
@@ -107,8 +109,8 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border/50 bg-muted/20 p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               {/* Inheriting shows the optimization model itself; picking a
-                  different one is one click on the chip, and its × returns
-                  the role to the optimization model. */}
+                  different one is one click on the chip. Removing it clears
+                  the evaluator model until another is selected. */}
               <ModelChip
                 roleLabel={msg("submit.blackbox.roles.scoring.label")}
                 showDetails={false}
@@ -140,14 +142,19 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                   })
                 }
                 onRemove={
-                  scorerModelMode === "explicit"
+                  resolvedScorerModel?.name.trim() || scorerModel.name.trim()
                     ? () => {
                         setScorerModel(emptyModelConfig());
-                        setScorerModelMode("inherit");
+                        setScorerModelMode("explicit");
                       }
                     : undefined
                 }
               />
+              {!resolvedScorerModel?.name.trim() && (
+                <p role="alert" className="w-full text-xs text-destructive">
+                  {msg("submit.blackbox.validation.scorer_model_required")}
+                </p>
+              )}
             </div>
           )}
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -166,7 +173,17 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               )}
             </div>
           </div>
-          <div id="bb-scorer-code" tabIndex={-1} className="outline-none">
+          <div
+            id="bb-scorer-code"
+            tabIndex={-1}
+            className="outline-none"
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                const code = withScorerImports(metricCode);
+                if (code !== metricCode) setMetricCode(code);
+              }
+            }}
+          >
             <CodeEditor
               value={metricCode}
               onChange={(v) => {

@@ -1,5 +1,7 @@
 "use client";
 
+import { scorerCallsModel } from "../lib/scorer-dependencies";
+
 import {
   inferExecutionKind,
   resolveExecutionKind,
@@ -195,15 +197,6 @@ function parseOptionalNumber(value: string): number | undefined {
   if (!trimmed) return undefined;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-/**
- * Whether a python scorer reaches for a model at all: only then does its
- * model matter. Comments are dropped first, since the template documents
- * `llm()` in one without ever calling it.
- */
-function scorerCallsModel(code: string): boolean {
-  return /\bllm\s*\(/.test(code.replace(/#.*$/gm, ""));
 }
 
 export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
@@ -787,14 +780,14 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     const selectedRuntime = engineCatalog?.proposer_runtimes.find(
       (runtime) => runtime.id === proposerRuntime,
     );
-    // Setup and the submitted run use separate metered Vercel sessions.
+    // Evaluation, final execution checks and the run use separate metered sessions.
     return projectCostBracket({
       autoLevel: "",
       maxFullEvals: "",
       maxMetricCalls: String(maxScorerRuns),
       datasetRows: Math.max(1, parsedCases?.rowCount ?? 0),
       modelRoles,
-      runtime: runtimeCostProjection(selectedRuntime?.cost, 2),
+      runtime: runtimeCostProjection(selectedRuntime?.cost, 3),
     });
   }, [
     effectiveReflectionModel,
@@ -882,6 +875,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const performDryRun = useCallback(
     async (overrideCode?: string, scope: PreflightScope = "evaluation") => {
+      const code = overrideCode ?? metricCode;
+      if (scorerKind === "python" && scorerCallsModel(code) && !resolvedScorerModel?.name.trim()) {
+        const error = msg("submit.blackbox.validation.scorer_model_required");
+        const outcome = { valid: false, errors: [error], warnings: [] };
+        setScorerValidation(outcome);
+        throw new Error(error);
+      }
       const attempt = ++dryRunAttemptRef.current;
       const navigation = navigationRevisionRef.current;
       const requestPayload = buildSubmissionPayload(overrideCode);
@@ -929,7 +929,14 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           setDryRun((current) => (current.status === "running" ? { status: "idle" } : current));
       }
     },
-    [preflight, buildSubmissionPayload, scorerUsesModel, resolvedScorerModel],
+    [
+      preflight,
+      buildSubmissionPayload,
+      scorerUsesModel,
+      resolvedScorerModel,
+      metricCode,
+      scorerKind,
+    ],
   );
   const runDryRun = useCallback(
     async (overrideCode?: string): Promise<ValidationResult | null> => {
@@ -1119,6 +1126,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         return null;
       }
       case WIZARD_STAGE.evaluation: {
+        if (maxCostCredits == null) return fail("budget.invalid", "totalBudgetInput");
         if (targetKind === "agent") {
           if (!parsedCases?.rowCount)
             return fail("submit.blackbox.validation.cases_required", "bb-cases");
@@ -1127,7 +1135,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         }
         if (scorerKind === "python" && !metricCode.trim())
           return fail("submit.blackbox.validation.scorer_code_required", "bb-scorer-code");
-        if (scorerUsesModel && scorerModelMode === "explicit" && !scorerModel.name.trim())
+        if (scorerUsesModel && !resolvedScorerModel?.name.trim())
           return fail("submit.blackbox.validation.scorer_model_required", "bb-scoring-model");
         if (scorerKind === "remote" && !/^https?:\/\/\S+$/.test(scorerUrl.trim()))
           return fail("submit.blackbox.validation.scorer_url_required", "bb-scorer-url");
@@ -1136,7 +1144,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         return null;
       }
       case WIZARD_STAGE.optimization: {
-        if (maxCostCredits == null) return fail("budget.invalid", "totalBudgetInput");
         if (trainingCaseCount === 0 && (strategyMode !== "single" || engine === "meta_harness"))
           return fail("submit.blackbox.validation.training_cases", "bb-cases");
         // Availability is not a validation failure: an unavailable engine is a
@@ -1224,15 +1231,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         t.obsolete(msg("submit.validation.toast.obsolete"));
         return null;
       }
-      if (preflightMayAdvance(response, scope)) {
-        if (response.status === "succeeded") {
-          const locale = getActiveIntlLocale();
-          t.succeed(
-            `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetAmount(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetAmount(response.budget.available_credits, locale)}`,
-          );
-        } else {
-          t.pending(msg(preflightPendingMessageKey(response)));
-        }
+      if (response.status === "succeeded" && preflightMayAdvance(response, scope)) {
+        const locale = getActiveIntlLocale();
+        t.succeed(
+          `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetAmount(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetAmount(response.budget.available_credits, locale)}`,
+        );
         return response;
       }
       if (response.status === "pending") {
@@ -1254,9 +1257,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
         t.fail(message.startsWith("budget.") ? msg(message as MessageKey) : message);
         if (message.startsWith("budget.")) {
-          goTo(WIZARD_STAGE.optimization);
+          goTo(WIZARD_STAGE.evaluation);
           setIssue({
-            stage: "optimization",
+            stage: "evaluation",
             fieldId: "totalBudgetInput",
             message: msg(message as MessageKey),
             identity,
@@ -1280,6 +1283,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return;
         }
       }
+      if (target === WIZARD_STAGE.optimization && !(await ensureEvaluatorChecked("evaluation")))
+        return;
       if (target > WIZARD_STAGE.optimization && !(await ensureEvaluatorChecked("execution")))
         return;
       goTo(target);
