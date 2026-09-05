@@ -25,6 +25,7 @@ import { modelProviderSlug } from "@/shared/lib/model-provider";
 interface ModelChipProps {
   config: ModelConfig;
   roleLabel?: string;
+  showDetails?: boolean;
   onClick: () => void;
   onClone?: () => void;
   onRemove?: () => void;
@@ -86,6 +87,7 @@ function TokenSourcePill({ source }: { source: ModelConfig["token_source"] }) {
 export function ModelChip({
   config,
   roleLabel,
+  showDetails = true,
   onClick,
   onClone,
   onRemove,
@@ -124,7 +126,8 @@ export function ModelChip({
       {/* A config that carries only a model id (e.g. the tagger's tagging
             model) renders no parameter row at all — a fabricated temperature
             would read as a setting the surface doesn't actually have. */}
-      {!isEmpty &&
+      {showDetails &&
+        !isEmpty &&
         (config.temperature != null ||
           config.max_tokens ||
           effort ||
