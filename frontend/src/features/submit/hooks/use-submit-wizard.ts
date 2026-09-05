@@ -972,15 +972,14 @@ export function useSubmitWizard() {
     const selectedRuntime = runtimeCatalog?.runtimes.find(
       (runtime) => runtime.id === executionRuntime,
     );
-    // DSPy defaults to Vercel before Evaluation, so a fresh Vercel path opens
-    // one session for each paid Continue scope and one for the submitted run.
+    // The final setup check and submitted run use separate metered sessions.
     return projectCostBracket({
       autoLevel,
       maxFullEvals: advancedMode ? maxFullEvals : DEFAULT_MAX_FULL_EVALS,
       maxMetricCalls: advancedMode ? maxMetricCalls : "",
       datasetRows: parsedDataset?.rowCount ?? 0,
       modelRoles,
-      runtime: runtimeCostProjection(selectedRuntime?.cost, 3),
+      runtime: runtimeCostProjection(selectedRuntime?.cost, 2),
     });
   }, [
     autoLevel,
@@ -1853,7 +1852,6 @@ export function useSubmitWizard() {
           return fail(msg("submit.validation.module_required"), "module-selector");
         return null;
       case WIZARD_STAGE.evaluation: {
-        if (maxCostCredits == null) return fail(msg("budget.invalid"), "totalBudgetInput");
         if (!parsedDataset || parsedDataset.rowCount === 0)
           return fail(msg("submit.validation.dataset_required"), "dataset-upload");
         const m = currentColumnMapping();
@@ -1880,7 +1878,7 @@ export function useSubmitWizard() {
         if (Math.abs(split.train + split.val + split.test - 1) > 0.001)
           return fail(msg("submit.validation.split_must_sum_to_one"), "data-splits");
         // Server-side validation covers the signature and the metric together;
-        // handleNext runs it before this check when the stage is left.
+        // The paid check runs after the budget is set, before entering Review.
         if (!structureOnly && evaluationStatus !== "passed")
           return fail(msg("submit.preflight.idle"));
         if (!structureOnly && datasetValidation && datasetValidation.errors.length > 0)
@@ -1888,6 +1886,7 @@ export function useSubmitWizard() {
         return null;
       }
       case WIZARD_STAGE.optimization: {
+        if (maxCostCredits == null) return fail(msg("budget.invalid"), "totalBudgetInput");
         if (!structureOnly && runtimeUnavailableReason) return fail(runtimeUnavailableReason);
         const targetProblem = targetScoreIssue();
         if (targetProblem) return fail(targetProblem, "target-score");
@@ -2105,10 +2104,7 @@ export function useSubmitWizard() {
           return;
         }
       }
-      if (
-        target > WIZARD_STAGE.evaluation &&
-        !(await ensureSetupChecked(target > WIZARD_STAGE.optimization ? "execution" : "evaluation"))
-      )
+      if (target > WIZARD_STAGE.optimization && !(await ensureSetupChecked("execution")))
         return;
       if (mountedRef.current) goTo(target);
     } finally {
@@ -2282,9 +2278,9 @@ export function useSubmitWizard() {
         const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
         t.fail(message.startsWith("budget.") ? msg(message as MessageKey) : message);
         if (message.startsWith("budget.")) {
-          goTo(WIZARD_STAGE.evaluation);
+          goTo(WIZARD_STAGE.optimization);
           setIssue({
-            stage: "evaluation",
+            stage: "optimization",
             fieldId: "totalBudgetInput",
             message: msg(message as MessageKey),
             identity,

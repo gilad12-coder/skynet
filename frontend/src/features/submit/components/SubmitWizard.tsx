@@ -25,18 +25,17 @@ import { ParamsStep } from "./steps/ParamsStep";
 import { SummaryStep } from "./steps/SummaryStep";
 import { SplitSection } from "./steps/SplitSection";
 
-const EVALUATION_STEPS = ["budget", "dataset", "code", "split"] as const;
-const OPTIMIZATION_STEPS = ["parameters", "models"] as const;
+const EVALUATION_STEPS = ["dataset", "code", "split"] as const;
+const OPTIMIZATION_STEPS = ["parameters", "models", "budget"] as const;
 const REVIEW_STEPS = ["review"] as const;
 const CODE_FIELDS = new Set(["signature-editor", "metric-editor", "react-config"]);
 
 /** The evaluation substep that holds a field, so a problem opens where it is fixed. */
 function evaluationPartFor(field?: string): number | null {
   if (!field) return null;
-  if (field === "totalBudgetInput") return 0;
-  if (CODE_FIELDS.has(field)) return 2;
-  if (field === "data-splits") return 3;
-  return 1;
+  if (CODE_FIELDS.has(field)) return 1;
+  if (field === "data-splits") return 2;
+  return 0;
 }
 
 export function SubmitWizard({ header }: { header?: ReactNode }) {
@@ -49,11 +48,12 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       const part = evaluationPartFor(field);
       if (part != null) setEvaluationPart(part);
     }
-    if (stage === "optimization") setOptimizationPart(field === "model-catalog" ? 1 : 0);
+    if (stage === "optimization")
+      setOptimizationPart(field === "totalBudgetInput" ? 2 : field === "model-catalog" ? 1 : 0);
   }, []);
   const goToField = (stage: WizardStageId, field?: string) => {
-    // The total budget lives in Evaluation even when a later stage reports it.
-    const target: WizardStageId = field === "totalBudgetInput" ? "evaluation" : stage;
+    // Budget errors return to the last configuration panel.
+    const target: WizardStageId = field === "totalBudgetInput" ? "optimization" : stage;
     routeSubstep(target, field);
     w.goTo(WIZARD_STAGE[target]);
     if (field) focusField(field);
@@ -86,7 +86,6 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
         ],
   );
   const evaluationPanels: readonly ReactNode[] = [
-    <TotalBudgetCard key="budget" w={w} mode={budgetMode} />,
     <DatasetStep key="dataset" w={w} />,
     <CodeStep key="code" w={w} part="code" />,
     <SplitSection key="split" w={w} />,
@@ -94,6 +93,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
   const optimizationPanels: readonly ReactNode[] = [
     <ParamsStep key="parameters" w={w} />,
     <ModelStep key="models" w={w} />,
+    <TotalBudgetCard key="budget" w={w} mode={budgetMode} />,
   ];
 
   const handleEvaluationNext = async () => {
@@ -158,6 +158,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       setOptimizationPart((current) => current - 1);
       return;
     }
+    if (w.step === WIZARD_STAGE.review) setOptimizationPart(OPTIMIZATION_STEPS.length - 1);
     w.goPrev();
   };
   const onNext =
@@ -168,7 +169,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
         : w.handleNext;
   const showSubmit = w.step === WIZARD_STAGE.review;
   const containerWidthClass =
-    w.step === WIZARD_STAGE.evaluation && evaluationPart === 2 && w.codeAssistMode === "auto"
+    w.step === WIZARD_STAGE.evaluation && evaluationPart === 1 && w.codeAssistMode === "auto"
       ? "max-w-6xl"
       : "max-w-2xl";
 

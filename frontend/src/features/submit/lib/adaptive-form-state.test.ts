@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 
+import { WIZARD_STAGE, stageAt } from "./wizard-steps.ts";
 import { detectLanguage, looksLikeCode } from "./seed-format.ts";
 
 // Execute the real handlers without loading the wizard's network and browser
@@ -183,5 +184,85 @@ for (const field of ["train", "val", "test"] as const) {
     assert.equal(state.split[field], 0.25);
     assert.equal(state.shuffle, false);
     assert.equal(state.seed, 123);
+  });
+}
+
+for (const path of ["../hooks/use-submit-wizard.ts", "../hooks/use-blackbox-wizard.ts"]) {
+  const hook = source(path);
+  test(`${path}: configuration advances without paid preflight until the budget is set`, async () => {
+    const visited: number[] = [];
+    const scopes: string[] = [];
+    const check = async (scope: string) => { scopes.push(scope); return {}; };
+    const bindings = {
+      WIZARD_STAGE, advancingRef: { current: false }, mountedRef: { current: true },
+      setAdvancing: () => {}, setIssue: () => {}, validateStep: () => true,
+      goTo: (stage: number) => { visited.push(stage); },
+      ensureSetupChecked: check, ensureEvaluatorChecked: check,
+    };
+    const advance = evaluate(variable(hook, "advance"), bindings);
+    await advance(WIZARD_STAGE.optimization);
+    assert.deepEqual(visited, [WIZARD_STAGE.optimization]);
+    assert.deepEqual(scopes, []);
+    await advance(WIZARD_STAGE.review);
+    assert.deepEqual(scopes, ["execution"]);
+    assert.equal(visited.at(-1), WIZARD_STAGE.review);
+  });
+
+  test(`${path}: missing budget belongs to Optimization and blocks Review`, async () => {
+    const stageIssue = evaluate(variable(hook, "stageIssue"), {
+      WIZARD_STAGE, stageAt, maxCostCredits: null, msg: (key: string) => key,
+    });
+    const issue = stageIssue(WIZARD_STAGE.optimization, true);
+    assert.equal(issue.stage, "optimization");
+    assert.equal(issue.fieldId, "totalBudgetInput");
+    const visited: number[] = [];
+    const advance = evaluate(variable(hook, "advance"), {
+      WIZARD_STAGE, advancingRef: { current: false }, mountedRef: { current: true },
+      setAdvancing: () => {}, setIssue: () => {},
+      validateStep: (stage: number) => stage !== WIZARD_STAGE.optimization,
+      goTo: (stage: number) => { visited.push(stage); },
+      ensureSetupChecked: () => assert.fail("Preflight ran without a budget"),
+      ensureEvaluatorChecked: () => assert.fail("Preflight ran without a budget"),
+    });
+    await advance(WIZARD_STAGE.review);
+    assert.deepEqual(visited, [WIZARD_STAGE.optimization]);
+  });
+}
+
+for (const path of ["../components/SubmitWizard.tsx", "../components/blackbox/BlackboxWizard.tsx"]) {
+  const component = source(path);
+  test(`${path}: budget is the last panel before summary and Back returns to it`, async () => {
+    const steps = evaluate(variable(component, "OPTIMIZATION_STEPS"), {});
+    let part = 1;
+    let summaryOpened = false;
+    let returned = false;
+    const setOptimizationPart = (update: number | ((previous: number) => number)) => {
+      part = typeof update === "function" ? update(part) : update;
+    };
+    const next = () => evaluate(variable(component, "handleOptimizationNext"), {
+      optimizationPart: part, OPTIMIZATION_STEPS: steps, setOptimizationPart,
+      w: { handleNext: async () => { summaryOpened = true; } },
+    })();
+    await next();
+    assert.equal(steps[part], "budget");
+    assert.equal(summaryOpened, false);
+    await next();
+    assert.equal(summaryOpened, true);
+    part = 0;
+    evaluate(variable(component, "onBack"), {
+      WIZARD_STAGE, OPTIMIZATION_STEPS: steps, setOptimizationPart,
+      w: { step: WIZARD_STAGE.review, goPrev: () => { returned = true; } },
+    })();
+    assert.equal(returned, true);
+    assert.equal(steps[part], "budget");
+  });
+
+  test(`${path}: budget errors open the final panel`, () => {
+    const steps = evaluate(variable(component, "OPTIMIZATION_STEPS"), {});
+    let part = -1;
+    evaluate(variable(component, "routeSubstep"), {
+      setOptimizationPart: (value: number) => { part = value; },
+    })("optimization", "totalBudgetInput");
+    assert.equal(steps[part], "budget");
   });
 }

@@ -1112,7 +1112,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         return null;
       }
       case WIZARD_STAGE.evaluation: {
-        if (maxCostCredits == null) return fail("budget.invalid", "totalBudgetInput");
         if (targetKind === "agent") {
           if (!parsedCases?.rowCount)
             return fail("submit.blackbox.validation.cases_required", "bb-cases");
@@ -1130,6 +1129,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         return null;
       }
       case WIZARD_STAGE.optimization: {
+        if (maxCostCredits == null) return fail("budget.invalid", "totalBudgetInput");
         if (trainingCaseCount === 0 && (strategyMode !== "single" || engine === "meta_harness"))
           return fail("submit.blackbox.validation.training_cases", "bb-cases");
         // Availability is not a validation failure: an unavailable engine is a
@@ -1147,8 +1147,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             "submit.blackbox.validation.reflection_model_required",
             "bb-optimization-model",
           );
-        if (nativeProposer && maxCostCredits == null)
-          return fail("submit.blackbox.validation.native_budget", "totalBudgetInput");
         if (strategyMode === "auto" && maxScorerRuns < 4)
           return fail("submit.blackbox.validation.auto_budget", "bb-max-runs");
         if (maxScorerRuns < 1)
@@ -1249,9 +1247,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
         t.fail(message.startsWith("budget.") ? msg(message as MessageKey) : message);
         if (message.startsWith("budget.")) {
-          goTo(WIZARD_STAGE.evaluation);
+          goTo(WIZARD_STAGE.optimization);
           setIssue({
-            stage: "evaluation",
+            stage: "optimization",
             fieldId: "totalBudgetInput",
             message: msg(message as MessageKey),
             identity,
@@ -1275,12 +1273,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return;
         }
       }
-      if (
-        target > WIZARD_STAGE.evaluation &&
-        !(await ensureEvaluatorChecked(
-          target > WIZARD_STAGE.optimization ? "execution" : "evaluation",
-        ))
-      )
+      if (target > WIZARD_STAGE.optimization && !(await ensureEvaluatorChecked("execution")))
         return;
       goTo(target);
     } finally {

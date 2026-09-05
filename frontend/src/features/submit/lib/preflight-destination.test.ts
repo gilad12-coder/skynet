@@ -20,7 +20,7 @@ test("execution failures return to the stage that owns the failed field", () => 
     fieldId: "wizard-stage-optimization",
   });
   assert.deepEqual(preflightDestination("dspy", "usage", "execution"), {
-    stage: "evaluation",
+    stage: "optimization",
     fieldId: "totalBudgetInput",
   });
 });
