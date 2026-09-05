@@ -30,6 +30,7 @@ import {
   type BlackboxAuthoringContext,
   type DatasetSummary,
 } from "@/shared/lib/api";
+import { useWizardStateOptional } from "@/features/agent-panel";
 import { readPref, useUserPrefs } from "@/features/settings";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
@@ -399,6 +400,62 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [draftSnapshot] = useState(() => drafts.takeSnapshot("anything"));
   const hydratedRef = useRef(false);
   const submittedRef = useRef(false);
+
+  // Shared wizard-state bridge (see use-submit-wizard): the panel agent's
+  // recipe-independent fields land here, and local edits go back so the agent
+  // sees the form it is talking about. The seed, target, scorer and optimizer
+  // are authored in-wizard and stay local.
+  const wizardCtx = useWizardStateOptional();
+  const wizardCtxRef = useRef(wizardCtx);
+  useEffect(() => {
+    wizardCtxRef.current = wizardCtx;
+  }, [wizardCtx]);
+  const agentPulseTick = wizardCtx?.agentPulseTick ?? 0;
+  useEffect(() => {
+    const shared = wizardCtx?.state;
+    const keys = wizardCtx?.agentPulseKeys ?? [];
+    if (!shared || keys.length === 0) return;
+    for (const key of keys) {
+      if (key === "job_name" && typeof shared.job_name === "string") {
+        // An agent-given name is decided: the suggestion must not overwrite it.
+        setJobName(shared.job_name);
+        setJobNameTouched(true);
+      } else if (key === "job_description" && typeof shared.job_description === "string") {
+        setJobDescription(shared.job_description);
+      } else if (key === "is_private" && typeof shared.is_private === "boolean") {
+        setIsPrivate(shared.is_private);
+      } else if (key === "split_fractions" && shared.split_fractions) {
+        setSplit(shared.split_fractions);
+      } else if (
+        key === "split_mode" &&
+        (shared.split_mode === "auto" || shared.split_mode === "manual")
+      ) {
+        splitModeRef.current = shared.split_mode;
+        setSplitModeState(shared.split_mode);
+      } else if (key === "seed" && typeof shared.seed === "number") {
+        setSeed(shared.seed);
+      } else if (key === "shuffle" && typeof shared.shuffle === "boolean") {
+        setShuffle(shared.shuffle);
+      }
+    }
+    // Runs once per agent pulse; the keys and state are read from that render.
+  }, [agentPulseTick]);
+  useEffect(() => {
+    if (!wizardCtx) return;
+    const s = wizardCtx.state;
+    if (s.job_name !== jobName) wizardCtx.setField("job_name", jobName, "user");
+    if (s.job_description !== jobDescription) {
+      wizardCtx.setField("job_description", jobDescription, "user");
+    }
+    if (s.is_private !== isPrivate) wizardCtx.setField("is_private", isPrivate, "user");
+    if (s.split_mode !== splitMode) wizardCtx.setField("split_mode", splitMode, "user");
+    if (s.seed !== seed) wizardCtx.setField("seed", seed, "user");
+    if (s.shuffle !== shuffle) wizardCtx.setField("shuffle", shuffle, "user");
+    const sf = s.split_fractions;
+    if (!sf || sf.train !== split.train || sf.val !== split.val || sf.test !== split.test) {
+      wizardCtx.setField("split_fractions", split, "user");
+    }
+  }, [wizardCtx, jobName, jobDescription, isPrivate, splitMode, seed, shuffle, split]);
   // The draft's stage is applied one render after its fields, so the
   // prerequisite walk (below validateStep) checks the restored state rather
   // than the empty initial one.
@@ -509,7 +566,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             ? (payload as Partial<BlackboxRunRequest>)
             : null;
         const basics = cloneBasics(stored, jobData?.name);
-        if (basics.name) setJobName(basics.name);
+        // A cloned run's name is decided; the suggestion must not replace it
+        // once the cloned objective lands.
+        if (basics.name) {
+          setJobName(basics.name);
+          setJobNameTouched(true);
+        }
         if (basics.description) setJobDescription(basics.description);
         if (basics.isPrivate != null) setIsPrivate(basics.isPrivate);
 
@@ -1390,8 +1452,14 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   }, [step]);
   useEffect(
     () => () => {
+      if (submittedRef.current) {
+        // A submit leaves on purpose: reset the shared agent state; the draft
+        // was already consumed when the job was accepted.
+        wizardCtxRef.current?.reset();
+        return;
+      }
       // Leaving mid-setup keeps the draft: write whatever the debounce still holds.
-      if (!submittedRef.current) draftsRef.current.flush();
+      draftsRef.current.flush();
     },
     [],
   );

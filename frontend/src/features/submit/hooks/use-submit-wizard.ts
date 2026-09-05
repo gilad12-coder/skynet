@@ -250,6 +250,7 @@ export function useSubmitWizard() {
     if (changedNodeId) {
       pulseClearRef.current = setTimeout(() => setAgentPulseNodeId(null), 1600);
     }
+    return laid;
   }, []);
 
   const [signatureCode, setSignatureCode] = useState(() => buildSignatureTemplate({}));
@@ -752,12 +753,18 @@ export function useSubmitWizard() {
     [],
   );
 
+  // The agent's graph as seated on the canvas; the outgoing push skips it so
+  // a layout-only copy is never echoed back as a user override.
+  const agentWorkflowRef = useRef<WorkflowSpec | null>(null);
   // Incoming: apply agent patches to local state whenever the pulse bumps.
   useEffect(() => {
     if (!sharedState || agentPulseKeys.length === 0) return;
     for (const key of agentPulseKeys) {
       if (key === "job_name" && typeof sharedState.job_name === "string") {
+        // An agent-given name is decided: the form's own suggestion must not
+        // overwrite it when the code or dataset changes later.
         setJobName(sharedState.job_name);
+        setJobNameTouched(true);
       } else if (key === "job_description" && typeof sharedState.job_description === "string") {
         setJobDescription(sharedState.job_description);
       } else if (
@@ -787,13 +794,24 @@ export function useSubmitWizard() {
           return next;
         });
       } else if (key === "signature_code" && typeof sharedState.signature_code === "string") {
+        // Agent-authored code is written for the module already in play (the
+        // predict default when none was named), so the picker never re-asks.
         setSignatureCode(sharedState.signature_code);
         setSignatureManuallyEdited(true);
         setSignatureValidation(null);
+        setModuleChosen(true);
       } else if (key === "metric_code" && typeof sharedState.metric_code === "string") {
         setMetricCode(sharedState.metric_code);
         setMetricManuallyEdited(true);
         setMetricValidation(null);
+        setModuleChosen(true);
+      } else if (key === "workflow" && sharedState.workflow) {
+        // A panel-authored graph is the program: seat it on the canvas as the
+        // workflow module instead of dropping it on the floor.
+        setModuleName("workflow");
+        setModuleChosen(true);
+        const laid = applyAgentWorkflow(sharedState.workflow, null);
+        agentWorkflowRef.current = laid;
       } else if (key === "column_roles" && sharedState.column_roles) {
         setColumnRoles((prev) => {
           const next = { ...prev };
@@ -1101,6 +1119,20 @@ export function useSubmitWizard() {
       wizardCtx.setField("job_name", jobName, "user");
     }
   }, [jobName, wizardCtx]);
+
+  // The canvas is the program for a workflow run: the agent submits what it
+  // sees here, so canvas edits reach it and a non-workflow module clears it.
+  useEffect(() => {
+    if (!wizardCtx) return;
+    const spec = isWorkflow ? workflowSpec : null;
+    if (spec) {
+      if (spec !== agentWorkflowRef.current && wizardCtx.state.workflow !== spec) {
+        wizardCtx.setField("workflow", spec, "user");
+      }
+    } else if (wizardCtx.state.workflow != null) {
+      wizardCtx.clearField("workflow");
+    }
+  }, [isWorkflow, wizardCtx, workflowSpec]);
 
   useEffect(() => {
     if (!wizardCtx) return;
@@ -1442,7 +1474,12 @@ export function useSubmitWizard() {
       // its basics and rows; the Start step drafts the rest from them.
       const fromProgram = cloneSourceRecipe(optimization_type) === "program";
       const basics = cloneBasics(payload, jobData?.name);
-      if (basics.name) setJobName(basics.name);
+      // A cloned run's name is decided; the suggestion must not replace it
+      // once the cloned code and dataset land.
+      if (basics.name) {
+        setJobName(basics.name);
+        setJobNameTouched(true);
+      }
       if (basics.description) setJobDescription(basics.description);
       if (basics.isPrivate != null) setIsPrivate(basics.isPrivate);
       if (fromProgram) {
