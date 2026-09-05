@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  inferExecutionKind,
+  resolveExecutionKind,
+  type ExecutionMode,
+} from "../lib/execution-intent";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -241,7 +246,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [seedParts, setSeedParts] = useState<SeedPart[]>([{ key: "", value: "" }]);
   const [objective, setObjective] = useState("");
   const [background, setBackground] = useState("");
-  const [targetKind, setTargetKind] = useState<"text" | "agent">("text");
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>("auto");
+  const inferredTargetKind = inferExecutionKind(objective);
+  const targetKind = resolveExecutionKind(executionMode, objective);
+  const setTargetKind = useCallback((kind: "text" | "agent") => setExecutionMode(kind), []);
   const [harness, setHarness] = useState<BlackboxHarness>("pi");
   // The model the agent harness runs on: what the run optimizes for, and no
   // part of the scorer. It carries only a name — the sandbox reaches it
@@ -478,7 +486,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerManuallyEdited(d.scorerManuallyEdited || !!d.metricCode.trim());
     setObjective(d.objective);
     setBackground(d.background);
-    setTargetKind(d.targetKind);
+    setExecutionMode(d.executionMode ?? d.targetKind);
     setHarness(d.harness);
     setTargetModel(d.targetModel);
     setTargetTimeout(d.targetTimeout);
@@ -1394,6 +1402,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       objective,
       background,
       targetKind,
+      executionMode,
       harness,
       targetModel: safeTargetModel,
       targetTimeout,
@@ -1490,6 +1499,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setBackground,
     targetKind,
     setTargetKind,
+    executionMode,
+    setExecutionMode,
+    inferredTargetKind,
     harness,
     setHarness,
     targetModel,

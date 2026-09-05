@@ -85,6 +85,7 @@ export interface AnythingDraftData {
   objective: string;
   background: string;
   targetKind: "text" | "agent";
+  executionMode?: "auto" | "text" | "agent";
   harness: BlackboxHarness;
   targetModel: ModelConfig;
   targetTimeout: number;
