@@ -236,7 +236,7 @@ export function ModelChip({
                 e.stopPropagation();
                 onRemove();
               }}
-              className="rounded-md p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all cursor-pointer"
+              className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
             >
               <Trash className="size-3" />
             </button>
