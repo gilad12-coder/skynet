@@ -30,15 +30,7 @@ import { Prec } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { linkifyMessage } from "@/shared/lib/linkify";
 import { CopyButton, CopyGlyph, useCopyToClipboard } from "@/shared/ui/copy-button";
-import {
-  CaretUp,
-  CaretDown,
-  Play,
-  CircleNotch,
-  X,
-  Eraser,
-  MagnifyingGlass,
-} from "@/shared/ui/icons";
+import { CaretDown, Play, CircleNotch, X, Eraser, MagnifyingGlass } from "@/shared/ui/icons";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
@@ -511,9 +503,11 @@ export function CodeEditor({
           }
           type="button"
           onClick={() => setCollapsed((c) => !c)}
-          className="max-lg:size-[44px]"
+          className="group/editor-action max-lg:size-[44px]"
         >
-          {collapsed ? <CaretDown className="size-3" /> : <CaretUp className="size-3" />}
+          <CaretDown
+            className={`size-3 transition-transform duration-200 ease-out motion-reduce:transition-none ${collapsed ? "" : "rotate-180"}`}
+          />
         </Button>
 
         {onRun && (
@@ -524,12 +518,12 @@ export function CodeEditor({
             type="button"
             onClick={handleRun}
             disabled={running || !value.trim()}
-            className="max-lg:size-[44px]"
+            className="group/editor-action max-lg:size-[44px]"
           >
             {running ? (
-              <CircleNotch className="size-3 animate-spin" />
+              <CircleNotch className="size-3 animate-spin motion-reduce:animate-none" />
             ) : (
-              <Play className="size-3" />
+              <Play className="size-3 transition-transform duration-150 ease-out group-hover/editor-action:translate-x-0.5 group-focus-visible/editor-action:translate-x-0.5 group-active/editor-action:scale-90 motion-reduce:transform-none motion-reduce:transition-none" />
             )}
           </Button>
         )}
@@ -541,12 +535,12 @@ export function CodeEditor({
           type="button"
           onClick={handleFormat}
           disabled={formatting || !value.trim()}
-          className="max-lg:size-[44px]"
+          className="group/editor-action max-lg:size-[44px]"
         >
           {formatting ? (
-            <CircleNotch className="size-3 animate-spin" />
+            <CircleNotch className="size-3 animate-spin motion-reduce:animate-none" />
           ) : (
-            <Eraser className="size-3" />
+            <Eraser className="size-3 transition-transform duration-150 ease-out group-hover/editor-action:-rotate-12 group-focus-visible/editor-action:-rotate-12 group-active/editor-action:scale-90 motion-reduce:transform-none motion-reduce:transition-none" />
           )}
         </Button>
 
@@ -556,9 +550,11 @@ export function CodeEditor({
           aria-label={copied ? msg("shared.code_editor.copied") : msg("shared.code_editor.copy")}
           type="button"
           onClick={handleCopy}
-          className="max-lg:size-[44px]"
+          className="group/editor-action max-lg:size-[44px]"
         >
-          <CopyGlyph copied={copied} className="size-3" checkClassName="text-[#3D2E22]" />
+          <span className="inline-flex transition-transform duration-150 ease-out group-hover/editor-action:scale-110 group-focus-visible/editor-action:scale-110 group-active/editor-action:scale-90 motion-reduce:transform-none motion-reduce:transition-none">
+            <CopyGlyph copied={copied} className="size-3" checkClassName="text-[#3D2E22]" />
+          </span>
         </Button>
       </div>
 
