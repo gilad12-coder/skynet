@@ -62,16 +62,22 @@ export function BlackboxStartStep({
   const updatePart = (i: number, patch: { key?: string; value?: string }) =>
     setSeedParts(seedParts.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
 
-  // Restore authored parts before seeding from the separate whole-text draft.
   const addPart = () => {
-    if (seedMode === "parts") {
-      setSeedParts([...seedParts, { key: "", value: "" }]);
-      return;
-    }
-    const saved = seedParts.filter((p) => p.key.trim() || p.value.trim());
-    const kept = saved.length ? saved : seedText.trim() ? [{ key: "", value: seedText }] : [];
-    setSeedParts([...kept, { key: "", value: "" }]);
+    const current =
+      seedMode === "parts" ? seedParts : [{ key: "", value: seedMode === "none" ? "" : seedText }];
+    setSeedParts([...current, { key: "", value: "" }]);
     setSeedMode("parts");
+  };
+
+  const removePart = (index: number) => {
+    const remaining = seedParts.filter((_, i) => i !== index);
+    if (remaining.length === 1) {
+      editSeed(remaining[0]!.value);
+      setSeedParts([]);
+    } else {
+      setSeedParts(remaining);
+      setSeedManuallyEdited(true);
+    }
   };
 
   const editorLanguage = seedLanguage ?? (recipe === "code" ? "Python" : "text");
@@ -113,16 +119,6 @@ export function BlackboxStartStep({
         <Plus className="size-4" aria-hidden="true" />
         {msg("submit.blackbox.start.add_part")}
       </Button>
-      {seedMode === "parts" && (
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => setSeedMode("text")}
-          className="min-h-11 w-full text-muted-foreground"
-        >
-          {msg("submit.blackbox.start.seed_whole_action")}
-        </Button>
-      )}
     </div>
   );
 
@@ -202,7 +198,7 @@ export function BlackboxStartStep({
                           size="icon"
                           aria-label={msg("submit.blackbox.start.remove_part")}
                           disabled={seedParts.length === 1}
-                          onClick={() => setSeedParts(seedParts.filter((_, idx) => idx !== i))}
+                          onClick={() => removePart(i)}
                           className="size-11 shrink-0 text-muted-foreground hover:text-destructive"
                         >
                           <Trash className="size-4" />

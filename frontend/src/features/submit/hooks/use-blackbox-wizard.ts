@@ -466,9 +466,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setIsPrivate(d.isPrivate);
     setRecipeState(d.recipe);
     setCodeAssistMode(d.codeAssistMode);
-    setSeedMode(d.seedMode);
-    setSeedText(d.seedText);
-    setSeedParts(d.seedParts);
+    const singlePart = d.seedMode === "parts" && d.seedParts.length === 1 ? d.seedParts[0] : null;
+    setSeedMode(singlePart ? "text" : d.seedMode);
+    setSeedText(singlePart ? singlePart.value : d.seedText);
+    setSeedParts(singlePart ? [] : d.seedParts);
     setSeedManuallyEdited(
       d.seedManuallyEdited ||
         !!d.seedText.trim() ||

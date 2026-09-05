@@ -89,32 +89,32 @@ for (const [language, seedSample] of [
   });
 }
 
-test("switching back to parts retains edited names and content", () => {
+test("adding parts uses the currently visible text rather than an older parts draft", () => {
   let seedMode = "text";
-  const seedText = "Original whole text";
-  let seedParts = [{ key: "", value: "" }];
-  const addPart = () => evaluate(variable(start, "addPart"), {
+  const seedText = "Current edited text";
+  let seedParts = [{ key: "old", value: "Old parts draft" }];
+  evaluate(variable(start, "addPart"), {
     seedMode, seedText, seedParts,
     setSeedMode: (mode: string) => { seedMode = mode; },
     setSeedParts: (parts: typeof seedParts) => { seedParts = parts; },
   })();
-  addPart();
-  assert.equal(seedParts[0]?.value, seedText);
   assert.equal(seedMode, "parts");
+  assert.equal(seedParts.length, 2);
+  assert.equal(seedParts[0]?.value, seedText);
+});
 
-  const authored = [
-    { key: "prompt", value: "Edited prompt" },
-    { key: "rules", value: "New constraints" },
-    { key: "unfinished", value: "" },
-  ];
-  seedParts = authored;
-  for (const mode of ["text", "none", "text"]) {
-    seedMode = mode;
-    addPart();
-    assert.equal(seedMode, "parts");
-    assert.deepEqual(Array.from(seedParts.slice(0, authored.length)), authored);
-    assert.equal(seedParts.at(-1)?.key, "");
-    assert.equal(seedParts.at(-1)?.value, "");
+test("removing either of two parts retains the surviving content as whole text", () => {
+  for (const index of [0, 1]) {
+    const seedParts = [{ key: "first", value: "First edited content" }, { key: "second", value: "Second edited content" }];
+    let text = "Stale whole text";
+    let remaining = seedParts;
+    evaluate(variable(start, "removePart"), {
+      seedParts,
+      editSeed: (value: string) => { text = value; },
+      setSeedParts: (parts: typeof seedParts) => { remaining = parts; },
+    })(index);
+    assert.equal(text, seedParts[1 - index]?.value);
+    assert.equal(remaining.length, 0);
   }
 });
 
