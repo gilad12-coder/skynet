@@ -200,7 +200,7 @@ function FindPanel({ view, listeners, replaceOpen, onReplaceOpenChange }: FindPa
     <div
       dir="ltr"
       onKeyDown={handleKeyDown}
-      className="flex flex-col gap-1 px-2 py-1.5 font-sans text-[11px] text-[#3D2E22]"
+      className="flex flex-col gap-1 px-2 py-1.5 font-sans text-[11px] text-[#3D2E22] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150"
     >
       <div className="flex items-center gap-1">
         {!readOnly && (

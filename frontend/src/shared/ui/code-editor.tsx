@@ -494,9 +494,9 @@ export function CodeEditor({
               aria-label={msg("shared.code_editor.find.open")}
               type="button"
               onClick={handleFind}
-              className="max-lg:size-[44px]"
+              className="group/find max-lg:size-[44px]"
             >
-              <MagnifyingGlass className="size-3" />
+              <MagnifyingGlass className="size-3 transition-transform duration-150 ease-out group-hover/find:scale-110 group-focus-visible/find:scale-110 group-active/find:scale-90 motion-reduce:transform-none motion-reduce:transition-none" />
             </Button>
           </TooltipButton>
         )}
