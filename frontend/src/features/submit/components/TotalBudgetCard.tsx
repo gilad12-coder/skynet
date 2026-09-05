@@ -201,47 +201,42 @@ export function TotalBudgetCard({
         )}
       </div>
 
-      <div className="space-y-2">
-        <div className="rounded-xl border border-[#C8B9A8]/50 bg-background px-3.5 py-3 shadow-[0_1px_2px_rgba(61,46,34,0.04)]">
-          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-            <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3D2E22]">
-              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
-                <Gauge className="h-3 w-3" aria-hidden="true" />
-              </span>
-              {msg(
-                preliminary
-                  ? "submit.budget.estimate_preliminary"
-                  : feeOnly
-                    ? "submit.summary.estimate_fee"
-                    : "submit.summary.estimate_cost",
-              )}
+      <div className="rounded-xl border border-[#C8B9A8]/50 bg-background px-3.5 py-3 shadow-[0_1px_2px_rgba(61,46,34,0.04)]">
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3D2E22]">
+            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
+              <Gauge className="h-3 w-3" aria-hidden="true" />
             </span>
-            <span
-              className="text-[13px] font-medium tabular-nums text-[#3D2E22] sm:text-end"
-              dir="auto"
-            >
-              {formatMsg("submit.summary.estimate_range", {
-                low: credits(bracket.lowCredits),
-                high: credits(bracket.highCredits),
-              })}
-            </span>
-          </div>
-          <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">
-            {estimateNotes}
-          </p>
-        </div>
-        {overLimit === "likely" && (
-          <p
-            className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs leading-snug text-amber-700"
+            {msg(
+              preliminary
+                ? "submit.budget.estimate_preliminary"
+                : feeOnly
+                  ? "submit.summary.estimate_fee"
+                  : "submit.summary.estimate_cost",
+            )}
+          </span>
+          <span
+            className="text-[13px] font-medium tabular-nums text-[#3D2E22] sm:text-end"
             dir="auto"
           >
+            {formatMsg("submit.summary.estimate_range", {
+              low: credits(bracket.lowCredits),
+              high: credits(bracket.highCredits),
+            })}
+          </span>
+        </div>
+        <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">
+          {estimateNotes}
+        </p>
+        {overLimit === "likely" && (
+          <p className="mt-2 flex items-start gap-2 text-xs leading-snug text-amber-700" dir="auto">
             <Warning className="mt-px size-3.5 shrink-0" aria-hidden="true" />
             {formatMsg("submit.budget.over_limit_low", { limit: credits(maxCostCredits ?? 0) })}
           </p>
         )}
         {overLimit === "possible" && (
           <p
-            className="flex items-start gap-2 px-1 text-xs leading-snug text-muted-foreground"
+            className="mt-2 flex items-start gap-2 text-xs leading-snug text-muted-foreground"
             dir="auto"
           >
             <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
@@ -359,8 +354,9 @@ export function TotalBudgetCard({
             )}
           </dl>
           <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
-            <p dir="auto">{msg("submit.budget.details.assumptions")}</p>
-            <p dir="auto">{msg("submit.budget.details.reservation")}</p>
+            <p dir="auto">
+              {msg("submit.budget.details.assumptions")} {msg("submit.budget.details.reservation")}
+            </p>
             {mixedBilling && <p dir="auto">{msg("submit.budget.details.mixed_billing")}</p>}
             {mode === "byok" && <p dir="auto">{msg("submit.budget.byok_note")}</p>}
           </div>
