@@ -3,6 +3,7 @@ import * as React from "react";
 import { toast } from "react-toastify";
 import { ArrowLeft, CaretLeft, CaretRight, CircleNotch, Tray } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/shared/ui/primitives/table";
 import {
   ColumnHeader,
@@ -276,10 +277,7 @@ export function DatasetRowsView({
             </div>
           ) : (
             <FadeIn className="flex min-h-0 flex-1 flex-col">
-              <div className="mb-2 flex min-h-[44px] items-center justify-between gap-3 max-lg:[&_button]:size-[44px] lg:min-h-0">
-                <span className="min-w-0 truncate text-xs text-muted-foreground">
-                  {msg("datasets.detail.row_reader.hint")}
-                </span>
+              <div className="mb-2 flex min-h-[44px] items-center justify-end gap-3 max-lg:[&_button]:size-[44px] lg:min-h-0">
                 <div className="flex items-center gap-2 shrink-0">
                   <ResetFiltersButton filters={colFilters} />
                   <ResetColumnsButton resize={colResize} />
@@ -339,46 +337,50 @@ export function DatasetRowsView({
                     </TableHeader>
                     <TableBody>
                       {filtered.slice(0, RENDER_ROW_CAP).map((row, i) => (
-                        <TableRow
-                          key={i}
-                          className="cursor-pointer transition-colors hover:bg-muted/40"
-                          onClick={() => {
-                            if (!window.matchMedia("(any-pointer: coarse)").matches) return;
-                            cancelPendingCopy();
-                            setReaderIndex(i);
-                          }}
-                          onDoubleClick={() => {
-                            cancelPendingCopy();
-                            setReaderIndex(i);
-                          }}
-                        >
-                          {columns.map((col) => (
-                            <TableCell
-                              key={col}
-                              className="max-w-[280px] align-top text-xs text-foreground/80"
-                              style={
-                                colResize.widths[col]
-                                  ? {
-                                      width: colResize.widths[col],
-                                      maxWidth: colResize.widths[col],
-                                    }
-                                  : undefined
-                              }
-                              title={cellText(row[col])}
-                              onClick={(e) => {
-                                if (e.detail !== 1) return;
-                                scheduleCellCopy(cellText(row[col]));
+                        <Tooltip key={i} delayDuration={500}>
+                          <TooltipTrigger asChild>
+                            <TableRow
+                              className="cursor-pointer transition-colors hover:bg-muted/40"
+                              onClick={() => {
+                                if (!window.matchMedia("(any-pointer: coarse)").matches) return;
+                                cancelPendingCopy();
+                                setReaderIndex(i);
+                              }}
+                              onDoubleClick={() => {
+                                cancelPendingCopy();
+                                setReaderIndex(i);
                               }}
                             >
-                              <span
-                                dir="auto"
-                                className="line-clamp-2 break-words whitespace-normal hover:underline underline-offset-2 decoration-foreground/40"
-                              >
-                                {cellText(row[col])}
-                              </span>
-                            </TableCell>
-                          ))}
-                        </TableRow>
+                              {columns.map((col) => (
+                                <TableCell
+                                  key={col}
+                                  className="max-w-[280px] align-top text-xs text-foreground/80"
+                                  style={
+                                    colResize.widths[col]
+                                      ? {
+                                          width: colResize.widths[col],
+                                          maxWidth: colResize.widths[col],
+                                        }
+                                      : undefined
+                                  }
+                                  title={cellText(row[col])}
+                                  onClick={(e) => {
+                                    if (e.detail !== 1) return;
+                                    scheduleCellCopy(cellText(row[col]));
+                                  }}
+                                >
+                                  <span
+                                    dir="auto"
+                                    className="line-clamp-2 break-words whitespace-normal hover:underline underline-offset-2 decoration-foreground/40"
+                                  >
+                                    {cellText(row[col])}
+                                  </span>
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          </TooltipTrigger>
+                          <TooltipContent>{msg("datasets.detail.row_reader.hint")}</TooltipContent>
+                        </Tooltip>
                       ))}
                     </TableBody>
                   </Table>
