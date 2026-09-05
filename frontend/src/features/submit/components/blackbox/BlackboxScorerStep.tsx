@@ -115,7 +115,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                     ? scorerModel
                     : (resolvedScorerModel ?? emptyModelConfig())
                 }
-                className={MOBILE_MODEL_CHIP_CLASS}
+                className={`w-full min-w-0 ${MOBILE_MODEL_CHIP_CLASS}`}
                 roleLabel={msg("submit.blackbox.roles.scoring.label")}
                 tooltip={msg("submit.blackbox.scorer.model_explainer")}
                 required
@@ -147,23 +147,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                     : undefined
                 }
               />
-              <HelpTip
-                text={`${tip("submit.blackbox.scorer_model")} ${msg(
-                  scorerModelMode === "explicit"
-                    ? "submit.blackbox.roles.scoring.custom_desc"
-                    : scoringModelPending
-                      ? "submit.blackbox.roles.scoring.pending_desc"
-                      : "submit.blackbox.roles.scoring.inherited_desc",
-                )}`}
-              >
-                <span className="text-xs text-muted-foreground">
-                  {msg(
-                    scorerModelMode === "inherit"
-                      ? "submit.blackbox.roles.scoring.inherited"
-                      : "submit.blackbox.roles.scoring.custom",
-                  )}
-                </span>
-              </HelpTip>
             </div>
           )}
           <div className="flex flex-wrap items-center justify-between gap-2">
