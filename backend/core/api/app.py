@@ -105,6 +105,7 @@ from .routers.models import create_models_router
 from .routers.notification_preferences import create_notification_preferences_router
 from .routers.optimizations import create_optimizations_router
 from .routers.optimizations_meta import create_optimizations_meta_router
+from .routers.package_registry import create_package_registry_router
 from .routers.registry import create_registry_router
 from .routers.serve import create_serve_router
 from .routers.share import create_share_router
@@ -1294,6 +1295,7 @@ def create_app(
     app.include_router(create_account_security_router(job_store=job_store), tags=["Auth"])
     app.include_router(create_account_data_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_notification_preferences_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_package_registry_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_datasets_router(job_store=job_store), tags=["Datasets"])
     app.include_router(create_dataset_library_router(job_store=job_store), tags=["Datasets"])
     app.include_router(create_dataset_share_router(job_store=job_store), tags=["Datasets"])

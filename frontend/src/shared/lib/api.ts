@@ -731,6 +731,21 @@ export interface AccountDeletionResult {
   anonymized_rows: number;
 }
 
+export interface PackageRegistryPreference {
+  index_url: string;
+}
+
+export function getPackageRegistry() {
+  return request<PackageRegistryPreference>("/account/package-registry");
+}
+
+export function updatePackageRegistry(indexUrl: string) {
+  return request<PackageRegistryPreference>("/account/package-registry", {
+    method: "PUT",
+    body: JSON.stringify({ index_url: indexUrl }),
+  });
+}
+
 export interface NotificationPreferences {
   job_updates_enabled: boolean;
   sharing_updates_enabled: boolean;
