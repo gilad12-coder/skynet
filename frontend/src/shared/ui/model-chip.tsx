@@ -206,7 +206,7 @@ export function ModelChip({
               type="button"
               aria-label={tooltip}
               onClick={(e) => e.stopPropagation()}
-              className="rounded-md p-1 text-muted-foreground/60 hover:bg-accent hover:text-foreground transition-colors cursor-pointer"
+              className="rounded-md p-1 text-muted-foreground/60 cursor-pointer"
             >
               <Info className="size-3.5" aria-hidden="true" />
             </button>
