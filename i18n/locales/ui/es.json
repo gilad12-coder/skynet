@@ -3558,7 +3558,7 @@
   "submit.budget.estimate_note": "El extremo alto supone prompts y salidas largos en cada llamada, no una ejecución típica.",
   "submit.budget.estimate_note_runtime": "Incluye el entorno de ejecución. El extremo alto supone prompts y salidas largos en cada llamada, no una ejecución típica.",
   "submit.budget.over_limit": "Si el consumo alcanza {limit} créditos, la ejecución se detiene antes. Nunca se te cobra más que el límite.",
-  "submit.budget.over_limit_low": "Incluso la estimación baja supera los {limit} créditos, así que es muy probable que esta ejecución se detenga antes. Sube el límite para que pueda terminar.",
+  "submit.budget.limit_too_low": "Sube el límite de gasto. Incluso la estimación baja es de {low} créditos, por encima de los {limit} que fijaste.",
   "submit.budget.remaining": "Restante en este límite",
   "submit.budget.spent": "Gastado hasta ahora",
   "submit.budget.reserved_tip": "Retenido para el trabajo en curso y liberado cuando se liquida.",

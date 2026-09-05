@@ -3558,7 +3558,7 @@
   "submit.budget.estimate_note": "上限值假設每次調用都用長嘅提示同輸出，唔係典型嘅運行。",
   "submit.budget.estimate_note_runtime": "包括執行環境。上限值假設每次調用都用長嘅提示同輸出，唔係典型嘅運行。",
   "submit.budget.over_limit": "如果用量去到 {limit} credits，運行就會提早停。永遠唔會收你多過上限嘅費用。",
-  "submit.budget.over_limit_low": "就算係較低嘅估算都高過 {limit} credits，所以今次運行好大機會提早停。提高上限先可以畀佢完成。",
+  "submit.budget.limit_too_low": "請提高支出上限。就算係較低嘅估算都有 {low} credits，高過你設定嘅 {limit}。",
   "submit.budget.remaining": "呢個上限內剩返",
   "submit.budget.spent": "到目前為止用咗",
   "submit.budget.reserved_tip": "為進行緊嘅工作預留，結算之後就會釋放。",

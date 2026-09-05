@@ -3558,7 +3558,7 @@
   "submit.budget.estimate_note": "The high end assumes long prompts and outputs on every call, not a typical run.",
   "submit.budget.estimate_note_runtime": "Includes the execution environment. The high end assumes long prompts and outputs on every call, not a typical run.",
   "submit.budget.over_limit": "If usage reaches {limit} credits the run stops early. You are never charged more than the limit.",
-  "submit.budget.over_limit_low": "Even the low estimate is above {limit} credits, so this run will very likely stop early. Raise the limit to let it finish.",
+  "submit.budget.limit_too_low": "Raise the spending limit. Even the low estimate is {low} credits, above the {limit} you set.",
   "submit.budget.remaining": "Remaining in this limit",
   "submit.budget.spent": "Spent so far",
   "submit.budget.reserved_tip": "Held for work in progress and released once it settles.",

@@ -3558,7 +3558,7 @@
   "submit.budget.estimate_note": "Üst sınır, her çağrıda uzun istem ve çıktılar varsayar; tipik bir çalıştırmayı değil.",
   "submit.budget.estimate_note_runtime": "Yürütme ortamını içerir. Üst sınır, her çağrıda uzun istem ve çıktılar varsayar; tipik bir çalıştırmayı değil.",
   "submit.budget.over_limit": "Kullanım {limit} krediye ulaşırsa çalıştırma erken durur. Limitten fazlası asla tahsil edilmez.",
-  "submit.budget.over_limit_low": "Düşük tahmin bile {limit} kredinin üzerinde; bu çalıştırma büyük olasılıkla erken duracak. Tamamlanabilmesi için limiti yükseltin.",
+  "submit.budget.limit_too_low": "Harcama limitini yükseltin. Düşük tahmin bile {low} kredi; belirlediğiniz {limit} limitinin üzerinde.",
   "submit.budget.remaining": "Bu limitte kalan",
   "submit.budget.spent": "Şimdiye kadar harcanan",
   "submit.budget.reserved_tip": "Devam eden iş için tutulur ve iş sonuçlandığında serbest bırakılır.",

@@ -3558,7 +3558,7 @@
   "submit.budget.estimate_note": "上限値は、毎回の呼び出しで長いプロンプトと出力を想定したもので、一般的な実行ではありません。",
   "submit.budget.estimate_note_runtime": "実行環境を含みます。上限値は、毎回の呼び出しで長いプロンプトと出力を想定したもので、一般的な実行ではありません。",
   "submit.budget.over_limit": "使用量が{limit}クレジットに達すると、実行は早期に停止します。上限を超えて請求されることはありません。",
-  "submit.budget.over_limit_low": "低い見積もりでも{limit}クレジットを上回るため、この実行は早期に停止する可能性が非常に高いです。完了させるには上限を引き上げてください。",
+  "submit.budget.limit_too_low": "支出上限を引き上げてください。低い見積もりでも{low}クレジットで、設定した{limit}を上回ります。",
   "submit.budget.remaining": "この上限の残り",
   "submit.budget.spent": "これまでの支出",
   "submit.budget.reserved_tip": "進行中の作業のために確保され、確定後に解放されます。",

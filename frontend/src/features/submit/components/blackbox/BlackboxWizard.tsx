@@ -9,6 +9,7 @@ import { TERMS } from "@/shared/lib/terms";
 
 import { useBlackboxWizard, type BlackboxRecipe } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig, slideVariants } from "../../constants";
+import { limitCoversEstimate } from "../../lib/budget-limit";
 import { focusField } from "../../lib/focus-field";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../../lib/wizard-steps";
 import { SubmitStepper } from "../SubmitStepper";
@@ -143,6 +144,11 @@ export function BlackboxWizard({
   ];
 
   const handleEvaluationNext = async () => {
+    if (
+      activeEvaluationStep === "budget" &&
+      !limitCoversEstimate(w.costBracket, w.tokenSource, w.maxCostCredits)
+    )
+      return;
     if (activeEvaluationPart < evaluationSteps.length - 1) {
       setEvaluationPart(activeEvaluationPart + 1);
       return;

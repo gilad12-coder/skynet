@@ -3558,7 +3558,7 @@
   "submit.budget.estimate_note": "Das obere Ende geht von langen Prompts und Ausgaben bei jedem Aufruf aus, nicht von einem typischen Lauf.",
   "submit.budget.estimate_note_runtime": "Enthält die Ausführungsumgebung. Das obere Ende geht von langen Prompts und Ausgaben bei jedem Aufruf aus, nicht von einem typischen Lauf.",
   "submit.budget.over_limit": "Erreicht der Verbrauch {limit} Credits, stoppt der Lauf vorzeitig. Dir wird nie mehr als das Limit berechnet.",
-  "submit.budget.over_limit_low": "Selbst die niedrige Schätzung liegt über {limit} Credits, daher wird dieser Lauf sehr wahrscheinlich vorzeitig stoppen. Erhöhe das Limit, damit er abschließen kann.",
+  "submit.budget.limit_too_low": "Erhöhe das Ausgabenlimit. Selbst die niedrige Schätzung liegt bei {low} Credits, über den festgelegten {limit}.",
   "submit.budget.remaining": "Verbleibend in diesem Limit",
   "submit.budget.spent": "Bisher ausgegeben",
   "submit.budget.reserved_tip": "Für laufende Arbeit zurückgehalten und nach Abschluss wieder freigegeben.",

@@ -17,7 +17,6 @@ import {
   Play,
   Terminal,
   Wallet,
-  Warning,
   WarningCircle,
 } from "@/shared/ui/icons";
 import {
@@ -194,12 +193,7 @@ export function TotalBudgetCard({
   const fieldHint = fieldError == null && parsed.kind === "empty" ? minimumMessage : null;
   const fieldMessage = fieldError ?? fieldHint;
 
-  const overLimit =
-    maxCostCredits != null && bracket.highCredits > maxCostCredits
-      ? bracket.lowCredits > maxCostCredits
-        ? "likely"
-        : "possible"
-      : null;
+  const overLimit = maxCostCredits != null && bracket.highCredits > maxCostCredits;
   const estimateLabel = msg(
     preliminary
       ? "submit.budget.estimate_preliminary"
@@ -210,7 +204,7 @@ export function TotalBudgetCard({
   const estimateNotes = [
     preliminary ? msg("submit.budget.estimate_preliminary_note") : null,
     msg(runtimeAtCost ? "submit.budget.estimate_note_runtime" : "submit.budget.estimate_note"),
-    overLimit === "possible"
+    overLimit
       ? formatMsg("submit.budget.over_limit", { limit: credits(maxCostCredits ?? 0) })
       : null,
   ]
@@ -518,12 +512,6 @@ export function TotalBudgetCard({
         <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">
           {estimateNotes}
         </p>
-        {overLimit === "likely" && (
-          <p className="mt-2 flex items-start gap-2 text-xs leading-snug text-amber-700" dir="auto">
-            <Warning className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-            {formatMsg("submit.budget.over_limit_low", { limit: credits(maxCostCredits ?? 0) })}
-          </p>
-        )}
       </div>
 
       {(showLedger || showStatus) && (

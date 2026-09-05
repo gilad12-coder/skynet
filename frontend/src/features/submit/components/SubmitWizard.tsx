@@ -11,6 +11,7 @@ import { WizardSubsteps } from "./WizardSubsteps";
 import { aggregateTokenSource } from "../lib/cost-bracket";
 import { useSubmitWizard } from "../hooks/use-submit-wizard";
 import { emptyModelConfig, slideVariants } from "../constants";
+import { limitCoversEstimate } from "../lib/budget-limit";
 import { focusField } from "../lib/focus-field";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { SubmitStepper } from "./SubmitStepper";
@@ -114,6 +115,11 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
   };
 
   const handleOptimizationNext = async () => {
+    if (
+      OPTIMIZATION_STEPS[optimizationPart] === "budget" &&
+      !limitCoversEstimate(w.costBracket, budgetMode, w.maxCostCredits)
+    )
+      return;
     if (optimizationPart < OPTIMIZATION_STEPS.length - 1) {
       setOptimizationPart((current) => current + 1);
       return;

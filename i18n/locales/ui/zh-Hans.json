@@ -3558,7 +3558,7 @@
   "submit.budget.estimate_note": "上限值假设每次调用都使用较长的提示和输出，而非典型运行。",
   "submit.budget.estimate_note_runtime": "包含执行环境。上限值假设每次调用都使用较长的提示和输出，而非典型运行。",
   "submit.budget.over_limit": "如果用量达到 {limit} 额度，运行将提前停止。绝不会向您收取超过上限的费用。",
-  "submit.budget.over_limit_low": "即使是较低的估算也超过 {limit} 额度，因此此次运行很可能提前停止。请提高上限以便其完成。",
+  "submit.budget.limit_too_low": "请提高支出上限。即使是较低的估算也有 {low} 额度，高于你设置的 {limit}。",
   "submit.budget.remaining": "此上限内剩余",
   "submit.budget.spent": "迄今已花费",
   "submit.budget.reserved_tip": "为进行中的工作预留，结算后释放。",
