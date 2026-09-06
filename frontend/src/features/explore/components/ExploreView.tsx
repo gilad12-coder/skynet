@@ -17,7 +17,6 @@ import { msg, formatMsg } from "@/shared/lib/messages";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { registerTutorialHook } from "@/features/tutorial";
-import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { usePublicDashboard } from "../hooks/use-public-dashboard";
 import { useCorpusFacets } from "../hooks/use-corpus-facets";
 import { useSemanticSearch } from "../hooks/use-semantic-search";
@@ -39,7 +38,6 @@ import { Pagination } from "./Pagination";
 export function ExploreView() {
   const { data: session, status } = useSession();
   const sessionUser = sessionIdentity(session);
-  const isPhone = useIsPhone();
   const { points: realPoints, loading: corpusLoading, error: corpusError } = usePublicDashboard();
   const [demoPoints, setDemoPoints] = React.useState<PublicDashboardPoint[] | null>(null);
   const rawPoints = demoPoints ?? realPoints;
@@ -169,9 +167,7 @@ export function ExploreView() {
             iconWrap="tile"
             title={msg("explore.empty.title")}
             description={msg("explore.empty.hint")}
-            action={
-              isPhone ? undefined : { label: msg("explore.empty.cta"), href: "/submit", icon: Plus }
-            }
+            action={{ label: msg("explore.empty.cta"), href: "/submit", icon: Plus }}
             className="mt-3.5"
           />
         ) : (
@@ -236,7 +232,6 @@ function ListPane({
   hasFilters: boolean;
   sessionUser: string;
 }) {
-  const isPhone = useIsPhone();
   if (response.error) {
     return (
       <div
@@ -285,9 +280,7 @@ function ListPane({
           iconWrap="tile"
           title={msg("explore.corpus.mine.empty")}
           description={msg("explore.corpus.mine.empty.hint")}
-          action={
-            isPhone ? undefined : { label: msg("explore.empty.cta"), href: "/submit", icon: Plus }
-          }
+          action={{ label: msg("explore.empty.cta"), href: "/submit", icon: Plus }}
           className="mt-3.5"
         />
       );

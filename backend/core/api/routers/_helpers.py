@@ -648,9 +648,10 @@ def enforce_storage_quota(job_store, username: str, incoming_bytes: int) -> None
 def is_resumable(job_store: Any, job_data: dict) -> bool:
     """Return whether a stopped run can be resumed in place from its checkpoint.
 
-    True only for the narrow case the Resume affordance targets: a terminal
+    True only for the narrow cases the Resume affordance targets: a terminal
     ``failed``/``cancelled`` run that still has attempts left under
-    ``job_max_attempts`` and a saved GEPA checkpoint. The cheap, indexed
+    ``job_max_attempts``, a manually ``paused`` run, or a run ``stopped`` at
+    its spending limit, each with a saved GEPA checkpoint. The cheap, indexed
     checkpoint lookup is gated behind the status/attempts checks so list pages
     query only the few candidate rows, never the whole page.
 
@@ -680,17 +681,35 @@ def _resume_candidate_id(job_data: dict) -> str | None:
         The optimization id when the row is a resume candidate, else ``None``.
     """
     status = status_to_job_status(job_data.get("status", "pending"))
-    if status not in {OptimizationStatus.failed, OptimizationStatus.cancelled, OptimizationStatus.paused}:
+    budget_stop = is_budget_stop(status, job_data)
+    resumable_status = status in {OptimizationStatus.failed, OptimizationStatus.cancelled, OptimizationStatus.paused}
+    if not resumable_status and not budget_stop:
         return None
     # A grid is resumed per pair (in its results), not via a whole-job button, so
     # the top-level flag stays False for grids — see ``grid_resumable_pairs``.
     if parse_overview(job_data).get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_GRID_SEARCH:
         return None
-    # A manual pause is user-driven, not failure recovery, so it is exempt from the
-    # attempt cap; only failed/cancelled (auto-recovery) runs are bounded by it.
-    if status != OptimizationStatus.paused and int(job_data.get("attempts") or 0) >= settings.job_max_attempts:
+    # A manual pause or a budget stop is user-driven, not failure recovery, so it is
+    # exempt from the attempt cap; only failed/cancelled (auto-recovery) runs are
+    # bounded by it.
+    cap_exempt = status == OptimizationStatus.paused or budget_stop
+    if not cap_exempt and int(job_data.get("attempts") or 0) >= settings.job_max_attempts:
         return None
     return job_data.get("optimization_id") or None
+
+
+def is_budget_stop(status: OptimizationStatus, job_data: dict) -> bool:
+    """Return whether the run halted at its spending limit with its work intact.
+
+    Args:
+        status: Parsed status of the row.
+        job_data: Raw job row from the store.
+
+    Returns:
+        ``True`` for a ``stopped`` row whose stop reason is the budget limit,
+        which raising the limit lets continue from its checkpoint.
+    """
+    return status == OptimizationStatus.stopped and job_data.get("stop_reason") == "budget_reached"
 
 
 def resumable_id_flags(job_store: Any, rows: list[dict]) -> set[str]:

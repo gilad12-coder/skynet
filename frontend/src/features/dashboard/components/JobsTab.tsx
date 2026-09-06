@@ -176,7 +176,7 @@ export function JobsTab({
           )}
           <ResetFiltersButton filters={{ activeCount, clearAll: clearAllFilters }} />
           <ResetColumnsButton resize={colResize} />
-          {!isPhone && filteredItems.length > 0 && (
+          {filteredItems.length > 0 && (
             <ExportTableMenu
               iconOnly
               className="ms-auto"
@@ -214,9 +214,7 @@ export function JobsTab({
             iconWrap="tile"
             title={`${msg("auto.features.dashboard.components.jobstab.4")}${TERMS.optimizationPlural}`}
             description={msg("auto.features.dashboard.components.jobstab.5")}
-            action={
-              isPhone ? undefined : { label: TERMS.notificationNewOpt, href: "/submit", icon: Plus }
-            }
+            action={{ label: TERMS.notificationNewOpt, href: "/submit", icon: Plus }}
           />
         )}
 
@@ -588,13 +586,13 @@ export function JobsTab({
           <div className="flex items-center justify-center gap-3 pt-5 border-t border-border/50 mt-4">
             <Button
               variant="outline"
-              size="sm"
+              size="icon-sm"
               disabled={pageOffset === 0 || loading}
               onClick={() => setPageOffset(Math.max(0, pageOffset - FETCH_PAGE_SIZE))}
-              className="min-h-[44px] gap-1 lg:min-h-0"
+              className="max-lg:size-[44px]"
+              aria-label={msg("auto.features.dashboard.components.jobstab.11")}
             >
               <PrevIcon className="size-3.5" />
-              {msg("auto.features.dashboard.components.jobstab.11")}
             </Button>
             <span className="text-sm text-muted-foreground tabular-nums px-3 py-1 rounded-md bg-muted/50">
               {Math.floor(pageOffset / FETCH_PAGE_SIZE) + 1} /{" "}
@@ -602,12 +600,12 @@ export function JobsTab({
             </span>
             <Button
               variant="outline"
-              size="sm"
+              size="icon-sm"
               disabled={pageOffset + FETCH_PAGE_SIZE >= data.total || loading}
               onClick={() => setPageOffset(pageOffset + FETCH_PAGE_SIZE)}
-              className="min-h-[44px] gap-1 lg:min-h-0"
+              className="max-lg:size-[44px]"
+              aria-label={msg("auto.features.dashboard.components.jobstab.12")}
             >
-              {msg("auto.features.dashboard.components.jobstab.12")}
               <NextIcon className="size-3.5" />
             </Button>
           </div>

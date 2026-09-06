@@ -117,6 +117,7 @@ class BudgetSnapshot:
     external_spent_credits: Decimal
     pending_operations: int
     blocked_reason: str | None
+    uncapped: bool = False
 
 
 @dataclass(frozen=True)
@@ -306,6 +307,20 @@ class BudgetService:
         )
         setup, setup_wallet = totals.get("setup", (0, 0))
         run, run_wallet = totals.get("run", (0, 0))
+        account_available = max(
+            0,
+            int(wallet.credit_balance)
+            + int(wallet.grant_remaining or 0)
+            - account_committed_credits(session, budget.username),
+        )
+        # Without a limit the remaining allowance is whatever the account can still fund.
+        available = (
+            Decimal(account_available)
+            if budget.uncapped
+            else credits_from_units(
+                max(0, budget.total_credits * CREDIT_SCALE - budget.settled_units - budget.reserved_units)
+            )
+        )
         return BudgetSnapshot(
             id=budget.id,
             username=budget.username,
@@ -317,22 +332,16 @@ class BudgetService:
             setup_spent_credits=credits_from_units(setup),
             run_spent_credits=credits_from_units(run),
             reserved_credits=credits_from_units(budget.reserved_units),
-            available_credits=credits_from_units(
-                max(0, budget.total_credits * CREDIT_SCALE - budget.settled_units - budget.reserved_units)
-            ),
+            available_credits=available,
             billed_credits=budget.billed_credits,
             wallet_setup_spent_credits=credits_from_units(setup_wallet),
             wallet_run_spent_credits=credits_from_units(run_wallet),
             wallet_reserved_credits=budget_wallet_hold(budget),
-            account_available_credits=max(
-                0,
-                int(wallet.credit_balance)
-                + int(wallet.grant_remaining or 0)
-                - account_committed_credits(session, budget.username),
-            ),
+            account_available_credits=account_available,
             external_spent_credits=credits_from_units(budget.settled_units - budget.wallet_settled_units),
             pending_operations=int(pending or 0),
             blocked_reason=budget.blocked_reason,
+            uncapped=bool(budget.uncapped),
         )
 
     def _operation_snapshot(
@@ -372,20 +381,24 @@ class BudgetService:
             budget=self._snapshot(session, budget, wallet),
         )
 
-    def create(self, username: str, total_credits: int, *, idempotency_key: str) -> BudgetSnapshot:
+    def create(
+        self, username: str, total_credits: int, *, idempotency_key: str, uncapped: bool = False
+    ) -> BudgetSnapshot:
         """Create or recover a budget envelope without holding its unspent total.
 
         Args:
             username: Authenticated account owner.
             total_credits: Authorized combined scope limit.
             idempotency_key: Stable creation identity across browser retries.
+            uncapped: Let the run draw on the account instead of stopping at the total.
 
         Returns:
             Current authoritative budget; paid work still requires a reservation.
         """
         total = _total(total_credits)
         key = _identifier(idempotency_key)
-        fingerprint = _fingerprint({"total": total})
+        # Only an uncapped request widens the fingerprint so earlier replays keep matching.
+        fingerprint = _fingerprint({"total": total, "uncapped": True} if uncapped else {"total": total})
         with self._transaction() as session:
             wallet = self._wallet(session, username)
             budget = session.scalar(
@@ -406,6 +419,7 @@ class BudgetService:
                 creation_key=key,
                 creation_fingerprint=fingerprint,
                 total_credits=total,
+                uncapped=uncapped,
                 created_at=now,
                 updated_at=now,
             )
@@ -521,7 +535,7 @@ class BudgetService:
             return list(session.execute(statement))
 
     def update_total(
-        self, budget_id: str, username: str, total_credits: int, *, expected_revision: int
+        self, budget_id: str, username: str, total_credits: int, *, expected_revision: int, uncapped: bool = False
     ) -> BudgetSnapshot:
         """Accept a versioned total without invalidating spent or covered amounts.
 
@@ -530,6 +544,7 @@ class BudgetService:
             username: Authenticated owner.
             total_credits: User's explicitly edited scope ceiling.
             expected_revision: Last accepted revision held by the caller.
+            uncapped: Whether the run may keep drawing on the account past the total.
 
         Returns:
             Updated authority, or the same revision for an unchanged total.
@@ -544,18 +559,20 @@ class BudgetService:
                     current_total_credits=budget.total_credits,
                     minimum_total_credits=minimum,
                 )
-            if total < minimum:
+            if not uncapped and total < minimum:
                 raise BudgetTotalConflictError(
                     f"The minimum currently supportable total is {minimum} credits.",
                     current_total_credits=budget.total_credits,
                     minimum_total_credits=minimum,
                 )
-            if total > budget.total_credits and wallet.credit_balance + int(
-                wallet.grant_remaining or 0
-            ) <= account_committed_credits(session, username):
+            widening = total > budget.total_credits or (uncapped and not budget.uncapped)
+            if widening and wallet.credit_balance + int(wallet.grant_remaining or 0) <= account_committed_credits(
+                session, username
+            ):
                 raise BudgetInsufficientError("The account has no available credits for additional work.")
-            if total != budget.total_credits:
+            if total != budget.total_credits or uncapped != budget.uncapped:
                 budget.total_credits = total
+                budget.uncapped = uncapped
                 budget.revision += 1
                 budget.updated_at = datetime.now(UTC)
             return self._snapshot(session, budget, wallet)
@@ -717,11 +734,12 @@ class BudgetService:
                 if headroom.state != "reserved" or scope > headroom.max_units or charge > headroom.max_wallet_units:
                     raise BudgetInsufficientError("Recovery work exceeded its pre-authorized operation bounds.")
             else:
-                remaining = budget.total_credits * CREDIT_SCALE - budget.settled_units
-                if scope > remaining:
-                    raise BudgetInsufficientError("The next operation exceeds the remaining total budget.")
-                if scope > remaining - budget.reserved_units:
-                    raise BudgetInFlightError("Covered work must settle before this operation can fit.")
+                if not budget.uncapped:
+                    remaining = budget.total_credits * CREDIT_SCALE - budget.settled_units
+                    if scope > remaining:
+                        raise BudgetInsufficientError("The next operation exceeds the remaining total budget.")
+                    if scope > remaining - budget.reserved_units:
+                        raise BudgetInFlightError("Covered work must settle before this operation can fit.")
                 held = account_committed_credits(session, username)
                 wallet_balance = int(wallet.credit_balance) + int(wallet.grant_remaining or 0)
                 hold_delta = (
@@ -1018,7 +1036,7 @@ class BudgetService:
             )
             if active is not None:
                 raise BudgetUnreconciledError("Previous paid work must reconcile before admission resumes.")
-            if budget.settled_units >= budget.total_credits * CREDIT_SCALE:
+            if not budget.uncapped and budget.settled_units >= budget.total_credits * CREDIT_SCALE:
                 raise BudgetInsufficientError("The total budget has no remaining allowance.")
             budget.state = "attached"
             budget.blocked_reason = None

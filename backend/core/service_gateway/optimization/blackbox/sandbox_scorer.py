@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shlex
 import threading
 import time
@@ -35,7 +36,7 @@ from ....config import Settings, settings
 from ....exceptions import ServiceError
 from ....models.common import ModelConfig
 from ...language_models import usage_by_model_from_history
-from . import runner
+from . import package_setup, runner
 from .agent_eval import gateway_from_settings
 from .harness import ENV_API_KEY
 from .heartbeat import heartbeat
@@ -298,6 +299,8 @@ class SandboxPythonScorer:
         lifetime_seconds: float | None = None,
         job_id: str | None = None,
         install_command: str | None = None,
+        dependency_lock: Mapping[str, Any] | None = None,
+        dependency_route: Mapping[str, str] | None = None,
     ) -> None:
         """Bind scorer code to a runtime without opening anything yet.
 
@@ -309,9 +312,20 @@ class SandboxPythonScorer:
             lifetime_seconds: Requested box lifetime; the configured ceiling when unset, and never above it.
             job_id: Names and tags the box after the job, when known.
             install_command: Shell command run once in every fresh box before the first call.
+            dependency_lock: Exact wheel set authenticated by the trusted parent.
+            dependency_route: Scoped capability for retrieving the locked artifacts.
         """
         self._code = code
         self._install_command = (install_command or "").strip() or None
+        self._dependency_lock = dict(dependency_lock) if dependency_lock is not None else None
+        self._dependency_route = (
+            dict(dependency_route)
+            if dependency_route is not None
+            else {
+                "url": os.environ.get("SKYNET_BUDGET_RELAY_URL", ""),
+                "token": os.environ.get("SKYNET_PACKAGE_RELAY_TOKEN", ""),
+            }
+        )
         self._runtime = runtime
         self._protected = bool(getattr(runtime, "protected", False) or (gateway and gateway.protected))
         if getattr(runtime, "protected", False) and gateway is not None and not gateway.protected:
@@ -452,7 +466,11 @@ class SandboxPythonScorer:
         )
         result = session.run(
             f"python3 {RUNNER_FILE} {shlex.quote(call_dir)}",
-            env={ENV_API_KEY: self._env_key} if self._env_key else None,
+            env={
+                **({ENV_API_KEY: self._env_key} if self._env_key else {}),
+                **({"PYTHONPATH": ".skynet-dependencies/site"} if self._dependency_lock is not None else {}),
+            }
+            or None,
             timeout_seconds=self._timeout_seconds,
         )
         logger.debug(
@@ -500,6 +518,35 @@ class SandboxPythonScorer:
         Raises:
             ServiceError: When the command fails or outruns its allowance.
         """
+        if self._dependency_lock is not None:
+            if not self._dependency_route.get("token"):
+                raise ServiceError("Pinned dependencies require the protected package relay.")
+            directory = ".skynet-dependencies"
+            session.write_files(
+                {
+                    f"{directory}/setup.py": Path(package_setup.__file__).read_text(),
+                    f"{directory}/request.json": json.dumps(
+                        {
+                            "action": "install",
+                            "lock": self._dependency_lock,
+                            "route": self._dependency_route,
+                        }
+                    ),
+                }
+            )
+            result = session.run(
+                f"python3 {directory}/setup.py {directory}/request.json",
+                timeout_seconds=300,
+            )
+            raw = session.read_file(f"{directory}/result.json")
+            outcome = json.loads(raw) if raw else {}
+            _raise_control(outcome)
+            if not result.ok or not outcome.get("ok"):
+                raise ServiceError(
+                    outcome.get("error")
+                    or _tail(result.stderr or result.stdout)
+                    or "Pinned package installation did not complete."
+                )
         if self._install_command is None:
             return
         logger.info("scorer sandbox: install running (allowance %.0fs)", _INSTALL_TIMEOUT_SECONDS)

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { formatCredits } from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
@@ -50,7 +51,7 @@ function totalCredits(w: WalletResult): number {
 }
 
 function fmtCredits(n: number): string {
-  return n.toLocaleString(getActiveIntlLocale());
+  return formatCredits(n, getActiveIntlLocale());
 }
 
 function fmtUsd(credits: number): string {
@@ -141,7 +142,7 @@ export function WalletCard({ call }: WalletCardProps) {
 
 function CreditDelta({ credits }: { credits: number }) {
   const positive = credits > 0;
-  const text = positive ? `+${credits.toLocaleString(getActiveIntlLocale())}` : credits.toLocaleString(getActiveIntlLocale());
+  const text = positive ? `+${fmtCredits(credits)}` : fmtCredits(credits);
   return (
     <span
       dir="ltr"

@@ -94,6 +94,9 @@ def main() -> None:
         if not os.environ.get("SKYNET_BUDGET_RELAY_URL"):
             raise RuntimeError("The protected tool roster requires its isolated mailbox relay.")
         os.environ["SKYNET_TOOL_RELAY_TOKEN"] = str(tools_route["token"])
+    packages_route = document["payload"].pop("_skynet_packages_route", None)
+    if packages_route is not None:
+        os.environ["SKYNET_PACKAGE_RELAY_TOKEN"] = str(packages_route["token"])
     preflight = document["payload"].pop("_preflight", None)
     interaction = document["payload"].pop("_interaction", None)
     directory = Path(document["payload"].get("_gepa_log_dir") or "checkpoints")

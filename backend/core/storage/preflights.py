@@ -147,7 +147,14 @@ def verification_fingerprint(
 
 
 def preflight_document(row: WizardPreflightModel) -> dict[str, Any]:
-    """Return only public evidence fields, keeping account and credential identities private."""
+    """Return only public evidence fields, keeping account and credential identities private.
+
+    Args:
+        row: Persisted setup attempt with its actual results.
+
+    Returns:
+        Public checks and completed workflow outputs, including pending usage status.
+    """
     status = "pending" if row.status == "running" else row.status
     pending_reason = row.result.get("pending_reason")
     if status == "pending" and not isinstance(pending_reason, dict):
@@ -170,6 +177,7 @@ def preflight_document(row: WizardPreflightModel) -> dict[str, Any]:
         or (status == "pending" and pending_reason.get("category") == "later_stage_dependency"),
         "checks": row.result.get("checks", []),
         **({"pending_reason": pending_reason} if status == "pending" else {}),
+        **({"dependency_result": row.result["dependency_result"]} if "dependency_result" in row.result else {}),
         **({"scorer_result": row.result["scorer_result"]} if "scorer_result" in row.result else {}),
         **({"workflow_result": row.result["workflow_result"]} if "workflow_result" in row.result else {}),
         **({"interaction_result": row.result["interaction_result"]} if "interaction_result" in row.result else {}),

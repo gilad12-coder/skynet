@@ -21,8 +21,8 @@ import { sessionIdentity } from "@/shared/lib/session-identity";
 import { DraftRestoreToast, type DraftRestoreState } from "../components/DraftRestoreToast";
 import {
   DraftSaver,
-  draftStage,
   hasMeaningfulDraft,
+  matchesClonedDraft,
   recipeToOpen,
   type DraftDataFor,
   type DraftRecipe,
@@ -44,6 +44,8 @@ export interface WizardDraftsApi {
   /** The in-memory snapshot for a workflow, or null while an offer is pending. */
   takeSnapshot<K extends DraftRecipe>(recipe: K): DraftDataFor<K> | null;
   publish<K extends DraftRecipe>(recipe: K, data: DraftDataFor<K>, meaningful: boolean): void;
+  /** Resolve a pending restore offer against the fully hydrated clone. */
+  compareClone<K extends DraftRecipe>(recipe: K, data: DraftDataFor<K> | null): void;
   /** Write any pending change now — stage boundaries and unmounts. */
   flush(): void;
   /** The draft turned into a submission; delete it and stop saving. */
@@ -58,6 +60,7 @@ const NOOP_API: WizardDraftsApi = {
   },
   takeSnapshot: () => null,
   publish: () => {},
+  compareClone: () => {},
   flush: () => {},
   consumed: () => {},
 };
@@ -85,14 +88,6 @@ function offerToastId(draftId: string): string {
   return `draft-restore:${draftId}`;
 }
 
-/** "Anything · Evaluation": what the draft is and where it reopens. */
-function draftSummary(record: WizardDraftRecord): string | null {
-  const recipe = recipeToOpen(record);
-  const stage = draftStage(record);
-  if (!recipe || !stage) return null;
-  return `${msg(`submit.recipe.${recipe}.title`)} · ${msg(`submit.stage.${stage}`)}`;
-}
-
 /**
  * Owns the durable draft for the signed-in account on `/submit`: discovers it
  * once the account is known, offers it back through one actionable toast,
@@ -101,9 +96,11 @@ function draftSummary(record: WizardDraftRecord): string | null {
  * storage has confirmed the choice.
  */
 export function useWizardDraftController({
+  cloning,
   onContinue,
   onStartNew,
 }: {
+  cloning: boolean;
   onContinue: (recipe: DraftRecipe) => void;
   onStartNew: () => void;
 }) {
@@ -117,13 +114,14 @@ export function useWizardDraftController({
   useEffect(() => {
     accountRef.current = accountId;
   }, [accountId]);
-  const transitions = useRef({ onContinue, onStartNew });
+  const transitions = useRef({ onContinue, onStartNew, cloning });
   useEffect(() => {
-    transitions.current = { onContinue, onStartNew };
-  }, [onContinue, onStartNew]);
+    transitions.current = { onContinue, onStartNew, cloning };
+  }, [onContinue, onStartNew, cloning]);
   const channelRef = useRef<ReturnType<typeof openDraftChannel> | null>(null);
 
   const [offer, setOffer] = useState<WizardDraftRecord | null>(null);
+  const [comparingClone, setComparingClone] = useState(false);
   const offerRef = useRef(offer);
   useEffect(() => {
     offerRef.current = offer;
@@ -138,6 +136,7 @@ export function useWizardDraftController({
     if (current) toast.dismiss(offerToastId(current.id));
     offerRef.current = null;
     setOffer(null);
+    setComparingClone(false);
   }, []);
 
   const warnSaveFailed = useCallback(() => {
@@ -171,10 +170,9 @@ export function useWizardDraftController({
   }, [dismissOffer]);
 
   const renderOffer = useCallback(
-    (record: WizardDraftRecord, continueDraft: () => void) => (
+    (continueDraft: () => void) => (
       <DraftRestoreToast
         title={msg("submit.draft.restore.title")}
-        summary={draftSummary(record)}
         state={offerStateRef.current.state}
         failureText={offerStateRef.current.failure}
         continueLabel={msg("submit.draft.restore.continue")}
@@ -187,8 +185,12 @@ export function useWizardDraftController({
     [startNew],
   );
 
-  const continueDraftRef = useRef<() => void>(() => {});
-  const continueDraft = () => {
+  type CloneComparison = {
+    recipe: DraftRecipe;
+    data: DraftDataFor<DraftRecipe> | null;
+  };
+  const continueDraftRef = useRef<(clone?: CloneComparison) => void>(() => {});
+  const continueDraft = (clone?: CloneComparison) => {
     const saver = saverRef.current;
     const current = offerRef.current;
     const account = accountRef.current;
@@ -196,13 +198,23 @@ export function useWizardDraftController({
     const id = offerToastId(current.id);
     const show = (state: DraftRestoreState, failure: string | null) => {
       offerStateRef.current = { state, failure };
-      toast.update(id, { render: renderOffer(current, () => continueDraftRef.current()) });
+      toast.update(id, { render: renderOffer(() => continueDraftRef.current()) });
     };
-    show("working", null);
+    if (!clone) show("working", null);
     indexedDbDraftStore
       .read(account)
       .then(({ record: fresh, resetGeneration }) => {
         if (offerRef.current !== current || accountRef.current !== account) return;
+        if (clone) {
+          setComparingClone(false);
+          if (!fresh || !hasMeaningfulDraft(fresh)) {
+            saver.adopt(null, resetGeneration);
+            saver.hold(false);
+            dismissOffer();
+            return;
+          }
+          if (!clone.data || !matchesClonedDraft(fresh, clone.recipe, clone.data)) return;
+        }
         const recipe = recipeToOpen(fresh);
         if (!fresh || !recipe) {
           show("failed", msg("submit.draft.restore.gone"));
@@ -215,6 +227,10 @@ export function useWizardDraftController({
       })
       .catch(() => {
         if (offerRef.current !== current) return;
+        if (clone) {
+          setComparingClone(false);
+          return;
+        }
         show("failed", msg("submit.draft.restore.failed"));
       });
   };
@@ -223,10 +239,10 @@ export function useWizardDraftController({
   });
 
   useEffect(() => {
-    if (!offer) return;
+    if (!offer || comparingClone) return;
     offerStateRef.current = { state: "offer", failure: null };
     toast(
-      renderOffer(offer, () => continueDraftRef.current()),
+      renderOffer(() => continueDraftRef.current()),
       {
         toastId: offerToastId(offer.id),
         autoClose: false,
@@ -237,7 +253,7 @@ export function useWizardDraftController({
         role: "status",
       },
     );
-  }, [offer, renderOffer]);
+  }, [offer, comparingClone, renderOffer]);
 
   // Leaving `/submit` keeps the draft and drops the offer; it comes back with
   // the page, and its buttons would otherwise point at an unmounted screen.
@@ -302,6 +318,7 @@ export function useWizardDraftController({
           return;
         }
         saver.adopt(record, resetGeneration);
+        setComparingClone(transitions.current.cloning);
         setOffer(record);
       })
       .catch(() => {
@@ -355,7 +372,12 @@ export function useWizardDraftController({
       },
       publish: (recipe, data, meaningful) => {
         const saver = saverRef.current;
-        if (saver?.accountId === accountId) saver.publish(recipe, data, meaningful);
+        if (saver?.accountId === accountId && !saver.isHeld)
+          saver.publish(recipe, data, meaningful);
+      },
+      compareClone: (recipe, data) => {
+        if (comparingClone && accountRef.current === accountId)
+          continueDraftRef.current({ recipe, data });
       },
       flush: () => {
         const saver = saverRef.current;
@@ -378,12 +400,13 @@ export function useWizardDraftController({
           .catch(() => {});
       },
     }),
-    [accountId, offerPending],
+    [accountId, offerPending, comparingClone],
   );
 
   return {
     api,
     offerPending,
+    comparingClone,
     startNew,
     accountReady: accountId !== null && readyAccount === accountId,
     accountId,

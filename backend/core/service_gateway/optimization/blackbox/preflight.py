@@ -103,6 +103,7 @@ def verify_anything_in_sandbox(
             timeout_seconds=scorer.timeout_seconds,
             lifetime_seconds=scorer.timeout_seconds + 60,
             install_command=scorer.install_command,
+            dependency_lock=scorer.dependency_lock.model_dump(mode="json") if scorer.dependency_lock else None,
             job_id=identity,
         )
     checks: list[dict[str, Any]] = []

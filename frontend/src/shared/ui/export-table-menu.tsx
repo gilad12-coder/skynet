@@ -56,7 +56,7 @@ export interface ExportTableMenuProps {
  */
 export function ExportTableMenu({
   getData,
-  iconOnly = false,
+  iconOnly = true,
   disabled = false,
   align = "end",
   className,
@@ -88,7 +88,7 @@ export function ExportTableMenu({
                 size="icon-sm"
                 disabled={disabled}
                 aria-label={msg("export.table.aria")}
-                className={className}
+                className={cn("max-lg:size-[44px]", className)}
               >
                 <DownloadSimple
                   className="size-[1.05rem] text-primary"

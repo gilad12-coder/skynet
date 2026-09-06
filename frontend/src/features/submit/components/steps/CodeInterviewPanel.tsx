@@ -25,14 +25,12 @@ interface Props {
 }
 
 const DSPY_COPY = {
-  subtitle: "submit.code.interview.subtitle",
   reading: "submit.code.interview.reading",
   briefDescription: "submit.code.interview.brief.description",
   briefConfirm: "submit.code.interview.brief.confirm",
 } as const;
 
 const BLACKBOX_COPY = {
-  subtitle: "submit.blackbox.interview.subtitle",
   reading: "submit.blackbox.interview.reading",
   briefDescription: "submit.blackbox.interview.brief.description",
   briefConfirm: "submit.blackbox.interview.brief.confirm",
@@ -65,19 +63,18 @@ export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
           <h3 className="text-sm font-semibold text-foreground">
             {msg("submit.code.interview.title")}
           </h3>
-          <p className="mt-0.5 text-pretty text-xs text-muted-foreground">{msg(copy.subtitle)}</p>
         </div>
         {/* The header spans both the chat and the brief card, so a re-run is
             one click away from the brief too — mirroring the tagger. */}
         <Button
           variant="ghost"
-          size="sm"
+          size="icon-sm"
           onClick={interview.reset}
           disabled={interview.busy || (interview.messages.length === 0 && !interview.done)}
-          className="min-h-[44px] shrink-0 gap-1.5 self-end text-muted-foreground sm:self-auto lg:min-h-0"
+          className="max-lg:size-[44px]"
+          aria-label={msg("submit.code.interview.restart")}
         >
           <ArrowCounterClockwise className="size-3.5" />
-          {msg("submit.code.interview.restart")}
         </Button>
       </div>
 

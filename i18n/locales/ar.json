@@ -199,6 +199,7 @@
     "optimization.pause_not_pausable": "لا يمكن إيقاف التحسين مؤقتًا إلا بعد حفظ أول نقطة تحقّق له — حاول مجددًا بعد لحظة.",
     "optimization.pause_wrong_status": "لا يمكن إيقاف سوى عمليات التحسين قيد التشغيل مؤقتًا — هذه في الحالة '{status}'.",
     "optimization.payload_unavailable": "حمولة التحسين غير متاحة.",
+    "optimization.resume_budget_projected": "التشغيل في طريقه إلى أن يكلف نحو {projected} رصيدًا، أي أكثر من حده البالغ {limit} رصيدًا. ارفع حد الإنفاق إلى أكثر من {projected} رصيدًا للمتابعة.",
     "optimization.resume_exhausted": "بلغ هذا التحسين أقصى عدد من المحاولات ({attempts}) — شغّله من جديد بدلاً من ذلك.",
     "optimization.resume_not_resumable": "لا يملك هذا التحسين أي نقطة استئناف محفوظة — شغّله من جديد بدلاً من ذلك.",
     "optimization.resume_wrong_status": "لا يمكن استئناف سوى عمليات التحسين التي توقّفت في منتصف التشغيل — هذه في الحالة '{status}'.",

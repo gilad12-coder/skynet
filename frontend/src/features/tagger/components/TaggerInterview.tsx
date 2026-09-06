@@ -182,19 +182,16 @@ export function TaggerInterview({
               <h3 className="text-sm font-semibold text-foreground">
                 {msg("tagger.assist.interview.title")}
               </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {msg("tagger.assist.interview.subtitle")}
-              </p>
             </div>
             <Button
               variant="ghost"
-              size="sm"
+              size="icon-sm"
               onClick={onRestart}
               disabled={busy || assist.interview.turns.length === 0}
-              className="min-h-[44px] shrink-0 gap-1.5 text-muted-foreground lg:min-h-0"
+              className="max-lg:size-[44px]"
+              aria-label={msg("tagger.assist.interview.restart")}
             >
               <ArrowCounterClockwise className="size-3.5" />
-              {msg("tagger.assist.interview.restart")}
             </Button>
           </div>
 

@@ -186,6 +186,7 @@
     "optimization.pause_not_pausable": "優化喺儲存第一個檢查點之後先可以暫停——請稍後再試。",
     "optimization.pause_wrong_status": "只有運行緊嘅優化先可以暫停——目前處於「{status}」。",
     "optimization.payload_unavailable": "優化 payload 無法使用。",
+    "optimization.resume_budget_projected": "照咁落去，運行大約會用到 {projected} credits，超過 {limit} credits 嘅上限。要繼續嘅話，請將支出上限提高到 {projected} credits 以上。",
     "optimization.resume_exhausted": "呢項優化已經達到嘗試次數上限（{attempts}）——請改為重新執行。",
     "optimization.resume_not_resumable": "呢項優化冇已儲存嘅復原點——請改為重新執行。",
     "optimization.resume_wrong_status": "只有中途停止嘅優化先可以繼續——目前處於「{status}」。",

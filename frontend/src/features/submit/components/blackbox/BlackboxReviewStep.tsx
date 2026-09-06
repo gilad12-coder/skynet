@@ -109,6 +109,7 @@ export function BlackboxReviewStep({
     costBracket,
     tokenSource,
     maxCostCredits,
+    budgetUncapped,
   } = w;
   const locale = getActiveIntlLocale();
   const bracket = chargeableBracket(costBracket, tokenSource);
@@ -124,12 +125,12 @@ export function BlackboxReviewStep({
   };
 
   const startSummary =
-    seedMode === "none"
+    seedMode === "none" || (seedMode === "text" && !seedText.trim())
       ? msg("submit.blackbox.review.start_none")
       : seedMode === "text"
         ? formatMsg("submit.blackbox.review.start_text", { chars: seedText.length })
         : formatMsg("submit.blackbox.review.start_parts", {
-            n: seedParts.filter((p) => p.key.trim() && p.value.trim()).length,
+            n: seedParts.filter((p) => p.value.trim()).length,
           });
 
   const displayName = jobName.trim() || suggestedName;
@@ -222,20 +223,13 @@ export function BlackboxReviewStep({
           <Row
             label={msg("submit.blackbox.scorer.install_label")}
             tip="submit.blackbox.scorer_install"
-            onEdit={edit("evaluation", "bb-scorer-install")}
           >
             <Mono>{scorerInstall.trim()}</Mono>
           </Row>
         )}
-        <Row
-          label={msg("submit.blackbox.review.execution")}
-          tip="submit.blackbox.target"
-          onEdit={edit("evaluation", "bb-execution-agent")}
-        >
-          {targetKind === "agent"
-            ? `${msg("submit.blackbox.start.target.agent")} · ${harnessLabel(harness)}`
-            : msg("submit.blackbox.start.target.text")}
-        </Row>
+        {targetKind === "agent" && (
+          <Row label={msg("submit.blackbox.review.execution")}>{harnessLabel(harness)}</Row>
+        )}
         <Row
           label={msg("submit.blackbox.review.models")}
           tip="submit.blackbox.roles"
@@ -347,7 +341,11 @@ export function BlackboxReviewStep({
           tip="submit.budget"
           onEdit={edit("evaluation", "totalBudgetInput")}
         >
-          {maxCostCredits != null ? credits(maxCostCredits) : msg("submit.budget.unset_short")}
+          {budgetUncapped
+            ? msg("submit.budget.uncapped_short")
+            : maxCostCredits != null
+              ? credits(maxCostCredits)
+              : msg("submit.budget.unset_short")}
           <span className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
             <span>
               {formatMsg("submit.budget.estimated_range", {

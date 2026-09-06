@@ -20,7 +20,7 @@ test("execution failures return to the stage that owns the failed field", () => 
     fieldId: "wizard-stage-optimization",
   });
   assert.deepEqual(preflightDestination("dspy", "usage", "execution"), {
-    stage: "evaluation",
+    stage: "optimization",
     fieldId: "totalBudgetInput",
   });
 });
@@ -29,5 +29,12 @@ test("unrecognized checks focus a real stage instead of a nonexistent API field"
   assert.deepEqual(preflightDestination("anything", "setup", "execution"), {
     stage: "optimization",
     fieldId: "wizard-stage-optimization",
+  });
+});
+
+test("Anything budget failures return to Evaluation", () => {
+  assert.deepEqual(preflightDestination("anything", "budget", "evaluation"), {
+    stage: "evaluation",
+    fieldId: "totalBudgetInput",
   });
 });

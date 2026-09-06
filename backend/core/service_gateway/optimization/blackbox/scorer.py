@@ -186,4 +186,5 @@ def build_scorer(
         timeout_seconds=spec.timeout_seconds,
         job_id=job_id,
         install_command=spec.install_command,
+        dependency_lock=spec.dependency_lock.model_dump(mode="json") if spec.dependency_lock else None,
     )

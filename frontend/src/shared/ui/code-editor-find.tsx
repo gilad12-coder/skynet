@@ -34,9 +34,9 @@ const WORD_GLYPH = "W";
 const REGEX_GLYPH = ".*";
 
 const ICON_BUTTON_CLASS =
-  "flex shrink-0 items-center rounded p-0.5 text-[#7C6350] transition-colors hover:bg-black/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#C8B8A4] disabled:cursor-not-allowed disabled:opacity-40";
+  "flex shrink-0 items-center rounded p-0.5 text-[#7C6350] transition-[transform,background-color] duration-150 ease-out hover:bg-black/5 enabled:hover:scale-105 enabled:active:scale-95 motion-reduce:transform-none motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#C8B8A4] disabled:cursor-not-allowed disabled:opacity-40";
 const TEXT_BUTTON_CLASS =
-  "shrink-0 rounded px-1.5 py-0.5 font-medium text-[#7C6350] transition-colors hover:bg-black/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#C8B8A4] disabled:cursor-not-allowed disabled:opacity-40";
+  "shrink-0 rounded px-1.5 py-0.5 font-medium text-[#7C6350] transition-[transform,background-color] duration-150 ease-out hover:bg-black/5 enabled:hover:scale-105 enabled:active:scale-95 motion-reduce:transform-none motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#C8B8A4] disabled:cursor-not-allowed disabled:opacity-40";
 const FIELD_CLASS =
   "min-w-0 flex-1 bg-transparent py-1 font-mono text-[11.5px] text-[#3D2E22] outline-none placeholder:text-[#B09878]";
 
@@ -200,7 +200,7 @@ function FindPanel({ view, listeners, replaceOpen, onReplaceOpenChange }: FindPa
     <div
       dir="ltr"
       onKeyDown={handleKeyDown}
-      className="flex flex-col gap-1 px-2 py-1.5 font-sans text-[11px] text-[#3D2E22]"
+      className="flex flex-col gap-1 px-2 py-1.5 font-sans text-[11px] text-[#3D2E22] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150"
     >
       <div className="flex items-center gap-1">
         {!readOnly && (

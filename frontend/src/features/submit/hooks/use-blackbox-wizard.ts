@@ -1,5 +1,14 @@
 "use client";
 
+import { scorerCallsModel } from "../lib/scorer-dependencies";
+
+import {
+  restoreExecutionMode,
+  resolveExecutionKind,
+  type ExecutionMode,
+} from "../lib/execution-intent";
+import { resolveScorerDependencies } from "@/shared/lib/api";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -12,6 +21,7 @@ import type {
   BlackboxHarness,
   BlackboxRunRequest,
   BlackboxScorer,
+  ScorerDependencyLock,
   BlackboxTarget,
   ModelConfig,
   ScorerDryRunResponse,
@@ -75,7 +85,7 @@ import {
 import type { PreflightScope, WizardPreflightResponse } from "@/shared/types/wizard-preflight";
 import { useWizardPreflight } from "./use-wizard-preflight";
 import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
-import { seedPartsIssue } from "../lib/seed-parts";
+import { namedSeedParts, seedPartsIssue } from "../lib/seed-parts";
 import { beginValidationToast, type ValidationToast } from "../lib/validation-toast";
 import {
   aggregateTokenSource,
@@ -192,15 +202,6 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-/**
- * Whether a python scorer reaches for a model at all: only then does its
- * model matter. Comments are dropped first, since the template documents
- * `llm()` in one without ever calling it.
- */
-function scorerCallsModel(code: string): boolean {
-  return /\bllm\s*\(/.test(code.replace(/#.*$/gm, ""));
-}
-
 export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -223,8 +224,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [jobDescription, setJobDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(true);
 
-  // The kind of starting point — a prompt, code or any other text. It follows
-  // what the seed reads as; the picker's link, a draft or a clone only seeds it.
+  // Execution intent comes from the entry point, draft or clone, never from
+  // syntax detection: code-shaped text may be a config or a prompt example.
   const [recipe, setRecipeState] = useState<BlackboxRecipe>(initialRecipe);
 
   const [codeAssistMode, setCodeAssistMode] = useState<"auto" | "manual">(() =>
@@ -241,7 +242,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [seedParts, setSeedParts] = useState<SeedPart[]>([{ key: "", value: "" }]);
   const [objective, setObjective] = useState("");
   const [background, setBackground] = useState("");
-  const [targetKind, setTargetKind] = useState<"text" | "agent">("text");
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>("auto");
+  const targetKind = resolveExecutionKind(executionMode);
+  const setTargetKind = useCallback((kind: "text" | "agent") => setExecutionMode(kind), []);
   const [harness, setHarness] = useState<BlackboxHarness>("pi");
   // The model the agent harness runs on: what the run optimizes for, and no
   // part of the scorer. It carries only a name — the sandbox reaches it
@@ -311,19 +314,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const [scorerKind, setScorerKind] = useState<"python" | "remote">("python");
   const [metricCode, setMetricCode] = useState(scorerTemplateFor(initialRecipe));
-  // The kind only seeds the scorer: a scorer still on the outgoing kind's
-  // template follows the switch, while anything the user or the agent wrote
-  // stays put.
-  const setRecipe = useCallback(
-    (next: BlackboxRecipe) => {
-      if (metricCode === scorerTemplateFor(recipe)) setMetricCode(scorerTemplateFor(next));
-      setRecipeState(next);
-    },
-    [metricCode, recipe],
-  );
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
   const [scorerInstall, setScorerInstall] = useState("");
+  const [scorerPackages, setScorerPackages] = useState("");
+  const [scorerDependencyLock, setScorerDependencyLock] = useState<ScorerDependencyLock | null>(
+    null,
+  );
   // A metric is any function; only one that calls `llm()` needs a model, and
   // the code says whether it does.
   const [scorerModel, setScorerModel] = useState<ModelConfig>(emptyModelConfig());
@@ -383,6 +380,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const {
     maxCostCredits,
     setMaxCostCredits,
+    budgetUncapped,
+    setBudgetUncapped,
     session: budgetSession,
     setupSpent,
     availableCredits,
@@ -476,9 +475,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setIsPrivate(d.isPrivate);
     setRecipeState(d.recipe);
     setCodeAssistMode(d.codeAssistMode);
-    setSeedMode(d.seedMode);
-    setSeedText(d.seedText);
-    setSeedParts(d.seedParts);
+    const singlePart = d.seedMode === "parts" && d.seedParts.length === 1 ? d.seedParts[0] : null;
+    setSeedMode(singlePart ? "text" : d.seedMode);
+    setSeedText(singlePart ? singlePart.value : d.seedText);
+    setSeedParts(singlePart ? [] : d.seedParts);
     setSeedManuallyEdited(
       d.seedManuallyEdited ||
         !!d.seedText.trim() ||
@@ -487,7 +487,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerManuallyEdited(d.scorerManuallyEdited || !!d.metricCode.trim());
     setObjective(d.objective);
     setBackground(d.background);
-    setTargetKind(d.targetKind);
+    setExecutionMode(restoreExecutionMode(d));
     setHarness(d.harness);
     setTargetModel(d.targetModel);
     setTargetTimeout(d.targetTimeout);
@@ -503,6 +503,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setMetricCode(d.metricCode);
     setScorerUrl(d.scorerUrl);
     setScorerInstall(d.scorerInstall);
+    setScorerPackages(d.scorerPackages ?? "");
+    setScorerDependencyLock(d.scorerDependencyLock ?? null);
     setScorerModel(d.scorerModel);
     setScorerModelMode(d.scorerModelMode);
     setStrategyMode(d.strategyMode);
@@ -548,6 +550,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // optimizer all come from the payload.
   const cloneRan = useRef(false);
   const [cloned, setCloned] = useState(false);
+  const [cloneReady, setCloneReady] = useState(false);
+  const cloneCompared = useRef(false);
   const [issue, setIssue] = useState<WizardIssue | null>(null);
   useEffect(() => {
     const cloneId = searchParams.get("clone");
@@ -632,6 +636,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           if (scorer) {
             setScorerKind(scorer.kind);
             if (scorer.metric_code) setMetricCode(scorer.metric_code);
+            if (scorer.dependency_lock) {
+              setScorerDependencyLock(scorer.dependency_lock);
+              setScorerPackages(scorer.dependency_lock.requirements.join("\n"));
+            }
             if (scorer.url) setScorerUrl(scorer.url);
             if (scorer.kind === "python" && scorer.install_command)
               setScorerInstall(scorer.install_command);
@@ -668,17 +676,18 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         // answered. The restore walk still stops at a stage that no longer
         // validates, so a stale clone lands where it needs repair.
         if (source) setPendingRestore({ stage: "review", furthest: "review" });
+        setCloneReady(true);
         toast.success(msg("submit.clone.success"));
       })
       .catch(() => {
+        draftsRef.current.compareClone("anything", null);
         toast.error(msg("submit.clone.failed"));
       });
   }, [searchParams]);
 
   // What the seed reads as, latched until the seed is cleared so the editor
   // never swaps out from under the caret while a snippet is typed or trimmed.
-  // The kind follows the same reading, so an agent-written seed and a pasted
-  // one land on the same scorer template.
+  // This controls editor presentation only, not the recipe or evaluator.
   const seedSample = seedMode === "text" ? seedText : seedParts.map((p) => p.value).join("\n");
   const [seedGuess, setSeedGuess] = useState<SeedGuess>(NO_GUESS);
   useEffect(() => {
@@ -695,16 +704,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           : { code: true, language: language ?? prev.language },
       );
     }
-    if (seedMode === "none") return;
-    const detected: BlackboxRecipe = code || seedGuess.code ? "code" : "anything";
-    if (detected !== recipe) setRecipe(detected);
-  }, [seedSample, seedMode, seedGuess.code, recipe, setRecipe]);
+  }, [seedSample]);
   const seedIsCode = recipe === "code" || seedGuess.code;
 
   const seedCandidate = useMemo<BlackboxCandidate | null>(() => {
     if (seedMode === "none") return null;
     if (seedMode === "text") return seedText.trim() ? seedText : null;
-    const parts = seedParts.filter((p) => p.key.trim() && p.value.trim());
+    const parts = namedSeedParts(seedParts).filter((p) => p.key.trim() && p.value.trim());
     return parts.length ? Object.fromEntries(parts.map((p) => [p.key.trim(), p.value])) : null;
   }, [seedMode, seedText, seedParts]);
 
@@ -731,6 +737,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             metric_code: code,
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
             install_command: scorerInstall.trim() || null,
+            dependency_lock: scorerDependencyLock,
             model:
               scorerCallsModel(code) && resolvedScorerModel?.name.trim()
                 ? prepareModelConfig(resolvedScorerModel)
@@ -742,7 +749,15 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             secret: scorerSecret.trim() || undefined,
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
           },
-    [scorerKind, metricCode, scorerUrl, scorerSecret, scorerInstall, resolvedScorerModel],
+    [
+      scorerKind,
+      metricCode,
+      scorerUrl,
+      scorerSecret,
+      scorerInstall,
+      scorerDependencyLock,
+      resolvedScorerModel,
+    ],
   );
 
   const buildTarget = (): BlackboxTarget =>
@@ -792,14 +807,14 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     const selectedRuntime = engineCatalog?.proposer_runtimes.find(
       (runtime) => runtime.id === proposerRuntime,
     );
-    // Setup and the submitted run use separate metered Vercel sessions.
+    // Two readiness checks, the run, and Python package resolution have separate coverage.
     return projectCostBracket({
       autoLevel: "",
       maxFullEvals: "",
       maxMetricCalls: String(maxScorerRuns),
       datasetRows: Math.max(1, parsedCases?.rowCount ?? 0),
       modelRoles,
-      runtime: runtimeCostProjection(selectedRuntime?.cost, 2),
+      runtime: runtimeCostProjection(selectedRuntime?.cost, scorerKind === "python" ? 4 : 3),
     });
   }, [
     effectiveReflectionModel,
@@ -810,6 +825,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     catalog,
     engineCatalog,
     maxScorerRuns,
+    scorerKind,
     parsedCases?.rowCount,
   ]);
   const tokenSource = aggregateTokenSource([
@@ -851,11 +867,14 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             : { mode: "auto" },
       proposer_runtime: proposerRuntime,
       target: buildTarget(),
-      task_model_config: targetKind === "agent" ? prepareModelConfig(targetModel) : undefined,
+      task_model_config:
+        targetKind === "agent"
+          ? prepareModelConfig(proposerModelConfig(targetModel, true))
+          : undefined,
       reflection_model_config: reflection,
       token_source: tokenSource,
       is_private: isPrivate,
-      max_cost_credits: maxCostCredits ?? undefined,
+      max_cost_credits: budgetUncapped ? undefined : (maxCostCredits ?? undefined),
       estimated_credits_low: estimate.lowCredits,
       estimated_credits_high: estimate.highCredits,
     };
@@ -887,13 +906,71 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const performDryRun = useCallback(
     async (overrideCode?: string, scope: PreflightScope = "evaluation") => {
+      const code = overrideCode ?? metricCode;
+      if (scorerKind === "python" && scorerCallsModel(code) && !resolvedScorerModel?.name.trim()) {
+        const error = msg("submit.blackbox.validation.scorer_model_required");
+        const outcome = { valid: false, errors: [error], warnings: [] };
+        setScorerValidation(outcome);
+        throw new Error(error);
+      }
       const attempt = ++dryRunAttemptRef.current;
       const navigation = navigationRevisionRef.current;
       const requestPayload = buildSubmissionPayload(overrideCode);
-      const requestIdentity = preflightIdentity("anything", requestPayload);
-      const completed = preflight.reusable(scope, requestPayload);
-      if (!completed) setDryRun({ status: "running" });
+      const initialIdentity = preflight.identity;
+      let completed: WizardPreflightResponse | null | undefined;
+      preflight.progress.start();
+      setDryRun({ status: "running" });
       try {
+        if (requestPayload.scorer.kind === "python") {
+          const code = requestPayload.scorer.metric_code ?? "";
+          const requirements = scorerPackages
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean);
+          const digest = Array.from(
+            new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code))),
+          )
+            .map((byte) => byte.toString(16).padStart(2, "0"))
+            .join("");
+          const lock = requestPayload.scorer.dependency_lock;
+          if (
+            !lock ||
+            lock.code_sha256 !== digest ||
+            JSON.stringify(lock.requirements) !== JSON.stringify(requirements)
+          ) {
+            const currentBudget = await budgetSession.ensure();
+            preflight.progress.phase("dependencies");
+            const resolved = await resolveScorerDependencies({
+              code,
+              requirements,
+              execution_budget_id: currentBudget.id,
+              execution_budget_revision: currentBudget.revision,
+            });
+            await budgetSession.adopt(resolved.budget);
+            if (
+              !mountedRef.current ||
+              attempt !== dryRunAttemptRef.current ||
+              navigation !== navigationRevisionRef.current ||
+              !preflight.isCurrent(initialIdentity)
+            ) {
+              throw new DOMException("Dependency resolution superseded", "AbortError");
+            }
+            if (!resolved.ok || !resolved.dependency_lock) {
+              throw new Error(
+                resolved.error ??
+                  msg(
+                    resolved.preview_status === "pending"
+                      ? "submit.preflight.usage_pending"
+                      : "submit.preflight.failed",
+                  ),
+              );
+            }
+            requestPayload.scorer.dependency_lock = resolved.dependency_lock;
+            setScorerDependencyLock(resolved.dependency_lock);
+          }
+        }
+        const requestIdentity = preflightIdentity("anything", requestPayload);
+        completed = preflight.reusable(scope, requestPayload);
         const response = completed ?? (await preflight.run(scope, requestPayload));
         const error =
           response.checks.find((check) => check.status === "failed")?.message ??
@@ -928,13 +1005,26 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           setEvaluatorEvidence(evidence);
           setScorerValidation(outcome);
         }
+        preflight.progress.finish(response.status, undefined, response);
         return { response, evidence, outcome };
+      } catch (error) {
+        preflight.progress.finish("failed", error instanceof Error ? error.message : msg("submit.preflight.failed"));
+        throw error;
       } finally {
         if (!completed && mountedRef.current && attempt === dryRunAttemptRef.current)
           setDryRun((current) => (current.status === "running" ? { status: "idle" } : current));
       }
     },
-    [preflight, buildSubmissionPayload, scorerUsesModel, resolvedScorerModel],
+    [
+      preflight,
+      buildSubmissionPayload,
+      scorerUsesModel,
+      resolvedScorerModel,
+      metricCode,
+      scorerKind,
+      scorerPackages,
+      budgetSession,
+    ],
   );
   const runDryRun = useCallback(
     async (overrideCode?: string): Promise<ValidationResult | null> => {
@@ -967,6 +1057,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   // Restored or cloned authored artifacts must survive the first render before hydration.
   const interviewPossible =
+    !drafts.offerPending &&
     codeAssistMode === "auto" &&
     !cloned &&
     !seedManuallyEdited &&
@@ -1043,7 +1134,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     metricValidation: scorerValidation,
     runSignatureValidation: noSeedValidation,
     runMetricValidation: noSeedValidation,
-    seedEnabled: interview.resolved,
+    seedEnabled: !drafts.offerPending && interview.resolved,
     interviewBrief: interview.confirmedBrief,
     blackbox: authoringContext,
     model: interview.model,
@@ -1114,19 +1205,18 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     });
     switch (s) {
       case WIZARD_STAGE.goal: {
-        const partsIssue = seedMode === "parts" ? seedPartsIssue(seedParts) : null;
+        const partsIssue = seedMode === "parts" ? seedPartsIssue(namedSeedParts(seedParts)) : null;
         if (partsIssue) return fail(`submit.parts.${partsIssue}`, "bb-seed");
         // In auto mode the agent drafts the text seed from the objective, so
         // the objective is the required input and the seed may stay blank.
         const agentDrafts = codeAssistMode === "auto" && seedMode === "text";
-        if ((seedMode === "none" || agentDrafts) && !objective.trim())
+        if ((seedCandidate == null || agentDrafts) && !objective.trim())
           return fail("submit.blackbox.validation.objective_required", "bb-objective");
-        if (seedMode !== "none" && !agentDrafts && seedCandidate == null)
-          return fail("submit.blackbox.validation.seed_required", "bb-seed");
         return null;
       }
       case WIZARD_STAGE.evaluation: {
-        if (maxCostCredits == null) return fail("budget.invalid", "totalBudgetInput");
+        if (!budgetUncapped && maxCostCredits == null)
+          return fail("budget.invalid", "totalBudgetInput");
         if (targetKind === "agent") {
           if (!parsedCases?.rowCount)
             return fail("submit.blackbox.validation.cases_required", "bb-cases");
@@ -1135,7 +1225,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         }
         if (scorerKind === "python" && !metricCode.trim())
           return fail("submit.blackbox.validation.scorer_code_required", "bb-scorer-code");
-        if (scorerUsesModel && scorerModelMode === "explicit" && !scorerModel.name.trim())
+        if (scorerUsesModel && !resolvedScorerModel?.name.trim())
           return fail("submit.blackbox.validation.scorer_model_required", "bb-scoring-model");
         if (scorerKind === "remote" && !/^https?:\/\/\S+$/.test(scorerUrl.trim()))
           return fail("submit.blackbox.validation.scorer_url_required", "bb-scorer-url");
@@ -1161,8 +1251,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             "submit.blackbox.validation.reflection_model_required",
             "bb-optimization-model",
           );
-        if (nativeProposer && maxCostCredits == null)
-          return fail("submit.blackbox.validation.native_budget", "totalBudgetInput");
         if (strategyMode === "auto" && maxScorerRuns < 4)
           return fail("submit.blackbox.validation.auto_budget", "bb-max-runs");
         if (maxScorerRuns < 1)
@@ -1216,36 +1304,33 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     const completed = preflight.reusable(scope);
     if (completed) return completed;
     const navigation = navigationRevisionRef.current;
-    const identity = preflight.identity;
+    let identity = preflight.identity;
     const t = beginValidationToast(
-      toast,
+      preflight.feedback,
       `wizard-validate-${++validationAttemptRef.current}`,
       msg("submit.validation.toast.running"),
     );
     validationToastRef.current = t;
     try {
-      const { response } = await performDryRun(undefined, scope);
+      const { response, evidence } = await performDryRun(undefined, scope);
+      identity = evidence.identity;
       if (
         !mountedRef.current ||
         navigation !== navigationRevisionRef.current ||
-        !preflight.isCurrent(identity)
+        !preflight.isCurrent(evidence.identity)
       ) {
         t.obsolete(msg("submit.validation.toast.obsolete"));
         return null;
       }
-      if (preflightMayAdvance(response, scope)) {
-        if (response.status === "succeeded") {
-          const locale = getActiveIntlLocale();
-          t.succeed(
-            `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetAmount(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetAmount(response.budget.available_credits, locale)}`,
-          );
-        } else {
-          t.pending(msg(preflightPendingMessageKey(response)));
-        }
+      if (response.status === "succeeded" && preflightMayAdvance(response, scope)) {
+        const locale = getActiveIntlLocale();
+        t.succeed(
+          `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetAmount(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetAmount(response.budget.available_credits, locale)}`,
+        );
         return response;
       }
       if (response.status === "pending") {
-        t.fail(msg(preflightPendingMessageKey(response)));
+        t.pending(msg(preflightPendingMessageKey(response)));
         return null;
       }
       const failure = response.checks.find((check) => check.status === "failed");
@@ -1289,12 +1374,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return;
         }
       }
-      if (
-        target > WIZARD_STAGE.evaluation &&
-        !(await ensureEvaluatorChecked(
-          target > WIZARD_STAGE.optimization ? "execution" : "evaluation",
-        ))
-      )
+      if (target === WIZARD_STAGE.optimization && !(await ensureEvaluatorChecked("evaluation")))
+        return;
+      if (target > WIZARD_STAGE.optimization && !(await ensureEvaluatorChecked("execution")))
         return;
       goTo(target);
     } finally {
@@ -1416,6 +1498,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       objective,
       background,
       targetKind,
+      executionMode,
       harness,
       targetModel: safeTargetModel,
       targetTimeout,
@@ -1430,6 +1513,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       metricCode,
       scorerUrl,
       scorerInstall,
+      scorerPackages,
+      scorerDependencyLock,
       scorerModel: safeScorerModel,
       scorerModelMode,
       strategyMode,
@@ -1443,6 +1528,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       maxCostCredits,
       setupSpent,
     };
+    if (cloneReady && !pendingRestore && !cloneCompared.current) {
+      cloneCompared.current = true;
+      draftsRef.current.compareClone("anything", snapshot);
+    }
     draftsRef.current.publish("anything", snapshot, isMeaningfulAnythingDraft(snapshot));
   });
   // Stage boundaries are the one place the debounce is skipped: a refresh right
@@ -1466,7 +1555,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   return {
     recipe,
-    setRecipe,
     step,
     direction,
     maxReachableStep: furthestReachedStep,
@@ -1513,6 +1601,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setBackground,
     targetKind,
     setTargetKind,
+    executionMode,
+    setExecutionMode,
     harness,
     setHarness,
     targetModel,
@@ -1548,6 +1638,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerSecret: updateScorerSecret,
     scorerInstall,
     setScorerInstall,
+    scorerPackages,
+    setScorerPackages,
+    scorerDependencyLock,
+    setScorerDependencyLock,
     scorerModel,
     setScorerModel,
     scorerUsesModel,
@@ -1590,6 +1684,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     tokenSource,
     maxCostCredits,
     setMaxCostCredits,
+    budgetUncapped,
+    setBudgetUncapped,
     budgetSession,
     setupSpent,
     availableCredits,

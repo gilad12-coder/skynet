@@ -69,10 +69,7 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
               </HelpTip>
             </Label>
             <div className="space-y-2">
-              <ModelRoleRow
-                role={msg("submit.blackbox.roles.task.label")}
-                description={msg("submit.blackbox.roles.task.desc")}
-              >
+              <ModelRoleRow description={msg("submit.blackbox.roles.task.desc")}>
                 <ModelChip
                   config={modelConfig}
                   className={MOBILE_MODEL_CHIP_CLASS}

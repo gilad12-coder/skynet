@@ -413,6 +413,23 @@ h3 {
   max-width: 320px !important;
   min-width: 120px !important;
 }
+/* The restore question needs more room than transient status messages. */
+.Toastify__toast-container:has([data-tutorial="submit-draft-offer"]) {
+  max-width: calc(100vw - 2rem) !important;
+}
+.Toastify__toast:has([data-tutorial="submit-draft-offer"]) {
+  max-width: 100%;
+}
+.Toastify__toast-container:has([data-tutorial="submit-draft-offer"])
+  > .Toastify__toast:not(:has([data-tutorial="submit-draft-offer"])) {
+  max-width: 320px;
+}
+@media (max-width: 480px) {
+  .Toastify__toast-container:has([data-tutorial="submit-draft-offer"]) {
+    inset-inline: 1rem;
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+}
 .Toastify__toast {
   min-height: 0 !important;
   border-radius: 12px !important;
@@ -433,6 +450,17 @@ h3 {
 .Toastify__toast--info {
   background: var(--surface-3) !important;
   color: var(--text-1) !important;
+}
+.Toastify__toast:has(.Toastify__spinner) {
+  --toastify-spinner-color: var(--text-2);
+  --toastify-spinner-color-empty-area: var(--border);
+  background: var(--surface-3) !important;
+  color: var(--text-1) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .Toastify__spinner {
+    animation: none;
+  }
 }
 .Toastify__progress-bar,
 .Toastify__progress-bar--success,
@@ -1034,37 +1062,8 @@ header {
    ENHANCED MOBILE RESPONSIVENESS
    ════════════════════════════════════════════ */
 
-/* Small phones */
-@media (max-width: 374px) {
-  body {
-    font-size: 14px;
-  }
-  h1 {
-    font-size: 1.25rem !important;
-  }
-  [data-slot="card"] {
-    border-radius: 0.375rem;
-  }
-  .mx-auto.max-w-7xl {
-    padding-inline: 0.75rem;
-  }
-}
-
 /* Standard mobile & narrow desktop windows (split-screen, quarter-snap) */
 @media (max-width: 767px) {
-  /* Stack grid layouts — scoped to main so portaled dialogs aren't affected */
-  main .grid-cols-2 {
-    grid-template-columns: 1fr !important;
-  }
-  main .grid-cols-3 {
-    grid-template-columns: 1fr !important;
-  }
-
-  /* Tighter heading */
-  h1 {
-    font-size: 1.5rem !important;
-  }
-
   /* Better mobile card spacing */
   [data-slot="card"] {
     margin-inline: -2px;
@@ -1080,11 +1079,6 @@ header {
     padding-inline: 0.5rem;
   }
 
-  /* Smaller stat numbers on mobile */
-  .text-3xl {
-    font-size: 1.5rem !important;
-  }
-
   /* Hide ambient orbs on mobile for performance */
   .ambient-bg .orb {
     filter: blur(60px);
@@ -1095,23 +1089,9 @@ header {
     display: none;
   }
 
-  /* Compact table cells */
-  td,
-  th {
-    padding-inline: 0.5rem !important;
-    font-size: 0.75rem !important;
-  }
-
   /* Chart containers scroll horizontally */
   .recharts-responsive-container {
     min-width: 320px;
-  }
-}
-
-/* Tablet adjustments */
-@media (min-width: 768px) and (max-width: 1023px) {
-  main .grid-cols-3 {
-    grid-template-columns: repeat(2, 1fr) !important;
   }
 }
 
@@ -1295,30 +1275,6 @@ header {
   }
 }
 
-@media (max-width: 960px) {
-  /* Compact layouts for medium viewports — let the fluid h1 clamp handle sizing */
-  main .grid-cols-2 {
-    grid-template-columns: 1fr !important;
-  }
-  main .grid-cols-3 {
-    grid-template-columns: repeat(2, 1fr) !important;
-  }
-  main .grid-cols-4 {
-    grid-template-columns: repeat(2, 1fr) !important;
-  }
-}
-
-@media (max-width: 800px) {
-  main .grid-cols-3 {
-    grid-template-columns: 1fr !important;
-  }
-  main .grid-cols-4 {
-    grid-template-columns: 1fr !important;
-  }
-
-  /* Stats cards use auto-fit — no override needed */
-}
-
 /* Fluid typography scale — 14.4px floor on mobile, 16.2px ceiling on wide
    desktops (0.9× of the original 16–18px range). Every rem-based Tailwind
    text-* utility scales off this. */
@@ -1349,22 +1305,10 @@ h3 {
   min-height: 0;
 }
 
-/* Table horizontal scroll on small viewports */
+/* Table components own their column widths and scroll containers. */
 table {
   width: 100%;
   min-width: 100%;
-}
-
-@media (max-width: 960px) {
-  main table:not(.table-stack) {
-    min-width: 700px; /* Force horizontal scroll below this width */
-  }
-}
-
-@media (max-width: 800px) {
-  main table:not(.table-stack) {
-    min-width: 600px;
-  }
 }
 
 /* ════════════════════════════════════════════

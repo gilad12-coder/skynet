@@ -475,6 +475,8 @@ export function useSubmitWizard() {
   const {
     maxCostCredits,
     setMaxCostCredits,
+    budgetUncapped,
+    setBudgetUncapped,
     session: budgetSession,
     setupSpent,
     availableCredits,
@@ -507,6 +509,8 @@ export function useSubmitWizard() {
   const validationCacheRef = useRef(new Map<string, Promise<ValidateCodeResponse>>());
 
   const [cloneLoading, setCloneLoading] = useState(false);
+  const [cloneReady, setCloneReady] = useState(false);
+  const cloneCompared = useRef(false);
   const [issue, setIssue] = useState<WizardIssue | null>(null);
   const cloneRan = useRef(false);
 
@@ -671,6 +675,11 @@ export function useSubmitWizard() {
     stage: WizardStageId;
     furthest: WizardStageId;
   } | null>(null);
+  useEffect(() => {
+    if (!cloneReady || pendingRestore || cloneCompared.current || !draftRef.current) return;
+    cloneCompared.current = true;
+    draftsRef.current.compareClone("program", draftRef.current);
+  }, [cloneReady, pendingRestore]);
   useEffect(() => {
     if (restoredRef.current) return;
     restoredRef.current = true;
@@ -972,15 +981,14 @@ export function useSubmitWizard() {
     const selectedRuntime = runtimeCatalog?.runtimes.find(
       (runtime) => runtime.id === executionRuntime,
     );
-    // DSPy defaults to Vercel before Evaluation, so a fresh Vercel path opens
-    // one session for each paid Continue scope and one for the submitted run.
+    // The final setup check and submitted run use separate metered sessions.
     return projectCostBracket({
       autoLevel,
       maxFullEvals: advancedMode ? maxFullEvals : DEFAULT_MAX_FULL_EVALS,
       maxMetricCalls: advancedMode ? maxMetricCalls : "",
       datasetRows: parsedDataset?.rowCount ?? 0,
       modelRoles,
-      runtime: runtimeCostProjection(selectedRuntime?.cost, 3),
+      runtime: runtimeCostProjection(selectedRuntime?.cost, 2),
     });
   }, [
     autoLevel,
@@ -1612,6 +1620,7 @@ export function useSubmitWizard() {
       if (fromProgram) {
         setPendingRestore({ stage: "review", furthest: "review" });
       }
+      setCloneReady(true);
       toast.success(msg("submit.clone.success"));
     };
 
@@ -1651,6 +1660,7 @@ export function useSubmitWizard() {
 
     source
       .catch(() => {
+        draftsRef.current.compareClone("program", null);
         toast.error(msg("submit.clone.failed"));
       })
       .finally(() => setCloneLoading(false));
@@ -1713,7 +1723,7 @@ export function useSubmitWizard() {
       token_source: tokenSource,
       estimated_credits_low: estimate.lowCredits,
       estimated_credits_high: estimate.highCredits,
-      ...(maxCostCredits != null && { max_cost_credits: maxCostCredits }),
+      ...(!budgetUncapped && maxCostCredits != null && { max_cost_credits: maxCostCredits }),
       ...(parsedTargetScore != null && { target_score: parsedTargetScore }),
       ...(seed != null && { seed }),
       ...(Object.keys(optKw).length > 0 && { optimizer_kwargs: optKw }),
@@ -1853,7 +1863,6 @@ export function useSubmitWizard() {
           return fail(msg("submit.validation.module_required"), "module-selector");
         return null;
       case WIZARD_STAGE.evaluation: {
-        if (maxCostCredits == null) return fail(msg("budget.invalid"), "totalBudgetInput");
         if (!parsedDataset || parsedDataset.rowCount === 0)
           return fail(msg("submit.validation.dataset_required"), "dataset-upload");
         const m = currentColumnMapping();
@@ -1880,7 +1889,7 @@ export function useSubmitWizard() {
         if (Math.abs(split.train + split.val + split.test - 1) > 0.001)
           return fail(msg("submit.validation.split_must_sum_to_one"), "data-splits");
         // Server-side validation covers the signature and the metric together;
-        // handleNext runs it before this check when the stage is left.
+        // The paid check runs after the budget is set, before entering Review.
         if (!structureOnly && evaluationStatus !== "passed")
           return fail(msg("submit.preflight.idle"));
         if (!structureOnly && datasetValidation && datasetValidation.errors.length > 0)
@@ -1888,6 +1897,8 @@ export function useSubmitWizard() {
         return null;
       }
       case WIZARD_STAGE.optimization: {
+        if (!budgetUncapped && maxCostCredits == null)
+          return fail(msg("budget.invalid"), "totalBudgetInput");
         if (!structureOnly && runtimeUnavailableReason) return fail(runtimeUnavailableReason);
         const targetProblem = targetScoreIssue();
         if (targetProblem) return fail(targetProblem, "target-score");
@@ -2105,11 +2116,7 @@ export function useSubmitWizard() {
           return;
         }
       }
-      if (
-        target > WIZARD_STAGE.evaluation &&
-        !(await ensureSetupChecked(target > WIZARD_STAGE.optimization ? "execution" : "evaluation"))
-      )
-        return;
+      if (target > WIZARD_STAGE.optimization && !(await ensureSetupChecked("execution"))) return;
       if (mountedRef.current) goTo(target);
     } finally {
       advancingRef.current = false;
@@ -2236,7 +2243,7 @@ export function useSubmitWizard() {
     const navigation = navigationRevisionRef.current;
     const identity = preflight.identity;
     const t = beginValidationToast(
-      toast,
+      preflight.feedback,
       `wizard-validate-${++validationAttemptRef.current}`,
       msg("submit.validation.toast.running"),
     );
@@ -2263,7 +2270,7 @@ export function useSubmitWizard() {
         return response;
       }
       if (response.status === "pending") {
-        t.fail(msg(preflightPendingMessageKey(response)));
+        t.pending(msg(preflightPendingMessageKey(response)));
         return preserveWorkflowResult && response.workflow_result ? response : null;
       }
       const failure = response.checks.find((check) => check.status === "failed");
@@ -2282,9 +2289,9 @@ export function useSubmitWizard() {
         const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
         t.fail(message.startsWith("budget.") ? msg(message as MessageKey) : message);
         if (message.startsWith("budget.")) {
-          goTo(WIZARD_STAGE.evaluation);
+          goTo(WIZARD_STAGE.optimization);
           setIssue({
-            stage: "evaluation",
+            stage: "optimization",
             fieldId: "totalBudgetInput",
             message: msg(message as MessageKey),
             identity,
@@ -2438,6 +2445,7 @@ export function useSubmitWizard() {
   // never fires before the dataset exists. Pre-existing code work (clone
   // pre-fill, manual edits, a touched canvas) rules the interview out.
   const interviewPossible =
+    !drafts.offerPending &&
     codeAssistMode === "auto" &&
     !signatureManuallyEdited &&
     !metricManuallyEdited &&
@@ -2491,7 +2499,10 @@ export function useSubmitWizard() {
     // picks another one — and while an interview could still happen. When
     // the interview is ruled out (manual mode, pre-existing code work) its
     // resolution never gates anything.
-    seedEnabled: !moduleSelectionRequired && (!interviewPossible || interview.resolved),
+    seedEnabled:
+      !drafts.offerPending &&
+      !moduleSelectionRequired &&
+      (!interviewPossible || interview.resolved),
     interviewBrief: interview.confirmedBrief,
     // The conversation rides through the locale-switch reload alongside the
     // wizard draft (see use-wizard-drafts.tsx).
@@ -2635,6 +2646,8 @@ export function useSubmitWizard() {
     setPxnProposals,
     maxCostCredits,
     setMaxCostCredits,
+    budgetUncapped,
+    setBudgetUncapped,
     budgetSession,
     setupSpent,
     availableCredits,

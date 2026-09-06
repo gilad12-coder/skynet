@@ -17,7 +17,8 @@ import { ModelPicker, modelSupportsThinking } from "./ModelPicker";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { modelProviderSlug } from "@/shared/lib/model-provider";
 import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
-import { NumberInput } from "@/shared/ui/number-input";
+import { Input } from "@/shared/ui/primitives/input";
+import { Disclosure } from "./Disclosure";
 import { cn } from "@/shared/lib/utils";
 import type { ModelConfig, CatalogModel } from "@/shared/types/api";
 import { HelpTip } from "@/shared/ui/help-tip";
@@ -98,6 +99,8 @@ export function ModelConfigModal({
   // layoutId must be unique per instance or Framer pairs them up.
   const effortPillId = React.useId();
   const tokenSourcePillId = React.useId();
+  const parametersId = React.useId();
+  const [parametersOpen, setParametersOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<ModelConfig>(() => withoutInlineConnection(config));
   const mode = nameOnly ? "managed" : (draft.token_source ?? "managed");
 
@@ -134,6 +137,9 @@ export function ModelConfigModal({
   React.useEffect(() => {
     if (open) {
       setDraft(withoutInlineConnection(config));
+      setParametersOpen(
+        config.temperature != null || config.max_tokens != null || !!config.extra?.reasoning_effort,
+      );
     }
   }, [open, config]);
 
@@ -211,15 +217,18 @@ export function ModelConfigModal({
                         type="button"
                         onClick={() => {
                           setDraft(withoutInlineConnection(rc));
+                          setParametersOpen(
+                            rc.temperature != null ||
+                              rc.max_tokens != null ||
+                              !!rc.extra?.reasoning_effort,
+                          );
                         }}
                         className="flex min-h-[44px] items-center gap-1.5 cursor-pointer outline-none lg:min-h-0"
                       >
                         <ProviderLogo slug={modelProviderSlug(rc.name)} size={14} />
                         <span className="truncate max-w-[120px]">{rc.name.split("/").pop()}</span>
                         {!nameOnly && !modelDefaultsOnly && (
-                          <span className="text-[9px] opacity-60">
-                            {rc.temperature?.toFixed(1)}
-                          </span>
+                          <span className="text-[9px] opacity-60">{rc.temperature}</span>
                         )}
                       </button>
                       {onRemoveRecent && (
@@ -256,7 +265,7 @@ export function ModelConfigModal({
                   role="group"
                   aria-label={msg("billing.mode.aria")}
                   data-tutorial="model-billing-source"
-                  className="flex w-full rounded-lg bg-muted p-0.5 sm:w-fit"
+                  className="flex w-full rounded-lg bg-muted p-0.5"
                 >
                   {TOKEN_SOURCE_SEGMENTS.map(({ mode: value, icon: Icon, labelKey }) => (
                     <button
@@ -274,7 +283,7 @@ export function ModelConfigModal({
                       }
                       aria-pressed={mode === value}
                       className={cn(
-                        "relative flex min-h-[44px] flex-1 cursor-pointer items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:flex-none lg:min-h-0",
+                        "relative flex min-h-[44px] flex-1 cursor-pointer items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors lg:min-h-0",
                         mode === value
                           ? "text-foreground"
                           : "text-muted-foreground hover:text-foreground",
@@ -366,103 +375,118 @@ export function ModelConfigModal({
             <>
               <Separator />
 
-              <Label className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
-                {msg("auto.features.submit.components.modelconfigmodal.section.parameters")}
-              </Label>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>
-                    <HelpTip text={tip("model_config.temperature")}>
-                      {msg("auto.features.submit.components.modelconfigmodal.5")}
-                    </HelpTip>
-                  </Label>
-                  <span className="text-xs font-mono text-muted-foreground">
-                    {draft.temperature?.toFixed(1) ?? "0.7"}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="2"
-                  step="0.1"
-                  value={draft.temperature ?? 0.7}
-                  onChange={(e) =>
-                    setDraft((p) => ({ ...p, temperature: parseFloat(e.target.value) }))
-                  }
-                  className="h-[44px] w-full cursor-pointer appearance-none rounded-full bg-transparent accent-primary [&::-moz-range-track]:h-2 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-muted [&::-webkit-slider-runnable-track]:h-2 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-muted lg:h-2 lg:bg-muted"
-                  dir="auto"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>
-                  <HelpTip text={tip("model_config.max_tokens")}>
-                    {msg("auto.features.submit.components.modelconfigmodal.7")}
-                  </HelpTip>
-                </Label>
-                <NumberInput
-                  min={1}
-                  step={256}
-                  value={draft.max_tokens ?? ""}
-                  onChange={(v) => setDraft((p) => ({ ...p, max_tokens: v }))}
-                  className="h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm"
-                />
-              </div>
-
-              {canThink && (
-                <>
-                  <Separator />
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <Label>{msg("auto.features.submit.components.modelconfigmodal.8")}</Label>
-                      <Switch
-                        checked={thinkingEnabled}
-                        onCheckedChange={setThinking}
-                        className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
-                      />
-                    </div>
-                    {thinkingEnabled && (
-                      <div className="space-y-2 p-3 border rounded-lg bg-muted/30">
-                        <Label>{msg("auto.features.submit.components.modelconfigmodal.9")}</Label>
-                        <div className="flex rounded-lg bg-muted p-0.5 w-full">
-                          {effortLadder.map((val) => (
-                            <button
-                              key={val}
-                              type="button"
-                              onClick={() => setEffort(val)}
-                              className={cn(
-                                "relative min-h-[44px] flex-1 cursor-pointer rounded-md px-2 py-1.5 text-center text-xs font-medium transition-colors sm:px-3 lg:min-h-0",
-                                reasoningEffort === val
-                                  ? "text-foreground"
-                                  : "text-muted-foreground hover:text-foreground",
-                              )}
-                            >
-                              {reasoningEffort === val && (
-                                <motion.span
-                                  layoutId={effortPillId}
-                                  transition={
-                                    prefersReducedMotion
-                                      ? { duration: 0 }
-                                      : {
-                                          type: "tween",
-                                          duration: 0.2,
-                                          ease: [0.2, 0.8, 0.2, 1],
-                                        }
-                                  }
-                                  className="absolute inset-0 rounded-md bg-background shadow-sm"
-                                  aria-hidden="true"
-                                />
-                              )}
-                              <span className="relative">{effortLabel(val)}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+              <Disclosure
+                id={parametersId}
+                label={msg("auto.features.submit.components.modelconfigmodal.section.parameters")}
+                open={parametersOpen}
+                onOpenChange={setParametersOpen}
+              >
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor={`${parametersId}-temperature`}>
+                      <HelpTip text={tip("model_config.temperature")}>
+                        {msg("auto.features.submit.components.modelconfigmodal.5")}
+                      </HelpTip>
+                    </Label>
+                    <Input
+                      id={`${parametersId}-temperature`}
+                      type="number"
+                      min={0}
+                      max={2}
+                      step="any"
+                      value={draft.temperature ?? ""}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setDraft((current) => ({
+                          ...current,
+                          temperature: value === "" ? undefined : Number(value),
+                        }));
+                      }}
+                      dir="ltr"
+                      className="min-h-[44px] text-base lg:min-h-0 lg:text-sm"
+                    />
                   </div>
-                </>
-              )}
+                  <div className="space-y-2">
+                    <Label htmlFor={`${parametersId}-max-tokens`}>
+                      <HelpTip text={tip("model_config.max_tokens")}>
+                        {msg("auto.features.submit.components.modelconfigmodal.7")}
+                      </HelpTip>
+                    </Label>
+                    <Input
+                      id={`${parametersId}-max-tokens`}
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={draft.max_tokens ?? ""}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setDraft((current) => ({
+                          ...current,
+                          max_tokens: value === "" ? undefined : Number(value),
+                        }));
+                      }}
+                      dir="ltr"
+                      className="min-h-[44px] text-base lg:min-h-0 lg:text-sm"
+                    />
+                  </div>
+
+                  {canThink && (
+                    <>
+                      <Separator />
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label>{msg("auto.features.submit.components.modelconfigmodal.8")}</Label>
+                          <Switch
+                            checked={thinkingEnabled}
+                            onCheckedChange={setThinking}
+                            className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
+                          />
+                        </div>
+                        {thinkingEnabled && (
+                          <div className="space-y-2 p-3 border rounded-lg bg-muted/30">
+                            <Label>
+                              {msg("auto.features.submit.components.modelconfigmodal.9")}
+                            </Label>
+                            <div className="flex rounded-lg bg-muted p-0.5 w-full">
+                              {effortLadder.map((val) => (
+                                <button
+                                  key={val}
+                                  type="button"
+                                  onClick={() => setEffort(val)}
+                                  className={cn(
+                                    "relative min-h-[44px] flex-1 cursor-pointer rounded-md px-2 py-1.5 text-center text-xs font-medium transition-colors sm:px-3 lg:min-h-0",
+                                    reasoningEffort === val
+                                      ? "text-foreground"
+                                      : "text-muted-foreground hover:text-foreground",
+                                  )}
+                                >
+                                  {reasoningEffort === val && (
+                                    <motion.span
+                                      layoutId={effortPillId}
+                                      transition={
+                                        prefersReducedMotion
+                                          ? { duration: 0 }
+                                          : {
+                                              type: "tween",
+                                              duration: 0.2,
+                                              ease: [0.2, 0.8, 0.2, 1],
+                                            }
+                                      }
+                                      className="absolute inset-0 rounded-md bg-background shadow-sm"
+                                      aria-hidden="true"
+                                    />
+                                  )}
+                                  <span className="relative">{effortLabel(val)}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </Disclosure>
             </>
           )}
         </div>
@@ -477,7 +501,17 @@ export function ModelConfigModal({
           </Button>
           <Button
             onClick={handleSave}
-            disabled={!draft.name.trim()}
+            disabled={
+              !draft.name.trim() ||
+              (!nameOnly &&
+                !modelDefaultsOnly &&
+                ((draft.temperature != null &&
+                  (!Number.isFinite(draft.temperature) ||
+                    draft.temperature < 0 ||
+                    draft.temperature > 2)) ||
+                  (draft.max_tokens != null &&
+                    (!Number.isInteger(draft.max_tokens) || draft.max_tokens < 1))))
+            }
             className="min-h-[44px] flex-1 lg:min-h-0"
           >
             {msg("auto.features.submit.components.modelconfigmodal.11")}

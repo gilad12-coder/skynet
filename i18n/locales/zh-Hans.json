@@ -199,6 +199,7 @@
     "optimization.pause_not_pausable": "优化只有在保存首个检查点之后才能暂停——请稍后再试。",
     "optimization.pause_wrong_status": "只有运行中的优化才能被暂停——这个优化处于 '{status}' 状态。",
     "optimization.payload_unavailable": "优化的载荷不可用。",
+    "optimization.resume_budget_projected": "照此趋势，运行的费用将达到约 {projected} 额度，超过其 {limit} 额度的上限。请将支出上限提高到 {projected} 额度以上以继续。",
     "optimization.resume_exhausted": "该优化已达到最大尝试次数（{attempts}）——请改为重新运行它。",
     "optimization.resume_not_resumable": "该优化没有可保存的恢复点——请改为重新运行它。",
     "optimization.resume_wrong_status": "只有运行中途停止的优化才能被恢复——这个优化处于 '{status}' 状态。",

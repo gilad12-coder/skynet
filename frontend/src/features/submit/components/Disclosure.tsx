@@ -17,6 +17,7 @@ export function Disclosure({
   open,
   onOpenChange,
   trailing,
+  alwaysShowTrailing = false,
   children,
 }: {
   id: string;
@@ -25,6 +26,7 @@ export function Disclosure({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   trailing?: ReactNode;
+  alwaysShowTrailing?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -49,7 +51,7 @@ export function Disclosure({
             <span>{label}</span>
           )}
         </button>
-        {open && trailing}
+        {(open || alwaysShowTrailing) && trailing}
       </div>
       <div id={id} className={cnGrid(open)} inert={open ? undefined : true}>
         <div className="overflow-hidden">{children}</div>

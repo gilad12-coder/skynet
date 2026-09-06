@@ -19,7 +19,9 @@
 import type { CatalogModel, ModelConfig, RuntimeCostProfile } from "@/shared/types/api";
 import {
   creditsForUsage,
+  modelTokenCosts,
   platformFeeCredits,
+  rawCostUsd,
   type ModelTokenUsage,
   type TokenSourceMode,
 } from "@/features/billing";
@@ -33,6 +35,12 @@ const AUTO_METRIC_CALLS: Record<string, number> = {
 
 /** Fallback metric-call budget when no `auto` tier and no explicit eval count is set. */
 const DEFAULT_METRIC_CALLS = 2000;
+
+/** Metric calls one full valset pass is taken to cost when scaling `max_full_evals`. */
+const METRIC_CALLS_PER_FULL_EVAL = 250;
+
+/** Dataset rows beyond which the row factor stops widening the bracket. */
+const DATASET_ROW_CAP = 2000;
 
 /**
  * Per-metric-call token estimate, low and high ends of the bracket. The spread
@@ -108,6 +116,47 @@ export function runtimeCostProjection(
   };
 }
 
+/** Where the metric-call budget the bracket scales from came from. */
+export type MetricCallSource = "auto_tier" | "metric_calls" | "full_evals" | "default";
+
+/** One priced model role, with the raw provider cost its projected tokens carry. */
+export interface RoleCostTrace {
+  role: ProjectedModelRole["role"];
+  modelLabel: string | null;
+  tokenSource: TokenSourceMode;
+  tokenShare: number;
+  inputCostPerToken: number;
+  outputCostPerToken: number;
+  /** False when the catalog left the model unpriced and the default rates apply. */
+  priced: boolean;
+  lowUsd: number;
+  highUsd: number;
+}
+
+/**
+ * Every input and intermediate value behind a bracket, so a surface can unfold
+ * the arithmetic instead of restating it. Built by the same pass that produces
+ * the credit totals, which keeps the two from drifting apart.
+ */
+export interface CostBracketTrace {
+  metricCalls: number;
+  metricCallSource: MetricCallSource;
+  autoLevel: string;
+  fullEvals: number;
+  metricCallsPerFullEval: number;
+  datasetRows: number;
+  datasetRowCap: number;
+  rowFactor: number;
+  tokensPerCallLow: number;
+  tokensPerCallHigh: number;
+  /** 1 without an optimization role; the reflection multiplier with one. */
+  reflectionHighMultiplier: number;
+  lowTokens: number;
+  highTokens: number;
+  inputTokenShare: number;
+  roles: RoleCostTrace[];
+}
+
 export interface CostBracket {
   /** Low end of the projected credit range. */
   lowCredits: number;
@@ -123,25 +172,44 @@ export interface CostBracket {
   runtimeSessionHighCredits: number;
   runtimeBillingBasis: RuntimeCostProjection["billingBasis"] | null;
   expectedRuntimeSessions: number;
+  trace: CostBracketTrace;
 }
 
-/** Resolve the metric-call budget the bracket scales from. */
+/** How a charged bracket splits between full-price credits, BYOK fees and runtime. */
+export interface ChargeTrace {
+  mode: TokenSourceMode;
+  managedLow: number;
+  managedHigh: number;
+  byokFullLow: number;
+  byokFullHigh: number;
+  byokFeeLow: number;
+  byokFeeHigh: number;
+  runtimeLow: number;
+  runtimeHigh: number;
+}
+
+export interface ChargedBracket extends CostBracket {
+  charge: ChargeTrace;
+}
+
+/** Resolve the metric-call budget the bracket scales from, and where it came from. */
 function resolveMetricCalls(
   autoLevel: string,
   maxFullEvals: string,
   maxMetricCalls?: string,
-): number {
+): { calls: number; source: MetricCallSource; evals: number } {
   const tier = autoLevel ? AUTO_METRIC_CALLS[autoLevel] : undefined;
-  if (tier !== undefined) return tier;
+  if (tier !== undefined) return { calls: tier, source: "auto_tier", evals: 0 };
   // An explicit metric-call budget is already the quantity this bracket
   // scales from — no conversion, and it outranks evals (mirrors build-kwargs).
   const calls = maxMetricCalls ? parseInt(maxMetricCalls, 10) : NaN;
-  if (Number.isFinite(calls) && calls > 0) return calls;
+  if (Number.isFinite(calls) && calls > 0) return { calls, source: "metric_calls", evals: 0 };
   const evals = parseInt(maxFullEvals, 10);
   // max_full_evals counts full valset passes; a pass is on the order of a few
   // hundred calls, so scale it into the same metric-call space as the auto tiers.
-  if (Number.isFinite(evals) && evals > 0) return evals * 250;
-  return DEFAULT_METRIC_CALLS;
+  if (Number.isFinite(evals) && evals > 0)
+    return { calls: evals * METRIC_CALLS_PER_FULL_EVAL, source: "full_evals", evals };
+  return { calls: DEFAULT_METRIC_CALLS, source: "default", evals: 0 };
 }
 
 /** Price explicit roles without collapsing two calls that happen to use the same model. */
@@ -190,11 +258,12 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     modelRoles,
     runtime,
   } = input;
-  const calls = resolveMetricCalls(autoLevel, maxFullEvals, maxMetricCalls);
+  const budget = resolveMetricCalls(autoLevel, maxFullEvals, maxMetricCalls);
+  const calls = budget.calls;
   // Larger datasets mean longer prompts and more baseline/eval rollouts; fold in
   // a gentle, sub-linear factor so a big dataset widens the bracket without
   // exploding it. Clamp the row factor so an empty/tiny dataset still projects.
-  const rowFactor = 1 + Math.min(datasetRows, 2000) / 2000;
+  const rowFactor = 1 + Math.min(datasetRows, DATASET_ROW_CAP) / DATASET_ROW_CAP;
   const sweep = Math.max(pairs, 1);
   const roles =
     modelRoles && modelRoles.length > 0
@@ -237,6 +306,28 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     lowCredits,
     managedModelHighCredits + byokModelHighCredits + runtimeEstimate.high,
   );
+  const tracedRoles: RoleCostTrace[] = roles
+    .filter((role) => Number.isFinite(role.tokenShare) && role.tokenShare > 0)
+    .map((role) => {
+      const costs = modelTokenCosts(role.model);
+      const [lowUsage] = roleUsage(lowTokens, [role]);
+      const [highUsage] = roleUsage(highTokens, [role]);
+      return {
+        role: role.role,
+        modelLabel: role.model?.label ?? null,
+        tokenSource: role.tokenSource,
+        tokenShare: role.tokenShare,
+        inputCostPerToken: costs.input,
+        outputCostPerToken: costs.output,
+        priced:
+          typeof role.model?.input_cost_per_token === "number" &&
+          role.model.input_cost_per_token > 0 &&
+          typeof role.model?.output_cost_per_token === "number" &&
+          role.model.output_cost_per_token > 0,
+        lowUsd: lowUsage ? rawCostUsd([lowUsage]) : 0,
+        highUsd: highUsage ? rawCostUsd([highUsage]) : 0,
+      };
+    });
   return {
     lowCredits,
     highCredits,
@@ -250,6 +341,23 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     runtimeSessionHighCredits: Math.max(0, runtime?.maximumSessionCredits ?? 0),
     runtimeBillingBasis: runtime?.billingBasis ?? null,
     expectedRuntimeSessions: runtime?.expectedSessions ?? 0,
+    trace: {
+      metricCalls: calls,
+      metricCallSource: budget.source,
+      autoLevel,
+      fullEvals: budget.evals,
+      metricCallsPerFullEval: METRIC_CALLS_PER_FULL_EVAL,
+      datasetRows,
+      datasetRowCap: DATASET_ROW_CAP,
+      rowFactor,
+      tokensPerCallLow: TOKENS_PER_CALL_LOW,
+      tokensPerCallHigh: TOKENS_PER_CALL_HIGH,
+      reflectionHighMultiplier: hasReflection ? REFLECTION_HIGH_MULTIPLIER : 1,
+      lowTokens,
+      highTokens,
+      inputTokenShare: INPUT_TOKEN_SHARE,
+      roles: tracedRoles,
+    },
   };
 }
 
@@ -262,9 +370,24 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
  * or discounted as a BYOK fee. Centralised so every estimate surface derives
  * the charge the same way and cannot drift apart.
  */
-export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): CostBracket {
+export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): ChargedBracket {
   const hasRoleSources = bracket.managedModelLowCredits > 0 || bracket.byokModelLowCredits > 0;
-  if (!hasRoleSources && mode !== "byok") return bracket;
+  if (!hasRoleSources && mode !== "byok") {
+    return {
+      ...bracket,
+      charge: {
+        mode,
+        managedLow: bracket.lowCredits - bracket.runtimeLowCredits,
+        managedHigh: bracket.highCredits - bracket.runtimeHighCredits,
+        byokFullLow: 0,
+        byokFullHigh: 0,
+        byokFeeLow: 0,
+        byokFeeHigh: 0,
+        runtimeLow: bracket.runtimeLowCredits,
+        runtimeHigh: bracket.runtimeHighCredits,
+      },
+    };
+  }
   const managedLow = hasRoleSources ? bracket.managedModelLowCredits : 0;
   const managedHigh = hasRoleSources ? bracket.managedModelHighCredits : 0;
   const byokLow = hasRoleSources
@@ -273,15 +396,26 @@ export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): 
   const byokHigh = hasRoleSources
     ? bracket.byokModelHighCredits
     : bracket.highCredits - bracket.runtimeHighCredits;
-  const lowCredits = Math.max(
-    1,
-    managedLow + platformFeeCredits(byokLow) + bracket.runtimeLowCredits,
-  );
-  const highCredits = Math.max(
+  const byokFeeLow = platformFeeCredits(byokLow);
+  const byokFeeHigh = platformFeeCredits(byokHigh);
+  const lowCredits = Math.max(1, managedLow + byokFeeLow + bracket.runtimeLowCredits);
+  const highCredits = Math.max(lowCredits, managedHigh + byokFeeHigh + bracket.runtimeHighCredits);
+  return {
+    ...bracket,
     lowCredits,
-    managedHigh + platformFeeCredits(byokHigh) + bracket.runtimeHighCredits,
-  );
-  return { ...bracket, lowCredits, highCredits };
+    highCredits,
+    charge: {
+      mode,
+      managedLow,
+      managedHigh,
+      byokFullLow: byokLow,
+      byokFullHigh: byokHigh,
+      byokFeeLow,
+      byokFeeHigh,
+      runtimeLow: bracket.runtimeLowCredits,
+      runtimeHigh: bracket.runtimeHighCredits,
+    },
+  };
 }
 
 /** Collapse per-model sources to the conservative job-level billing stamp. */

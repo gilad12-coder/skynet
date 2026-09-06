@@ -750,3 +750,39 @@ def test_amounts_reject_unrepresentable_values(amount: str) -> None:
     """Reject unknown or silently rounded charges at the accounting boundary."""
     with pytest.raises(ValueError):
         credit_units(amount)
+
+
+def test_uncapped_budget_admits_past_its_total_until_the_account_runs_dry(engine: Engine) -> None:
+    """Skip the total checks for an uncapped budget while the wallet still gates admission."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 5, idempotency_key="draft", uncapped=True)
+    assert budget.uncapped is True
+    assert budget.available_credits == 50
+    with pytest.raises(BudgetConflictError):
+        service.create("alice", 5, idempotency_key="draft")
+    _reserve(service, budget.id, key="first", max_credits=30)
+    _reserve(service, budget.id, key="second", max_credits=15)
+    assert service.get(budget.id, "alice").available_credits == 5
+    with pytest.raises(BudgetInsufficientError, match="cannot fund"):
+        _reserve(service, budget.id, key="third", max_credits=60)
+
+
+def test_uncapped_flag_is_versioned_like_the_total(engine: Engine) -> None:
+    """Bump the revision when only the mode changes and keep replays on the original fingerprint."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 20, idempotency_key="draft")
+    assert budget.uncapped is False
+    assert service.create("alice", 20, idempotency_key="draft").id == budget.id
+    with pytest.raises(BudgetConflictError):
+        service.create("alice", 20, idempotency_key="draft", uncapped=True)
+    lifted = service.update_total(budget.id, "alice", 20, expected_revision=1, uncapped=True)
+    assert lifted.uncapped is True
+    assert lifted.revision == 2
+    assert lifted.available_credits == 50
+    _reserve(service, budget.id, max_credits=30)
+    with pytest.raises(BudgetTotalConflictError):
+        service.update_total(budget.id, "alice", 20, expected_revision=2)
+    capped = service.update_total(budget.id, "alice", 30, expected_revision=2)
+    assert capped.uncapped is False
+    assert capped.revision == 3
+    assert capped.available_credits == 0

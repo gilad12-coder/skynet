@@ -5,6 +5,7 @@ import type {
 } from "@/shared/types/wizard-preflight";
 import type {
   BlackboxAgentRunResponse,
+  ScorerDependencyLock,
   BlackboxEngineCatalogResponse,
   BlackboxRunRequest,
   ColumnMapping,
@@ -493,23 +494,46 @@ export function getExecutionRuntimes(hasImageInputs: boolean, signal?: AbortSign
   );
 }
 
-export function runWizardPreflight(payload: WizardPreflightRequest, signal?: AbortSignal) {
-  return request<WizardPreflightResponse>("/wizard/preflight", {
+export async function runWizardPreflight(
+  payload: WizardPreflightRequest,
+  signal?: AbortSignal,
+  onPhase?: (phase: string) => void,
+): Promise<WizardPreflightResponse> {
+  if (!onPhase)
+    return request<WizardPreflightResponse>("/wizard/preflight", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal,
+    });
+  const response = await fetchWithAuthRetry(`${apiBase()}/wizard/preflight/stream`, {
     method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify(payload),
     signal,
   });
+  if (!response.ok || !response.body)
+    throw new Error(parseErrorMessage(await response.text()) ?? msg("submit.preflight.failed"));
+  let result: WizardPreflightResponse | undefined;
+  await readServerSentEvents(response.body, ({ event, data }) => {
+    if (event === "phase" && typeof data.phase === "string") onPhase(data.phase);
+    if (event === "result") result = data as unknown as WizardPreflightResponse;
+    if (event === "error")
+      throw new Error(parseErrorMessage(JSON.stringify(data)) ?? msg("submit.preflight.failed"));
+  });
+  if (!result) throw new Error(msg("submit.preflight.failed"));
+  return result;
 }
 
 export function createExecutionBudget(
   totalCredits: number,
   idempotencyKey: string,
   signal?: AbortSignal,
+  uncapped = false,
 ) {
   return request<ExecutionBudget>("/execution-budgets", {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ total_credits: totalCredits }),
+    body: JSON.stringify({ total_credits: totalCredits, uncapped }),
     signal,
   });
 }
@@ -523,10 +547,15 @@ export function updateExecutionBudget(
   totalCredits: number,
   expectedRevision: number,
   signal?: AbortSignal,
+  uncapped = false,
 ) {
   return request<ExecutionBudget>(`/execution-budgets/${encodeURIComponent(budgetId)}`, {
     method: "PATCH",
-    body: JSON.stringify({ total_credits: totalCredits, expected_revision: expectedRevision }),
+    body: JSON.stringify({
+      total_credits: totalCredits,
+      expected_revision: expectedRevision,
+      uncapped,
+    }),
     signal,
   });
 }
@@ -729,6 +758,36 @@ export function deletePasskey(credentialId: string) {
 export interface AccountDeletionResult {
   deleted_rows: number;
   anonymized_rows: number;
+}
+
+export function resolveScorerDependencies(input: {
+  code: string;
+  requirements: string[];
+  execution_budget_id: string;
+  execution_budget_revision: number;
+}) {
+  return request<{
+    ok: boolean;
+    dependency_lock?: ScorerDependencyLock;
+    error?: string;
+    budget: ExecutionBudget;
+    preview_status: "succeeded" | "failed" | "pending";
+  }>("/wizard/scorer-dependencies", { method: "POST", body: JSON.stringify(input) });
+}
+
+export interface PackageRegistryPreference {
+  index_url: string;
+}
+
+export function getPackageRegistry() {
+  return request<PackageRegistryPreference>("/account/package-registry");
+}
+
+export function updatePackageRegistry(indexUrl: string) {
+  return request<PackageRegistryPreference>("/account/package-registry", {
+    method: "PUT",
+    body: JSON.stringify({ index_url: indexUrl }),
+  });
 }
 
 export interface NotificationPreferences {

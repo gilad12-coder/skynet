@@ -1,5 +1,8 @@
 "use client";
 
+import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -96,6 +99,7 @@ import { StageInfoModal } from "./StageInfoModal";
 import { PairSelectionStrip } from "./PairSelectionStrip";
 import { OverviewTab } from "./OverviewTab";
 import { RunLifecycleNotice } from "./RunLifecycleNotice";
+import { isBudgetPause } from "../lib/run-lifecycle";
 import { RunCreditsChip } from "./RunCreditsChip";
 import { BestVersionTab } from "./BestVersionTab";
 import { GridServeTab } from "./GridServeTab";
@@ -785,7 +789,9 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         setStreamingRun(null);
         if (res.credits_charged != null) {
           toast.success(
-            formatMsg("optimizations.serve.request_spent", { credits: res.credits_charged }),
+            formatMsg("optimizations.serve.request_spent", {
+              credits: formatBudgetAmount(String(res.credits_charged), getActiveIntlLocale()),
+            }),
           );
         }
       } catch (err) {
@@ -821,7 +827,9 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         setStreamingRun(null);
         if (res.credits_charged != null) {
           toast.success(
-            formatMsg("optimizations.serve.request_spent", { credits: res.credits_charged }),
+            formatMsg("optimizations.serve.request_spent", {
+              credits: formatBudgetAmount(String(res.credits_charged), getActiveIntlLocale()),
+            }),
           );
         }
       } catch (err) {
@@ -871,7 +879,9 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         setStreamingRun(null);
         if (res.credits_charged != null) {
           toast.success(
-            formatMsg("optimizations.serve.request_spent", { credits: res.credits_charged }),
+            formatMsg("optimizations.serve.request_spent", {
+              credits: formatBudgetAmount(String(res.credits_charged), getActiveIntlLocale()),
+            }),
           );
         }
       },
@@ -1128,8 +1138,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           className="rounded-xl border border-border/40 bg-gradient-to-br from-card to-card/80 p-4 sm:p-5"
           data-tutorial="detail-header"
         >
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2 min-w-0">
+          <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
+            <div className="space-y-2 min-w-0 sm:flex-1">
               <div className="flex flex-col items-start gap-1.5">
                 <StatusBadge status={job.status} />
                 {job.name && (
@@ -1216,7 +1226,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             </div>
             {!isShare && (
               <div
-                className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:gap-2"
+                className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto sm:shrink-0 sm:flex-nowrap sm:gap-2"
                 data-tutorial="result-actions"
               >
                 {canManageShare && <ShareDialog optimizationId={job.optimization_id} />}
@@ -1240,6 +1250,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   (job.status === "failed" ||
                     job.status === "cancelled" ||
                     job.status === "paused") &&
+                  !isBudgetPause(job) &&
                   (job.resumable ? (
                     <TooltipButton tooltip={msg("optimization.resume_tooltip")}>
                       <Button
@@ -1307,7 +1318,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               </div>
             )}
             {shareCanInteract && !isPhone && (
-              <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+              <div className="flex w-full items-center justify-end gap-2 sm:w-auto sm:shrink-0">
                 <TooltipButton tooltip={msg("share.clone_tooltip")}>
                   <Button
                     variant="ghost"
@@ -1331,7 +1342,14 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         </div>
       </FadeIn>
 
-      <RunLifecycleNotice job={job} />
+      <RunLifecycleNotice
+        job={job}
+        canEdit={canEditRun && !skipNetwork}
+        onBudgetChanged={() => {
+          window.dispatchEvent(new Event("optimizations-changed"));
+          void fetchJob();
+        }}
+      />
 
       {isPairContext && effectiveJob?.grid_result && (
         <PairSelectionStrip

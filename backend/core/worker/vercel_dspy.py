@@ -123,6 +123,8 @@ def run_vercel_dspy(payload: dict[str, Any], artifact_id: str, event_queue: Any,
                     event_queue.put(event)
 
         command = f"PYTHONPATH=/app python3 -m core.worker.isolated_runner {shlex.quote(request_path)}"
+        if "_preflight" in guest_payload:
+            event_queue.put({"type": "preflight_phase", "phase": "evaluator"})
         result = session.run(
             command,
             env={"PYTHONUNBUFFERED": "1", "LITELLM_LOCAL_MODEL_COST_MAP": "True"},

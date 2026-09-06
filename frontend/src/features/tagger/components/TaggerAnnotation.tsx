@@ -463,13 +463,14 @@ export function TaggerAnnotation({
 
         <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-between max-lg:landscape:col-span-2 max-lg:landscape:flex max-lg:landscape:items-center max-lg:landscape:justify-between">
           <Button
+            size="icon-sm"
             variant="outline"
             onClick={() => onNavigate(-1)}
             disabled={currentIndex === 0}
-            className="min-h-[44px] w-full gap-2 sm:w-auto max-lg:landscape:w-auto lg:min-h-0"
+            className="max-lg:size-[44px]"
+            aria-label={msg("auto.features.tagger.components.taggerannotation.8")}
           >
             <PrevIcon className="size-4" />
-            {msg("auto.features.tagger.components.taggerannotation.8")}
           </Button>
 
           <div className="col-span-2 row-start-2 flex items-center justify-center gap-1 sm:col-auto sm:row-auto sm:gap-2">
@@ -588,12 +589,13 @@ export function TaggerAnnotation({
           </div>
 
           <Button
+            size="icon-sm"
             variant="outline"
             onClick={() => onNavigate(1)}
             disabled={currentIndex === data.length - 1}
-            className="col-start-2 row-start-1 min-h-[44px] w-full gap-2 sm:col-auto sm:row-auto sm:w-auto max-lg:landscape:w-auto lg:min-h-0"
+            className="col-start-2 row-start-1 justify-self-end max-lg:size-[44px] sm:col-auto sm:row-auto"
+            aria-label={msg("auto.features.tagger.components.taggerannotation.13")}
           >
-            {msg("auto.features.tagger.components.taggerannotation.13")}
             <NextIcon className="size-4" />
           </Button>
         </div>

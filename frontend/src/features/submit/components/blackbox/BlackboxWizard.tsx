@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
+import { ValidationProgressModal } from "../ValidationProgressModal";
 import { msg } from "@/shared/lib/messages";
 import { SubmitSplashOverlay } from "@/shared/ui/submit-splash-overlay";
 import { TERMS } from "@/shared/lib/terms";
 
 import { useBlackboxWizard, type BlackboxRecipe } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig, slideVariants } from "../../constants";
+import { limitCoversEstimate } from "../../lib/budget-limit";
 import { focusField } from "../../lib/focus-field";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../../lib/wizard-steps";
 import { SubmitStepper } from "../SubmitStepper";
@@ -22,11 +24,10 @@ import { BlackboxBasicsStep } from "./BlackboxBasicsStep";
 import { BlackboxStartStep } from "./BlackboxStartStep";
 import { BlackboxCasesStep } from "./BlackboxCasesStep";
 import { BlackboxScorerStep } from "./BlackboxScorerStep";
-import { BlackboxExecutionSection } from "./BlackboxExecutionSection";
 import { BlackboxOptimizerStep } from "./BlackboxOptimizerStep";
 import { BlackboxReviewStep } from "./BlackboxReviewStep";
 
-type EvaluationStep = "budget" | "cases" | "scorer" | "execution" | "split";
+type EvaluationStep = "cases" | "scorer" | "split" | "budget";
 const GOAL_STEPS = ["goal"] as const;
 const OPTIMIZATION_STEPS = ["strategy", "model"] as const;
 const REVIEW_STEPS = ["review"] as const;
@@ -37,14 +38,15 @@ function evaluationStepFor(field: string | undefined, hasCases: boolean): Evalua
   if (field === "totalBudgetInput") return "budget";
   if (field === "bb-cases" || field === "wizard-stage-evaluation") return "cases";
   if (field.startsWith("bb-scor")) return "scorer";
-  if (field === "bb-execution-agent" || field === "bb-task-model") return "execution";
+  if (field === "bb-execution-agent" || field === "bb-task-model") return "scorer";
   if (field === "bb-split") return hasCases ? "split" : "cases";
   return null;
 }
 
-/** Fields that live in Evaluation even when a later stage reports them. */
+/** Resolve the owning stage when a different stage reports a field error. */
 function stageOwning(stage: WizardStageId, field?: string): WizardStageId {
-  return field === "totalBudgetInput" || field === "bb-cases" ? "evaluation" : stage;
+  if (field === "totalBudgetInput") return "evaluation";
+  return field === "bb-cases" ? "evaluation" : stage;
 }
 
 export function BlackboxWizard({
@@ -55,20 +57,19 @@ export function BlackboxWizard({
   initialRecipe: BlackboxRecipe;
 }) {
   const w = useBlackboxWizard(initialRecipe);
+  const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
+  const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
   const [optimizationPart, setOptimizationPart] = useState(0);
 
   // The split only exists once there are cases to divide.
   const hasCases = Boolean(w.parsedCases?.rowCount);
   const evaluationSteps = useMemo<readonly EvaluationStep[]>(
-    () =>
-      hasCases
-        ? ["budget", "cases", "scorer", "execution", "split"]
-        : ["budget", "cases", "scorer", "execution"],
+    () => (hasCases ? ["budget", "cases", "scorer", "split"] : ["budget", "cases", "scorer"]),
     [hasCases],
   );
   const activeEvaluationPart = Math.min(evaluationPart, evaluationSteps.length - 1);
-  const activeEvaluationStep: EvaluationStep = evaluationSteps[activeEvaluationPart] ?? "budget";
+  const activeEvaluationStep: EvaluationStep = evaluationSteps[activeEvaluationPart] ?? "cases";
 
   const routeSubstep = useCallback(
     (stage: WizardStageId, field?: string) => {
@@ -77,13 +78,7 @@ export function BlackboxWizard({
         if (key) setEvaluationPart(Math.max(0, evaluationSteps.indexOf(key)));
       }
       if (stage === "optimization")
-        setOptimizationPart(
-          field === "bb-optimization-model" ||
-            field === "bb-max-runs" ||
-            field === "totalBudgetInput"
-            ? 1
-            : 0,
-        );
+        setOptimizationPart(field === "bb-optimization-model" || field === "bb-max-runs" ? 1 : 0);
     },
     [evaluationSteps, hasCases],
   );
@@ -113,17 +108,29 @@ export function BlackboxWizard({
       : null;
 
   const evaluationPanels: Record<EvaluationStep, ReactNode> = {
-    budget: <TotalBudgetCard w={w} mode={w.tokenSource} />,
     cases: (
       <div id="bb-cases" tabIndex={-1} className="outline-none">
-        <BlackboxCasesStep w={w} />
+        <BlackboxCasesStep
+          w={w}
+          previewOpen={dataPreviewOpen}
+          onPreviewOpenChange={setDataPreviewOpen}
+          previewExpanded={dataPreviewExpanded}
+          onPreviewExpandedChange={setDataPreviewExpanded}
+        />
       </div>
     ),
+    // Cases and the optimization model both move the estimate and come later.
+    budget: (
+      <TotalBudgetCard
+        w={w}
+        mode={w.tokenSource}
+        preliminary={!hasCases || !w.reflectionModel.name.trim()}
+      />
+    ),
     scorer: <BlackboxScorerStep w={w} />,
-    execution: <BlackboxExecutionSection w={w} />,
     split: (
       <div id="bb-split" tabIndex={-1} className="outline-none">
-        <SplitSection w={w} />
+        <SplitSection w={w} totalRows={w.parsedCases?.rowCount ?? 0} />
       </div>
     ),
   };
@@ -133,6 +140,11 @@ export function BlackboxWizard({
   ];
 
   const handleEvaluationNext = async () => {
+    if (
+      activeEvaluationStep === "budget" &&
+      !limitCoversEstimate(w.costBracket, w.tokenSource, w.budgetUncapped ? null : w.maxCostCredits)
+    )
+      return;
     if (activeEvaluationPart < evaluationSteps.length - 1) {
       setEvaluationPart(activeEvaluationPart + 1);
       return;
@@ -191,6 +203,7 @@ export function BlackboxWizard({
       setOptimizationPart((current) => current - 1);
       return;
     }
+    if (w.step === WIZARD_STAGE.review) setOptimizationPart(OPTIMIZATION_STEPS.length - 1);
     w.goPrev();
   };
   const onNext =
@@ -206,12 +219,19 @@ export function BlackboxWizard({
     w.codeAssistMode === "auto" &&
     (w.step === WIZARD_STAGE.goal ||
       (w.step === WIZARD_STAGE.evaluation && activeEvaluationStep === "scorer"));
-  const containerWidthClass = wideAuthoringPanel ? "max-w-6xl" : "max-w-2xl";
+  const wideDataPreview =
+    w.step === WIZARD_STAGE.evaluation &&
+    activeEvaluationStep === "cases" &&
+    dataPreviewOpen &&
+    dataPreviewExpanded &&
+    !!w.parsedCases;
+  const containerWidthClass = wideAuthoringPanel || wideDataPreview ? "max-w-6xl" : "max-w-2xl";
 
   return (
     <div
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
+      <ValidationProgressModal preflight={w.preflight} />
       <SubmitStepper w={w} />
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">

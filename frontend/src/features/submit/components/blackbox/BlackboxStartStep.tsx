@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import dynamic from "next/dynamic";
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
+
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Plus, Trash } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
-import { Input } from "@/shared/ui/primitives/input";
 import { msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 
@@ -14,27 +15,7 @@ import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
 import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
 import { Disclosure } from "../Disclosure";
-import { Field, MOBILE_INPUT_CLASS, TEXTAREA_CLASS } from "./shared";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-});
-
-// The seed's shape is a side choice, not a question the form asks: each
-// alternative is a quiet text action under the editor.
-function SeedAction({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return (
-    <Button
-      type="button"
-      variant="link"
-      size="sm"
-      onClick={onClick}
-      className="min-h-[44px] gap-1 px-0 text-xs text-muted-foreground hover:text-foreground lg:min-h-0"
-    >
-      {children}
-    </Button>
-  );
-}
+import { Field, TEXTAREA_CLASS } from "./shared";
 
 export function BlackboxStartStep({
   w,
@@ -64,6 +45,23 @@ export function BlackboxStartStep({
     setBackground,
   } = w;
 
+  const reducedMotion = useReducedMotion();
+  const partIds = useRef(new WeakMap<object, number>());
+  const nextPartId = useRef(0);
+  const partKey = (part: object) => {
+    let id = partIds.current.get(part);
+    if (id == null) {
+      id = nextPartId.current++;
+      partIds.current.set(part, id);
+    }
+    return id;
+  };
+
+  const editSeed = (value: string) => {
+    setSeedText(value);
+    setSeedMode("text");
+    setSeedManuallyEdited(true);
+  };
   // Background is optional, so it folds away until it has something to say:
   // opening by itself when a clone, a draft or the interview's brief fills it.
   const [backgroundOpen, setBackgroundOpen] = useState(() => background.trim() !== "");
@@ -72,19 +70,33 @@ export function BlackboxStartStep({
   }, [background]);
 
   const updatePart = (i: number, patch: { key?: string; value?: string }) =>
-    setSeedParts(seedParts.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
+    setSeedParts(
+      seedParts.map((part, index) => {
+        if (index !== i) return part;
+        const updated = { ...part, ...patch };
+        partIds.current.set(updated, partKey(part));
+        return updated;
+      }),
+    );
 
-  // Splitting a whole text keeps it as the first part.
   const addPart = () => {
-    if (seedMode === "parts") {
-      setSeedParts([...seedParts, { key: "", value: "" }]);
-      return;
-    }
-    const kept = seedText.trim()
-      ? [{ key: "", value: seedText }]
-      : seedParts.filter((p) => p.key.trim() || p.value.trim());
-    setSeedParts([...kept, { key: "", value: "" }]);
+    const current =
+      seedMode === "parts" ? seedParts : [{ key: "", value: seedMode === "none" ? "" : seedText }];
+    setSeedParts([...current, { key: "", value: "" }]);
     setSeedMode("parts");
+  };
+
+  const removePart = (index: number) => {
+    setSeedParts(seedParts.filter((_, i) => i !== index));
+    setSeedManuallyEdited(true);
+  };
+
+  // Keep the outgoing card mounted until its collapse finishes.
+  const finishRemoval = () => {
+    if (seedParts.length === 1) {
+      editSeed(seedParts[0]!.value);
+      setSeedParts([]);
+    }
   };
 
   const editorLanguage = seedLanguage ?? (recipe === "code" ? "Python" : "text");
@@ -102,7 +114,7 @@ export function BlackboxStartStep({
   // One line of guidance at most: what the interview does while it is live,
   // otherwise only the code recipe needs a nudge about what to paste.
   const seedHint =
-    seedMode !== "text"
+    seedMode === "parts"
       ? undefined
       : interviewEligible
         ? msg("submit.blackbox.start.seed_hint_auto")
@@ -110,34 +122,22 @@ export function BlackboxStartStep({
           ? seedPlaceholder
           : undefined;
 
-  const showSeedTextarea = seedMode === "text" && !seedIsCode;
+  const showSeedTextarea = seedMode !== "parts" && !seedIsCode;
   // The stepper and status chip mean nothing until the agent has touched the
   // seed; idle they render empty and would leave a hollow label row.
   const showSeedAgent = interviewEligible && agent.signatureStatus !== "idle";
 
   const seedActions = (
-    <div className="flex flex-wrap items-center gap-x-5">
-      {seedMode === "none" ? (
-        <SeedAction onClick={() => setSeedMode("text")}>
-          <Plus className="size-3.5" />
-          {msg("submit.blackbox.start.seed_add_action")}
-        </SeedAction>
-      ) : (
-        <>
-          <SeedAction onClick={addPart}>
-            <Plus className="size-3.5" />
-            {msg("submit.blackbox.start.add_part")}
-          </SeedAction>
-          {seedMode === "parts" && (
-            <SeedAction onClick={() => setSeedMode("text")}>
-              {msg("submit.blackbox.start.seed_whole_action")}
-            </SeedAction>
-          )}
-          <SeedAction onClick={() => setSeedMode("none")}>
-            {msg("submit.blackbox.start.seed_none_action")}
-          </SeedAction>
-        </>
-      )}
+    <div className="flex w-full flex-col gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={addPart}
+        className="min-h-11 w-full gap-2 rounded-lg border-dashed bg-transparent shadow-none"
+      >
+        <Plus className="size-4" aria-hidden="true" />
+        {msg("submit.blackbox.start.add_part")}
+      </Button>
     </div>
   );
 
@@ -145,11 +145,8 @@ export function BlackboxStartStep({
     <ExpandableTextarea
       id="bb-seed"
       label={seedLabel}
-      value={seedText}
-      onChange={(value) => {
-        setSeedText(value);
-        setSeedManuallyEdited(true);
-      }}
+      value={seedMode === "none" ? "" : seedText}
+      onChange={editSeed}
       placeholder={seedPlaceholder}
       rows={8}
       className={`${TEXTAREA_CLASS} flex-1 font-mono text-sm`}
@@ -175,14 +172,11 @@ export function BlackboxStartStep({
           }
           className="min-h-0 flex-1"
         >
-          {seedMode === "text" &&
+          {seedMode !== "parts" &&
             (seedIsCode ? (
               <CodeEditor
-                value={seedText}
-                onChange={(v) => {
-                  setSeedText(v);
-                  setSeedManuallyEdited(true);
-                }}
+                value={seedMode === "none" ? "" : seedText}
+                onChange={editSeed}
                 height="420px"
                 language={editorLanguage}
                 label={seedLanguage ?? msg("submit.blackbox.start.seed_editor_label")}
@@ -194,52 +188,61 @@ export function BlackboxStartStep({
             ))}
 
           {seedMode === "parts" && (
-            <div className="space-y-3">
-              {seedParts.map((part, i) => (
-                <ExpandableTextarea
-                  key={i}
-                  id={`bb-seed-part-${i}`}
-                  label={part.key.trim() || seedLabel}
-                  value={part.value}
-                  onChange={(value) => updatePart(i, { value })}
-                  placeholder={msg("submit.blackbox.start.part_value")}
-                  rows={4}
-                  className={`${TEXTAREA_CLASS} font-mono text-sm`}
-                >
-                  {({ textarea: partTextarea, trigger: partTrigger }) => (
-                    <div className="space-y-2 rounded-lg border border-border/50 p-3">
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={part.key}
-                          onChange={(e) => updatePart(i, { key: e.target.value })}
-                          placeholder={msg("submit.blackbox.start.part_key")}
-                          className={`${MOBILE_INPUT_CLASS} font-mono`}
-                        />
-                        {partTrigger}
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          aria-label={msg("submit.blackbox.start.remove_part")}
-                          disabled={seedParts.length === 1}
-                          onClick={() => setSeedParts(seedParts.filter((_, idx) => idx !== i))}
-                          className="shrink-0"
-                        >
-                          <Trash className="size-4" />
-                        </Button>
-                      </div>
-                      {partTextarea}
+            <div>
+              <AnimatePresence onExitComplete={finishRemoval}>
+                {seedParts.map((part, i) => (
+                  <motion.div
+                    key={partKey(part)}
+                    initial={reducedMotion ? false : { height: 0, opacity: 0, overflow: "hidden" }}
+                    animate={{ height: "auto", opacity: 1, transitionEnd: { overflow: "visible" } }}
+                    exit={{ height: 0, opacity: 0, overflow: "hidden", pointerEvents: "none" }}
+                    transition={{ duration: reducedMotion ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <div className={i > 0 ? "pt-3" : undefined}>
+                      <ExpandableTextarea
+                        id={`bb-seed-part-${partKey(part)}`}
+                        label={
+                          part.key.trim() || msg("submit.blackbox.start.part_label", { n: i + 1 })
+                        }
+                        value={part.value}
+                        onChange={(value) => updatePart(i, { value })}
+                        placeholder={msg("submit.blackbox.start.part_value")}
+                        rows={4}
+                        className={`${TEXTAREA_CLASS} min-h-32 rounded-none border-0 bg-transparent text-base shadow-none focus-visible:ring-inset md:text-sm`}
+                      >
+                        {({ textarea: partTextarea, trigger: partTrigger }) => (
+                          <div className="overflow-hidden rounded-xl border border-border bg-background">
+                            <div className="flex min-h-12 items-center gap-2 border-b border-border bg-muted/30 px-3">
+                              <label
+                                htmlFor={`bb-seed-part-${partKey(part)}`}
+                                className="min-w-0 flex-1 truncate text-sm font-medium"
+                                title={part.key || undefined}
+                              >
+                                {part.key.trim() ||
+                                  msg("submit.blackbox.start.part_label", { n: i + 1 })}
+                              </label>
+                              {partTrigger}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                aria-label={msg("submit.blackbox.start.remove_part")}
+                                disabled={seedParts.length === 1}
+                                onClick={() => removePart(i)}
+                                className="size-11 shrink-0 text-muted-foreground hover:text-destructive"
+                              >
+                                <Trash className="size-4" />
+                              </Button>
+                            </div>
+                            {partTextarea}
+                          </div>
+                        )}
+                      </ExpandableTextarea>
                     </div>
-                  )}
-                </ExpandableTextarea>
-              ))}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             </div>
-          )}
-
-          {seedMode === "none" && (
-            <p className="text-sm text-muted-foreground" dir="auto">
-              {msg("submit.blackbox.start.seed_none_note")}
-            </p>
           )}
 
           {seedActions}

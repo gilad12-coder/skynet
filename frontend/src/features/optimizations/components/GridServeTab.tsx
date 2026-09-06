@@ -1,5 +1,8 @@
 "use client";
 
+import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+
 /**
  * Grid-level serve playground — lets the user pick any successful pair
  * from a grid search and run it interactively. Defaults to the pair with
@@ -222,7 +225,9 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
           ]);
           if (res.credits_charged != null) {
             toast.success(
-              formatMsg("optimizations.serve.request_spent", { credits: res.credits_charged }),
+              formatMsg("optimizations.serve.request_spent", {
+                credits: formatBudgetAmount(String(res.credits_charged), getActiveIntlLocale()),
+              }),
             );
           }
           setStreamingRun(null);

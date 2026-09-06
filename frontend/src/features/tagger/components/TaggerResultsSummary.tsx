@@ -1,5 +1,8 @@
 "use client";
 
+import { formatCredits } from "@/features/billing";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+
 import { Coins, SealCheck, Sparkle, User, WarningCircle } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
@@ -116,7 +119,7 @@ export function TaggerResultsSummary({ assist, annotations, onFlaggedPass }: Pro
         ))}
         {credits > 0 && (
           <StatCell
-            value={credits}
+            value={formatCredits(credits, getActiveIntlLocale())}
             icon={Coins}
             label={msg("tagger.results.recap.credits")}
             hint={msg("tagger.results.recap.credits_hint")}
@@ -155,7 +158,7 @@ function StatCell({
   color = "var(--muted-foreground)",
   first = false,
 }: {
-  value: number;
+  value: number | string;
   icon: typeof User;
   label: string;
   hint: string;
@@ -163,12 +166,7 @@ function StatCell({
   first?: boolean;
 }) {
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-1.5 px-5",
-        first ? "ps-0" : "border-s border-border/60",
-      )}
-    >
+    <div className={cn("flex flex-col gap-1.5 px-5", first ? "ps-0" : "border-s border-border/60")}>
       <span className="text-2xl font-semibold leading-none tracking-tight tabular-nums text-foreground">
         {value}
       </span>

@@ -199,6 +199,7 @@
     "optimization.pause_not_pausable": "Eine Optimierung kann erst pausiert werden, nachdem ihr erster Checkpoint gespeichert wurde — versuchen Sie es gleich noch einmal.",
     "optimization.pause_wrong_status": "Nur laufende Optimierungen können pausiert werden — diese befindet sich im Zustand '{status}'.",
     "optimization.payload_unavailable": "Die Nutzlast der Optimierung ist nicht verfügbar.",
+    "optimization.resume_budget_projected": "Der Lauf steuert auf Kosten von etwa {projected} Credits zu, mehr als sein Limit von {limit} Credits. Erhöhen Sie das Ausgabenlimit auf über {projected} Credits, um fortzufahren.",
     "optimization.resume_exhausted": "Diese Optimierung hat ihre maximale Anzahl von Versuchen ({attempts}) erreicht — führen Sie sie stattdessen erneut aus.",
     "optimization.resume_not_resumable": "Diese Optimierung hat keinen gespeicherten Fortsetzungspunkt — führen Sie sie stattdessen erneut aus.",
     "optimization.resume_wrong_status": "Nur Optimierungen, die mitten im Durchlauf gestoppt wurden, können fortgesetzt werden — diese befindet sich im Zustand '{status}'.",

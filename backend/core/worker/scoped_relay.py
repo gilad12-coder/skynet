@@ -66,6 +66,7 @@ def model_forwarder(payload: dict[str, Any]) -> Any:
             register(config["extra"].get("_skynet_budget_route"), model_paths)
     register(payload.get("_skynet_target_route"), model_paths)
     register(payload.get("_skynet_tools_route"), frozenset({"/v1/_mcp", "/v1/_budget/state"}))
+    register(payload.get("_skynet_packages_route"), frozenset({"/v1/_packages"}))
     register(payload.get("_skynet_evaluator_route"), frozenset({"/v1/_evaluator", "/v1/_budget/state"}))
 
     def dispatch(token: str, path: str, body: dict[str, Any], headers: dict[str, str]) -> ModelHTTPResult:

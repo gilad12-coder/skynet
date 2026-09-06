@@ -6,5 +6,19 @@ export { UsageTab } from "./components/UsageTab";
 export { ByokKeysSection } from "./components/ByokKeysSection";
 export { InsufficientCreditsModalHost } from "./components/InsufficientCreditsModalHost";
 export { litellmProviderForByok } from "./lib/byok";
-export { creditsToUsd, formatCredits, formatUsd, type TokenSourceMode } from "./lib/credit";
-export { creditsForUsage, platformFeeCredits, type ModelTokenUsage } from "./lib/pricing";
+export {
+  CREDIT_USD_VALUE,
+  creditsToUsd,
+  formatCredits,
+  formatUsd,
+  type TokenSourceMode,
+} from "./lib/credit";
+export {
+  MARKUP,
+  PLATFORM_FEE_FRACTION,
+  creditsForUsage,
+  modelTokenCosts,
+  platformFeeCredits,
+  rawCostUsd,
+  type ModelTokenUsage,
+} from "./lib/pricing";

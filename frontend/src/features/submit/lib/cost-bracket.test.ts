@@ -128,3 +128,83 @@ test("zero managed sandbox sessions add no runtime charge", () => {
   assert.equal(bracket.runtimeLowCredits, 0);
   assert.equal(bracket.runtimeHighCredits, 0);
 });
+
+test("traces the inputs and intermediate values behind the bracket", () => {
+  const bracket = projectCostBracket({
+    ...base,
+    autoLevel: "medium",
+    datasetRows: 1000,
+    modelRoles: [
+      { role: "task", model: cheap, tokenSource: "managed", tokenShare: 0.65 },
+      { role: "optimization", model: expensive, tokenSource: "byok", tokenShare: 0.35 },
+    ],
+  });
+  const { trace } = bracket;
+
+  assert.equal(trace.metricCalls, 2000);
+  assert.equal(trace.metricCallSource, "auto_tier");
+  assert.equal(trace.rowFactor, 1.5);
+  assert.equal(trace.lowTokens, 2000 * 700 * 1.5);
+  assert.equal(trace.highTokens, 2000 * 4500 * 1.5 * 1.5);
+  assert.deepEqual(
+    trace.roles.map((role) => [role.role, role.modelLabel, role.tokenSource, role.priced]),
+    [
+      ["task", "cheap", "managed", true],
+      ["optimization", "expensive", "byok", true],
+    ],
+  );
+  // The traced provider costs rebuild the credit totals the bracket reports.
+  const usd = (source: string, end: "lowUsd" | "highUsd") =>
+    trace.roles
+      .filter((role) => role.tokenSource === source)
+      .reduce((sum, role) => sum + role[end], 0);
+  assert.equal(Math.ceil((usd("managed", "lowUsd") * 1.5) / 0.01), bracket.managedModelLowCredits);
+  assert.equal(Math.ceil((usd("byok", "highUsd") * 1.5) / 0.01), bracket.byokModelHighCredits);
+});
+
+test("explains a full-evals budget and an unpriced model", () => {
+  const bracket = projectCostBracket({
+    autoLevel: "",
+    maxFullEvals: "4",
+    maxMetricCalls: "",
+    datasetRows: 0,
+    modelRoles: [
+      { role: "task", model: model("free", 0, 0), tokenSource: "managed", tokenShare: 1 },
+    ],
+  });
+
+  assert.equal(bracket.trace.metricCallSource, "full_evals");
+  assert.equal(bracket.trace.fullEvals, 4);
+  assert.equal(bracket.trace.metricCalls, 1000);
+  assert.equal(bracket.trace.reflectionHighMultiplier, 1);
+  assert.equal(bracket.trace.roles[0]?.priced, false);
+});
+
+test("charge trace adds up to the charged bracket", () => {
+  const runtime = runtimeCostProjection(
+    {
+      billing_basis: "at_cost",
+      minimum_session_credits: "1",
+      maximum_session_credits: "12",
+      maximum_lifetime_seconds: 3600,
+      vcpus: 2,
+    },
+    2,
+  );
+  const charged = chargeableBracket(
+    projectCostBracket({
+      ...base,
+      modelRoles: [
+        { role: "task", model: expensive, tokenSource: "managed", tokenShare: 1 },
+        { role: "judge", model: cheap, tokenSource: "byok", tokenShare: 1 },
+      ],
+      runtime,
+    }),
+    "managed",
+  );
+  const { charge } = charged;
+
+  assert.equal(charge.byokFeeLow, platformFeeCredits(charge.byokFullLow));
+  assert.equal(charge.managedLow + charge.byokFeeLow + charge.runtimeLow, charged.lowCredits);
+  assert.equal(charge.managedHigh + charge.byokFeeHigh + charge.runtimeHigh, charged.highCredits);
+});

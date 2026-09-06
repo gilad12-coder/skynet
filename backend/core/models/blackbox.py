@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .common import ModelConfig, SplitCounts, SplitFractions
 from .results import LMActivity, ModelTokenUsage
+from .scorer_dependencies import ScorerDependencyLock
 
 BLACKBOX_ENGINE_GEPA = "gepa"
 BLACKBOX_ENGINE_BEST_OF_N = "best_of_n"
@@ -70,6 +71,7 @@ class BlackboxScorer(BaseModel):
     secret: str | None = None
     timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     install_command: str | None = None
+    dependency_lock: ScorerDependencyLock | None = None
     model: ModelConfig | None = None
 
     @model_validator(mode="after")

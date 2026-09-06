@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle, CircleNotch, Warning, XCircle } from "@/shared/ui/icons";
+import { CheckCircle, CircleNotch, Warning } from "@/shared/ui/icons";
 import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
@@ -37,14 +37,6 @@ export function EvidenceChip({
         {modelName
           ? formatMsg("submit.blackbox.evidence.passed_with", { model: `⁦${modelName}⁩` })
           : msg("submit.blackbox.evidence.passed")}
-      </span>
-    );
-  }
-  if (status === "failed") {
-    return (
-      <span className={cn(base, "text-[#A3512B]", className)} role="status">
-        <XCircle className="size-3 shrink-0" aria-hidden="true" />
-        {msg("submit.blackbox.evidence.failed")}
       </span>
     );
   }

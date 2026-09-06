@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
+import { withScorerImports } from "../../lib/scorer-dependencies";
+
+import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
+
 import { CheckCircle, CircleNotch, Play, XCircle } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
@@ -16,17 +18,12 @@ import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
-import { Disclosure } from "../Disclosure";
 import { emptyModelConfig } from "../../constants";
 import { EvidenceChip } from "./EvidenceChip";
 import { Field, MOBILE_INPUT_CLASS, Segmented } from "./shared";
 
 const MOBILE_MODEL_CHIP_CLASS =
   "min-h-[44px] max-lg:[&_button]:min-h-[44px] max-lg:[&_button]:min-w-[44px] max-lg:[&_button]:opacity-100";
-
-const CodeEditor = dynamic(() => import("@/shared/ui/code-editor").then((m) => m.CodeEditor), {
-  ssr: false,
-});
 
 function isDataImage(entry: [string, unknown]): entry is [string, string] {
   return typeof entry[1] === "string" && entry[1].startsWith("data:image/");
@@ -46,15 +43,12 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
     setScorerUrl,
     scorerSecret,
     setScorerSecret,
-    scorerInstall,
-    setScorerInstall,
     scorerModel,
     setScorerModel,
     scorerModelMode,
     setScorerModelMode,
     resolvedScorerModel,
     scoringModelPending,
-    reflectionModel,
     scorerUsesModel,
     evaluatorEvidence,
     evaluatorStatus,
@@ -63,14 +57,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
     dryRun,
     runDryRun,
   } = w;
-
-  // Most scorers need nothing installed, so the command folds away until
-  // one is set (a clone, a returning draft, the agent).
-  const hasInstall = scorerInstall.trim() !== "";
-  const [installOpen, setInstallOpen] = useState(hasInstall);
-  useEffect(() => {
-    if (hasInstall) setInstallOpen(true);
-  }, [hasInstall]);
 
   const result = dryRun.status === "done" ? dryRun.result : null;
   const sideEntries = result?.ok ? Object.entries(result.side_info) : [];
@@ -110,16 +96,16 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border/50 bg-muted/20 p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               {/* Inheriting shows the optimization model itself; picking a
-                  different one is one click on the chip, and its × returns
-                  the role to the optimization model. */}
+                  different one is one click on the chip. Removing it clears
+                  the evaluator model until another is selected. */}
               <ModelChip
+                roleLabel={msg("submit.blackbox.roles.scoring.label")}
                 config={
                   scorerModelMode === "explicit"
                     ? scorerModel
                     : (resolvedScorerModel ?? emptyModelConfig())
                 }
-                className={MOBILE_MODEL_CHIP_CLASS}
-                roleLabel={msg("submit.blackbox.roles.scoring.label")}
+                className={`w-full min-w-0 ${MOBILE_MODEL_CHIP_CLASS}`}
                 tooltip={msg("submit.blackbox.scorer.model_explainer")}
                 required
                 emptyLabel={
@@ -130,10 +116,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                   setEditingModel({
                     // Seeded from the model it replaces so a different scoring
                     // model starts one field away, not from blank.
-                    config:
-                      scorerModelMode === "explicit" || scorerModel.name
-                        ? scorerModel
-                        : { ...reflectionModel },
+                    config: resolvedScorerModel ?? emptyModelConfig(),
                     onSave: (config) => {
                       setScorerModel(config);
                       setScorerModelMode("explicit");
@@ -142,31 +125,19 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                   })
                 }
                 onRemove={
-                  scorerModelMode === "explicit"
+                  resolvedScorerModel?.name.trim() || scorerModel.name.trim()
                     ? () => {
                         setScorerModel(emptyModelConfig());
-                        setScorerModelMode("inherit");
+                        setScorerModelMode("explicit");
                       }
                     : undefined
                 }
               />
-              <HelpTip
-                text={`${tip("submit.blackbox.scorer_model")} ${msg(
-                  scorerModelMode === "explicit"
-                    ? "submit.blackbox.roles.scoring.custom_desc"
-                    : scoringModelPending
-                      ? "submit.blackbox.roles.scoring.pending_desc"
-                      : "submit.blackbox.roles.scoring.inherited_desc",
-                )}`}
-              >
-                <span className="text-xs text-muted-foreground">
-                  {msg(
-                    scorerModelMode === "inherit"
-                      ? "submit.blackbox.roles.scoring.inherited"
-                      : "submit.blackbox.roles.scoring.custom",
-                  )}
-                </span>
-              </HelpTip>
+              {!resolvedScorerModel?.name.trim() && (
+                <p role="alert" className="w-full text-xs text-destructive">
+                  {msg("submit.blackbox.validation.scorer_model_required")}
+                </p>
+              )}
             </div>
           )}
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -185,7 +156,17 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               )}
             </div>
           </div>
-          <div id="bb-scorer-code" tabIndex={-1} className="outline-none">
+          <div
+            id="bb-scorer-code"
+            tabIndex={-1}
+            className="outline-none"
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                const code = withScorerImports(metricCode);
+                if (code !== metricCode) setMetricCode(code);
+              }
+            }}
+          >
             <CodeEditor
               value={metricCode}
               onChange={(v) => {
@@ -201,29 +182,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
             />
           </div>
-          <Disclosure
-            id="bb-scorer-install-panel"
-            label={msg("submit.blackbox.scorer.install_toggle")}
-            open={installOpen}
-            onOpenChange={setInstallOpen}
-          >
-            <div className="pt-1">
-              <Field
-                label={msg("submit.blackbox.scorer.install_label")}
-                htmlFor="bb-scorer-install"
-                tip="submit.blackbox.scorer_install"
-              >
-                <Input
-                  id="bb-scorer-install"
-                  value={scorerInstall}
-                  onChange={(e) => setScorerInstall(e.target.value)}
-                  placeholder="pip install --no-index --find-links=/opt/skynet/wheels package-name"
-                  dir="ltr"
-                  className={`${MOBILE_INPUT_CLASS} font-mono`}
-                />
-              </Field>
-            </div>
-          </Disclosure>
         </div>
       ) : (
         <div className="space-y-4">
@@ -266,7 +224,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               variant="outline"
               onClick={() => void runDryRun()}
               disabled={dryRun.status === "running"}
-              className="min-h-[44px] gap-2 lg:min-h-0"
+              className="min-h-[44px] w-full gap-2 lg:min-h-0"
             >
               {dryRun.status === "running" ? (
                 <CircleNotch className="size-4 animate-spin" />

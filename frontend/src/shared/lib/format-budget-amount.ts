@@ -1,14 +1,9 @@
-/** Localize exact server credit decimals without rounding them through a floating point number. */
+/** Round displayed credit decimals to whole credits without changing the ledger value. */
 export function formatBudgetAmount(value: string, locale: string): string {
-  const [integer = "0", fraction = ""] = value.split(".");
-  const formatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 });
-  const whole = formatter.format(BigInt(integer));
-  const significant = fraction.replace(/0+$/, "");
-  if (!significant) return whole;
-  const decimal =
-    new Intl.NumberFormat(locale).formatToParts(1.1).find((part) => part.type === "decimal")
-      ?.value ?? ".";
-  return (
-    whole + decimal + [...significant].map((digit) => formatter.format(Number(digit))).join("")
+  const negative = value.startsWith("-");
+  const [integer = "0", fraction = ""] = (negative ? value.slice(1) : value).split(".");
+  const rounded = BigInt(integer) + ((fraction[0] ?? "0") >= "5" ? 1n : 0n);
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(
+    negative ? -rounded : rounded,
   );
 }

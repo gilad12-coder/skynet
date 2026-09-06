@@ -57,6 +57,7 @@ from ..storage.models import (
     NotificationPreferenceModel,
     OptimizationShareGrantModel,
     OptimizationShareLinkModel,
+    PackageRegistryPreferenceModel,
     ProgressEventModel,
     TaggingSessionModel,
     TaggingSessionShareGrantModel,
@@ -153,6 +154,7 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
             },
         }
 
+    registry_row = session.get(PackageRegistryPreferenceModel, username)
     notification_row = session.get(NotificationPreferenceModel, username)
     notification_preferences = {
         "job_updates_enabled": (
@@ -341,6 +343,7 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         "provider_keys": provider_keys_out,
         "passkeys": passkeys_out,
         "notification_preferences": notification_preferences,
+        "package_registry": {"index_url": registry_row.index_url if registry_row else "https://pypi.org/simple"},
     }
 
 
@@ -363,11 +366,21 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     anonymized = 0
 
     def _run_delete(statement: Any) -> None:
+        """Delete owned rows and accumulate their count.
+
+        Args:
+            statement: Account-scoped SQL deletion.
+        """
         nonlocal deleted
         result = session.execute(statement, execution_options={"synchronize_session": False})
         deleted += result.rowcount or 0
 
     def _run_anonymize(statement: Any) -> None:
+        """Anonymize retained rows and accumulate their count.
+
+        Args:
+            statement: Account-scoped SQL update.
+        """
         nonlocal anonymized
         result = session.execute(statement, execution_options={"synchronize_session": False})
         anonymized += result.rowcount or 0
@@ -500,6 +513,8 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
             NotificationPreferenceModel.username == username
         )
     )
+
+    _run_delete(delete(PackageRegistryPreferenceModel).where(PackageRegistryPreferenceModel.username == username))
 
     tombstone = _anonymized_username(username)
     _run_anonymize(
