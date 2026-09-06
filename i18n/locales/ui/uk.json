@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "Видалити збережену команду встановлення",
   "submit.blackbox.scorer.agent_runner": "Запуск агента (необов’язково)",
   "submit.blackbox.scorer.agent_runner_hint": "Увімкніть лише тоді, коли функція оцінювання очікує журнал запуску агента. Агент виконує кожного кандидата на прикладі перед оцінюванням.",
-  "submit.split.example_count": "Приклади: {count}",
   "submit.validation.progress.title": "Перевіряємо налаштування",
   "submit.validation.progress.success": "Налаштування готові",
   "submit.validation.progress.failed": "Налаштування потребують уваги",

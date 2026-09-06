@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "Gespeicherten Installationsbefehl entfernen",
   "submit.blackbox.scorer.agent_runner": "Agent ausführen (optional)",
   "submit.blackbox.scorer.agent_runner_hint": "Nur aktivieren, wenn die Bewertungsfunktion ein Agentenprotokoll erwartet. Der Agent führt jeden Kandidaten vor der Bewertung für einen Fall aus.",
-  "submit.split.example_count": "Beispiele: {count}",
   "submit.validation.progress.title": "Einrichtung wird geprüft",
   "submit.validation.progress.success": "Deine Einrichtung ist bereit",
   "submit.validation.progress.failed": "Deine Einrichtung benötigt Aufmerksamkeit",

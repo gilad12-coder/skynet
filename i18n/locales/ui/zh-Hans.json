@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "移除已保存的安装命令",
   "submit.blackbox.scorer.agent_runner": "运行代理（可选）",
   "submit.blackbox.scorer.agent_runner_hint": "仅当评分器需要代理运行记录时启用。代理会在评分前针对案例运行每个候选项。",
-  "submit.split.example_count": "示例数：{count}",
   "submit.validation.progress.title": "正在检查配置",
   "submit.validation.progress.success": "配置已就绪",
   "submit.validation.progress.failed": "配置需要调整",

@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "إزالة أمر التثبيت المحفوظ",
   "submit.blackbox.scorer.agent_runner": "تشغيل وكيل (اختياري)",
   "submit.blackbox.scorer.agent_runner_hint": "فعّل هذا الخيار فقط إذا كانت دالة التقييم تتوقع سجل تشغيل وكيل. يشغّل الوكيل كل مرشح على حالة قبل التقييم.",
-  "submit.split.example_count": "الأمثلة: {count}",
   "submit.validation.progress.title": "جارٍ التحقق من الإعداد",
   "submit.validation.progress.success": "إعدادك جاهز",
   "submit.validation.progress.failed": "إعدادك يحتاج إلى مراجعة",

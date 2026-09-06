@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "सहेजा गया इंस्टॉल कमांड हटाएँ",
   "submit.blackbox.scorer.agent_runner": "एजेंट चलाएँ (वैकल्पिक)",
   "submit.blackbox.scorer.agent_runner_hint": "इसे केवल तभी सक्षम करें जब आपका स्कोरर एजेंट के रन रिकॉर्ड की अपेक्षा करता हो। स्कोर देने से पहले एजेंट प्रत्येक उम्मीदवार को एक केस पर चलाता है।",
-  "submit.split.example_count": "उदाहरण: {count}",
   "submit.validation.progress.title": "आपके सेटअप की जाँच हो रही है",
   "submit.validation.progress.success": "आपका सेटअप तैयार है",
   "submit.validation.progress.failed": "आपके सेटअप में सुधार चाहिए",

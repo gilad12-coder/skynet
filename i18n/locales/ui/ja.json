@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "保存済みのインストールコマンドを削除",
   "submit.blackbox.scorer.agent_runner": "エージェントの実行（任意）",
   "submit.blackbox.scorer.agent_runner_hint": "スコアラーがエージェントの実行記録を必要とする場合のみ有効にしてください。採点前に、エージェントが各候補をケースに対して実行します。",
-  "submit.split.example_count": "例数：{count}",
   "submit.validation.progress.title": "設定を確認しています",
   "submit.validation.progress.success": "設定の準備ができました",
   "submit.validation.progress.failed": "設定の修正が必要です",

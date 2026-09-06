@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "저장된 설치 명령 삭제",
   "submit.blackbox.scorer.agent_runner": "에이전트 실행 (선택 사항)",
   "submit.blackbox.scorer.agent_runner_hint": "평가 함수가 에이전트 실행 기록을 필요로 할 때만 활성화하세요. 에이전트가 채점 전에 각 후보를 사례에 대해 실행합니다.",
-  "submit.split.example_count": "예제 수: {count}",
   "submit.validation.progress.title": "설정을 확인하고 있습니다",
   "submit.validation.progress.success": "설정이 준비되었습니다",
   "submit.validation.progress.failed": "설정을 수정해야 합니다",

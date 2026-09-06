@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "Remove saved install command",
   "submit.blackbox.scorer.agent_runner": "Agent runner (optional)",
   "submit.blackbox.scorer.agent_runner_hint": "Enable only if your scorer expects an agent run record. The agent runs each candidate on a case before scoring.",
-  "submit.split.example_count": "Examples: {count}",
   "submit.validation.progress.title": "Checking your setup",
   "submit.validation.progress.success": "Your setup is ready",
   "submit.validation.progress.failed": "Your setup needs attention",

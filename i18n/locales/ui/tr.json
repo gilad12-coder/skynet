@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "Kayıtlı kurulum komutunu kaldır",
   "submit.blackbox.scorer.agent_runner": "Ajan çalıştırma (isteğe bağlı)",
   "submit.blackbox.scorer.agent_runner_hint": "Yalnızca puanlayıcınız bir ajan çalıştırma kaydı bekliyorsa etkinleştirin. Ajan, puanlamadan önce her adayı bir vaka üzerinde çalıştırır.",
-  "submit.split.example_count": "Örnekler: {count}",
   "submit.validation.progress.title": "Kurulumunuz denetleniyor",
   "submit.validation.progress.success": "Kurulumunuz hazır",
   "submit.validation.progress.failed": "Kurulumunuzun düzeltilmesi gerekiyor",

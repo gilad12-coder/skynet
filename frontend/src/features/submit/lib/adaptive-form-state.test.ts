@@ -184,46 +184,56 @@ function splitState(mode = "manual") {
   };
 }
 
+const splitCard = source("../components/SplitRecommendationCard.tsx");
+
+// The card's own toggle hands the chosen mode to the wizard: Manual selection
+// keeps whatever fractions are set, Use recommendation restores the plan.
+function chooseMode(bindings: ReturnType<typeof splitState>["bindings"], mode: "auto" | "manual") {
+  const button = find(
+    splitCard,
+    (node) =>
+      ts.isJsxAttribute(node) &&
+      node.name.getText() === "onClick" &&
+      node.getText().includes("onChange(mode)"),
+  ) as ts.JsxAttribute;
+  assert.ok(button.initializer && ts.isJsxExpression(button.initializer));
+  evaluate(button.initializer.expression!, { onChange: bindings.setSplitMode, mode })();
+}
+
 for (const mode of ["manual", "auto"]) {
-  test(`opening split settings enables manual editing from ${mode} without changing values`, () => {
+  test(`Manual selection from ${mode} keeps the current values`, () => {
     const { state, bindings } = splitState(mode);
-    const toggle = evaluate(variable(splitSection, "setEditing"), {
-      ...bindings,
-      setEditingState: () => {},
-    });
     const before = structuredClone(state);
-    toggle(true);
+    chooseMode(bindings, "manual");
     assert.deepEqual(state, { ...before, mode: "manual" });
   });
 }
 
-test("closing split editing preserves manual fractions", () => {
-  const { state, bindings } = splitState();
-  const before = structuredClone(state);
-  evaluate(variable(splitSection, "setEditing"), { ...bindings, setEditingState: () => {} })(false);
-  assert.deepEqual(state, before);
-});
-
 test("Use recommendation restores the planned fractions, shuffle and seed", () => {
   const { state, bindings } = splitState();
-  const button = find(
-    splitSection,
-    (node) =>
-      ts.isJsxAttribute(node) &&
-      node.name.getText() === "onClick" &&
-      node.getText().includes('setSplitMode("auto")'),
-  ) as ts.JsxAttribute;
-  assert.ok(button.initializer && ts.isJsxExpression(button.initializer));
-  evaluate(button.initializer.expression!, { ...bindings, setEditingState: () => {} })();
+  chooseMode(bindings, "auto");
   assert.equal(state.mode, "auto");
   assert.deepEqual(state.split, bindings.splitPlan.fractions);
   assert.equal(state.shuffle, true);
   assert.equal(state.seed, 42);
 });
 
+test("the manual fields only render under Manual selection", () => {
+  const gate = find(
+    splitSection,
+    (node) =>
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken &&
+      node.left.getText() === 'splitMode === "manual"',
+  ) as ts.BinaryExpression;
+  for (const field of ["train", "val", "test"]) {
+    assert.ok(gate.right.getText().includes(`id="split-${field}"`));
+  }
+});
+
 for (const field of ["train", "val", "test"] as const) {
-  test(`editing ${field} switches to manual before applying the value`, () => {
-    const { state, bindings } = splitState("auto");
+  test(`editing ${field} applies the value and stays manual`, () => {
+    const { state, bindings } = splitState();
     const input = find(
       splitSection,
       (node) =>

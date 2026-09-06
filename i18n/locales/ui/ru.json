@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "Удалить сохранённую команду установки",
   "submit.blackbox.scorer.agent_runner": "Запуск агента (необязательно)",
   "submit.blackbox.scorer.agent_runner_hint": "Включайте, только если функция оценки ожидает журнал запуска агента. Агент выполняет каждого кандидата на примере перед оценкой.",
-  "submit.split.example_count": "Примеры: {count}",
   "submit.validation.progress.title": "Проверяем настройки",
   "submit.validation.progress.success": "Настройки готовы",
   "submit.validation.progress.failed": "Настройки требуют внимания",

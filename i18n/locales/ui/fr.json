@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "Supprimer la commande d’installation enregistrée",
   "submit.blackbox.scorer.agent_runner": "Exécution par un agent (facultatif)",
   "submit.blackbox.scorer.agent_runner_hint": "À activer uniquement si votre évaluateur attend un journal d’exécution de l’agent. L’agent exécute chaque candidat sur un cas avant l’évaluation.",
-  "submit.split.example_count": "Exemples : {count}",
   "submit.validation.progress.title": "Vérification de votre configuration",
   "submit.validation.progress.success": "Votre configuration est prête",
   "submit.validation.progress.failed": "Votre configuration nécessite une correction",

@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "移除已儲存嘅安裝指令",
   "submit.blackbox.scorer.agent_runner": "執行代理（可選）",
   "submit.blackbox.scorer.agent_runner_hint": "只喺評分器需要代理執行記錄時啟用。代理會喺評分前，針對案例執行每個候選項。",
-  "submit.split.example_count": "例子數量：{count}",
   "submit.validation.progress.title": "正在檢查設定",
   "submit.validation.progress.success": "設定已準備好",
   "submit.validation.progress.failed": "設定需要調整",

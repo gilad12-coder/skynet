@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "הסרת פקודת ההתקנה השמורה",
   "submit.blackbox.scorer.agent_runner": "הרצת סוכן (אופציונלי)",
   "submit.blackbox.scorer.agent_runner_hint": "יש להפעיל רק אם פונקציית הניקוד מצפה לרשומת הרצה של סוכן. הסוכן מריץ כל מועמד על מקרה לפני הניקוד.",
-  "submit.split.example_count": "דוגמאות: {count}",
   "submit.validation.progress.title": "בודקים את ההגדרות שלך",
   "submit.validation.progress.success": "ההגדרות שלך מוכנות",
   "submit.validation.progress.failed": "נדרש תיקון בהגדרות",

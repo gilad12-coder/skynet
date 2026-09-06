@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "حذف فرمان نصب ذخیره‌شده",
   "submit.blackbox.scorer.agent_runner": "اجرای عامل (اختیاری)",
   "submit.blackbox.scorer.agent_runner_hint": "فقط زمانی فعال کنید که تابع امتیازدهی به گزارش اجرای عامل نیاز دارد. عامل پیش از امتیازدهی، هر نامزد را روی یک مورد اجرا می‌کند.",
-  "submit.split.example_count": "نمونه‌ها: {count}",
   "submit.validation.progress.title": "در حال بررسی تنظیمات",
   "submit.validation.progress.success": "تنظیمات شما آماده است",
   "submit.validation.progress.failed": "تنظیمات نیاز به بررسی دارد",

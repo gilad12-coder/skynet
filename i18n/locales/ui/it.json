@@ -3714,7 +3714,6 @@
   "submit.blackbox.packages.remove_legacy": "Rimuovi il comando di installazione salvato",
   "submit.blackbox.scorer.agent_runner": "Esecuzione tramite agente (facoltativa)",
   "submit.blackbox.scorer.agent_runner_hint": "Attiva solo se il valutatore richiede un registro di esecuzione dell’agente. L’agente esegue ogni candidato su un caso prima della valutazione.",
-  "submit.split.example_count": "Esempi: {count}",
   "submit.validation.progress.title": "Verifica della configurazione",
   "submit.validation.progress.success": "La configurazione è pronta",
   "submit.validation.progress.failed": "La configurazione richiede attenzione",
