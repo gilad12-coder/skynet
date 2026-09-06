@@ -413,7 +413,7 @@ export function ModelConfigModal({
                     <NumberInput
                       id={`${parametersId}-max-tokens`}
                       min={1}
-                      step={1}
+                      step={256}
                       value={draft.max_tokens ?? ""}
                       onChange={(value) =>
                         setDraft((current) => ({ ...current, max_tokens: value }))

@@ -68,16 +68,16 @@ export function NumberInput({
     setText(format(next));
   };
 
+  // A step that would leave the range lands on its edge, so a coarse step
+  // (256 tokens above a floor of 1) still reaches the floor and the ceiling.
   const decrement = () => {
-    const next = round(numValue - step);
-    if (min != null && next < min) return;
-    setValue(next);
+    if (min != null && numValue <= min) return;
+    setValue(clamp(round(numValue - step)));
   };
 
   const increment = () => {
-    const next = round(numValue + step);
-    if (max != null && next > max) return;
-    setValue(next);
+    if (max != null && numValue >= max) return;
+    setValue(clamp(round(numValue + step)));
   };
 
   return (
