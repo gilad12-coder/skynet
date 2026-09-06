@@ -5,7 +5,6 @@ import { useSession } from "next-auth/react";
 import { toast } from "react-toastify";
 import { getPackageRegistry, updatePackageRegistry } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
-import { Button } from "@/shared/ui/primitives/button";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
@@ -50,20 +49,24 @@ function RegistryForm({ owner }: { owner: string }) {
     };
   }, [owner, reload]);
 
-  const save = useCallback(async (indexUrl: string) => {
-    setSaving(true);
-    setError(null);
-    try {
-      const result = await updatePackageRegistry(indexUrl);
-      setSaved(result.index_url);
-      setValue(result.index_url);
-      toast.success(msg("settings.saved"));
-    } catch {
-      setError(msg("settings.registry.save_error"));
-    } finally {
-      setSaving(false);
-    }
-  }, []);
+  const save = useCallback(
+    async (indexUrl: string) => {
+      if (saving || saved === null || indexUrl.trim() === saved) return;
+      setSaving(true);
+      setError(null);
+      try {
+        const result = await updatePackageRegistry(indexUrl);
+        setSaved(result.index_url);
+        setValue(result.index_url);
+        toast.success(msg("settings.saved"));
+      } catch {
+        setError(msg("settings.registry.save_error"));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [saved, saving],
+  );
 
   return (
     <form
@@ -86,6 +89,8 @@ function RegistryForm({ owner }: { owner: string }) {
         value={value}
         placeholder={PYPI}
         onChange={(event) => setValue(event.target.value)}
+        onBlur={(event) => void save(event.target.value)}
+        aria-busy={saving}
         disabled={!owner || loading || saving || saved === null}
         aria-describedby="settings-package-registry-hint"
         autoComplete="off"
@@ -97,32 +102,13 @@ function RegistryForm({ owner }: { owner: string }) {
           {error}
         </p>
       )}
-      <div className="flex flex-wrap justify-end gap-2">
-        {saved === null && error ? (
-          <RetryIconButton
-            label={msg("settings.notifications.retry")}
-            onClick={() => setReload((n) => n + 1)}
-            loading={loading}
-          />
-        ) : (
-          <>
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={loading || saving || saved === null || (saved === PYPI && value === PYPI)}
-              onClick={() => void save(PYPI)}
-            >
-              {msg("settings.registry.reset")}
-            </Button>
-            <Button
-              type="submit"
-              disabled={loading || saving || saved === null || value.trim() === saved}
-            >
-              {saving ? msg("settings.registry.saving") : msg("settings.registry.save")}
-            </Button>
-          </>
-        )}
-      </div>
+      {saved === null && error && (
+        <RetryIconButton
+          label={msg("settings.notifications.retry")}
+          onClick={() => setReload((n) => n + 1)}
+          loading={loading}
+        />
+      )}
     </form>
   );
 }
