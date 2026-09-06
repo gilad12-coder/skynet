@@ -1,4 +1,5 @@
 import type {
+  ScorerDependencyLock,
   BlackboxEngineId,
   BlackboxHarness,
   BlackboxProposerRuntime,
@@ -99,6 +100,8 @@ export interface AnythingDraftData {
   metricCode: string;
   scorerUrl: string;
   scorerInstall: string;
+  scorerPackages?: string;
+  scorerDependencyLock?: ScorerDependencyLock | null;
   scorerModel: ModelConfig;
   scorerModelMode: ScoringModelMode;
   strategyMode: "auto" | "single" | "plateau";

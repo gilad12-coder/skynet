@@ -3405,6 +3405,9 @@
   "submit.blackbox.cases.upload": "Upload file",
   "submit.blackbox.cases.loaded": "{rows} rows · {cols} columns",
   "submit.blackbox.cases.none_hint": "CSV, JSON or Excel. Columns become fields on `case`.",
+  "submit.blackbox.packages.label": "Package overrides (optional)",
+  "submit.blackbox.packages.hint": "Leave blank to detect imports automatically. Otherwise list all required packages, one per line.",
+  "submit.blackbox.packages.included": "Already available in the pinned runtime.",
   "submit.blackbox.scorer.title": "Scorer",
   "submit.blackbox.scorer.desc": "A function that returns a number — higher is better. This is what the optimizer maximizes.",
   "submit.blackbox.scorer.kind.python": "Python code",
@@ -3645,5 +3648,7 @@
   "optimizations.serve.request_budget": "Request budget",
   "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
   "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
-  "optimizations.serve.request_spent": "Used {credits} credits"
+  "optimizations.serve.request_spent": "Used {credits} credits",
+  "submit.blackbox.packages.resolve_again": "Resolve again on next check",
+  "submit.blackbox.packages.remove_legacy": "Remove saved install command"
 }

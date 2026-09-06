@@ -159,6 +159,9 @@
   "submit.blackbox.scorer.secret_label": "密鑰（選填）",
   "submit.blackbox.scorer.test": "測試評分器",
   "submit.blackbox.scorer.testing": "測試緊…",
+  "submit.blackbox.packages.label": "自訂套件（可選）",
+  "submit.blackbox.packages.hint": "留空會自動偵測匯入。或者列出所有需要嘅套件，每行一個。",
+  "submit.blackbox.packages.included": "固定版本嘅執行環境已經提供。",
   "submit.blackbox.scorer.title": "評分器",
   "submit.blackbox.scorer.url_label": "URL",
   "submit.blackbox.scorer.install_label": "安裝指令（可以唔填）",
@@ -3645,5 +3648,7 @@
   "optimizations.serve.request_budget": "單次請求預算",
   "optimizations.serve.request_budget_hint": "今次請求嘅最高金額。未用嘅預留點數會自動退回。",
   "optimizations.serve.request_budget_invalid": "請輸入至少 1 點嘅整數預算。",
-  "optimizations.serve.request_spent": "已用 {credits} 點"
+  "optimizations.serve.request_spent": "已用 {credits} 點",
+  "submit.blackbox.packages.resolve_again": "下次檢查時重新解析",
+  "submit.blackbox.packages.remove_legacy": "移除已儲存嘅安裝指令"
 }

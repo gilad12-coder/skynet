@@ -1,5 +1,7 @@
 "use client";
 
+import { resolveScorerDependencies } from "@/shared/lib/api";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -12,6 +14,7 @@ import type {
   BlackboxHarness,
   BlackboxRunRequest,
   BlackboxScorer,
+  ScorerDependencyLock,
   BlackboxTarget,
   ModelConfig,
   ScorerDryRunResponse,
@@ -324,6 +327,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
   const [scorerInstall, setScorerInstall] = useState("");
+  const [scorerPackages, setScorerPackages] = useState("");
+  const [scorerDependencyLock, setScorerDependencyLock] = useState<ScorerDependencyLock | null>(
+    null,
+  );
   // A metric is any function; only one that calls `llm()` needs a model, and
   // the code says whether it does.
   const [scorerModel, setScorerModel] = useState<ModelConfig>(emptyModelConfig());
@@ -503,6 +510,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setMetricCode(d.metricCode);
     setScorerUrl(d.scorerUrl);
     setScorerInstall(d.scorerInstall);
+    setScorerPackages(d.scorerPackages ?? "");
+    setScorerDependencyLock(d.scorerDependencyLock ?? null);
     setScorerModel(d.scorerModel);
     setScorerModelMode(d.scorerModelMode);
     setStrategyMode(d.strategyMode);
@@ -632,6 +641,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           if (scorer) {
             setScorerKind(scorer.kind);
             if (scorer.metric_code) setMetricCode(scorer.metric_code);
+            if (scorer.dependency_lock) {
+              setScorerDependencyLock(scorer.dependency_lock);
+              setScorerPackages(scorer.dependency_lock.requirements.join("\n"));
+            }
             if (scorer.url) setScorerUrl(scorer.url);
             if (scorer.kind === "python" && scorer.install_command)
               setScorerInstall(scorer.install_command);
@@ -731,6 +744,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             metric_code: code,
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
             install_command: scorerInstall.trim() || null,
+            dependency_lock: scorerDependencyLock,
             model:
               scorerCallsModel(code) && resolvedScorerModel?.name.trim()
                 ? prepareModelConfig(resolvedScorerModel)
@@ -742,7 +756,15 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             secret: scorerSecret.trim() || undefined,
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
           },
-    [scorerKind, metricCode, scorerUrl, scorerSecret, scorerInstall, resolvedScorerModel],
+    [
+      scorerKind,
+      metricCode,
+      scorerUrl,
+      scorerSecret,
+      scorerInstall,
+      scorerDependencyLock,
+      resolvedScorerModel,
+    ],
   );
 
   const buildTarget = (): BlackboxTarget =>
@@ -792,14 +814,14 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     const selectedRuntime = engineCatalog?.proposer_runtimes.find(
       (runtime) => runtime.id === proposerRuntime,
     );
-    // Setup and the submitted run use separate metered Vercel sessions.
+    // Two readiness checks, the run, and Python package resolution have separate coverage.
     return projectCostBracket({
       autoLevel: "",
       maxFullEvals: "",
       maxMetricCalls: String(maxScorerRuns),
       datasetRows: Math.max(1, parsedCases?.rowCount ?? 0),
       modelRoles,
-      runtime: runtimeCostProjection(selectedRuntime?.cost, 2),
+      runtime: runtimeCostProjection(selectedRuntime?.cost, scorerKind === "python" ? 4 : 3),
     });
   }, [
     effectiveReflectionModel,
@@ -810,6 +832,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     catalog,
     engineCatalog,
     maxScorerRuns,
+    scorerKind,
     parsedCases?.rowCount,
   ]);
   const tokenSource = aggregateTokenSource([
@@ -890,10 +913,59 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       const attempt = ++dryRunAttemptRef.current;
       const navigation = navigationRevisionRef.current;
       const requestPayload = buildSubmissionPayload(overrideCode);
-      const requestIdentity = preflightIdentity("anything", requestPayload);
-      const completed = preflight.reusable(scope, requestPayload);
-      if (!completed) setDryRun({ status: "running" });
+      const initialIdentity = preflight.identity;
+      let completed: WizardPreflightResponse | null | undefined;
+      setDryRun({ status: "running" });
       try {
+        if (requestPayload.scorer.kind === "python") {
+          const code = requestPayload.scorer.metric_code ?? "";
+          const requirements = scorerPackages
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean);
+          const digest = Array.from(
+            new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code))),
+          )
+            .map((byte) => byte.toString(16).padStart(2, "0"))
+            .join("");
+          const lock = requestPayload.scorer.dependency_lock;
+          if (
+            !lock ||
+            lock.code_sha256 !== digest ||
+            JSON.stringify(lock.requirements) !== JSON.stringify(requirements)
+          ) {
+            const currentBudget = await budgetSession.ensure();
+            const resolved = await resolveScorerDependencies({
+              code,
+              requirements,
+              execution_budget_id: currentBudget.id,
+              execution_budget_revision: currentBudget.revision,
+            });
+            await budgetSession.adopt(resolved.budget);
+            if (
+              !mountedRef.current ||
+              attempt !== dryRunAttemptRef.current ||
+              navigation !== navigationRevisionRef.current ||
+              !preflight.isCurrent(initialIdentity)
+            ) {
+              throw new DOMException("Dependency resolution superseded", "AbortError");
+            }
+            if (!resolved.ok || !resolved.dependency_lock) {
+              throw new Error(
+                resolved.error ??
+                  msg(
+                    resolved.preview_status === "pending"
+                      ? "submit.preflight.usage_pending"
+                      : "submit.preflight.failed",
+                  ),
+              );
+            }
+            requestPayload.scorer.dependency_lock = resolved.dependency_lock;
+            setScorerDependencyLock(resolved.dependency_lock);
+          }
+        }
+        const requestIdentity = preflightIdentity("anything", requestPayload);
+        completed = preflight.reusable(scope, requestPayload);
         const response = completed ?? (await preflight.run(scope, requestPayload));
         const error =
           response.checks.find((check) => check.status === "failed")?.message ??
@@ -934,7 +1006,14 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           setDryRun((current) => (current.status === "running" ? { status: "idle" } : current));
       }
     },
-    [preflight, buildSubmissionPayload, scorerUsesModel, resolvedScorerModel],
+    [
+      preflight,
+      buildSubmissionPayload,
+      scorerUsesModel,
+      resolvedScorerModel,
+      scorerPackages,
+      budgetSession,
+    ],
   );
   const runDryRun = useCallback(
     async (overrideCode?: string): Promise<ValidationResult | null> => {
@@ -1216,7 +1295,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     const completed = preflight.reusable(scope);
     if (completed) return completed;
     const navigation = navigationRevisionRef.current;
-    const identity = preflight.identity;
+    let identity = preflight.identity;
     const t = beginValidationToast(
       toast,
       `wizard-validate-${++validationAttemptRef.current}`,
@@ -1224,11 +1303,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     );
     validationToastRef.current = t;
     try {
-      const { response } = await performDryRun(undefined, scope);
+      const { response, evidence } = await performDryRun(undefined, scope);
+      identity = evidence.identity;
       if (
         !mountedRef.current ||
         navigation !== navigationRevisionRef.current ||
-        !preflight.isCurrent(identity)
+        !preflight.isCurrent(evidence.identity)
       ) {
         t.obsolete(msg("submit.validation.toast.obsolete"));
         return null;
@@ -1430,6 +1510,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       metricCode,
       scorerUrl,
       scorerInstall,
+      scorerPackages,
+      scorerDependencyLock,
       scorerModel: safeScorerModel,
       scorerModelMode,
       strategyMode,
@@ -1548,6 +1630,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerSecret: updateScorerSecret,
     scorerInstall,
     setScorerInstall,
+    scorerPackages,
+    setScorerPackages,
+    scorerDependencyLock,
+    setScorerDependencyLock,
     scorerModel,
     setScorerModel,
     scorerUsesModel,

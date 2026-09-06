@@ -159,6 +159,9 @@
   "submit.blackbox.scorer.secret_label": "Secret (optional)",
   "submit.blackbox.scorer.test": "Scorer testen",
   "submit.blackbox.scorer.testing": "Wird getestet…",
+  "submit.blackbox.packages.label": "Paketvorgaben (optional)",
+  "submit.blackbox.packages.hint": "Für automatische Importerkennung leer lassen. Andernfalls alle benötigten Pakete angeben, eines pro Zeile.",
+  "submit.blackbox.packages.included": "Bereits in der festgelegten Laufzeit verfügbar.",
   "submit.blackbox.scorer.title": "Scorer",
   "submit.blackbox.scorer.url_label": "URL",
   "submit.blackbox.scorer.install_label": "Installationsbefehl (optional)",
@@ -3645,5 +3648,7 @@
   "optimizations.serve.request_budget": "Request budget",
   "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
   "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
-  "optimizations.serve.request_spent": "Used {credits} credits"
+  "optimizations.serve.request_spent": "Used {credits} credits",
+  "submit.blackbox.packages.resolve_again": "Bei der nächsten Prüfung neu auflösen",
+  "submit.blackbox.packages.remove_legacy": "Gespeicherten Installationsbefehl entfernen"
 }

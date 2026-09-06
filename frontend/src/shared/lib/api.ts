@@ -5,6 +5,7 @@ import type {
 } from "@/shared/types/wizard-preflight";
 import type {
   BlackboxAgentRunResponse,
+  ScorerDependencyLock,
   BlackboxEngineCatalogResponse,
   BlackboxRunRequest,
   ColumnMapping,
@@ -729,6 +730,21 @@ export function deletePasskey(credentialId: string) {
 export interface AccountDeletionResult {
   deleted_rows: number;
   anonymized_rows: number;
+}
+
+export function resolveScorerDependencies(input: {
+  code: string;
+  requirements: string[];
+  execution_budget_id: string;
+  execution_budget_revision: number;
+}) {
+  return request<{
+    ok: boolean;
+    dependency_lock?: ScorerDependencyLock;
+    error?: string;
+    budget: ExecutionBudget;
+    preview_status: "succeeded" | "failed" | "pending";
+  }>("/wizard/scorer-dependencies", { method: "POST", body: JSON.stringify(input) });
 }
 
 export interface PackageRegistryPreference {

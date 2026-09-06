@@ -159,6 +159,9 @@
   "submit.blackbox.scorer.secret_label": "Segredo (opcional)",
   "submit.blackbox.scorer.test": "Testar pontuador",
   "submit.blackbox.scorer.testing": "A testar…",
+  "submit.blackbox.packages.label": "Pacotes personalizados (opcional)",
+  "submit.blackbox.packages.hint": "Deixe em branco para detectar as importações automaticamente. Ou liste todos os pacotes necessários, um por linha.",
+  "submit.blackbox.packages.included": "Já disponíveis no ambiente de execução fixado.",
   "submit.blackbox.scorer.title": "Pontuador",
   "submit.blackbox.scorer.url_label": "URL",
   "submit.blackbox.scorer.install_label": "Comando de instalação (opcional)",
@@ -3645,5 +3648,7 @@
   "optimizations.serve.request_budget": "Request budget",
   "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
   "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
-  "optimizations.serve.request_spent": "Used {credits} credits"
+  "optimizations.serve.request_spent": "Used {credits} credits",
+  "submit.blackbox.packages.resolve_again": "Resolver novamente na próxima verificação",
+  "submit.blackbox.packages.remove_legacy": "Remover comando de instalação salvo"
 }

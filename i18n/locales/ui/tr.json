@@ -159,6 +159,9 @@
   "submit.blackbox.scorer.secret_label": "Gizli anahtar (isteğe bağlı)",
   "submit.blackbox.scorer.test": "Puanlayıcıyı test et",
   "submit.blackbox.scorer.testing": "Test ediliyor…",
+  "submit.blackbox.packages.label": "Paketleri elle belirle (isteğe bağlı)",
+  "submit.blackbox.packages.hint": "İçe aktarımları otomatik algılamak için boş bırakın. Aksi halde gereken tüm paketleri her satıra bir tane yazın.",
+  "submit.blackbox.packages.included": "Sabitlenmiş çalışma ortamında zaten mevcut.",
   "submit.blackbox.scorer.title": "Puanlayıcı",
   "submit.blackbox.scorer.url_label": "URL",
   "submit.blackbox.scorer.install_label": "Kurulum komutu (isteğe bağlı)",
@@ -3645,5 +3648,7 @@
   "optimizations.serve.request_budget": "Request budget",
   "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
   "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
-  "optimizations.serve.request_spent": "Used {credits} credits"
+  "optimizations.serve.request_spent": "Used {credits} credits",
+  "submit.blackbox.packages.resolve_again": "Sonraki kontrolde yeniden çözümle",
+  "submit.blackbox.packages.remove_legacy": "Kayıtlı kurulum komutunu kaldır"
 }

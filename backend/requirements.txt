@@ -244,6 +244,8 @@ pathable==0.5.0
     # via jsonschema-path
 pgvector==0.4.2
     # via skynet
+pip==26.2.1
+    # via skynet
 platformdirs==4.9.6
     # via fastmcp
 prometheus-client==0.25.0

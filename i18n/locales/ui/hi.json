@@ -159,6 +159,9 @@
   "submit.blackbox.scorer.secret_label": "सीक्रेट (वैकल्पिक)",
   "submit.blackbox.scorer.test": "स्कोरर टेस्ट करें",
   "submit.blackbox.scorer.testing": "टेस्ट किया जा रहा है…",
+  "submit.blackbox.packages.label": "पैकेज ओवरराइड (वैकल्पिक)",
+  "submit.blackbox.packages.hint": "इंपोर्ट अपने आप पहचानने के लिए खाली छोड़ें। अन्यथा हर पंक्ति में एक आवश्यक पैकेज लिखें।",
+  "submit.blackbox.packages.included": "पिन किए गए रनटाइम में पहले से उपलब्ध हैं।",
   "submit.blackbox.scorer.title": "स्कोरर",
   "submit.blackbox.scorer.url_label": "URL",
   "submit.blackbox.scorer.install_label": "इंस्टॉल कमांड (वैकल्पिक)",
@@ -3645,5 +3648,7 @@
   "optimizations.serve.request_budget": "Request budget",
   "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
   "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
-  "optimizations.serve.request_spent": "Used {credits} credits"
+  "optimizations.serve.request_spent": "Used {credits} credits",
+  "submit.blackbox.packages.resolve_again": "अगली जाँच पर फिर से हल करें",
+  "submit.blackbox.packages.remove_legacy": "सहेजा गया इंस्टॉल कमांड हटाएँ"
 }

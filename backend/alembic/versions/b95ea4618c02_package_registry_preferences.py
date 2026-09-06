@@ -1,7 +1,8 @@
 """Persist caller-owned Python package registry preferences."""
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "b95ea4618c02"
 down_revision = "a83f9d1c6e42"

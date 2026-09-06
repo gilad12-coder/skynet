@@ -2634,6 +2634,9 @@
   "submit.blackbox.scorer.secret_label": "סוד (לא חובה)",
   "submit.blackbox.scorer.test": "בדיקת המדד",
   "submit.blackbox.scorer.testing": "בודק…",
+  "submit.blackbox.packages.label": "עקיפת רשימת החבילות (אופציונלי)",
+  "submit.blackbox.packages.hint": "יש להשאיר ריק לזיהוי אוטומטי של ייבואים. לחלופין, יש לרשום את כל החבילות הנדרשות, אחת בכל שורה.",
+  "submit.blackbox.packages.included": "כבר זמינות בסביבת הריצה בעלת הגרסה הקבועה.",
   "submit.blackbox.scorer.title": "מדד",
   "submit.blackbox.scorer.url_label": "כתובת",
   "submit.blackbox.scorer.install_label": "פקודת התקנה (לא חובה)",
@@ -3645,5 +3648,7 @@
   "optimizations.serve.request_budget": "תקציב לבקשה",
   "optimizations.serve.request_budget_hint": "המקסימום לבקשה הזאת. קרדיטים ששוריינו ולא נוצלו משתחררים.",
   "optimizations.serve.request_budget_invalid": "יש להזין תקציב של קרדיט אחד לפחות במספר שלם.",
-  "optimizations.serve.request_spent": "נוצלו {credits} קרדיטים"
+  "optimizations.serve.request_spent": "נוצלו {credits} קרדיטים",
+  "submit.blackbox.packages.resolve_again": "פתרון מחדש בבדיקה הבאה",
+  "submit.blackbox.packages.remove_legacy": "הסרת פקודת ההתקנה השמורה"
 }

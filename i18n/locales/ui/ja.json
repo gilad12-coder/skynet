@@ -159,6 +159,9 @@
   "submit.blackbox.scorer.secret_label": "シークレット（任意）",
   "submit.blackbox.scorer.test": "スコアラーをテスト",
   "submit.blackbox.scorer.testing": "テスト中…",
+  "submit.blackbox.packages.label": "パッケージの上書き（任意）",
+  "submit.blackbox.packages.hint": "空欄の場合、インポートを自動検出します。指定する場合は必要なパッケージをすべて1行ずつ入力してください。",
+  "submit.blackbox.packages.included": "固定されたランタイムですでに利用可能です。",
   "submit.blackbox.scorer.title": "スコアラー",
   "submit.blackbox.scorer.url_label": "URL",
   "submit.blackbox.scorer.install_label": "インストールコマンド（任意）",
@@ -3645,5 +3648,7 @@
   "optimizations.serve.request_budget": "Request budget",
   "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
   "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
-  "optimizations.serve.request_spent": "Used {credits} credits"
+  "optimizations.serve.request_spent": "Used {credits} credits",
+  "submit.blackbox.packages.resolve_again": "次のチェックで再解決",
+  "submit.blackbox.packages.remove_legacy": "保存済みのインストールコマンドを削除"
 }

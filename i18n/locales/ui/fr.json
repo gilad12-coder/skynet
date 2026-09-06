@@ -159,6 +159,9 @@
   "submit.blackbox.scorer.secret_label": "Secret (facultatif)",
   "submit.blackbox.scorer.test": "Tester l'évaluateur",
   "submit.blackbox.scorer.testing": "Test en cours…",
+  "submit.blackbox.packages.label": "Paquets personnalisés (facultatif)",
+  "submit.blackbox.packages.hint": "Laissez vide pour détecter automatiquement les imports. Sinon, indiquez tous les paquets requis, un par ligne.",
+  "submit.blackbox.packages.included": "Déjà disponibles dans l’environnement d’exécution figé.",
   "submit.blackbox.scorer.title": "Évaluateur",
   "submit.blackbox.scorer.url_label": "URL",
   "submit.blackbox.scorer.install_label": "Commande d'installation (facultatif)",
@@ -3645,5 +3648,7 @@
   "optimizations.serve.request_budget": "Request budget",
   "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
   "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
-  "optimizations.serve.request_spent": "Used {credits} credits"
+  "optimizations.serve.request_spent": "Used {credits} credits",
+  "submit.blackbox.packages.resolve_again": "Résoudre à nouveau au prochain contrôle",
+  "submit.blackbox.packages.remove_legacy": "Supprimer la commande d’installation enregistrée"
 }

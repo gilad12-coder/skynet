@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { CheckCircle, CircleNotch, Play, XCircle } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -16,7 +15,7 @@ import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
-import { Disclosure } from "../Disclosure";
+import { ScorerPackages } from "./ScorerPackages";
 import { emptyModelConfig } from "../../constants";
 import { EvidenceChip } from "./EvidenceChip";
 import { Field, MOBILE_INPUT_CLASS, Segmented } from "./shared";
@@ -46,8 +45,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
     setScorerUrl,
     scorerSecret,
     setScorerSecret,
-    scorerInstall,
-    setScorerInstall,
     scorerModel,
     setScorerModel,
     scorerModelMode,
@@ -63,14 +60,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
     dryRun,
     runDryRun,
   } = w;
-
-  // Most scorers need nothing installed, so the command folds away until
-  // one is set (a clone, a returning draft, the agent).
-  const hasInstall = scorerInstall.trim() !== "";
-  const [installOpen, setInstallOpen] = useState(hasInstall);
-  useEffect(() => {
-    if (hasInstall) setInstallOpen(true);
-  }, [hasInstall]);
 
   const result = dryRun.status === "done" ? dryRun.result : null;
   const sideEntries = result?.ok ? Object.entries(result.side_info) : [];
@@ -201,29 +190,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
             />
           </div>
-          <Disclosure
-            id="bb-scorer-install-panel"
-            label={msg("submit.blackbox.scorer.install_toggle")}
-            open={installOpen}
-            onOpenChange={setInstallOpen}
-          >
-            <div className="pt-1">
-              <Field
-                label={msg("submit.blackbox.scorer.install_label")}
-                htmlFor="bb-scorer-install"
-                tip="submit.blackbox.scorer_install"
-              >
-                <Input
-                  id="bb-scorer-install"
-                  value={scorerInstall}
-                  onChange={(e) => setScorerInstall(e.target.value)}
-                  placeholder="pip install --no-index --find-links=/opt/skynet/wheels package-name"
-                  dir="ltr"
-                  className={`${MOBILE_INPUT_CLASS} font-mono`}
-                />
-              </Field>
-            </div>
-          </Disclosure>
+          <ScorerPackages w={w} />
         </div>
       ) : (
         <div className="space-y-4">

@@ -159,6 +159,9 @@
   "submit.blackbox.scorer.secret_label": "کلید محرمانه (اختیاری)",
   "submit.blackbox.scorer.test": "آزمودن امتیازدهنده",
   "submit.blackbox.scorer.testing": "در حال آزمودن…",
+  "submit.blackbox.packages.label": "تعیین دستی بسته‌ها (اختیاری)",
+  "submit.blackbox.packages.hint": "برای تشخیص خودکار واردسازی‌ها خالی بگذارید. در غیر این صورت همهٔ بسته‌های لازم را هر کدام در یک خط بنویسید.",
+  "submit.blackbox.packages.included": "از قبل در محیط اجرای ثابت موجود است.",
   "submit.blackbox.scorer.title": "امتیازدهنده",
   "submit.blackbox.scorer.url_label": "URL",
   "submit.blackbox.scorer.install_label": "دستور نصب (اختیاری)",
@@ -3056,11 +3059,11 @@
   "submit.react.tools_count": "{p1} ابزار مجاز",
   "submit.react.section_title": "تنظیمات عامل ReAct",
   "submit.react.tool_no_description": "بدون توضیحات",
-  "submit.react.tool_missing": "این ابزار توسط این نقطه پایانی ارائه نمی\u200cشود. انتخاب آن حفظ می\u200cشود و اگر در دسترس نباشد، راه\u200cاندازی متوقف خواهد شد.",
+  "submit.react.tool_missing": "این ابزار توسط این نقطه پایانی ارائه نمی‌شود. انتخاب آن حفظ می‌شود و اگر در دسترس نباشد، راه‌اندازی متوقف خواهد شد.",
   "submit.react.tools_empty": "این نقطه پایانی هیچ ابزاری ارائه نکرد.",
   "submit.react.tools_full_roster": "دسترسی قدیمی به فهرست کامل حفظ شده است: هر ابزاری که این نقطه پایانی ارائه کند قابل فراخوانی است.",
-  "submit.react.tools_keep_one": "حداقل یک ابزار باید انتخاب\u200cشده بماند.",
-  "submit.react.tools_permissions_help": "در این اجرا فقط ابزارهای انتخاب\u200cشده قابل فراخوانی هستند.",
+  "submit.react.tools_keep_one": "حداقل یک ابزار باید انتخاب‌شده بماند.",
+  "submit.react.tools_permissions_help": "در این اجرا فقط ابزارهای انتخاب‌شده قابل فراخوانی هستند.",
   "submit.react.tools_select_all": "انتخاب همه ابزارهای موجود",
   "submit.react.tools_selected": "{p1} از {p2} انتخاب شده",
   "submit.react.tool_source_label": "منبع ابزار",
@@ -3645,5 +3648,7 @@
   "optimizations.serve.request_budget": "Request budget",
   "optimizations.serve.request_budget_hint": "Maximum for this call. Unused reserved credits are released.",
   "optimizations.serve.request_budget_invalid": "Enter a whole-number request budget of at least 1 credit.",
-  "optimizations.serve.request_spent": "Used {credits} credits"
+  "optimizations.serve.request_spent": "Used {credits} credits",
+  "submit.blackbox.packages.resolve_again": "حل مجدد در بررسی بعدی",
+  "submit.blackbox.packages.remove_legacy": "حذف فرمان نصب ذخیره‌شده"
 }

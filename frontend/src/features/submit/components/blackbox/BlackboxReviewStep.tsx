@@ -222,7 +222,7 @@ export function BlackboxReviewStep({
           <Row
             label={msg("submit.blackbox.scorer.install_label")}
             tip="submit.blackbox.scorer_install"
-            onEdit={edit("evaluation", "bb-scorer-install")}
+            onEdit={edit("evaluation", "bb-scorer-packages")}
           >
             <Mono>{scorerInstall.trim()}</Mono>
           </Row>
