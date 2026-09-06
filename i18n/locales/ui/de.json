@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "Der Evaluator wird geladen und dein Startkandidat getestet, sofern vorhanden.",
   "submit.validation.progress.models_detail": "Eine kleine Anfrage prüft die Verbindungen zu deinen ausgewählten Modellen.",
   "submit.validation.progress.usage_detail": "Die Ausführung wird abgeschlossen. Die Bestätigung der Anbieter- und Sandbox-Nutzung erfolgt automatisch.",
-  "submit.validation.progress.view": "Validierung ansehen",
   "submit.validation.progress.working": "In Bearbeitung",
   "submit.validation.progress.score": "Beispielbewertung",
   "submit.validation.progress.details": "Prüfergebnisse ansehen",
-  "submit.validation.progress.hide_detail": "Du kannst dieses Fenster ausblenden. Die Validierung läuft weiter.",
   "submit.validation.progress.saved": "Prüfe die Ergebnisse, bevor du fortfährst.",
-  "submit.validation.progress.hide": "Fortschritt ausblenden",
   "submit.validation.progress.done": "Fertig",
   "submit.validation.progress.back": "Zurück zur Einrichtung"
 }

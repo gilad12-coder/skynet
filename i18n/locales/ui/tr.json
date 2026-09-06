@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "Değerlendiriciyi yüklüyor ve varsa başlangıç adayınızı test ediyoruz.",
   "submit.validation.progress.models_detail": "Seçtiğiniz model bağlantılarını doğrulamak için küçük bir istek gönderiyoruz.",
   "submit.validation.progress.usage_detail": "Çalıştırma tamamlanıyor. Sağlayıcı ve ortam kullanımının otomatik doğrulanmasını bekliyoruz.",
-  "submit.validation.progress.view": "Doğrulamayı görüntüle",
   "submit.validation.progress.working": "Devam ediyor",
   "submit.validation.progress.score": "Örnek puanı",
   "submit.validation.progress.details": "Denetim sonuçlarını görüntüle",
-  "submit.validation.progress.hide_detail": "Bu pencereyi gizleyebilirsiniz. Doğrulama devam edecek.",
   "submit.validation.progress.saved": "Devam etmeden önce sonuçları inceleyin.",
-  "submit.validation.progress.hide": "İlerlemeyi gizle",
   "submit.validation.progress.done": "Bitti",
   "submit.validation.progress.back": "Kuruluma dön"
 }

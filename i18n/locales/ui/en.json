@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "Loading the evaluator and testing your starting candidate when one is available.",
   "submit.validation.progress.models_detail": "Sending a small request to verify your selected model connections.",
   "submit.validation.progress.usage_detail": "Execution is finishing. Waiting for provider and sandbox usage to be confirmed automatically.",
-  "submit.validation.progress.view": "View validation",
   "submit.validation.progress.working": "In progress",
   "submit.validation.progress.score": "Sample score",
   "submit.validation.progress.details": "View check results",
-  "submit.validation.progress.hide_detail": "You can hide this window. Validation will keep running.",
   "submit.validation.progress.saved": "Review the results before continuing.",
-  "submit.validation.progress.hide": "Hide progress",
   "submit.validation.progress.done": "Done",
   "submit.validation.progress.back": "Back to setup"
 }

@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "نحمّل المقيّم ونختبر المرشح الأولي عند توفره.",
   "submit.validation.progress.models_detail": "نرسل طلبًا صغيرًا للتحقق من اتصالات النماذج المحددة.",
   "submit.validation.progress.usage_detail": "ينتهي التنفيذ. ننتظر تأكيد استخدام المزوّد وبيئة التشغيل تلقائيًا.",
-  "submit.validation.progress.view": "عرض التحقق",
   "submit.validation.progress.working": "قيد التنفيذ",
   "submit.validation.progress.score": "درجة العينة",
   "submit.validation.progress.details": "عرض نتائج الفحوصات",
-  "submit.validation.progress.hide_detail": "يمكنك إخفاء هذه النافذة. سيستمر التحقق.",
   "submit.validation.progress.saved": "راجع النتائج قبل المتابعة.",
-  "submit.validation.progress.hide": "إخفاء التقدم",
   "submit.validation.progress.done": "تم",
   "submit.validation.progress.back": "العودة إلى الإعداد"
 }

@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "मूल्यांकनकर्ता लोड हो रहा है और उपलब्ध होने पर शुरुआती उम्मीदवार का परीक्षण हो रहा है।",
   "submit.validation.progress.models_detail": "चुने गए मॉडल कनेक्शन जाँचने के लिए एक छोटा अनुरोध भेजा जा रहा है।",
   "submit.validation.progress.usage_detail": "निष्पादन पूरा हो रहा है। प्रदाता और सैंडबॉक्स उपयोग की स्वतः पुष्टि की प्रतीक्षा है।",
-  "submit.validation.progress.view": "सत्यापन देखें",
   "submit.validation.progress.working": "जारी है",
   "submit.validation.progress.score": "नमूना स्कोर",
   "submit.validation.progress.details": "जाँच के परिणाम देखें",
-  "submit.validation.progress.hide_detail": "आप यह विंडो छिपा सकते हैं। सत्यापन जारी रहेगा।",
   "submit.validation.progress.saved": "आगे बढ़ने से पहले परिणाम देखें।",
-  "submit.validation.progress.hide": "प्रगति छिपाएँ",
   "submit.validation.progress.done": "हो गया",
   "submit.validation.progress.back": "सेटअप पर वापस जाएँ"
 }

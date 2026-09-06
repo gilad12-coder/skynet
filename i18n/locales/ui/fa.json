@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "ارزیاب را بارگذاری و در صورت وجود، نامزد اولیه را آزمایش می‌کنیم.",
   "submit.validation.progress.models_detail": "درخواستی کوچک برای بررسی اتصال مدل‌های انتخابی می‌فرستیم.",
   "submit.validation.progress.usage_detail": "اجرا در حال پایان است. منتظر تأیید خودکار مصرف ارائه‌دهنده و محیط اجرا هستیم.",
-  "submit.validation.progress.view": "نمایش اعتبارسنجی",
   "submit.validation.progress.working": "در حال اجرا",
   "submit.validation.progress.score": "امتیاز نمونه",
   "submit.validation.progress.details": "نمایش نتایج بررسی",
-  "submit.validation.progress.hide_detail": "می‌توانید این پنجره را پنهان کنید. اعتبارسنجی ادامه می‌یابد.",
   "submit.validation.progress.saved": "پیش از ادامه نتایج را بررسی کنید.",
-  "submit.validation.progress.hide": "پنهان کردن پیشرفت",
   "submit.validation.progress.done": "تمام",
   "submit.validation.progress.back": "بازگشت به تنظیمات"
 }

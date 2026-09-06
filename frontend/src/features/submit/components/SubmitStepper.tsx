@@ -12,7 +12,14 @@ type StepperContext = Pick<
   "step" | "maxReachableStep" | "validateStep" | "handleTabClick"
 >;
 
-export function SubmitStepper({ w }: { w: StepperContext }) {
+export function SubmitStepper({
+  w,
+  locked = false,
+}: {
+  w: StepperContext;
+  /** A running check holds the wizard where it is. */
+  locked?: boolean;
+}) {
   const { step, maxReachableStep, validateStep, handleTabClick } = w;
   const steps = WIZARD_STAGES;
 
@@ -49,11 +56,12 @@ export function SubmitStepper({ w }: { w: StepperContext }) {
               <button
                 type="button"
                 onClick={() => handleTabClick(i)}
-                disabled={!clickable}
+                disabled={!clickable || locked}
                 aria-label={s.label()}
                 aria-current={active ? "step" : undefined}
                 className={cn(
-                  "relative z-10 flex items-center justify-center rounded-full transition-all duration-300 cursor-pointer",
+                  "relative z-10 flex items-center justify-center rounded-full transition-all duration-300",
+                  locked ? "cursor-default" : "cursor-pointer",
                   "size-[44px] text-sm font-semibold",
                   active
                     ? "bg-primary text-primary-foreground shadow-[0_0_16px_rgba(124,99,80,0.4)] scale-110"

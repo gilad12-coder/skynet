@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "正在載入評估器，並在有初始候選項時進行測試。",
   "submit.validation.progress.models_detail": "正在發送小型請求以驗證所選模型的連線。",
   "submit.validation.progress.usage_detail": "執行即將結束，正在等待自動確認供應商及沙箱用量。",
-  "submit.validation.progress.view": "查看驗證",
   "submit.validation.progress.working": "進行中",
   "submit.validation.progress.score": "樣本分數",
   "submit.validation.progress.details": "查看檢查結果",
-  "submit.validation.progress.hide_detail": "可以隱藏此視窗，驗證會繼續進行。",
   "submit.validation.progress.saved": "繼續之前請查看結果。",
-  "submit.validation.progress.hide": "隱藏進度",
   "submit.validation.progress.done": "完成",
   "submit.validation.progress.back": "返回設定"
 }

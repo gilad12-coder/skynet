@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "評価器を読み込み、初期候補があればテストしています。",
   "submit.validation.progress.models_detail": "選択したモデルへの接続を小さなリクエストで確認しています。",
   "submit.validation.progress.usage_detail": "実行を終了しています。プロバイダーとサンドボックスの使用量が自動確定するのを待っています。",
-  "submit.validation.progress.view": "検証を表示",
   "submit.validation.progress.working": "実行中",
   "submit.validation.progress.score": "サンプルスコア",
   "submit.validation.progress.details": "チェック結果を表示",
-  "submit.validation.progress.hide_detail": "このウィンドウを隠しても検証は続行されます。",
   "submit.validation.progress.saved": "続行する前に結果をご確認ください。",
-  "submit.validation.progress.hide": "進捗を隠す",
   "submit.validation.progress.done": "完了",
   "submit.validation.progress.back": "設定に戻る"
 }

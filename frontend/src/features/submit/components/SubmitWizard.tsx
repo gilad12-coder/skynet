@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import { ValidationProgressModal } from "./ValidationProgressModal";
+import { ValidationGate } from "./ValidationFrame";
 import { msg } from "@/shared/lib/messages";
 
 import { TotalBudgetCard } from "./TotalBudgetCard";
@@ -184,6 +184,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
         ? handleOptimizationNext
         : w.handleNext;
   const showSubmit = w.step === WIZARD_STAGE.review;
+  const validation = w.preflight.progress.state;
   const containerWidthClass =
     w.step === WIZARD_STAGE.evaluation &&
     ((evaluationPart === 1 && w.codeAssistMode === "auto") ||
@@ -195,39 +196,46 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
     <div
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
-      <ValidationProgressModal preflight={w.preflight} />
-      <SubmitStepper w={w} />
+      <SubmitStepper w={w} locked={validation !== null} />
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">
-        <AnimatePresence mode="wait" custom={w.direction}>
-          <motion.div
-            key={w.step}
-            data-tutorial={`wizard-stage-${stage}`}
-            custom={w.direction}
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.1 }}
-          >
-            {issue && (
-              <WizardIssueNotice
-                issue={issue}
-                onFix={() => goToField(issue.stage, issue.fieldId)}
-              />
-            )}
-            {stageViews[stage]}
-          </motion.div>
-        </AnimatePresence>
+        <ValidationGate
+          validation={validation}
+          direction={w.direction}
+          onBack={w.preflight.progress.clear}
+        >
+          <AnimatePresence mode="wait" custom={w.direction}>
+            <motion.div
+              key={w.step}
+              data-tutorial={`wizard-stage-${stage}`}
+              custom={w.direction}
+              variants={slideVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.1 }}
+            >
+              {issue && (
+                <WizardIssueNotice
+                  issue={issue}
+                  onFix={() => goToField(issue.stage, issue.fieldId)}
+                />
+              )}
+              {stageViews[stage]}
+            </motion.div>
+          </AnimatePresence>
+        </ValidationGate>
       </div>
 
-      <SubmitNav
-        w={w}
-        onBack={onBack}
-        onNext={onNext}
-        backDisabled={w.step === WIZARD_STAGE.goal}
-        showSubmit={showSubmit}
-      />
+      {validation === null && (
+        <SubmitNav
+          w={w}
+          onBack={onBack}
+          onNext={onNext}
+          backDisabled={w.step === WIZARD_STAGE.goal}
+          showSubmit={showSubmit}
+        />
+      )}
 
       <ModelConfigModal
         open={!!w.editingModel}

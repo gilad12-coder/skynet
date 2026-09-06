@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "Carichiamo il valutatore e testiamo il candidato iniziale, se disponibile.",
   "submit.validation.progress.models_detail": "Inviamo una piccola richiesta per verificare le connessioni ai modelli selezionati.",
   "submit.validation.progress.usage_detail": "L’esecuzione sta terminando. Attendiamo la conferma automatica dell’utilizzo del fornitore e della sandbox.",
-  "submit.validation.progress.view": "Mostra validazione",
   "submit.validation.progress.working": "In corso",
   "submit.validation.progress.score": "Punteggio di esempio",
   "submit.validation.progress.details": "Mostra risultati dei controlli",
-  "submit.validation.progress.hide_detail": "Puoi nascondere questa finestra. La validazione continuerà.",
   "submit.validation.progress.saved": "Controlla i risultati prima di continuare.",
-  "submit.validation.progress.hide": "Nascondi avanzamento",
   "submit.validation.progress.done": "Fine",
   "submit.validation.progress.back": "Torna alla configurazione"
 }

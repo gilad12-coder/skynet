@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "טוענים את קוד ההערכה ובודקים את המועמד ההתחלתי, אם קיים.",
   "submit.validation.progress.models_detail": "שולחים בקשה קטנה כדי לבדוק את החיבורים למודלים שבחרת.",
   "submit.validation.progress.usage_detail": "ההרצה מסתיימת. ממתינים לאישור אוטומטי של שימוש הספק וסביבת ההרצה.",
-  "submit.validation.progress.view": "הצגת האימות",
   "submit.validation.progress.working": "בתהליך",
   "submit.validation.progress.score": "ציון לדוגמה",
   "submit.validation.progress.details": "הצגת תוצאות הבדיקות",
-  "submit.validation.progress.hide_detail": "אפשר להסתיר את החלון. האימות ימשיך ברקע.",
   "submit.validation.progress.saved": "אפשר לעיין בתוצאות לפני שממשיכים.",
-  "submit.validation.progress.hide": "הסתרת ההתקדמות",
   "submit.validation.progress.done": "סיום",
   "submit.validation.progress.back": "חזרה להגדרות"
 }

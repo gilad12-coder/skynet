@@ -918,7 +918,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       const requestPayload = buildSubmissionPayload(overrideCode);
       const initialIdentity = preflight.identity;
       let completed: WizardPreflightResponse | null | undefined;
-      preflight.progress.start();
+      preflight.progress.start(scope);
       setDryRun({ status: "running" });
       try {
         if (requestPayload.scorer.kind === "python") {
@@ -1008,10 +1008,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         preflight.progress.finish(response.status, undefined, response);
         return { response, evidence, outcome };
       } catch (error) {
-        preflight.progress.finish(
-          "failed",
-          error instanceof Error ? error.message : msg("submit.preflight.failed"),
-        );
+        // A cancelled check leaves no trace; a failed one stays on screen.
+        if (error instanceof Error && error.name === "AbortError") preflight.progress.clear();
+        else
+          preflight.progress.finish(
+            "failed",
+            error instanceof Error ? error.message : msg("submit.preflight.failed"),
+          );
         throw error;
       } finally {
         if (!completed && mountedRef.current && attempt === dryRunAttemptRef.current)
@@ -1309,7 +1312,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     const navigation = navigationRevisionRef.current;
     let identity = preflight.identity;
     const t = beginValidationToast(
-      preflight.feedback,
+      preflight.feedback(scope),
       `wizard-validate-${++validationAttemptRef.current}`,
       msg("submit.validation.toast.running"),
     );
@@ -1387,6 +1390,19 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       if (mountedRef.current) setAdvancing(false);
     }
   };
+  // A check the user walked away from (or one that finished while they were
+  // gone) is picked up where it stands: the frame already shows it, and its
+  // outcome moves the wizard on the way Next would have.
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current || !hydratedRef.current || pendingRestore) return;
+    resumedRef.current = true;
+    const progress = preflight.progress.state;
+    if (!progress || progress.identity !== preflight.identity) return;
+    if (progress.status !== "running" && progress.status !== "succeeded") return;
+    void advance(progress.scope === "evaluation" ? WIZARD_STAGE.optimization : WIZARD_STAGE.review);
+  });
+
   const handleNext = async () => {
     await advance(step + 1);
   };

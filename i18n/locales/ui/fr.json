@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "Nous chargeons l’évaluateur et testons votre candidat initial, s’il est disponible.",
   "submit.validation.progress.models_detail": "Une petite requête vérifie les connexions aux modèles sélectionnés.",
   "submit.validation.progress.usage_detail": "L’exécution se termine. Nous attendons la confirmation automatique de l’utilisation du fournisseur et de l’environnement.",
-  "submit.validation.progress.view": "Voir la validation",
   "submit.validation.progress.working": "En cours",
   "submit.validation.progress.score": "Score de l’exemple",
   "submit.validation.progress.details": "Voir les résultats des contrôles",
-  "submit.validation.progress.hide_detail": "Vous pouvez masquer cette fenêtre. La validation continuera.",
   "submit.validation.progress.saved": "Consultez les résultats avant de continuer.",
-  "submit.validation.progress.hide": "Masquer la progression",
   "submit.validation.progress.done": "Terminé",
   "submit.validation.progress.back": "Retour à la configuration"
 }

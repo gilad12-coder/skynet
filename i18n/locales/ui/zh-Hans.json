@@ -3731,13 +3731,10 @@
   "submit.validation.progress.evaluator_detail": "正在加载评估器，并在存在初始候选项时进行测试。",
   "submit.validation.progress.models_detail": "正在发送小型请求以验证所选模型的连接。",
   "submit.validation.progress.usage_detail": "执行即将结束。正在等待自动确认提供商及沙箱用量。",
-  "submit.validation.progress.view": "查看验证",
   "submit.validation.progress.working": "进行中",
   "submit.validation.progress.score": "样本评分",
   "submit.validation.progress.details": "查看检查结果",
-  "submit.validation.progress.hide_detail": "可以隐藏此窗口，验证将继续进行。",
   "submit.validation.progress.saved": "继续之前请查看结果。",
-  "submit.validation.progress.hide": "隐藏进度",
   "submit.validation.progress.done": "完成",
   "submit.validation.progress.back": "返回配置"
 }
