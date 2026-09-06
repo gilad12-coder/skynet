@@ -458,9 +458,6 @@ export function TotalBudgetCard({
   return (
     <StepCard
       title={msg("submit.budget.label")}
-      description={msg(
-        budgetUncapped ? "submit.budget.explainer_uncapped" : "submit.budget.explainer",
-      )}
       trailing={
         <Segmented<"limit" | "uncapped">
           compact
