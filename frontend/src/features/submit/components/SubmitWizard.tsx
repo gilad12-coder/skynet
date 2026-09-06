@@ -89,6 +89,24 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
           ...(w.optimizerName === "gepa" && w.secondModelConfig ? [w.secondModelConfig] : []),
         ],
   );
+  const evaluationPanels: readonly ReactNode[] = [
+    <DatasetStep
+      key="dataset"
+      w={w}
+      previewOpen={dataPreviewOpen}
+      onPreviewOpenChange={setDataPreviewOpen}
+      previewExpanded={dataPreviewExpanded}
+      onPreviewExpandedChange={setDataPreviewExpanded}
+    />,
+    <CodeStep key="code" w={w} part="code" />,
+    <SplitSection key="split" w={w} totalRows={w.parsedDataset?.rowCount ?? 0} />,
+  ];
+  const optimizationPanels: readonly ReactNode[] = [
+    <ParamsStep key="parameters" w={w} />,
+    <ModelStep key="models" w={w} />,
+    <TotalBudgetCard key="budget" w={w} mode={budgetMode} />,
+  ];
+
   const handleEvaluationNext = async () => {
     if (evaluationPart < EVALUATION_STEPS.length - 1) {
       setEvaluationPart((current) => current + 1);
@@ -109,24 +127,6 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
     }
     await w.handleNext();
   };
-
-  const evaluationPanels: readonly ReactNode[] = [
-    <DatasetStep
-      key="dataset"
-      w={w}
-      previewOpen={dataPreviewOpen}
-      onPreviewOpenChange={setDataPreviewOpen}
-      previewExpanded={dataPreviewExpanded}
-      onPreviewExpandedChange={setDataPreviewExpanded}
-    />,
-    <CodeStep key="code" w={w} part="code" />,
-    <SplitSection key="split" w={w} totalRows={w.parsedDataset?.rowCount ?? 0} />,
-  ];
-  const optimizationPanels: readonly ReactNode[] = [
-    <ParamsStep key="parameters" w={w} />,
-    <ModelStep key="models" w={w} />,
-    <TotalBudgetCard key="budget" w={w} mode={budgetMode} onContinue={handleOptimizationNext} />,
-  ];
 
   const stageViews: Record<WizardStageId, ReactNode> = {
     goal: <CodeStep w={w} part="module" header={header} />,

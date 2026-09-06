@@ -388,48 +388,6 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
   });
 }
 
-const budgetCard = source("../components/TotalBudgetCard.tsx");
-const budgetContinue = find(
-  budgetCard,
-  (node) =>
-    ts.isCallExpression(node) &&
-    node.expression.getText() === "useEffect" &&
-    !!node.arguments[0]?.getText().includes("continueRef.current"),
-) as ts.CallExpression;
-
-test("choosing No limit moves the wizard on once the mode has landed, and only once", () => {
-  let budgetUncapped = false;
-  let continued = 0;
-  const continueRef = { current: false };
-  const bindings = () => ({
-    budgetUncapped,
-    continueRef,
-    onContinue: () => {
-      continued += 1;
-    },
-    setBudgetUncapped: (uncapped: boolean) => {
-      budgetUncapped = uncapped;
-    },
-  });
-  const choose = (uncapped: boolean) =>
-    evaluate(variable(budgetCard, "chooseMode"), bindings())(uncapped);
-  const render = () => evaluate(budgetContinue.arguments[0]!, bindings())();
-
-  choose(true);
-  assert.equal(budgetUncapped, true);
-  assert.equal(continued, 0);
-  render();
-  assert.equal(continued, 1);
-  render();
-  assert.equal(continued, 1);
-  choose(true);
-  assert.equal(continued, 2);
-  choose(false);
-  render();
-  assert.equal(budgetUncapped, false);
-  assert.equal(continued, 2);
-});
-
 for (const codeAssistMode of ["manual", "auto"]) {
   test(`${codeAssistMode}: an empty starting point uses the goal without a mode switch`, () => {
     const validate = (objective: string, seedCandidate: string | null) =>
