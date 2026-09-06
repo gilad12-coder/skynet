@@ -185,10 +185,11 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
         : w.handleNext;
   const showSubmit = w.step === WIZARD_STAGE.review;
   const validation = w.preflight.progress.state;
-  const containerWidthClass =
-    w.step === WIZARD_STAGE.evaluation &&
-    ((evaluationPart === 1 && w.codeAssistMode === "auto") ||
-      (evaluationPart === 0 && dataPreviewOpen && dataPreviewExpanded && !!w.parsedDataset))
+  const containerWidthClass = validation
+    ? "max-w-3xl"
+    : w.step === WIZARD_STAGE.evaluation &&
+        ((evaluationPart === 1 && w.codeAssistMode === "auto") ||
+          (evaluationPart === 0 && dataPreviewOpen && dataPreviewExpanded && !!w.parsedDataset))
       ? "max-w-6xl"
       : "max-w-2xl";
 

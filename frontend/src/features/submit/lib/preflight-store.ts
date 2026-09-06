@@ -40,7 +40,15 @@ export interface ValidationPhaseProgress {
   finishedAt?: number;
 }
 
+/** What the usage wait has seen so far: budget reads, and what the last one said. */
+export interface ValidationUsageWait {
+  attempts: number;
+  pendingOperations: number;
+  checkedAt: number;
+}
+
 export interface ValidationProgress {
+  workflow: PreflightWorkflow;
   scope: PreflightScope;
   /** Identity of the payload under check; a restored draft joins by matching it. */
   identity: string;
@@ -50,6 +58,7 @@ export interface ValidationProgress {
   startedAt: number;
   finishedAt?: number;
   phases: ValidationPhaseProgress[];
+  usage?: ValidationUsageWait;
   response?: WizardPreflightResponse;
   message?: string;
 }
@@ -203,6 +212,7 @@ export class PreflightStore {
         (settled) => this.deps.preflight(request(settled), signal, onPhase),
         signal,
         this.deps.wait,
+        (attempt, read) => this.poll(workflow, attempt, read.pending_operations),
       );
       await this.adopt(workflow, response.budget);
       this.update(workflow, (state) => ({
@@ -265,6 +275,7 @@ export class PreflightStore {
       ...state,
       progress: {
         ...details,
+        workflow,
         status: "running",
         startedAt: now,
         phases: [{ key: "budget", startedAt: now }],
@@ -289,6 +300,16 @@ export class PreflightStore {
           { key, startedAt: now },
         ],
       },
+    }));
+  }
+
+  /** One more read of the budget while usage settles; the frame shows the count and countdown. */
+  poll(workflow: PreflightWorkflow, attempts: number, pendingOperations: number): void {
+    const progress = this.getState(workflow).progress;
+    if (progress?.status !== "running") return;
+    this.update(workflow, (state) => ({
+      ...state,
+      progress: { ...progress, usage: { attempts, pendingOperations, checkedAt: this.now() } },
     }));
   }
 

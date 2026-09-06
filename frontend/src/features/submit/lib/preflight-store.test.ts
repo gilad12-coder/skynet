@@ -224,6 +224,9 @@ test("a run pending on usage polls the budget and resumes once it settles", asyn
     progress.phases.map((phase) => phase.key),
     ["budget", "evaluator", "usage", "evaluator"],
   );
+  assert.equal(progress.workflow, "anything");
+  assert.equal(progress.usage?.attempts, 2);
+  assert.equal(progress.usage?.pendingOperations, 0);
   assert.equal(store.getState("anything").evidence.evaluation?.response, response);
 });
 

@@ -226,7 +226,11 @@ export function BlackboxWizard({
     dataPreviewOpen &&
     dataPreviewExpanded &&
     !!w.parsedCases;
-  const containerWidthClass = wideAuthoringPanel || wideDataPreview ? "max-w-6xl" : "max-w-2xl";
+  const containerWidthClass = validation
+    ? "max-w-3xl"
+    : wideAuthoringPanel || wideDataPreview
+      ? "max-w-6xl"
+      : "max-w-2xl";
 
   return (
     <div
