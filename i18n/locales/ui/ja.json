@@ -2996,7 +2996,6 @@
   "submit.basics.privacy.public": "公開",
   "submit.basics.privacy.public_desc": "公開検索に表示されます",
   "submit.clone.failed": "複製する設定の読み込み中にエラーが発生しました",
-  "submit.clone.success": "設定を複製しました",
   "submit.code.agent.tool.metric.title": "メトリックを編集",
   "submit.code.agent.tool.signature.title": "シグネチャを編集",
   "submit.code.interview.brief.add": "指示を追加",

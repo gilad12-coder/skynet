@@ -2716,7 +2716,6 @@
   "submit.blackbox.validation.seed_required": "הוסיפו נקודת התחלה או בחרו להתחיל מאפס",
   "submit.blackbox.validation.split_sum": "החלוקה צריכה להסתכם ב-100%",
   "submit.clone.failed": "שגיאה בטעינת הגדרות לשכפול",
-  "submit.clone.success": "הגדרות שוכפלו בהצלחה",
   "submit.code.agent.tool.metric.title": "עריכת {term.metric}",
   "submit.code.agent.tool.signature.title": "עריכת {term.signature}",
   "submit.code.interview.brief.add": "הוספת הנחיה",

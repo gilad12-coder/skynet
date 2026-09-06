@@ -2996,7 +2996,6 @@
   "submit.basics.privacy.public": "Публичная",
   "submit.basics.privacy.public_desc": "Отображается в публичном поиске",
   "submit.clone.failed": "Ошибка при загрузке конфигурации для клонирования",
-  "submit.clone.success": "Конфигурация успешно клонирована",
   "submit.code.agent.tool.metric.title": "Редактировать метрику",
   "submit.code.agent.tool.signature.title": "Редактировать Сигнатуру",
   "submit.code.interview.brief.add": "Добавить указание",

@@ -2996,7 +2996,6 @@
   "submit.basics.privacy.public": "Public",
   "submit.basics.privacy.public_desc": "Apparaît dans la recherche publique",
   "submit.clone.failed": "Erreur lors du chargement de la configuration à cloner",
-  "submit.clone.success": "Configuration clonée avec succès",
   "submit.code.agent.tool.metric.title": "Modifier la métrique",
   "submit.code.agent.tool.signature.title": "Modifier la Signature",
   "submit.code.interview.brief.add": "Ajouter une directive",

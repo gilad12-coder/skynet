@@ -677,7 +677,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         // validates, so a stale clone lands where it needs repair.
         if (source) setPendingRestore({ stage: "review", furthest: "review" });
         setCloneReady(true);
-        toast.success(msg("submit.clone.success"));
       })
       .catch(() => {
         draftsRef.current.compareClone("anything", null);

@@ -2648,7 +2648,6 @@
   "submit.basics.privacy.public": "公開",
   "submit.basics.privacy.public_desc": "會喺公開搜尋中顯示",
   "submit.clone.failed": "載入要複製嘅設定時發生錯誤",
-  "submit.clone.success": "已成功複製設定",
   "submit.code.agent.tool.metric.title": "編輯指標",
   "submit.code.agent.tool.signature.title": "編輯簽名",
   "submit.code.interview.brief.add": "新增指示",

@@ -2996,7 +2996,6 @@
   "submit.basics.privacy.public": "공개",
   "submit.basics.privacy.public_desc": "공개 검색에 표시됨",
   "submit.clone.failed": "복제할 구성을 불러오는 중 오류",
-  "submit.clone.success": "구성이 성공적으로 복제됨",
   "submit.code.agent.tool.metric.title": "메트릭 편집",
   "submit.code.agent.tool.signature.title": "시그니처 편집",
   "submit.code.interview.brief.add": "지시 추가",

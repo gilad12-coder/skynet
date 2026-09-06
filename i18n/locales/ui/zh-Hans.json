@@ -2996,7 +2996,6 @@
   "submit.basics.privacy.public": "公开",
   "submit.basics.privacy.public_desc": "会出现在公开搜索中",
   "submit.clone.failed": "加载要克隆的配置时出错",
-  "submit.clone.success": "配置克隆成功",
   "submit.code.agent.tool.metric.title": "编辑指标",
   "submit.code.agent.tool.signature.title": "编辑签名",
   "submit.code.interview.brief.add": "添加指令",

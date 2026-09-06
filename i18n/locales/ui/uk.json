@@ -2996,7 +2996,6 @@
   "submit.basics.privacy.public": "Публічний",
   "submit.basics.privacy.public_desc": "З’являється в публічному пошуку",
   "submit.clone.failed": "Помилка завантаження конфігурації для клонування",
-  "submit.clone.success": "Конфігурацію успішно клоновано",
   "submit.code.agent.tool.metric.title": "Редагувати метрику",
   "submit.code.agent.tool.signature.title": "Редагувати Сигнатуру",
   "submit.code.interview.brief.add": "Додати директиву",

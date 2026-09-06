@@ -1621,7 +1621,6 @@ export function useSubmitWizard() {
         setPendingRestore({ stage: "review", furthest: "review" });
       }
       setCloneReady(true);
-      toast.success(msg("submit.clone.success"));
     };
 
     // Share / public clone: hydrate from the scrubbed composite — token-gated for

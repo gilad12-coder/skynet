@@ -2996,7 +2996,6 @@
   "submit.basics.privacy.public": "सार्वजनिक",
   "submit.basics.privacy.public_desc": "सार्वजनिक खोज में दिखाई देता है",
   "submit.clone.failed": "क्लोन करने के लिए कॉन्फ़िगरेशन लोड करने में त्रुटि",
-  "submit.clone.success": "कॉन्फ़िगरेशन सफलतापूर्वक क्लोन किया गया",
   "submit.code.agent.tool.metric.title": "मीट्रिक संपादित करें",
   "submit.code.agent.tool.signature.title": "सिग्नेचर संपादित करें",
   "submit.code.interview.brief.add": "एक निर्देश जोड़ें",

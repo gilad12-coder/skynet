@@ -2996,7 +2996,6 @@
   "submit.basics.privacy.public": "عمومی",
   "submit.basics.privacy.public_desc": "در جستجوی عمومی نمایش داده می‌شود",
   "submit.clone.failed": "خطا در بارگذاری پیکربندی برای کلون کردن",
-  "submit.clone.success": "پیکربندی با موفقیت کلون شد",
   "submit.code.agent.tool.metric.title": "ویرایش معیار",
   "submit.code.agent.tool.signature.title": "ویرایش امضا",
   "submit.code.interview.brief.add": "افزودن دستورالعمل",

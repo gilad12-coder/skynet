@@ -2996,7 +2996,6 @@
   "submit.basics.privacy.public": "Herkese açık",
   "submit.basics.privacy.public_desc": "Genel aramada görünür",
   "submit.clone.failed": "Klonlanacak yapılandırma yüklenirken hata oluştu",
-  "submit.clone.success": "Yapılandırma başarıyla klonlandı",
   "submit.code.agent.tool.metric.title": "Metriği düzenle",
   "submit.code.agent.tool.signature.title": "İmzayı düzenle",
   "submit.code.interview.brief.add": "Yönerge ekle",
