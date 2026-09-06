@@ -17,7 +17,7 @@ import { msg } from "@/shared/lib/messages";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 import { Disclosure } from "../Disclosure";
-import { SplitRecommendationCard, type SplitPlanControls } from "../SplitRecommendationCard";
+import { SplitRecommendationHelp, type SplitPlanControls } from "../SplitRecommendationHelp";
 
 export type SplitControls = SplitPlanControls &
   Pick<SubmitWizardContext, "split" | "updateSplit" | "splitSum">;
@@ -25,8 +25,7 @@ export type SplitControls = SplitPlanControls &
 const MOBILE_NUMBER_INPUT_CLASS =
   "h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm";
 
-// The recommendation always shows. The manual fractions fold behind a
-// disclosure whose open state is the split mode itself: closing it hands the
+// The disclosure follows the split mode: closing it hands the
 // numbers back to the planner, and a clone or draft that brought its own
 // split arrives with the panel already open.
 export function SplitSection({ w }: { w: SplitControls }) {
@@ -58,9 +57,10 @@ export function SplitSection({ w }: { w: SplitControls }) {
         {!splitPlan && !profileLoading && (
           <p className="text-sm text-muted-foreground">{msg("submit.split.empty")}</p>
         )}
-        <SplitRecommendationCard w={w} />
         <Disclosure
           id="split-adjust"
+          trailing={<SplitRecommendationHelp w={w} />}
+          alwaysShowTrailing
           label={msg("submit.split.adjust_toggle")}
           tip={msg("submit.split.adjust_hint")}
           open={splitMode === "manual"}
