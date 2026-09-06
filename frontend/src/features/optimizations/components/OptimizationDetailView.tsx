@@ -96,6 +96,7 @@ import { StageInfoModal } from "./StageInfoModal";
 import { PairSelectionStrip } from "./PairSelectionStrip";
 import { OverviewTab } from "./OverviewTab";
 import { RunLifecycleNotice } from "./RunLifecycleNotice";
+import { isBudgetPause } from "../lib/run-lifecycle";
 import { RunCreditsChip } from "./RunCreditsChip";
 import { BestVersionTab } from "./BestVersionTab";
 import { GridServeTab } from "./GridServeTab";
@@ -1240,6 +1241,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   (job.status === "failed" ||
                     job.status === "cancelled" ||
                     job.status === "paused") &&
+                  !isBudgetPause(job) &&
                   (job.resumable ? (
                     <TooltipButton tooltip={msg("optimization.resume_tooltip")}>
                       <Button
@@ -1331,7 +1333,14 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         </div>
       </FadeIn>
 
-      <RunLifecycleNotice job={job} />
+      <RunLifecycleNotice
+        job={job}
+        canEdit={canEditRun && !skipNetwork}
+        onBudgetChanged={() => {
+          window.dispatchEvent(new Event("optimizations-changed"));
+          void fetchJob();
+        }}
+      />
 
       {isPairContext && effectiveJob?.grid_result && (
         <PairSelectionStrip

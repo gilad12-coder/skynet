@@ -149,6 +149,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "optimization.resume_wrong_status": "Only optimizations that stopped mid-run can be resumed — this one is in '{status}'.",
     "optimization.resume_not_resumable": "This optimization has no saved resume point — run it again instead.",
     "optimization.resume_exhausted": "This optimization reached its maximum attempts ({attempts}) — run it again instead.",
+    "optimization.resume_budget_projected": "The run is on track to cost about {projected} credits, above its {limit}-credit limit. Raise the spending limit above {projected} credits to continue.",
     "optimization.pause_wrong_status": "Only running optimizations can be paused — this one is in '{status}'.",
     "optimization.pause_not_pausable": "An optimization can be paused only after its first checkpoint is saved — try again in a moment.",
     "optimization.pair_not_rerunnable": "Cannot re-run a pair while the optimization is in state '{status}'.",

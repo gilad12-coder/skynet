@@ -14,6 +14,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from ...config import settings
+from ...storage.tests.test_remote_jobstore import SQLiteJobStore, _fund_checkpoint
+from ..auth import AuthenticatedUser
 from ..routers._helpers import is_pausable, is_resumable, pausable_id_flags
 from ..routers.optimizations import create_optimizations_router
 from .conftest import bypass_auth
@@ -285,3 +287,88 @@ def test_listings_mark_checkpointed_running_job_pausable(
         assert response.status_code == 200
         item = next(row for row in response.json()["items"] if row["optimization_id"] == "sidebar-pause")
         assert item["pausable"] is True
+
+
+def test_resume_budget_stopped_run_continues_without_consuming_an_attempt(
+    client: TestClient, store: _BaseFakeJobStore
+) -> None:
+    """A run stopped at its spending limit continues (202) once raised — cap-exempt like a pause."""
+    store.seed_job(
+        "bs", status="stopped", stop_reason="budget_reached", attempts=settings.job_max_attempts, username="alice"
+    )
+    store.save_gepa_checkpoint("bs", b"GEPA-STATE", iteration=7)
+    resp = client.post("/optimizations/bs/resume")
+    assert resp.status_code == 202, resp.text
+    job = store.get_job("bs")
+    assert job["status"] == "pending"
+    assert job["attempts"] == settings.job_max_attempts
+
+
+def test_resume_rejects_stopped_run_without_a_budget_reason(client: TestClient, store: _BaseFakeJobStore) -> None:
+    """Only a budget stop makes ``stopped`` continuable; other stops stay final."""
+    store.seed_job("so", status="stopped", username="alice")
+    store.save_gepa_checkpoint("so", b"STATE", iteration=1)
+    resp = client.post("/optimizations/so/resume")
+    assert resp.status_code == 409
+    assert "mid-run" in resp.json()["detail"]
+
+
+def test_budget_stopped_run_is_resumable_even_at_attempt_cap(store: _BaseFakeJobStore) -> None:
+    """A budget stop offers Resume at the attempt cap; a plain stop never does."""
+    store.seed_job(
+        "bcap", status="stopped", stop_reason="budget_reached", attempts=settings.job_max_attempts, username="alice"
+    )
+    store.save_gepa_checkpoint("bcap", b"x", 1)
+    assert is_resumable(store, store.get_job("bcap")) is True
+    store.seed_job("scap", status="stopped", username="alice")
+    store.save_gepa_checkpoint("scap", b"x", 1)
+    assert is_resumable(store, store.get_job("scap")) is False
+
+
+def test_resume_budget_projected_pause_requires_a_limit_above_the_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refuse to continue a projection pause until the limit clears the projection, then continue cap-free.
+
+    Args:
+        monkeypatch: Fixture binding the checkpoint's immutable runtime profile.
+    """
+    store = SQLiteJobStore()
+    store.create_job("pp")
+    store.update_job("pp", status="running")
+    budgets = _fund_checkpoint(store, "pp", monkeypatch)
+    budget_id = store.get_job("pp")["execution_budget_id"]
+    budgets.stop_admission(budget_id, "resume-owner", reason="budget_projected")
+    store.update_job(
+        "pp",
+        status="paused",
+        stop_reason="budget_projected",
+        attempts=settings.job_max_attempts,
+        terminal_evidence={
+            "budget_projection": {
+                "planned_calls": 230,
+                "done_calls": 23,
+                "spent_credits": "3",
+                "projected_credits": 30,
+                "limit_credits": 20,
+            }
+        },
+    )
+    app = FastAPI()
+    app.include_router(create_optimizations_router(job_store=store, get_worker_ref=lambda: None))
+    bypass_auth(app, user=AuthenticatedUser(username="resume-owner", role="admin", groups=()))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    blocked = client.post("/optimizations/pp/resume")
+    assert blocked.status_code == 409, blocked.text
+    assert "above 30 credits" in blocked.text
+    assert store.get_job("pp")["status"] == "paused"
+
+    budget = budgets.get(budget_id, "resume-owner")
+    budgets.update_total(budget_id, "resume-owner", 40, expected_revision=budget.revision)
+    resp = client.post("/optimizations/pp/resume")
+    assert resp.status_code == 202, resp.text
+    job = store.get_job("pp")
+    assert job["status"] == "pending"
+    assert job["attempts"] == settings.job_max_attempts
+    assert budgets.get(budget_id, "resume-owner").state == "attached"

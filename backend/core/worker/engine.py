@@ -68,7 +68,7 @@ from ..constants import (
     TOKEN_SOURCE_MANAGED,
 )
 from ..exceptions import INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
-from ..i18n import CANCELLATION_REASON
+from ..i18n import CANCELLATION_REASON, PAUSE_REASON
 from ..models import BlackboxRunRequest, GridSearchRequest, GridSearchResponse, PairResult, RunRequest, SplitCounts
 from ..models.results import TerminalOutcome
 from ..notifications import notify_job_completed
@@ -81,6 +81,13 @@ from ..service_gateway.optimization.core import _merge_usage_rows
 from ..service_gateway.optimization.trajectory import GEPA_STATE_FILENAME, GRID_PAIR_RESULT_FILENAME
 from ..storage import JobStore
 from ..telemetry import record_server_event
+from .budget_probe import (
+    STOP_REASON_BUDGET_PROJECTED,
+    planned_calls_from_progress,
+    probe_ready,
+    project_total_credits,
+    projection_evidence,
+)
 from .checkpoint_compat import (
     CheckpointCompatibilityError,
     checkpoint_manifest,
@@ -1012,6 +1019,10 @@ class BackgroundWorker:
                         )
                     if gepa_dir is not None:
                         self._persist_gepa_checkpoint(optimization_id, gepa_dir, checkpoint_tracker, is_grid=is_grid)
+                        if budget_gateway is not None and not is_grid:
+                            self._pause_if_over_projection(
+                                optimization_id, budget_gateway, checkpoint_tracker, execution_generation
+                            )
 
                 drained_result, drained_error, _ = self._drain_subprocess_events(
                     events_target,
@@ -1537,6 +1548,75 @@ class BackgroundWorker:
                 if event is not None:
                     event.set()
 
+    def _pause_if_over_projection(
+        self,
+        optimization_id: str,
+        gateway: ModelGateway,
+        tracker: dict[str, Any],
+        generation: int | None,
+    ) -> None:
+        """Pause a run whose measured burn projects past its spending limit.
+
+        Evaluated once per newly persisted checkpoint, so a pause always has a
+        checkpoint to resume from. The credits settled so far are scaled to the
+        optimizer's planned evaluation count; a projection above the limit
+        closes paid admission, parks the row as ``paused`` with the projection
+        as evidence, and unwinds the run exactly like a user pause, so raising
+        the limit continues from the checkpoint instead of the hard stop at the
+        limit discarding the remaining work.
+
+        Args:
+            optimization_id: The running job.
+            gateway: Trusted parent transport whose runtime owns the budget.
+            tracker: Checkpoint cursor holding the planned count reported by
+                the optimizer and the metric calls of the last saved state.
+            generation: Worker epoch allowed to publish the pause.
+
+        Raises:
+            CancellationError: After the pause is published, to unwind the run.
+        """
+        planned = tracker.get("planned_calls")
+        done = tracker.get(-1, {}).get("metric_calls")
+        if planned is None or done is None or done == tracker.get("_probed_calls"):
+            return
+        tracker["_probed_calls"] = done
+        if not probe_ready(done, planned):
+            return
+        runtime = gateway.runtime
+        snapshot = runtime.service.get(runtime.budget_id, runtime.username)
+        projected = project_total_credits(snapshot.setup_spent_credits, snapshot.run_spent_credits, done, planned)
+        if projected <= snapshot.total_credits:
+            return
+        logger.info(
+            "Optimization %s: %s/%s evaluations project %s credits against a %s-credit limit; pausing",
+            optimization_id,
+            done,
+            planned,
+            projected,
+            snapshot.total_credits,
+        )
+        runtime.service.stop_admission(runtime.budget_id, runtime.username, reason=STOP_REASON_BUDGET_PROJECTED)
+        existing = (self._job_store.get_job(optimization_id) or {}).get("terminal_evidence") or {}
+        fields = {
+            "status": "paused",
+            "message": PAUSE_REASON,
+            "completed_at": datetime.now(UTC).isoformat(),
+            "stop_reason": STOP_REASON_BUDGET_PROJECTED,
+            "terminal_evidence": {
+                **existing,
+                "budget_projection": projection_evidence(
+                    snapshot, done_calls=done, planned_calls=planned, projected_credits=projected
+                ),
+            },
+        }
+        cas = getattr(self._job_store, "update_job_if_status", None)
+        if callable(cas):
+            fence = {} if generation is None else {"expected_generation": generation}
+            cas(optimization_id, ("running", "validating"), **fence, **fields)
+        else:
+            self._job_store.update_job(optimization_id, **fields)
+        raise CancellationError()
+
     def _raise_if_store_cancelled(self, optimization_id: str) -> None:
         """Raise ``CancellationError`` when a peer pod has cancelled/paused the job.
 
@@ -1858,6 +1938,9 @@ class BackgroundWorker:
                     if progress_rewrite is not None:
                         metrics = progress_rewrite(event.get("event"), metrics)
                     if checkpoint_tracker is not None:
+                        planned_calls = planned_calls_from_progress(metrics)
+                        if planned_calls is not None:
+                            checkpoint_tracker["planned_calls"] = planned_calls
                         incumbent = evaluated_incumbent_from_progress(
                             event.get("event"),
                             metrics,
@@ -2079,8 +2162,8 @@ class BackgroundWorker:
             optimization_id: The running job.
             state_path: Path to this run/pair's state file.
             pair_index: ``-1`` for a single run, else the grid pair index.
-            tracker: Shared cursor; this pair's ``{"mtime","n"}`` sub-entry is
-                created and updated in place.
+            tracker: Shared cursor; this pair's ``{"mtime","n","metric_calls"}``
+                sub-entry is created and updated in place.
         """
         try:
             mtime = state_path.stat().st_mtime
@@ -2120,6 +2203,7 @@ class BackgroundWorker:
             return
         cursor["mtime"] = mtime
         cursor["n"] = next_n
+        cursor["metric_calls"] = manifest["metric_calls"]
 
     def _store_grid_pair_result(
         self, optimization_id: str, pair_index: int, result_path: Path, *, expected_generation: int | None = None

@@ -199,6 +199,7 @@
     "optimization.pause_not_pausable": "最適化は最初のチェックポイントが保存された後でのみ一時停止できます。しばらくしてから再度お試しください。",
     "optimization.pause_wrong_status": "実行中の最適化のみ一時停止できます。これは '{status}' の状態です。",
     "optimization.payload_unavailable": "最適化のペイロードが利用できません。",
+    "optimization.resume_budget_projected": "この実行はこのままでは約{projected}クレジットかかる見込みで、上限の{limit}クレジットを超えます。続行するには、支出上限を{projected}クレジットより大きい値に引き上げてください。",
     "optimization.resume_exhausted": "この最適化は最大試行回数（{attempts}）に達しました。代わりに再度実行してください。",
     "optimization.resume_not_resumable": "この最適化には保存された再開ポイントがありません。代わりに再度実行してください。",
     "optimization.resume_wrong_status": "実行途中で停止した最適化のみ再開できます。これは '{status}' の状態です。",

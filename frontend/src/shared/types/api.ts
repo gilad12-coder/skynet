@@ -294,6 +294,16 @@ export interface TerminalEvidence {
     iteration?: number | null;
   };
   execution_budget?: JobExecutionBudget | null;
+  budget_projection?: BudgetProjection | null;
+}
+
+/** The worker's measured-burn projection that parked a run at its checkpoint. */
+export interface BudgetProjection {
+  planned_calls: number;
+  done_calls: number;
+  spent_credits: string;
+  projected_credits: number;
+  limit_credits: number;
 }
 
 export interface OptimizationSummaryResponse {
