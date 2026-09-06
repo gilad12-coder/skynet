@@ -548,24 +548,27 @@ test("model-only selection and cloning do not inject sampling overrides", () => 
 
 for (const parameter of ["temperature", "max_tokens"]) {
   test(`picker preserves explicit ${parameter} and allows clearing it`, () => {
-    const change = find(
-      modelModal,
-      (node) =>
-        ts.isJsxAttribute(node) &&
-        node.name.getText() === "onChange" &&
-        node.getText().includes(`${parameter}:`),
-    ) as ts.JsxAttribute;
-    assert.ok(change.initializer && ts.isJsxExpression(change.initializer));
     let draft: Record<string, unknown> = { name: "model" };
-    const onChange = evaluate(change.initializer.expression!, {
+    const bindings = {
       setDraft: (update: (state: typeof draft) => typeof draft) => {
         draft = update(draft);
       },
-    });
-    const value = parameter === "temperature" ? "0.25" : "4096";
-    onChange({ target: { value } });
-    assert.equal(draft[parameter], Number(value));
-    onChange({ target: { value: "" } });
+    };
+    const stepperHandler = (name: string) => {
+      const attribute = find(
+        modelModal,
+        (node) =>
+          ts.isJsxAttribute(node) &&
+          node.name.getText() === name &&
+          node.getText().includes(`${parameter}:`),
+      ) as ts.JsxAttribute;
+      assert.ok(attribute.initializer && ts.isJsxExpression(attribute.initializer));
+      return evaluate(attribute.initializer.expression!, bindings);
+    };
+    const value = parameter === "temperature" ? 0.25 : 4096;
+    stepperHandler("onChange")(value);
+    assert.equal(draft[parameter], value);
+    stepperHandler("onClear")();
     assert.equal(draft[parameter], undefined);
     assert.equal(draft.name, "model");
   });

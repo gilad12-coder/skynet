@@ -9,6 +9,8 @@ interface NumberInputProps {
   id?: string;
   value: number | "";
   onChange: (value: number) => void;
+  /** Called when the field is emptied; without it the last value stands until a new one is typed. */
+  onClear?: () => void;
   min?: number;
   max?: number;
   step?: number;
@@ -20,6 +22,7 @@ export function NumberInput({
   id,
   value,
   onChange,
+  onClear,
   min,
   max,
   step = 1,
@@ -51,7 +54,11 @@ export function NumberInput({
   }, [value, decimals]);
 
   const commitText = (raw: string) => {
-    if (raw === "" || raw === ".") return;
+    if (raw === "") {
+      onClear?.();
+      return;
+    }
+    if (raw === ".") return;
     const n = parseFloat(raw);
     if (!isNaN(n)) onChange(round(clamp(n)));
   };
