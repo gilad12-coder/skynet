@@ -8,9 +8,7 @@ depends_on = None
 
 def upgrade() -> None:
     """Preserve both independent schema changes at one migration head."""
-    pass
 
 
 def downgrade() -> None:
     """Return to both parent revisions without changing schema objects."""
-    pass
