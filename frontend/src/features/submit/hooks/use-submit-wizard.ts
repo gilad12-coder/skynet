@@ -668,6 +668,7 @@ export function useSubmitWizard() {
   // reload) so the user lands on the same step with inputs intact. A blank
   // start leaves a clone/share URL to populate the form itself.
   const restoredRef = useRef(false);
+  const restoreWalkedRef = useRef(false);
   // The draft's stage is applied one render after its fields, so the
   // prerequisite walk (below validateStep) checks the restored state rather
   // than the empty initial one.
@@ -1621,7 +1622,6 @@ export function useSubmitWizard() {
         setPendingRestore({ stage: "review", furthest: "review" });
       }
       setCloneReady(true);
-      toast.success(msg("submit.clone.success"));
     };
 
     // Share / public clone: hydrate from the scrubbed composite — token-gated for
@@ -1967,6 +1967,7 @@ export function useSubmitWizard() {
   useEffect(() => {
     if (!pendingRestore) return;
     setPendingRestore(null);
+    restoreWalkedRef.current = true;
     const target = WIZARD_STAGE[pendingRestore.stage];
     const furthest = Math.max(target, WIZARD_STAGE[pendingRestore.furthest]);
     let open = target;
@@ -2124,6 +2125,21 @@ export function useSubmitWizard() {
     }
   };
 
+  // A check the user walked away from (or one that finished while they were
+  // gone) is picked up where it stands: the frame already shows it, and its
+  // outcome moves the wizard on the way Next would have.
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current || !hydratedRef.current || pendingRestore) return;
+    if (draftSnapshot && !restoreWalkedRef.current) return;
+    resumedRef.current = true;
+    const progress = preflight.progress.state;
+    if (!progress || progress.identity !== preflight.identity) return;
+    if (progress.scope !== "execution") return;
+    if (progress.status !== "running" && progress.status !== "succeeded") return;
+    void advance(WIZARD_STAGE.review);
+  });
+
   const handleNext = async () => {
     await advance(step + 1);
   };
@@ -2243,7 +2259,7 @@ export function useSubmitWizard() {
     const navigation = navigationRevisionRef.current;
     const identity = preflight.identity;
     const t = beginValidationToast(
-      preflight.feedback,
+      preflight.feedback(scope),
       `wizard-validate-${++validationAttemptRef.current}`,
       msg("submit.validation.toast.running"),
     );

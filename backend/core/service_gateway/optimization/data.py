@@ -24,6 +24,7 @@ import dspy
 
 from ...exceptions import ServiceError
 from ...models import ColumnMapping, SplitFractions
+from ..datasets.split_counts import split_counts
 from .logged_scores import log_metrics
 
 
@@ -416,6 +417,10 @@ def split_examples(
 ) -> DatasetSplits:
     """Split examples into train/val/test partitions.
 
+    The counts come from :func:`split_counts`, so every example lands in a
+    split, a non-zero fraction always gets at least one example and a zero
+    fraction gets none.
+
     Args:
         examples: Examples to partition.
         fractions: Train/val/test fractions summing to 1.0.
@@ -426,8 +431,8 @@ def split_examples(
         A populated :class:`DatasetSplits` with train/val/test lists.
 
     Raises:
-        ServiceError: If the dataset is too small to produce the requested
-            val split.
+        ServiceError: If the dataset has too few examples to give the
+            requested val split a single one.
     """
 
     total = len(examples)
@@ -439,12 +444,11 @@ def split_examples(
         rng = random.Random(seed)
         rng.shuffle(ordered)
 
-    train_count = int(total * fractions.train)
-    val_count = int(total * fractions.val)
-    val_end = train_count + val_count
+    counts = split_counts(total, fractions)
+    val_end = counts.train + counts.val
     splits = DatasetSplits(
-        train=ordered[:train_count],
-        val=ordered[train_count:val_end],
+        train=ordered[: counts.train],
+        val=ordered[counts.train : val_end],
         test=ordered[val_end:],
     )
 

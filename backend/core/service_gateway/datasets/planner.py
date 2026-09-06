@@ -44,6 +44,7 @@ from ...i18n import t
 from ...models.blackbox import BLACKBOX_ENGINE_BEST_OF_N, BLACKBOX_ENGINE_META_HARNESS
 from ...models.common import SplitCounts, SplitFractions
 from ...models.dataset import DatasetProfile, SplitPlan
+from .split_counts import split_counts
 
 TIER_TINY = 30
 TIER_SMALL = 80
@@ -74,7 +75,7 @@ def recommend_split(
     """
     total = profile.row_count
     fractions = _recommend_fractions(total, engine)
-    counts = _compute_counts(total, fractions)
+    counts = split_counts(total, fractions)
     resolved_seed = seed if seed is not None else random.Random().randint(0, 2**31 - 1)
 
     return SplitPlan(
@@ -179,36 +180,12 @@ def _meta_harness_fractions(total: int) -> SplitFractions:
     return SplitFractions(train=train_fraction, val=0.0, test=test_fraction)
 
 
-def _compute_counts(total: int, fractions: SplitFractions) -> SplitCounts:
-    """Convert fractional sizes into integer counts that sum to ``total``.
-
-    Rounds train and val down; test absorbs the remainder so the three
-    counts always sum exactly to ``total``. No floor logic — the new
-    tier policy already guarantees test=0 when the dataset can't
-    afford a meaningful holdout.
-
-    Args:
-        total: Total number of rows in the dataset.
-        fractions: Recommended train/val/test fractions.
-
-    Returns:
-        :class:`SplitCounts` with train+val+test == total.
-    """
-    train = int(total * fractions.train)
-    val = int(total * fractions.val)
-    if fractions.test == 0:
-        train = total - val
-        return SplitCounts(train=train, val=val, test=0)
-    test = total - train - val
-    return SplitCounts(train=train, val=val, test=test)
-
-
 def _build_rationale(total: int, counts: SplitCounts, engine: str | None = None) -> list[str]:
     """Build short Hebrew rationale bullets explaining the chosen tier.
 
     Args:
         total: Total dataset size.
-        counts: Per-split row counts produced by ``_compute_counts``.
+        counts: Per-split row counts produced by ``split_counts``.
         engine: Optional black-box engine id the split was sized for.
 
     Returns:
@@ -239,7 +216,7 @@ def _best_of_n_rationale(total: int, counts: SplitCounts) -> str:
 
     Args:
         total: Total dataset size.
-        counts: Per-split row counts produced by ``_compute_counts``.
+        counts: Per-split row counts produced by ``split_counts``.
 
     Returns:
         A single rationale bullet.
@@ -267,7 +244,7 @@ def _meta_harness_rationale(total: int, counts: SplitCounts) -> str:
 
     Args:
         total: Total dataset size.
-        counts: Per-split row counts produced by ``_compute_counts``.
+        counts: Per-split row counts produced by ``split_counts``.
 
     Returns:
         A single rationale bullet.

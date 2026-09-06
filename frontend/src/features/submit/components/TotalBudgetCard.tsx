@@ -42,8 +42,9 @@ import { Segmented, StepCard } from "./blackbox/shared";
 /**
  * The one budget surface of both wizards: a spending limit that covers setup
  * checks and the optimization itself. The limit is the decision; the projected
- * usage bracket only supports it, and the arithmetic behind the bracket stays
- * folded away until asked for.
+ * usage bracket only supports it, so it sits attached under the field as one
+ * block, and the arithmetic behind the bracket stays folded away until asked
+ * for.
  *
  * Every figure on the card is a trigger: it opens a layer over the card that
  * walks through the calculation behind that number, built from the same trace
@@ -54,7 +55,9 @@ import { Segmented, StepCard } from "./blackbox/shared";
  * estimate in either mode.
  *
  * The limit can also be switched off: the run then draws on the account
- * balance until it finishes, and stops in place if that balance runs out.
+ * balance until it finishes, and stops in place if that balance runs out. Each
+ * mode explains itself in the tooltip of its option; under "No limit" the card
+ * is its header alone, as the estimate and the ledger describe a limit.
  */
 type BudgetContext = Pick<
   SubmitWizardContext,
@@ -448,7 +451,7 @@ export function TotalBudgetCard({
       ]
     : [];
 
-  const showLedger = budget != null && spent != null;
+  const showLedger = !budgetUncapped && budget != null && spent != null;
   const pendingTotal =
     budget != null &&
     (budget.uncapped !== budgetUncapped ||
@@ -458,9 +461,6 @@ export function TotalBudgetCard({
   return (
     <StepCard
       title={msg("submit.budget.label")}
-      description={msg(
-        budgetUncapped ? "submit.budget.explainer_uncapped" : "submit.budget.explainer",
-      )}
       trailing={
         <Segmented<"limit" | "uncapped">
           compact
@@ -468,53 +468,73 @@ export function TotalBudgetCard({
           value={budgetUncapped ? "uncapped" : "limit"}
           onChange={(value) => setBudgetUncapped(value === "uncapped")}
           options={[
-            { value: "limit", label: msg("submit.budget.mode.limit") },
-            { value: "uncapped", label: msg("submit.budget.mode.uncapped") },
+            {
+              value: "limit",
+              label: msg("submit.budget.mode.limit"),
+              tip: msg("submit.budget.explainer"),
+            },
+            {
+              value: "uncapped",
+              label: msg("submit.budget.mode.uncapped"),
+              tip: msg("submit.budget.uncapped.warning"),
+            },
           ]}
         />
       }
     >
-      {budgetUncapped ? (
-        <p
-          className="flex items-start gap-2 rounded-lg border border-[#C8A882]/45 bg-[#C8A882]/10 px-3.5 py-3 text-xs leading-relaxed text-[#3D2E22]"
-          dir="auto"
-        >
-          <WarningCircle className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-          {msg("submit.budget.uncapped.warning")}
-        </p>
-      ) : (
+      {!budgetUncapped && (
         <div className="space-y-2">
           <Label htmlFor="totalBudgetInput" className="sr-only">
             {msg("submit.budget.label")}
           </Label>
           <div
-            dir="ltr"
             className={cn(
-              "flex h-12 items-center overflow-hidden rounded-lg border bg-background transition-[border-color,box-shadow] focus-within:ring-[3px]",
+              "overflow-hidden rounded-lg border bg-background transition-[border-color,box-shadow] focus-within:ring-[3px]",
               fieldError
                 ? "border-destructive focus-within:border-destructive focus-within:ring-destructive/20"
                 : "border-input focus-within:border-ring focus-within:ring-ring/50",
             )}
           >
-            <Input
-              id="totalBudgetInput"
-              inputMode="numeric"
-              autoComplete="off"
-              aria-invalid={fieldError ? true : undefined}
-              aria-describedby={cn(fieldMessage && "totalBudgetMessage", "totalBudgetUnit")}
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value);
-                const next = parseBudgetInput(e.target.value, locale);
-                setMaxCostCredits(next.kind === "value" ? next.value : null);
-              }}
-              placeholder={formatMsg("submit.budget.placeholder", { suggested })}
-              dir="ltr"
-              className="h-full rounded-none border-0 bg-transparent px-4 text-lg tabular-nums shadow-none backdrop-blur-none md:text-lg focus-visible:border-transparent focus-visible:ring-0"
-            />
-            <span id="totalBudgetUnit" className="shrink-0 px-4 text-muted-foreground" dir="auto">
-              {unit}
-            </span>
+            <div dir="ltr" className="flex h-12 items-center">
+              <Input
+                id="totalBudgetInput"
+                inputMode="numeric"
+                autoComplete="off"
+                aria-invalid={fieldError ? true : undefined}
+                aria-describedby={cn(fieldMessage && "totalBudgetMessage", "totalBudgetUnit")}
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  const next = parseBudgetInput(e.target.value, locale);
+                  setMaxCostCredits(next.kind === "value" ? next.value : null);
+                }}
+                placeholder={formatMsg("submit.budget.placeholder", { suggested })}
+                dir="ltr"
+                className="h-full rounded-none border-0 bg-transparent px-4 text-lg tabular-nums shadow-none backdrop-blur-none md:text-lg focus-visible:border-transparent focus-visible:ring-0"
+              />
+              <span id="totalBudgetUnit" className="shrink-0 px-4 text-muted-foreground" dir="auto">
+                {unit}
+              </span>
+            </div>
+            <div className="border-t border-border/40 bg-[#FAF8F5] px-3.5 py-3">
+              <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3D2E22]">
+                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
+                    <Gauge className="h-3 w-3" aria-hidden="true" />
+                  </span>
+                  {estimateLabel}
+                </span>
+                <Figure
+                  label={estimateLabel}
+                  value={creditRange(bracket.lowCredits, bracket.highCredits)}
+                  sections={estimateSections}
+                  className="self-start text-[13px] text-[#3D2E22] sm:self-auto sm:text-end"
+                />
+              </div>
+              <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">
+                {estimateNotes}
+              </p>
+            </div>
           </div>
           {fieldMessage && (
             <p
@@ -536,26 +556,6 @@ export function TotalBudgetCard({
           )}
         </div>
       )}
-
-      <div className="rounded-xl border border-[#C8B9A8]/50 bg-background px-3.5 py-3 shadow-[0_1px_2px_rgba(61,46,34,0.04)]">
-        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3D2E22]">
-            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
-              <Gauge className="h-3 w-3" aria-hidden="true" />
-            </span>
-            {estimateLabel}
-          </span>
-          <Figure
-            label={estimateLabel}
-            value={creditRange(bracket.lowCredits, bracket.highCredits)}
-            sections={estimateSections}
-            className="self-start text-[13px] text-[#3D2E22] sm:self-auto sm:text-end"
-          />
-        </div>
-        <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">
-          {estimateNotes}
-        </p>
-      </div>
 
       {(showLedger || showStatus) && (
         <div className="space-y-2">
@@ -610,65 +610,68 @@ export function TotalBudgetCard({
         </div>
       )}
 
-      <Disclosure
-        id="totalBudgetDetails"
-        label={msg("submit.budget.details.summary")}
-        open={detailsOpen}
-        onOpenChange={setDetailsOpen}
-      >
-        <div className="space-y-3">
-          <dl>
-            <Row
-              icon={Cpu}
-              label={msg(
-                mode === "byok" ? "submit.budget.details.fee" : "submit.budget.details.models",
+      {!budgetUncapped && (
+        <Disclosure
+          id="totalBudgetDetails"
+          label={msg("submit.budget.details.summary")}
+          open={detailsOpen}
+          onOpenChange={setDetailsOpen}
+        >
+          <div className="space-y-3">
+            <dl>
+              <Row
+                icon={Cpu}
+                label={msg(
+                  mode === "byok" ? "submit.budget.details.fee" : "submit.budget.details.models",
+                )}
+                value={creditRange(modelLow, modelHigh)}
+                sections={modelSections}
+              />
+              {runtimeAtCost && runtimeSection && (
+                <Row
+                  icon={Terminal}
+                  label={msg("submit.budget.details.runtime")}
+                  value={formatMsg("submit.budget.details.up_to", {
+                    amount: credits(bracket.runtimeHighCredits),
+                  })}
+                  sections={[runtimeSection]}
+                />
               )}
-              value={creditRange(modelLow, modelHigh)}
-              sections={modelSections}
-            />
-            {runtimeAtCost && runtimeSection && (
-              <Row
-                icon={Terminal}
-                label={msg("submit.budget.details.runtime")}
-                value={formatMsg("submit.budget.details.up_to", {
-                  amount: credits(bracket.runtimeHighCredits),
-                })}
-                sections={[runtimeSection]}
-              />
-            )}
-            {runtimeIncluded && (
-              <Row
-                icon={Terminal}
-                label={msg("submit.budget.details.runtime")}
-                value={msg("submit.budget.details.runtime_included")}
-              />
-            )}
-            {budget && !isZero(budget.setup_spent_credits) && (
-              <Row
-                icon={ListChecks}
-                label={msg("submit.budget.setup_spent")}
-                value={ledgerAmount(budget.setup_spent_credits)}
-                sections={spentSections}
-              />
-            )}
-            {budget && !isZero(budget.run_spent_credits) && (
-              <Row
-                icon={Play}
-                label={msg("submit.budget.run_spent")}
-                value={ledgerAmount(budget.run_spent_credits)}
-                sections={spentSections}
-              />
-            )}
-          </dl>
-          <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
-            <p dir="auto">
-              {msg("submit.budget.details.assumptions")} {msg("submit.budget.details.reservation")}
-            </p>
-            {mixedBilling && <p dir="auto">{msg("submit.budget.details.mixed_billing")}</p>}
-            {mode === "byok" && <p dir="auto">{msg("submit.budget.byok_note")}</p>}
+              {runtimeIncluded && (
+                <Row
+                  icon={Terminal}
+                  label={msg("submit.budget.details.runtime")}
+                  value={msg("submit.budget.details.runtime_included")}
+                />
+              )}
+              {budget && !isZero(budget.setup_spent_credits) && (
+                <Row
+                  icon={ListChecks}
+                  label={msg("submit.budget.setup_spent")}
+                  value={ledgerAmount(budget.setup_spent_credits)}
+                  sections={spentSections}
+                />
+              )}
+              {budget && !isZero(budget.run_spent_credits) && (
+                <Row
+                  icon={Play}
+                  label={msg("submit.budget.run_spent")}
+                  value={ledgerAmount(budget.run_spent_credits)}
+                  sections={spentSections}
+                />
+              )}
+            </dl>
+            <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
+              <p dir="auto">
+                {msg("submit.budget.details.assumptions")}{" "}
+                {msg("submit.budget.details.reservation")}
+              </p>
+              {mixedBilling && <p dir="auto">{msg("submit.budget.details.mixed_billing")}</p>}
+              {mode === "byok" && <p dir="auto">{msg("submit.budget.byok_note")}</p>}
+            </div>
           </div>
-        </div>
-      </Disclosure>
+        </Disclosure>
+      )}
     </StepCard>
   );
 }

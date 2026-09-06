@@ -96,6 +96,28 @@ test("cancellation during settlement prevents another validation request", async
   );
 });
 
+test("reports each budget read so the wait can be shown as it happens", async () => {
+  const seen: Array<[number, number]> = [];
+  let reads = 0;
+  const settled = { ...budget, pending_operations: 0 };
+  await waitForPreflightUsage(
+    pending,
+    async () => {
+      reads += 1;
+      return reads === 2 ? settled : budget;
+    },
+    async () => ({ ...pending, status: "succeeded" as const, budget: settled }),
+    undefined,
+    immediate,
+    (attempt, current) => seen.push([attempt, current.pending_operations]),
+  );
+  assert.deepEqual(seen, [
+    [0, 1],
+    [1, 1],
+    [2, 0],
+  ]);
+});
+
 test("a resumed pending result does not cause repeated execution", async () => {
   let resumes = 0;
   const result = await waitForPreflightUsage(
