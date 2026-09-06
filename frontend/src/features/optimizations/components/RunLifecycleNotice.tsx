@@ -59,6 +59,12 @@ export function RunLifecycleNotice({
   const budgetStop = isBudgetStop(job);
   const budgetPause = isBudgetPause(job);
   const budget = job.execution_budget ?? job.terminal_evidence?.execution_budget;
+  // A run without a limit only stops when the account itself runs dry, so
+  // it is told to top up rather than to raise a limit it never had.
+  const accountEmpty = budgetStop && budget?.uncapped === true;
+  const stopTitle = msg(
+    accountEmpty ? "optimization.account_empty.title" : "optimization.budget_reached.title",
+  );
   const projection = budgetPause ? (job.terminal_evidence?.budget_projection ?? null) : null;
   const recovery = job.recovery;
   const recoveryState = recoveryDisplayState(recovery);
@@ -83,14 +89,14 @@ export function RunLifecycleNotice({
     if (budgetStop) {
       if (liveToast.current) {
         toast.update(liveToast.current, {
-          render: `${msg("optimization.budget_reached.title")}. ${resultCopy}`,
+          render: `${stopTitle}. ${resultCopy}`,
           type: "info",
           isLoading: false,
           autoClose: 6000,
         });
         liveToast.current = null;
       } else if (sameRun && !before.budgetStop) {
-        toast.info(`${msg("optimization.budget_reached.title")}. ${resultCopy}`, {
+        toast.info(`${stopTitle}. ${resultCopy}`, {
           toastId: `run-budget:${job.optimization_id}`,
         });
       }
@@ -133,7 +139,16 @@ export function RunLifecycleNotice({
       episode,
       recoveryState: recovery ? recoveryState : undefined,
     };
-  }, [job.optimization_id, budgetStop, budgetPause, episode, recovery, recoveryState, resultCopy]);
+  }, [
+    job.optimization_id,
+    budgetStop,
+    budgetPause,
+    episode,
+    recovery,
+    recoveryState,
+    resultCopy,
+    stopTitle,
+  ]);
 
   useEffect(
     () => () => {
@@ -185,7 +200,8 @@ export function RunLifecycleNotice({
   );
   const requested = Math.max(minimumLimit, requestedLimit ?? suggestedLimit);
   const settling = (budget?.pending_operations ?? 0) > 0;
-  const canContinue = budgetHalt && canEdit && job.resumable === true && budget != null;
+  const canContinue =
+    budgetHalt && canEdit && job.resumable === true && budget != null && !budget.uncapped;
 
   const handleRaise = async () => {
     if (!budget || raising) return;
@@ -221,7 +237,7 @@ export function RunLifecycleNotice({
         <div className="min-w-0 space-y-1">
           <p className="text-sm font-semibold">
             {budgetStop
-              ? msg("optimization.budget_reached.title")
+              ? stopTitle
               : budgetPause
                 ? msg("optimization.budget_projected.title")
                 : recovery
@@ -260,6 +276,11 @@ export function RunLifecycleNotice({
                 {msg("optimization.budget_reached.final_not_run")}
               </p>
             )}
+          {accountEmpty && (
+            <p className="text-xs text-muted-foreground" dir="auto">
+              {msg("optimization.account_empty.body")}
+            </p>
+          )}
           {budgetStop && canContinue && (
             <p className="text-xs text-muted-foreground">
               {msg("optimization.budget_reached.raise_hint")}
@@ -277,7 +298,12 @@ export function RunLifecycleNotice({
           <dl className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-5">
             {(
               [
-                ["submit.budget.label", String(budget.total_credits)],
+                [
+                  "submit.budget.label",
+                  budget.uncapped
+                    ? msg("submit.budget.uncapped_short")
+                    : String(budget.total_credits),
+                ],
                 ["submit.budget.setup_spent", budget.setup_spent_credits],
                 ["submit.budget.run_spent", budget.run_spent_credits],
                 ["submit.budget.reserved", budget.reserved_credits],
@@ -287,7 +313,7 @@ export function RunLifecycleNotice({
               <div key={key} className="min-w-0 space-y-1">
                 <dt className="text-muted-foreground">{msg(key)}</dt>
                 <dd className="break-all font-medium tabular-nums" dir="auto">
-                  {amount(value)}
+                  {key === "submit.budget.label" && budget.uncapped ? value : amount(value)}
                 </dd>
               </div>
             ))}

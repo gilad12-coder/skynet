@@ -117,7 +117,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
   const handleOptimizationNext = async () => {
     if (
       OPTIMIZATION_STEPS[optimizationPart] === "budget" &&
-      !limitCoversEstimate(w.costBracket, budgetMode, w.maxCostCredits)
+      !limitCoversEstimate(w.costBracket, budgetMode, w.budgetUncapped ? null : w.maxCostCredits)
     )
       return;
     if (optimizationPart < OPTIMIZATION_STEPS.length - 1) {

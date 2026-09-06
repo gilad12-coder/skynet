@@ -25,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -364,6 +365,7 @@ class ExecutionBudgetModel(Base):
     creation_key: Mapped[str] = mapped_column(String(128), nullable=False)
     creation_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     total_credits: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    uncapped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="open")

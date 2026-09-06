@@ -26,6 +26,7 @@ const snapshot = (total = 20, revision = 1): ExecutionBudget => ({
   external_spent_credits: "0",
   pending_operations: 0,
   blocked_reason: null,
+  uncapped: false,
 });
 function fixture(
   overrides: Partial<BudgetSessionDependencies> = {},

@@ -37,7 +37,7 @@ import { chargeableBracket, type RoleCostTrace } from "../lib/cost-bracket";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
 import { Disclosure } from "./Disclosure";
-import { StepCard } from "./blackbox/shared";
+import { Segmented, StepCard } from "./blackbox/shared";
 
 /**
  * The one budget surface of both wizards: a spending limit that covers setup
@@ -52,10 +52,18 @@ import { StepCard } from "./blackbox/shared";
  * Mode-aware: managed model roles show their full credit cost; BYOK roles show
  * their platform fee. The required execution environment is included in the
  * estimate in either mode.
+ *
+ * The limit can also be switched off: the run then draws on the account
+ * balance until it finishes, and stops in place if that balance runs out.
  */
 type BudgetContext = Pick<
   SubmitWizardContext,
-  "costBracket" | "suggestedCeiling" | "maxCostCredits" | "setMaxCostCredits"
+  | "costBracket"
+  | "suggestedCeiling"
+  | "maxCostCredits"
+  | "setMaxCostCredits"
+  | "budgetUncapped"
+  | "setBudgetUncapped"
 > & {
   setupSpent?: number;
   availableCredits?: number | null;
@@ -127,7 +135,14 @@ export function TotalBudgetCard({
   /** The estimate still waits on inputs from later steps (cases, models). */
   preliminary?: boolean;
 }) {
-  const { costBracket, suggestedCeiling, maxCostCredits, setMaxCostCredits } = w;
+  const {
+    costBracket,
+    suggestedCeiling,
+    maxCostCredits,
+    setMaxCostCredits,
+    budgetUncapped,
+    setBudgetUncapped,
+  } = w;
   const { budget, budgetBusy, budgetError, minimumTotalCredits } = useExecutionBudget();
   const locale = getActiveIntlLocale();
   const bracket = chargeableBracket(costBracket, mode);
@@ -193,7 +208,8 @@ export function TotalBudgetCard({
   const fieldHint = fieldError == null && parsed.kind === "empty" ? minimumMessage : null;
   const fieldMessage = fieldError ?? fieldHint;
 
-  const overLimit = maxCostCredits != null && bracket.highCredits > maxCostCredits;
+  const overLimit =
+    !budgetUncapped && maxCostCredits != null && bracket.highCredits > maxCostCredits;
   const estimateLabel = msg(
     preliminary
       ? "submit.budget.estimate_preliminary"
@@ -392,7 +408,9 @@ export function TotalBudgetCard({
             steps: [
               {
                 label: msg("submit.budget.label"),
-                value: withUnit(formatCredits(budget.total_credits, locale)),
+                value: budget.uncapped
+                  ? msg("submit.budget.uncapped_short")
+                  : withUnit(formatCredits(budget.total_credits, locale)),
               },
               ledgerSteps.setup,
               ledgerSteps.run,
@@ -436,63 +454,91 @@ export function TotalBudgetCard({
     : [];
 
   const showLedger = budget != null && spent != null;
-  const showStatus =
-    budgetBusy || budgetError || (budget && budget.total_credits !== maxCostCredits);
+  const pendingTotal =
+    budget != null &&
+    (budget.uncapped !== budgetUncapped ||
+      (!budgetUncapped && budget.total_credits !== maxCostCredits));
+  const showStatus = budgetBusy || budgetError || pendingTotal;
 
   return (
-    <StepCard title={msg("submit.budget.label")} description={msg("submit.budget.explainer")}>
-      <div className="space-y-2">
-        <Label htmlFor="totalBudgetInput" className="sr-only">
-          {msg("submit.budget.label")}
-        </Label>
-        <div
-          dir="ltr"
-          className={cn(
-            "flex h-12 items-center overflow-hidden rounded-lg border bg-background transition-[border-color,box-shadow] focus-within:ring-[3px]",
-            fieldError
-              ? "border-destructive focus-within:border-destructive focus-within:ring-destructive/20"
-              : "border-input focus-within:border-ring focus-within:ring-ring/50",
-          )}
+    <StepCard
+      title={msg("submit.budget.label")}
+      description={msg(
+        budgetUncapped ? "submit.budget.explainer_uncapped" : "submit.budget.explainer",
+      )}
+    >
+      <Segmented<"limit" | "uncapped">
+        label={msg("submit.budget.label")}
+        value={budgetUncapped ? "uncapped" : "limit"}
+        onChange={(value) => setBudgetUncapped(value === "uncapped")}
+        options={[
+          { value: "limit", label: msg("submit.budget.mode.limit") },
+          { value: "uncapped", label: msg("submit.budget.mode.uncapped") },
+        ]}
+      />
+
+      {budgetUncapped ? (
+        <p
+          className="flex items-start gap-2 rounded-lg border border-[#C8A882]/45 bg-[#C8A882]/10 px-3.5 py-3 text-xs leading-relaxed text-[#3D2E22]"
+          dir="auto"
         >
-          <Input
-            id="totalBudgetInput"
-            inputMode="numeric"
-            autoComplete="off"
-            aria-invalid={fieldError ? true : undefined}
-            aria-describedby={cn(fieldMessage && "totalBudgetMessage", "totalBudgetUnit")}
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              const next = parseBudgetInput(e.target.value, locale);
-              setMaxCostCredits(next.kind === "value" ? next.value : null);
-            }}
-            placeholder={formatMsg("submit.budget.placeholder", { suggested })}
+          <WarningCircle className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+          {msg("submit.budget.uncapped.warning")}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          <Label htmlFor="totalBudgetInput" className="sr-only">
+            {msg("submit.budget.label")}
+          </Label>
+          <div
             dir="ltr"
-            className="h-full rounded-none border-0 bg-transparent px-4 text-lg tabular-nums shadow-none backdrop-blur-none md:text-lg focus-visible:border-transparent focus-visible:ring-0"
-          />
-          <span id="totalBudgetUnit" className="shrink-0 px-4 text-muted-foreground" dir="auto">
-            {unit}
-          </span>
-        </div>
-        {fieldMessage && (
-          <p
-            id="totalBudgetMessage"
-            aria-live="polite"
             className={cn(
-              "flex items-start gap-1.5 text-xs leading-snug",
-              fieldError ? "text-destructive" : "text-muted-foreground",
+              "flex h-12 items-center overflow-hidden rounded-lg border bg-background transition-[border-color,box-shadow] focus-within:ring-[3px]",
+              fieldError
+                ? "border-destructive focus-within:border-destructive focus-within:ring-destructive/20"
+                : "border-input focus-within:border-ring focus-within:ring-ring/50",
             )}
-            dir="auto"
           >
-            {fieldError ? (
-              <WarningCircle className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-            ) : (
-              <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-            )}
-            {fieldMessage}
-          </p>
-        )}
-      </div>
+            <Input
+              id="totalBudgetInput"
+              inputMode="numeric"
+              autoComplete="off"
+              aria-invalid={fieldError ? true : undefined}
+              aria-describedby={cn(fieldMessage && "totalBudgetMessage", "totalBudgetUnit")}
+              value={text}
+              onChange={(e) => {
+                setText(e.target.value);
+                const next = parseBudgetInput(e.target.value, locale);
+                setMaxCostCredits(next.kind === "value" ? next.value : null);
+              }}
+              placeholder={formatMsg("submit.budget.placeholder", { suggested })}
+              dir="ltr"
+              className="h-full rounded-none border-0 bg-transparent px-4 text-lg tabular-nums shadow-none backdrop-blur-none md:text-lg focus-visible:border-transparent focus-visible:ring-0"
+            />
+            <span id="totalBudgetUnit" className="shrink-0 px-4 text-muted-foreground" dir="auto">
+              {unit}
+            </span>
+          </div>
+          {fieldMessage && (
+            <p
+              id="totalBudgetMessage"
+              aria-live="polite"
+              className={cn(
+                "flex items-start gap-1.5 text-xs leading-snug",
+                fieldError ? "text-destructive" : "text-muted-foreground",
+              )}
+              dir="auto"
+            >
+              {fieldError ? (
+                <WarningCircle className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+              ) : (
+                <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+              )}
+              {fieldMessage}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="rounded-xl border border-[#C8B9A8]/50 bg-background px-3.5 py-3 shadow-[0_1px_2px_rgba(61,46,34,0.04)]">
         <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
@@ -559,7 +605,7 @@ export function TotalBudgetCard({
               {budgetError}
             </p>
           )}
-          {budget && budget.total_credits !== maxCostCredits && (
+          {pendingTotal && (
             <p className="text-xs text-muted-foreground" dir="auto">
               {msg("submit.budget.pending_total")}
             </p>

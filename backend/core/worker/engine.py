@@ -1563,7 +1563,9 @@ class BackgroundWorker:
         closes paid admission, parks the row as ``paused`` with the projection
         as evidence, and unwinds the run exactly like a user pause, so raising
         the limit continues from the checkpoint instead of the hard stop at the
-        limit discarding the remaining work.
+        limit discarding the remaining work. A run without a spending limit is
+        never probed; it draws on the account until the ledger cannot fund the
+        next operation.
 
         Args:
             optimization_id: The running job.
@@ -1584,6 +1586,8 @@ class BackgroundWorker:
             return
         runtime = gateway.runtime
         snapshot = runtime.service.get(runtime.budget_id, runtime.username)
+        if snapshot.uncapped:
+            return
         projected = project_total_credits(snapshot.setup_spent_credits, snapshot.run_spent_credits, done, planned)
         if projected <= snapshot.total_credits:
             return

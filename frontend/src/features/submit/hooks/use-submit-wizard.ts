@@ -475,6 +475,8 @@ export function useSubmitWizard() {
   const {
     maxCostCredits,
     setMaxCostCredits,
+    budgetUncapped,
+    setBudgetUncapped,
     session: budgetSession,
     setupSpent,
     availableCredits,
@@ -1712,7 +1714,7 @@ export function useSubmitWizard() {
       token_source: tokenSource,
       estimated_credits_low: estimate.lowCredits,
       estimated_credits_high: estimate.highCredits,
-      ...(maxCostCredits != null && { max_cost_credits: maxCostCredits }),
+      ...(!budgetUncapped && maxCostCredits != null && { max_cost_credits: maxCostCredits }),
       ...(parsedTargetScore != null && { target_score: parsedTargetScore }),
       ...(seed != null && { seed }),
       ...(Object.keys(optKw).length > 0 && { optimizer_kwargs: optKw }),
@@ -1886,7 +1888,8 @@ export function useSubmitWizard() {
         return null;
       }
       case WIZARD_STAGE.optimization: {
-        if (maxCostCredits == null) return fail(msg("budget.invalid"), "totalBudgetInput");
+        if (!budgetUncapped && maxCostCredits == null)
+          return fail(msg("budget.invalid"), "totalBudgetInput");
         if (!structureOnly && runtimeUnavailableReason) return fail(runtimeUnavailableReason);
         const targetProblem = targetScoreIssue();
         if (targetProblem) return fail(targetProblem, "target-score");
@@ -2104,8 +2107,7 @@ export function useSubmitWizard() {
           return;
         }
       }
-      if (target > WIZARD_STAGE.optimization && !(await ensureSetupChecked("execution")))
-        return;
+      if (target > WIZARD_STAGE.optimization && !(await ensureSetupChecked("execution"))) return;
       if (mountedRef.current) goTo(target);
     } finally {
       advancingRef.current = false;
@@ -2631,6 +2633,8 @@ export function useSubmitWizard() {
     setPxnProposals,
     maxCostCredits,
     setMaxCostCredits,
+    budgetUncapped,
+    setBudgetUncapped,
     budgetSession,
     setupSpent,
     availableCredits,

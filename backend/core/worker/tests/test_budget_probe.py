@@ -175,3 +175,52 @@ def test_progress_and_checkpoint_feed_the_probe_tracker() -> None:
     finally:
         shutil.rmtree(base, ignore_errors=True)
     assert tracker[-1]["metric_calls"] == store.manifests[-1]["metric_calls"] == 10
+
+
+def test_projection_never_pauses_a_run_without_a_spending_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Leave an uncapped run alone however far its projection outgrows the stored total.
+
+    Args:
+        monkeypatch: Fixture binding the checkpoint's immutable runtime profile.
+    """
+    store = SQLiteJobStore()
+    store.create_job("open")
+    store.update_job("open", status="running")
+    budgets = _fund_checkpoint(store, "open", monkeypatch)
+    budget_id = store.get_job("open")["execution_budget_id"]
+    budget = budgets.get(budget_id, "resume-owner")
+    budgets.update_total(budget_id, "resume-owner", 20, expected_revision=budget.revision, uncapped=True)
+    _settle_run_spend(budgets, budget_id, 3)
+    tracker: dict = {"planned_calls": 230, -1: {"mtime": 1.0, "n": 3, "metric_calls": 23}}
+
+    BackgroundWorker(job_store=store)._pause_if_over_projection("open", _gateway(budgets, budget_id), tracker, 0)
+
+    assert tracker["_probed_calls"] == 23
+    assert store.get_job("open")["status"] == "running"
+    assert budgets.get(budget_id, "resume-owner").state == "attached"
+
+
+def test_uncapped_run_resumes_admission_past_its_stored_total(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reopen an uncapped run that spent past its stored total as long as the account can still fund it.
+
+    Args:
+        monkeypatch: Fixture binding the checkpoint's immutable runtime profile.
+    """
+    store = SQLiteJobStore()
+    store.create_job("dry")
+    store.update_job("dry", status="running")
+    budgets = _fund_checkpoint(store, "dry", monkeypatch)
+    budget_id = store.get_job("dry")["execution_budget_id"]
+    budget = budgets.get(budget_id, "resume-owner")
+    budgets.update_total(budget_id, "resume-owner", 20, expected_revision=budget.revision, uncapped=True)
+    _settle_run_spend(budgets, budget_id, 25)
+    budgets.stop_admission(budget_id, "resume-owner", reason="budget_reached")
+    store.update_job("dry", status="stopped", stop_reason="budget_reached")
+    budget = budgets.get(budget_id, "resume-owner")
+    assert budget.run_spent_credits == 25
+    assert budget.available_credits == 25
+
+    assert store.requeue_for_resume("dry", bump_attempts=False, expected_generation=0, budget_service=budgets) == 0
+
+    assert budgets.get(budget_id, "resume-owner").state == "attached"
+    assert store.get_job("dry")["status"] == "pending"

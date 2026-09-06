@@ -114,6 +114,7 @@ export function SummaryStep({
     workflowSpec,
     costBracket,
     maxCostCredits,
+    budgetUncapped,
   } = w;
 
   // A workflow run has no single top-level signature — the graph carries the
@@ -717,12 +718,16 @@ export function SummaryStep({
             ))}
           </dl>
         )}
-        {maxCostCredits != null && (
-          <p className="mt-1.5 text-[11px] text-[#8C7A6B]">
-            {formatMsg("submit.summary.estimate_capped", {
-              cap: formatCredits(maxCostCredits, locale),
-            })}
-          </p>
+        {budgetUncapped ? (
+          <p className="mt-1.5 text-[11px] text-[#8C7A6B]">{msg("submit.budget.uncapped_short")}</p>
+        ) : (
+          maxCostCredits != null && (
+            <p className="mt-1.5 text-[11px] text-[#8C7A6B]">
+              {formatMsg("submit.summary.estimate_capped", {
+                cap: formatCredits(maxCostCredits, locale),
+              })}
+            </p>
+          )
         )}
       </div>
     </div>

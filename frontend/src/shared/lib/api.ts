@@ -505,11 +505,12 @@ export function createExecutionBudget(
   totalCredits: number,
   idempotencyKey: string,
   signal?: AbortSignal,
+  uncapped = false,
 ) {
   return request<ExecutionBudget>("/execution-budgets", {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ total_credits: totalCredits }),
+    body: JSON.stringify({ total_credits: totalCredits, uncapped }),
     signal,
   });
 }
@@ -523,10 +524,15 @@ export function updateExecutionBudget(
   totalCredits: number,
   expectedRevision: number,
   signal?: AbortSignal,
+  uncapped = false,
 ) {
   return request<ExecutionBudget>(`/execution-budgets/${encodeURIComponent(budgetId)}`, {
     method: "PATCH",
-    body: JSON.stringify({ total_credits: totalCredits, expected_revision: expectedRevision }),
+    body: JSON.stringify({
+      total_credits: totalCredits,
+      expected_revision: expectedRevision,
+      uncapped,
+    }),
     signal,
   });
 }
