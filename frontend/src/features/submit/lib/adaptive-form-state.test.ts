@@ -301,8 +301,12 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
 
   test(`${path}: a run without a spending limit needs no budget amount`, () => {
     const stageIssue = evaluate(variable(hook, "stageIssue"), {
-      WIZARD_STAGE, stageAt, maxCostCredits: null, budgetUncapped: true,
-      targetScoreIssue: () => "target", msg: (key: string) => key,
+      WIZARD_STAGE,
+      stageAt,
+      maxCostCredits: null,
+      budgetUncapped: true,
+      targetScoreIssue: () => "target",
+      msg: (key: string) => key,
     });
     assert.equal(stageIssue(WIZARD_STAGE.optimization, true).fieldId, "target-score");
   });
@@ -332,7 +336,7 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
           },
           costBracket: {},
           maxCostCredits: 120,
-    budgetUncapped: false,
+          budgetUncapped: false,
         },
       })();
     await next();
@@ -454,9 +458,16 @@ test("Anything missing budget blocks Evaluation before execution", () => {
 
 test("Anything without a spending limit skips the budget amount check", () => {
   const stageIssue = evaluate(variable(wizard, "stageIssue"), {
-    WIZARD_STAGE, stageAt, maxCostCredits: null, budgetUncapped: true, targetKind: "text",
-    scorerKind: "python", metricCode: "def score(c): return llm(c)", scorerUsesModel: true,
-    resolvedScorerModel: null, msg: (key: string) => key,
+    WIZARD_STAGE,
+    stageAt,
+    maxCostCredits: null,
+    budgetUncapped: true,
+    targetKind: "text",
+    scorerKind: "python",
+    metricCode: "def score(c): return llm(c)",
+    scorerUsesModel: true,
+    resolvedScorerModel: null,
+    msg: (key: string) => key,
   });
   assert.equal(stageIssue(WIZARD_STAGE.evaluation).fieldId, "bb-scoring-model");
 });

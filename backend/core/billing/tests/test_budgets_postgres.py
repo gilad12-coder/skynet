@@ -162,12 +162,21 @@ def test_migration_applies_from_legacy_credit_ledger_and_is_idempotent(database:
     assert spec.loader is not None
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
+    extension_path = path.with_name("b7c2e4d9f130_add_execution_budget_uncapped.py")
+    extension_spec = importlib.util.spec_from_file_location("uncapped_migration_fixture", extension_path)
+    assert extension_spec is not None
+    assert extension_spec.loader is not None
+    extension = importlib.util.module_from_spec(extension_spec)
+    extension_spec.loader.exec_module(extension)
     with database.begin() as connection, Operations.context(MigrationContext.configure(connection)):
         migration.downgrade()
         migration.upgrade()
         migration.upgrade()
+        extension.upgrade()
+        extension.upgrade()
     service = BudgetService(engine=database)
     budget = service.create("alice", 10, idempotency_key="migrated")
+    assert budget.uncapped is False
     operation = _reserve(service, budget.id, "call", maximum=5)
     service.mark_dispatched(operation.id, "alice")
     result = service.settle(operation.id, "alice", evidence_key="usage", actual_credits=2, evidence={})

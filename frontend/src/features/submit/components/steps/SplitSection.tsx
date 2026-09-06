@@ -136,9 +136,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
                 className="flex items-center gap-1.5 text-xs"
               >
                 <span className="inline-block w-2 h-2 rounded-full bg-[#3D2E22]" />
-                <HelpTip text={tip("data.split.train")}>
-                  {msg("submit.split.label_train")}
-                </HelpTip>
+                <HelpTip text={tip("data.split.train")}>{msg("submit.split.label_train")}</HelpTip>
               </Label>
               {editing ? (
                 <NumberInput
@@ -172,9 +170,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
                 className="flex items-center gap-1.5 text-xs"
               >
                 <span className="inline-block w-2 h-2 rounded-full bg-[#C8A882]" />
-                <HelpTip text={tip("data.split.val")}>
-                  {msg("submit.split.label_val")}
-                </HelpTip>
+                <HelpTip text={tip("data.split.val")}>{msg("submit.split.label_val")}</HelpTip>
               </Label>
               {editing ? (
                 <NumberInput
@@ -208,9 +204,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
                 className="flex items-center gap-1.5 text-xs"
               >
                 <span className="inline-block w-2 h-2 rounded-full bg-[#8C7A6B]" />
-                <HelpTip text={tip("data.split.test")}>
-                  {msg("submit.split.label_test")}
-                </HelpTip>
+                <HelpTip text={tip("data.split.test")}>{msg("submit.split.label_test")}</HelpTip>
               </Label>
               {editing ? (
                 <NumberInput
