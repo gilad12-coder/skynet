@@ -293,6 +293,7 @@ export function BlackboxOptimizerStep({
           >
             <ModelChip
               config={reflectionModel}
+              modelDefaultsOnly={nativeProposer}
               className={MOBILE_MODEL_CHIP_CLASS}
               roleLabel={optimizationLabel}
               tooltip={msg("model.reflection.explainer")}

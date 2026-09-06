@@ -851,7 +851,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             : { mode: "auto" },
       proposer_runtime: proposerRuntime,
       target: buildTarget(),
-      task_model_config: targetKind === "agent" ? prepareModelConfig(targetModel) : undefined,
+      task_model_config:
+        targetKind === "agent"
+          ? prepareModelConfig(proposerModelConfig(targetModel, true))
+          : undefined,
       reflection_model_config: reflection,
       token_source: tokenSource,
       is_private: isPrivate,

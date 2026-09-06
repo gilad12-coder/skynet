@@ -96,6 +96,7 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
             >
               <ModelChip
                 config={targetModel}
+                modelDefaultsOnly
                 className={MOBILE_MODEL_CHIP_CLASS}
                 roleLabel={msg("submit.blackbox.roles.task.label")}
                 required
@@ -104,6 +105,7 @@ export function BlackboxExecutionSection({ w }: { w: BlackboxWizardContext }) {
                   setEditingModel({
                     config: targetModel,
                     onSave: setTargetModel,
+                    modelDefaultsOnly: true,
                     label: msg("submit.blackbox.roles.task.label"),
                   })
                 }

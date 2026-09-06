@@ -25,6 +25,8 @@ import { modelProviderSlug } from "@/shared/lib/model-provider";
 interface ModelChipProps {
   config: ModelConfig;
   roleLabel?: string;
+  /** Hide sampling and reasoning settings when the runtime owns them. */
+  modelDefaultsOnly?: boolean;
   onClick: () => void;
   onClone?: () => void;
   onRemove?: () => void;
@@ -86,6 +88,7 @@ function TokenSourcePill({ source }: { source: ModelConfig["token_source"] }) {
 export function ModelChip({
   config,
   roleLabel,
+  modelDefaultsOnly = false,
   onClick,
   onClone,
   onRemove,
@@ -95,7 +98,11 @@ export function ModelChip({
   tooltip,
   className,
 }: ModelChipProps) {
-  const effort = config.extra?.reasoning_effort as string | undefined;
+  const effort = modelDefaultsOnly
+    ? undefined
+    : (config.extra?.reasoning_effort as string | undefined);
+  const temperature = modelDefaultsOnly ? undefined : config.temperature;
+  const maxTokens = modelDefaultsOnly ? undefined : config.max_tokens;
   const name =
     config.name ||
     emptyLabel ||
@@ -125,25 +132,21 @@ export function ModelChip({
             model) renders no parameter row at all — a fabricated temperature
             would read as a setting the surface doesn't actually have. */}
       {!isEmpty &&
-        (config.temperature != null ||
-          config.max_tokens ||
-          effort ||
-          supportsVision ||
-          config.token_source) && (
+        (temperature != null || maxTokens || effort || supportsVision || config.token_source) && (
           <div
             className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[0.625rem] text-muted-foreground"
             dir="ltr"
           >
-            {config.temperature != null && (
+            {temperature != null && (
               <span className="inline-flex items-center gap-0.5">
                 <Thermometer className="size-2.5" />
-                {config.temperature.toFixed(1)}
+                {temperature.toFixed(1)}
               </span>
             )}
-            {config.max_tokens && (
+            {maxTokens && (
               <span className="inline-flex items-center gap-0.5">
                 <TextT className="size-2.5" aria-hidden="true" />
-                {config.max_tokens}
+                {maxTokens}
               </span>
             )}
             {effort && <ReasoningPill value={effort} />}
