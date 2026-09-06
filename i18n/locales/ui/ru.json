@@ -3069,6 +3069,7 @@
   "submit.react.tools_next": "Следующие инструменты",
   "submit.react.tools_prev": "Предыдущие инструменты",
   "submit.split.empty": "Пока нечего разбивать. Добавьте строки на предыдущем шаге, и рекомендуемое разбиение появится здесь.",
+  "submit.split.example_count": "Примеры: {count}",
   "submit.split.label_test": "Тестовая",
   "submit.split.label_train": "Обучающая",
   "submit.split.label_val": "Валидационная",

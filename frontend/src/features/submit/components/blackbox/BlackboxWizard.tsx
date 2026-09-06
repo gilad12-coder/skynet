@@ -130,7 +130,7 @@ export function BlackboxWizard({
     scorer: <BlackboxScorerStep w={w} />,
     split: (
       <div id="bb-split" tabIndex={-1} className="outline-none">
-        <SplitSection w={w} />
+        <SplitSection w={w} totalRows={w.parsedCases?.rowCount ?? 0} />
       </div>
     ),
   };

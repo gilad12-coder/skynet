@@ -218,7 +218,7 @@ test("Use recommendation restores the planned fractions, shuffle and seed", () =
   assert.equal(state.seed, 42);
 });
 
-test("the manual fields only render under Manual selection", () => {
+test("the manual fields and their example counts only render under Manual selection", () => {
   const gate = find(
     splitSection,
     (node) =>
@@ -228,6 +228,7 @@ test("the manual fields only render under Manual selection", () => {
   ) as ts.BinaryExpression;
   for (const field of ["train", "val", "test"]) {
     assert.ok(gate.right.getText().includes(`id="split-${field}"`));
+    assert.ok(gate.right.getText().includes(`examples(counts.${field})`));
   }
 });
 

@@ -99,7 +99,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       onPreviewExpandedChange={setDataPreviewExpanded}
     />,
     <CodeStep key="code" w={w} part="code" />,
-    <SplitSection key="split" w={w} />,
+    <SplitSection key="split" w={w} totalRows={w.parsedDataset?.rowCount ?? 0} />,
   ];
   const optimizationPanels: readonly ReactNode[] = [
     <ParamsStep key="parameters" w={w} />,

@@ -3069,6 +3069,7 @@
   "submit.react.tools_next": "Nächste Tools",
   "submit.react.tools_prev": "Vorherige Tools",
   "submit.split.empty": "Noch nichts aufzuteilen. Füge die Zeilen im vorherigen Schritt hinzu, dann erscheint hier die empfohlene Aufteilung.",
+  "submit.split.example_count": "Beispiele: {count}",
   "submit.split.label_test": "Test",
   "submit.split.label_train": "Training",
   "submit.split.label_val": "Validierung",

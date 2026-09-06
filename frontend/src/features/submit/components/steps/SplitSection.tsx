@@ -14,9 +14,11 @@ import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 import { SplitRecommendationCard, type SplitPlanControls } from "../SplitRecommendationCard";
+import { splitExampleCounts } from "../../lib/split-example-counts";
 
 export type SplitControls = SplitPlanControls &
   Pick<SubmitWizardContext, "split" | "updateSplit" | "splitSum">;
@@ -25,9 +27,16 @@ const MOBILE_NUMBER_INPUT_CLASS =
   "h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm";
 
 // The recommendation card carries the mode switch; the manual fractions
-// only appear once the user picks manual selection.
-export function SplitSection({ w }: { w: SplitControls }) {
+// only appear once the user picks manual selection, each with the number
+// of examples it takes from the dataset.
+export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: number }) {
   const { split, updateSplit, splitSum, splitMode, splitPlan, profileLoading } = w;
+  const locale = getActiveIntlLocale();
+  const counts = splitExampleCounts(totalRows, split);
+  const examples = (count: number) =>
+    msg("submit.split.example_count", {
+      count: new Intl.NumberFormat(locale).format(count),
+    });
 
   return (
     <Card
@@ -89,6 +98,11 @@ export function SplitSection({ w }: { w: SplitControls }) {
                   onChange={(v) => updateSplit("train", String(v))}
                   className={MOBILE_NUMBER_INPUT_CLASS}
                 />
+                {totalRows > 0 && (
+                  <p className="text-xs tabular-nums text-[#8C7A6B]" aria-live="polite" dir="auto">
+                    {examples(counts.train)}
+                  </p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label htmlFor="split-val" className="flex items-center gap-1.5 text-xs">
@@ -104,6 +118,11 @@ export function SplitSection({ w }: { w: SplitControls }) {
                   onChange={(v) => updateSplit("val", String(v))}
                   className={MOBILE_NUMBER_INPUT_CLASS}
                 />
+                {totalRows > 0 && (
+                  <p className="text-xs tabular-nums text-[#8C7A6B]" aria-live="polite" dir="auto">
+                    {examples(counts.val)}
+                  </p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label htmlFor="split-test" className="flex items-center gap-1.5 text-xs">
@@ -119,6 +138,11 @@ export function SplitSection({ w }: { w: SplitControls }) {
                   onChange={(v) => updateSplit("test", String(v))}
                   className={MOBILE_NUMBER_INPUT_CLASS}
                 />
+                {totalRows > 0 && (
+                  <p className="text-xs tabular-nums text-[#8C7A6B]" aria-live="polite" dir="auto">
+                    {examples(counts.test)}
+                  </p>
+                )}
               </div>
             </div>
           </div>

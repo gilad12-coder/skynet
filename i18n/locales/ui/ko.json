@@ -3069,6 +3069,7 @@
   "submit.react.tools_next": "다음 도구",
   "submit.react.tools_prev": "이전 도구",
   "submit.split.empty": "아직 나눌 행이 없습니다. 이전 단계에서 행을 추가하면 권장 분할이 여기에 표시됩니다.",
+  "submit.split.example_count": "예제 수: {count}",
   "submit.split.label_test": "테스트",
   "submit.split.label_train": "학습",
   "submit.split.label_val": "검증",

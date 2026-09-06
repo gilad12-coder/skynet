@@ -2740,6 +2740,7 @@
   "submit.react.tools_next": "下一步工具",
   "submit.react.tools_prev": "上一批工具",
   "submit.split.empty": "暫時未有嘢可以分割。喺上一步加入行之後，建議嘅分割就會喺呢度顯示。",
+  "submit.split.example_count": "例子數量：{count}",
   "submit.split.label_test": "測試",
   "submit.split.label_train": "訓練",
   "submit.split.label_val": "驗證",

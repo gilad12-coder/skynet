@@ -3069,6 +3069,7 @@
   "submit.react.tools_next": "下一批工具",
   "submit.react.tools_prev": "上一批工具",
   "submit.split.empty": "暂时没有可划分的内容。在前面的步骤中添加行后，推荐的划分会显示在这里。",
+  "submit.split.example_count": "示例数：{count}",
   "submit.split.label_test": "测试",
   "submit.split.label_train": "训练",
   "submit.split.label_val": "验证",

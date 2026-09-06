@@ -3069,6 +3069,7 @@
   "submit.react.tools_next": "Herramientas siguientes",
   "submit.react.tools_prev": "Herramientas anteriores",
   "submit.split.empty": "Aún no hay nada que dividir. Añade las filas en el paso anterior y la división recomendada aparecerá aquí.",
+  "submit.split.example_count": "Ejemplos: {count}",
   "submit.split.label_test": "Prueba",
   "submit.split.label_train": "Entrenamiento",
   "submit.split.label_val": "Validación",

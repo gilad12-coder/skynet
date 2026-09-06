@@ -3069,6 +3069,7 @@
   "submit.react.tools_next": "次のツール",
   "submit.react.tools_prev": "前のツール",
   "submit.split.empty": "まだ分割する行がありません。前のステップで行を追加すると、推奨の分割がここに表示されます。",
+  "submit.split.example_count": "例数：{count}",
   "submit.split.label_test": "テスト",
   "submit.split.label_train": "学習",
   "submit.split.label_val": "検証",
