@@ -107,38 +107,6 @@ export function BlackboxWizard({
         : w.stageIssue(w.step)
       : null;
 
-  const evaluationPanels: Record<EvaluationStep, ReactNode> = {
-    cases: (
-      <div id="bb-cases" tabIndex={-1} className="outline-none">
-        <BlackboxCasesStep
-          w={w}
-          previewOpen={dataPreviewOpen}
-          onPreviewOpenChange={setDataPreviewOpen}
-          previewExpanded={dataPreviewExpanded}
-          onPreviewExpandedChange={setDataPreviewExpanded}
-        />
-      </div>
-    ),
-    // Cases and the optimization model both move the estimate and come later.
-    budget: (
-      <TotalBudgetCard
-        w={w}
-        mode={w.tokenSource}
-        preliminary={!hasCases || !w.reflectionModel.name.trim()}
-      />
-    ),
-    scorer: <BlackboxScorerStep w={w} />,
-    split: (
-      <div id="bb-split" tabIndex={-1} className="outline-none">
-        <SplitSection w={w} totalRows={w.parsedCases?.rowCount ?? 0} />
-      </div>
-    ),
-  };
-  const optimizationPanels: readonly ReactNode[] = [
-    <BlackboxOptimizerStep key="strategy" w={w} part="strategy" />,
-    <BlackboxOptimizerStep key="model" w={w} part="model" />,
-  ];
-
   const handleEvaluationNext = async () => {
     if (
       activeEvaluationStep === "budget" &&
@@ -159,6 +127,39 @@ export function BlackboxWizard({
     }
     await w.handleNext();
   };
+
+  const evaluationPanels: Record<EvaluationStep, ReactNode> = {
+    cases: (
+      <div id="bb-cases" tabIndex={-1} className="outline-none">
+        <BlackboxCasesStep
+          w={w}
+          previewOpen={dataPreviewOpen}
+          onPreviewOpenChange={setDataPreviewOpen}
+          previewExpanded={dataPreviewExpanded}
+          onPreviewExpandedChange={setDataPreviewExpanded}
+        />
+      </div>
+    ),
+    // Cases and the optimization model both move the estimate and come later.
+    budget: (
+      <TotalBudgetCard
+        w={w}
+        mode={w.tokenSource}
+        preliminary={!hasCases || !w.reflectionModel.name.trim()}
+        onContinue={handleEvaluationNext}
+      />
+    ),
+    scorer: <BlackboxScorerStep w={w} />,
+    split: (
+      <div id="bb-split" tabIndex={-1} className="outline-none">
+        <SplitSection w={w} totalRows={w.parsedCases?.rowCount ?? 0} />
+      </div>
+    ),
+  };
+  const optimizationPanels: readonly ReactNode[] = [
+    <BlackboxOptimizerStep key="strategy" w={w} part="strategy" />,
+    <BlackboxOptimizerStep key="model" w={w} part="model" />,
+  ];
 
   const stageViews: Record<WizardStageId, ReactNode> = {
     goal: (

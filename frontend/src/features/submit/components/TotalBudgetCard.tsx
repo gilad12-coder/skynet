@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
@@ -55,9 +55,10 @@ import { Segmented, StepCard } from "./blackbox/shared";
  * estimate in either mode.
  *
  * The limit can also be switched off: the run then draws on the account
- * balance until it finishes, and stops in place if that balance runs out. The
- * card then says only that; the estimate and the ledger describe a limit and
- * are not shown.
+ * balance until it finishes, and stops in place if that balance runs out. Each
+ * mode explains itself in the tooltip of its option, and since "No limit"
+ * leaves nothing else to decide here, choosing it also moves the wizard on;
+ * the estimate and the ledger describe a limit and are not shown.
  */
 type BudgetContext = Pick<
   SubmitWizardContext,
@@ -132,11 +133,14 @@ export function TotalBudgetCard({
   w,
   mode,
   preliminary = false,
+  onContinue,
 }: {
   w: BudgetContext;
   mode: TokenSourceMode;
   /** The estimate still waits on inputs from later steps (cases, models). */
   preliminary?: boolean;
+  /** Moves the wizard on; "No limit" calls it, as it leaves nothing else to decide here. */
+  onContinue: () => void;
 }) {
   const {
     costBracket,
@@ -159,6 +163,23 @@ export function TotalBudgetCard({
   const mixedBilling =
     costBracket.managedModelHighCredits > 0 && costBracket.byokModelHighCredits > 0;
   const [detailsOpen, setDetailsOpen] = useState(false);
+
+  // The move waits for the render that carries the new mode, so the wizard's
+  // next handler validates the mode just chosen rather than the one before it.
+  const continueRef = useRef(false);
+  useEffect(() => {
+    if (!continueRef.current) return;
+    continueRef.current = false;
+    if (budgetUncapped) onContinue();
+  }, [budgetUncapped, onContinue]);
+  const chooseMode = (uncapped: boolean) => {
+    if (uncapped && budgetUncapped) {
+      onContinue();
+      return;
+    }
+    continueRef.current = uncapped;
+    setBudgetUncapped(uncapped);
+  };
 
   // The field owns its text so the user can clear it or leave a typo visible
   // with its error; an unreadable value stays unset instead of snapping to zero.
@@ -466,19 +487,23 @@ export function TotalBudgetCard({
           compact
           label={msg("submit.budget.label")}
           value={budgetUncapped ? "uncapped" : "limit"}
-          onChange={(value) => setBudgetUncapped(value === "uncapped")}
+          onChange={(value) => chooseMode(value === "uncapped")}
           options={[
-            { value: "limit", label: msg("submit.budget.mode.limit") },
-            { value: "uncapped", label: msg("submit.budget.mode.uncapped") },
+            {
+              value: "limit",
+              label: msg("submit.budget.mode.limit"),
+              tip: msg("submit.budget.explainer"),
+            },
+            {
+              value: "uncapped",
+              label: msg("submit.budget.mode.uncapped"),
+              tip: msg("submit.budget.uncapped.warning"),
+            },
           ]}
         />
       }
     >
-      {budgetUncapped ? (
-        <p className="text-sm leading-relaxed text-[#3D2E22]" dir="auto">
-          {msg("submit.budget.uncapped.warning")}
-        </p>
-      ) : (
+      {!budgetUncapped && (
         <div className="space-y-2">
           <Label htmlFor="totalBudgetInput" className="sr-only">
             {msg("submit.budget.label")}
