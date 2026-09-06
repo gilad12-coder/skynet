@@ -15,6 +15,9 @@ import {
   type StoredPreflightEvidence,
 } from "../lib/preflight-outcome";
 import { preflightIdentity } from "../lib/validation-evidence";
+import { waitForPreflightUsage } from "../lib/wait-for-preflight-usage";
+
+import { useValidationProgress, type ValidationPhase } from "./use-validation-progress";
 
 export type PreflightEvidence = StoredPreflightEvidence;
 
@@ -24,6 +27,8 @@ export function useWizardPreflight(
   payload: WizardPreflightPayload,
   budget: ExecutionBudgetSession,
 ) {
+  const progress = useValidationProgress();
+  const { start, phase, finish, result } = progress;
   const identity = preflightIdentity(workflow, payload);
   const [evidence, setEvidence] = useState<Partial<Record<PreflightScope, PreflightEvidence>>>({});
   const [running, setRunning] = useState<Partial<Record<PreflightScope, string>>>({});
@@ -79,6 +84,7 @@ export function useWizardPreflight(
       const key = `${scope}:${requestIdentity}`;
       const pending = requests.current.get(key);
       if (pending) return pending;
+      start();
       const signal = controller.current?.signal;
       setRunning((previous) => ({ ...previous, [scope]: requestIdentity }));
       setError(null);
@@ -87,13 +93,54 @@ export function useWizardPreflight(
       const work = (async () => {
         const currentBudget = await budget.ensure();
         if (signal?.aborted) throw new DOMException("Preflight cancelled", "AbortError");
-        const response = await runWizardPreflight(
+        let response = await runWizardPreflight(
           {
             scope,
             workflow,
             payload: overridePayload,
             execution_budget_id: currentBudget.id,
             execution_budget_revision: currentBudget.revision,
+          },
+          signal,
+          (value) => {
+            if (
+              !signal?.aborted &&
+              ["budget", "sandbox", "evaluator", "models", "usage"].includes(value)
+            )
+              phase(value as ValidationPhase);
+          },
+        );
+        signal?.throwIfAborted();
+        await budget.adopt(response.budget);
+        result(response);
+        if (response.pending_reason?.category === "usage_reconciliation") phase("usage");
+        response = await waitForPreflightUsage(
+          response,
+          () => {
+            if (requestIdentity !== identityRef.current)
+              throw new DOMException("Preflight inputs changed", "AbortError");
+            return budget.refresh();
+          },
+          (settledBudget) => {
+            if (requestIdentity !== identityRef.current)
+              throw new DOMException("Preflight inputs changed", "AbortError");
+            return runWizardPreflight(
+              {
+                scope,
+                workflow,
+                payload: overridePayload,
+                execution_budget_id: settledBudget.id,
+                execution_budget_revision: settledBudget.revision,
+              },
+              signal,
+              (value) => {
+                if (
+                  !signal?.aborted &&
+                  ["budget", "sandbox", "evaluator", "models", "usage"].includes(value)
+                )
+                  phase(value as ValidationPhase);
+              },
+            );
           },
           signal,
         );
@@ -103,6 +150,7 @@ export function useWizardPreflight(
             ...previous,
             [scope]: { identity: requestIdentity, response },
           }));
+          finish(response.status, undefined, response);
         }
         return response;
       })()
@@ -113,7 +161,9 @@ export function useWizardPreflight(
             !(failure instanceof DOMException && failure.name === "AbortError")
           ) {
             const message = failure instanceof Error ? failure.message : String(failure);
-            setError(message.startsWith("budget.") ? msg(message as MessageKey) : message);
+            const translated = message.startsWith("budget.") ? msg(message as MessageKey) : message;
+            setError(translated);
+            finish("failed", translated);
           }
           throw failure;
         })
@@ -127,7 +177,7 @@ export function useWizardPreflight(
       requests.current.set(key, work);
       return work;
     },
-    [workflow, payload, budget, rememberEvidence],
+    [workflow, payload, budget, rememberEvidence, start, phase, finish, result],
   );
 
   const cancel = () => {
@@ -135,6 +185,17 @@ export function useWizardPreflight(
     controller.current = new AbortController();
   };
   const isCurrent = (candidate: string) => candidate === identityRef.current;
-  return { identity, evidence, running, error, reusable, run, cancel, isCurrent };
+  return {
+    identity,
+    evidence,
+    running,
+    error,
+    reusable,
+    run,
+    cancel,
+    isCurrent,
+    progress,
+    feedback: progress.feedback,
+  };
 }
 export type WizardPreflightContext = ReturnType<typeof useWizardPreflight>;

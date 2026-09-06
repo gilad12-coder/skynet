@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
+import { ValidationProgressModal } from "../ValidationProgressModal";
 import { msg } from "@/shared/lib/messages";
 import { SubmitSplashOverlay } from "@/shared/ui/submit-splash-overlay";
 import { TERMS } from "@/shared/lib/terms";
@@ -23,11 +24,10 @@ import { BlackboxBasicsStep } from "./BlackboxBasicsStep";
 import { BlackboxStartStep } from "./BlackboxStartStep";
 import { BlackboxCasesStep } from "./BlackboxCasesStep";
 import { BlackboxScorerStep } from "./BlackboxScorerStep";
-import { BlackboxExecutionSection } from "./BlackboxExecutionSection";
 import { BlackboxOptimizerStep } from "./BlackboxOptimizerStep";
 import { BlackboxReviewStep } from "./BlackboxReviewStep";
 
-type EvaluationStep = "cases" | "scorer" | "execution" | "split" | "budget";
+type EvaluationStep = "cases" | "scorer" | "split" | "budget";
 const GOAL_STEPS = ["goal"] as const;
 const OPTIMIZATION_STEPS = ["strategy", "model"] as const;
 const REVIEW_STEPS = ["review"] as const;
@@ -38,7 +38,7 @@ function evaluationStepFor(field: string | undefined, hasCases: boolean): Evalua
   if (field === "totalBudgetInput") return "budget";
   if (field === "bb-cases" || field === "wizard-stage-evaluation") return "cases";
   if (field.startsWith("bb-scor")) return "scorer";
-  if (field === "bb-execution-agent" || field === "bb-task-model") return "execution";
+  if (field === "bb-execution-agent" || field === "bb-task-model") return "scorer";
   if (field === "bb-split") return hasCases ? "split" : "cases";
   return null;
 }
@@ -65,10 +65,7 @@ export function BlackboxWizard({
   // The split only exists once there are cases to divide.
   const hasCases = Boolean(w.parsedCases?.rowCount);
   const evaluationSteps = useMemo<readonly EvaluationStep[]>(
-    () =>
-      hasCases
-        ? ["budget", "cases", "scorer", "execution", "split"]
-        : ["budget", "cases", "scorer", "execution"],
+    () => (hasCases ? ["budget", "cases", "scorer", "split"] : ["budget", "cases", "scorer"]),
     [hasCases],
   );
   const activeEvaluationPart = Math.min(evaluationPart, evaluationSteps.length - 1);
@@ -131,10 +128,9 @@ export function BlackboxWizard({
       />
     ),
     scorer: <BlackboxScorerStep w={w} />,
-    execution: <BlackboxExecutionSection w={w} />,
     split: (
       <div id="bb-split" tabIndex={-1} className="outline-none">
-        <SplitSection w={w} />
+        <SplitSection w={w} totalRows={w.parsedCases?.rowCount ?? 0} />
       </div>
     ),
   };
@@ -235,6 +231,7 @@ export function BlackboxWizard({
     <div
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
+      <ValidationProgressModal preflight={w.preflight} />
       <SubmitStepper w={w} />
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">

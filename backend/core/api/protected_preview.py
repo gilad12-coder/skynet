@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -19,6 +21,7 @@ from ..billing.budgets import (
     BudgetService,
     OperationSnapshot,
 )
+from ..billing.dependency_lock import sign_dependency_lock
 from ..billing.model_gateway import ModelGateway
 from ..billing.operation_pricing import OperationQuote, json_fingerprint
 from ..billing.protected_credentials import prepare_protected_credentials
@@ -28,8 +31,10 @@ from ..billing.service import StripeBillingService
 from ..config import settings
 from ..constants import TOKEN_SOURCE_MANAGED
 from ..models.blackbox import BlackboxScorer
+from ..service_gateway.optimization.blackbox import package_setup
 from ..service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
-from ..service_gateway.optimization.blackbox.sandbox_scorer import SandboxPythonScorer, scorer_gateway
+from ..service_gateway.optimization.blackbox.sandbox import SandboxSpec
+from ..service_gateway.optimization.blackbox.sandbox_scorer import SandboxPythonScorer, _raise_control, scorer_gateway
 from ..service_gateway.optimization.blackbox.scorer import build_scorer
 from ..storage.models import ExecutionBudgetModel, ExecutionOperationModel, ExecutionUsageEvidenceModel
 from ..storage.preflights import PreflightStore
@@ -139,6 +144,69 @@ def _run_workflow(
     return events.result
 
 
+def _run_dependencies(
+    gateway: ModelGateway,
+    payload: dict[str, Any],
+    identity: str,
+    on_token: Callable[[dict[str, str]], None] | None,
+) -> dict[str, Any]:
+    """Resolve dependency metadata inside a paid offline Vercel sandbox.
+
+    Args:
+        gateway: Parent-owned package and spending authority.
+        payload: Exact code, requirements, and scoped package capability.
+        identity: Durable preview identity.
+        on_token: Unused preview adapter argument.
+
+    Returns:
+        Signed dependency lock and actual resolution outcome.
+    """
+    descriptor = payload["_budget_gateway_descriptor"]
+    runtime = RemoteSandboxRuntime(descriptor["url"], descriptor["control_token"])
+    session = runtime.open(
+        SandboxSpec(
+            lifetime_seconds=min(300, descriptor["lifetime_seconds"]),
+            network_disabled=True,
+            operation_key=f"dependencies:{identity}",
+        )
+    )
+    try:
+        session.write_files(
+            {
+                "packages/setup.py": Path(package_setup.__file__).read_text(),
+                "packages/request.json": json.dumps(
+                    {
+                        "action": "resolve",
+                        "code": payload["scorer"]["metric_code"],
+                        "requirements": payload.get("requirements", []),
+                        "route": payload["_skynet_packages_route"],
+                    }
+                ),
+            }
+        )
+        result = session.run("python3 packages/setup.py packages/request.json", timeout_seconds=300)
+        raw = session.read_file("packages/result.json")
+        outcome = json.loads(raw) if raw else {}
+        _raise_control(outcome)
+        if not result.ok or not outcome.get("ok"):
+            raise ValueError(
+                outcome.get("error")
+                or (result.stderr or result.stdout)[-6000:]
+                or "Sandbox package resolution did not complete."
+            )
+        lock = sign_dependency_lock(
+            {
+                **outcome["result"],
+                "image": descriptor["image"],
+                "registry_url": payload["registry_url"],
+            }
+        )
+        return {"ok": True, "dependency_lock": lock}
+    finally:
+        with suppress(UsagePendingError):
+            session.close()
+
+
 def _run_scorer(
     gateway: ModelGateway, payload: dict[str, Any], identity: str, on_token: Callable[[dict[str, str]], None] | None
 ) -> dict[str, Any]:
@@ -180,8 +248,12 @@ def _run_scorer(
         runtime=runtime,
         gateway=scorer_gateway(scorer.model, settings) if scorer.model else None,
         timeout_seconds=scorer.timeout_seconds,
-        lifetime_seconds=min(scorer.timeout_seconds + 60, descriptor["lifetime_seconds"]),
+        lifetime_seconds=min(
+            scorer.timeout_seconds + (300 if scorer.dependency_lock else 60), descriptor["lifetime_seconds"]
+        ),
         install_command=scorer.install_command,
+        dependency_lock=scorer.dependency_lock.model_dump(mode="json") if scorer.dependency_lock else None,
+        dependency_route=payload.get("_skynet_packages_route"),
         job_id=identity,
     )
     started = time.perf_counter()
@@ -294,7 +366,9 @@ def run_protected_preview(
     store = PreflightStore(engine)
     key = (idempotency_key or "").strip() or str(uuid4())
     scope = json_fingerprint({"kind": kind, "key": key})[:24]
-    result_key = "scorer_result" if kind == "scorer" else "workflow_result"
+    result_key = (
+        "dependency_result" if kind == "dependencies" else "scorer_result" if kind == "scorer" else "workflow_result"
+    )
     started = time.perf_counter()
     try:
         budget = _budget_for_preview(service, engine, payload, user.username, key, kind)
@@ -305,7 +379,7 @@ def run_protected_preview(
             workflow=kind + "_preview",
             scope=scope,
             payload=payload,
-            reuse_failed=True,
+            reuse_failed=kind != "dependencies",
             exclusive_scope=True,
         )
         document = claim.document
@@ -327,7 +401,12 @@ def run_protected_preview(
                         TOKEN_SOURCE_MANAGED,
                         default_token_source=str(parent_payload.get("token_source") or TOKEN_SOURCE_MANAGED),
                     )
-                    if settings.openrouter_api_key is None and uses_managed_models and not remote_evaluator:
+                    if (
+                        settings.openrouter_api_key is None
+                        and uses_managed_models
+                        and not remote_evaluator
+                        and kind != "dependencies"
+                    ):
                         raise ValueError("Managed model routing is not configured.")
                     gateway = ModelGateway(
                         _PreviewRuntime(
@@ -343,7 +422,7 @@ def run_protected_preview(
                     bind_protected_sandbox(
                         gateway,
                         settings,
-                        workflow="anything" if kind == "scorer" else "dspy",
+                        workflow="anything" if kind in {"scorer", "dependencies"} else "dspy",
                         owner_id=document["id"],
                     )
                     protected = gateway.protect_payload(
@@ -353,9 +432,13 @@ def run_protected_preview(
                         else "",
                         allow_private_tools=settings.discover_allow_private,
                     )
-                    result = (_run_scorer if kind == "scorer" else _run_workflow)(
-                        gateway, protected, document["id"], on_token
-                    )
+                    result = (
+                        _run_dependencies
+                        if kind == "dependencies"
+                        else _run_scorer
+                        if kind == "scorer"
+                        else _run_workflow
+                    )(gateway, protected, document["id"], on_token)
                 except Exception as caught:
                     error = str(caught)
                 finally:
@@ -368,9 +451,9 @@ def run_protected_preview(
                             error = str(caught)
                 if error is not None:
                     result["error"] = error
-                    if kind == "scorer":
+                    if kind in {"scorer", "dependencies"}:
                         result["ok"] = False
-                failed = bool(result.get("error")) or (kind == "scorer" and not result.get("ok"))
+                failed = bool(result.get("error")) or (kind in {"scorer", "dependencies"} and not result.get("ok"))
                 status = "failed" if failed else "succeeded"
                 checks = [{"key": kind, "status": status}]
                 if service.get(budget.id, user.username).pending_operations:
@@ -383,7 +466,7 @@ def run_protected_preview(
                     result={"checks": checks, result_key: result},
                 )
         result = dict(document.get(result_key) or {})
-        if kind == "scorer":
+        if kind in {"scorer", "dependencies"}:
             result.setdefault("ok", False)
             result.setdefault("elapsed_ms", (time.perf_counter() - started) * 1000)
         else:

@@ -222,20 +222,13 @@ export function BlackboxReviewStep({
           <Row
             label={msg("submit.blackbox.scorer.install_label")}
             tip="submit.blackbox.scorer_install"
-            onEdit={edit("evaluation", "bb-scorer-install")}
           >
             <Mono>{scorerInstall.trim()}</Mono>
           </Row>
         )}
-        <Row
-          label={msg("submit.blackbox.review.execution")}
-          tip="submit.blackbox.target"
-          onEdit={edit("evaluation", "bb-execution-agent")}
-        >
-          {targetKind === "agent"
-            ? `${msg("submit.blackbox.start.target.agent")} · ${harnessLabel(harness)}`
-            : msg("submit.blackbox.start.target.text")}
-        </Row>
+        {targetKind === "agent" && (
+          <Row label={msg("submit.blackbox.review.execution")}>{harnessLabel(harness)}</Row>
+        )}
         <Row
           label={msg("submit.blackbox.review.models")}
           tip="submit.blackbox.roles"

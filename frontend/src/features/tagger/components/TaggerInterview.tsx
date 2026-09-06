@@ -182,9 +182,6 @@ export function TaggerInterview({
               <h3 className="text-sm font-semibold text-foreground">
                 {msg("tagger.assist.interview.title")}
               </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {msg("tagger.assist.interview.subtitle")}
-              </p>
             </div>
             <Button
               variant="ghost"

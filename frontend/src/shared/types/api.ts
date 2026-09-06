@@ -553,6 +553,18 @@ export type BlackboxEngineId = "gepa" | "best_of_n" | "autoresearch" | "meta_har
 export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "prime" | "custom";
 export type BlackboxProposerRuntime = "vercel";
 
+export interface ScorerDependencyLock {
+  code_sha256: string;
+  requirements: string[];
+  inferred: string[];
+  imports: string[];
+  artifacts: Array<{ name: string; version: string; filename: string; url: string; sha256: string }>;
+  python: string;
+  image: string;
+  registry_url: string;
+  signature: string;
+}
+
 export interface BlackboxScorer {
   kind: "python" | "remote";
   metric_code?: string | null;
@@ -562,6 +574,7 @@ export interface BlackboxScorer {
   // Runs once when a python scorer's sandbox opens — apt-get or pip for what
   // the scorer imports. Null when the stock box already has everything.
   install_command?: string | null;
+  dependency_lock?: ScorerDependencyLock | null;
   // The model injected into the python scorer as `llm()` — the "model that
   // runs your prompt". Null when the scorer never calls a model.
   model?: ModelConfig | null;

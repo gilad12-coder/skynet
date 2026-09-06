@@ -4,7 +4,6 @@ import { withScorerImports } from "../../lib/scorer-dependencies";
 
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 
-import { useEffect, useState } from "react";
 import { CheckCircle, CircleNotch, Play, XCircle } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
@@ -19,7 +18,6 @@ import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { ArtifactStatusChip } from "../steps/AuthoringShell";
 import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
-import { Disclosure } from "../Disclosure";
 import { emptyModelConfig } from "../../constants";
 import { EvidenceChip } from "./EvidenceChip";
 import { Field, MOBILE_INPUT_CLASS, Segmented } from "./shared";
@@ -45,15 +43,12 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
     setScorerUrl,
     scorerSecret,
     setScorerSecret,
-    scorerInstall,
-    setScorerInstall,
     scorerModel,
     setScorerModel,
     scorerModelMode,
     setScorerModelMode,
     resolvedScorerModel,
     scoringModelPending,
-    reflectionModel,
     scorerUsesModel,
     evaluatorEvidence,
     evaluatorStatus,
@@ -62,14 +57,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
     dryRun,
     runDryRun,
   } = w;
-
-  // Most scorers need nothing installed, so the command folds away until
-  // one is set (a clone, a returning draft, the agent).
-  const hasInstall = scorerInstall.trim() !== "";
-  const [installOpen, setInstallOpen] = useState(hasInstall);
-  useEffect(() => {
-    if (hasInstall) setInstallOpen(true);
-  }, [hasInstall]);
 
   const result = dryRun.status === "done" ? dryRun.result : null;
   const sideEntries = result?.ok ? Object.entries(result.side_info) : [];
@@ -113,7 +100,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                   the evaluator model until another is selected. */}
               <ModelChip
                 roleLabel={msg("submit.blackbox.roles.scoring.label")}
-                showDetails={false}
                 config={
                   scorerModelMode === "explicit"
                     ? scorerModel
@@ -130,10 +116,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                   setEditingModel({
                     // Seeded from the model it replaces so a different scoring
                     // model starts one field away, not from blank.
-                    config:
-                      scorerModelMode === "explicit" || scorerModel.name
-                        ? scorerModel
-                        : { ...reflectionModel },
+                    config: resolvedScorerModel ?? emptyModelConfig(),
                     onSave: (config) => {
                       setScorerModel(config);
                       setScorerModelMode("explicit");
@@ -199,29 +182,6 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               flashLines={codeAssistMode === "auto" ? agent.metricFlashLines : undefined}
             />
           </div>
-          <Disclosure
-            id="bb-scorer-install-panel"
-            label={msg("submit.blackbox.scorer.install_toggle")}
-            open={installOpen}
-            onOpenChange={setInstallOpen}
-          >
-            <div className="pt-1">
-              <Field
-                label={msg("submit.blackbox.scorer.install_label")}
-                htmlFor="bb-scorer-install"
-                tip="submit.blackbox.scorer_install"
-              >
-                <Input
-                  id="bb-scorer-install"
-                  value={scorerInstall}
-                  onChange={(e) => setScorerInstall(e.target.value)}
-                  placeholder="pip install --no-index --find-links=/opt/skynet/wheels package-name"
-                  dir="ltr"
-                  className={`${MOBILE_INPUT_CLASS} font-mono`}
-                />
-              </Field>
-            </div>
-          </Disclosure>
         </div>
       ) : (
         <div className="space-y-4">

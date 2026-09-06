@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { Button } from "@/shared/ui/primitives/button";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { splitExampleCounts } from "../../lib/split-example-counts";
 
 import {
   Card,
@@ -11,7 +14,6 @@ import {
 } from "@/shared/ui/primitives/card";
 import { Label } from "@/shared/ui/primitives/label";
 import { Badge } from "@/shared/ui/primitives/badge";
-import { Button } from "@/shared/ui/primitives/button";
 import { NumberInput } from "@/shared/ui/number-input";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
@@ -19,8 +21,7 @@ import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
-import { Disclosure } from "../Disclosure";
-import { SplitRecommendationCard, type SplitPlanControls } from "../SplitRecommendationCard";
+import { SplitRecommendationHelp, type SplitPlanControls } from "../SplitRecommendationHelp";
 
 export type SplitControls = SplitPlanControls &
   Pick<SubmitWizardContext, "split" | "updateSplit" | "splitSum">;
@@ -28,15 +29,24 @@ export type SplitControls = SplitPlanControls &
 const MOBILE_NUMBER_INPUT_CLASS =
   "h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm";
 
-export function SplitSection({ w }: { w: SplitControls }) {
+export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: number }) {
   const { split, updateSplit, splitSum, splitMode, setSplitMode, splitPlan, profileLoading } = w;
-  const [adjustOpen, setAdjustOpen] = useState(splitMode === "manual");
-
-  // Hydrated overrides should be visible, but collapsing never resets them.
-  useEffect(() => {
-    if (splitMode === "manual") setAdjustOpen(true);
-  }, [splitMode]);
-
+  const [editing, setEditingState] = useState(false);
+  const setEditing = (open: boolean) => {
+    if (open) setSplitMode("manual");
+    setEditingState(open);
+  };
+  const locale = getActiveIntlLocale();
+  const counts = splitExampleCounts(totalRows, split);
+  const percent = (value: number) =>
+    new Intl.NumberFormat(locale, {
+      style: "percent",
+      maximumFractionDigits: 2,
+    }).format(value);
+  const examples = (count: number) =>
+    msg("submit.split.example_count", {
+      count: new Intl.NumberFormat(locale).format(count),
+    });
   return (
     <Card
       className="border-border/50 bg-card/80 backdrop-blur-xl shadow-lg"
@@ -63,41 +73,68 @@ export function SplitSection({ w }: { w: SplitControls }) {
         {!splitPlan && !profileLoading && (
           <p className="text-sm text-muted-foreground">{msg("submit.split.empty")}</p>
         )}
-        <SplitRecommendationCard w={w} />
-        <Disclosure
-          id="split-adjust"
-          label={msg("submit.split.adjust_toggle")}
-          open={adjustOpen}
-          onOpenChange={setAdjustOpen}
-        >
-          <div className="space-y-3 pt-1">
-            {splitMode === "manual" && splitPlan && (
-              <Button type="button" variant="ghost" size="sm" onClick={() => setSplitMode("auto")}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {splitMode === "auto" && (
+              <span className="text-sm text-muted-foreground">
+                {msg("submit.split.rationale_title")}
+              </span>
+            )}
+            <SplitRecommendationHelp w={w} />
+          </div>
+          <div className="flex items-center gap-2">
+            {splitMode === "manual" && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="min-h-[44px]"
+                onClick={() => {
+                  setSplitMode("auto");
+                  setEditingState(false);
+                }}
+              >
                 {msg("submit.split.mode_auto")}
               </Button>
             )}
-            <div className="flex h-3 rounded-full overflow-hidden">
-              <div
-                className="bg-[#3D2E22] transition-all"
-                style={{ width: `${split.train * 100}%` }}
-              />
-              <div
-                className="bg-[#C8A882] transition-all"
-                style={{ width: `${split.val * 100}%` }}
-              />
-              <div
-                className="bg-[#8C7A6B] transition-all"
-                style={{ width: `${split.test * 100}%` }}
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <Label htmlFor="split-train" className="flex items-center gap-1.5 text-xs">
-                  <span className="inline-block w-2 h-2 rounded-full bg-[#3D2E22]" />
-                  <HelpTip text={tip("data.split.train")}>
-                    {msg("auto.features.submit.components.steps.paramsstep.6")}
-                  </HelpTip>
-                </Label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="min-h-[44px]"
+              aria-expanded={editing}
+              aria-controls="split-adjust"
+              disabled={editing && splitSum !== 1}
+              onClick={() => setEditing(!editing)}
+            >
+              {msg(editing ? "tagger.results.edit_done" : "submit.blackbox.review.edit")}
+            </Button>
+          </div>
+        </div>
+        <div id="split-adjust" className="space-y-3 pt-1">
+          <div className="flex h-3 rounded-full overflow-hidden">
+            <div
+              className="bg-[#3D2E22] transition-all"
+              style={{ width: `${split.train * 100}%` }}
+            />
+            <div className="bg-[#C8A882] transition-all" style={{ width: `${split.val * 100}%` }} />
+            <div
+              className="bg-[#8C7A6B] transition-all"
+              style={{ width: `${split.test * 100}%` }}
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <Label
+                htmlFor={editing ? "split-train" : undefined}
+                className="flex items-center gap-1.5 text-xs"
+              >
+                <span className="inline-block w-2 h-2 rounded-full bg-[#3D2E22]" />
+                <HelpTip text={tip("data.split.train")}>
+                  {msg("auto.features.submit.components.steps.paramsstep.6")}
+                </HelpTip>
+              </Label>
+              {editing ? (
                 <NumberInput
                   id="split-train"
                   step={0.05}
@@ -110,14 +147,30 @@ export function SplitSection({ w }: { w: SplitControls }) {
                   }}
                   className={MOBILE_NUMBER_INPUT_CLASS}
                 />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="split-val" className="flex items-center gap-1.5 text-xs">
-                  <span className="inline-block w-2 h-2 rounded-full bg-[#C8A882]" />
-                  <HelpTip text={tip("data.split.val")}>
-                    {msg("auto.features.submit.components.steps.paramsstep.7")}
-                  </HelpTip>
-                </Label>
+              ) : (
+                <p className="py-2 text-lg font-semibold tabular-nums" dir="auto">
+                  {percent(split.train)}
+                </p>
+              )}
+              <p
+                className="text-sm text-muted-foreground tabular-nums"
+                aria-live="polite"
+                dir="auto"
+              >
+                {examples(counts.train)}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <Label
+                htmlFor={editing ? "split-val" : undefined}
+                className="flex items-center gap-1.5 text-xs"
+              >
+                <span className="inline-block w-2 h-2 rounded-full bg-[#C8A882]" />
+                <HelpTip text={tip("data.split.val")}>
+                  {msg("auto.features.submit.components.steps.paramsstep.7")}
+                </HelpTip>
+              </Label>
+              {editing ? (
                 <NumberInput
                   id="split-val"
                   step={0.05}
@@ -130,14 +183,30 @@ export function SplitSection({ w }: { w: SplitControls }) {
                   }}
                   className={MOBILE_NUMBER_INPUT_CLASS}
                 />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="split-test" className="flex items-center gap-1.5 text-xs">
-                  <span className="inline-block w-2 h-2 rounded-full bg-[#8C7A6B]" />
-                  <HelpTip text={tip("data.split.test")}>
-                    {msg("auto.features.submit.components.steps.paramsstep.8")}
-                  </HelpTip>
-                </Label>
+              ) : (
+                <p className="py-2 text-lg font-semibold tabular-nums" dir="auto">
+                  {percent(split.val)}
+                </p>
+              )}
+              <p
+                className="text-sm text-muted-foreground tabular-nums"
+                aria-live="polite"
+                dir="auto"
+              >
+                {examples(counts.val)}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <Label
+                htmlFor={editing ? "split-test" : undefined}
+                className="flex items-center gap-1.5 text-xs"
+              >
+                <span className="inline-block w-2 h-2 rounded-full bg-[#8C7A6B]" />
+                <HelpTip text={tip("data.split.test")}>
+                  {msg("auto.features.submit.components.steps.paramsstep.8")}
+                </HelpTip>
+              </Label>
+              {editing ? (
                 <NumberInput
                   id="split-test"
                   step={0.05}
@@ -150,10 +219,21 @@ export function SplitSection({ w }: { w: SplitControls }) {
                   }}
                   className={MOBILE_NUMBER_INPUT_CLASS}
                 />
-              </div>
+              ) : (
+                <p className="py-2 text-lg font-semibold tabular-nums" dir="auto">
+                  {percent(split.test)}
+                </p>
+              )}
+              <p
+                className="text-sm text-muted-foreground tabular-nums"
+                aria-live="polite"
+                dir="auto"
+              >
+                {examples(counts.test)}
+              </p>
             </div>
           </div>
-        </Disclosure>
+        </div>
       </CardContent>
     </Card>
   );

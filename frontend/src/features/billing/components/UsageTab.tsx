@@ -353,7 +353,7 @@ function ModelBreakdown({
       <ChartTable
         rows={rows.map((row) => ({
           model: row.model ? modelDisplayName(row.model) : msg("usage.model.unknown"),
-          credits: row.credits,
+          credits: formatCredits(row.credits, locale),
           runs: row.runs,
           tokens: rowTokens(row) > 0 ? formatTokens(rowTokens(row), locale) : "—",
         }))}

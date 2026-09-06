@@ -124,4 +124,5 @@ def test_remote_preflight_never_reads_submitted_checkpoint_directory(
     assert request["export_checkpoints"] is False
     assert marker.read_bytes() == b"parent-only"
     assert session.closed
+    assert events.get_nowait() == {"type": "preflight_phase", "phase": "evaluator"}
     assert events.get_nowait()["type"] == "result"

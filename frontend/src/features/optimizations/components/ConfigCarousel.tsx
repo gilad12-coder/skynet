@@ -348,12 +348,10 @@ const MODEL_CARD_TIPS: Record<string, string> = perLocale(() => ({
 
 type ModelParameterKey = "temperature" | "max_tokens";
 
-const MODEL_PARAMETER_DEFAULTS: Record<ModelParameterKey, number> = {
-  temperature: 0.7,
-  max_tokens: 1024,
-};
-
-function resolveModelParameter(cfg: Record<string, unknown>, key: ModelParameterKey): number {
+function resolveModelParameter(
+  cfg: Record<string, unknown>,
+  key: ModelParameterKey,
+): number | null {
   const rawExtra = cfg.extra;
   const extra =
     rawExtra && typeof rawExtra === "object" && !Array.isArray(rawExtra)
@@ -367,7 +365,7 @@ function resolveModelParameter(cfg: Record<string, unknown>, key: ModelParameter
         ? Number(rawValue)
         : Number.NaN;
 
-  return Number.isFinite(value) ? value : MODEL_PARAMETER_DEFAULTS[key];
+  return Number.isFinite(value) ? value : null;
 }
 
 /**
@@ -414,27 +412,31 @@ export function ModelCard({
           </span>
         </div>
       </div>
-      {params && (
+      {params && (temp != null || maxTok != null || reasoning) && (
         <div
           className="flex flex-wrap items-center gap-2 text-[0.6875rem] text-muted-foreground"
           dir="ltr"
         >
-          <span
-            className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
-            aria-label={`${temperatureLabel}: ${temp.toFixed(1)}`}
-            title={temperatureLabel}
-          >
-            <Thermometer className="size-3" aria-hidden="true" />
-            {temp.toFixed(1)}
-          </span>
-          <span
-            className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
-            aria-label={`${maxTokensLabel}: ${maxTok}`}
-            title={maxTokensLabel}
-          >
-            <TextT className="size-3" aria-hidden="true" />
-            {maxTok}
-          </span>
+          {temp != null && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
+              aria-label={`${temperatureLabel}: ${temp}`}
+              title={temperatureLabel}
+            >
+              <Thermometer className="size-3" aria-hidden="true" />
+              {temp}
+            </span>
+          )}
+          {maxTok != null && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
+              aria-label={`${maxTokensLabel}: ${maxTok}`}
+              title={maxTokensLabel}
+            >
+              <TextT className="size-3" aria-hidden="true" />
+              {maxTok}
+            </span>
+          )}
           {reasoning && <ReasoningPill value={reasoning} />}
         </div>
       )}

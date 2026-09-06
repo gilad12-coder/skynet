@@ -25,6 +25,7 @@ from ..service_gateway.optimization.data import split_examples
 from ..storage.preflights import PreflightStore
 from ..worker.vercel_dspy import run_vercel_dspy
 from .model_billing import normalize_model_token_sources
+from .preflight_progress import report_preflight_phase
 from .routers.execution_budgets import ExecutionBudgetResponse, budget_http_error, budget_response
 
 
@@ -175,6 +176,7 @@ def _verify_model_routes(gateway: ModelGateway, *, native: bool) -> list[dict[st
     Returns:
         Actual successful or failed connection checks for each distinct role route.
     """
+    report_preflight_phase("models")
     checks = []
     for route in gateway.model_routes():
         anthropic = native and route["role"] == "optimization"
@@ -210,6 +212,7 @@ def _verify_anything(gateway: ModelGateway, payload: dict[str, Any], *, scope: s
     Returns:
         Real checks and, when a seed exists, its actual scorer preview.
     """
+    report_preflight_phase("sandbox")
     events = _Events()
     protected = {
         **payload,
@@ -240,7 +243,9 @@ class _Events:
 
     def put(self, event: dict[str, Any]) -> None:
         """Preserve a real result or error without interpreting optimizer logs as checks."""
-        if event.get("type") == "preflight_result":
+        if event.get("type") == "preflight_phase":
+            report_preflight_phase(str(event.get("phase")))
+        elif event.get("type") == "preflight_result":
             self.result = event["result"]
         elif event.get("type") == "error":
             self.error = str(event.get("error") or "Setup execution failed.")
@@ -248,6 +253,7 @@ class _Events:
 
 def _verify_dspy(payload: dict[str, Any], *, scope: str, identity: str) -> dict[str, Any]:
     """Run program readiness and a non-held-out sample through the selected isolated executor."""
+    report_preflight_phase("sandbox")
     events = _Events()
     sample = _sample({**payload, "cases": payload.get("dataset") or []})
     payload = {**payload, "dataset": [sample] if sample is not None else [], "_preflight": {"scope": scope}}
@@ -268,6 +274,7 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
     Returns:
         Durable scoped checks and current budget state.
     """
+    report_preflight_phase("budget")
     budgets = BudgetService(engine=job_store.engine)
     evidence = PreflightStore(job_store.engine)
     if request.scope == "execution":
@@ -429,6 +436,7 @@ def _perform_preflight(
         result = {"checks": [_check("setup", "failed", str(error))]}
     finally:
         if gateway is not None:
+            report_preflight_phase("usage")
             try:
                 gateway.close()
             except UsagePendingError:

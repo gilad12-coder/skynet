@@ -1,5 +1,8 @@
 "use client";
 
+import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+
 import * as React from "react";
 import { CircleNotch, Sparkle, XCircle } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
@@ -235,7 +238,10 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
                 {result.credits_charged != null && (
                   <p className="mt-1 text-[0.6875rem] text-muted-foreground">
                     {formatMsg("optimizations.serve.request_spent", {
-                      credits: result.credits_charged,
+                      credits: formatBudgetAmount(
+                        String(result.credits_charged),
+                        getActiveIntlLocale(),
+                      ),
                     })}
                   </p>
                 )}

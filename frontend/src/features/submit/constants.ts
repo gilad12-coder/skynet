@@ -6,8 +6,6 @@ import { WIZARD_STAGE_ORDER, type WizardStageId } from "./lib/wizard-steps";
 export const emptyModelConfig = (): ModelConfig => ({
   name: "",
   token_source: "managed",
-  temperature: 0.7,
-  max_tokens: 1024,
 });
 
 export const defaultSplit: SplitFractions = { train: 0.7, val: 0.15, test: 0.15 };

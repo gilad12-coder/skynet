@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   DraftSaver,
   hasMeaningfulDraft,
+  matchesClonedDraft,
   recipeToOpen,
   stripModelSecrets,
   sanitizeProgramDraft,
@@ -161,6 +162,91 @@ test("recipeToOpen prefers the active workflow while it still has content", () =
   );
   assert.equal(recipeToOpen({ ...base, program: null }), null);
   assert.equal(hasMeaningfulDraft({ ...base, program: null }), false);
+});
+
+test("an identical clone matches a saved draft despite navigation and key order", () => {
+  const clone = anythingDraft({
+    objective: "Improve the answer",
+    targetModel: { name: "model", extra: { temperature: 0.4, max_tokens: 100 } },
+  });
+  const record: WizardDraftRecord = {
+    version: 1,
+    id: "draft",
+    accountId: "account",
+    activeRecipe: "anything",
+    revision: 2,
+    updatedAt: 1000,
+    program: null,
+    anything: {
+      meaningful: true,
+      data: {
+        ...clone,
+        stage: "review",
+        furthestStage: "review",
+        setupSpent: 5,
+        targetModel: { extra: { max_tokens: 100, temperature: 0.4 }, name: "model" },
+      },
+    },
+  };
+  assert.equal(matchesClonedDraft(record, "anything", clone), true);
+  for (const change of [
+    { jobName: "A renamed clone" },
+    { objective: "A different goal" },
+    { metricCode: "def evaluate(candidate): return 1" },
+    { targetModel: { name: "another-model" } },
+    { maxCostCredits: 25 },
+    { split: { train: 0.8, val: 0.1, test: 0.1 } },
+    { seedParts: [{ key: "instruction", value: "New instructions" }] },
+  ]) {
+    assert.equal(matchesClonedDraft(record, "anything", { ...clone, ...change }), false);
+  }
+  assert.equal(matchesClonedDraft(null, "anything", clone), false);
+  assert.equal(matchesClonedDraft({ ...record, anything: null }, "anything", clone), false);
+  assert.equal(
+    matchesClonedDraft(
+      { ...record, activeRecipe: "program", program: { meaningful: true, data: {} as never } },
+      "anything",
+      clone,
+    ),
+    false,
+  );
+});
+
+test("Program clone comparison keeps edited code and dataset contents distinct", () => {
+  const clone = {
+    stage: "goal",
+    furthestStage: "goal",
+    summaryTab: 0,
+    summaryCodeTab: "signature",
+    jobName: "Topic tagging",
+    signatureCode: "class TopicTagger(dspy.Signature): pass",
+    parsedDataset: { columns: ["text"], rows: [{ text: "First" }], rowCount: 1 },
+  } as WizardDraftData;
+  const record: WizardDraftRecord = {
+    version: 1,
+    id: "draft",
+    accountId: "account",
+    activeRecipe: "program",
+    revision: 1,
+    updatedAt: 0,
+    anything: null,
+    program: {
+      meaningful: true,
+      data: { ...clone, stage: "review", summaryTab: 1, summaryCodeTab: "metric" },
+    },
+  };
+  assert.equal(matchesClonedDraft(record, "program", clone), true);
+  assert.equal(
+    matchesClonedDraft(record, "program", { ...clone, signatureCode: "Edited code" }),
+    false,
+  );
+  assert.equal(
+    matchesClonedDraft(record, "program", {
+      ...clone,
+      parsedDataset: { columns: ["text"], rows: [{ text: "Second" }], rowCount: 1 },
+    }),
+    false,
+  );
 });
 
 test("a held saver writes nothing; release writes once per distinct snapshot", async () => {

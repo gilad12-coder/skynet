@@ -451,6 +451,17 @@ h3 {
   background: var(--surface-3) !important;
   color: var(--text-1) !important;
 }
+.Toastify__toast:has(.Toastify__spinner) {
+  --toastify-spinner-color: var(--text-2);
+  --toastify-spinner-color-empty-area: var(--border);
+  background: var(--surface-3) !important;
+  color: var(--text-1) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .Toastify__spinner {
+    animation: none;
+  }
+}
 .Toastify__progress-bar,
 .Toastify__progress-bar--success,
 .Toastify__progress-bar--error,

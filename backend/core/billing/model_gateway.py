@@ -20,10 +20,12 @@ import httpx
 from ..exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
 from .budgets import BudgetError, BudgetInsufficientError
 from .credential_safety import scrub_model_config
+from .dependency_lock import verify_dependency_lock
 from .mcp_broker import McpToolsBroker
 from .model_dispatch import MODEL_ATTEMPT_HEADER, ModelHTTPResult, OpenRouterDispatcher
 from .openrouter_quotes import resolve_model_slug
 from .operation_pricing import ChargePolicy, UnpricedOperationError
+from .package_broker import PackageBroker
 from .protected_credentials import (
     MCP_CREDENTIAL_REF_FIELD,
     MCP_CREDENTIAL_REVISION_FIELD,
@@ -171,6 +173,8 @@ class ModelGateway:
         self._sandbox: SandboxControl | None = None
         self._tools: McpToolsBroker | None = None
         self._evaluator: RemoteEvaluatorBroker | None = None
+        self._packages: PackageBroker | None = None
+        self._package_token = secrets.token_urlsafe(32)
         self._evaluator_token = secrets.token_urlsafe(32)
         self._tool_token = secrets.token_urlsafe(32)
         self._control_token = secrets.token_urlsafe(32)
@@ -250,7 +254,12 @@ class ModelGateway:
                     and gateway._evaluator is not None
                     and secrets.compare_digest(token, gateway._evaluator_token)
                 )
-                if route is None and not is_tools and not is_evaluator:
+                is_packages = (
+                    self.path == "/v1/_packages"
+                    and gateway._packages is not None
+                    and secrets.compare_digest(token, gateway._package_token)
+                )
+                if route is None and not is_tools and not is_evaluator and not is_packages:
                     self._error(401, "unauthorized", "Unknown scoped model route.")
                     return
                 if self.path == "/v1/_budget/recovery-seed-complete":
@@ -274,7 +283,9 @@ class ModelGateway:
                     if not isinstance(body, dict):
                         raise TypeError("A JSON object is required.")
                     response = (
-                        gateway._evaluator.dispatch(body)
+                        gateway._packages.dispatch(body)
+                        if is_packages
+                        else gateway._evaluator.dispatch(body)
                         if is_evaluator
                         else gateway._tools.dispatch(body)
                         if is_tools
@@ -567,11 +578,16 @@ class ModelGateway:
         route = self._routes.get(token)
         is_tools = self._tools is not None and secrets.compare_digest(token, self._tool_token)
         is_evaluator = self._evaluator is not None and secrets.compare_digest(token, self._evaluator_token)
-        if route is None and not is_tools and not is_evaluator:
+        is_packages = self._packages is not None and secrets.compare_digest(token, self._package_token)
+        if route is None and not is_tools and not is_evaluator and not is_packages:
             raise ValueError("Unknown scoped model route.")
         if path == "/v1/_budget/state":
             snapshot = self._budget_state()
             return ModelHTTPResult(200, "application/json", json.dumps(snapshot, default=str).encode())
+        if is_packages:
+            if path != "/v1/_packages":
+                raise ValueError("The package capability can only fetch its registered artifacts.")
+            return self._packages.dispatch(body)
         if path == "/v1/_budget/recovery-seed-complete":
             if body:
                 raise ValueError("Recovery marker body must be empty.")
@@ -630,6 +646,7 @@ class ModelGateway:
             "_skynet_target_route",
             "_skynet_tools_route",
             "_skynet_evaluator_route",
+            "_skynet_packages_route",
             "_budget_gateway_descriptor",
         ):
             result.pop(key, None)
@@ -672,6 +689,29 @@ class ModelGateway:
             if isinstance(result.get(key), dict):
                 models.append((result[key], role))
         scorer = result.get("scorer")
+        if isinstance(scorer, dict) and scorer.get("kind", "python") == "python":
+            lock_document = scorer.get("dependency_lock")
+            registry = result.pop("dependency_registry", None)
+            if lock_document is not None:
+                if self._descriptor is None:
+                    raise ValueError("Package installation requires the protected sandbox profile.")
+                lock = verify_dependency_lock(
+                    lock_document,
+                    image=self._descriptor["image"],
+                    code=str(scorer.get("metric_code") or ""),
+                )
+                registry = lock.registry_url
+                artifacts = [wheel.model_dump(mode="json") for wheel in lock.artifacts]
+            else:
+                artifacts = None
+            if registry is not None:
+                self._packages = PackageBroker(
+                    registry,
+                    check_admission=self.runtime.check_admission,
+                    allow_private=allow_private_tools,
+                    artifacts=artifacts,
+                )
+                result["_skynet_packages_route"] = {"url": self.url, "token": self._package_token}
         if isinstance(scorer, dict) and scorer.get("kind") == "remote":
             if any(
                 field in scorer
@@ -757,3 +797,4 @@ class ModelGateway:
             self._routes.clear()
             self._tools = None
             self._evaluator = None
+            self._packages = None

@@ -3,10 +3,12 @@
 import { scorerCallsModel } from "../lib/scorer-dependencies";
 
 import {
-  inferExecutionKind,
+  restoreExecutionMode,
   resolveExecutionKind,
   type ExecutionMode,
 } from "../lib/execution-intent";
+import { resolveScorerDependencies } from "@/shared/lib/api";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
@@ -19,6 +21,7 @@ import type {
   BlackboxHarness,
   BlackboxRunRequest,
   BlackboxScorer,
+  ScorerDependencyLock,
   BlackboxTarget,
   ModelConfig,
   ScorerDryRunResponse,
@@ -240,8 +243,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [objective, setObjective] = useState("");
   const [background, setBackground] = useState("");
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("auto");
-  const inferredTargetKind = inferExecutionKind(objective);
-  const targetKind = resolveExecutionKind(executionMode, objective);
+  const targetKind = resolveExecutionKind(executionMode);
   const setTargetKind = useCallback((kind: "text" | "agent") => setExecutionMode(kind), []);
   const [harness, setHarness] = useState<BlackboxHarness>("pi");
   // The model the agent harness runs on: what the run optimizes for, and no
@@ -315,6 +317,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
   const [scorerInstall, setScorerInstall] = useState("");
+  const [scorerPackages, setScorerPackages] = useState("");
+  const [scorerDependencyLock, setScorerDependencyLock] = useState<ScorerDependencyLock | null>(
+    null,
+  );
   // A metric is any function; only one that calls `llm()` needs a model, and
   // the code says whether it does.
   const [scorerModel, setScorerModel] = useState<ModelConfig>(emptyModelConfig());
@@ -479,7 +485,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerManuallyEdited(d.scorerManuallyEdited || !!d.metricCode.trim());
     setObjective(d.objective);
     setBackground(d.background);
-    setExecutionMode(d.executionMode ?? d.targetKind);
+    setExecutionMode(restoreExecutionMode(d));
     setHarness(d.harness);
     setTargetModel(d.targetModel);
     setTargetTimeout(d.targetTimeout);
@@ -495,6 +501,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setMetricCode(d.metricCode);
     setScorerUrl(d.scorerUrl);
     setScorerInstall(d.scorerInstall);
+    setScorerPackages(d.scorerPackages ?? "");
+    setScorerDependencyLock(d.scorerDependencyLock ?? null);
     setScorerModel(d.scorerModel);
     setScorerModelMode(d.scorerModelMode);
     setStrategyMode(d.strategyMode);
@@ -540,6 +548,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // optimizer all come from the payload.
   const cloneRan = useRef(false);
   const [cloned, setCloned] = useState(false);
+  const [cloneReady, setCloneReady] = useState(false);
+  const cloneCompared = useRef(false);
   const [issue, setIssue] = useState<WizardIssue | null>(null);
   useEffect(() => {
     const cloneId = searchParams.get("clone");
@@ -624,6 +634,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           if (scorer) {
             setScorerKind(scorer.kind);
             if (scorer.metric_code) setMetricCode(scorer.metric_code);
+            if (scorer.dependency_lock) {
+              setScorerDependencyLock(scorer.dependency_lock);
+              setScorerPackages(scorer.dependency_lock.requirements.join("\n"));
+            }
             if (scorer.url) setScorerUrl(scorer.url);
             if (scorer.kind === "python" && scorer.install_command)
               setScorerInstall(scorer.install_command);
@@ -660,9 +674,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         // answered. The restore walk still stops at a stage that no longer
         // validates, so a stale clone lands where it needs repair.
         if (source) setPendingRestore({ stage: "review", furthest: "review" });
+        setCloneReady(true);
         toast.success(msg("submit.clone.success"));
       })
       .catch(() => {
+        draftsRef.current.compareClone("anything", null);
         toast.error(msg("submit.clone.failed"));
       });
   }, [searchParams]);
@@ -719,6 +735,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             metric_code: code,
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
             install_command: scorerInstall.trim() || null,
+            dependency_lock: scorerDependencyLock,
             model:
               scorerCallsModel(code) && resolvedScorerModel?.name.trim()
                 ? prepareModelConfig(resolvedScorerModel)
@@ -730,7 +747,15 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             secret: scorerSecret.trim() || undefined,
             timeout_seconds: SCORER_TIMEOUT_SECONDS,
           },
-    [scorerKind, metricCode, scorerUrl, scorerSecret, scorerInstall, resolvedScorerModel],
+    [
+      scorerKind,
+      metricCode,
+      scorerUrl,
+      scorerSecret,
+      scorerInstall,
+      scorerDependencyLock,
+      resolvedScorerModel,
+    ],
   );
 
   const buildTarget = (): BlackboxTarget =>
@@ -780,14 +805,14 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     const selectedRuntime = engineCatalog?.proposer_runtimes.find(
       (runtime) => runtime.id === proposerRuntime,
     );
-    // Evaluation, final execution checks and the run use separate metered sessions.
+    // Two readiness checks, the run, and Python package resolution have separate coverage.
     return projectCostBracket({
       autoLevel: "",
       maxFullEvals: "",
       maxMetricCalls: String(maxScorerRuns),
       datasetRows: Math.max(1, parsedCases?.rowCount ?? 0),
       modelRoles,
-      runtime: runtimeCostProjection(selectedRuntime?.cost, 3),
+      runtime: runtimeCostProjection(selectedRuntime?.cost, scorerKind === "python" ? 4 : 3),
     });
   }, [
     effectiveReflectionModel,
@@ -798,6 +823,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     catalog,
     engineCatalog,
     maxScorerRuns,
+    scorerKind,
     parsedCases?.rowCount,
   ]);
   const tokenSource = aggregateTokenSource([
@@ -839,7 +865,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             : { mode: "auto" },
       proposer_runtime: proposerRuntime,
       target: buildTarget(),
-      task_model_config: targetKind === "agent" ? prepareModelConfig(targetModel) : undefined,
+      task_model_config:
+        targetKind === "agent"
+          ? prepareModelConfig(proposerModelConfig(targetModel, true))
+          : undefined,
       reflection_model_config: reflection,
       token_source: tokenSource,
       is_private: isPrivate,
@@ -885,10 +914,61 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       const attempt = ++dryRunAttemptRef.current;
       const navigation = navigationRevisionRef.current;
       const requestPayload = buildSubmissionPayload(overrideCode);
-      const requestIdentity = preflightIdentity("anything", requestPayload);
-      const completed = preflight.reusable(scope, requestPayload);
-      if (!completed) setDryRun({ status: "running" });
+      const initialIdentity = preflight.identity;
+      let completed: WizardPreflightResponse | null | undefined;
+      preflight.progress.start();
+      setDryRun({ status: "running" });
       try {
+        if (requestPayload.scorer.kind === "python") {
+          const code = requestPayload.scorer.metric_code ?? "";
+          const requirements = scorerPackages
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean);
+          const digest = Array.from(
+            new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code))),
+          )
+            .map((byte) => byte.toString(16).padStart(2, "0"))
+            .join("");
+          const lock = requestPayload.scorer.dependency_lock;
+          if (
+            !lock ||
+            lock.code_sha256 !== digest ||
+            JSON.stringify(lock.requirements) !== JSON.stringify(requirements)
+          ) {
+            const currentBudget = await budgetSession.ensure();
+            preflight.progress.phase("dependencies");
+            const resolved = await resolveScorerDependencies({
+              code,
+              requirements,
+              execution_budget_id: currentBudget.id,
+              execution_budget_revision: currentBudget.revision,
+            });
+            await budgetSession.adopt(resolved.budget);
+            if (
+              !mountedRef.current ||
+              attempt !== dryRunAttemptRef.current ||
+              navigation !== navigationRevisionRef.current ||
+              !preflight.isCurrent(initialIdentity)
+            ) {
+              throw new DOMException("Dependency resolution superseded", "AbortError");
+            }
+            if (!resolved.ok || !resolved.dependency_lock) {
+              throw new Error(
+                resolved.error ??
+                  msg(
+                    resolved.preview_status === "pending"
+                      ? "submit.preflight.usage_pending"
+                      : "submit.preflight.failed",
+                  ),
+              );
+            }
+            requestPayload.scorer.dependency_lock = resolved.dependency_lock;
+            setScorerDependencyLock(resolved.dependency_lock);
+          }
+        }
+        const requestIdentity = preflightIdentity("anything", requestPayload);
+        completed = preflight.reusable(scope, requestPayload);
         const response = completed ?? (await preflight.run(scope, requestPayload));
         const error =
           response.checks.find((check) => check.status === "failed")?.message ??
@@ -923,7 +1003,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           setEvaluatorEvidence(evidence);
           setScorerValidation(outcome);
         }
+        preflight.progress.finish(response.status, undefined, response);
         return { response, evidence, outcome };
+      } catch (error) {
+        preflight.progress.finish("failed", error instanceof Error ? error.message : msg("submit.preflight.failed"));
+        throw error;
       } finally {
         if (!completed && mountedRef.current && attempt === dryRunAttemptRef.current)
           setDryRun((current) => (current.status === "running" ? { status: "idle" } : current));
@@ -936,6 +1020,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       resolvedScorerModel,
       metricCode,
       scorerKind,
+      scorerPackages,
+      budgetSession,
     ],
   );
   const runDryRun = useCallback(
@@ -969,6 +1055,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   // Restored or cloned authored artifacts must survive the first render before hydration.
   const interviewPossible =
+    !drafts.offerPending &&
     codeAssistMode === "auto" &&
     !cloned &&
     !seedManuallyEdited &&
@@ -1045,7 +1132,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     metricValidation: scorerValidation,
     runSignatureValidation: noSeedValidation,
     runMetricValidation: noSeedValidation,
-    seedEnabled: interview.resolved,
+    seedEnabled: !drafts.offerPending && interview.resolved,
     interviewBrief: interview.confirmedBrief,
     blackbox: authoringContext,
     model: interview.model,
@@ -1214,19 +1301,20 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     const completed = preflight.reusable(scope);
     if (completed) return completed;
     const navigation = navigationRevisionRef.current;
-    const identity = preflight.identity;
+    let identity = preflight.identity;
     const t = beginValidationToast(
-      toast,
+      preflight.feedback,
       `wizard-validate-${++validationAttemptRef.current}`,
       msg("submit.validation.toast.running"),
     );
     validationToastRef.current = t;
     try {
-      const { response } = await performDryRun(undefined, scope);
+      const { response, evidence } = await performDryRun(undefined, scope);
+      identity = evidence.identity;
       if (
         !mountedRef.current ||
         navigation !== navigationRevisionRef.current ||
-        !preflight.isCurrent(identity)
+        !preflight.isCurrent(evidence.identity)
       ) {
         t.obsolete(msg("submit.validation.toast.obsolete"));
         return null;
@@ -1239,7 +1327,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         return response;
       }
       if (response.status === "pending") {
-        t.fail(msg(preflightPendingMessageKey(response)));
+        t.pending(msg(preflightPendingMessageKey(response)));
         return null;
       }
       const failure = response.checks.find((check) => check.status === "failed");
@@ -1422,6 +1510,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       metricCode,
       scorerUrl,
       scorerInstall,
+      scorerPackages,
+      scorerDependencyLock,
       scorerModel: safeScorerModel,
       scorerModelMode,
       strategyMode,
@@ -1435,6 +1525,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       maxCostCredits,
       setupSpent,
     };
+    if (cloneReady && !pendingRestore && !cloneCompared.current) {
+      cloneCompared.current = true;
+      draftsRef.current.compareClone("anything", snapshot);
+    }
     draftsRef.current.publish("anything", snapshot, isMeaningfulAnythingDraft(snapshot));
   });
   // Stage boundaries are the one place the debounce is skipped: a refresh right
@@ -1506,7 +1600,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setTargetKind,
     executionMode,
     setExecutionMode,
-    inferredTargetKind,
     harness,
     setHarness,
     targetModel,
@@ -1542,6 +1635,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerSecret: updateScorerSecret,
     scorerInstall,
     setScorerInstall,
+    scorerPackages,
+    setScorerPackages,
+    scorerDependencyLock,
+    setScorerDependencyLock,
     scorerModel,
     setScorerModel,
     scorerUsesModel,

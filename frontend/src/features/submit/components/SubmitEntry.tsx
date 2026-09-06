@@ -54,10 +54,12 @@ export function SubmitEntry() {
   const {
     api: drafts,
     offerPending,
+    comparingClone,
     startNew,
     accountReady,
     accountId,
   } = useWizardDraftController({
+    cloning,
     onContinue: (next) => {
       wizardState?.reset();
       setWizardKey((k) => k + 1);
@@ -80,7 +82,7 @@ export function SubmitEntry() {
   });
 
   const choose = (next: Recipe) => {
-    if (offerPending) {
+    if (offerPending && !comparingClone) {
       // Entering a workflow past a pending offer is an explicit start-new:
       // the saved draft goes through the same reset before a wizard mounts.
       void startNew().then((ok) => {
@@ -113,11 +115,15 @@ export function SubmitEntry() {
               // shorter and scrolls.
               className="mx-auto flex w-full min-w-0 max-w-4xl flex-col justify-center pb-6 md:min-h-[calc(100dvh-var(--header-height,53px)-5rem)] md:pb-8"
             >
-              <RecipePicker current={recipe} onChoose={choose} startsNew={offerPending} />
+              <RecipePicker
+                current={recipe}
+                onChoose={choose}
+                startsNew={offerPending && !comparingClone}
+              />
             </motion.div>
           )}
         </AnimatePresence>
-        {recipe && accountReady && !offerPending && (
+        {recipe && accountReady && (!offerPending || comparingClone) && (
           <motion.div
             variants={variants}
             initial={false}
@@ -125,7 +131,7 @@ export function SubmitEntry() {
             onAnimationComplete={(definition) => {
               if (definition === "out" && picking) setShown("picker");
             }}
-            className={shown === "wizard" ? undefined : "hidden"}
+            className={shown === "wizard" && !comparingClone ? undefined : "hidden"}
           >
             {recipe === "anything" ? (
               <BlackboxWizard

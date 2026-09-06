@@ -258,6 +258,8 @@ pathable==0.6.0
     # via jsonschema-path
 pgvector==0.4.2
     # via skynet (pyproject.toml)
+pip==26.2.1
+    # via skynet
 platformdirs==4.10.0
     # via fastmcp-slim
 prometheus-client==0.25.0

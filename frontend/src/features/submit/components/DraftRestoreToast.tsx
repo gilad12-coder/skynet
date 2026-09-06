@@ -34,7 +34,7 @@ export function DraftRestoreToast({
 
   return (
     <div className="flex w-96 min-w-0 max-w-full flex-col gap-3" data-tutorial="submit-draft-offer">
-      <p className="text-[14px] font-semibold leading-5 text-foreground">{title}</p>
+      <p className="text-center text-[14px] font-semibold leading-5 text-foreground">{title}</p>
       {failed && failureText && (
         <p role="alert" className="text-pretty text-[14px] leading-relaxed text-destructive">
           {failureText}

@@ -1,5 +1,8 @@
 "use client";
 
+import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+
 import { useRef, useState } from "react";
 import { ChatText, Check, PencilSimple, Square, X } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -184,7 +187,10 @@ export function ServeChat({
                   {run.creditsCharged != null && (
                     <p className="mt-1 text-[0.6875rem] text-muted-foreground">
                       {formatMsg("optimizations.serve.request_spent", {
-                        credits: run.creditsCharged,
+                        credits: formatBudgetAmount(
+                          String(run.creditsCharged),
+                          getActiveIntlLocale(),
+                        ),
                       })}
                     </p>
                   )}

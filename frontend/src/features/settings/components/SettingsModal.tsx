@@ -123,6 +123,7 @@ import { useSettingsModal } from "../hooks/use-settings-modal";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { ShortcutRecorder } from "./ShortcutRecorder";
 import { PrivacyTab } from "./PrivacyTab";
+import { PackageRegistrySetting } from "./PackageRegistrySetting";
 import { SecurityTab } from "./SecurityTab";
 import { SettingsRow } from "@/shared/ui/settings-row";
 
@@ -160,6 +161,7 @@ function WizardTab() {
           </SelectContent>
         </Select>
       </SettingsRow>
+      <PackageRegistrySetting />
     </div>
   );
 }

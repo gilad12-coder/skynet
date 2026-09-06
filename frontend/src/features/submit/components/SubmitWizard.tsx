@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
+import { ValidationProgressModal } from "./ValidationProgressModal";
 import { msg } from "@/shared/lib/messages";
 
 import { TotalBudgetCard } from "./TotalBudgetCard";
@@ -98,7 +99,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       onPreviewExpandedChange={setDataPreviewExpanded}
     />,
     <CodeStep key="code" w={w} part="code" />,
-    <SplitSection key="split" w={w} />,
+    <SplitSection key="split" w={w} totalRows={w.parsedDataset?.rowCount ?? 0} />,
   ];
   const optimizationPanels: readonly ReactNode[] = [
     <ParamsStep key="parameters" w={w} />,
@@ -194,6 +195,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
     <div
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
+      <ValidationProgressModal preflight={w.preflight} />
       <SubmitStepper w={w} />
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">

@@ -175,6 +175,9 @@ RUN if [ "$PKG_MANAGER" = "pip" ]; then \
 
 ARG GIT_SHA=unknown
 
+# Login shells must retain the same interpreter used to install the pinned dependencies.
+RUN printf '%s\n' 'export PATH="/app/.venv/bin:$PATH"' > /etc/profile.d/skynet-runtime.sh
+
 USER 1001
 
 ENV PATH="/app/.venv/bin:$PATH"
