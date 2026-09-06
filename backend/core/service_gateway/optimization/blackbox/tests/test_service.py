@@ -621,9 +621,8 @@ def test_unavailable_native_recipe_fails_before_building_a_scorer(
         ({"mode": "single", "engine": "autoresearch"}, False),
     ],
 )
-@pytest.mark.parametrize("train_fraction", [0.0, 0.01])
 def test_empty_training_split_rejected_only_for_meta_harness_recipes(
-    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str], requires_train: bool, train_fraction: float
+    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str], requires_train: bool
 ) -> None:
     """Protect Meta-Harness from dropping validation-only data without relocating any cases.
 
@@ -631,14 +630,13 @@ def test_empty_training_split_rejected_only_for_meta_harness_recipes(
         monkeypatch: Pytest fixture for deterministic runtime capabilities.
         strategy: Upstream recipe being validated.
         requires_train: Whether the recipe includes Meta-Harness.
-        train_fraction: Fraction that rounds to zero training cases.
     """
     monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
     monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
     payload = _payload(
         strategy=strategy,
         max_cost_credits=100,
-        split_fractions={"train": train_fraction, "val": 0.8, "test": 0.2 - train_fraction},
+        split_fractions={"train": 0.0, "val": 0.8, "test": 0.2},
     )
     before = payload.model_dump()
 
@@ -657,6 +655,26 @@ def test_empty_training_split_rejected_only_for_meta_harness_recipes(
             run_blackbox_optimization(payload, artifact_id="empty-training")
     else:
         validate_blackbox_payload(payload)
+
+    assert payload.model_dump() == before
+
+
+def test_smallest_training_share_keeps_one_case_for_meta_harness(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give a training share too small to round to a case one case, so Meta-Harness accepts it.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+    """
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
+    payload = _payload(
+        strategy={"mode": "single", "engine": "meta_harness"},
+        max_cost_credits=100,
+        split_fractions={"train": 0.01, "val": 0.8, "test": 0.19},
+    )
+    before = payload.model_dump()
+
+    validate_blackbox_payload(payload)
 
     assert payload.model_dump() == before
 

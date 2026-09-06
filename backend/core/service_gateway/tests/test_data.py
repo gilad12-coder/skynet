@@ -38,16 +38,30 @@ def _items(n: int) -> list[int]:
 @pytest.mark.parametrize(
     ("n", "train_f", "val_f", "test_f", "exp_train", "exp_val", "exp_test"),
     [
-        (10, 0.7, 0.15, 0.15, 7, 1, 2),
+        (10, 0.7, 0.15, 0.15, 7, 2, 1),
         (100, 0.7, 0.15, 0.15, 70, 15, 15),
         (1, 1.0, 0.0, 0.0, 1, 0, 0),
         (10, 0.8, 0.1, 0.1, 8, 1, 1),
         (10, 0.5, 0.5, 0.0, 5, 5, 0),
+        (4, 0.85, 0.15, 0.0, 3, 1, 0),
+        (101, 0.8, 0.2, 0.0, 81, 20, 0),
+        (4, 0.9, 0.05, 0.05, 2, 1, 1),
+        (2, 0.7, 0.15, 0.15, 1, 1, 0),
     ],
-    ids=["10-std", "100-std", "1-all-train", "10-80-10-10", "10-50-50-0"],
+    ids=[
+        "10-std",
+        "100-std",
+        "1-all-train",
+        "10-80-10-10",
+        "10-50-50-0",
+        "4-val-keeps-one",
+        "101-no-test",
+        "4-one-each",
+        "2-too-few",
+    ],
 )
 def test_split_examples_counts(n, train_f, val_f, test_f, exp_train, exp_val, exp_test) -> None:
-    """Split counts match expectations across multiple dataset sizes."""
+    """Every example lands in a split; a non-zero fraction gets at least one and a zero fraction none."""
     items = _items(n)
     fractions = _fractions(train_f, val_f, test_f)
 
@@ -59,8 +73,8 @@ def test_split_examples_counts(n, train_f, val_f, test_f, exp_train, exp_val, ex
 
 
 def test_split_examples_too_small_for_nonzero_val_raises() -> None:
-    """Datasets too small to allocate a non-empty val split raise ``ServiceError``."""
-    items = _items(3)
+    """A single example goes to train, so a non-zero val fraction raises ``ServiceError``."""
+    items = _items(1)
     fractions = _fractions(0.7, 0.15, 0.15)
 
     with pytest.raises(ServiceError, match="too small for a val split"):
@@ -207,9 +221,7 @@ class PredictDecade(dspy.Signature):
 """
     sig = load_signature_from_code(code)
 
-    assert not any(
-        isinstance(f.annotation, typing.ForwardRef) for f in sig.model_fields.values()
-    )
+    assert not any(isinstance(f.annotation, typing.ForwardRef) for f in sig.model_fields.values())
     # The loader must preserve the user's typing.List form verbatim; list[str]
     # is a distinct object that compares unequal, so UP006 must not rewrite this.
     assert sig.model_fields["subcategories"].annotation == typing.List[str]  # noqa: UP006
@@ -447,6 +459,7 @@ def test_is_signature_field_detects_via_dspy_field_type_marker() -> None:
 
 def test_is_signature_field_detects_via_json_schema_extra() -> None:
     """Detection via the ``json_schema_extra`` schema dict."""
+
     class _SchemaField:
         json_schema_extra = {"__dspy_field_type": "output"}
 

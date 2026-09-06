@@ -61,6 +61,7 @@ import {
 } from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { suggestedRunName } from "../lib/budget";
+import { splitExampleCounts } from "../lib/split-example-counts";
 import { detectLanguage, looksLikeCode, type SeedLanguage } from "../lib/seed-format";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import type { WizardIssue } from "../lib/wizard-issue";
@@ -1007,7 +1008,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         preflight.progress.finish(response.status, undefined, response);
         return { response, evidence, outcome };
       } catch (error) {
-        preflight.progress.finish("failed", error instanceof Error ? error.message : msg("submit.preflight.failed"));
+        preflight.progress.finish(
+          "failed",
+          error instanceof Error ? error.message : msg("submit.preflight.failed"),
+        );
         throw error;
       } finally {
         if (!completed && mountedRef.current && attempt === dryRunAttemptRef.current)
@@ -1173,7 +1177,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const selectedEngine = engineCatalog?.engines.find((e) => e.id === engine) ?? null;
   const trainingCaseCount = parsedCases?.rows.length
-    ? Math.floor(parsedCases.rows.length * split.train)
+    ? splitExampleCounts(parsedCases.rows.length, split).train
     : null;
   const autoEngineLabels = useMemo<string[]>(
     () =>
