@@ -3558,7 +3558,6 @@
   "submit.budget.estimate_preliminary_note": "מתעדכנת ככל שמוסיפים מקרים ובוחרים מודלים.",
   "submit.budget.estimate_note": "הקצה הגבוה מניח פרומפטים ופלטים ארוכים בכל קריאה, לא ריצה טיפוסית.",
   "submit.budget.estimate_note_runtime": "כולל את סביבת ההרצה. הקצה הגבוה מניח פרומפטים ופלטים ארוכים בכל קריאה, לא ריצה טיפוסית.",
-  "submit.budget.over_limit": "אם השימוש צפוי לחרוג מ-{limit} קרדיטים, הריצה מושהית ומבקשת להעלות את התקרה. לעולם לא תחויבו ביותר מהתקרה.",
   "submit.budget.limit_too_low": "יש להגדיל את תקרת ההוצאה. גם ההערכה הנמוכה היא {low} קרדיטים, מעל {limit} שהגדרתם.",
   "submit.budget.remaining": "נותר בתקרה הזו",
   "submit.budget.spent": "הוצא עד כה",

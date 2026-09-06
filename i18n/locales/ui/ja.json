@@ -3558,7 +3558,6 @@
   "submit.budget.estimate_preliminary_note": "ケースの追加やモデルの選択に応じて更新されます。",
   "submit.budget.estimate_note": "上限値は、毎回の呼び出しで長いプロンプトと出力を想定したもので、一般的な実行ではありません。",
   "submit.budget.estimate_note_runtime": "実行環境を含みます。上限値は、毎回の呼び出しで長いプロンプトと出力を想定したもので、一般的な実行ではありません。",
-  "submit.budget.over_limit": "使用量が{limit}クレジットを超える見込みになると、実行は一時停止し、上限の引き上げを求めます。上限を超えて請求されることはありません。",
   "submit.budget.limit_too_low": "支出上限を引き上げてください。低い見積もりでも{low}クレジットで、設定した{limit}を上回ります。",
   "submit.budget.remaining": "この上限の残り",
   "submit.budget.spent": "これまでの支出",

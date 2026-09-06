@@ -3558,7 +3558,6 @@
   "submit.budget.estimate_preliminary_note": "Se met à jour à mesure que vous ajoutez des cas et choisissez des modèles.",
   "submit.budget.estimate_note": "La borne haute suppose des prompts et des sorties longs à chaque appel, pas une exécution typique.",
   "submit.budget.estimate_note_runtime": "Inclut l'environnement d'exécution. La borne haute suppose des prompts et des sorties longs à chaque appel, pas une exécution typique.",
-  "submit.budget.over_limit": "Si la consommation est en passe de dépasser {limit} crédits, l'exécution se met en pause et vous demande de relever le plafond. Vous n'êtes jamais facturé au-delà du plafond.",
   "submit.budget.limit_too_low": "Augmentez le plafond de dépenses. Même l'estimation basse atteint {low} crédits, au-dessus des {limit} définis.",
   "submit.budget.remaining": "Restant dans ce plafond",
   "submit.budget.spent": "Dépensé jusqu'ici",

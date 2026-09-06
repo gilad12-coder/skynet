@@ -208,8 +208,6 @@ export function TotalBudgetCard({
   const fieldHint = fieldError == null && parsed.kind === "empty" ? minimumMessage : null;
   const fieldMessage = fieldError ?? fieldHint;
 
-  const overLimit =
-    !budgetUncapped && maxCostCredits != null && bracket.highCredits > maxCostCredits;
   const estimateLabel = msg(
     preliminary
       ? "submit.budget.estimate_preliminary"
@@ -220,9 +218,6 @@ export function TotalBudgetCard({
   const estimateNotes = [
     preliminary ? msg("submit.budget.estimate_preliminary_note") : null,
     msg(runtimeAtCost ? "submit.budget.estimate_note_runtime" : "submit.budget.estimate_note"),
-    overLimit
-      ? formatMsg("submit.budget.over_limit", { limit: credits(maxCostCredits ?? 0) })
-      : null,
   ]
     .filter(Boolean)
     .join(" ");
@@ -466,17 +461,19 @@ export function TotalBudgetCard({
       description={msg(
         budgetUncapped ? "submit.budget.explainer_uncapped" : "submit.budget.explainer",
       )}
+      trailing={
+        <Segmented<"limit" | "uncapped">
+          compact
+          label={msg("submit.budget.label")}
+          value={budgetUncapped ? "uncapped" : "limit"}
+          onChange={(value) => setBudgetUncapped(value === "uncapped")}
+          options={[
+            { value: "limit", label: msg("submit.budget.mode.limit") },
+            { value: "uncapped", label: msg("submit.budget.mode.uncapped") },
+          ]}
+        />
+      }
     >
-      <Segmented<"limit" | "uncapped">
-        label={msg("submit.budget.label")}
-        value={budgetUncapped ? "uncapped" : "limit"}
-        onChange={(value) => setBudgetUncapped(value === "uncapped")}
-        options={[
-          { value: "limit", label: msg("submit.budget.mode.limit") },
-          { value: "uncapped", label: msg("submit.budget.mode.uncapped") },
-        ]}
-      />
-
       {budgetUncapped ? (
         <p
           className="flex items-start gap-2 rounded-lg border border-[#C8A882]/45 bg-[#C8A882]/10 px-3.5 py-3 text-xs leading-relaxed text-[#3D2E22]"

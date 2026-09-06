@@ -3558,7 +3558,6 @@
   "submit.budget.estimate_preliminary_note": "Wird aktualisiert, sobald du Fälle hinzufügst und Modelle wählst.",
   "submit.budget.estimate_note": "Das obere Ende geht von langen Prompts und Ausgaben bei jedem Aufruf aus, nicht von einem typischen Lauf.",
   "submit.budget.estimate_note_runtime": "Enthält die Ausführungsumgebung. Das obere Ende geht von langen Prompts und Ausgaben bei jedem Aufruf aus, nicht von einem typischen Lauf.",
-  "submit.budget.over_limit": "Wenn der Verbrauch voraussichtlich {limit} Credits übersteigt, pausiert der Lauf und bittet dich, das Limit zu erhöhen. Dir wird nie mehr als das Limit berechnet.",
   "submit.budget.limit_too_low": "Erhöhe das Ausgabenlimit. Selbst die niedrige Schätzung liegt bei {low} Credits, über den festgelegten {limit}.",
   "submit.budget.remaining": "Verbleibend in diesem Limit",
   "submit.budget.spent": "Bisher ausgegeben",

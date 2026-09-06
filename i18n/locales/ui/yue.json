@@ -3558,7 +3558,6 @@
   "submit.budget.estimate_preliminary_note": "隨住你加入案例同揀模型而更新。",
   "submit.budget.estimate_note": "上限值假設每次調用都用長嘅提示同輸出，唔係典型嘅運行。",
   "submit.budget.estimate_note_runtime": "包括執行環境。上限值假設每次調用都用長嘅提示同輸出，唔係典型嘅運行。",
-  "submit.budget.over_limit": "如果用量預計會超過 {limit} credits，運行就會暫停並要求你提高上限。永遠唔會收你多過上限嘅費用。",
   "submit.budget.limit_too_low": "請提高支出上限。就算係較低嘅估算都有 {low} credits，高過你設定嘅 {limit}。",
   "submit.budget.remaining": "呢個上限內剩返",
   "submit.budget.spent": "到目前為止用咗",
