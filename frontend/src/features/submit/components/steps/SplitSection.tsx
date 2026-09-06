@@ -75,20 +75,16 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
         )}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            {splitMode === "auto" && (
-              <span className="text-sm text-muted-foreground">
-                {msg("submit.split.rationale_title")}
-              </span>
-            )}
             <SplitRecommendationHelp w={w} />
           </div>
           <div className="flex items-center gap-2">
-            {splitMode === "manual" && (
+            <div className="inline-flex rounded-lg bg-muted p-0.5">
               <Button
                 type="button"
-                variant="ghost"
+                variant={splitMode === "auto" ? "secondary" : "ghost"}
                 size="sm"
                 className="min-h-[44px]"
+                aria-pressed={splitMode === "auto"}
                 onClick={() => {
                   setSplitMode("auto");
                   setEditingState(false);
@@ -96,7 +92,17 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
               >
                 {msg("submit.split.mode_auto")}
               </Button>
-            )}
+              <Button
+                type="button"
+                variant={splitMode === "manual" ? "secondary" : "ghost"}
+                size="sm"
+                className="min-h-[44px]"
+                aria-pressed={splitMode === "manual"}
+                onClick={() => setEditing(true)}
+              >
+                {msg("submit.split.mode_manual")}
+              </Button>
+            </div>
             <Button
               type="button"
               variant="outline"
@@ -131,7 +137,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
               >
                 <span className="inline-block w-2 h-2 rounded-full bg-[#3D2E22]" />
                 <HelpTip text={tip("data.split.train")}>
-                  {msg("auto.features.submit.components.steps.paramsstep.6")}
+                  {msg("submit.split.label_train")}
                 </HelpTip>
               </Label>
               {editing ? (
@@ -167,7 +173,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
               >
                 <span className="inline-block w-2 h-2 rounded-full bg-[#C8A882]" />
                 <HelpTip text={tip("data.split.val")}>
-                  {msg("auto.features.submit.components.steps.paramsstep.7")}
+                  {msg("submit.split.label_val")}
                 </HelpTip>
               </Label>
               {editing ? (
@@ -203,7 +209,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
               >
                 <span className="inline-block w-2 h-2 rounded-full bg-[#8C7A6B]" />
                 <HelpTip text={tip("data.split.test")}>
-                  {msg("auto.features.submit.components.steps.paramsstep.8")}
+                  {msg("submit.split.label_test")}
                 </HelpTip>
               </Label>
               {editing ? (
