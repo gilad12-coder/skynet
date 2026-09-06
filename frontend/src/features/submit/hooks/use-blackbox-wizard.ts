@@ -380,6 +380,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const {
     maxCostCredits,
     setMaxCostCredits,
+    budgetUncapped,
+    setBudgetUncapped,
     session: budgetSession,
     setupSpent,
     availableCredits,
@@ -872,7 +874,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       reflection_model_config: reflection,
       token_source: tokenSource,
       is_private: isPrivate,
-      max_cost_credits: maxCostCredits ?? undefined,
+      max_cost_credits: budgetUncapped ? undefined : (maxCostCredits ?? undefined),
       estimated_credits_low: estimate.lowCredits,
       estimated_credits_high: estimate.highCredits,
     };
@@ -1213,7 +1215,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         return null;
       }
       case WIZARD_STAGE.evaluation: {
-        if (maxCostCredits == null) return fail("budget.invalid", "totalBudgetInput");
+        if (!budgetUncapped && maxCostCredits == null)
+          return fail("budget.invalid", "totalBudgetInput");
         if (targetKind === "agent") {
           if (!parsedCases?.rowCount)
             return fail("submit.blackbox.validation.cases_required", "bb-cases");
@@ -1681,6 +1684,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     tokenSource,
     maxCostCredits,
     setMaxCostCredits,
+    budgetUncapped,
+    setBudgetUncapped,
     budgetSession,
     setupSpent,
     availableCredits,

@@ -109,6 +109,7 @@ export function BlackboxReviewStep({
     costBracket,
     tokenSource,
     maxCostCredits,
+    budgetUncapped,
   } = w;
   const locale = getActiveIntlLocale();
   const bracket = chargeableBracket(costBracket, tokenSource);
@@ -340,7 +341,11 @@ export function BlackboxReviewStep({
           tip="submit.budget"
           onEdit={edit("evaluation", "totalBudgetInput")}
         >
-          {maxCostCredits != null ? credits(maxCostCredits) : msg("submit.budget.unset_short")}
+          {budgetUncapped
+            ? msg("submit.budget.uncapped_short")
+            : maxCostCredits != null
+              ? credits(maxCostCredits)
+              : msg("submit.budget.unset_short")}
           <span className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
             <span>
               {formatMsg("submit.budget.estimated_range", {

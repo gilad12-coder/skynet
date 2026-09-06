@@ -7,25 +7,36 @@ import type {
 export interface WizardBudgetDraft {
   executionBudgetRef?: ExecutionBudgetRef;
   budgetTotalCredits?: number | null;
+  budgetUncapped?: boolean;
   budgetCreateIdempotencyKey?: string;
   budgetCreateTotalCredits?: number;
+  budgetCreateUncapped?: boolean;
   submissionIdempotencyKey?: string;
   submissionFingerprint?: string;
 }
 
 export interface BudgetSessionDependencies {
   persist: (draft: WizardBudgetDraft) => Promise<void>;
-  create: (total: number, key: string, signal: AbortSignal) => Promise<ExecutionBudget>;
+  create: (
+    total: number,
+    key: string,
+    signal: AbortSignal,
+    uncapped: boolean,
+  ) => Promise<ExecutionBudget>;
   get: (id: string, signal: AbortSignal) => Promise<ExecutionBudget>;
   update: (
     id: string,
     total: number,
     revision: number,
     signal: AbortSignal,
+    uncapped: boolean,
   ) => Promise<ExecutionBudget>;
   changed: () => void;
   newKey?: () => string;
 }
+
+// The server keeps a total on every budget; a run without a limit never reads it.
+const UNCAPPED_PLACEHOLDER_TOTAL = 1;
 
 function errorNumber(error: unknown, key: string): number | null {
   if (!error || typeof error !== "object" || !("params" in error)) return null;
@@ -49,6 +60,11 @@ export function readBudgetDraft(raw: WizardBudgetDraft): WizardBudgetDraft {
     ...(Number.isInteger(raw.budgetCreateTotalCredits) && (raw.budgetCreateTotalCredits ?? 0) > 0
       ? { budgetCreateTotalCredits: raw.budgetCreateTotalCredits }
       : {}),
+    ...Object.fromEntries(
+      (["budgetUncapped", "budgetCreateUncapped"] as const)
+        .filter((key) => typeof raw[key] === "boolean")
+        .map((key) => [key, raw[key]]),
+    ),
     ...Object.fromEntries(
       (["budgetCreateIdempotencyKey", "submissionIdempotencyKey", "submissionFingerprint"] as const)
         .filter((key) => typeof raw[key] === "string" && raw[key])
@@ -87,6 +103,15 @@ export class ExecutionBudgetSession {
     void this.save().catch((error: unknown) => this.report(error));
   }
 
+  setUncapped(uncapped: boolean): void {
+    if (!this.active || (this.draft.budgetUncapped ?? false) === uncapped) return;
+    this.draft = { ...this.draft, budgetUncapped: uncapped };
+    this.error = null;
+    this.minimumTotalCredits = null;
+    this.deps.changed();
+    void this.save().catch((error: unknown) => this.report(error));
+  }
+
   detach(): void {
     this.active = false;
     this.controller.abort();
@@ -105,8 +130,12 @@ export class ExecutionBudgetSession {
   async ensure(): Promise<ExecutionBudget> {
     if (this.pending) await this.pending;
     return this.perform(async () => {
+      const uncapped = this.draft.budgetUncapped ?? false;
       const total = this.draft.budgetTotalCredits;
-      if (!Number.isInteger(total) || total == null || total < 1) throw new Error("budget.invalid");
+      if (!uncapped && (!Number.isInteger(total) || total == null || total < 1))
+        throw new Error("budget.invalid");
+      // A budget without a limit still carries a total; the server ignores it.
+      const wanted = uncapped ? (total ?? UNCAPPED_PLACEHOLDER_TOTAL) : total!;
       let budget: ExecutionBudget;
       if (this.draft.executionBudgetRef) {
         budget = await this.deps.get(this.draft.executionBudgetRef.id, this.controller.signal);
@@ -115,25 +144,28 @@ export class ExecutionBudgetSession {
           this.draft = {
             ...this.draft,
             budgetCreateIdempotencyKey: this.newKey(),
-            budgetCreateTotalCredits: total,
+            budgetCreateTotalCredits: wanted,
+            budgetCreateUncapped: uncapped,
           };
         }
         await this.save();
         this.assertActive();
         budget = await this.deps.create(
-          this.draft.budgetCreateTotalCredits ?? total,
+          this.draft.budgetCreateTotalCredits ?? wanted,
           this.draft.budgetCreateIdempotencyKey!,
           this.controller.signal,
+          this.draft.budgetCreateUncapped ?? false,
         );
       }
       await this.adopt(budget);
-      if (budget.total_credits !== total) {
+      if (budget.uncapped !== uncapped || (!uncapped && budget.total_credits !== wanted)) {
         try {
           budget = await this.deps.update(
             budget.id,
-            total,
+            uncapped ? budget.total_credits : wanted,
             budget.revision,
             this.controller.signal,
+            uncapped,
           );
         } catch (error) {
           await this.restoreRejectedTotal(error, budget);

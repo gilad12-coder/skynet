@@ -142,7 +142,7 @@ export function BlackboxWizard({
   const handleEvaluationNext = async () => {
     if (
       activeEvaluationStep === "budget" &&
-      !limitCoversEstimate(w.costBracket, w.tokenSource, w.maxCostCredits)
+      !limitCoversEstimate(w.costBracket, w.tokenSource, w.budgetUncapped ? null : w.maxCostCredits)
     )
       return;
     if (activeEvaluationPart < evaluationSteps.length - 1) {

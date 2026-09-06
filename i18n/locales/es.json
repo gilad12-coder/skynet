@@ -199,6 +199,7 @@
     "optimization.pause_not_pausable": "Una optimización solo puede pausarse después de que se guarde su primer punto de control; inténtalo de nuevo en un momento.",
     "optimization.pause_wrong_status": "Solo se pueden pausar las optimizaciones en ejecución; esta está en '{status}'.",
     "optimization.payload_unavailable": "La carga útil de la optimización no está disponible.",
+    "optimization.resume_budget_projected": "La ejecución va camino de costar unos {projected} créditos, por encima de su límite de {limit} créditos. Sube el límite de gasto por encima de {projected} créditos para continuar.",
     "optimization.resume_exhausted": "Esta optimización alcanzó su número máximo de intentos ({attempts}); ejecútala de nuevo en su lugar.",
     "optimization.resume_not_resumable": "Esta optimización no tiene ningún punto de reanudación guardado; ejecútala de nuevo en su lugar.",
     "optimization.resume_wrong_status": "Solo se pueden reanudar las optimizaciones que se detuvieron a mitad de ejecución; esta está en '{status}'.",

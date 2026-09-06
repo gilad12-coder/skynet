@@ -29,6 +29,7 @@ IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=1, ma
 
 class CreateExecutionBudgetRequest(BaseModel):
     total_credits: int = Field(ge=1, le=MAX_CREDITS, strict=True)
+    uncapped: bool = Field(default=False, strict=True)
 
 
 class UpdateExecutionBudgetRequest(CreateExecutionBudgetRequest):
@@ -38,6 +39,7 @@ class UpdateExecutionBudgetRequest(CreateExecutionBudgetRequest):
 class ExecutionBudgetResponse(BaseModel):
     id: str
     total_credits: int
+    uncapped: bool
     revision: int
     generation: int
     state: str
@@ -133,7 +135,9 @@ def create_execution_budgets_router(*, job_store: Any) -> APIRouter:
         """
         try:
             return budget_response(
-                ledger().create(user.username, request.total_credits, idempotency_key=idempotency_key)
+                ledger().create(
+                    user.username, request.total_credits, idempotency_key=idempotency_key, uncapped=request.uncapped
+                )
             )
         except BudgetError as error:
             raise budget_http_error(error) from error
@@ -171,7 +175,11 @@ def create_execution_budgets_router(*, job_store: Any) -> APIRouter:
         try:
             return budget_response(
                 ledger().update_total(
-                    budget_id, user.username, request.total_credits, expected_revision=request.expected_revision
+                    budget_id,
+                    user.username,
+                    request.total_credits,
+                    expected_revision=request.expected_revision,
+                    uncapped=request.uncapped,
                 )
             )
         except BudgetError as error:

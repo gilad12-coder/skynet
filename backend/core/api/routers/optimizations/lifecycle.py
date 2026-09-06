@@ -39,6 +39,7 @@ from ....models import (
     OptimizationSubmissionResponse,
 )
 from ....storage.usage import json_byte_size
+from ....worker.budget_probe import STOP_REASON_BUDGET_PROJECTED
 from ....worker.checkpoint_compat import CheckpointCompatibilityError
 from ...auth import AuthenticatedUser, get_authenticated_user
 from ...converters import parse_overview, status_to_job_status
@@ -47,6 +48,7 @@ from ...sharing_access import ShareRole
 from .._helpers import (
     enforce_storage_quota,
     filter_ids_at_least,
+    is_budget_stop,
     is_pausable,
     load_job_for_user,
     require_role_at_least,
@@ -512,13 +514,15 @@ def register_lifecycle_routes(
         """Resume a mid-run optimization in place from its saved GEPA checkpoint.
 
         Valid only when the run stopped after producing optimizer state — a
-        terminal ``failed``/``cancelled`` or manually ``paused`` status with a
-        saved checkpoint. Unlike retry/clone this creates no new run: the existing
-        row is flipped back to ``pending`` with its original id, seed and budget,
-        and a worker continues GEPA from the last completed iteration with no
-        budget double-spend. A ``failed``/``cancelled`` resume shares the attempt
-        cap with automatic pod-failure recovery; a manual ``paused`` resume is
-        exempt (it neither consumes an attempt nor is bounded by the cap).
+        terminal ``failed``/``cancelled``, manually ``paused``, or budget
+        ``stopped`` status with a saved checkpoint. Unlike retry/clone this
+        creates no new run: the existing row is flipped back to ``pending`` with
+        its original id, seed and budget, and a worker continues GEPA from the
+        last completed iteration with no budget double-spend. A
+        ``failed``/``cancelled`` resume shares the attempt cap with automatic
+        pod-failure recovery; a manual ``paused`` resume or a continuation past
+        the spending limit is exempt (it neither consumes an attempt nor is
+        bounded by the cap).
 
         Args:
             optimization_id: The optimization to resume.
@@ -530,16 +534,18 @@ def register_lifecycle_routes(
         Raises:
             DomainError: 404 (unknown / inaccessible), 403 (caller's share role
                 below ``editor``), 409 (not mid-run / no checkpoint / attempts
-                exhausted).
+                exhausted / spending limit still below the measured projection).
         """
         job_data, _role = require_role_at_least(job_store, optimization_id, current_user, ShareRole.editor)
 
         status = status_to_job_status(job_data.get("status", "pending"))
-        if status not in {
+        budget_stop = is_budget_stop(status, job_data)
+        resumable_status = status in {
             OptimizationStatus.failed,
             OptimizationStatus.cancelled,
             OptimizationStatus.paused,
-        }:
+        }
+        if not resumable_status and not budget_stop:
             raise DomainError(
                 "optimization.resume_wrong_status",
                 status=409,
@@ -554,10 +560,30 @@ def register_lifecycle_routes(
         if not resumable_state:
             raise DomainError("optimization.resume_not_resumable", status=409)
 
-        # A manual pause/resume is user-driven, not failure recovery: it neither
-        # consumes an attempt nor is bounded by the cap. Only failed/cancelled
-        # resumes share ``job_max_attempts`` with automatic pod-failure recovery.
-        is_paused = status == OptimizationStatus.paused
+        # Continuing a projection pause under a limit the measured burn already
+        # outgrows would only pause again at the next checkpoint, so the limit
+        # has to clear the projection first.
+        if (
+            job_data.get("stop_reason") == STOP_REASON_BUDGET_PROJECTED
+            and job_data.get("execution_budget_id")
+            and job_data.get("username")
+            and getattr(job_store, "engine", None) is not None
+        ):
+            projection = (job_data.get("terminal_evidence") or {}).get("budget_projection") or {}
+            projected = int(projection.get("projected_credits") or 0)
+            budget = BudgetService(engine=job_store.engine).get(job_data["execution_budget_id"], job_data["username"])
+            if budget.total_credits <= projected:
+                raise DomainError(
+                    "optimization.resume_budget_projected",
+                    status=409,
+                    params={"projected": projected, "limit": budget.total_credits},
+                )
+
+        # A manual pause/resume or a continuation past the spending limit is
+        # user-driven, not failure recovery: it neither consumes an attempt nor is
+        # bounded by the cap. Only failed/cancelled resumes share
+        # ``job_max_attempts`` with automatic pod-failure recovery.
+        is_paused = status == OptimizationStatus.paused or budget_stop
         if not is_paused:
             attempts = int(job_data.get("attempts") or 0)
             if attempts >= settings.job_max_attempts:

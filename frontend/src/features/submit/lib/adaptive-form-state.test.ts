@@ -275,6 +275,7 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
       WIZARD_STAGE,
       stageAt,
       maxCostCredits: null,
+      budgetUncapped: false,
       msg: (key: string) => key,
     });
     const issue = stageIssue(WIZARD_STAGE.optimization, true);
@@ -296,6 +297,14 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
     });
     await advance(WIZARD_STAGE.review);
     assert.deepEqual(visited, [WIZARD_STAGE.optimization]);
+  });
+
+  test(`${path}: a run without a spending limit needs no budget amount`, () => {
+    const stageIssue = evaluate(variable(hook, "stageIssue"), {
+      WIZARD_STAGE, stageAt, maxCostCredits: null, budgetUncapped: true,
+      targetScoreIssue: () => "target", msg: (key: string) => key,
+    });
+    assert.equal(stageIssue(WIZARD_STAGE.optimization, true).fieldId, "target-score");
   });
 }
 
@@ -323,6 +332,7 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
           },
           costBracket: {},
           maxCostCredits: 120,
+    budgetUncapped: false,
         },
       })();
     await next();
@@ -429,6 +439,7 @@ test("Anything missing budget blocks Evaluation before execution", () => {
     WIZARD_STAGE,
     stageAt,
     maxCostCredits: null,
+    budgetUncapped: false,
     msg: (key: string) => key,
   });
   assert.deepEqual(
@@ -441,11 +452,21 @@ test("Anything missing budget blocks Evaluation before execution", () => {
   );
 });
 
+test("Anything without a spending limit skips the budget amount check", () => {
+  const stageIssue = evaluate(variable(wizard, "stageIssue"), {
+    WIZARD_STAGE, stageAt, maxCostCredits: null, budgetUncapped: true, targetKind: "text",
+    scorerKind: "python", metricCode: "def score(c): return llm(c)", scorerUsesModel: true,
+    resolvedScorerModel: null, msg: (key: string) => key,
+  });
+  assert.equal(stageIssue(WIZARD_STAGE.evaluation).fieldId, "bb-scoring-model");
+});
+
 test("Anything missing evaluator model blocks Continue even without an explicit override", () => {
   const stageIssue = evaluate(variable(wizard, "stageIssue"), {
     WIZARD_STAGE,
     stageAt,
     maxCostCredits: 120,
+    budgetUncapped: false,
     targetKind: "text",
     scorerKind: "python",
     metricCode: "def score(c): return llm(c)",

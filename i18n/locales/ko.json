@@ -199,6 +199,7 @@
     "optimization.pause_not_pausable": "최적화는 첫 번째 체크포인트가 저장된 후에만 일시 중지할 수 있습니다. 잠시 후 다시 시도하세요.",
     "optimization.pause_wrong_status": "실행 중인 최적화만 일시 중지할 수 있습니다. 이 최적화는 '{status}' 상태입니다.",
     "optimization.payload_unavailable": "최적화 페이로드를 사용할 수 없습니다.",
+    "optimization.resume_budget_projected": "이 실행은 약 {projected}크레딧이 들 것으로 예상되어 한도인 {limit}크레딧을 넘습니다. 계속하려면 지출 한도를 {projected}크레딧보다 높게 올리세요.",
     "optimization.resume_exhausted": "이 최적화는 최대 시도 횟수({attempts}회)에 도달했습니다. 대신 다시 실행하세요.",
     "optimization.resume_not_resumable": "이 최적화에는 저장된 재개 지점이 없습니다. 대신 다시 실행하세요.",
     "optimization.resume_wrong_status": "실행 도중 멈춘 최적화만 재개할 수 있습니다. 이 최적화는 '{status}' 상태입니다.",

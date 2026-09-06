@@ -199,6 +199,7 @@
     "optimization.pause_not_pausable": "Une optimisation ne peut être mise en pause qu'après l'enregistrement de son premier point de reprise — réessayez dans un instant.",
     "optimization.pause_wrong_status": "Seules les optimisations en cours peuvent être mises en pause — celle-ci est dans l'état '{status}'.",
     "optimization.payload_unavailable": "La charge utile de l'optimisation est indisponible.",
+    "optimization.resume_budget_projected": "L'exécution se dirige vers un coût d'environ {projected} crédits, au-delà de son plafond de {limit} crédits. Relevez le plafond de dépenses au-dessus de {projected} crédits pour continuer.",
     "optimization.resume_exhausted": "Cette optimisation a atteint son nombre maximal de tentatives ({attempts}) — relancez-la plutôt.",
     "optimization.resume_not_resumable": "Cette optimisation n'a aucun point de reprise enregistré — relancez-la plutôt.",
     "optimization.resume_wrong_status": "Seules les optimisations interrompues en cours d'exécution peuvent être reprises — celle-ci est dans l'état '{status}'.",

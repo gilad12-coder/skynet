@@ -18,6 +18,7 @@ export interface ExecutionBudget {
   external_spent_credits: string;
   pending_operations: number;
   blocked_reason: string | null;
+  uncapped: boolean;
 }
 
 export interface ExecutionBudgetRef {

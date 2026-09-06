@@ -199,6 +199,7 @@
     "optimization.pause_not_pausable": "Un'ottimizzazione può essere messa in pausa solo dopo il salvataggio del suo primo checkpoint: riprova tra un momento.",
     "optimization.pause_wrong_status": "Solo le ottimizzazioni in esecuzione possono essere messe in pausa: questa è nello stato '{status}'.",
     "optimization.payload_unavailable": "Il payload dell'ottimizzazione non è disponibile.",
+    "optimization.resume_budget_projected": "L'esecuzione è avviata verso un costo di circa {projected} crediti, oltre il suo limite di {limit} crediti. Alza il limite di spesa sopra {projected} crediti per continuare.",
     "optimization.resume_exhausted": "Questa ottimizzazione ha raggiunto il numero massimo di tentativi ({attempts}): eseguila di nuovo invece.",
     "optimization.resume_not_resumable": "Questa ottimizzazione non ha alcun punto di ripresa salvato: eseguila di nuovo invece.",
     "optimization.resume_wrong_status": "Possono essere riprese solo le ottimizzazioni che si sono interrotte durante l'esecuzione: questa è nello stato '{status}'.",

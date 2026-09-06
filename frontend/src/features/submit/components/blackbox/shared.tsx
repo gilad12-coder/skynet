@@ -28,6 +28,7 @@ export function StepCard({
   title,
   description,
   tip,
+  trailing,
   children,
   tutorial,
 }: {
@@ -35,18 +36,28 @@ export function StepCard({
   description?: ReactNode;
   // Guidance that used to sit in the body; hovering the title shows it.
   tip?: string;
+  // Rendered at the end of the title row (mode toggles, status chips).
+  trailing?: ReactNode;
   children: ReactNode;
   tutorial?: string;
 }) {
+  const heading = (
+    <CardTitle className="text-lg">{tip ? <HelpTip text={tip}>{title}</HelpTip> : title}</CardTitle>
+  );
   return (
     <Card
       className="border-border/50 bg-card/80 backdrop-blur-xl shadow-lg"
       data-tutorial={tutorial}
     >
       <CardHeader className="px-4 sm:px-6">
-        <CardTitle className="text-lg">
-          {tip ? <HelpTip text={tip}>{title}</HelpTip> : title}
-        </CardTitle>
+        {trailing ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {heading}
+            {trailing}
+          </div>
+        ) : (
+          heading
+        )}
         {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
       {/* Positioned so an expanded textarea covers the fields, not the page. */}
