@@ -156,6 +156,21 @@ def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
     )
 
 
+def _offline_admission(price_snapshot: Mapping[str, Any] | None) -> bool:
+    """Report whether the admitted request denied all sandbox network and exposed no ports.
+
+    Args:
+        price_snapshot: Original admission, absent for standalone pricing checks.
+
+    Returns:
+        True only when the admitted request left no billable network path.
+    """
+    if price_snapshot is None:
+        return False
+    request = price_snapshot.get("request")
+    return isinstance(request, Mapping) and request.get("network_disabled") is True and request.get("ports") == []
+
+
 def vercel_actual_usd(
     session: Mapping[str, Any], *, session_id: str, vcpus: int, price_snapshot: Mapping[str, Any] | None = None
 ) -> Decimal:
@@ -198,9 +213,12 @@ def vercel_actual_usd(
         raise UsagePendingError("Vercel has not reported final network transfer.")
     ingress = _integer(network.get("ingress"), "network ingress")
     egress = _integer(network.get("egress"), "network egress")
-    # The public counters are usage, not billing totals. Unexpected traffic
-    # needs reconciliation; classifying all ingress as paid would overcharge.
-    if ingress or egress:
+    # The public counters are usage, not billing totals. Vercel reports a few
+    # KB of control-plane traffic (file uploads, command streams) even for a
+    # deny-all sandbox with no exposed ports, which the admitted quote already
+    # excludes from billing. Only an unknown admission leaves the transfer
+    # unclassified, and charging it as paid egress would overcharge.
+    if (ingress or egress) and not _offline_admission(price_snapshot):
         raise UsagePendingError("Offline Vercel transfer needs provider billing classification before settlement.")
     try:
         regional = rates[region]
