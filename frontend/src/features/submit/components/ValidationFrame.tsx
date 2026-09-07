@@ -401,9 +401,6 @@ function PhaseRow({
   const nextCheckIn = usage
     ? Math.max(0, Math.ceil((usage.checkedAt + USAGE_WAIT_INTERVAL_MS - now) / 1000))
     : 0;
-  const hasDetail =
-    checks.length > 0 || usage !== undefined || score !== undefined || message !== undefined;
-
   return (
     <li>
       <button
@@ -540,11 +537,6 @@ function PhaseRow({
             {message && (
               <p className="max-w-prose break-words text-sm text-destructive" dir="auto">
                 {message}
-              </p>
-            )}
-            {!active && !hasDetail && (
-              <p className="text-sm text-muted-foreground">
-                {msg("submit.validation.progress.no_detail")}
               </p>
             )}
           </div>

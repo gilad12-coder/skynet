@@ -3744,7 +3744,6 @@
   "submit.validation.progress.next_check": "Sonraki kontrol {seconds} sn içinde",
   "submit.validation.progress.pending_operations": "Onay bekleyen işlemler: {count}",
   "submit.validation.progress.slow": "Hâlâ çalışıyor. Uzun adımlar birkaç dakika sürebilir ve bu sayfadan ayrılsanız bile kontrol devam eder.",
-  "submit.validation.progress.no_detail": "Bu adım için başka bir şey bildirilmedi.",
   "submit.validation.check.program": "Program kodu",
   "submit.validation.check.metric": "Metrik kodu",
   "submit.validation.check.sample_mapping": "Örnek satırda sütun eşlemesi",

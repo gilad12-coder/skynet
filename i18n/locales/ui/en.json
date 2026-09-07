@@ -3744,7 +3744,6 @@
   "submit.validation.progress.next_check": "Next check in {seconds} s",
   "submit.validation.progress.pending_operations": "Operations awaiting confirmation: {count}",
   "submit.validation.progress.slow": "Still working. Longer steps can take a few minutes, and the check keeps running if you leave this page.",
-  "submit.validation.progress.no_detail": "Nothing further was reported for this step.",
   "submit.validation.check.program": "Program code",
   "submit.validation.check.metric": "Metric code",
   "submit.validation.check.sample_mapping": "Column mapping on a sample row",

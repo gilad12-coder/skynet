@@ -3744,7 +3744,6 @@
   "submit.validation.progress.next_check": "Следующая проверка через {seconds} с",
   "submit.validation.progress.pending_operations": "Операций в ожидании подтверждения: {count}",
   "submit.validation.progress.slow": "Всё ещё выполняется. Долгие шаги могут занять несколько минут, а проверка продолжится, если вы покинете эту страницу.",
-  "submit.validation.progress.no_detail": "По этому шагу больше ничего не сообщалось.",
   "submit.validation.check.program": "Код программы",
   "submit.validation.check.metric": "Код метрики",
   "submit.validation.check.sample_mapping": "Сопоставление столбцов на примере строки",

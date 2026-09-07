@@ -3744,7 +3744,6 @@
   "submit.validation.progress.next_check": "次の確認まで {seconds} 秒",
   "submit.validation.progress.pending_operations": "確認待ちの処理: {count}",
   "submit.validation.progress.slow": "まだ処理中です。時間のかかるステップは数分かかることがあり、このページを離れてもチェックは続行されます。",
-  "submit.validation.progress.no_detail": "このステップについて追加の報告はありません。",
   "submit.validation.check.program": "プログラムコード",
   "submit.validation.check.metric": "メトリックコード",
   "submit.validation.check.sample_mapping": "サンプル行の列マッピング",

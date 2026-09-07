@@ -3744,7 +3744,6 @@
   "submit.validation.progress.next_check": "Próxima comprobación en {seconds} s",
   "submit.validation.progress.pending_operations": "Operaciones a la espera de confirmación: {count}",
   "submit.validation.progress.slow": "Sigue en marcha. Los pasos largos pueden tardar unos minutos y la comprobación continúa si sales de esta página.",
-  "submit.validation.progress.no_detail": "No se informó nada más sobre este paso.",
   "submit.validation.check.program": "Código del programa",
   "submit.validation.check.metric": "Código de la métrica",
   "submit.validation.check.sample_mapping": "Asignación de columnas en una fila de muestra",
