@@ -3561,6 +3561,7 @@
   "submit.budget.estimate_preliminary_note": "Se met à jour à mesure que vous ajoutez des cas et choisissez des modèles.",
   "submit.budget.estimate_note": "La borne haute suppose des prompts et des sorties longs à chaque appel, pas une exécution typique.",
   "submit.budget.estimate_note_runtime": "Inclut l'environnement d'exécution. La borne haute suppose des prompts et des sorties longs à chaque appel, pas une exécution typique.",
+  "submit.budget.limit_below_hold": "L'environnement d'exécution réserve jusqu'à {amount} crédits dès le lancement, en plus de ce que dépensent les vérifications. Fixez le plafond au moins à ce montant.",
   "submit.budget.limit_too_low": "Augmentez le plafond de dépenses. Même l'estimation basse atteint {low} crédits, au-dessus des {limit} définis.",
   "submit.budget.remaining": "Restant dans ce plafond",
   "submit.budget.spent": "Dépensé jusqu'ici",

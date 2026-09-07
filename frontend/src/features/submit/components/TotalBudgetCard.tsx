@@ -33,7 +33,7 @@ import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import { cn } from "@/shared/lib/utils";
 
 import { parseBudgetInput } from "../lib/budget-input";
-import { chargeableBracket, type RoleCostTrace } from "../lib/cost-bracket";
+import { chargeableBracket, runtimeStartHold, type RoleCostTrace } from "../lib/cost-bracket";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
 import { Disclosure } from "./Disclosure";
@@ -198,6 +198,11 @@ export function TotalBudgetCard({
     minimum == null
       ? null
       : formatMsg("submit.budget.minimum_total", { amount: formatCredits(minimum, locale) });
+  const hold = runtimeStartHold(bracket);
+  const holdMessage =
+    hold > 0
+      ? formatMsg("submit.budget.limit_below_hold", { amount: formatCredits(hold, locale) })
+      : null;
   const fieldError =
     parsed.kind === "invalid"
       ? formatMsg("submit.budget.error.invalid", { suggested })
@@ -207,8 +212,11 @@ export function TotalBudgetCard({
           ? msg("submit.budget.error.below_one")
           : parsed.kind === "value" && minimum != null && parsed.value < minimum
             ? minimumMessage
-            : null;
-  const fieldHint = fieldError == null && parsed.kind === "empty" ? minimumMessage : null;
+            : parsed.kind === "value" && parsed.value < hold
+              ? holdMessage
+              : null;
+  const fieldHint =
+    fieldError == null && parsed.kind === "empty" ? (minimumMessage ?? holdMessage) : null;
   const fieldMessage = fieldError ?? fieldHint;
 
   const estimateLabel = msg(

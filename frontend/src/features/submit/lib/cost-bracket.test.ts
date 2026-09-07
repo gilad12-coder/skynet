@@ -17,9 +17,8 @@ registerHooks({
   },
 });
 
-const { chargeableBracket, projectCostBracket, runtimeCostProjection } = await import(
-  "./cost-bracket.ts"
-);
+const { chargeableBracket, projectCostBracket, runtimeCostProjection, runtimeStartHold } =
+  await import("./cost-bracket.ts");
 const { platformFeeCredits } = await import(billingUrl);
 
 function model(value: string, input: number, output: number) {
@@ -207,4 +206,31 @@ test("charge trace adds up to the charged bracket", () => {
   assert.equal(charge.byokFeeLow, platformFeeCredits(charge.byokFullLow));
   assert.equal(charge.managedLow + charge.byokFeeLow + charge.runtimeLow, charged.lowCredits);
   assert.equal(charge.managedHigh + charge.byokFeeHigh + charge.runtimeHigh, charged.highCredits);
+});
+
+test("the runtime start hold is one full-lifetime session, and only when billed at cost", () => {
+  const profile = {
+    minimum_session_credits: "0.14",
+    maximum_session_credits: "235.8",
+    maximum_lifetime_seconds: 18000,
+    vcpus: 2,
+  };
+  const withRuntime = (billingBasis: "at_cost" | "included_in_model_markup") =>
+    projectCostBracket({
+      ...base,
+      modelRoles: [{ role: "task", model: cheap, tokenSource: "managed", tokenShare: 1 }],
+      runtime: runtimeCostProjection({ ...profile, billing_basis: billingBasis }, 4),
+    });
+
+  assert.equal(runtimeStartHold(withRuntime("at_cost")), 236);
+  assert.equal(runtimeStartHold(withRuntime("included_in_model_markup")), 0);
+  assert.equal(
+    runtimeStartHold(
+      projectCostBracket({
+        ...base,
+        modelRoles: [{ role: "task", model: cheap, tokenSource: "managed", tokenShare: 1 }],
+      }),
+    ),
+    0,
+  );
 });

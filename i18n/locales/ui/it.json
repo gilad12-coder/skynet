@@ -3561,6 +3561,7 @@
   "submit.budget.estimate_preliminary_note": "Si aggiorna man mano che aggiungi casi e scegli i modelli.",
   "submit.budget.estimate_note": "L'estremo alto presuppone prompt e output lunghi a ogni chiamata, non un'esecuzione tipica.",
   "submit.budget.estimate_note_runtime": "Include l'ambiente di esecuzione. L'estremo alto presuppone prompt e output lunghi a ogni chiamata, non un'esecuzione tipica.",
+  "submit.budget.limit_below_hold": "L'ambiente di esecuzione riserva fino a {amount} crediti non appena l'esecuzione parte, oltre a quanto spendono i controlli. Imposta il limite almeno a quella cifra.",
   "submit.budget.limit_too_low": "Alza il limite di spesa. Anche la stima bassa è di {low} crediti, sopra i {limit} impostati.",
   "submit.budget.remaining": "Rimanente in questo limite",
   "submit.budget.spent": "Speso finora",

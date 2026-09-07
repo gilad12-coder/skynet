@@ -3561,6 +3561,7 @@
   "submit.budget.estimate_preliminary_note": "Updates as you add cases and choose models.",
   "submit.budget.estimate_note": "The high end assumes long prompts and outputs on every call, not a typical run.",
   "submit.budget.estimate_note_runtime": "Includes the execution environment. The high end assumes long prompts and outputs on every call, not a typical run.",
+  "submit.budget.limit_below_hold": "The execution environment reserves up to {amount} credits the moment the run starts, on top of what the checks spend. Set the limit to at least that.",
   "submit.budget.limit_too_low": "Raise the spending limit. Even the low estimate is {low} credits, above the {limit} you set.",
   "submit.budget.remaining": "Remaining in this limit",
   "submit.budget.spent": "Spent so far",

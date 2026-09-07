@@ -737,7 +737,10 @@ class BudgetService:
                 if not budget.uncapped:
                     remaining = budget.total_credits * CREDIT_SCALE - budget.settled_units
                     if scope > remaining:
-                        raise BudgetInsufficientError("The next operation exceeds the remaining total budget.")
+                        raise BudgetInsufficientError(
+                            f"The next operation needs up to {ceil_credits(scope)} credits, but only "
+                            f"{max(remaining, 0) // CREDIT_SCALE} of the {budget.total_credits}-credit limit remain."
+                        )
                     if scope > remaining - budget.reserved_units:
                         raise BudgetInFlightError("Covered work must settle before this operation can fit.")
                 held = account_committed_credits(session, username)

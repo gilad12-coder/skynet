@@ -3561,6 +3561,7 @@
   "submit.budget.estimate_preliminary_note": "מתעדכנת ככל שמוסיפים מקרים ובוחרים מודלים.",
   "submit.budget.estimate_note": "הקצה הגבוה מניח פרומפטים ופלטים ארוכים בכל קריאה, לא ריצה טיפוסית.",
   "submit.budget.estimate_note_runtime": "כולל את סביבת ההרצה. הקצה הגבוה מניח פרומפטים ופלטים ארוכים בכל קריאה, לא ריצה טיפוסית.",
+  "submit.budget.limit_below_hold": "סביבת ההרצה שומרת עד {amount} קרדיטים ברגע שההרצה מתחילה, בנוסף למה שהבדיקות מוציאות. הגדירו תקרה של לפחות סכום זה.",
   "submit.budget.limit_too_low": "יש להגדיל את תקרת ההוצאה. גם ההערכה הנמוכה היא {low} קרדיטים, מעל {limit} שהגדרתם.",
   "submit.budget.remaining": "נותר בתקרה הזו",
   "submit.budget.spent": "הוצא עד כה",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -21,12 +22,16 @@ from ..config import settings
 from ..constants import OPTIMIZATION_TYPE_BLACKBOX, TOKEN_SOURCE_MANAGED
 from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
 from ..models.common import SplitFractions
+from ..service_gateway.optimization.blackbox.preflight import preflight_lifetime_seconds
 from ..service_gateway.optimization.data import split_examples
 from ..storage.preflights import PreflightStore
 from ..worker.vercel_dspy import run_vercel_dspy
 from .model_billing import normalize_model_token_sources
 from .preflight_progress import report_preflight_phase
 from .routers.execution_budgets import ExecutionBudgetResponse, budget_http_error, budget_response
+
+# One sample prediction and its metric call, with room for a slow program.
+_DSPY_PREFLIGHT_LIFETIME_SECONDS = 1800
 
 
 class WizardPreflightRequest(BaseModel):
@@ -406,7 +411,20 @@ def _perform_preflight(
                 phase="setup",
             )
         )
-        bind_protected_sandbox(gateway, settings, workflow=request.workflow, owner_id=document["id"])
+        # The box's hold is priced on its whole lifetime, so a check gets the
+        # time its own work can take rather than the run's configured ceiling.
+        lifetime_seconds = (
+            math.ceil(preflight_lifetime_seconds(payload))
+            if request.workflow == "anything"
+            else _DSPY_PREFLIGHT_LIFETIME_SECONDS
+        )
+        bind_protected_sandbox(
+            gateway,
+            settings,
+            workflow=request.workflow,
+            owner_id=document["id"],
+            lifetime_seconds=lifetime_seconds,
+        )
         protected = gateway.protect_payload(
             payload,
             managed_key=settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else "",

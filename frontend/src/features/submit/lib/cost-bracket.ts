@@ -418,6 +418,17 @@ export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): 
   };
 }
 
+/**
+ * Credits the run's execution environment holds the moment it starts: the
+ * cost of its whole lifetime, released as the run settles. A spending limit
+ * below this cannot start the run at all, however small the usage estimate.
+ */
+export function runtimeStartHold(bracket: CostBracket): number {
+  return bracket.runtimeBillingBasis === "at_cost"
+    ? Math.ceil(bracket.runtimeSessionHighCredits)
+    : 0;
+}
+
 /** Collapse per-model sources to the conservative job-level billing stamp. */
 export function aggregateTokenSource(configs: ModelConfig[]): TokenSourceMode {
   const selected = configs.filter((config) => config.name.trim());

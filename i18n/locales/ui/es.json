@@ -3561,6 +3561,7 @@
   "submit.budget.estimate_preliminary_note": "Se actualiza a medida que añades casos y eliges modelos.",
   "submit.budget.estimate_note": "El extremo alto supone prompts y salidas largos en cada llamada, no una ejecución típica.",
   "submit.budget.estimate_note_runtime": "Incluye el entorno de ejecución. El extremo alto supone prompts y salidas largos en cada llamada, no una ejecución típica.",
+  "submit.budget.limit_below_hold": "El entorno de ejecución reserva hasta {amount} créditos en cuanto arranca la ejecución, además de lo que gastan las comprobaciones. Fija el límite al menos en esa cantidad.",
   "submit.budget.limit_too_low": "Sube el límite de gasto. Incluso la estimación baja es de {low} créditos, por encima de los {limit} que fijaste.",
   "submit.budget.remaining": "Restante en este límite",
   "submit.budget.spent": "Gastado hasta ahora",
