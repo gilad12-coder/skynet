@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "استفاده از مدل دیگر",
   "submit.blackbox.roles.scoring.use_optimization": "استفاده از مدل بهینه‌سازی",
   "submit.blackbox.roles.not_chosen": "هنوز انتخاب نشده",
-  "submit.blackbox.evidence.running": "در حال بررسی امتیازدهنده…",
   "submit.blackbox.evidence.passed": "بررسی امتیازدهنده موفق بود",
   "submit.blackbox.evidence.passed_with": "بررسی امتیازدهنده با {model} موفق بود",
   "submit.blackbox.evidence.failed": "بررسی امتیازدهنده ناموفق بود",

@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "使用另一個模型",
   "submit.blackbox.roles.scoring.use_optimization": "使用最佳化模型",
   "submit.blackbox.roles.not_chosen": "仲未揀",
-  "submit.blackbox.evidence.running": "正在檢查評分器…",
   "submit.blackbox.evidence.passed": "評分器檢查通過",
   "submit.blackbox.evidence.passed_with": "評分器檢查通過（使用 {model}）",
   "submit.blackbox.evidence.failed": "評分器檢查失敗",

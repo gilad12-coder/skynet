@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "استخدام نموذج مختلف",
   "submit.blackbox.roles.scoring.use_optimization": "استخدام نموذج التحسين",
   "submit.blackbox.roles.not_chosen": "لم يُختر بعد",
-  "submit.blackbox.evidence.running": "جارٍ فحص المُقيِّم…",
   "submit.blackbox.evidence.passed": "نجح فحص المُقيِّم",
   "submit.blackbox.evidence.passed_with": "نجح فحص المُقيِّم باستخدام {model}",
   "submit.blackbox.evidence.failed": "فشل فحص المُقيِّم",

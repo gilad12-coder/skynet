@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "Usar um modelo diferente",
   "submit.blackbox.roles.scoring.use_optimization": "Usar o modelo de otimização",
   "submit.blackbox.roles.not_chosen": "Ainda não escolhido",
-  "submit.blackbox.evidence.running": "Verificando o pontuador…",
   "submit.blackbox.evidence.passed": "Verificação do pontuador aprovada",
   "submit.blackbox.evidence.passed_with": "Verificação do pontuador aprovada com {model}",
   "submit.blackbox.evidence.failed": "Verificação do pontuador falhou",

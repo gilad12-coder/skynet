@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "Use a different model",
   "submit.blackbox.roles.scoring.use_optimization": "Use optimization model",
   "submit.blackbox.roles.not_chosen": "Not chosen yet",
-  "submit.blackbox.evidence.running": "Checking evaluator…",
   "submit.blackbox.evidence.passed": "Evaluator check passed",
   "submit.blackbox.evidence.passed_with": "Evaluator check passed with {model}",
   "submit.blackbox.evidence.failed": "Evaluator check failed",

@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "Использовать другую модель",
   "submit.blackbox.roles.scoring.use_optimization": "Использовать модель оптимизации",
   "submit.blackbox.roles.not_chosen": "Ещё не выбрана",
-  "submit.blackbox.evidence.running": "Проверяем оценщик…",
   "submit.blackbox.evidence.passed": "Проверка оценщика пройдена",
   "submit.blackbox.evidence.passed_with": "Проверка оценщика пройдена с {model}",
   "submit.blackbox.evidence.failed": "Проверка оценщика не пройдена",

@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "Utiliser un autre modèle",
   "submit.blackbox.roles.scoring.use_optimization": "Utiliser le modèle d'optimisation",
   "submit.blackbox.roles.not_chosen": "Pas encore choisi",
-  "submit.blackbox.evidence.running": "Vérification de l'évaluateur…",
   "submit.blackbox.evidence.passed": "Vérification de l'évaluateur réussie",
   "submit.blackbox.evidence.passed_with": "Vérification de l'évaluateur réussie avec {model}",
   "submit.blackbox.evidence.failed": "Échec de la vérification de l'évaluateur",

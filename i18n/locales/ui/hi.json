@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "कोई अलग मॉडल उपयोग करें",
   "submit.blackbox.roles.scoring.use_optimization": "ऑप्टिमाइज़ेशन मॉडल उपयोग करें",
   "submit.blackbox.roles.not_chosen": "अभी चुना नहीं गया",
-  "submit.blackbox.evidence.running": "स्कोरर की जाँच हो रही है…",
   "submit.blackbox.evidence.passed": "स्कोरर जाँच सफल",
   "submit.blackbox.evidence.passed_with": "{model} के साथ स्कोरर जाँच सफल",
   "submit.blackbox.evidence.failed": "स्कोरर जाँच विफल",

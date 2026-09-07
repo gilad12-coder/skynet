@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "別のモデルを使う",
   "submit.blackbox.roles.scoring.use_optimization": "最適化モデルを使う",
   "submit.blackbox.roles.not_chosen": "まだ選択されていません",
-  "submit.blackbox.evidence.running": "スコアラーを確認しています…",
   "submit.blackbox.evidence.passed": "スコアラーチェックに合格しました",
   "submit.blackbox.evidence.passed_with": "{model} でスコアラーチェックに合格しました",
   "submit.blackbox.evidence.failed": "スコアラーチェックに失敗しました",

@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "שימוש במודל אחר",
   "submit.blackbox.roles.scoring.use_optimization": "שימוש במודל האופטימיזציה",
   "submit.blackbox.roles.not_chosen": "עוד לא נבחר",
-  "submit.blackbox.evidence.running": "בודקים את המדד…",
   "submit.blackbox.evidence.passed": "בדיקת המדד עברה",
   "submit.blackbox.evidence.passed_with": "בדיקת המדד עברה עם {model}",
   "submit.blackbox.evidence.failed": "בדיקת המדד נכשלה",

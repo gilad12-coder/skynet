@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "다른 모델 사용",
   "submit.blackbox.roles.scoring.use_optimization": "최적화 모델 사용",
   "submit.blackbox.roles.not_chosen": "아직 선택되지 않음",
-  "submit.blackbox.evidence.running": "채점기를 확인하는 중…",
   "submit.blackbox.evidence.passed": "채점기 확인 통과",
   "submit.blackbox.evidence.passed_with": "{model}(으)로 채점기 확인 통과",
   "submit.blackbox.evidence.failed": "채점기 확인 실패",

@@ -3528,7 +3528,6 @@
   "submit.blackbox.roles.scoring.use_different": "Farklı bir model kullan",
   "submit.blackbox.roles.scoring.use_optimization": "Optimizasyon modelini kullan",
   "submit.blackbox.roles.not_chosen": "Henüz seçilmedi",
-  "submit.blackbox.evidence.running": "Puanlayıcı kontrol ediliyor…",
   "submit.blackbox.evidence.passed": "Puanlayıcı kontrolü geçti",
   "submit.blackbox.evidence.passed_with": "Puanlayıcı kontrolü {model} ile geçti",
   "submit.blackbox.evidence.failed": "Puanlayıcı kontrolü başarısız oldu",
