@@ -36,7 +36,7 @@ import httpx
 from ....billing.operation_pricing import json_fingerprint
 from ....billing.runtime import BudgetRuntime
 from ....billing.vercel_usage import VercelUsageReservation
-from ....config import Settings
+from ....config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, Settings
 from ....exceptions import ServiceError
 
 # The SDK is a declared dependency, but an air-gap build vendored from an
@@ -347,7 +347,11 @@ class VercelSandboxSession:
         if timeout_seconds is not None:
             seconds = max(1, math.ceil(timeout_seconds))
             inner = f"timeout --signal=KILL {seconds}s {inner}"
-            kill_after = seconds + KILL_GRACE_SECONDS
+            # Vercel refuses a kill timer past its five-hour session maximum,
+            # and a command given a box's whole lifetime at that ceiling would
+            # ask for the grace on top. The box ends there anyway, so the grace
+            # has nothing left to cover.
+            kill_after = min(seconds + KILL_GRACE_SECONDS, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS)
             deadline = time.monotonic() + kill_after + _POLL_DEADLINE_SLACK_SECONDS
         token = uuid.uuid4().hex
         sentinel = f"{_EXIT_FILE_PREFIX}{token}"

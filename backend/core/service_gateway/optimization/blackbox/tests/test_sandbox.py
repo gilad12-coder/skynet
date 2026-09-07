@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
-from core.config import Settings
+from core.config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, Settings
 from core.exceptions import ServiceError
 
 from .. import sandbox as sandbox_mod
@@ -255,6 +255,18 @@ def test_run_wraps_in_timeout_and_flags_timeouts() -> None:
     assert box.runs[0]["kill_after"] == 5 + KILL_GRACE_SECONDS
     assert result.timed_out is True
     assert result.exit_code == 124
+
+
+def test_run_caps_the_kill_timer_at_the_vercel_maximum() -> None:
+    """A command given a full five-hour box keeps its grace inside the timeout Vercel accepts."""
+    box = _FakeBox(returncode=0)
+    session = VercelSandboxSession(box, _FakeApiSession(), contextvars.copy_context())
+
+    session.run("sleep 1", timeout_seconds=VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS)
+
+    wrapped = box.runs[0]["args"][1]
+    assert wrapped.startswith(f"timeout --signal=KILL {VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS}s bash -lc")
+    assert box.runs[0]["kill_after"] == VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
 
 
 def test_run_without_timeout_has_no_kill_timer() -> None:
