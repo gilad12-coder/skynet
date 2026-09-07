@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "بررسی امتیازدهنده موفق بود",
   "submit.blackbox.evidence.passed_with": "بررسی امتیازدهنده با {model} موفق بود",
   "submit.blackbox.evidence.failed": "بررسی امتیازدهنده ناموفق بود",
-  "submit.blackbox.evidence.stale": "تنظیمات از آخرین بررسی تغییر کرده است",
   "submit.blackbox.evidence.pending": "پس از انتخاب مدل بهینه‌سازی اجرا می‌شود",
   "submit.blackbox.evidence.idle": "هنوز بررسی نشده — «ادامه» آن را اجرا می‌کند",
   "submit.blackbox.execution.title": "اجرا",

@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "स्कोरर जाँच सफल",
   "submit.blackbox.evidence.passed_with": "{model} के साथ स्कोरर जाँच सफल",
   "submit.blackbox.evidence.failed": "स्कोरर जाँच विफल",
-  "submit.blackbox.evidence.stale": "पिछली जाँच के बाद सेटअप बदल गया है",
   "submit.blackbox.evidence.pending": "ऑप्टिमाइज़ेशन मॉडल चुनने के बाद चलेगी",
   "submit.blackbox.evidence.idle": "अभी जाँच नहीं हुई — “जारी रखें” इसे चलाता है",
   "submit.blackbox.execution.title": "निष्पादन",

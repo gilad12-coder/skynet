@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "בדיקת המדד עברה",
   "submit.blackbox.evidence.passed_with": "בדיקת המדד עברה עם {model}",
   "submit.blackbox.evidence.failed": "בדיקת המדד נכשלה",
-  "submit.blackbox.evidence.stale": "ההגדרות השתנו מאז הבדיקה האחרונה",
   "submit.blackbox.evidence.pending": "תרוץ אחרי שתבחרו את מודל האופטימיזציה",
   "submit.blackbox.evidence.idle": "עוד לא נבדק — לחיצה על המשך מריצה את הבדיקה",
   "submit.blackbox.execution.title": "הרצה",

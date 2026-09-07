@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "채점기 확인 통과",
   "submit.blackbox.evidence.passed_with": "{model}(으)로 채점기 확인 통과",
   "submit.blackbox.evidence.failed": "채점기 확인 실패",
-  "submit.blackbox.evidence.stale": "마지막 확인 이후 설정이 변경되었습니다",
   "submit.blackbox.evidence.pending": "최적화 모델을 선택한 후 실행됩니다",
   "submit.blackbox.evidence.idle": "아직 확인되지 않음 — ‘계속’을 누르면 실행됩니다",
   "submit.blackbox.execution.title": "실행",

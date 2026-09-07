@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "Puanlayıcı kontrolü geçti",
   "submit.blackbox.evidence.passed_with": "Puanlayıcı kontrolü {model} ile geçti",
   "submit.blackbox.evidence.failed": "Puanlayıcı kontrolü başarısız oldu",
-  "submit.blackbox.evidence.stale": "Kurulum son kontrolden bu yana değişti",
   "submit.blackbox.evidence.pending": "Optimizasyon modelini seçtikten sonra çalışır",
   "submit.blackbox.evidence.idle": "Henüz kontrol edilmedi — Devam kontrolü çalıştırır",
   "submit.blackbox.execution.title": "Yürütme",

@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "Controllo dello scorer superato",
   "submit.blackbox.evidence.passed_with": "Controllo dello scorer superato con {model}",
   "submit.blackbox.evidence.failed": "Controllo dello scorer non superato",
-  "submit.blackbox.evidence.stale": "La configurazione è cambiata dall'ultimo controllo",
   "submit.blackbox.evidence.pending": "Viene eseguito dopo che scegli il modello di ottimizzazione",
   "submit.blackbox.evidence.idle": "Non ancora controllato — Continua lo esegue",
   "submit.blackbox.execution.title": "Esecuzione",

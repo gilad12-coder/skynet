@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "Verificação do pontuador aprovada",
   "submit.blackbox.evidence.passed_with": "Verificação do pontuador aprovada com {model}",
   "submit.blackbox.evidence.failed": "Verificação do pontuador falhou",
-  "submit.blackbox.evidence.stale": "A configuração mudou desde a última verificação",
   "submit.blackbox.evidence.pending": "Executa depois que você escolher o modelo de otimização",
   "submit.blackbox.evidence.idle": "Ainda não verificado — Continuar executa a verificação",
   "submit.blackbox.execution.title": "Execução",

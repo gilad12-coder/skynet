@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "評分器檢查通過",
   "submit.blackbox.evidence.passed_with": "評分器檢查通過（使用 {model}）",
   "submit.blackbox.evidence.failed": "評分器檢查失敗",
-  "submit.blackbox.evidence.stale": "自上次檢查之後設定已經改變",
   "submit.blackbox.evidence.pending": "揀好最佳化模型之後就會執行",
   "submit.blackbox.evidence.idle": "仲未檢查 — 撳「繼續」就會執行",
   "submit.blackbox.execution.title": "執行",

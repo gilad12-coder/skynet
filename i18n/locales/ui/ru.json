@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "Проверка оценщика пройдена",
   "submit.blackbox.evidence.passed_with": "Проверка оценщика пройдена с {model}",
   "submit.blackbox.evidence.failed": "Проверка оценщика не пройдена",
-  "submit.blackbox.evidence.stale": "Настройки изменились после последней проверки",
   "submit.blackbox.evidence.pending": "Запустится после выбора модели оптимизации",
   "submit.blackbox.evidence.idle": "Ещё не проверено — «Продолжить» запустит проверку",
   "submit.blackbox.execution.title": "Выполнение",

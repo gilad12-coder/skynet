@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "Evaluator check passed",
   "submit.blackbox.evidence.passed_with": "Evaluator check passed with {model}",
   "submit.blackbox.evidence.failed": "Evaluator check failed",
-  "submit.blackbox.evidence.stale": "Setup changed since the last check",
   "submit.blackbox.evidence.pending": "Runs after you choose the optimization model",
   "submit.blackbox.evidence.idle": "Not checked yet — Continue runs it",
   "submit.blackbox.execution.title": "Execution",

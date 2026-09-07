@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "Scorer-Prüfung bestanden",
   "submit.blackbox.evidence.passed_with": "Scorer-Prüfung mit {model} bestanden",
   "submit.blackbox.evidence.failed": "Scorer-Prüfung fehlgeschlagen",
-  "submit.blackbox.evidence.stale": "Setup seit der letzten Prüfung geändert",
   "submit.blackbox.evidence.pending": "Läuft, nachdem Sie das Optimierungsmodell gewählt haben",
   "submit.blackbox.evidence.idle": "Noch nicht geprüft — „Weiter“ startet die Prüfung",
   "submit.blackbox.execution.title": "Ausführung",

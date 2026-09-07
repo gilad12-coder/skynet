@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "スコアラーチェックに合格しました",
   "submit.blackbox.evidence.passed_with": "{model} でスコアラーチェックに合格しました",
   "submit.blackbox.evidence.failed": "スコアラーチェックに失敗しました",
-  "submit.blackbox.evidence.stale": "前回のチェック以降にセットアップが変更されました",
   "submit.blackbox.evidence.pending": "最適化モデルを選択した後に実行されます",
   "submit.blackbox.evidence.idle": "まだ確認していません — 「続行」で実行されます",
   "submit.blackbox.execution.title": "実行",

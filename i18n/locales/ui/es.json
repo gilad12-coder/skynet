@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "Comprobación del evaluador superada",
   "submit.blackbox.evidence.passed_with": "Comprobación del evaluador superada con {model}",
   "submit.blackbox.evidence.failed": "La comprobación del evaluador falló",
-  "submit.blackbox.evidence.stale": "La configuración cambió desde la última comprobación",
   "submit.blackbox.evidence.pending": "Se ejecuta después de que elijas el modelo de optimización",
   "submit.blackbox.evidence.idle": "Aún sin comprobar — Continuar la ejecuta",
   "submit.blackbox.execution.title": "Ejecución",

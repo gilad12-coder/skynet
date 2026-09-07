@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "نجح فحص المُقيِّم",
   "submit.blackbox.evidence.passed_with": "نجح فحص المُقيِّم باستخدام {model}",
   "submit.blackbox.evidence.failed": "فشل فحص المُقيِّم",
-  "submit.blackbox.evidence.stale": "تغيّر الإعداد منذ الفحص الأخير",
   "submit.blackbox.evidence.pending": "يُجرى بعد اختيار نموذج التحسين",
   "submit.blackbox.evidence.idle": "لم يُفحص بعد — «متابعة» تشغّله",
   "submit.blackbox.execution.title": "التنفيذ",

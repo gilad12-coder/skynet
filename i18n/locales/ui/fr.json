@@ -3531,7 +3531,6 @@
   "submit.blackbox.evidence.passed": "Vérification de l'évaluateur réussie",
   "submit.blackbox.evidence.passed_with": "Vérification de l'évaluateur réussie avec {model}",
   "submit.blackbox.evidence.failed": "Échec de la vérification de l'évaluateur",
-  "submit.blackbox.evidence.stale": "La configuration a changé depuis la dernière vérification",
   "submit.blackbox.evidence.pending": "S'exécute après le choix du modèle d'optimisation",
   "submit.blackbox.evidence.idle": "Pas encore vérifié — Continuer lance la vérification",
   "submit.blackbox.execution.title": "Exécution",
