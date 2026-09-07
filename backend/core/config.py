@@ -30,6 +30,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # per request. Requires OPENROUTER_API_KEY in the env.
 DEFAULT_AGENT_MODEL_ID = "openrouter/openrouter/auto-beta"
 
+# Vercel's API refuses any sandbox timeout above five hours (``timeout`` should
+# be <= 18000000), whatever a plan allows below that, so a larger configured
+# ceiling can never be admitted and would fail at creation.
+VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS = 18_000
+
 
 # Keyed on the raw CSV rather than cached on the instance: tests monkeypatch
 # the source strings at runtime, and an instance-level cache would go stale.
@@ -175,7 +180,8 @@ class Settings(BaseSettings):
         default=2_700.0,
         alias="VERCEL_SANDBOX_MAX_LIFETIME_SECONDS",
         gt=0.0,
-        description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro teams can raise it to 86400 (24 hours). A job that outlives its box reopens one on its next call.",
+        le=VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS,
+        description="Ceiling on a sandbox's lifetime in seconds. 2700 (45 minutes) is the Hobby plan limit; Pro and Enterprise teams can raise it to 18000 (5 hours), the most Vercel accepts. A job that outlives its box reopens one on its next call.",
     )
     blackbox_agent_gateway_url: str | None = Field(
         default=None,

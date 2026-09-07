@@ -321,7 +321,9 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
                 default_token_source=str(parent_payload.get("token_source") or "managed"),
             )
             parent_request = request.model_copy(update={"payload": parent_payload})
-            status, result = _perform_preflight(parent_request, user, budgets, snapshot, claim.document)
+            status, result = _perform_preflight(
+                parent_request, user, budgets, snapshot, claim.document, attempt=claim.attempt
+            )
             snapshot = budgets.get(request.execution_budget_id, user.username)
             if snapshot.pending_operations:
                 status = "pending"
@@ -336,7 +338,13 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
 
 
 def _perform_preflight(
-    request: WizardPreflightRequest, user: Any, budgets: BudgetService, snapshot: Any, document: dict[str, Any]
+    request: WizardPreflightRequest,
+    user: Any,
+    budgets: BudgetService,
+    snapshot: Any,
+    document: dict[str, Any],
+    *,
+    attempt: int,
 ) -> tuple[str, dict[str, Any]]:
     """Execute the owned attempt and finalize its transports before publishing evidence.
 
@@ -346,6 +354,7 @@ def _perform_preflight(
         budgets: Shared operation ledger.
         snapshot: Generation read after the execution claim.
         document: Durable identity of this setup attempt.
+        attempt: Number of this physical run of the setup row.
 
     Returns:
         Actual readiness outcome and preserved results, including pending usage.
@@ -403,15 +412,14 @@ def _perform_preflight(
             managed_key=settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else "",
             allow_private_tools=settings.discover_allow_private,
         )
+        # The ledger keys the run's sandbox hold by this identity, and a settled
+        # or released hold from an earlier run would block a new dispatch under
+        # the same key, so every run of the row carries its own number.
+        identity = f"{document['id']}-{attempt}"
         result = (
-            _verify_anything(
-                gateway,
-                protected,
-                scope=request.scope,
-                identity=document["id"],
-            )
+            _verify_anything(gateway, protected, scope=request.scope, identity=identity)
             if request.workflow == "anything"
-            else _verify_dspy(protected, scope=request.scope, identity=document["id"])
+            else _verify_dspy(protected, scope=request.scope, identity=identity)
         )
         if request.workflow == "dspy" and request.scope == "execution":
             result["checks"].extend(_verify_model_routes(gateway, native=False))

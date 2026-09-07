@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 
+from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
+from .budgets import BudgetError
 from .operation_pricing import (
     ChargePolicy,
     OperationQuote,
@@ -109,7 +111,7 @@ def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
     if (
         isinstance(lifetime_ms, bool)
         or not isinstance(lifetime_ms, int)
-        or not 0 < lifetime_ms <= 86_400_000
+        or not 0 < lifetime_ms <= VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS * 1000
         or isinstance(vcpus, bool)
         or not isinstance(vcpus, int)
         or vcpus not in {1, *range(2, 33, 2)}
@@ -220,6 +222,24 @@ def vercel_actual_usd(
     )
 
 
+def _refused_creation(error: BaseException) -> httpx.Response | None:
+    """Return the provider's answer when it refused the create call itself.
+
+    Args:
+        error: Failure raised while creating a sandbox.
+
+    Returns:
+        The 4xx response to the creation request, or None for any other failure.
+    """
+    response = getattr(error, "response", None)
+    if not isinstance(response, httpx.Response) or not 400 <= response.status_code < 500:
+        return None
+    request = response.request
+    if request.method != "POST" or request.url.host != "vercel.com" or request.url.path != "/api/v3/sandboxes":
+        return None
+    return response
+
+
 class VercelUsageReservation:
     """Own coverage and raw control-plane evidence for one sandbox creation."""
 
@@ -306,6 +326,35 @@ class VercelUsageReservation:
                 evidence_key=json_fingerprint(evidence),
                 evidence=evidence,
             )
+
+    def fail(self, error: BaseException) -> None:
+        """Release the hold when the provider refused creation outright, otherwise retain it.
+
+        A 4xx answer to the create call proves no session came into being, so
+        its coverage goes back to the budget instead of waiting for a
+        reconciliation with nothing to reconcile. Every other failure,
+        including a lost response, keeps the hold pending.
+
+        Args:
+            error: Failure raised while creating or confirming the sandbox.
+        """
+        response = _refused_creation(error) if self.session_id is None and not self._sessions else None
+        if response is not None:
+            try:
+                self.runtime.service.reject(
+                    self.operation.id,
+                    self.runtime.username,
+                    evidence_key=f"vercel-refusal:{self.operation.id}",
+                    evidence={
+                        "provider": "vercel",
+                        "status_code": response.status_code,
+                        "message": str(error)[:1000],
+                    },
+                )
+                return
+            except BudgetError:
+                pass
+        self.pending()
 
     def settle(self) -> None:
         """Settle one fully stopped session at actual cost, retaining uncertainty.

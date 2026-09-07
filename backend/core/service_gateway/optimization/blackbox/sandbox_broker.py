@@ -11,6 +11,7 @@ from pathlib import PurePosixPath
 from typing import Any, Protocol
 
 from ....billing.vercel_usage import quote_vercel_sandbox
+from ....config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
 from ....exceptions import ServiceError
 from .sandbox import CommandResult, OutputSink, SandboxRuntime, SandboxSession, SandboxSpec
 
@@ -132,7 +133,7 @@ class SandboxBroker:
         """
         self._runtime = runtime
         self._image = image
-        self._maximum = _duration(max_lifetime_seconds, 86_400)
+        self._maximum = _duration(max_lifetime_seconds, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS)
         quote_vercel_sandbox(
             {
                 "image": image,

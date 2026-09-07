@@ -593,12 +593,12 @@ class VercelSandboxRuntime:
             if usage is not None:
                 usage.confirm_created(box.current_session)
             return session
-        except BaseException:
+        except BaseException as error:
             if box is not None:
                 with contextlib.suppress(Exception):
                     box.__exit__(None, None, None)
             if usage is not None:
-                usage.pending()
+                usage.fail(error)
             context.run(api_session.__exit__, None, None, None)
             raise
 
