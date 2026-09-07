@@ -173,7 +173,9 @@ export function sanitizeProgramDraft(raw: WizardDraftData): WizardDraftData {
     ...data,
     executionRuntime: "vercel",
     codeAssistMode: data.codeAssistMode ?? "manual",
-    splitMode: data.splitMode ?? "manual",
+    // Drafts from before the mode was stored follow the recommendation, like
+    // a new optimization does.
+    splitMode: data.splitMode ?? "auto",
     reactConfig: { ...data.reactConfig, mcpAuthHeader: "" },
     modelConfig: stripModelSecrets(data.modelConfig),
     secondModelConfig: data.secondModelConfig ? stripModelSecrets(data.secondModelConfig) : null,

@@ -391,6 +391,18 @@ test("restored Program drafts discard stored green checks and tool/model credent
   assert.deepEqual(safe.secondModelConfig?.extra, { headers: { region: "eu" } });
 });
 
+test("a Program draft without a stored split mode follows the recommendation", () => {
+  const raw = {
+    jobName: "Older draft",
+    split: { train: 0.7, val: 0.2, test: 0.1 },
+    reactConfig: { mcpUrl: "", mcpAuthHeader: "", toolFilter: [] },
+    modelConfig: { name: "task", extra: {} },
+    generationModels: [],
+    reflectionModels: [],
+  } as unknown as WizardDraftData;
+  assert.equal(sanitizeProgramDraft(raw).splitMode, "auto");
+});
+
 test("a missed cross-tab reset message still fences an old saver out of storage", async () => {
   const s = fakeStore();
   const old = saverWith(s.store, fakeTimers()).saver;

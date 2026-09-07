@@ -704,8 +704,8 @@ export function useSubmitWizard() {
     setModuleChosen(d.moduleChosen);
     setOptimizerName(d.optimizerName);
     setCodeAssistMode(d.codeAssistMode ?? "manual");
-    splitModeRef.current = d.splitMode ?? "manual";
-    setSplitModeState(d.splitMode ?? "manual");
+    splitModeRef.current = d.splitMode ?? "auto";
+    setSplitModeState(d.splitMode ?? "auto");
     setReactConfig({ ...d.reactConfig, mcpAuthHeader: "" });
     if (d.workflowSpec) {
       replaceWorkflowSpec(d.workflowSpec);

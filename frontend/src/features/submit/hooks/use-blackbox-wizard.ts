@@ -1147,11 +1147,25 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     reasoningEffort: interview.reasoningEffort,
   });
 
+  // A fresh set of cases deserves a fresh recommendation: the mode returns to
+  // the user's saved preference so the profiling effect applies the new plan
+  // when they prefer the recommendation, and stays out of the way when they
+  // prefer manual. A clone keeps its pinned manual split because it sets the
+  // cases directly.
+  const resetSplitModeForNewCases = () => {
+    const mode = readPref("wizardSplitMode");
+    splitModeRef.current = mode;
+    setSplitModeState(mode);
+    setSplitPlan(null);
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      setParsedCases(await parseDatasetFile(file));
+      const cases = await parseDatasetFile(file);
+      resetSplitModeForNewCases();
+      setParsedCases(cases);
       setCasesName(file.name);
     } catch {
       toast.error(msg("submit.dataset.file_error"));
@@ -1162,6 +1176,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setLibraryOpen(false);
     try {
       const res = await getDatasetRows(dataset.id);
+      resetSplitModeForNewCases();
       setParsedCases({
         columns: res.columns.length > 0 ? res.columns : Object.keys(res.rows[0] ?? {}),
         rows: res.rows,
