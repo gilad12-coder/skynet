@@ -27,6 +27,7 @@ from core.worker.preflight import run_dspy_preflight
 from core.worker.subprocess_runner import run_service_in_subprocess
 
 EVENT_PREFIX = "SKYNET_JOB_EVENT "
+INCOMPATIBLE_IMAGE_MESSAGE = "The sandbox backend image is incompatible with this worker revision and runtime."
 _CHECKPOINT_PATH = re.compile(r"(?:(?:pair_\d+|gepa)/)?gepa_state\.bin\Z")
 
 
@@ -84,7 +85,7 @@ def main() -> None:
         events.put(
             {
                 "type": "error",
-                "error": "The sandbox backend image is incompatible with this worker revision and runtime.",
+                "error": INCOMPATIBLE_IMAGE_MESSAGE,
                 "traceback": "",
             }
         )

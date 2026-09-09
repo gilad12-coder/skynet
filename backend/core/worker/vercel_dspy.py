@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 import secrets
 import shlex
@@ -14,14 +15,18 @@ from ..billing.runtime import UsagePendingError
 from ..billing.signals import BudgetReached
 from ..exceptions import InfrastructureInterruptionError
 from ..service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
-from ..service_gateway.optimization.blackbox.sandbox import SandboxSpec
+from ..service_gateway.optimization.blackbox.sandbox import CommandResult, SandboxSpec
 from .checkpoint_compat import runtime_identity
 from .constants import EVENT_ERROR, EVENT_RESULT, EVENT_TERMINAL
 from .failure_events import failure_event
-from .isolated_runner import EVENT_PREFIX
+from .isolated_runner import EVENT_PREFIX, INCOMPATIBLE_IMAGE_MESSAGE
+
+logger = logging.getLogger(__name__)
 
 CHECKPOINT_EVENT = "checkpoint_file"
 _CHECKPOINT_PATH = re.compile(r"(?:(?:pair_\d+|gepa)/)?gepa_state\.bin\Z")
+_MISSING_CORE_MODULE = re.compile(r"(?:ModuleNotFoundError|ImportError): .*\bcore\.")
+_DIAGNOSTIC_LINES = 40
 
 
 def _save_checkpoint(directory: Path, event: dict[str, Any]) -> None:
@@ -40,6 +45,36 @@ def _save_checkpoint(directory: Path, event: dict[str, Any]) -> None:
     temporary = target.with_suffix(".incoming")
     temporary.write_bytes(data)
     temporary.replace(target)
+
+
+def _guest_failure(result: CommandResult) -> Exception:
+    """Explain a guest that exited without a terminal event from its own stderr.
+
+    The guest frames every failure inside its entrypoint as an event, so a bare
+    non-zero exit means Python died before reaching it and the traceback on
+    stderr is the only evidence. A ``core`` module failing to import there
+    means the pinned image was built from another revision than this worker.
+
+    Args:
+        result: Outcome of the guest command.
+
+    Returns:
+        The exception to raise, ending with the guest's last stderr line.
+    """
+    lines = [line.rstrip() for line in result.stderr.splitlines() if line.strip()]
+    if lines:
+        logger.error(
+            "Vercel optimizer guest exited %s without a result:\n%s",
+            result.exit_code,
+            "\n".join(lines[-_DIAGNOSTIC_LINES:]),
+        )
+    last = lines[-1].strip() if lines and not result.timed_out else ""
+    if _MISSING_CORE_MODULE.match(last):
+        return RuntimeError(f"{INCOMPATIBLE_IMAGE_MESSAGE} {last}")
+    detail = f" {last}" if last else ""
+    return InfrastructureInterruptionError(
+        f"The Vercel optimizer exited without a complete result (exit {result.exit_code}).{detail}"
+    )
 
 
 def run_vercel_dspy(payload: dict[str, Any], artifact_id: str, event_queue: Any, _start_method: str) -> None:
@@ -132,9 +167,7 @@ def run_vercel_dspy(payload: dict[str, Any], artifact_id: str, event_queue: Any,
             on_output=output,
         )
         if not terminal or not result.ok:
-            raise InfrastructureInterruptionError(
-                f"The Vercel optimizer exited without a complete result (exit {result.exit_code})."
-            )
+            raise _guest_failure(result)
     except BudgetReached as error:
         event_queue.put(
             {
