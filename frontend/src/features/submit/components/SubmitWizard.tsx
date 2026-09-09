@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import { ValidationGate } from "./ValidationFrame";
 import { msg } from "@/shared/lib/messages";
+import { useCredits } from "@/features/billing";
 
 import { TotalBudgetCard } from "./TotalBudgetCard";
 import { WizardIssueNotice } from "./WizardIssueNotice";
@@ -12,7 +13,7 @@ import { WizardSubsteps } from "./WizardSubsteps";
 import { aggregateTokenSource } from "../lib/cost-bracket";
 import { useSubmitWizard } from "../hooks/use-submit-wizard";
 import { emptyModelConfig, slideVariants } from "../constants";
-import { limitCoversEstimate } from "../lib/budget-limit";
+import { budgetBlocksNext } from "../lib/budget-limit";
 import { focusField } from "../lib/focus-field";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { SubmitStepper } from "./SubmitStepper";
@@ -42,6 +43,7 @@ function evaluationPartFor(field?: string): number | null {
 
 export function SubmitWizard({ header }: { header?: ReactNode }) {
   const w = useSubmitWizard();
+  const wallet = useCredits();
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
@@ -115,12 +117,13 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
     await w.handleNext();
   };
 
+  const budgetBlocked = budgetBlocksNext(w.costBracket, budgetMode, {
+    uncapped: w.budgetUncapped,
+    limit: w.maxCostCredits,
+    balance: wallet.available ? wallet.totalCredits : null,
+  });
   const handleOptimizationNext = async () => {
-    if (
-      OPTIMIZATION_STEPS[optimizationPart] === "budget" &&
-      !limitCoversEstimate(w.costBracket, budgetMode, w.budgetUncapped ? null : w.maxCostCredits)
-    )
-      return;
+    if (OPTIMIZATION_STEPS[optimizationPart] === "budget" && budgetBlocked) return;
     if (optimizationPart < OPTIMIZATION_STEPS.length - 1) {
       setOptimizationPart((current) => current + 1);
       return;
@@ -234,6 +237,11 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
           onBack={onBack}
           onNext={onNext}
           backDisabled={w.step === WIZARD_STAGE.goal}
+          nextDisabled={
+            w.step === WIZARD_STAGE.optimization &&
+            OPTIMIZATION_STEPS[optimizationPart] === "budget" &&
+            budgetBlocked
+          }
           showSubmit={showSubmit}
         />
       )}

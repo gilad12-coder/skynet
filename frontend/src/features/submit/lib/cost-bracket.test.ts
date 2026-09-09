@@ -99,12 +99,33 @@ test("adds Vercel at cost after applying the BYOK model fee", () => {
   });
   const charged = chargeableBracket(full, "byok");
 
-  assert.equal(charged.runtimeLowCredits, 3);
+  assert.equal(charged.runtimeLowCredits, 12);
   assert.equal(charged.runtimeHighCredits, 36);
   assert.equal(charged.runtimeSessionLowCredits, 1);
   assert.equal(charged.runtimeSessionHighCredits, 12);
-  assert.equal(charged.lowCredits, platformFeeCredits(full.byokModelLowCredits) + 3);
+  assert.equal(charged.lowCredits, platformFeeCredits(full.byokModelLowCredits) + 12);
   assert.equal(charged.highCredits, platformFeeCredits(full.byokModelHighCredits) + 36);
+});
+
+test("the runtime low end starts at one session's full hold", () => {
+  const bracket = projectCostBracket({
+    ...base,
+    modelRoles: [{ role: "task", model: cheap, tokenSource: "managed", tokenShare: 1 }],
+    runtime: runtimeCostProjection(
+      {
+        billing_basis: "at_cost",
+        minimum_session_credits: "0.14",
+        maximum_session_credits: "235.8",
+        maximum_lifetime_seconds: 18000,
+        vcpus: 2,
+      },
+      4,
+    ),
+  });
+
+  assert.equal(bracket.runtimeLowCredits, 236);
+  assert.equal(bracket.runtimeHighCredits, 944);
+  assert.equal(bracket.lowCredits, bracket.managedModelLowCredits + 236);
 });
 
 test("zero managed sandbox sessions add no runtime charge", () => {

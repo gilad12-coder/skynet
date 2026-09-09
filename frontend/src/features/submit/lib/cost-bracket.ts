@@ -232,9 +232,16 @@ function runtimeCredits(runtime: RuntimeCostProjection | null | undefined): {
   const sessions = Math.max(0, Math.floor(runtime.expectedSessions));
   const low = runtime.minimumSessionCredits;
   const high = runtime.maximumSessionCredits;
+  const perSessionHigh = high == null || !Number.isFinite(high) ? 0 : Math.max(0, high);
+  // A box reserves its whole lifetime the moment it opens, so the low end
+  // starts at one full session's hold however briefly the sessions run.
+  const hold = sessions > 0 ? Math.ceil(perSessionHigh) : 0;
   return {
-    low: low == null || !Number.isFinite(low) ? 0 : Math.ceil(Math.max(0, low) * sessions),
-    high: high == null || !Number.isFinite(high) ? 0 : Math.ceil(Math.max(0, high) * sessions),
+    low: Math.max(
+      hold,
+      low == null || !Number.isFinite(low) ? 0 : Math.ceil(Math.max(0, low) * sessions),
+    ),
+    high: Math.ceil(perSessionHigh * sessions),
   };
 }
 

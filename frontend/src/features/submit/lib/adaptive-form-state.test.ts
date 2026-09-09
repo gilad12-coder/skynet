@@ -325,12 +325,12 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
 
 for (const path of ["../components/SubmitWizard.tsx"]) {
   const component = source(path);
-  test(`${path}: budget is the last panel before summary, holds until the limit covers the estimate, and Back returns to it`, async () => {
+  test(`${path}: budget is the last panel before summary, holds while the budget blocks it, and Back returns to it`, async () => {
     const steps = evaluate(variable(component, "OPTIMIZATION_STEPS"), {});
     let part = 1;
     let summaryOpened = false;
     let returned = false;
-    let covered = true;
+    let blocked = false;
     const setOptimizationPart = (update: number | ((previous: number) => number)) => {
       part = typeof update === "function" ? update(part) : update;
     };
@@ -339,25 +339,21 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
         optimizationPart: part,
         OPTIMIZATION_STEPS: steps,
         setOptimizationPart,
-        budgetMode: "managed",
-        limitCoversEstimate: () => covered,
+        budgetBlocked: blocked,
         w: {
           handleNext: async () => {
             summaryOpened = true;
           },
-          costBracket: {},
-          maxCostCredits: 120,
-          budgetUncapped: false,
         },
       })();
     await next();
     assert.equal(steps[part], "budget");
     assert.equal(summaryOpened, false);
-    covered = false;
+    blocked = true;
     await next();
     assert.equal(steps[part], "budget");
     assert.equal(summaryOpened, false);
-    covered = true;
+    blocked = false;
     await next();
     assert.equal(summaryOpened, true);
     part = 0;

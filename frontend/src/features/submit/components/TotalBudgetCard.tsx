@@ -33,6 +33,7 @@ import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import { cn } from "@/shared/lib/utils";
 
 import { parseBudgetInput } from "../lib/budget-input";
+import { limitFloor } from "../lib/budget-limit";
 import { chargeableBracket, runtimeStartHold, type RoleCostTrace } from "../lib/cost-bracket";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
@@ -198,11 +199,6 @@ export function TotalBudgetCard({
     minimum == null
       ? null
       : formatMsg("submit.budget.minimum_total", { amount: formatCredits(minimum, locale) });
-  const hold = runtimeStartHold(bracket);
-  const holdMessage =
-    hold > 0
-      ? formatMsg("submit.budget.limit_below_hold", { amount: formatCredits(hold, locale) })
-      : null;
   const fieldError =
     parsed.kind === "invalid"
       ? formatMsg("submit.budget.error.invalid", { suggested })
@@ -212,12 +208,13 @@ export function TotalBudgetCard({
           ? msg("submit.budget.error.below_one")
           : parsed.kind === "value" && minimum != null && parsed.value < minimum
             ? minimumMessage
-            : parsed.kind === "value" && parsed.value < hold
-              ? holdMessage
-              : null;
-  const fieldHint =
-    fieldError == null && parsed.kind === "empty" ? (minimumMessage ?? holdMessage) : null;
+            : null;
+  const fieldHint = fieldError == null && parsed.kind === "empty" ? minimumMessage : null;
   const fieldMessage = fieldError ?? fieldHint;
+  // A limit under the estimate's low end is only marked: the range underneath
+  // shows the figure, and the step's Next stays disabled until it is reached.
+  const belowFloor = parsed.kind === "value" && parsed.value < limitFloor(costBracket, mode);
+  const fieldInvalid = fieldError != null || belowFloor;
 
   const estimateLabel = msg(
     preliminary
@@ -348,7 +345,7 @@ export function TotalBudgetCard({
           {
             label: msg("submit.runtime.vercel"),
             formula: formatMsg("submit.budget.calc.runtime_formula", {
-              low: isolate(formatBudgetAmount(bracket.runtimeSessionLowCredits.toFixed(9), locale)),
+              hold: credits(runtimeStartHold(bracket)),
               high: isolate(
                 formatBudgetAmount(bracket.runtimeSessionHighCredits.toFixed(9), locale),
               ),
@@ -498,7 +495,7 @@ export function TotalBudgetCard({
           <div
             className={cn(
               "overflow-hidden rounded-lg border bg-background transition-[border-color,box-shadow] focus-within:ring-[3px]",
-              fieldError
+              fieldInvalid
                 ? "border-destructive focus-within:border-destructive focus-within:ring-destructive/20"
                 : "border-input focus-within:border-ring focus-within:ring-ring/50",
             )}
@@ -508,7 +505,7 @@ export function TotalBudgetCard({
                 id="totalBudgetInput"
                 inputMode="numeric"
                 autoComplete="off"
-                aria-invalid={fieldError ? true : undefined}
+                aria-invalid={fieldInvalid ? true : undefined}
                 aria-describedby={cn(fieldMessage && "totalBudgetMessage", "totalBudgetUnit")}
                 value={text}
                 onChange={(e) => {
@@ -639,9 +636,7 @@ export function TotalBudgetCard({
                 <Row
                   icon={Terminal}
                   label={msg("submit.budget.details.runtime")}
-                  value={formatMsg("submit.budget.details.up_to", {
-                    amount: credits(bracket.runtimeHighCredits),
-                  })}
+                  value={creditRange(charge.runtimeLow, charge.runtimeHigh)}
                   sections={[runtimeSection]}
                 />
               )}

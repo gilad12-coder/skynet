@@ -5,12 +5,13 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import { ValidationGate } from "../ValidationFrame";
 import { msg } from "@/shared/lib/messages";
+import { useCredits } from "@/features/billing";
 import { SubmitSplashOverlay } from "@/shared/ui/submit-splash-overlay";
 import { TERMS } from "@/shared/lib/terms";
 
 import { useBlackboxWizard, type BlackboxRecipe } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig, slideVariants } from "../../constants";
-import { limitCoversEstimate } from "../../lib/budget-limit";
+import { budgetBlocksNext } from "../../lib/budget-limit";
 import { focusField } from "../../lib/focus-field";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../../lib/wizard-steps";
 import { SubmitStepper } from "../SubmitStepper";
@@ -57,6 +58,7 @@ export function BlackboxWizard({
   initialRecipe: BlackboxRecipe;
 }) {
   const w = useBlackboxWizard(initialRecipe);
+  const wallet = useCredits();
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
@@ -139,12 +141,13 @@ export function BlackboxWizard({
     <BlackboxOptimizerStep key="model" w={w} part="model" />,
   ];
 
+  const budgetBlocked = budgetBlocksNext(w.costBracket, w.tokenSource, {
+    uncapped: w.budgetUncapped,
+    limit: w.maxCostCredits,
+    balance: wallet.available ? wallet.totalCredits : null,
+  });
   const handleEvaluationNext = async () => {
-    if (
-      activeEvaluationStep === "budget" &&
-      !limitCoversEstimate(w.costBracket, w.tokenSource, w.budgetUncapped ? null : w.maxCostCredits)
-    )
-      return;
+    if (activeEvaluationStep === "budget" && budgetBlocked) return;
     if (activeEvaluationPart < evaluationSteps.length - 1) {
       setEvaluationPart(activeEvaluationPart + 1);
       return;
@@ -273,6 +276,9 @@ export function BlackboxWizard({
           onBack={onBack}
           onNext={onNext}
           backDisabled={w.step === WIZARD_STAGE.goal}
+          nextDisabled={
+            w.step === WIZARD_STAGE.evaluation && activeEvaluationStep === "budget" && budgetBlocked
+          }
           showSubmit={showSubmit}
         />
       )}
