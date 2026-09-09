@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "Le tariffe del valutatore esterno o del fornitore MCP vengono pagate direttamente a quel fornitore e non sono incluse in questo totale.",
   "submit.budget.pending_total": "Il limite aggiornato verrà verificato quando continui.",
   "submit.budget.minimum_total": "Il lavoro già svolto o riservato richiede un limite di almeno {amount} crediti.",
+  "submit.budget.limit_too_low": "Budget troppo basso. Il limite di spesa deve essere di almeno {amount} crediti.",
+  "submit.budget.balance_too_low": "Budget troppo basso. Il saldo deve essere di almeno {amount} crediti per avviare l'esecuzione.",
   "submit.budget.syncing": "Aggiornamento del saldo del budget…",
   "submit.budget.calc.show": "Mostra come viene calcolata questa cifra",
   "submit.budget.calc.volume": "Volume di token",

@@ -33,7 +33,6 @@ import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import { cn } from "@/shared/lib/utils";
 
 import { parseBudgetInput } from "../lib/budget-input";
-import { limitFloor } from "../lib/budget-limit";
 import { chargeableBracket, runtimeStartHold, type RoleCostTrace } from "../lib/cost-bracket";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
@@ -211,10 +210,6 @@ export function TotalBudgetCard({
             : null;
   const fieldHint = fieldError == null && parsed.kind === "empty" ? minimumMessage : null;
   const fieldMessage = fieldError ?? fieldHint;
-  // A limit under the estimate's low end is only marked: the range underneath
-  // shows the figure, and the step's Next stays disabled until it is reached.
-  const belowFloor = parsed.kind === "value" && parsed.value < limitFloor(costBracket, mode);
-  const fieldInvalid = fieldError != null || belowFloor;
 
   const estimateLabel = msg(
     preliminary
@@ -495,7 +490,7 @@ export function TotalBudgetCard({
           <div
             className={cn(
               "overflow-hidden rounded-lg border bg-background transition-[border-color,box-shadow] focus-within:ring-[3px]",
-              fieldInvalid
+              fieldError
                 ? "border-destructive focus-within:border-destructive focus-within:ring-destructive/20"
                 : "border-input focus-within:border-ring focus-within:ring-ring/50",
             )}
@@ -505,7 +500,7 @@ export function TotalBudgetCard({
                 id="totalBudgetInput"
                 inputMode="numeric"
                 autoComplete="off"
-                aria-invalid={fieldInvalid ? true : undefined}
+                aria-invalid={fieldError ? true : undefined}
                 aria-describedby={cn(fieldMessage && "totalBudgetMessage", "totalBudgetUnit")}
                 value={text}
                 onChange={(e) => {

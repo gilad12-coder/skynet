@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "Gebühren Ihres externen Bewertungs- oder MCP-Anbieters werden direkt an diesen Anbieter bezahlt und sind nicht in diesem Gesamtbudget enthalten.",
   "submit.budget.pending_total": "Dein geändertes Limit wird beim Fortfahren geprüft.",
   "submit.budget.minimum_total": "Bereits erledigte oder reservierte Arbeit erfordert ein Limit von mindestens {amount} Credits.",
+  "submit.budget.limit_too_low": "Budget zu niedrig. Das Ausgabenlimit muss mindestens {amount} Credits betragen.",
+  "submit.budget.balance_too_low": "Budget zu niedrig. Dein Guthaben muss mindestens {amount} Credits betragen, damit der Lauf starten kann.",
   "submit.budget.syncing": "Der Budgetstand wird aktualisiert…",
   "submit.budget.calc.show": "Anzeigen, wie dieser Wert berechnet wird",
   "submit.budget.calc.volume": "Token-Volumen",

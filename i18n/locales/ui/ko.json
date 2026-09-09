@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "외부 평가기 또는 MCP 제공업체가 청구하는 요금은 해당 업체에 직접 지불하며, 이 총예산에 포함되지 않습니다.",
   "submit.budget.pending_total": "변경한 한도는 계속할 때 확인됩니다.",
   "submit.budget.minimum_total": "이미 완료되었거나 예약된 작업에는 최소 {amount}크레딧의 한도가 필요합니다.",
+  "submit.budget.limit_too_low": "예산이 너무 적습니다. 지출 한도는 최소 {amount} 크레딧이어야 합니다.",
+  "submit.budget.balance_too_low": "예산이 너무 적습니다. 실행을 시작하려면 잔액이 최소 {amount} 크레딧이어야 합니다.",
   "submit.budget.syncing": "예산 잔액 새로고침 중…",
   "submit.budget.calc.show": "이 수치의 계산 방식 보기",
   "submit.budget.calc.volume": "토큰 양",

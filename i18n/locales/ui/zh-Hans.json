@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "外部评分器或 MCP 提供商收取的费用直接支付给该提供商，不计入此总预算。",
   "submit.budget.pending_total": "继续时将检查更新后的上限。",
   "submit.budget.minimum_total": "已完成或已预留的工作需要至少 {amount} 额度的上限。",
+  "submit.budget.limit_too_low": "预算过低。支出上限至少需要 {amount} 个额度。",
+  "submit.budget.balance_too_low": "预算过低。开始运行需要余额至少 {amount} 个额度。",
   "submit.budget.syncing": "正在刷新预算余额…",
   "submit.budget.calc.show": "查看此数字的计算方式",
   "submit.budget.calc.volume": "令牌用量",

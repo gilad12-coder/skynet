@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "Harici puanlayıcınızın veya MCP sağlayıcınızın ücretleri doğrudan ilgili sağlayıcıya ödenir ve bu toplama dahil değildir.",
   "submit.budget.pending_total": "Güncellenen limitiniz devam ettiğinizde kontrol edilecek.",
   "submit.budget.minimum_total": "Zaten yapılmış veya ayrılmış iş en az {amount} kredilik bir limit gerektirir.",
+  "submit.budget.limit_too_low": "Bütçe çok düşük. Harcama limiti en az {amount} kredi olmalı.",
+  "submit.budget.balance_too_low": "Bütçe çok düşük. Çalıştırmanın başlaması için bakiyeniz en az {amount} kredi olmalı.",
   "submit.budget.syncing": "Bütçe bakiyesi yenileniyor…",
   "submit.budget.calc.show": "Bu rakamın nasıl hesaplandığını göster",
   "submit.budget.calc.volume": "Token hacmi",

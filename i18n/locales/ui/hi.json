@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "आपके बाहरी स्कोरर या MCP प्रदाता का शुल्क सीधे उसी प्रदाता को दिया जाता है और इस कुल बजट में शामिल नहीं है।",
   "submit.budget.pending_total": "आगे बढ़ने पर आपकी बदली हुई सीमा जाँची जाएगी।",
   "submit.budget.minimum_total": "पहले से किए गए या आरक्षित काम के लिए कम से कम {amount} क्रेडिट की सीमा चाहिए।",
+  "submit.budget.limit_too_low": "बजट बहुत कम है। खर्च सीमा कम से कम {amount} क्रेडिट होनी चाहिए।",
+  "submit.budget.balance_too_low": "बजट बहुत कम है। रन शुरू करने के लिए आपके खाते में कम से कम {amount} क्रेडिट होने चाहिए।",
   "submit.budget.syncing": "बजट की शेष राशि रीफ़्रेश हो रही है…",
   "submit.budget.calc.show": "देखें कि यह आँकड़ा कैसे निकाला गया",
   "submit.budget.calc.volume": "टोकन की मात्रा",

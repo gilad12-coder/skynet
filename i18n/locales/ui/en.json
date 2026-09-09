@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "Any fees charged by your external scorer or MCP provider are paid directly to that provider, outside this total.",
   "submit.budget.pending_total": "Your updated limit is checked when you continue.",
   "submit.budget.minimum_total": "Work already done or reserved needs a limit of at least {amount} credits.",
+  "submit.budget.limit_too_low": "Budget too low. The spending limit needs at least {amount} credits.",
+  "submit.budget.balance_too_low": "Budget too low. Your balance needs at least {amount} credits to start the run.",
   "submit.budget.syncing": "Refreshing the budget balance…",
   "submit.budget.calc.show": "Show how this figure is calculated",
   "submit.budget.calc.volume": "Token volume",

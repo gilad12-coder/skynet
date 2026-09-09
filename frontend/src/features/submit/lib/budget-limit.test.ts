@@ -23,7 +23,7 @@ registerHooks({
 });
 
 const { projectCostBracket, runtimeCostProjection } = await import("./cost-bracket.ts");
-const { budgetBlocksNext, limitFloor } = await import(budgetLimitUrl);
+const { budgetShortfall, limitFloor } = await import(budgetLimitUrl);
 
 const cheap = {
   value: "cheap",
@@ -61,21 +61,21 @@ test("the limit floor is the low end of the estimate, which starts at the openin
   assert.equal(floor, bracket.lowCredits);
 });
 
-test("a capped run is held under the floor and released at it", () => {
+test("a capped run falls short under the floor and is clear at it", () => {
   const floor = limitFloor(bracket, "managed");
   const capped = (limit: number | null) =>
-    budgetBlocksNext(bracket, "managed", { uncapped: false, limit, balance: 5 });
+    budgetShortfall(bracket, "managed", { uncapped: false, limit, balance: 5 });
 
-  assert.equal(capped(floor - 1), true);
-  assert.equal(capped(floor), false);
-  assert.equal(capped(null), false);
+  assert.deepEqual(capped(floor - 1), { kind: "limit", needed: floor });
+  assert.equal(capped(floor), null);
+  assert.equal(capped(null), null);
 });
 
-test("an uncapped run is held while the balance cannot cover the opening hold", () => {
+test("an uncapped run falls short while the balance cannot cover the opening hold", () => {
   const uncapped = (balance: number | null) =>
-    budgetBlocksNext(bracket, "managed", { uncapped: true, limit: 1, balance });
+    budgetShortfall(bracket, "managed", { uncapped: true, limit: 1, balance });
 
-  assert.equal(uncapped(235), true);
-  assert.equal(uncapped(236), false);
-  assert.equal(uncapped(null), false);
+  assert.deepEqual(uncapped(235), { kind: "balance", needed: 236 });
+  assert.equal(uncapped(236), null);
+  assert.equal(uncapped(null), null);
 });

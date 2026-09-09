@@ -33,8 +33,6 @@ interface SubmitNavProps {
   onNext?: () => void;
   onSubmit?: () => void;
   backDisabled?: boolean;
-  /** Next holds where it is until the current step's requirement is met. */
-  nextDisabled?: boolean;
   showSubmit?: boolean;
 }
 
@@ -44,7 +42,6 @@ export function SubmitNav({
   onNext,
   onSubmit,
   backDisabled,
-  nextDisabled,
   showSubmit,
 }: SubmitNavProps) {
   const reducedMotion = useReducedMotion();
@@ -81,7 +78,7 @@ export function SubmitNav({
         </Button>
         <Button
           onClick={onNext ?? handleNext}
-          disabled={advancing || nextDisabled}
+          disabled={advancing}
           aria-busy={advancing || undefined}
           aria-live="polite"
           className="min-h-[44px] min-w-0 flex-1 justify-center gap-2 whitespace-normal sm:min-w-[88px] sm:flex-none sm:whitespace-nowrap"

@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "تُدفع أي رسوم يفرضها مزوّد التقييم الخارجي أو مزوّد MCP مباشرةً إلى ذلك المزوّد، ولا تدخل ضمن هذا الإجمالي.",
   "submit.budget.pending_total": "سيُراجع الحد المعدّل عند المتابعة.",
   "submit.budget.minimum_total": "العمل المنجز أو المحجوز بالفعل يتطلب حدًا لا يقل عن {amount} رصيدًا.",
+  "submit.budget.limit_too_low": "الميزانية منخفضة جدًا. يجب أن يكون حد الإنفاق {amount} رصيدًا على الأقل.",
+  "submit.budget.balance_too_low": "الميزانية منخفضة جدًا. يجب أن يكون رصيدك {amount} رصيدًا على الأقل لبدء التشغيل.",
   "submit.budget.syncing": "جارٍ تحديث رصيد الميزانية…",
   "submit.budget.calc.show": "عرض طريقة حساب هذا الرقم",
   "submit.budget.calc.volume": "حجم الرموز",

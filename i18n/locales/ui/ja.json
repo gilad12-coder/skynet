@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "外部スコアラーまたはMCPプロバイダーの料金は、そのプロバイダーに直接支払われ、この合計には含まれません。",
   "submit.budget.pending_total": "変更した上限は、続行時に確認されます。",
   "submit.budget.minimum_total": "すでに完了または予約済みの作業には、{amount}クレジット以上の上限が必要です。",
+  "submit.budget.limit_too_low": "予算が不足しています。支出上限は{amount}クレジット以上にしてください。",
+  "submit.budget.balance_too_low": "予算が不足しています。実行を開始するには残高が{amount}クレジット以上必要です。",
   "submit.budget.syncing": "予算残高を更新中…",
   "submit.budget.calc.show": "この数値の計算方法を表示",
   "submit.budget.calc.volume": "トークン量",

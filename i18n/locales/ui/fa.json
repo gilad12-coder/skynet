@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "هر هزینه‌ای که ارائه‌دهندهٔ ارزیاب خارجی یا MCP شما دریافت کند، مستقیماً به همان ارائه‌دهنده پرداخت می‌شود و خارج از این مبلغ کل است.",
   "submit.budget.pending_total": "سقف ویرایش‌شده هنگام ادامه بررسی می‌شود.",
   "submit.budget.minimum_total": "کار انجام‌شده یا رزروشده به سقفی دست‌کم {amount} اعتبار نیاز دارد.",
+  "submit.budget.limit_too_low": "بودجه خیلی کم است. سقف هزینه باید دست‌کم {amount} اعتبار باشد.",
+  "submit.budget.balance_too_low": "بودجه خیلی کم است. برای شروع اجرا موجودی شما باید دست‌کم {amount} اعتبار باشد.",
   "submit.budget.syncing": "در حال تازه‌سازی موجودی بودجه…",
   "submit.budget.calc.show": "نمایش نحوهٔ محاسبهٔ این رقم",
   "submit.budget.calc.volume": "حجم توکن‌ها",

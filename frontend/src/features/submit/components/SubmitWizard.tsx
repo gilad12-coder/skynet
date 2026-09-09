@@ -13,7 +13,8 @@ import { WizardSubsteps } from "./WizardSubsteps";
 import { aggregateTokenSource } from "../lib/cost-bracket";
 import { useSubmitWizard } from "../hooks/use-submit-wizard";
 import { emptyModelConfig, slideVariants } from "../constants";
-import { budgetBlocksNext } from "../lib/budget-limit";
+import { budgetShortfall } from "../lib/budget-limit";
+import { toastBudgetShortfall } from "../lib/budget-toast";
 import { focusField } from "../lib/focus-field";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { SubmitStepper } from "./SubmitStepper";
@@ -117,13 +118,16 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
     await w.handleNext();
   };
 
-  const budgetBlocked = budgetBlocksNext(w.costBracket, budgetMode, {
+  const shortfall = budgetShortfall(w.costBracket, budgetMode, {
     uncapped: w.budgetUncapped,
     limit: w.maxCostCredits,
     balance: wallet.available ? wallet.totalCredits : null,
   });
   const handleOptimizationNext = async () => {
-    if (OPTIMIZATION_STEPS[optimizationPart] === "budget" && budgetBlocked) return;
+    if (OPTIMIZATION_STEPS[optimizationPart] === "budget" && shortfall) {
+      toastBudgetShortfall(shortfall);
+      return;
+    }
     if (optimizationPart < OPTIMIZATION_STEPS.length - 1) {
       setOptimizationPart((current) => current + 1);
       return;
@@ -237,11 +241,6 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
           onBack={onBack}
           onNext={onNext}
           backDisabled={w.step === WIZARD_STAGE.goal}
-          nextDisabled={
-            w.step === WIZARD_STAGE.optimization &&
-            OPTIMIZATION_STEPS[optimizationPart] === "budget" &&
-            budgetBlocked
-          }
           showSubmit={showSubmit}
         />
       )}

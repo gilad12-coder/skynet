@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "外部評分器或 MCP 供應商收取嘅費用會直接支付畀該供應商，唔包括喺呢個總額入面。",
   "submit.budget.pending_total": "繼續時會檢查你更新咗嘅上限。",
   "submit.budget.minimum_total": "已經完成或者預留咗嘅工作，需要最少 {amount} credits 嘅上限。",
+  "submit.budget.limit_too_low": "預算太低。支出上限最少要 {amount} 點數。",
+  "submit.budget.balance_too_low": "預算太低。要開始運行，餘額最少要有 {amount} 點數。",
   "submit.budget.syncing": "正在重新整理預算餘額…",
   "submit.budget.calc.show": "睇下呢個數字點計",
   "submit.budget.calc.volume": "token 用量",

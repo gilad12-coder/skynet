@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "Les frais de votre évaluateur externe ou fournisseur MCP sont payés directement à ce fournisseur et ne sont pas inclus dans ce total.",
   "submit.budget.pending_total": "Votre plafond mis à jour sera vérifié lorsque vous continuerez.",
   "submit.budget.minimum_total": "Le travail déjà effectué ou réservé exige un plafond d'au moins {amount} crédits.",
+  "submit.budget.limit_too_low": "Budget trop bas. Le plafond de dépenses doit être d'au moins {amount} crédits.",
+  "submit.budget.balance_too_low": "Budget trop bas. Votre solde doit atteindre au moins {amount} crédits pour lancer l'exécution.",
   "submit.budget.syncing": "Actualisation du solde du budget…",
   "submit.budget.calc.show": "Afficher le calcul de ce chiffre",
   "submit.budget.calc.volume": "Volume de tokens",

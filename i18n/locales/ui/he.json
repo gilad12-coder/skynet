@@ -3648,6 +3648,8 @@
   "submit.budget.external_endpoint_fees": "עמלות שגובה ספק הניקוד החיצוני או ספק ה-MCP שלכם משולמות ישירות לספק, מחוץ לתקציב הכולל הזה.",
   "submit.budget.pending_total": "התקרה המעודכנת תיבדק בלחיצה על המשך.",
   "submit.budget.minimum_total": "עבודה שכבר בוצעה או נשמרה דורשת תקרה של לפחות {amount} קרדיטים.",
+  "submit.budget.limit_too_low": "התקציב נמוך מדי. תקרת ההוצאה צריכה להיות לפחות {amount} קרדיטים.",
+  "submit.budget.balance_too_low": "התקציב נמוך מדי. כדי להתחיל את הריצה היתרה צריכה להיות לפחות {amount} קרדיטים.",
   "submit.budget.syncing": "יתרת התקציב מתעדכנת…",
   "submit.budget.calc.show": "הצגת אופן החישוב של הנתון",
   "submit.budget.calc.volume": "היקף טוקנים",

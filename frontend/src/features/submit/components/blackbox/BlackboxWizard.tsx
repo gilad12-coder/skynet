@@ -11,7 +11,8 @@ import { TERMS } from "@/shared/lib/terms";
 
 import { useBlackboxWizard, type BlackboxRecipe } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig, slideVariants } from "../../constants";
-import { budgetBlocksNext } from "../../lib/budget-limit";
+import { budgetShortfall } from "../../lib/budget-limit";
+import { toastBudgetShortfall } from "../../lib/budget-toast";
 import { focusField } from "../../lib/focus-field";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../../lib/wizard-steps";
 import { SubmitStepper } from "../SubmitStepper";
@@ -141,13 +142,16 @@ export function BlackboxWizard({
     <BlackboxOptimizerStep key="model" w={w} part="model" />,
   ];
 
-  const budgetBlocked = budgetBlocksNext(w.costBracket, w.tokenSource, {
+  const shortfall = budgetShortfall(w.costBracket, w.tokenSource, {
     uncapped: w.budgetUncapped,
     limit: w.maxCostCredits,
     balance: wallet.available ? wallet.totalCredits : null,
   });
   const handleEvaluationNext = async () => {
-    if (activeEvaluationStep === "budget" && budgetBlocked) return;
+    if (activeEvaluationStep === "budget" && shortfall) {
+      toastBudgetShortfall(shortfall);
+      return;
+    }
     if (activeEvaluationPart < evaluationSteps.length - 1) {
       setEvaluationPart(activeEvaluationPart + 1);
       return;
@@ -276,9 +280,6 @@ export function BlackboxWizard({
           onBack={onBack}
           onNext={onNext}
           backDisabled={w.step === WIZARD_STAGE.goal}
-          nextDisabled={
-            w.step === WIZARD_STAGE.evaluation && activeEvaluationStep === "budget" && budgetBlocked
-          }
           showSubmit={showSubmit}
         />
       )}

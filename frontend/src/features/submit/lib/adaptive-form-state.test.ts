@@ -325,12 +325,13 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
 
 for (const path of ["../components/SubmitWizard.tsx"]) {
   const component = source(path);
-  test(`${path}: budget is the last panel before summary, holds while the budget blocks it, and Back returns to it`, async () => {
+  test(`${path}: budget is the last panel before summary, toasts while the budget falls short, and Back returns to it`, async () => {
     const steps = evaluate(variable(component, "OPTIMIZATION_STEPS"), {});
     let part = 1;
     let summaryOpened = false;
     let returned = false;
     let blocked = false;
+    let toasted = 0;
     const setOptimizationPart = (update: number | ((previous: number) => number)) => {
       part = typeof update === "function" ? update(part) : update;
     };
@@ -339,7 +340,10 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
         optimizationPart: part,
         OPTIMIZATION_STEPS: steps,
         setOptimizationPart,
-        budgetBlocked: blocked,
+        shortfall: blocked ? { kind: "limit", needed: 236 } : null,
+        toastBudgetShortfall: () => {
+          toasted += 1;
+        },
         w: {
           handleNext: async () => {
             summaryOpened = true;
@@ -353,9 +357,11 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
     await next();
     assert.equal(steps[part], "budget");
     assert.equal(summaryOpened, false);
+    assert.equal(toasted, 1);
     blocked = false;
     await next();
     assert.equal(summaryOpened, true);
+    assert.equal(toasted, 1);
     part = 0;
     evaluate(variable(component, "onBack"), {
       WIZARD_STAGE,
