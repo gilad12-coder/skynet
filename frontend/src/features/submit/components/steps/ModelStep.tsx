@@ -69,12 +69,14 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
               </HelpTip>
             </Label>
             <div className="space-y-2">
-              <ModelRoleRow description={msg("submit.blackbox.roles.task.desc")}>
+              <ModelRoleRow
+                role={msg("submit.blackbox.roles.task.label")}
+                description={msg("model.generation.explainer")}
+              >
                 <ModelChip
                   config={modelConfig}
                   className={MOBILE_MODEL_CHIP_CLASS}
                   roleLabel={msg("submit.blackbox.roles.task.label")}
-                  tooltip={msg("model.generation.explainer")}
                   required
                   catalogModels={catalog?.models}
                   onClick={() =>
@@ -90,13 +92,12 @@ export function ModelStep({ w }: { w: SubmitWizardContext }) {
               {requiresOptimizationModel && (
                 <ModelRoleRow
                   role={msg("submit.blackbox.roles.optimization.label")}
-                  description={msg("submit.blackbox.roles.optimization.desc.gepa")}
+                  description={msg("model.reflection.explainer")}
                 >
                   <ModelChip
                     config={secondModelConfig ?? emptyModelConfig()}
                     className={MOBILE_MODEL_CHIP_CLASS}
                     roleLabel={msg("submit.blackbox.roles.optimization.label")}
-                    tooltip={msg("model.reflection.explainer")}
                     required
                     catalogModels={catalog?.models}
                     onClick={() =>

@@ -296,7 +296,6 @@ export function BlackboxOptimizerStep({
               modelDefaultsOnly={nativeProposer}
               className={MOBILE_MODEL_CHIP_CLASS}
               roleLabel={optimizationLabel}
-              tooltip={msg("model.reflection.explainer")}
               required
               catalogModels={catalog?.models}
               onClick={() =>

@@ -23,6 +23,7 @@ import { modelProviderSlug } from "@/shared/lib/model-provider";
 
 interface ModelChipProps {
   config: ModelConfig;
+  /** Names the role for assistive tech; the surface shows it above the chip. */
   roleLabel?: string;
   /** Hide sampling and reasoning settings when the runtime owns them. */
   modelDefaultsOnly?: boolean;
@@ -111,11 +112,6 @@ export function ModelChip({
 
   const content = (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      {roleLabel && (
-        <span className="text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
-          {roleLabel}
-        </span>
-      )}
       <span
         className={cn(
           "truncate text-sm",
@@ -191,11 +187,7 @@ export function ModelChip({
         aria-label={roleLabel ? `${roleLabel}: ${name}` : name}
         className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2.5 rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-ring lg:min-h-0"
       >
-        {!isEmpty && (
-          <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border/45 bg-background shadow-sm">
-            <ProviderLogo slug={modelProviderSlug(config.name)} size={20} />
-          </span>
-        )}
+        {!isEmpty && <ProviderLogo slug={modelProviderSlug(config.name)} size={24} />}
         {content}
       </button>
 

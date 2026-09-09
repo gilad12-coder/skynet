@@ -10,6 +10,7 @@ import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { ModelChip } from "@/shared/ui/model-chip";
+import { ModelRoleRow } from "./ModelRoleRow";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 import { formatElapsedMs, formatScore } from "@/shared/lib/formatters";
@@ -90,10 +91,10 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
       {scorerKind === "python" ? (
         <div className="space-y-3">
           {scorerUsesModel && (
-            <div
+            <ModelRoleRow
               id="bb-scoring-model"
-              tabIndex={-1}
-              className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border/50 bg-muted/20 p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              role={msg("submit.blackbox.roles.scoring.label")}
+              description={msg("submit.blackbox.scorer.model_explainer")}
             >
               {/* Inheriting shows the optimization model itself; picking a
                   different one is one click on the chip. Removing it clears
@@ -105,8 +106,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                     ? scorerModel
                     : (resolvedScorerModel ?? emptyModelConfig())
                 }
-                className={`w-full min-w-0 ${MOBILE_MODEL_CHIP_CLASS}`}
-                tooltip={msg("submit.blackbox.scorer.model_explainer")}
+                className={MOBILE_MODEL_CHIP_CLASS}
                 required
                 emptyLabel={
                   scoringModelPending ? msg("submit.blackbox.roles.not_chosen") : undefined
@@ -134,11 +134,11 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                 }
               />
               {!resolvedScorerModel?.name.trim() && (
-                <p role="alert" className="w-full text-xs text-destructive">
+                <p role="alert" className="text-xs text-destructive">
                   {msg("submit.blackbox.validation.scorer_model_required")}
                 </p>
               )}
-            </div>
+            </ModelRoleRow>
           )}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Label>

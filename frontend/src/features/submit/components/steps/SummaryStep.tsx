@@ -42,6 +42,7 @@ import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { ModelRoleRow } from "../blackbox/ModelRoleRow";
 import { formatCredits } from "@/features/billing";
 import { useUserPrefs } from "@/features/settings";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
@@ -431,18 +432,22 @@ export function SummaryStep({
               {summaryTab === 2 && (
                 <div className="space-y-2 pointer-events-none">
                   {jobType === "run" ? (
-                    <div className="space-y-2">
-                      <ModelChip
-                        config={modelConfig}
-                        roleLabel={msg("submit.blackbox.roles.task.label")}
-                        onClick={() => {}}
-                      />
-                      {w.optimizerName.toLowerCase() === "gepa" && secondModelConfig?.name && (
+                    <div className="space-y-3">
+                      <ModelRoleRow role={msg("submit.blackbox.roles.task.label")}>
                         <ModelChip
-                          config={secondModelConfig}
-                          roleLabel={msg("submit.blackbox.roles.optimization.label")}
+                          config={modelConfig}
+                          roleLabel={msg("submit.blackbox.roles.task.label")}
                           onClick={() => {}}
                         />
+                      </ModelRoleRow>
+                      {w.optimizerName.toLowerCase() === "gepa" && secondModelConfig?.name && (
+                        <ModelRoleRow role={msg("submit.blackbox.roles.optimization.label")}>
+                          <ModelChip
+                            config={secondModelConfig}
+                            roleLabel={msg("submit.blackbox.roles.optimization.label")}
+                            onClick={() => {}}
+                          />
+                        </ModelRoleRow>
                       )}
                     </div>
                   ) : (
