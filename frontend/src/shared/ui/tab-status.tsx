@@ -4,7 +4,7 @@ import * as React from "react";
 
 import { useResolvedTabActivity } from "@/shared/hooks/use-tab-activity";
 import type { TabActivity } from "@/shared/lib/tab-activity";
-import { markFavicon, markTitle } from "@/shared/lib/tab-status-mark";
+import { markFavicon } from "@/shared/lib/tab-status-mark";
 
 const ICON_SELECTOR = 'link[rel~="icon"]';
 
@@ -19,8 +19,8 @@ function loadFaviconSource(href: string): Promise<string | null> {
 }
 
 /**
- * Keeps the browser tab's favicon and title in step with the app's activity.
- * Mounted once at the root; renders nothing.
+ * Keeps the status dot on the browser tab's favicon in step with the app's
+ * activity. Mounted once at the root; renders nothing.
  */
 export function TabStatus() {
   const activity = useResolvedTabActivity();
@@ -33,10 +33,6 @@ export function TabStatus() {
     let cancelled = false;
     let marked: string | null = null;
 
-    const applyTitle = () => {
-      const next = markTitle(document.title, activity);
-      if (next !== document.title) document.title = next;
-    };
     const applyIcon = () => {
       const icon = document.querySelector<HTMLLinkElement>(ICON_SELECTOR);
       if (!icon) return;
@@ -44,7 +40,6 @@ export function TabStatus() {
       if (href !== null && icon.getAttribute("href") !== href) icon.setAttribute("href", href);
     };
 
-    applyTitle();
     if (activity === null) {
       applyIcon();
       return;
@@ -57,14 +52,11 @@ export function TabStatus() {
       });
     }
 
-    // Navigation rewrites <title> from route metadata and may swap the icon
-    // link; put the mark back whenever the head changes. Attributes are not
-    // observed, so our own writes never re-trigger this.
-    const observer = new MutationObserver(() => {
-      applyTitle();
-      applyIcon();
-    });
-    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    // Navigation may swap the icon link from route metadata; put the dot back
+    // whenever the head changes. Attributes are not observed, so our own
+    // writes never re-trigger this.
+    const observer = new MutationObserver(applyIcon);
+    observer.observe(document.head, { childList: true, subtree: true });
 
     return () => {
       cancelled = true;
