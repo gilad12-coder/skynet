@@ -18,10 +18,9 @@ export function requestNotificationPermission(): void {
   }
 }
 
-/** Notify only when the app is not in front: the user can already see it otherwise. */
+/** Always notify, even with the app in front: the OS log is the point. */
 export function notifyUser(title: string): void {
   if (!supported() || Notification.permission !== "granted") return;
-  if (document.visibilityState === "visible" && document.hasFocus()) return;
   try {
     const notification = new Notification(title);
     notification.onclick = () => {
