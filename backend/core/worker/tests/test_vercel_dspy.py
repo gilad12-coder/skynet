@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
 import queue
+import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +17,7 @@ import pytest
 from core.exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION
 from core.service_gateway.optimization.blackbox.sandbox import CommandResult
 from core.worker import vercel_dspy
+from core.worker.checkpoint_compat import runtime_identity, source_digest
 
 
 class FakeSession:
@@ -32,7 +35,10 @@ class FakeSession:
 
     def run(self, command: str, **kwargs: Any) -> CommandResult:
         """Emit fragmented checkpoint and successful optimizer frames."""
-        request = json.loads(next(iter(self.files.values())))
+        [request_path] = [path for path in self.files if path.endswith("/request.json")]
+        [archive_path] = [path for path in self.files if path.endswith("/source.tgz.b64")]
+        assert command.index(f"base64 -d {archive_path} | tar -xzf -") < command.index("core.worker.isolated_runner")
+        request = json.loads(self.files[request_path])
         assert "_budget_gateway_descriptor" not in request["payload"]
         assert request["runtime_identity"]["gepa_revision"] == "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
         prefix = f"{vercel_dspy.EVENT_PREFIX}{request['nonce']} "
@@ -120,7 +126,7 @@ def test_remote_preflight_never_reads_submitted_checkpoint_directory(
         events,
         "spawn",
     )
-    request = json.loads(next(iter(session.files.values())))
+    request = json.loads(session.files[next(path for path in session.files if path.endswith("/request.json"))])
     assert "_gepa_log_dir" not in request["payload"]
     assert request["checkpoints"] == {}
     assert request["export_checkpoints"] is False
@@ -128,6 +134,22 @@ def test_remote_preflight_never_reads_submitted_checkpoint_directory(
     assert session.closed
     assert events.get_nowait() == {"type": "preflight_phase", "phase": "evaluator"}
     assert events.get_nowait()["type"] == "result"
+
+
+def test_parent_ships_the_source_its_identity_covers(tmp_path: Path) -> None:
+    """Unpack the staged archive and hash it the way a guest does.
+
+    Args:
+        tmp_path: Stand-in for the guest's session directory.
+    """
+    archive = base64.b64decode(vercel_dspy._source_archive())
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+        tar.extractall(tmp_path, filter="data")
+    assert source_digest(tmp_path / "core") == runtime_identity()["source_sha256"]
+    assert (tmp_path / "core/worker/isolated_runner.py").is_file()
+    assert (tmp_path / "core/i18n_locales/he.json").is_file()
+    assert not list((tmp_path / "core").rglob("tests"))
+    assert not list((tmp_path / "core").rglob("__pycache__"))
 
 
 class CrashingSession(FakeSession):

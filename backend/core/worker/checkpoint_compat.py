@@ -72,23 +72,50 @@ def _dependencies() -> dict[str, str]:
     return {name: importlib.metadata.version(name) for name in ("gepa", "dspy", "litellm")}
 
 
+def source_files(root: Path | None = None) -> list[tuple[str, Path]]:
+    """List the backend modules the runtime identity covers, sorted by path.
+
+    Args:
+        root: Package directory to scan; the running package by default.
+
+    Returns:
+        Package-relative POSIX paths paired with their files, without tests or caches.
+    """
+    root = root if root is not None else Path(__file__).resolve().parents[1]
+    return [
+        (path.relative_to(root).as_posix(), path)
+        for path in sorted(root.rglob("*.py"))
+        if "__pycache__" not in path.parts and "tests" not in path.parts
+    ]
+
+
+def source_digest(root: Path | None = None) -> str:
+    """Hash the backend modules of one package tree.
+
+    Args:
+        root: Package directory to hash; the running package by default.
+
+    Returns:
+        SHA-256 over the relative path and bytes of every covered module.
+    """
+    digest = hashlib.sha256()
+    for relative, path in source_files(root):
+        digest.update(relative.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
 def runtime_identity() -> dict[str, Any]:
     """Identify the exact Python, dependencies, and backend source mounted in a guest.
 
     Returns:
         Immutable compatibility evidence checked before authored code executes.
     """
-    root = Path(__file__).resolve().parents[1]
-    digest = hashlib.sha256()
-    for path in sorted(root.rglob("*.py")):
-        if "__pycache__" not in path.parts and "tests" not in path.parts:
-            digest.update(path.relative_to(root).as_posix().encode())
-            digest.update(path.read_bytes())
     direct_url = importlib.metadata.distribution("gepa").read_text("direct_url.json")
     return {
         "python": platform.python_version(),
         "dependencies": _dependencies(),
-        "source_sha256": digest.hexdigest(),
+        "source_sha256": source_digest(),
         "gepa_revision": json.loads(direct_url or "{}").get("vcs_info", {}).get("commit_id"),
     }
 
@@ -277,11 +304,7 @@ def evaluated_incumbent_from_progress(
         return None
     for row in per_example:
         row_score = row.get("score") if isinstance(row, dict) else None
-        if (
-            isinstance(row_score, bool)
-            or not isinstance(row_score, int | float)
-            or not math.isfinite(float(row_score))
-        ):
+        if isinstance(row_score, bool) or not isinstance(row_score, int | float) or not math.isfinite(float(row_score)):
             return None
     candidate_id = metrics.get("candidate_id")
     if not isinstance(candidate_id, str | int) or isinstance(candidate_id, bool):
@@ -344,11 +367,7 @@ def checkpoint_incumbent(manifest: dict[str, Any] | None) -> dict[str, Any] | No
     if incumbent.get("selection_scope") not in {"validation", "training"}:
         return None
     evaluated_examples = incumbent.get("evaluated_examples")
-    if (
-        not isinstance(evaluated_examples, int)
-        or isinstance(evaluated_examples, bool)
-        or evaluated_examples <= 0
-    ):
+    if not isinstance(evaluated_examples, int) or isinstance(evaluated_examples, bool) or evaluated_examples <= 0:
         return None
     try:
         return json.loads(json.dumps(incumbent, allow_nan=False))
