@@ -261,6 +261,7 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
     };
     const bindings = {
       WIZARD_STAGE,
+      step: WIZARD_STAGE.evaluation,
       advancingRef: { current: false },
       mountedRef: { current: true },
       setAdvancing: () => {},
@@ -269,6 +270,8 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
       goTo: (stage: number) => {
         visited.push(stage);
       },
+      settleHeldCheck: () => {},
+      preflight: { reusable: () => null },
       ensureSetupChecked: check,
       ensureEvaluatorChecked: check,
     };
@@ -279,6 +282,33 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
     await advance(WIZARD_STAGE.review);
     assert.deepEqual(scopes, ["execution"]);
     assert.equal(visited.at(-1), WIZARD_STAGE.review);
+  });
+
+  test(`${path}: a check run from Optimization holds there and a reused pass moves on`, async () => {
+    const visited: number[] = [];
+    let settled = 0;
+    let reusable: object | null = null;
+    const advance = evaluate(variable(hook, "advance"), {
+      WIZARD_STAGE,
+      step: WIZARD_STAGE.optimization,
+      advancingRef: { current: false },
+      mountedRef: { current: true },
+      setAdvancing: () => {},
+      setIssue: () => {},
+      validateStep: () => true,
+      goTo: (stage: number) => visited.push(stage),
+      settleHeldCheck: () => {
+        settled += 1;
+      },
+      preflight: { reusable: () => reusable },
+      ensureSetupChecked: async () => ({}),
+    });
+    await advance(WIZARD_STAGE.review);
+    assert.deepEqual(visited, []);
+    reusable = {};
+    await advance(WIZARD_STAGE.review);
+    assert.deepEqual(visited, [WIZARD_STAGE.review]);
+    assert.equal(settled, 2);
   });
 
   test(`${path}: missing budget belongs to Optimization and blocks Review`, async () => {
@@ -303,6 +333,7 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
       goTo: (stage: number) => {
         visited.push(stage);
       },
+      settleHeldCheck: () => {},
       ensureSetupChecked: () => assert.fail("Preflight ran without a budget"),
       ensureEvaluatorChecked: () => assert.fail("Preflight ran without a budget"),
     });
@@ -325,13 +356,14 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
 
 for (const path of ["../components/SubmitWizard.tsx"]) {
   const component = source(path);
-  test(`${path}: budget is the last panel before summary, toasts while the budget falls short, and Back returns to it`, async () => {
+  test(`${path}: budget toasts while it falls short, Continue runs the check from it, and Back from the summary returns to the check page`, async () => {
     const steps = evaluate(variable(component, "OPTIMIZATION_STEPS"), {});
     let part = 1;
-    let summaryOpened = false;
+    let summaryOpened = 0;
     let returned = false;
     let blocked = false;
     let toasted = 0;
+    let executionResult: object | null = null;
     const setOptimizationPart = (update: number | ((previous: number) => number)) => {
       part = typeof update === "function" ? update(part) : update;
     };
@@ -339,6 +371,7 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
       evaluate(variable(component, "handleOptimizationNext"), {
         optimizationPart: part,
         OPTIMIZATION_STEPS: steps,
+        executionResult,
         setOptimizationPart,
         shortfall: blocked ? { kind: "limit", needed: 236 } : null,
         toastBudgetShortfall: () => {
@@ -346,26 +379,34 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
         },
         w: {
           handleNext: async () => {
-            summaryOpened = true;
+            summaryOpened += 1;
           },
         },
       })();
     await next();
     assert.equal(steps[part], "budget");
-    assert.equal(summaryOpened, false);
+    assert.equal(summaryOpened, 0);
     blocked = true;
     await next();
     assert.equal(steps[part], "budget");
-    assert.equal(summaryOpened, false);
+    assert.equal(summaryOpened, 0);
     assert.equal(toasted, 1);
     blocked = false;
     await next();
-    assert.equal(summaryOpened, true);
+    assert.equal(steps[part], "budget");
+    assert.equal(summaryOpened, 1);
     assert.equal(toasted, 1);
+    executionResult = {};
+    await next();
+    assert.equal(steps[part], "check");
+    assert.equal(summaryOpened, 1);
+    await next();
+    assert.equal(summaryOpened, 2);
     part = 0;
     evaluate(variable(component, "onBack"), {
       WIZARD_STAGE,
       OPTIMIZATION_STEPS: steps,
+      held: false,
       setOptimizationPart,
       w: {
         step: WIZARD_STAGE.review,
@@ -375,6 +416,27 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
       },
     })();
     assert.equal(returned, true);
+    assert.equal(steps[part], "check");
+    let cleared = 0;
+    evaluate(variable(component, "onBack"), {
+      WIZARD_STAGE,
+      OPTIMIZATION_STEPS: steps,
+      held: true,
+      optimizationPart: part,
+      setOptimizationPart,
+      w: {
+        step: WIZARD_STAGE.optimization,
+        preflight: {
+          progress: {
+            clear: () => {
+              cleared += 1;
+            },
+          },
+        },
+        goPrev: () => assert.fail("Back from the check page left the stage"),
+      },
+    })();
+    assert.equal(cleared, 1);
     assert.equal(steps[part], "budget");
   });
 
@@ -434,12 +496,15 @@ for (const success of [true, false]) {
     const scopes: string[] = [];
     const advance = evaluate(variable(wizard, "advance"), {
       WIZARD_STAGE,
+      step: WIZARD_STAGE.goal,
       advancingRef: { current: false },
       mountedRef: { current: true },
       setAdvancing: () => {},
       setIssue: () => {},
       validateStep: () => true,
       goTo: (stage: number) => visited.push(stage),
+      settleHeldCheck: () => {},
+      preflight: { reusable: () => null },
       ensureEvaluatorChecked: async (scope: string) => {
         scopes.push(scope);
         return success ? {} : null;
@@ -448,6 +513,56 @@ for (const success of [true, false]) {
     await advance(WIZARD_STAGE.optimization);
     assert.deepEqual(scopes, ["evaluation"]);
     assert.deepEqual(visited, success ? [WIZARD_STAGE.optimization] : []);
+  });
+}
+
+test("Anything holds on a check run from Evaluation and moves on with a reused pass", async () => {
+  const visited: number[] = [];
+  let reusable: object | null = null;
+  const advance = evaluate(variable(wizard, "advance"), {
+    WIZARD_STAGE,
+    step: WIZARD_STAGE.evaluation,
+    advancingRef: { current: false },
+    mountedRef: { current: true },
+    setAdvancing: () => {},
+    setIssue: () => {},
+    validateStep: () => true,
+    goTo: (stage: number) => visited.push(stage),
+    settleHeldCheck: () => {},
+    preflight: { reusable: () => reusable },
+    ensureEvaluatorChecked: async () => ({}),
+  });
+  await advance(WIZARD_STAGE.optimization);
+  assert.deepEqual(visited, []);
+  reusable = {};
+  await advance(WIZARD_STAGE.optimization);
+  assert.deepEqual(visited, [WIZARD_STAGE.optimization]);
+});
+
+for (const path of ["../hooks/use-submit-wizard.ts", "../hooks/use-blackbox-wizard.ts"]) {
+  const hook = source(path);
+  test(`${path}: leaving a stage settles only the check held on it`, () => {
+    const settle = (step: number, state: { status: string; scope: string } | null) => {
+      let cleared = 0;
+      evaluate(variable(hook, "settleHeldCheck"), {
+        WIZARD_STAGE,
+        step,
+        preflight: {
+          progress: {
+            state,
+            clear: () => {
+              cleared += 1;
+            },
+          },
+        },
+      })();
+      return cleared;
+    };
+    assert.equal(settle(WIZARD_STAGE.optimization, { status: "succeeded", scope: "execution" }), 1);
+    assert.equal(settle(WIZARD_STAGE.evaluation, { status: "succeeded", scope: "evaluation" }), 1);
+    assert.equal(settle(WIZARD_STAGE.review, { status: "succeeded", scope: "execution" }), 0);
+    assert.equal(settle(WIZARD_STAGE.optimization, { status: "running", scope: "execution" }), 0);
+    assert.equal(settle(WIZARD_STAGE.optimization, null), 0);
   });
 }
 
@@ -599,14 +714,49 @@ test("inherited evaluator picker opens the effective model instead of stale expl
 
 const blackboxView = source("../components/blackbox/BlackboxWizard.tsx");
 
-test("Evaluation proceeds from the scorer to split or Optimization without an execution step", () => {
+test("Evaluation ends on its check page, with the split only when there are cases", () => {
   for (const hasCases of [false, true]) {
     const steps = evaluate(variable(blackboxView, "evaluationSteps"), { hasCases })();
     assert.deepEqual(
       Array.from(steps),
-      hasCases ? ["budget", "cases", "scorer", "split"] : ["budget", "cases", "scorer"],
+      hasCases
+        ? ["budget", "cases", "scorer", "split", "check"]
+        : ["budget", "cases", "scorer", "check"],
     );
   }
+});
+
+test("Continue from the split runs the check, opens the last pass, and moves on from the check page", async () => {
+  let part = 3;
+  let advanced = 0;
+  let evaluationResult: object | null = null;
+  const steps = ["budget", "cases", "scorer", "split", "check"];
+  const next = () =>
+    evaluate(variable(blackboxView, "handleEvaluationNext"), {
+      activeEvaluationStep: steps[part],
+      activeEvaluationPart: part,
+      evaluationSteps: steps,
+      evaluationResult,
+      shortfall: null,
+      toastBudgetShortfall: () => {},
+      setEvaluationPart: (value: number) => {
+        part = value;
+      },
+      w: {
+        handleNext: async () => {
+          advanced += 1;
+        },
+      },
+    })();
+  await next();
+  assert.equal(steps[part], "split");
+  assert.equal(advanced, 1);
+  evaluationResult = {};
+  await next();
+  assert.equal(steps[part], "check");
+  assert.equal(advanced, 1);
+  await next();
+  assert.equal(advanced, 2);
 });
 
 test("agent model errors and review edits route back to scorer settings", () => {

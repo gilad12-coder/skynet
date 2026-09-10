@@ -3,17 +3,19 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import { ValidationFrame, ValidationGate } from "../ValidationFrame";
+import { ValidationFrame, ValidationGate, ValidationPlan } from "../ValidationFrame";
 import { msg } from "@/shared/lib/messages";
 import { useCredits } from "@/features/billing";
 import { SubmitSplashOverlay } from "@/shared/ui/submit-splash-overlay";
 import { TERMS } from "@/shared/lib/terms";
+import type { PreflightScope } from "@/shared/types/wizard-preflight";
 
 import { useBlackboxWizard, type BlackboxRecipe } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig, slideVariants } from "../../constants";
 import { budgetShortfall } from "../../lib/budget-limit";
 import { toastBudgetShortfall } from "../../lib/budget-toast";
 import { focusField } from "../../lib/focus-field";
+import type { ValidationProgress } from "../../lib/preflight-store";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../../lib/wizard-steps";
 import { SubmitStepper } from "../SubmitStepper";
 import { SubmitNav } from "../SubmitNav";
@@ -29,9 +31,9 @@ import { BlackboxScorerStep } from "./BlackboxScorerStep";
 import { BlackboxOptimizerStep } from "./BlackboxOptimizerStep";
 import { BlackboxReviewStep } from "./BlackboxReviewStep";
 
-type EvaluationStep = "cases" | "scorer" | "split" | "budget";
+type EvaluationStep = "cases" | "scorer" | "split" | "budget" | "check";
 const GOAL_STEPS = ["goal"] as const;
-const OPTIMIZATION_STEPS = ["strategy", "model"] as const;
+const OPTIMIZATION_STEPS = ["strategy", "model", "check"] as const;
 const REVIEW_STEPS = ["review"] as const;
 
 /** The evaluation substep that holds a field, so a problem opens where it is fixed. */
@@ -65,10 +67,14 @@ export function BlackboxWizard({
   const [evaluationPart, setEvaluationPart] = useState(0);
   const [optimizationPart, setOptimizationPart] = useState(0);
 
-  // The split only exists once there are cases to divide.
+  // The split only exists once there are cases to divide; the stage's check
+  // closes it either way.
   const hasCases = Boolean(w.parsedCases?.rowCount);
   const evaluationSteps = useMemo<readonly EvaluationStep[]>(
-    () => (hasCases ? ["budget", "cases", "scorer", "split"] : ["budget", "cases", "scorer"]),
+    () =>
+      hasCases
+        ? ["budget", "cases", "scorer", "split", "check"]
+        : ["budget", "cases", "scorer", "check"],
     [hasCases],
   );
   const activeEvaluationPart = Math.min(evaluationPart, evaluationSteps.length - 1);
@@ -110,6 +116,34 @@ export function BlackboxWizard({
         : w.stageIssue(w.step)
       : null;
 
+  // Each stage ends on its check: the last pass for this setup, or what
+  // Continue will run.
+  const evaluationResult = w.preflight.progress.completed("evaluation");
+  const executionResult = w.preflight.progress.completed("execution");
+  const checkPage = (scope: PreflightScope, result: ValidationProgress | null) => {
+    if (result) return <ValidationFrame state={result} settled />;
+    const prior = w.preflight.evidence[scope];
+    const stale = prior !== undefined && prior.identity !== w.preflight.identity;
+    return <ValidationPlan workflow="anything" scope={scope} stale={stale} />;
+  };
+  const validation = w.preflight.progress.state;
+  // A passed check is shown on its own page, the last substep of its stage,
+  // which is where the stage reopens afterwards.
+  const passedCheck = validation?.status === "succeeded" ? validation.scope : null;
+  useEffect(() => {
+    if (passedCheck === "evaluation") setEvaluationPart(evaluationSteps.length - 1);
+    if (passedCheck === "execution") setOptimizationPart(OPTIMIZATION_STEPS.length - 1);
+  }, [passedCheck, evaluationSteps]);
+  // A check that passed from its own stage is a page of its own: it stays,
+  // with the navigation, until the user moves on.
+  const held =
+    validation?.status === "succeeded" &&
+    w.step ===
+      (validation.scope === "evaluation" ? WIZARD_STAGE.evaluation : WIZARD_STAGE.optimization);
+  const onCheckPage =
+    (w.step === WIZARD_STAGE.evaluation && activeEvaluationStep === "check") ||
+    (w.step === WIZARD_STAGE.optimization && OPTIMIZATION_STEPS[optimizationPart] === "check");
+
   const evaluationPanels: Record<EvaluationStep, ReactNode> = {
     cases: (
       <div id="bb-cases" tabIndex={-1} className="outline-none">
@@ -136,14 +170,13 @@ export function BlackboxWizard({
         <SplitSection w={w} totalRows={w.parsedCases?.rowCount ?? 0} />
       </div>
     ),
+    check: checkPage("evaluation", evaluationResult),
   };
   const optimizationPanels: readonly ReactNode[] = [
     <BlackboxOptimizerStep key="strategy" w={w} part="strategy" />,
     <BlackboxOptimizerStep key="model" w={w} part="model" />,
+    checkPage("execution", executionResult),
   ];
-  // A passed check stays under the panel whose Continue ran it.
-  const evaluationResult = w.preflight.progress.completed("evaluation");
-  const executionResult = w.preflight.progress.completed("execution");
 
   const shortfall = budgetShortfall(w.costBracket, w.tokenSource, {
     uncapped: w.budgetUncapped,
@@ -155,7 +188,14 @@ export function BlackboxWizard({
       toastBudgetShortfall(shortfall);
       return;
     }
-    if (activeEvaluationPart < evaluationSteps.length - 1) {
+    const next = evaluationSteps[activeEvaluationPart + 1];
+    // The check page opens on the last pass; without one, Continue runs the
+    // check, which holds the wizard there.
+    if (next === "check" && !evaluationResult) {
+      await w.handleNext();
+      return;
+    }
+    if (next) {
       setEvaluationPart(activeEvaluationPart + 1);
       return;
     }
@@ -163,7 +203,12 @@ export function BlackboxWizard({
   };
 
   const handleOptimizationNext = async () => {
-    if (optimizationPart < OPTIMIZATION_STEPS.length - 1) {
+    const next = OPTIMIZATION_STEPS[optimizationPart + 1];
+    if (next === "check" && !executionResult) {
+      await w.handleNext();
+      return;
+    }
+    if (next) {
       setOptimizationPart((current) => current + 1);
       return;
     }
@@ -183,11 +228,6 @@ export function BlackboxWizard({
         steps={evaluationSteps}
       >
         {evaluationPanels[activeEvaluationStep]}
-        {activeEvaluationPart === evaluationSteps.length - 1 && evaluationResult && (
-          <div className="mt-4 md:mt-6">
-            <ValidationFrame state={evaluationResult} settled />
-          </div>
-        )}
       </WizardSubsteps>
     ),
     optimization: (
@@ -197,11 +237,6 @@ export function BlackboxWizard({
         steps={OPTIMIZATION_STEPS}
       >
         {optimizationPanels[optimizationPart]}
-        {optimizationPart === OPTIMIZATION_STEPS.length - 1 && executionResult && (
-          <div className="mt-4 md:mt-6">
-            <ValidationFrame state={executionResult} settled />
-          </div>
-        )}
       </WizardSubsteps>
     ),
     review: (
@@ -215,6 +250,8 @@ export function BlackboxWizard({
   };
 
   const onBack = () => {
+    // Leaving a held result settles it into its page.
+    if (held) w.preflight.progress.clear();
     if (w.step === WIZARD_STAGE.evaluation && activeEvaluationPart > 0) {
       setEvaluationPart(activeEvaluationPart - 1);
       return;
@@ -233,7 +270,6 @@ export function BlackboxWizard({
         ? handleOptimizationNext
         : w.handleNext;
   const showSubmit = w.step === WIZARD_STAGE.review;
-  const validation = w.preflight.progress.state;
   // Auto mode seats the agent pane beside the form on the Goal stage and the
   // scorer, so those take the wide column; plain forms keep the narrow one.
   const wideAuthoringPanel =
@@ -246,22 +282,24 @@ export function BlackboxWizard({
     dataPreviewOpen &&
     dataPreviewExpanded &&
     !!w.parsedCases;
-  const containerWidthClass = validation
-    ? "max-w-3xl"
-    : wideAuthoringPanel || wideDataPreview
-      ? "max-w-6xl"
-      : "max-w-2xl";
+  const containerWidthClass =
+    validation || onCheckPage
+      ? "max-w-3xl"
+      : wideAuthoringPanel || wideDataPreview
+        ? "max-w-6xl"
+        : "max-w-2xl";
 
   return (
     <div
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
-      <SubmitStepper w={w} locked={validation !== null} />
+      <SubmitStepper w={w} locked={validation !== null && !held} />
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">
         <ValidationGate
           validation={validation}
           direction={w.direction}
+          hold={held}
           onBack={w.preflight.progress.clear}
         >
           <AnimatePresence mode="wait" custom={w.direction}>
@@ -287,7 +325,7 @@ export function BlackboxWizard({
         </ValidationGate>
       </div>
 
-      {validation === null && (
+      {(validation === null || held) && (
         <SubmitNav
           w={w}
           onBack={onBack}

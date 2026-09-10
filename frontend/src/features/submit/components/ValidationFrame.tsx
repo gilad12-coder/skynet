@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { CaretDown, Check, CircleNotch, Clock, Warning } from "@/shared/ui/icons";
+import { CaretDown, Check, CircleNotch, Clock, ListChecks, Warning } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { msg } from "@/shared/lib/messages";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
@@ -83,8 +83,9 @@ const PLAN: Record<PreflightWorkflow, Record<PreflightScope, readonly Validation
   },
 };
 
-// A passed check moves the wizard on by itself; its result stays just long
-// enough to be read before the next step slides in.
+// A passed check run on the way to another stage moves the wizard on by
+// itself; its result stays just long enough to be read before the next step
+// slides in. A check run from its own page is held there instead.
 const SUCCESS_LINGER_MS = 1200;
 
 // A step that has run this long gets a word of reassurance.
@@ -126,11 +127,14 @@ function duration(ms: number): string {
 export function ValidationGate({
   validation,
   direction,
+  hold = false,
   onBack,
   children,
 }: {
   validation: ValidationProgress | null;
   direction: number;
+  /** A passed check that is a page of its own: it stays until the wizard moves on. */
+  hold?: boolean;
   onBack: () => void;
   children: ReactNode;
 }) {
@@ -158,7 +162,7 @@ export function ValidationGate({
             exit="exit"
             transition={{ duration: 0.1 }}
           >
-            <ValidationFrame state={validation} onBack={onBack} />
+            <ValidationFrame state={validation} onBack={hold ? undefined : onBack} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -332,25 +336,11 @@ export function ValidationFrame({
           );
         })}
         {upcoming.map((key, offset) => (
-          <li
+          <UpcomingRow
             key={`upcoming-${key}-${offset}`}
-            className="flex items-center gap-4 px-6 py-4 sm:px-8"
-          >
-            <span
-              className="flex size-9 shrink-0 items-center justify-center rounded-full border border-dashed border-border text-xs tabular-nums text-muted-foreground"
-              aria-hidden="true"
-            >
-              {phases.length + offset + 1}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[15px] font-medium text-muted-foreground">
-                {msg(phaseKeys[key])}
-              </span>
-              <span className="mt-0.5 block text-xs text-muted-foreground/80">
-                {msg("submit.validation.progress.upcoming")}
-              </span>
-            </span>
-          </li>
+            number={phases.length + offset + 1}
+            phase={key}
+          />
         ))}
       </ol>
 
@@ -365,6 +355,69 @@ export function ValidationFrame({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * The check page before its check has run: what Continue will check, in
+ * order, and whether an earlier pass no longer describes the setup.
+ */
+export function ValidationPlan({
+  workflow,
+  scope,
+  stale,
+}: {
+  workflow: PreflightWorkflow;
+  scope: PreflightScope;
+  stale: boolean;
+}) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg backdrop-blur-xl">
+      <div className="flex items-start gap-4 px-6 pt-7 pb-6 sm:px-8">
+        <div
+          className="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted text-foreground"
+          aria-hidden="true"
+        >
+          <ListChecks className="size-6" weight="bold" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
+            {msg(
+              scope === "evaluation" ? "submit.preflight.evaluation" : "submit.preflight.execution",
+            )}
+          </h2>
+          <p className="max-w-prose text-[15px] leading-relaxed text-muted-foreground" dir="auto">
+            {msg(stale ? "submit.preflight.stale" : "submit.preflight.idle")}
+          </p>
+        </div>
+      </div>
+      <ol className="divide-y divide-border/60 border-t border-border/60">
+        {PLAN[workflow][scope].map((key, index) => (
+          <UpcomingRow key={key} number={index + 1} phase={key} />
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function UpcomingRow({ number, phase }: { number: number; phase: ValidationPhase }) {
+  return (
+    <li className="flex items-center gap-4 px-6 py-4 sm:px-8">
+      <span
+        className="flex size-9 shrink-0 items-center justify-center rounded-full border border-dashed border-border text-xs tabular-nums text-muted-foreground"
+        aria-hidden="true"
+      >
+        {number}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[15px] font-medium text-muted-foreground">
+          {msg(phaseKeys[phase])}
+        </span>
+        <span className="mt-0.5 block text-xs text-muted-foreground/80">
+          {msg("submit.validation.progress.upcoming")}
+        </span>
+      </span>
+    </li>
   );
 }
 

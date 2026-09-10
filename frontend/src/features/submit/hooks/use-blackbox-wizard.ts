@@ -1297,11 +1297,21 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setFurthestReachedStep(Math.max(reachable, WIZARD_STAGE[pendingRestore.furthest]));
   }, [pendingRestore, validateStep]);
 
+  // A passed check held on its own stage settles as the wizard leaves it; one
+  // run on the way to another stage lingers and clears itself.
+  const settleHeldCheck = () => {
+    const progress = preflight.progress.state;
+    if (progress?.status !== "succeeded") return;
+    const stage =
+      progress.scope === "evaluation" ? WIZARD_STAGE.evaluation : WIZARD_STAGE.optimization;
+    if (step === stage) preflight.progress.clear();
+  };
   const goTo = (idx: number) => {
     navigationRevisionRef.current += 1;
     dryRunAttemptRef.current += 1;
     setDryRun((current) => (current.status === "running" ? { status: "idle" } : current));
     preflight.cancel();
+    settleHeldCheck();
     validationToastRef.current?.dismiss();
     setDirection(idx > step ? 1 : -1);
     setStep(idx);
@@ -1381,32 +1391,43 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setAdvancing(true);
     setIssue(null);
     try {
+      settleHeldCheck();
       for (let i = 0; i < target; i++) {
         if (!validateStep(i, true)) {
           goTo(i);
           return;
         }
       }
-      if (target === WIZARD_STAGE.optimization && !(await ensureEvaluatorChecked("evaluation")))
-        return;
-      if (target > WIZARD_STAGE.optimization && !(await ensureEvaluatorChecked("execution")))
-        return;
+      // A check that runs from its own stage is a page of its own: the wizard
+      // holds on the result, and the next Continue moves on. A pass reused
+      // from an earlier run moves on at once.
+      if (target === WIZARD_STAGE.optimization) {
+        const reused = Boolean(preflight.reusable("evaluation"));
+        if (!(await ensureEvaluatorChecked("evaluation"))) return;
+        if (!reused && step === WIZARD_STAGE.evaluation) return;
+      }
+      if (target > WIZARD_STAGE.optimization) {
+        const reused = Boolean(preflight.reusable("execution"));
+        if (!(await ensureEvaluatorChecked("execution"))) return;
+        if (!reused && step === WIZARD_STAGE.optimization) return;
+      }
       goTo(target);
     } finally {
       advancingRef.current = false;
       if (mountedRef.current) setAdvancing(false);
     }
   };
-  // A check the user walked away from (or one that finished while they were
-  // gone) is picked up where it stands: the frame already shows it, and its
-  // outcome moves the wizard on the way Next would have.
+  // A check the user walked away from is picked up where it stands: the frame
+  // already shows it, and its outcome holds or moves the wizard on the way
+  // Next would have. One that finished while they were gone is its own page.
   const resumedRef = useRef(false);
   useEffect(() => {
     if (resumedRef.current || !hydratedRef.current || pendingRestore) return;
     resumedRef.current = true;
     const progress = preflight.progress.state;
     if (!progress || progress.identity !== preflight.identity) return;
-    if (progress.status !== "running" && progress.status !== "succeeded") return;
+    // A pass is already its own page; a run still going is joined.
+    if (progress.status !== "running") return;
     void advance(progress.scope === "evaluation" ? WIZARD_STAGE.optimization : WIZARD_STAGE.review);
   });
 
