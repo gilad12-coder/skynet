@@ -26,7 +26,6 @@ BLACKBOX_ENGINE_BEST_OF_N = "best_of_n"
 BLACKBOX_ENGINE_AUTORESEARCH = "autoresearch"
 BLACKBOX_ENGINE_META_HARNESS = "meta_harness"
 BLACKBOX_STRATEGY_AUTO = "auto"
-BLACKBOX_STRATEGY_PLATEAU = "plateau"
 BLACKBOX_TARGET_TEXT = "text"
 BLACKBOX_TARGET_AGENT = "agent"
 BLACKBOX_HARNESS_PI = "pi"
@@ -147,15 +146,10 @@ class BlackboxTarget(BaseModel):
 
 
 # ``auto`` explores every available engine on a budget slice, then continues
-# from the best version with GEPA; ``single`` runs one named engine;
-# ``plateau`` relays over the available engines in Auto's order, handing the
-# best version to the next engine whenever ``patience`` scorer runs pass
-# without improvement, until the budget, the target score or a full round
-# without progress.
+# from the best version with GEPA; ``single`` runs one named engine.
 class BlackboxStrategy(BaseModel):
-    mode: Literal["auto", "single", "plateau"] = "auto"
+    mode: Literal["auto", "single"] = "auto"
     engine: str | None = None
-    patience: int = Field(default=40, ge=5, le=10_000)
 
     @model_validator(mode="after")
     def _ensure_engine_for_single(self) -> BlackboxStrategy:
@@ -295,12 +289,11 @@ class ScorerDryRunResponse(BaseModel):
 
 
 # One engine lane of a run. ``explore`` lanes share the budget; the
-# ``continue`` lane resumes from the best explore result; ``relay`` lanes
-# are the plateau strategy's hand-offs.
+# ``continue`` lane resumes from the best explore result.
 class BlackboxLaneResult(BaseModel):
     engine: str
-    phase: Literal["explore", "continue", "single", "relay"]
-    status: Literal["completed", "failed", "unavailable", "budget_exhausted", "plateaued", "stopped"]
+    phase: Literal["explore", "continue", "single"]
+    status: Literal["completed", "failed", "unavailable", "budget_exhausted", "stopped"]
     best_score: float | None = None
     scorer_runs: int = 0
     error: str | None = None
@@ -337,7 +330,7 @@ class BlackboxCandidateNode(BaseModel):
 # billing paths read them unchanged.
 class BlackboxRunResponse(BaseModel):
     optimizer_name: str
-    strategy_mode: Literal["auto", "single", "plateau"]
+    strategy_mode: Literal["auto", "single"]
     engine_used: str
     split_counts: SplitCounts
     baseline_test_metric: float | None = None
@@ -361,6 +354,33 @@ class BlackboxRunResponse(BaseModel):
     lm_activity: LMActivity | None = None
     optimization_metadata: dict[str, Any] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)
+
+    # Results stored by the retired plateau relay strategy stay readable:
+    # they open as Auto runs whose hand-off lanes ended by completing.
+    @model_validator(mode="before")
+    @classmethod
+    def _fold_retired_relay(cls, data: Any) -> Any:
+        """Map a stored relay result onto the current strategy values.
+
+        Args:
+            data: The raw result mapping.
+
+        Returns:
+            The mapping with the relay read as Auto and its lanes as explore lanes.
+        """
+        if not isinstance(data, dict) or data.get("strategy_mode") != "plateau":
+            return data
+        lanes = [
+            {
+                **lane,
+                "phase": "explore" if lane.get("phase") == "relay" else lane.get("phase"),
+                "status": "completed" if lane.get("status") == "plateaued" else lane.get("status"),
+            }
+            if isinstance(lane, dict)
+            else lane
+            for lane in data.get("lanes") or []
+        ]
+        return {**data, "strategy_mode": "auto", "lanes": lanes}
 
 
 # One sandboxed agent run of a black-box job, as ``GET

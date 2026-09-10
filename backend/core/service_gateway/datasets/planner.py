@@ -33,7 +33,7 @@ proposal on the val set and ignores train — so its plan pushes the data
 into val (capped, so each proposal stays affordable) and keeps a test
 holdout. Meta-Harness evaluates every candidate on train and val pooled
 together, so a val slice buys nothing and only test is a true holdout.
-GEPA and the auto / plateau lanes keep the tiers above.
+GEPA and the auto lanes keep the tiers above.
 """
 
 from __future__ import annotations
@@ -54,9 +54,7 @@ VAL_CAP = 200
 TEST_CAP = 500
 
 
-def recommend_split(
-    profile: DatasetProfile, *, seed: int | None = None, engine: str | None = None
-) -> SplitPlan:
+def recommend_split(profile: DatasetProfile, *, seed: int | None = None, engine: str | None = None) -> SplitPlan:
     """Return a recommended ``SplitPlan`` for the profiled dataset.
 
     When ``seed`` is omitted a fresh random seed is chosen so the plan is

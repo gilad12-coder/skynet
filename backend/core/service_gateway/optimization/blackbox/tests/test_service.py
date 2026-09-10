@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
 from core.billing.signals import BudgetReached
 from core.constants import (
@@ -31,7 +30,6 @@ from core.models.blackbox import (
     BLACKBOX_ENGINE_BEST_OF_N,
     BLACKBOX_ENGINE_GEPA,
     BlackboxRunRequest,
-    BlackboxStrategy,
     ScorerDryRunRequest,
 )
 from core.models.results import ModelTokenUsage
@@ -541,46 +539,10 @@ _JUDGE_SCORER_CODE = (
 )
 
 
-def test_plateau_run_relays_between_engines(
-    fake_lm: FakeReflectionLM, tmp_path: Path, fake_native_proposers: list[tuple[str, EngineContext]]
-) -> None:
-    """Preserve upstream adaptive scheduling and its shared evaluation budget.
-
-    Args:
-        fake_lm: Metered model fake used by GEPA slices.
-        tmp_path: Per-test artifact directory.
-        fake_native_proposers: Captured native invocations without paid model calls.
-    """
-    sink: list[tuple[str, dict[str, Any]]] = []
-
-    response = run_blackbox_optimization(
-        _payload(strategy={"mode": "plateau", "patience": 5}, budget={"max_scorer_runs": 40}, max_cost_credits=100),
-        artifact_id="job-plateau",
-        progress_callback=lambda e, m: sink.append((e, m)),
-        gepa_log_dir_path=str(tmp_path),
-    )
-
-    assert response.strategy_mode == "plateau"
-    assert response.lanes[0].engine == "gepa"
-    assert {lane.phase for lane in response.lanes} == {"relay"}
-    assert len(response.lanes) >= 2
-    assert {engine for engine, _ in fake_native_proposers} == {"autoresearch", "meta_harness"}
-    assert response.total_scorer_runs <= 40
-    assert response.optimized_test_metric >= response.baseline_test_metric
-    assert response.details["adaptive_switches"] >= 2
-    assert response.details["adaptive_schedule"][0]["engine_idx"] == 0
-    assert all(step["eval_delta"] <= 5 for step in response.details["adaptive_schedule"])
-    assert "stage_results" not in response.details
-    assert len([event for event, _ in sink if event == PROGRESS_LANE_STARTED]) == len(response.lanes)
-    assert len([event for event, _ in sink if event == PROGRESS_LANE_COMPLETED]) == len(response.lanes)
-    response.model_dump_json()
-
-
 @pytest.mark.parametrize(
     "strategy",
     [
         {"mode": "auto"},
-        {"mode": "plateau"},
         {"mode": "single", "engine": "autoresearch"},
         {"mode": "single", "engine": "meta_harness"},
     ],
@@ -615,7 +577,6 @@ def test_unavailable_native_recipe_fails_before_building_a_scorer(
     ("strategy", "requires_train"),
     [
         ({"mode": "auto"}, True),
-        ({"mode": "plateau"}, True),
         ({"mode": "single", "engine": "meta_harness"}, True),
         ({"mode": "single", "engine": "gepa"}, False),
         ({"mode": "single", "engine": "autoresearch"}, False),
@@ -705,7 +666,6 @@ def test_combined_usage_preserves_distinct_native_model_keys() -> None:
     ("strategy", "native"),
     [
         ({"mode": "auto"}, True),
-        ({"mode": "plateau"}, True),
         ({"mode": "single", "engine": "meta_harness"}, True),
         ({"mode": "single", "engine": "autoresearch"}, True),
         ({"mode": "single", "engine": "gepa"}, False),
@@ -746,15 +706,6 @@ def test_native_model_controls_are_rejected_without_restricting_direct_engines(
             validate_blackbox_payload(payload)
     else:
         validate_blackbox_payload(payload)
-
-
-def test_strategy_patience_has_bounds() -> None:
-    """Patience below five runs or above ten thousand is rejected at validation."""
-    assert BlackboxStrategy(mode="plateau").patience == 40
-    with pytest.raises(ValidationError):
-        BlackboxStrategy(mode="plateau", patience=4)
-    with pytest.raises(ValidationError):
-        BlackboxStrategy(mode="plateau", patience=10_001)
 
 
 def test_scorer_llm_usage_is_billed_with_the_run(
@@ -1215,7 +1166,7 @@ def test_budget_stop_before_completed_baseline_has_no_result(fake_lm, tmp_path, 
 
 @pytest.mark.parametrize(
     "strategy",
-    [{"mode": "auto"}, {"mode": "plateau"}, {"mode": "single", "engine": "meta_harness"}],
+    [{"mode": "auto"}, {"mode": "single", "engine": "meta_harness"}],
 )
 def test_budget_backed_native_run_leaves_its_cost_ceiling_to_the_ledger(
     monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str]

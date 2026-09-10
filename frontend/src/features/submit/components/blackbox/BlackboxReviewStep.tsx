@@ -99,7 +99,6 @@ export function BlackboxReviewStep({
     runDisabledReason,
     nativeProposer,
     iterationLimitSupported,
-    patience,
     maxScorerRuns,
     maxIterations,
     stopAtScore,
@@ -297,9 +296,7 @@ export function BlackboxReviewStep({
         >
           {strategyMode === "auto"
             ? msg("submit.blackbox.strategy.auto")
-            : strategyMode === "plateau"
-              ? formatMsg("submit.blackbox.review.strategy_plateau", { n: patience })
-              : (selectedEngine?.label ?? msg("submit.blackbox.strategy.single"))}
+            : (selectedEngine?.label ?? msg("submit.blackbox.strategy.single"))}
           {runDisabledReason && (
             <span className="mt-1 flex items-start gap-1.5 text-xs text-amber-700" role="status">
               <Warning className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />

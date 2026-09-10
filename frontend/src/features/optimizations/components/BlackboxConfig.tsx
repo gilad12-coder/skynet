@@ -131,9 +131,7 @@ export function BlackboxConfigCard({
   const strategyValue =
     strategy.mode === "single"
       ? msg("submit.blackbox.strategy.single")
-      : strategy.mode === "plateau"
-        ? msg("submit.blackbox.strategy.plateau")
-        : msg("submit.blackbox.strategy.auto");
+      : msg("submit.blackbox.strategy.auto");
 
   const targetValue =
     target.kind === "agent"

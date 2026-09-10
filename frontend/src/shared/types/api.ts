@@ -568,7 +568,13 @@ export interface ScorerDependencyLock {
   requirements: string[];
   inferred: string[];
   imports: string[];
-  artifacts: Array<{ name: string; version: string; filename: string; url: string; sha256: string }>;
+  artifacts: Array<{
+    name: string;
+    version: string;
+    filename: string;
+    url: string;
+    sha256: string;
+  }>;
   python: string;
   image: string;
   registry_url: string;
@@ -608,11 +614,8 @@ export interface BlackboxTarget {
 }
 
 export interface BlackboxStrategy {
-  mode: "auto" | "single" | "plateau";
+  mode: "auto" | "single";
   engine?: BlackboxEngineId | null;
-  // Plateau patience: scorer runs without improvement before rotating to the
-  // next engine in the relay. Ignored unless mode is "plateau".
-  patience?: number;
 }
 
 export interface BlackboxRunRequest {
@@ -673,8 +676,8 @@ export interface ScorerDryRunResponse {
 
 export interface BlackboxLaneResult {
   engine: BlackboxEngineId;
-  phase: "explore" | "continue" | "single" | "relay";
-  status: "completed" | "failed" | "unavailable" | "budget_exhausted" | "plateaued";
+  phase: "explore" | "continue" | "single";
+  status: "completed" | "failed" | "unavailable" | "budget_exhausted";
   best_score?: number | null;
   scorer_runs: number;
   error?: string | null;
@@ -708,7 +711,7 @@ export interface BlackboxCandidateNode {
 
 export interface BlackboxRunResult {
   optimizer_name: string;
-  strategy_mode: "auto" | "single" | "plateau";
+  strategy_mode: "auto" | "single";
   engine_used: BlackboxEngineId;
   split_counts: Record<string, number>;
   baseline_test_metric?: number | null;

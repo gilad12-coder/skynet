@@ -15,7 +15,6 @@ Skynet owns input validation, model routing, execution transport, outer accounti
 | Meta-Harness | Pinned `gepa.oa.engines.meta_harness.MetaHarnessEngine` | Text | Claude Code proposer, selected managed model, worker OS jail or Vercel microVM | No persisted-job resume API at this pin |
 | AutoResearch | Pinned `gepa.oa.engines.autoresearch.AutoResearchEngine` | Text | Same execution/model transport; upstream controls the research session | In-run Ralph continuation is not persisted-job recovery |
 | Auto | Published omni-GEPA recipe | Text | All three GEPA/AutoResearch/Meta-Harness lanes must be available | No composed restart implementation |
-| Plateau | Pinned `optimize_adaptive_sequential` helper | Text | Same three engines; upstream aggregate-score scheduler with the supplied patience | No composed restart implementation |
 
 The [pinned omni example](https://github.com/gepa-ai/gepa/blob/0632cdb5dcc052e690eab439e1b4a7e3e9cfe407/docs/docs/blog/posts/2026-07-22-optimize-anything-omni/index.md) runs three equal exploration allocations through `optimize_best_of`, then a fresh GEPA continuation. Skynet assigns a quarter of the proposer allowance to each phase, partitions scorer calls into four allocations (integer remainder to continuation), and requires at least four scorer calls. Best-of-N is an independent selectable baseline, not a substitute exploration lane. Missing native capability blocks the recipe instead of silently reducing it.
 
@@ -44,7 +43,7 @@ The gateway URL and authentication configure the CLI's Anthropic-compatible tran
 
 The wizard associates catalog responses with the requested target/runtime so a late response cannot authorize a different setup. AutoResearch remains visible. Native engines and compositions show the compact runtime control in Optimization and the chosen runtime in Review. Drafts, clones and payloads retain it. Meta-Harness is no longer gated on the old `target.kind=agent` choice.
 
-Meta-Harness requires training examples when a dataset is supplied; Auto and Plateau inherit that requirement. Validation-only GEPA and AutoResearch runs remain supported. The adapter does not move examples between splits to satisfy an engine. The optional iteration cap applies only to single Meta-Harness runs. Other choices omit that control and reject an explicit API iteration cap, because the pinned implementations do not enforce it as a run-wide limit.
+Meta-Harness requires training examples when a dataset is supplied; Auto inherits that requirement. Validation-only GEPA and AutoResearch runs remain supported. The adapter does not move examples between splits to satisfy an engine. The optional iteration cap applies only to single Meta-Harness runs. Other choices omit that control and reject an explicit API iteration cap, because the pinned implementations do not enforce it as a run-wide limit.
 
 ## Evidence, costs and remaining specification work
 

@@ -49,7 +49,6 @@ function anythingDraft(overrides: Partial<AnythingDraftData> = {}): AnythingDraf
     scorerModelMode: "inherit",
     strategyMode: "auto",
     engine: null,
-    patience: 5,
     maxScorerRuns: 100,
     maxIterations: "",
     stopAtScore: "",

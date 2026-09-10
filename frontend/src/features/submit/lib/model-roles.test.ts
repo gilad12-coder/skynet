@@ -109,7 +109,6 @@ test("resolveScoringModel keeps an explicit override even when it matches the op
 
 test("optimizationModelFamily names the proposer the model drives", () => {
   assert.equal(optimizationModelFamily("auto", null), "auto");
-  assert.equal(optimizationModelFamily("plateau", "meta_harness"), "auto");
   assert.equal(optimizationModelFamily("single", "best_of_n"), "gepa");
   assert.equal(optimizationModelFamily("single", "meta_harness"), "meta_harness");
   assert.equal(optimizationModelFamily("single", "autoresearch"), "autoresearch");

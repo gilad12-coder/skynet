@@ -194,7 +194,6 @@ function scorerTemplateFor(recipe: BlackboxRecipe): string {
 // backend caps the value at 600.
 const SCORER_TIMEOUT_SECONDS = 300;
 const DEFAULT_MAX_SCORER_RUNS = 100;
-const DEFAULT_PATIENCE = 40;
 
 function parseOptionalNumber(value: string): number | undefined {
   const trimmed = value.trim();
@@ -349,10 +348,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     };
   }, []);
 
-  const [strategyMode, setStrategyMode] = useState<"auto" | "single" | "plateau">("auto");
+  const [strategyMode, setStrategyMode] = useState<"auto" | "single">("auto");
   const [engine, setEngine] = useState<BlackboxEngineId | null>(null);
   const proposerRuntime = "vercel" as const;
-  const [patience, setPatience] = useState(DEFAULT_PATIENCE);
   const [engineCatalogResult, setEngineCatalogResult] = useState<{
     target: BlackboxTarget["kind"];
     data: BlackboxEngineCatalogResponse | null;
@@ -508,17 +506,17 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerDependencyLock(d.scorerDependencyLock ?? null);
     setScorerModel(d.scorerModel);
     setScorerModelMode(d.scorerModelMode);
-    setStrategyMode(d.strategyMode);
+    // Drafts saved with the retired plateau relay open as Auto.
+    setStrategyMode(d.strategyMode === "single" ? "single" : "auto");
     setEngine(d.engine);
-    setPatience(d.patience);
     setMaxScorerRuns(d.maxScorerRuns);
     setMaxIterations(d.maxIterations);
     setStopAtScore(d.stopAtScore);
     setReflectionModel(d.reflectionModel);
   }, [draftSnapshot]);
 
-  // Auto and Plateau relay pick engines themselves, so only a hand-picked engine
-  // shapes the recommended split.
+  // Auto picks engines itself, so only a hand-picked engine shapes the
+  // recommended split.
   useDatasetProfiling({
     parsedDataset: parsedCases,
     columnRoles: caseColumnRoles,
@@ -654,9 +652,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
           const strategy = source.strategy;
           if (strategy) {
-            setStrategyMode(strategy.mode);
+            // Jobs run with the retired plateau relay clone as Auto.
+            setStrategyMode(strategy.mode === "single" ? "single" : "auto");
             setEngine(strategy.engine ?? null);
-            if (strategy.patience != null) setPatience(strategy.patience);
           }
           const budget = source.budget;
           if (budget) {
@@ -859,12 +857,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         max_iterations: iterationLimitSupported && maxIterations !== "" ? maxIterations : undefined,
         stop_at_score: parseOptionalNumber(stopAtScore),
       },
-      strategy:
-        strategyMode === "single"
-          ? { mode: "single", engine }
-          : strategyMode === "plateau"
-            ? { mode: "plateau", patience }
-            : { mode: "auto" },
+      strategy: strategyMode === "single" ? { mode: "single", engine } : { mode: "auto" },
       proposer_runtime: proposerRuntime,
       target: buildTarget(),
       task_model_config:
@@ -1567,7 +1560,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       strategyMode,
       engine,
       proposerRuntime,
-      patience,
       maxScorerRuns,
       maxIterations,
       stopAtScore,
@@ -1709,8 +1701,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     proposerRuntime,
     nativeProposer,
     iterationLimitSupported,
-    patience,
-    setPatience,
     engineCatalog,
     selectedEngine,
     runDisabledReason,

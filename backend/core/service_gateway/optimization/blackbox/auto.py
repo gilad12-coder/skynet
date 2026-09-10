@@ -1,4 +1,4 @@
-"""Compose pinned upstream engines with the published omni and relay helpers."""
+"""Compose pinned upstream engines with the published omni helper."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any
 import dspy
 from gepa.oa.config import OptimizeAnythingConfig
 from gepa.oa.engine import Result as UpstreamResult
-from gepa.oa.ensemble import optimize_adaptive_sequential, optimize_best_of
+from gepa.oa.ensemble import optimize_best_of
 from gepa.oa.eval_server import EvalServer as UpstreamEvalServer
 from gepa.oa.task import Task as UpstreamTask
 
@@ -39,9 +39,7 @@ class LaneOutcome:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def _completed_lane_incumbent(
-    lanes: list[LaneOutcome], server: EvalServer, interrupted: Any = None
-) -> Result | None:
+def _completed_lane_incumbent(lanes: list[LaneOutcome], server: EvalServer, interrupted: Any = None) -> Result | None:
     """Keep the best finite result already selected by an interrupted lane.
 
     Args:
@@ -171,7 +169,7 @@ class _LaneEngine:
             )
 
         def progress(event: str, metrics: dict[str, Any]) -> None:
-            """Keep candidate identifiers distinct across parallel engines and relay slices.
+            """Keep candidate identifiers distinct across parallel engines.
 
             Args:
                 event: Upstream/platform event name.
@@ -294,9 +292,7 @@ def run_strategy(
         return result, lanes
 
     if not task.str_mode:
-        raise ServiceError(
-            "The upstream Auto and Plateau recipes require a text starting point; use GEPA for named parts."
-        )
+        raise ServiceError("The upstream Auto recipe requires a text starting point; use GEPA for named parts.")
     for name in AUTO_ENGINES:
         get_engine(name, caps)
     if strategy.mode == "auto" and server.remaining < 4:
@@ -335,17 +331,6 @@ def run_strategy(
         "name": Path(ctx.run_dir).name,
     }
     try:
-        if strategy.mode == "plateau":
-            result = optimize_adaptive_sequential(
-                **kwargs,
-                configs=[configuration(name, "relay", server.remaining, 1 / 3) for name in AUTO_ENGINES],
-                plateau_evals=strategy.patience,
-                max_evals=server.remaining,
-                max_concurrency=ctx.concurrency,
-                output_dir=str(Path(ctx.run_dir) / "relay-evals"),
-            )
-            return local_result(result, server), lanes
-
         per_lane = server.remaining // 4
         continuation_allowance = server.remaining - 3 * per_lane
         winner = optimize_best_of(
@@ -368,9 +353,11 @@ def run_strategy(
             if lane.best_score is not None
         ]
         exc.evidence["selection_scope"] = (
-            "validation" if exc.result is not None and task.val_set else
-            "training" if exc.result is not None else
-            "unpublished_composition"
+            "validation"
+            if exc.result is not None and task.val_set
+            else "training"
+            if exc.result is not None
+            else "unpublished_composition"
         )
         raise
     if progress_callback is not None:

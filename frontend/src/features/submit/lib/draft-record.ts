@@ -105,10 +105,9 @@ export interface AnythingDraftData {
   scorerDependencyLock?: ScorerDependencyLock | null;
   scorerModel: ModelConfig;
   scorerModelMode: ScoringModelMode;
-  strategyMode: "auto" | "single" | "plateau";
+  strategyMode: "auto" | "single";
   engine: BlackboxEngineId | null;
   proposerRuntime?: BlackboxProposerRuntime;
-  patience: number;
   maxScorerRuns: number;
   maxIterations: number | "";
   stopAtScore: string;
