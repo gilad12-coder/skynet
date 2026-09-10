@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import { ValidationGate } from "../ValidationFrame";
+import { ValidationFrame, ValidationGate } from "../ValidationFrame";
 import { msg } from "@/shared/lib/messages";
 import { useCredits } from "@/features/billing";
 import { SubmitSplashOverlay } from "@/shared/ui/submit-splash-overlay";
@@ -141,6 +141,9 @@ export function BlackboxWizard({
     <BlackboxOptimizerStep key="strategy" w={w} part="strategy" />,
     <BlackboxOptimizerStep key="model" w={w} part="model" />,
   ];
+  // A passed check stays under the panel whose Continue ran it.
+  const evaluationResult = w.preflight.progress.completed("evaluation");
+  const executionResult = w.preflight.progress.completed("execution");
 
   const shortfall = budgetShortfall(w.costBracket, w.tokenSource, {
     uncapped: w.budgetUncapped,
@@ -180,6 +183,11 @@ export function BlackboxWizard({
         steps={evaluationSteps}
       >
         {evaluationPanels[activeEvaluationStep]}
+        {activeEvaluationPart === evaluationSteps.length - 1 && evaluationResult && (
+          <div className="mt-4 md:mt-6">
+            <ValidationFrame state={evaluationResult} settled />
+          </div>
+        )}
       </WizardSubsteps>
     ),
     optimization: (
@@ -189,6 +197,11 @@ export function BlackboxWizard({
         steps={OPTIMIZATION_STEPS}
       >
         {optimizationPanels[optimizationPart]}
+        {optimizationPart === OPTIMIZATION_STEPS.length - 1 && executionResult && (
+          <div className="mt-4 md:mt-6">
+            <ValidationFrame state={executionResult} settled />
+          </div>
+        )}
       </WizardSubsteps>
     ),
     review: (

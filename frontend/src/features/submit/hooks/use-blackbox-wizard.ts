@@ -1197,13 +1197,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const trainingCaseCount = parsedCases?.rows.length
     ? splitExampleCounts(parsedCases.rows.length, split).train
     : null;
-  const autoEngineLabels = useMemo<string[]>(
-    () =>
-      (engineCatalog?.auto_engines ?? []).map(
-        (id) => engineCatalog?.engines.find((e) => e.id === id)?.label ?? id,
-      ),
-    [engineCatalog],
-  );
   const runDisabledReason = useMemo<string | null>(() => {
     if (engineCatalogFailed) return msg("submit.blackbox.engines.check_failed");
     const issue = engineSelectionIssue({
@@ -1700,7 +1693,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setPatience,
     engineCatalog,
     selectedEngine,
-    autoEngineLabels,
     runDisabledReason,
     optimizationFamily,
     maxScorerRuns,

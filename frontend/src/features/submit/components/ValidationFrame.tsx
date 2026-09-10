@@ -170,9 +170,12 @@ export function ValidationGate({
 export function ValidationFrame({
   state,
   onBack,
+  settled = false,
 }: {
   state: ValidationProgress;
-  onBack: () => void;
+  onBack?: () => void;
+  /** A finished check kept on the stage it ran from: it neither leaves by itself nor offers a way back. */
+  settled?: boolean;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const running = state.status === "running";
@@ -185,10 +188,10 @@ export function ValidationFrame({
 
   const success = state.status === "succeeded";
   useEffect(() => {
-    if (!success) return;
+    if (!success || settled || !onBack) return;
     const timer = setTimeout(onBack, SUCCESS_LINGER_MS);
     return () => clearTimeout(timer);
-  }, [success, onBack]);
+  }, [success, settled, onBack]);
 
   const [opened, setOpened] = useState<Record<string, boolean>>({});
 
@@ -248,7 +251,7 @@ export function ValidationFrame({
     <section
       className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg backdrop-blur-xl"
       aria-busy={running}
-      data-tutorial="wizard-validation"
+      data-tutorial={settled ? undefined : "wizard-validation"}
     >
       <div className="flex items-start gap-4 px-6 pt-7 pb-6 sm:px-8">
         <div

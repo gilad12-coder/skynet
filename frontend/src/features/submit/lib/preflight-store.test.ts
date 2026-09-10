@@ -159,6 +159,28 @@ test("the progress timeline moves through phases and finishes once", () => {
   assert.equal(store.getState("anything").progress, null);
 });
 
+test("a passed check that leaves the screen stays with its scope until the next one starts", () => {
+  const store = build(async () => succeeded());
+  const owner = {};
+  store.start("anything", { scope: "evaluation", identity: "a", owner });
+  store.finish("anything", "succeeded", undefined, succeeded());
+  store.clear("anything");
+  let state = store.getState("anything");
+  assert.equal(state.progress, null);
+  assert.equal(state.completed.evaluation?.identity, "a");
+  assert.equal(state.completed.evaluation?.status, "succeeded");
+
+  store.start("anything", { scope: "execution", identity: "a", owner });
+  store.finish("anything", "failed", "boom");
+  store.clear("anything");
+  state = store.getState("anything");
+  assert.equal(state.completed.execution, undefined);
+  assert.equal(state.completed.evaluation?.identity, "a");
+
+  store.start("anything", { scope: "evaluation", identity: "b", owner });
+  assert.equal(store.getState("anything").completed.evaluation, undefined);
+});
+
 test("cancel aborts the run and drops its progress instead of failing it", async () => {
   const store = build(
     (_request, signal) =>

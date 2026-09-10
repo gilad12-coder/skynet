@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Warning } from "@/shared/ui/icons";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Input } from "@/shared/ui/primitives/input";
@@ -17,7 +16,6 @@ import { radioNavigationIndex } from "../../lib/radio-navigation";
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig } from "../../constants";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
-import { Disclosure } from "../Disclosure";
 import { ModelRoleRow } from "./ModelRoleRow";
 import {
   Field,
@@ -45,7 +43,6 @@ export function BlackboxOptimizerStep({
     patience,
     setPatience,
     engineCatalog,
-    autoEngineLabels,
     nativeProposer,
     iterationLimitSupported,
     runDisabledReason,
@@ -68,13 +65,6 @@ export function BlackboxOptimizerStep({
 
   const engines = engineCatalog?.engines ?? [];
   const single = strategyMode === "single";
-  // Opens by itself when a limit is already set (a clone, a returning draft)
-  // so nothing that shapes the run hides behind a closed panel.
-  const hasLimits = (iterationLimitSupported && maxIterations !== "") || stopAtScore.trim() !== "";
-  const [advancedOpen, setAdvancedOpen] = useState(hasLimits);
-  useEffect(() => {
-    if (hasLimits) setAdvancedOpen(true);
-  }, [hasLimits]);
   const optimizationLabel = msg("submit.blackbox.roles.optimization.label");
 
   return (
@@ -110,21 +100,6 @@ export function BlackboxOptimizerStep({
               },
             ]}
           />
-
-          {!single && engineCatalog && (
-            <p
-              className={cn(
-                "text-xs leading-relaxed",
-                engineCatalog.auto_available ? "text-muted-foreground" : "text-amber-700",
-              )}
-            >
-              {autoEngineLabels.length > 0
-                ? formatMsg("submit.blackbox.engines.auto_can_run", {
-                    engines: autoEngineLabels.join(" · "),
-                  })
-                : msg("submit.blackbox.engines.auto_none")}
-            </p>
-          )}
 
           {strategyMode === "plateau" && (
             <Field
@@ -231,11 +206,6 @@ export function BlackboxOptimizerStep({
                       <span className="flex w-full items-center gap-2">
                         <span className="text-sm font-medium">{e.label}</span>
                         <span className="ms-auto flex gap-1">
-                          {e.supports_parts && (
-                            <Badge variant="outline" size="sm">
-                              {msg("submit.blackbox.engines.parts")}
-                            </Badge>
-                          )}
                           {!e.available && (
                             <Badge variant="secondary" size="sm">
                               {msg("submit.blackbox.engines.not_runnable")}
@@ -333,50 +303,37 @@ export function BlackboxOptimizerStep({
                 </p>
               )}
             </Field>
-          </div>
-
-          <Disclosure
-            id="bb-advanced"
-            label={msg("submit.blackbox.optimizer.advanced")}
-            tip={
-              iterationLimitSupported ? msg("submit.blackbox.optimizer.advanced_hint") : undefined
-            }
-            open={advancedOpen}
-            onOpenChange={setAdvancedOpen}
-          >
-            <div className="grid gap-4 pt-1 sm:grid-cols-2">
-              {iterationLimitSupported && (
-                <Field
-                  label={msg("submit.blackbox.budget.max_iterations")}
-                  htmlFor="bb-max-iterations"
-                  tip="blackbox.config.budget_iterations"
-                >
-                  <NumberInput
-                    id="bb-max-iterations"
-                    value={maxIterations}
-                    onChange={setMaxIterations}
-                    min={1}
-                    max={1000}
-                    className={MOBILE_NUMBER_INPUT_CLASS}
-                  />
-                </Field>
-              )}
+            <Field
+              label={msg("submit.blackbox.budget.stop_at")}
+              htmlFor="bb-stop-at"
+              tip="blackbox.config.budget_stop"
+            >
+              <Input
+                id="bb-stop-at"
+                inputMode="decimal"
+                value={stopAtScore}
+                onChange={(e) => setStopAtScore(e.target.value)}
+                dir="ltr"
+                className={MOBILE_INPUT_CLASS}
+              />
+            </Field>
+            {iterationLimitSupported && (
               <Field
-                label={msg("submit.blackbox.budget.stop_at")}
-                htmlFor="bb-stop-at"
-                tip="blackbox.config.budget_stop"
+                label={msg("submit.blackbox.budget.max_iterations")}
+                htmlFor="bb-max-iterations"
+                tip="blackbox.config.budget_iterations"
               >
-                <Input
-                  id="bb-stop-at"
-                  inputMode="decimal"
-                  value={stopAtScore}
-                  onChange={(e) => setStopAtScore(e.target.value)}
-                  dir="ltr"
-                  className={MOBILE_INPUT_CLASS}
+                <NumberInput
+                  id="bb-max-iterations"
+                  value={maxIterations}
+                  onChange={setMaxIterations}
+                  min={1}
+                  max={1000}
+                  className={MOBILE_NUMBER_INPUT_CLASS}
                 />
               </Field>
-            </div>
-          </Disclosure>
+            )}
+          </div>
         </>
       )}
     </StepCard>

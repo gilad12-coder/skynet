@@ -216,7 +216,11 @@ def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: boo
             raise ServiceError(
                 "Native proposers accept a model selection; custom sampling and routing settings are unsupported."
             )
-        if payload.max_cost_credits is None:
+        # A run backed by an execution budget keeps its allowance in the ledger
+        # and is metered by the gateway route; the parent hands its guest the
+        # ceiling the proposer plans against, so only a budget-less run must
+        # state one here.
+        if payload.max_cost_credits is None and payload.execution_budget_id is None:
             raise ServiceError("Set a total credit budget before starting an upstream agent proposer.")
         includes_meta_harness = payload.strategy.mode != "single" or payload.strategy.engine == "meta_harness"
         if includes_meta_harness and payload.cases:

@@ -430,3 +430,20 @@ def test_mailbox_retries_have_independent_coverage_and_duplicate_frames_do_not_r
         ("model-attempt:" + "a" * 32, "settled"),
         ("model-attempt:" + "b" * 32, "settled"),
     ]
+
+
+def test_cost_ceiling_is_the_total_or_what_the_account_can_fund(gateway: ModelGateway) -> None:
+    """Hand a guest a capped budget's total and an uncapped budget's account allowance.
+
+    Args:
+        gateway: Parent protocol over the capped fixture budget.
+    """
+    assert gateway.cost_ceiling_credits() == 20
+    ledger = gateway.runtime.service
+    uncapped = ledger.create("alice", 1, idempotency_key="uncapped", uncapped=True)
+    other = ModelGateway(BudgetRuntime(ledger, username="alice", budget_id=uncapped.id, generation=0, phase="run"))
+    try:
+        ceiling = other.cost_ceiling_credits()
+    finally:
+        other.close()
+    assert ceiling == int(uncapped.available_credits) > uncapped.total_credits

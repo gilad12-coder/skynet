@@ -1211,3 +1211,22 @@ def test_budget_stop_before_completed_baseline_has_no_result(fake_lm, tmp_path, 
         run_blackbox_optimization(_payload(), artifact_id="budget-fixture", gepa_log_dir_path=str(tmp_path))
 
     assert caught.value.result is None
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [{"mode": "auto"}, {"mode": "plateau"}, {"mode": "single", "engine": "meta_harness"}],
+)
+def test_budget_backed_native_run_leaves_its_cost_ceiling_to_the_ledger(
+    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str]
+) -> None:
+    """Demand a cost ceiling only from a native run that no execution budget backs.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+        strategy: Upstream recipe being validated.
+    """
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    validate_blackbox_payload(_payload(strategy=strategy, execution_budget_id="budget-1"), verify_scorer=False)
+    with pytest.raises(ServiceError, match="Set a total credit budget"):
+        validate_blackbox_payload(_payload(strategy=strategy), verify_scorer=False)

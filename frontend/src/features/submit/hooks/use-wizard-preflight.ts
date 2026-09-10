@@ -104,6 +104,15 @@ export function useWizardPreflight(
     state.progress && (state.progress.owner === budget || state.progress.identity === identity)
       ? state.progress
       : null;
+  // A passed check that has left the screen stays with the stage it ran
+  // from, for the setup it checked; a changed setup gets a fresh check.
+  const completed = useCallback(
+    (scope: PreflightScope): ValidationProgress | null => {
+      const record = state.completed[scope];
+      return record?.identity === identity ? record : null;
+    },
+    [state.completed, identity],
+  );
 
   const feedback = useCallback(
     (scope: PreflightScope): ToastApi => ({
@@ -136,7 +145,7 @@ export function useWizardPreflight(
     run,
     cancel,
     isCurrent,
-    progress: { ...progress, state: shown },
+    progress: { ...progress, state: shown, completed },
     feedback,
   };
 }

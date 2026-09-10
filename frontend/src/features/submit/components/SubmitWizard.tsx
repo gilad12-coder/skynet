@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import { ValidationGate } from "./ValidationFrame";
+import { ValidationFrame, ValidationGate } from "./ValidationFrame";
 import { msg } from "@/shared/lib/messages";
 import { useCredits } from "@/features/billing";
 
@@ -109,6 +109,8 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
     <ModelStep key="models" w={w} />,
     <TotalBudgetCard key="budget" w={w} mode={budgetMode} />,
   ];
+  // A passed check stays under the panel whose Continue ran it.
+  const executionResult = w.preflight.progress.completed("execution");
 
   const handleEvaluationNext = async () => {
     if (evaluationPart < EVALUATION_STEPS.length - 1) {
@@ -153,6 +155,11 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
         steps={OPTIMIZATION_STEPS}
       >
         {optimizationPanels[optimizationPart]}
+        {optimizationPart === OPTIMIZATION_STEPS.length - 1 && executionResult && (
+          <div className="mt-4 md:mt-6">
+            <ValidationFrame state={executionResult} settled />
+          </div>
+        )}
       </WizardSubsteps>
     ),
     review: (

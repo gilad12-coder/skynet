@@ -67,6 +67,8 @@ export interface PreflightWorkflowState {
   evidence: Partial<Record<PreflightScope, StoredPreflightEvidence>>;
   running: Partial<Record<PreflightScope, string>>;
   progress: ValidationProgress | null;
+  /** Passed checks that have left the screen, kept for the stage each ran from. */
+  completed: Partial<Record<PreflightScope, ValidationProgress>>;
   error: string | null;
 }
 
@@ -100,7 +102,13 @@ const SERVER_PHASES: ReadonlySet<string> = new Set([
   "usage",
 ]);
 
-const EMPTY: PreflightWorkflowState = { evidence: {}, running: {}, progress: null, error: null };
+const EMPTY: PreflightWorkflowState = {
+  evidence: {},
+  running: {},
+  progress: null,
+  completed: {},
+  error: null,
+};
 
 interface Run {
   promise: Promise<WizardPreflightResponse>;
@@ -280,6 +288,7 @@ export class PreflightStore {
         startedAt: now,
         phases: [{ key: "budget", startedAt: now }],
       },
+      completed: { ...state.completed, [details.scope]: undefined },
     }));
   }
 
@@ -343,9 +352,18 @@ export class PreflightStore {
     this.update(workflow, (state) => ({ ...state, progress: { ...progress, response } }));
   }
 
+  /** Take the timeline off the screen; a passed one stays with the stage that ran it. */
   clear(workflow: PreflightWorkflow): void {
-    if (!this.getState(workflow).progress) return;
-    this.update(workflow, (state) => ({ ...state, progress: null }));
+    const progress = this.getState(workflow).progress;
+    if (!progress) return;
+    this.update(workflow, (state) => ({
+      ...state,
+      progress: null,
+      completed:
+        progress.status === "succeeded"
+          ? { ...state.completed, [progress.scope]: progress }
+          : state.completed,
+    }));
   }
 
   private abandon(workflow: PreflightWorkflow, scope: PreflightScope, identity: string): void {

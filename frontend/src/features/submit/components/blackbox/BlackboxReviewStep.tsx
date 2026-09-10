@@ -96,7 +96,6 @@ export function BlackboxReviewStep({
     scorerInstall,
     strategyMode,
     selectedEngine,
-    autoEngineLabels,
     runDisabledReason,
     nativeProposer,
     iterationLimitSupported,
@@ -301,13 +300,6 @@ export function BlackboxReviewStep({
             : strategyMode === "plateau"
               ? formatMsg("submit.blackbox.review.strategy_plateau", { n: patience })
               : (selectedEngine?.label ?? msg("submit.blackbox.strategy.single"))}
-          {strategyMode !== "single" && autoEngineLabels.length > 0 && (
-            <span className="ms-2 text-xs text-muted-foreground">
-              {formatMsg("submit.blackbox.engines.auto_can_run", {
-                engines: autoEngineLabels.join(" · "),
-              })}
-            </span>
-          )}
           {runDisabledReason && (
             <span className="mt-1 flex items-start gap-1.5 text-xs text-amber-700" role="status">
               <Warning className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
