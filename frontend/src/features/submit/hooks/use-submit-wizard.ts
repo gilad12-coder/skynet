@@ -703,9 +703,9 @@ export function useSubmitWizard() {
     setModuleName(d.moduleName);
     setModuleChosen(d.moduleChosen);
     setOptimizerName(d.optimizerName);
-    setCodeAssistMode(d.codeAssistMode ?? "manual");
-    splitModeRef.current = d.splitMode ?? "auto";
-    setSplitModeState(d.splitMode ?? "auto");
+    setCodeAssistMode(d.codeAssistMode ?? readPref("wizardCodeAssist"));
+    splitModeRef.current = d.splitMode ?? readPref("wizardSplitMode");
+    setSplitModeState(d.splitMode ?? readPref("wizardSplitMode"));
     setReactConfig({ ...d.reactConfig, mcpAuthHeader: "" });
     if (d.workflowSpec) {
       replaceWorkflowSpec(d.workflowSpec);
@@ -1514,13 +1514,13 @@ export function useSubmitWizard() {
         setColumnRoles(cloneColumnRoles(payload, rows.columns));
       }
 
-      if (basics.split) {
-        setSplit({ ...defaultSplit, ...basics.split });
-        // Cloned splits are intentional — pin the wizard to manual so the
-        // auto-profile effect doesn't clobber them when the dataset reloads.
-        splitModeRef.current = "manual";
-        setSplitModeState("manual");
-      }
+      // The cloned split stays on hand for manual selection, but the mode
+      // starts where every new optimization does: on the saved preference,
+      // so the recommendation applies unless the user prefers manual.
+      if (basics.split) setSplit({ ...defaultSplit, ...basics.split });
+      const cloneDefaultMode = readPref("wizardSplitMode");
+      splitModeRef.current = cloneDefaultMode;
+      setSplitModeState(cloneDefaultMode);
 
       if (basics.shuffle != null) setShuffle(basics.shuffle);
       if (basics.seed != null) setSeed(basics.seed);

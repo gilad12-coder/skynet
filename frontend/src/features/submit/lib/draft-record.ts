@@ -172,9 +172,10 @@ export function sanitizeProgramDraft(raw: WizardDraftData): WizardDraftData {
   return {
     ...data,
     executionRuntime: "vercel",
-    codeAssistMode: data.codeAssistMode ?? "manual",
-    // Drafts from before the mode was stored follow the recommendation, like
-    // a new optimization does.
+    // Drafts from before a mode was stored start where a new optimization
+    // does: the agent writes the code and the split follows the
+    // recommendation.
+    codeAssistMode: data.codeAssistMode ?? "auto",
     splitMode: data.splitMode ?? "auto",
     reactConfig: { ...data.reactConfig, mcpAuthHeader: "" },
     modelConfig: stripModelSecrets(data.modelConfig),

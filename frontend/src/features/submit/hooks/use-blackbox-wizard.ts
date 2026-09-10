@@ -622,13 +622,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           setParsedCases(rows);
           setCasesName(String(basics.name || cloneId));
         }
-        if (basics.split) {
-          setSplit({ ...defaultSplit, ...basics.split });
-          // Cloned splits are intentional — pin the wizard to manual so the
-          // profiling effect doesn't clobber them when the cases reload.
-          splitModeRef.current = "manual";
-          setSplitModeState("manual");
-        }
+        // The cloned split stays on hand for manual selection, but the mode
+        // starts where every new optimization does: on the saved preference,
+        // so the recommendation applies unless the user prefers manual.
+        if (basics.split) setSplit({ ...defaultSplit, ...basics.split });
+        const cloneDefaultMode = readPref("wizardSplitMode");
+        splitModeRef.current = cloneDefaultMode;
+        setSplitModeState(cloneDefaultMode);
         if (basics.shuffle != null) setShuffle(basics.shuffle);
         if (basics.seed != null) setSeed(basics.seed);
 
@@ -1150,8 +1150,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // A fresh set of cases deserves a fresh recommendation: the mode returns to
   // the user's saved preference so the profiling effect applies the new plan
   // when they prefer the recommendation, and stays out of the way when they
-  // prefer manual. A clone keeps its pinned manual split because it sets the
-  // cases directly.
+  // prefer manual.
   const resetSplitModeForNewCases = () => {
     const mode = readPref("wizardSplitMode");
     splitModeRef.current = mode;
