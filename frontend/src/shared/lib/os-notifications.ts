@@ -22,7 +22,8 @@ export function requestNotificationPermission(): void {
 export function notifyUser(title: string): void {
   if (!supported() || Notification.permission !== "granted") return;
   try {
-    const notification = new Notification(title);
+    // The OS shows the browser as the sender; the site's mark rides along as the image.
+    const notification = new Notification(title, { icon: "/notification-icon.png" });
     notification.onclick = () => {
       window.focus();
       notification.close();
