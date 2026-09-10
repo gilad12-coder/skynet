@@ -32,6 +32,7 @@ from .harness import GatewayConfig
 from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, Task
 from .runner import side_info_json_default
 from .sandbox import (
+    CommandResult,
     SandboxRuntime,
     SandboxSession,
     SandboxSpec,
@@ -43,6 +44,10 @@ from .sandbox import (
 
 GEPA_SOURCE = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
 CLAUDE_VERSION = "2.1.259"
+# The guest must already carry the parent's exact Python patch version (checkpoint_compat identity),
+# so the native floor only restates pyproject's requires-python. A stricter floor here contradicts
+# any image built to match a host below it and fails every readiness check on that host.
+PYTHON_FLOOR = (3, 11)
 _RUNNER_FILE = "native_runner.py"
 _INPUT_FILE = "native_input.json"
 _RESULT_FILE = "native_result.json"
@@ -139,7 +144,7 @@ def _bootstrap_command(runtime: str, *, protected: bool = False) -> str:
         prepare += (
             'export HOME="$PWD"; '
             'export PATH="$HOME/.local/bin:$PATH"; '
-            "if python3 -c 'import sys; sys.exit(sys.version_info < (3, 11, 8))' 2>/dev/null; then "
+            f"if python3 -c 'import sys; sys.exit(sys.version_info < {PYTHON_FLOOR!r})' 2>/dev/null; then "
             "command -v python3 > native-python.txt; else "
             "python3 -m pip install --disable-pip-version-check --no-deps --user uv==0.9.13; "
             '"$HOME/.local/bin/uv" python install 3.11.9; '
@@ -160,12 +165,31 @@ def _bootstrap_command(runtime: str, *, protected: bool = False) -> str:
         f'claude --version | grep -q "^{re.escape(CLAUDE_VERSION)} "; '
         f'"$(cat native-python.txt)" -c '
         + shlex.quote(
-            "import sys; assert sys.version_info >= (3, 11, 8), 'Native optimizers need Python 3.11.8 or newer'"
+            f"import sys; assert sys.version_info >= {PYTHON_FLOOR!r}, "
+            f"'Native optimizers need Python {'.'.join(map(str, PYTHON_FLOOR))} or newer'"
         )
     )
     if protected:
         prepare += "; node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'"
     return prepare
+
+
+def _failure_detail(result: CommandResult, timeout_seconds: float) -> str:
+    """Summarize a failed readiness command so the setup check names what broke.
+
+    Args:
+        result: Completed command whose output would otherwise be discarded.
+        timeout_seconds: Bound the command ran under.
+
+    Returns:
+        One sentence naming the timeout or the command's exit status and last output line.
+    """
+    if result.timed_out:
+        return f"The check timed out after {timeout_seconds:.0f}s."
+    lines = [line.strip() for line in f"{result.stdout}\n{result.stderr}".splitlines() if line.strip()]
+    if not lines:
+        return f"The check exited with status {result.exit_code} and no output."
+    return f"The check exited with status {result.exit_code}: {lines[-1][:240]}"
 
 
 def _selected_runtime(options: NativeOptions) -> SandboxRuntime:
@@ -219,11 +243,13 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
                 "native_source.tar.gz.b64": source,
             }
         )
-        installed = session.run(
-            _bootstrap_command(options.runtime, protected=True), timeout_seconds=min(60, lifetime - 1)
-        )
+        install_timeout = min(60, lifetime - 1)
+        installed = session.run(_bootstrap_command(options.runtime, protected=True), timeout_seconds=install_timeout)
         if not installed.ok or installed.timed_out:
-            raise ServiceError("The selected native runtime lacks its required pinned offline dependencies.")
+            raise ServiceError(
+                "The selected native runtime lacks its required pinned offline dependencies. "
+                + _failure_detail(installed, install_timeout)
+            )
         probe = (
             "import json,subprocess; import native_runner; "
             "from gepa.oa.registry import get_engine_cls; "
@@ -236,10 +262,11 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
         remaining = lifetime - (time.monotonic() - started) - 1
         if remaining <= 0:
             raise ServiceError("The native readiness runtime expired during dependency checks.")
+        probe_timeout = min(60, remaining)
         checked = session.run(
             'export HOME="$PWD"; export PYTHONPATH="$PWD/native_vendor"; '
             f'"$(cat native-python.txt)" -c {shlex.quote(probe)}',
-            timeout_seconds=min(60, remaining),
+            timeout_seconds=probe_timeout,
             env={"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CI": "1"},
         )
         if (
@@ -247,7 +274,10 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
             or checked.timed_out
             or not any(line.strip() == '{"ready": true}' for line in checked.stdout.splitlines())
         ):
-            raise ServiceError("The selected native runtime cannot launch the pinned upstream engine dependencies.")
+            raise ServiceError(
+                "The selected native runtime cannot launch the pinned upstream engine dependencies. "
+                + _failure_detail(checked, probe_timeout)
+            )
         return {"runtime": options.runtime, "gepa_source": GEPA_SOURCE, "claude_version": CLAUDE_VERSION}
     finally:
         original_error = sys.exception()

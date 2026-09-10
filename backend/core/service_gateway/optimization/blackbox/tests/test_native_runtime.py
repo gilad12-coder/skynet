@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tarfile
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,7 +24,7 @@ from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededEr
 
 from .. import native_runner, native_runtime
 from ..harness import GatewayConfig
-from ..native_runtime import NativeOptions, check_native_runtime, run_native_engine
+from ..native_runtime import NativeOptions, _bootstrap_command, check_native_runtime, run_native_engine
 from ..protocol import EvalServer, ScorerAbortError, Task
 from ..sandbox import CommandResult, SandboxSpec
 
@@ -140,15 +141,18 @@ class FakeRuntime:
 class ReadinessSession(FakeSession):
     """Report dependency checks without executing an optimizer or an evaluator."""
 
-    def __init__(self, *, fail: bool = False, pending: bool = False) -> None:
-        """Select a runtime readiness failure or unresolved final sandbox usage."""
+    def __init__(self, *, fail: bool = False, pending: bool = False, bootstrap: CommandResult | None = None) -> None:
+        """Select a runtime readiness failure, a scripted bootstrap result or unresolved final sandbox usage."""
         super().__init__()
         self.fail = fail
         self.pending = pending
+        self.bootstrap = bootstrap
 
     def run(self, command: str, **kwargs: Any) -> CommandResult:
         """Capture offline runtime probes and return the required explicit success marker."""
         self.calls.append((command, kwargs))
+        if self.bootstrap is not None and len(self.calls) == 1:
+            return self.bootstrap
         return CommandResult(exit_code=1 if self.fail else 0, stdout='{"ready": true}\n')
 
     def close(self) -> None:
@@ -216,6 +220,61 @@ def test_native_readiness_does_not_hide_failure_or_pending_usage(
     assert session.closed
 
 
+@pytest.mark.parametrize(
+    ("bootstrap", "detail"),
+    [
+        (
+            CommandResult(
+                exit_code=1,
+                stderr='Traceback (most recent call last):\n  File "<string>", line 1, in <module>\n'
+                "AssertionError: Native optimizers need Python 3.11 or newer\n",
+            ),
+            "The check exited with status 1: AssertionError: Native optimizers need Python 3.11 or newer",
+        ),
+        (CommandResult(exit_code=124, timed_out=True), "The check timed out after 60s."),
+        (CommandResult(exit_code=2), "The check exited with status 2 and no output."),
+    ],
+)
+def test_native_readiness_failure_names_the_broken_step(
+    monkeypatch: pytest.MonkeyPatch, bootstrap: CommandResult, detail: str
+) -> None:
+    """Surface the failing bootstrap step instead of a bare dependency verdict.
+
+    Args:
+        monkeypatch: Pytest fixture for replacing the pinned source archive.
+        bootstrap: Scripted result of the offline dependency bootstrap.
+        detail: Expected explanation appended to the readiness error.
+    """
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "verified-source")
+    session = ReadinessSession(bootstrap=bootstrap)
+    options = NativeOptions(
+        runtime="vercel",
+        model="test/model",
+        gateway=GatewayConfig(url="http://127.0.0.1:9000/v1", api_key="scoped"),
+        budget_route={"url": "http://127.0.0.1:9000/v1", "token": "scoped"},
+        sandbox_runtime=FakeRuntime(session),
+        max_token_cost=1,
+    )
+    with pytest.raises(ServiceError) as failure:
+        check_native_runtime(options)
+    assert str(failure.value) == f"The selected native runtime lacks its required pinned offline dependencies. {detail}"
+    assert len(session.calls) == 1
+    assert session.closed
+
+
+def test_native_python_floor_matches_pyproject_and_admits_the_host() -> None:
+    """Keep the offline bootstrap floor at requires-python so an image built for this host passes it."""
+    pyproject = tomllib.loads((Path(__file__).resolve().parents[5] / "pyproject.toml").read_text())
+    requires = pyproject["project"]["requires-python"]
+    assert requires.startswith(">=")
+    assert tuple(int(part) for part in requires[2:].split(".")) == native_runtime.PYTHON_FLOOR
+    assert sys.version_info >= native_runtime.PYTHON_FLOOR
+    protected = _bootstrap_command("vercel", protected=True)
+    assert f"sys.version_info >= {native_runtime.PYTHON_FLOOR!r}" in protected
+    assert "3, 11, 8" not in protected
+    assert "3, 11, 8" not in _bootstrap_command("vercel")
+
+
 def _context(tmp_path: Path, runtime: FakeRuntime, kind: str = "vercel") -> SimpleNamespace:
     """Build only the engine context fields this transport needs.
 
@@ -278,9 +337,7 @@ def test_native_transport_preserves_engine_choice_and_scores_once(
     assert session.closed
 
 
-def test_protected_managed_runtime_does_not_nest_upstream_jail(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_protected_managed_runtime_does_not_nest_upstream_jail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Use the already isolated outer sandbox as the native engine boundary.
 
     Args:
