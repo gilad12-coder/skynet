@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "评估器模型",
   "submit.validation.check.scorer.readiness": "评估器就绪状态",
   "submit.validation.check.target.readiness": "目标就绪状态",
-  "submit.validation.check.model": "{role} 连接"
+  "submit.validation.check.model": "{role} 连接",
+  "notify.agent.replied": "智能体已回复",
+  "notify.agent.failed": "智能体运行失败",
+  "notify.code.done": "代码智能体已完成",
+  "notify.code.failed": "代码智能体运行失败",
+  "notify.interview.turn": "访谈正在等待你的回答",
+  "notify.check.passed": "设置检查已通过",
+  "notify.check.failed": "设置检查失败"
 }

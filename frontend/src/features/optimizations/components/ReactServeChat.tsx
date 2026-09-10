@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useTabActivity } from "@/shared/hooks/use-tab-activity";
+import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
 import { ChatText, CircleNotch } from "@/shared/ui/icons";
 
 import { AgentThread } from "@/shared/ui/agent/agent-thread";
@@ -30,7 +30,9 @@ export function ReactServeChat({ optimizationId }: ReactServeChatProps) {
   const agent = useReactServeChat(optimizationId, trustMode, requestBudgetCredits);
   const [draft, setDraft] = React.useState("");
   const streaming = agent.status === "streaming";
-  useTabActivity(streaming ? "busy" : "idle");
+  useCompletionNotification(streaming, () =>
+    msg(agent.status === "error" ? "notify.agent.failed" : "notify.agent.replied"),
+  );
 
   const thinking: AgentThinking = {
     reasoning: agent.reasoning,

@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { useTabActivity } from "@/shared/hooks/use-tab-activity";
 import { msg } from "@/shared/lib/messages";
-import { resolveTabActivity, type TabActivity } from "@/shared/lib/tab-activity";
+import { notifyUser, requestNotificationPermission } from "@/shared/lib/os-notifications";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import { getExecutionBudget, runWizardPreflight } from "@/shared/lib/api";
 import type {
@@ -18,7 +17,6 @@ import {
 } from "../lib/preflight-outcome";
 import {
   PreflightStore,
-  checkActivity,
   type PreflightWorkflow,
   type ValidationPhase,
   type ValidationProgress,
@@ -43,19 +41,25 @@ const store = new PreflightStore({
 });
 
 const WORKFLOWS: PreflightWorkflow[] = ["anything", "dspy"];
-const readCheckActivity = (): TabActivity | null => {
-  const values: TabActivity[] = [];
-  for (const workflow of WORKFLOWS) {
-    const activity = checkActivity(store.getState(workflow).progress);
-    if (activity) values.push(activity);
-  }
-  return resolveTabActivity(values);
-};
-const noCheckActivity = (): TabActivity | null => null;
 
-/** Follow every running check in the tab mark, wherever in the app the user is. */
-export function usePreflightTabActivity(): void {
-  useTabActivity(useSyncExternalStore(store.subscribe, readCheckActivity, noCheckActivity));
+/** Notify when a check finishes, wherever in the app the user is. */
+export function usePreflightNotifications(): void {
+  useEffect(() => {
+    const seen = new Map<PreflightWorkflow, ValidationStatus | undefined>();
+    const follow = () => {
+      for (const workflow of WORKFLOWS) {
+        const status = store.getState(workflow).progress?.status;
+        const previous = seen.get(workflow);
+        seen.set(workflow, status);
+        if (status === previous) continue;
+        if (status === "running") requestNotificationPermission();
+        else if (previous === "running" && status === "succeeded") notifyUser(msg("notify.check.passed"));
+        else if (previous === "running" && status === "failed") notifyUser(msg("notify.check.failed"));
+      }
+    };
+    follow();
+    return store.subscribe(follow);
+  }, []);
 }
 
 /** Keep checks scoped to the current setup; server evidence and costs remain authoritative. */

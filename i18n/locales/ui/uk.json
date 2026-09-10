@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "Модель оцінювача",
   "submit.validation.check.scorer.readiness": "Готовність оцінювача",
   "submit.validation.check.target.readiness": "Готовність цілі",
-  "submit.validation.check.model": "Підключення: {role}"
+  "submit.validation.check.model": "Підключення: {role}",
+  "notify.agent.replied": "Агент відповів",
+  "notify.agent.failed": "Запуск агента завершився помилкою",
+  "notify.code.done": "Агент коду завершив роботу",
+  "notify.code.failed": "Запуск агента коду завершився помилкою",
+  "notify.interview.turn": "Інтерв'ю чекає на вашу відповідь",
+  "notify.check.passed": "Перевірку налаштувань пройдено",
+  "notify.check.failed": "Перевірку налаштувань не пройдено"
 }

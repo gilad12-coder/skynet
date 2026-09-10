@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "評估器模型",
   "submit.validation.check.scorer.readiness": "評估器準備狀態",
   "submit.validation.check.target.readiness": "目標準備狀態",
-  "submit.validation.check.model": "{role} 連線"
+  "submit.validation.check.model": "{role} 連線",
+  "notify.agent.replied": "Agent 已經回覆咗",
+  "notify.agent.failed": "Agent 運行失敗",
+  "notify.code.done": "程式碼 Agent 已經完成",
+  "notify.code.failed": "程式碼 Agent 運行失敗",
+  "notify.interview.turn": "訪談等緊你嘅回覆",
+  "notify.check.passed": "設定檢查通過咗",
+  "notify.check.failed": "設定檢查失敗"
 }

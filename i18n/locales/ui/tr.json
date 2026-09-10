@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "Değerlendirici modeli",
   "submit.validation.check.scorer.readiness": "Değerlendirici hazırlığı",
   "submit.validation.check.target.readiness": "Hedef hazırlığı",
-  "submit.validation.check.model": "{role} bağlantısı"
+  "submit.validation.check.model": "{role} bağlantısı",
+  "notify.agent.replied": "Ajan yanıt verdi",
+  "notify.agent.failed": "Ajan çalıştırması başarısız oldu",
+  "notify.code.done": "Kod ajanı işini bitirdi",
+  "notify.code.failed": "Kod ajanı çalıştırması başarısız oldu",
+  "notify.interview.turn": "Görüşme yanıtınızı bekliyor",
+  "notify.check.passed": "Kurulum kontrolü başarılı oldu",
+  "notify.check.failed": "Kurulum kontrolü başarısız oldu"
 }

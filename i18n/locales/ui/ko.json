@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "평가기 모델",
   "submit.validation.check.scorer.readiness": "평가기 준비 상태",
   "submit.validation.check.target.readiness": "대상 준비 상태",
-  "submit.validation.check.model": "{role} 연결"
+  "submit.validation.check.model": "{role} 연결",
+  "notify.agent.replied": "에이전트가 답변했습니다",
+  "notify.agent.failed": "에이전트 실행이 실패했습니다",
+  "notify.code.done": "코드 에이전트가 완료했습니다",
+  "notify.code.failed": "코드 에이전트 실행이 실패했습니다",
+  "notify.interview.turn": "인터뷰가 답변을 기다리고 있습니다",
+  "notify.check.passed": "설정 검사를 통과했습니다",
+  "notify.check.failed": "설정 검사에 실패했습니다"
 }

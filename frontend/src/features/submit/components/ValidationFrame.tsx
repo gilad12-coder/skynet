@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { useTabActivity } from "@/shared/hooks/use-tab-activity";
 import { AnimatePresence, motion } from "framer-motion";
 import { CaretDown, Check, CircleNotch, Clock, ListChecks, Warning } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -184,9 +183,6 @@ export function ValidationFrame({
 }) {
   const [now, setNow] = useState(() => Date.now());
   const running = state.status === "running";
-  // The check page is a place to wait: gray in the tab. The store turns it
-  // green itself while a phase executes.
-  useTabActivity("idle");
   useEffect(() => {
     if (!running) return;
     setNow(Date.now());
@@ -375,7 +371,6 @@ export function ValidationPlan({
   scope: PreflightScope;
   stale: boolean;
 }) {
-  useTabActivity("idle");
   return (
     <section className="overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg backdrop-blur-xl">
       <div className="flex items-start gap-4 px-6 pt-7 pb-6 sm:px-8">

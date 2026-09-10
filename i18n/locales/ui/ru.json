@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "Модель оценщика",
   "submit.validation.check.scorer.readiness": "Готовность оценщика",
   "submit.validation.check.target.readiness": "Готовность цели",
-  "submit.validation.check.model": "Подключение: {role}"
+  "submit.validation.check.model": "Подключение: {role}",
+  "notify.agent.replied": "Агент ответил",
+  "notify.agent.failed": "Запуск агента завершился ошибкой",
+  "notify.code.done": "Агент кода закончил работу",
+  "notify.code.failed": "Запуск агента кода завершился ошибкой",
+  "notify.interview.turn": "Интервью ждёт вашего ответа",
+  "notify.check.passed": "Проверка настроек пройдена",
+  "notify.check.failed": "Проверка настроек не пройдена"
 }

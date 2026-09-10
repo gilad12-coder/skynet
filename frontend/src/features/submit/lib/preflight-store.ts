@@ -63,16 +63,6 @@ export interface ValidationProgress {
   message?: string;
 }
 
-/**
- * What the tab mark shows for a check: green while a phase executes, gray
- * while the run waits for pending operations to settle, nothing once done.
- */
-export function checkActivity(progress: ValidationProgress | null): "busy" | "idle" | null {
-  if (progress?.status !== "running") return null;
-  const last = progress.phases[progress.phases.length - 1];
-  return last?.key === "usage" ? "idle" : "busy";
-}
-
 export interface PreflightWorkflowState {
   evidence: Partial<Record<PreflightScope, StoredPreflightEvidence>>;
   running: Partial<Record<PreflightScope, string>>;

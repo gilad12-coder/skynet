@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "評価器のモデル",
   "submit.validation.check.scorer.readiness": "評価器の準備状況",
   "submit.validation.check.target.readiness": "ターゲットの準備状況",
-  "submit.validation.check.model": "{role} の接続"
+  "submit.validation.check.model": "{role} の接続",
+  "notify.agent.replied": "エージェントが返信しました",
+  "notify.agent.failed": "エージェントの実行が失敗しました",
+  "notify.code.done": "コードエージェントが完了しました",
+  "notify.code.failed": "コードエージェントの実行が失敗しました",
+  "notify.interview.turn": "インタビューがあなたの回答を待っています",
+  "notify.check.passed": "セットアップチェックに合格しました",
+  "notify.check.failed": "セットアップチェックに失敗しました"
 }

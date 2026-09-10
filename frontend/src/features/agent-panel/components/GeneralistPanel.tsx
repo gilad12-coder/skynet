@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useTabActivity } from "@/shared/hooks/use-tab-activity";
+import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
@@ -249,14 +249,11 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     onConversationMeta: handleConversationMeta,
   });
   const streaming = agent.status === "streaming";
-  // The tab mark: green while any conversation streams or waits its turn,
-  // gray while the panel is open and quiet.
-  useTabActivity(
-    streaming || agent.status === "queued" || agent.backgroundBusyCount > 0
-      ? "busy"
-      : open
-        ? "idle"
-        : null,
+  // Any conversation still streaming or waiting its turn keeps the user's
+  // notification pending; it fires once they have all settled.
+  useCompletionNotification(
+    streaming || agent.status === "queued" || agent.backgroundBusyCount > 0,
+    () => msg(agent.status === "error" ? "notify.agent.failed" : "notify.agent.replied"),
   );
   // A queued turn locks the composer like a streaming one — its stop button
   // cancels the queued run before it ever reaches the server.

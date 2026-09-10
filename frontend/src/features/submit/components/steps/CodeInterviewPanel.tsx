@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useTabActivity } from "@/shared/hooks/use-tab-activity";
 import { CircleNotch, Plus, ArrowCounterClockwise, Trash } from "@/shared/ui/icons";
 
 import { Button } from "@/shared/ui/primitives/button";
@@ -47,7 +46,6 @@ type InterviewCopy = typeof DSPY_COPY | typeof BLACKBOX_COPY;
  * the directives to the seed generation.
  */
 export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
-  useTabActivity(interview.busy ? "busy" : "idle");
   const [draft, setDraft] = React.useState("");
   const copy = blackbox ? BLACKBOX_COPY : DSPY_COPY;
 

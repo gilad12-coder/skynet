@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "मूल्यांकक मॉडल",
   "submit.validation.check.scorer.readiness": "मूल्यांकक की तैयारी",
   "submit.validation.check.target.readiness": "लक्ष्य की तैयारी",
-  "submit.validation.check.model": "{role} कनेक्शन"
+  "submit.validation.check.model": "{role} कनेक्शन",
+  "notify.agent.replied": "एजेंट ने जवाब दिया",
+  "notify.agent.failed": "एजेंट रन विफल रहा",
+  "notify.code.done": "कोड एजेंट ने काम पूरा कर लिया",
+  "notify.code.failed": "कोड एजेंट रन विफल रहा",
+  "notify.interview.turn": "इंटरव्यू आपके जवाब की प्रतीक्षा कर रहा है",
+  "notify.check.passed": "सेटअप जाँच सफल रही",
+  "notify.check.failed": "सेटअप जाँच विफल रही"
 }

@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "مدل ارزیاب",
   "submit.validation.check.scorer.readiness": "آمادگی ارزیاب",
   "submit.validation.check.target.readiness": "آمادگی هدف",
-  "submit.validation.check.model": "اتصال {role}"
+  "submit.validation.check.model": "اتصال {role}",
+  "notify.agent.replied": "عامل پاسخ داد",
+  "notify.agent.failed": "اجرای عامل ناموفق بود",
+  "notify.code.done": "عامل کد کارش را تمام کرد",
+  "notify.code.failed": "اجرای عامل کد ناموفق بود",
+  "notify.interview.turn": "مصاحبه منتظر پاسخ شماست",
+  "notify.check.passed": "بررسی تنظیمات موفق بود",
+  "notify.check.failed": "بررسی تنظیمات ناموفق بود"
 }

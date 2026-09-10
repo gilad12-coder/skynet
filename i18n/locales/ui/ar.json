@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "نموذج المقيّم",
   "submit.validation.check.scorer.readiness": "جاهزية المقيّم",
   "submit.validation.check.target.readiness": "جاهزية الهدف",
-  "submit.validation.check.model": "اتصال {role}"
+  "submit.validation.check.model": "اتصال {role}",
+  "notify.agent.replied": "رد الوكيل",
+  "notify.agent.failed": "فشل تشغيل الوكيل",
+  "notify.code.done": "أنهى وكيل الكود عمله",
+  "notify.code.failed": "فشل تشغيل وكيل الكود",
+  "notify.interview.turn": "المقابلة بانتظار إجابتك",
+  "notify.check.passed": "نجح فحص الإعداد",
+  "notify.check.failed": "فشل فحص الإعداد"
 }

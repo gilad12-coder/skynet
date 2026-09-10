@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "מודל המעריך",
   "submit.validation.check.scorer.readiness": "מוכנות המעריך",
   "submit.validation.check.target.readiness": "מוכנות היעד",
-  "submit.validation.check.model": "חיבור {role}"
+  "submit.validation.check.model": "חיבור {role}",
+  "notify.agent.replied": "הסוכן השיב",
+  "notify.agent.failed": "ריצת הסוכן נכשלה",
+  "notify.code.done": "סוכן הקוד סיים",
+  "notify.code.failed": "ריצת סוכן הקוד נכשלה",
+  "notify.interview.turn": "הראיון ממתין לתשובתך",
+  "notify.check.passed": "בדיקת ההגדרות עברה",
+  "notify.check.failed": "בדיקת ההגדרות נכשלה"
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useTabActivity } from "@/shared/hooks/use-tab-activity";
+import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
 import { toast } from "react-toastify";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
@@ -278,8 +278,10 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   );
 
   const [status, setStatus] = React.useState<AgentStatus>("idle");
-  // A run keeps the tab mark green even after its panel has left the screen.
-  useTabActivity(status === "streaming" ? "busy" : null);
+  // The run notifies from the hook, so it still does after its panel has left the screen.
+  useCompletionNotification(status === "streaming", () =>
+    msg(status === "error" ? "notify.code.failed" : "notify.code.done"),
+  );
   const [mode, setMode] = React.useState<AgentMode>(restored?.mode ?? "seed");
   const [statusLabel, setStatusLabel] = React.useState("");
   const [signatureStatus, setSignatureStatus] = React.useState<ArtifactStatus>(

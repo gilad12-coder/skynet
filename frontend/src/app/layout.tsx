@@ -22,10 +22,9 @@ import {
   SettingsModal,
 } from "@/features/settings";
 import { StorageQuotaModalHost } from "@/features/storage";
-import { PreflightTabActivity } from "@/features/submit";
+import { PreflightNotifications } from "@/features/submit";
 import { CreditProvider, ByokKeysProvider, InsufficientCreditsModalHost } from "@/features/billing";
 import { AppSkeletonTheme } from "@/shared/ui/skeleton";
-import { TabStatus } from "@/shared/ui/tab-status";
 import { msg } from "@/shared/lib/messages";
 import { getServerRuntimeEnv, serializeRuntimeEnv } from "@/shared/lib/runtime-env";
 import {
@@ -262,8 +261,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <TelemetryProvider />
             <StorageQuotaModalHost />
             <ToastContainer />
-            <TabStatus />
-            <PreflightTabActivity />
+            <PreflightNotifications />
           </LocaleProvider>
         </DeviceClassProvider>
       </body>

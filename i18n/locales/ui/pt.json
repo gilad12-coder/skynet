@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "Modelo do avaliador",
   "submit.validation.check.scorer.readiness": "Prontidão do avaliador",
   "submit.validation.check.target.readiness": "Prontidão do alvo",
-  "submit.validation.check.model": "Conexão de {role}"
+  "submit.validation.check.model": "Conexão de {role}",
+  "notify.agent.replied": "O agente respondeu",
+  "notify.agent.failed": "A execução do agente falhou",
+  "notify.code.done": "O agente de código terminou",
+  "notify.code.failed": "A execução do agente de código falhou",
+  "notify.interview.turn": "A entrevista aguarda a sua resposta",
+  "notify.check.passed": "A verificação da configuração foi aprovada",
+  "notify.check.failed": "A verificação da configuração falhou"
 }

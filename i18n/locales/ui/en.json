@@ -3743,5 +3743,12 @@
   "submit.validation.check.scorer.model": "Evaluator model",
   "submit.validation.check.scorer.readiness": "Evaluator readiness",
   "submit.validation.check.target.readiness": "Target readiness",
-  "submit.validation.check.model": "{role} connection"
+  "submit.validation.check.model": "{role} connection",
+  "notify.agent.replied": "The agent has replied",
+  "notify.agent.failed": "The agent run failed",
+  "notify.code.done": "The code agent has finished",
+  "notify.code.failed": "The code agent run failed",
+  "notify.interview.turn": "The interview is waiting for your answer",
+  "notify.check.passed": "The setup check passed",
+  "notify.check.failed": "The setup check failed"
 }
