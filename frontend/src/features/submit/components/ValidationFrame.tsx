@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { CaretDown, Check, CircleNotch, Clock, ListChecks, Warning } from "@/shared/ui/icons";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import {
+  CaretDown,
+  Check,
+  CircleNotch,
+  Clock,
+  Hourglass,
+  ListChecks,
+  Warning,
+} from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { msg } from "@/shared/lib/messages";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
@@ -90,6 +98,24 @@ const SUCCESS_LINGER_MS = 1200;
 
 // A step that has run this long gets a word of reassurance.
 const SLOW_AFTER_MS = 30_000;
+
+// Rough per-step budgets, used only to fill the progress bar and to read out
+// how much time is likely left. The evaluator step dominates a real run.
+const PHASE_ESTIMATE_MS: Record<ValidationPhase, number> = {
+  budget: 4_000,
+  dependencies: 20_000,
+  sandbox: 25_000,
+  evaluator: 120_000,
+  models: 15_000,
+  usage: 20_000,
+};
+
+// Below this much time left the finish is close enough that a countdown only
+// flickers, so the estimate steps aside.
+const ETA_HIDE_BELOW_MS = 8_000;
+
+// A running bar never quite fills — the last stretch belongs to the result.
+const RUNNING_BAR_CAP = 0.92;
 
 type RowTone = "active" | "done" | "failed" | "pending" | "upcoming";
 
@@ -235,6 +261,42 @@ export function ValidationFrame({
   const reached = plan.indexOf(current);
   const upcoming = running && reached >= 0 ? plan.slice(reached + 1) : [];
 
+  const reduce = useReducedMotion();
+
+  // Time left = what is left of the running step plus the untouched steps
+  // ahead. Both are read from `now`, so no ref math and no lint on writes.
+  const activePhase = phases[phases.length - 1];
+  const activeKey = activePhase?.key ?? current;
+  const activeElapsedMs = activePhase ? now - activePhase.startedAt : 0;
+  const activeLeftMs = Math.max(3_000, (PHASE_ESTIMATE_MS[activeKey] ?? 20_000) - activeElapsedMs);
+  const aheadMs = upcoming.reduce((sum, key) => sum + (PHASE_ESTIMATE_MS[key] ?? 20_000), 0);
+  const remainingMs = activeLeftMs + aheadMs;
+
+  // The bar creeps toward the cap as elapsed grows against the estimate; a
+  // finished run reads its outcome instead of the clock.
+  const totalElapsedMs = (state.finishedAt ?? now) - state.startedAt;
+  const reachedFraction = plan.length > 0 ? (Math.max(0, reached) + 1) / plan.length : 0;
+  const barFraction = success
+    ? 1
+    : running
+      ? Math.min(RUNNING_BAR_CAP, totalElapsedMs / (totalElapsedMs + remainingMs))
+      : Math.min(0.92, Math.max(0.08, reachedFraction));
+  const barTone = success
+    ? "bg-emerald-500"
+    : failed
+      ? "bg-destructive"
+      : running
+        ? "bg-foreground/70"
+        : "bg-amber-500";
+
+  // The estimate only earns a spot on a real wait: while running, off the
+  // usage poll (which shows its own countdown), and with room left to name.
+  const showEta = running && activeKey !== "usage" && remainingMs >= ETA_HIDE_BELOW_MS;
+  const etaLabel =
+    remainingMs >= 60_000
+      ? msg("submit.validation.progress.eta", { minutes: Math.ceil(remainingMs / 60_000) })
+      : msg("submit.validation.progress.eta_soon");
+
   const title = running
     ? msg("submit.validation.progress.title")
     : success
@@ -291,6 +353,22 @@ export function ValidationFrame({
               <Clock className="size-3.5" aria-hidden="true" />
               {elapsed}
             </span>
+            <AnimatePresence initial={false}>
+              {showEta && (
+                <motion.span
+                  key="eta"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground"
+                  dir="auto"
+                  initial={reduce ? false : { opacity: 0, y: -3 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
+                >
+                  <Hourglass className="size-3.5" aria-hidden="true" />
+                  {etaLabel}
+                </motion.span>
+              )}
+            </AnimatePresence>
           </div>
           <p
             className="max-w-prose text-[15px] leading-relaxed text-muted-foreground"
@@ -302,7 +380,24 @@ export function ValidationFrame({
         </div>
       </div>
 
-      <ol className="divide-y divide-border/60 border-t border-border/60">
+      <div
+        className="h-[3px] w-full overflow-hidden bg-border/40"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(barFraction * 100)}
+      >
+        <div
+          className={cn(
+            "h-full rounded-full",
+            barTone,
+            !reduce && "transition-[width] duration-700 ease-out",
+          )}
+          style={{ width: `${Math.round(barFraction * 100)}%` }}
+        />
+      </div>
+
+      <ol className="divide-y divide-border/60">
         {phases.map((phase, index) => {
           const rowChecks = checksByRow.get(index) ?? [];
           const active = running && index === phases.length - 1;
@@ -445,6 +540,7 @@ function PhaseRow({
   message: string | undefined;
 }) {
   const active = tone === "active";
+  const reduce = useReducedMotion();
   const elapsedMs = (phase.finishedAt ?? (active ? now : phase.startedAt)) - phase.startedAt;
   const statusWord =
     tone === "failed"
@@ -468,7 +564,7 @@ function PhaseRow({
       >
         <span
           className={cn(
-            "flex size-9 shrink-0 items-center justify-center rounded-full border",
+            "relative flex size-9 shrink-0 items-center justify-center rounded-full border",
             tone === "failed"
               ? "border-destructive/40 bg-destructive/10 text-destructive"
               : tone === "pending"
@@ -479,6 +575,14 @@ function PhaseRow({
           )}
           aria-hidden="true"
         >
+          {active && !reduce && (
+            <motion.span
+              className="absolute inset-0 rounded-full border border-foreground/25"
+              initial={{ opacity: 0.5, scale: 1 }}
+              animate={{ opacity: 0, scale: 1.7 }}
+              transition={{ duration: 1.6, repeat: Infinity, ease: "easeOut" }}
+            />
+          )}
           {active ? (
             <CircleNotch className="size-4 animate-spin" />
           ) : tone === "failed" ? (
@@ -535,8 +639,18 @@ function PhaseRow({
             )}
             {checks.length > 0 && (
               <ul className="space-y-2">
-                {checks.map((check) => (
-                  <li key={check.key} className="flex items-start gap-2.5 text-sm">
+                {checks.map((check, index) => (
+                  <motion.li
+                    key={check.key}
+                    className="flex items-start gap-2.5 text-sm"
+                    initial={reduce ? false : { opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{
+                      duration: 0.25,
+                      delay: reduce ? 0 : index * 0.05,
+                      ease: "easeOut",
+                    }}
+                  >
                     <span
                       className={cn(
                         "mt-0.5 flex size-4 shrink-0 items-center justify-center",
@@ -575,7 +689,7 @@ function PhaseRow({
                         </span>
                       )}
                     </span>
-                  </li>
+                  </motion.li>
                 ))}
               </ul>
             )}

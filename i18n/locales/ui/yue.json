@@ -3730,6 +3730,8 @@
   "submit.validation.progress.next_check": "{seconds} 秒後再查核",
   "submit.validation.progress.pending_operations": "等緊確認嘅操作：{count}",
   "submit.validation.progress.slow": "仲喺度處理緊。較長嘅步驟可能要幾分鐘，就算你離開呢頁，檢查都會繼續。",
+  "submit.validation.progress.eta": "仲有大約 {minutes} 分鐘",
+  "submit.validation.progress.eta_soon": "唔夠一分鐘",
   "submit.validation.check.program": "程式碼",
   "submit.validation.check.metric": "指標程式碼",
   "submit.validation.check.sample_mapping": "樣本行嘅欄位對應",

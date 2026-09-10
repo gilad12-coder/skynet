@@ -3730,6 +3730,8 @@
   "submit.validation.progress.next_check": "다음 확인까지 {seconds}초",
   "submit.validation.progress.pending_operations": "확인 대기 중인 작업: {count}",
   "submit.validation.progress.slow": "아직 진행 중입니다. 오래 걸리는 단계는 몇 분이 걸릴 수 있으며, 이 페이지를 떠나도 검사는 계속됩니다.",
+  "submit.validation.progress.eta": "약 {minutes}분 남음",
+  "submit.validation.progress.eta_soon": "1분 미만 남음",
   "submit.validation.check.program": "프로그램 코드",
   "submit.validation.check.metric": "메트릭 코드",
   "submit.validation.check.sample_mapping": "샘플 행의 열 매핑",

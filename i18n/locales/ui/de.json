@@ -3730,6 +3730,8 @@
   "submit.validation.progress.next_check": "Nächste Prüfung in {seconds} s",
   "submit.validation.progress.pending_operations": "Vorgänge, die auf Bestätigung warten: {count}",
   "submit.validation.progress.slow": "Läuft noch. Längere Schritte können einige Minuten dauern, und die Prüfung läuft weiter, wenn Sie diese Seite verlassen.",
+  "submit.validation.progress.eta": "Noch etwa {minutes, plural, one {# Minute} other {# Minuten}}",
+  "submit.validation.progress.eta_soon": "Weniger als eine Minute",
   "submit.validation.check.program": "Programmcode",
   "submit.validation.check.metric": "Metrik-Code",
   "submit.validation.check.sample_mapping": "Spaltenzuordnung an einer Beispielzeile",

@@ -3730,6 +3730,8 @@
   "submit.validation.progress.next_check": "{seconds} 秒后再次核对",
   "submit.validation.progress.pending_operations": "等待确认的操作：{count}",
   "submit.validation.progress.slow": "仍在处理中。较长的步骤可能需要几分钟，即使离开此页面，检查也会继续。",
+  "submit.validation.progress.eta": "大约还剩 {minutes} 分钟",
+  "submit.validation.progress.eta_soon": "不到一分钟",
   "submit.validation.check.program": "程序代码",
   "submit.validation.check.metric": "指标代码",
   "submit.validation.check.sample_mapping": "样本行的列映射",

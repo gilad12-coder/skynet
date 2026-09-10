@@ -3730,6 +3730,8 @@
   "submit.validation.progress.next_check": "بررسی بعدی تا {seconds} ثانیه دیگر",
   "submit.validation.progress.pending_operations": "عملیات در انتظار تأیید: {count}",
   "submit.validation.progress.slow": "هنوز در حال کار است. مراحل طولانی ممکن است چند دقیقه طول بکشد و اگر این صفحه را ترک کنید بررسی ادامه می‌یابد.",
+  "submit.validation.progress.eta": "حدود {minutes} دقیقه باقی مانده",
+  "submit.validation.progress.eta_soon": "کمتر از یک دقیقه باقی مانده",
   "submit.validation.check.program": "کد برنامه",
   "submit.validation.check.metric": "کد معیار",
   "submit.validation.check.sample_mapping": "نگاشت ستون‌ها روی یک ردیف نمونه",

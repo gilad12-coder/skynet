@@ -3730,6 +3730,8 @@
   "submit.validation.progress.next_check": "Наступна перевірка через {seconds} с",
   "submit.validation.progress.pending_operations": "Операцій в очікуванні підтвердження: {count}",
   "submit.validation.progress.slow": "Досі виконується. Довгі кроки можуть тривати кілька хвилин, а перевірка продовжиться, якщо ви залишите цю сторінку.",
+  "submit.validation.progress.eta": "Залишилось близько {minutes, plural, one {# хвилини} other {# хвилин}}",
+  "submit.validation.progress.eta_soon": "Залишилось менше хвилини",
   "submit.validation.check.program": "Код програми",
   "submit.validation.check.metric": "Код метрики",
   "submit.validation.check.sample_mapping": "Зіставлення стовпців на прикладі рядка",

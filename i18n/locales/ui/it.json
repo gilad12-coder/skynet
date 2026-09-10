@@ -3730,6 +3730,8 @@
   "submit.validation.progress.next_check": "Prossima verifica tra {seconds} s",
   "submit.validation.progress.pending_operations": "Operazioni in attesa di conferma: {count}",
   "submit.validation.progress.slow": "Ancora in corso. I passaggi più lunghi possono richiedere qualche minuto e la verifica continua se lasci questa pagina.",
+  "submit.validation.progress.eta": "Circa {minutes, plural, one {# minuto rimasto} other {# minuti rimasti}}",
+  "submit.validation.progress.eta_soon": "Meno di un minuto rimasto",
   "submit.validation.check.program": "Codice del programma",
   "submit.validation.check.metric": "Codice della metrica",
   "submit.validation.check.sample_mapping": "Mappatura delle colonne su una riga di esempio",

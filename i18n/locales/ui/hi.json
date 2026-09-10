@@ -3730,6 +3730,8 @@
   "submit.validation.progress.next_check": "अगली जाँच {seconds} सेकंड में",
   "submit.validation.progress.pending_operations": "पुष्टि की प्रतीक्षा में कार्रवाइयाँ: {count}",
   "submit.validation.progress.slow": "अभी भी काम चल रहा है। लंबे चरणों में कुछ मिनट लग सकते हैं, और यदि आप यह पेज छोड़ते हैं तो जाँच चलती रहती है।",
+  "submit.validation.progress.eta": "लगभग {minutes} मिनट शेष",
+  "submit.validation.progress.eta_soon": "एक मिनट से भी कम शेष",
   "submit.validation.check.program": "प्रोग्राम कोड",
   "submit.validation.check.metric": "मेट्रिक कोड",
   "submit.validation.check.sample_mapping": "नमूना पंक्ति पर कॉलम मैपिंग",

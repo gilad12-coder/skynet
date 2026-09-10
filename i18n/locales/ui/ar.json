@@ -3730,6 +3730,8 @@
   "submit.validation.progress.next_check": "التحقق التالي بعد {seconds} ث",
   "submit.validation.progress.pending_operations": "عمليات بانتظار التأكيد: {count}",
   "submit.validation.progress.slow": "لا يزال العمل جارياً. قد تستغرق الخطوات الطويلة بضع دقائق، ويستمر الفحص إذا غادرت هذه الصفحة.",
+  "submit.validation.progress.eta": "يتبقى نحو {minutes, plural, one {دقيقة} other {# دقائق}}",
+  "submit.validation.progress.eta_soon": "يتبقى أقل من دقيقة",
   "submit.validation.check.program": "كود البرنامج",
   "submit.validation.check.metric": "كود المقياس",
   "submit.validation.check.sample_mapping": "تعيين الأعمدة على صف نموذجي",

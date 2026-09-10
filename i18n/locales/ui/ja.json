@@ -3730,6 +3730,8 @@
   "submit.validation.progress.next_check": "次の確認まで {seconds} 秒",
   "submit.validation.progress.pending_operations": "確認待ちの処理: {count}",
   "submit.validation.progress.slow": "まだ処理中です。時間のかかるステップは数分かかることがあり、このページを離れてもチェックは続行されます。",
+  "submit.validation.progress.eta": "残り約 {minutes} 分",
+  "submit.validation.progress.eta_soon": "残り 1 分未満",
   "submit.validation.check.program": "プログラムコード",
   "submit.validation.check.metric": "メトリックコード",
   "submit.validation.check.sample_mapping": "サンプル行の列マッピング",
