@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTabActivity } from "@/shared/hooks/use-tab-activity";
 
 import { readPref } from "@/features/settings";
 import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
@@ -88,6 +89,8 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
 
   const [turns, setTurns] = React.useState<InterviewTurn[]>([]);
   const [busy, setBusy] = React.useState(false);
+  // A turn keeps the tab mark green even after the panel has left the screen.
+  useTabActivity(busy ? "busy" : null);
   const [streamText, setStreamText] = React.useState("");
   const [thinking, setThinking] = React.useState<AgentThinking | null>(null);
   const [options, setOptions] = React.useState<InterviewOption[]>([]);

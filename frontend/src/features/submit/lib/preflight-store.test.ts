@@ -7,7 +7,12 @@ import type {
   WizardPreflightResponse,
 } from "../../../shared/types/wizard-preflight.ts";
 import { reusableSuccessfulPreflight } from "./preflight-outcome.ts";
-import { PreflightStore, type PreflightBudgetSession } from "./preflight-store.ts";
+import {
+  PreflightStore,
+  checkActivity,
+  type PreflightBudgetSession,
+  type ValidationProgress,
+} from "./preflight-store.ts";
 import { preflightIdentity } from "./validation-evidence.ts";
 import { waitForPreflightUsage } from "./wait-for-preflight-usage.ts";
 
@@ -269,4 +274,30 @@ test("listeners hear every change and the snapshot is stable in between", async 
   const count = notified;
   store.clear("anything");
   assert.equal(notified, count);
+});
+
+test("checkActivity is green while a phase executes and gray while usage settles", () => {
+  const base: ValidationProgress = {
+    workflow: "anything",
+    scope: "execution",
+    identity: "id",
+    owner: null,
+    status: "running",
+    startedAt: 0,
+    phases: [{ key: "budget", startedAt: 0 }],
+  };
+  assert.equal(checkActivity(null), null);
+  assert.equal(checkActivity(base), "busy");
+  assert.equal(
+    checkActivity({
+      ...base,
+      phases: [
+        { key: "evaluator", startedAt: 0, finishedAt: 1 },
+        { key: "usage", startedAt: 1 },
+      ],
+    }),
+    "idle",
+  );
+  assert.equal(checkActivity({ ...base, status: "succeeded", finishedAt: 2 }), null);
+  assert.equal(checkActivity({ ...base, status: "failed", finishedAt: 2 }), null);
 });

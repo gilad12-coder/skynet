@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTabActivity } from "@/shared/hooks/use-tab-activity";
 import { toast } from "react-toastify";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
@@ -277,6 +278,8 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
   );
 
   const [status, setStatus] = React.useState<AgentStatus>("idle");
+  // A run keeps the tab mark green even after its panel has left the screen.
+  useTabActivity(status === "streaming" ? "busy" : null);
   const [mode, setMode] = React.useState<AgentMode>(restored?.mode ?? "seed");
   const [statusLabel, setStatusLabel] = React.useState("");
   const [signatureStatus, setSignatureStatus] = React.useState<ArtifactStatus>(

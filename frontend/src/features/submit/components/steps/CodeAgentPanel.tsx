@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTabActivity } from "@/shared/hooks/use-tab-activity";
 import { Robot, Ruler, FileCode, ChatCenteredDots, ShareNetwork } from "@/shared/ui/icons";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
@@ -48,6 +49,7 @@ export function CodeAgentPanel({
   const [draft, setDraft] = React.useState("");
 
   const streaming = agent.status === "streaming";
+  useTabActivity(streaming ? "busy" : "idle");
 
   const handleSend = () => {
     if (!agent.canSend || !draft.trim() || disabled) return;

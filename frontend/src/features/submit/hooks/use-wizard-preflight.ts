@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useTabActivity } from "@/shared/hooks/use-tab-activity";
 import { msg } from "@/shared/lib/messages";
+import { resolveTabActivity, type TabActivity } from "@/shared/lib/tab-activity";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import { getExecutionBudget, runWizardPreflight } from "@/shared/lib/api";
 import type {
@@ -16,6 +18,7 @@ import {
 } from "../lib/preflight-outcome";
 import {
   PreflightStore,
+  checkActivity,
   type PreflightWorkflow,
   type ValidationPhase,
   type ValidationProgress,
@@ -38,6 +41,22 @@ const store = new PreflightStore({
   reusable: reusableSuccessfulPreflight,
   settleUsage: waitForPreflightUsage,
 });
+
+const WORKFLOWS: PreflightWorkflow[] = ["anything", "dspy"];
+const readCheckActivity = (): TabActivity | null => {
+  const values: TabActivity[] = [];
+  for (const workflow of WORKFLOWS) {
+    const activity = checkActivity(store.getState(workflow).progress);
+    if (activity) values.push(activity);
+  }
+  return resolveTabActivity(values);
+};
+const noCheckActivity = (): TabActivity | null => null;
+
+/** Follow every running check in the tab mark, wherever in the app the user is. */
+export function usePreflightTabActivity(): void {
+  useTabActivity(useSyncExternalStore(store.subscribe, readCheckActivity, noCheckActivity));
+}
 
 /** Keep checks scoped to the current setup; server evidence and costs remain authoritative. */
 export function useWizardPreflight(

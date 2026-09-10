@@ -1,16 +1,11 @@
 "use client";
 
 import * as React from "react";
+import { useTabActivity } from "@/shared/hooks/use-tab-activity";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import {
-  ClockCounterClockwise,
-  SidebarSimple,
-  Plus,
-  Sparkle,
-  MagicWand,
-} from "@/shared/ui/icons";
+import { ClockCounterClockwise, SidebarSimple, Plus, Sparkle, MagicWand } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
@@ -254,6 +249,15 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     onConversationMeta: handleConversationMeta,
   });
   const streaming = agent.status === "streaming";
+  // The tab mark: green while any conversation streams or waits its turn,
+  // gray while the panel is open and quiet.
+  useTabActivity(
+    streaming || agent.status === "queued" || agent.backgroundBusyCount > 0
+      ? "busy"
+      : open
+        ? "idle"
+        : null,
+  );
   // A queued turn locks the composer like a streaming one — its stop button
   // cancels the queued run before it ever reaches the server.
   const activeBusy = streaming || agent.status === "queued";

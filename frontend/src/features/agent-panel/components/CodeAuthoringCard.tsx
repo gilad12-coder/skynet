@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTabActivity } from "@/shared/hooks/use-tab-activity";
 import dynamic from "next/dynamic";
 import { Sparkle, XCircle } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
@@ -46,6 +47,7 @@ interface CodeAuthoringCardProps {
  */
 export function CodeAuthoringCard({ agent }: CodeAuthoringCardProps) {
   const streaming = agent.status === "streaming";
+  useTabActivity(streaming ? "busy" : "idle");
   const authored = agent.isWorkflow ? !!agent.workflowSpec : !!agent.signatureCode;
   const hasOutput = streaming || authored || !!agent.metricCode || !!agent.reasoning;
   const hasError = agent.status === "error" && !!agent.error;
