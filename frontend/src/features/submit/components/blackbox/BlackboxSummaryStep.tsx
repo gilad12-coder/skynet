@@ -25,7 +25,6 @@ import {
 } from "@/shared/ui/icons";
 import { cn } from "@/shared/lib/utils";
 import { Badge } from "@/shared/ui/primitives/badge";
-import { Button } from "@/shared/ui/primitives/button";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { formatCredits } from "@/features/billing";
@@ -39,8 +38,6 @@ import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { chargeableBracket } from "../../lib/cost-bracket";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
-import { WIZARD_STAGE, type WizardStageId } from "../../lib/wizard-steps";
-import { focusField } from "../../lib/focus-field";
 import { ModelRoleRow } from "./ModelRoleRow";
 
 /** One key/value line: an icon-and-label on the start, its value on the end. */
@@ -107,18 +104,11 @@ function Mono({ children }: { children: ReactNode }) {
 }
 
 /**
- * The blackbox review, carried by the same carousel the DSPy summary uses:
- * a sliding-pill tab bar over an animated body, then the cost estimate. Each
- * tab reads the values the run is submitted with; the buttons at the top jump
- * back to the stage that owns them.
+ * The blackbox review, carried by the same carousel the DSPy summary uses: a
+ * sliding-pill tab bar over an animated body. Each tab reads the values the run
+ * is submitted with, and the last tab carries the cost estimate and budget.
  */
-export function BlackboxSummaryStep({
-  w,
-  onEditStage,
-}: {
-  w: BlackboxWizardContext;
-  onEditStage?: (stage: Exclude<WizardStageId, "review">) => void;
-}) {
+export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
   const [summaryTab, setSummaryTab] = useState(0);
   const {
     jobName,
@@ -201,31 +191,15 @@ export function BlackboxSummaryStep({
       label: msg("submit.blackbox.scorer.title"),
       icon: <Code className="size-3.5" />,
     },
+    {
+      id: "budget",
+      label: msg("submit.blackbox.review.budget"),
+      icon: <Coins className="size-3.5" />,
+    },
   ];
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        {(["goal", "evaluation", "optimization"] as const).map((stage) => (
-          <Button
-            key={stage}
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              if (onEditStage) {
-                onEditStage(stage);
-                return;
-              }
-              w.goTo(WIZARD_STAGE[stage]);
-              focusField(`wizard-stage-${stage}`);
-            }}
-          >
-            {msg("submit.blackbox.review.edit")} · {msg(`submit.stage.${stage}`)}
-          </Button>
-        ))}
-      </div>
-
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -514,59 +488,61 @@ export function BlackboxSummaryStep({
                   )}
                 </div>
               )}
+
+              {summaryTab === 5 && (
+                <div className="rounded-xl border border-[#C8B9A8]/50 bg-[#FAF8F5] px-3.5 py-3 shadow-[0_1px_2px_rgba(61,46,34,0.04)]">
+                  <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                    <HelpTip text={tip("submit.estimate")}>
+                      <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3D2E22]">
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
+                          <Gauge className="h-3 w-3" />
+                        </span>
+                        {byok ? msg("submit.summary.estimate_fee") : msg("submit.summary.estimate_cost")}
+                      </span>
+                    </HelpTip>
+                    <span className="text-[13px] font-medium text-[#3D2E22] sm:text-end" dir="auto">
+                      {/* Isolate "low–high" as one LTR run (U+2066…U+2069) so the en-dash
+                          between the two number groups doesn't flip them under RTL. */}
+                      {formatMsg("submit.summary.estimate_range", {
+                        low: `⁦${formatCredits(estimate.lowCredits, locale)}`,
+                        high: `${formatCredits(estimate.highCredits, locale)}⁩`,
+                      })}
+                    </span>
+                  </div>
+                  {w.budgetSession.budget && (
+                    <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      {(
+                        [
+                          ["submit.budget.setup_spent", w.budgetSession.budget.setup_spent_credits],
+                          ["submit.budget.run_spent", w.budgetSession.budget.run_spent_credits],
+                          ["submit.budget.reserved", w.budgetSession.budget.reserved_credits],
+                          ["submit.budget.available", w.budgetSession.budget.available_credits],
+                        ] as const
+                      ).map(([label, amount]) => (
+                        <div key={label}>
+                          <dt>{msg(label)}</dt>
+                          <dd dir="auto">{formatBudgetAmount(amount, locale)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                  {budgetUncapped ? (
+                    <p className="mt-1.5 text-[11px] text-[#8C7A6B]">{msg("submit.budget.uncapped_short")}</p>
+                  ) : (
+                    maxCostCredits != null && (
+                      <p className="mt-1.5 text-[11px] text-[#8C7A6B]">
+                        {formatMsg("submit.summary.estimate_capped", {
+                          cap: formatCredits(maxCostCredits, locale),
+                        })}
+                      </p>
+                    )
+                  )}
+                </div>
+              )}
             </motion.div>
           </AnimatePresence>
         </div>
       </motion.div>
-
-      <div className="rounded-xl border border-[#C8B9A8]/50 bg-[#FAF8F5] px-3.5 py-3 shadow-[0_1px_2px_rgba(61,46,34,0.04)]">
-        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <HelpTip text={tip("submit.estimate")}>
-            <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3D2E22]">
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
-                <Gauge className="h-3 w-3" />
-              </span>
-              {byok ? msg("submit.summary.estimate_fee") : msg("submit.summary.estimate_cost")}
-            </span>
-          </HelpTip>
-          <span className="text-[13px] font-medium text-[#3D2E22] sm:text-end" dir="auto">
-            {/* Isolate "low–high" as one LTR run (U+2066…U+2069) so the en-dash
-                between the two number groups doesn't flip them under RTL. */}
-            {formatMsg("submit.summary.estimate_range", {
-              low: `⁦${formatCredits(estimate.lowCredits, locale)}`,
-              high: `${formatCredits(estimate.highCredits, locale)}⁩`,
-            })}
-          </span>
-        </div>
-        {w.budgetSession.budget && (
-          <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            {(
-              [
-                ["submit.budget.setup_spent", w.budgetSession.budget.setup_spent_credits],
-                ["submit.budget.run_spent", w.budgetSession.budget.run_spent_credits],
-                ["submit.budget.reserved", w.budgetSession.budget.reserved_credits],
-                ["submit.budget.available", w.budgetSession.budget.available_credits],
-              ] as const
-            ).map(([label, amount]) => (
-              <div key={label}>
-                <dt>{msg(label)}</dt>
-                <dd dir="auto">{formatBudgetAmount(amount, locale)}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-        {budgetUncapped ? (
-          <p className="mt-1.5 text-[11px] text-[#8C7A6B]">{msg("submit.budget.uncapped_short")}</p>
-        ) : (
-          maxCostCredits != null && (
-            <p className="mt-1.5 text-[11px] text-[#8C7A6B]">
-              {formatMsg("submit.summary.estimate_capped", {
-                cap: formatCredits(maxCostCredits, locale),
-              })}
-            </p>
-          )
-        )}
-      </div>
     </div>
   );
 }

@@ -95,12 +95,6 @@ export function BlackboxWizard({
     w.goTo(WIZARD_STAGE[target]);
     if (field) focusField(field);
   };
-  // The summary's stage-level Edit buttons reopen a stage at its first substep.
-  const handleEditStage = (target: Exclude<WizardStageId, "review">) => {
-    if (target === "evaluation") setEvaluationPart(0);
-    if (target === "optimization") setOptimizationPart(0);
-    w.goTo(WIZARD_STAGE[target]);
-  };
   // A reported problem opens the substep that holds its field and lands focus there.
   useEffect(() => {
     if (!w.issue) return;
@@ -251,7 +245,7 @@ export function BlackboxWizard({
         {activeReviewPart === 0 ? (
           <BlackboxBasicsStep w={w} />
         ) : (
-          <BlackboxSummaryStep w={w} onEditStage={handleEditStage} />
+          <BlackboxSummaryStep w={w} />
         )}
       </WizardSubsteps>
     ),
