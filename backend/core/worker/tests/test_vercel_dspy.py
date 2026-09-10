@@ -38,6 +38,7 @@ class FakeSession:
         [request_path] = [path for path in self.files if path.endswith("/request.json")]
         [archive_path] = [path for path in self.files if path.endswith("/source.tgz.b64")]
         assert command.index(f"base64 -d {archive_path} | tar -xzf -") < command.index("core.worker.isolated_runner")
+        assert 'PYTHONSAFEPATH=1 PYTHONPATH="$PWD"/' in command
         request = json.loads(self.files[request_path])
         assert "_budget_gateway_descriptor" not in request["payload"]
         assert request["runtime_identity"]["gepa_revision"] == "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"

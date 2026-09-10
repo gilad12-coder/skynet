@@ -190,10 +190,13 @@ def run_vercel_dspy(payload: dict[str, Any], artifact_id: str, event_queue: Any,
                     }
                     event_queue.put(event)
 
+        # python -m puts the working directory ahead of PYTHONPATH, and the box
+        # works in /app, where the image's own copy of the package lives; the
+        # safe path keeps the shipped source first.
         command = (
             f"mkdir -p {shlex.quote(source_root)}"
             f" && base64 -d {shlex.quote(archive_path)} | tar -xzf - -C {shlex.quote(source_root)}"
-            f' && PYTHONPATH="$PWD"/{shlex.quote(source_root)}:/app'
+            f' && PYTHONSAFEPATH=1 PYTHONPATH="$PWD"/{shlex.quote(source_root)}:/app'
             f" python3 -m core.worker.isolated_runner {shlex.quote(request_path)}"
         )
         if "_preflight" in guest_payload:
