@@ -132,7 +132,9 @@ export function ExpandableTextarea({
           aria-label={label}
           onKeyDown={handleSurfaceKeyDown}
           className={cn(
-            "absolute inset-0 z-10 flex flex-col gap-2 bg-card px-4 py-5 sm:px-6 sm:py-6",
+            // z-20 so the surface sits above form controls that use z-10 (e.g.
+            // the privacy segmented pill), which would otherwise show through it.
+            "absolute inset-0 z-20 flex flex-col gap-2 bg-card px-4 py-5 sm:px-6 sm:py-6",
             "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95 motion-safe:duration-150",
           )}
         >
