@@ -21,7 +21,25 @@ _RATE_FIELDS = {
     "image",
     "input_cache_read",
     "input_cache_write",
+    "input_cache_write_1h",
     "internal_reasoning",
+}
+# _check_text_request rejects audio parts, the audio field, plugins, web search options, provider
+# tools and media output modalities, so a text request cannot be billed under these categories
+# even though most Gemini, Claude and audio-capable endpoints publish nonzero rates for them.
+_UNREACHABLE_RATE_FIELDS = {"audio", "input_audio_cache", "audio_output", "web_search", "image_output"}
+# Conditional rows (long-context tiers, weekend or off-peak overrides) carry their trigger next to
+# the rates they replace; the bound takes the maximum over every row rather than predicting the trigger.
+_CONDITION_FIELDS = {
+    "tiers",
+    "overrides",
+    "min_context",
+    "max_context",
+    "min_prompt_tokens",
+    "utc_days",
+    "utc_start",
+    "utc_end",
+    "discount",
 }
 _UNSUPPORTED_REQUEST_FIELDS = {"plugins", "web_search_options", "audio", "image_config", "models", "route"}
 
@@ -138,23 +156,35 @@ def _check_text_request(body: Mapping[str, Any]) -> int:
 
 
 def _rate_maxima(pricing: Any) -> dict[str, Decimal]:
-    """Include published long-context tiers and cache rates in the maximum bound."""
+    """Include published long-context tiers, scheduled overrides and cache rates in the maximum bound.
+
+    Args:
+        pricing: One endpoint's published pricing, as a mapping or a list of tier rows.
+
+    Returns:
+        Highest published rate per chargeable category across the base row and every conditional row.
+
+    Raises:
+        UnpricedOperationError: When prompt or completion prices are missing, a conditional row is
+            malformed, or a category a text request could incur has no covered rate.
+    """
     if isinstance(pricing, list):
         if not pricing or any(not isinstance(row, dict) for row in pricing):
             raise UnpricedOperationError("Unrecognized tiered pricing cannot authorize work.")
         pricing = {**pricing[0], "tiers": pricing[1:]}
     if not isinstance(pricing, dict) or pricing.get("prompt") is None or pricing.get("completion") is None:
         raise UnpricedOperationError("Both prompt and completion prices must be verified.")
-    tiers = pricing.get("tiers") or []
-    if not isinstance(tiers, list) or any(not isinstance(tier, dict) for tier in tiers):
-        raise UnpricedOperationError("Unrecognized tiered pricing cannot authorize work.")
-    rows = [pricing, *tiers]
+    rows = [pricing]
+    for key in ("tiers", "overrides"):
+        nested = pricing.get(key) or []
+        if not isinstance(nested, list) or any(not isinstance(row, dict) for row in nested):
+            raise UnpricedOperationError("Unrecognized tiered pricing cannot authorize work.")
+        rows.extend(nested)
     for row in rows:
         for key, value in row.items():
-            if (
-                key not in _RATE_FIELDS | {"tiers", "min_context", "max_context", "discount"}
-                and exact_nonnegative(value) != 0
-            ):
+            if key in _RATE_FIELDS | _UNREACHABLE_RATE_FIELDS | _CONDITION_FIELDS:
+                continue
+            if exact_nonnegative(value) != 0:
                 raise UnpricedOperationError(f"The provider reports an uncovered price category: {key}.")
     return {
         field: max(exact_nonnegative(row.get(field, pricing.get(field, "0"))) for row in rows) for field in _RATE_FIELDS
@@ -214,7 +244,9 @@ def price_text_request(request: Mapping[str, Any], catalog: Mapping[str, Any], p
         base_prices = prices[0] if isinstance(prices, list) else prices
         if image_count and base_prices.get("image") is None:
             raise UnpricedOperationError("Image inputs require an explicit provider image price.")
-        input_rate = max(rates[key] for key in ("prompt", "input_cache_read", "input_cache_write"))
+        input_rate = max(
+            rates[key] for key in ("prompt", "input_cache_read", "input_cache_write", "input_cache_write_1h")
+        )
         maximum_usd = (
             context * input_rate
             + output_limit * (rates["completion"] + rates["internal_reasoning"])
