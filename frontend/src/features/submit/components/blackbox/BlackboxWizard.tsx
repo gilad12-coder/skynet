@@ -27,12 +27,12 @@ import { BlackboxStartStep } from "./BlackboxStartStep";
 import { BlackboxCasesStep } from "./BlackboxCasesStep";
 import { BlackboxScorerStep } from "./BlackboxScorerStep";
 import { BlackboxOptimizerStep } from "./BlackboxOptimizerStep";
-import { BlackboxReviewStep } from "./BlackboxReviewStep";
+import { BlackboxSummaryStep } from "./BlackboxSummaryStep";
 
 type EvaluationStep = "cases" | "scorer" | "split" | "budget";
 const GOAL_STEPS = ["goal"] as const;
 const OPTIMIZATION_STEPS = ["strategy", "model", "check"] as const;
-const REVIEW_STEPS = ["review"] as const;
+const REVIEW_STEPS = ["basics", "summary"] as const;
 
 /** The evaluation substep that holds a field, so a problem opens where it is fixed. */
 function evaluationStepFor(field: string | undefined, hasCases: boolean): EvaluationStep | null {
@@ -64,6 +64,10 @@ export function BlackboxWizard({
   const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
   const [optimizationPart, setOptimizationPart] = useState(0);
+  // Review splits into its own two substeps: the basics get a Continue gate of
+  // their own before the summary carousel opens.
+  const [reviewPart, setReviewPart] = useState(0);
+  const activeReviewPart = Math.min(reviewPart, REVIEW_STEPS.length - 1);
 
   // The split only exists once there are cases to divide.
   const hasCases = Boolean(w.parsedCases?.rowCount);
@@ -90,6 +94,12 @@ export function BlackboxWizard({
     routeSubstep(target, field);
     w.goTo(WIZARD_STAGE[target]);
     if (field) focusField(field);
+  };
+  // The summary's stage-level Edit buttons reopen a stage at its first substep.
+  const handleEditStage = (target: Exclude<WizardStageId, "review">) => {
+    if (target === "evaluation") setEvaluationPart(0);
+    if (target === "optimization") setOptimizationPart(0);
+    w.goTo(WIZARD_STAGE[target]);
   };
   // A reported problem opens the substep that holds its field and lands focus there.
   useEffect(() => {
@@ -201,8 +211,12 @@ export function BlackboxWizard({
       setOptimizationPart((current) => current + 1);
       return;
     }
+    setReviewPart(0);
     await w.handleNext();
   };
+
+  // The basics substep gates the summary: Continue opens the summary carousel.
+  const handleReviewNext = () => setReviewPart(REVIEW_STEPS.length - 1);
 
   const stageViews: Record<WizardStageId, ReactNode> = {
     goal: (
@@ -229,11 +243,16 @@ export function BlackboxWizard({
       </WizardSubsteps>
     ),
     review: (
-      <WizardSubsteps active={0} ariaLabel={msg("submit.stage.review")} steps={REVIEW_STEPS}>
-        <div className="space-y-4 md:space-y-6">
+      <WizardSubsteps
+        active={activeReviewPart}
+        ariaLabel={msg("submit.stage.review")}
+        steps={REVIEW_STEPS}
+      >
+        {activeReviewPart === 0 ? (
           <BlackboxBasicsStep w={w} />
-          <BlackboxReviewStep w={w} onEditField={handleEditField} />
-        </div>
+        ) : (
+          <BlackboxSummaryStep w={w} onEditStage={handleEditStage} />
+        )}
       </WizardSubsteps>
     ),
   };
@@ -249,6 +268,10 @@ export function BlackboxWizard({
       setOptimizationPart((current) => current - 1);
       return;
     }
+    if (w.step === WIZARD_STAGE.review && activeReviewPart > 0) {
+      setReviewPart((current) => current - 1);
+      return;
+    }
     if (w.step === WIZARD_STAGE.review) setOptimizationPart(OPTIMIZATION_STEPS.length - 1);
     w.goPrev();
   };
@@ -257,8 +280,11 @@ export function BlackboxWizard({
       ? handleEvaluationNext
       : w.step === WIZARD_STAGE.optimization
         ? handleOptimizationNext
-        : w.handleNext;
-  const showSubmit = w.step === WIZARD_STAGE.review;
+        : w.step === WIZARD_STAGE.review
+          ? handleReviewNext
+          : w.handleNext;
+  const showSubmit =
+    w.step === WIZARD_STAGE.review && activeReviewPart === REVIEW_STEPS.length - 1;
   // Auto mode seats the agent pane beside the form on the Goal stage and the
   // scorer, so those take the wide column; plain forms keep the narrow one.
   const wideAuthoringPanel =
