@@ -11,12 +11,12 @@ from sqlalchemy.orm import Session
 
 from core.billing.model_dispatch import OpenRouterDispatcher, generation_charge
 from core.billing.model_reconciliation import OpenRouterUsageReconciler
-from core.billing.openrouter_quotes import resolve_model_slug
+from core.billing.openrouter_quotes import price_text_request, resolve_model_slug
 from core.billing.operation_pricing import ChargePolicy
-from core.billing.runtime import UsagePendingError
+from core.billing.runtime import PaidResult, UsagePendingError
 from core.billing.tests.test_protected_dispatch import CATALOG, REQUEST, _runtime
 from core.billing.tests.test_protected_dispatch import database as _database_fixture
-from core.storage.models import ExecutionOperationModel
+from core.storage.models import ExecutionOperationModel, ExecutionUsageEvidenceModel
 
 database = _database_fixture
 
@@ -117,6 +117,69 @@ def test_rotated_credential_does_not_query_or_release_original_hold(database) ->
         with pytest.raises(UsagePendingError):
             reconciler.reconcile(operation_id, "alice", client=client)
     assert runtime.service.get(runtime.budget_id, "alice").pending_operations == 1
+
+
+def test_refused_request_releases_its_hold_instead_of_waiting_for_a_receipt(database) -> None:
+    """Return coverage when the provider's complete error answer names no generation."""
+    runtime = _runtime(database)
+
+    def refusing_provider(request: httpx.Request) -> httpx.Response:
+        """Rate-limit the only POST and fail if anything tries to look a generation up."""
+        if request.url.path.endswith("/endpoints"):
+            return httpx.Response(200, json={"data": CATALOG})
+        if request.method == "POST":
+            return httpx.Response(429, json={"error": {"message": "Rate limit exceeded", "code": 429}})
+        pytest.fail("A refusal without a generation must not be looked up.")
+
+    with httpx.Client(transport=httpx.MockTransport(refusing_provider)) as client:
+        dispatcher = OpenRouterDispatcher(
+            runtime,
+            api_key="private",
+            model="fixture/text",
+            role="task",
+            policy=ChargePolicy("managed_model"),
+            client=client,
+        )
+        response = dispatcher.dispatch("/chat/completions", REQUEST)
+    assert response.status == 429
+    snapshot = runtime.service.get(runtime.budget_id, "alice")
+    assert (snapshot.pending_operations, snapshot.reserved_credits, snapshot.setup_spent_credits) == (0, 0, 0)
+    with Session(database) as session:
+        assert session.scalar(select(ExecutionOperationModel.state)) == "released"
+        evidence = session.scalar(select(ExecutionUsageEvidenceModel))
+        assert (evidence.issue, evidence.final, evidence.evidence["status"]) == ("rejected", True, 429)
+
+
+def test_sweep_releases_a_refusal_that_earlier_runtimes_parked_as_pending(database) -> None:
+    """Settle nothing and return coverage from a stored refusal without any provider credential."""
+    runtime = _runtime(database)
+    policy = ChargePolicy("managed_model")
+    quote = price_text_request(REQUEST, CATALOG, policy).quote
+    refusal = {
+        "provider": "openrouter",
+        "model": "fixture/text",
+        "request_id": None,
+        "status": 429,
+        "usage": None,
+        "interrupted": False,
+    }
+    with pytest.raises(UsagePendingError):
+        runtime.execute(
+            quote,
+            policy,
+            lambda: PaidResult(value=None, provider_usd=None, evidence=refusal),
+            operation_key="parked",
+            cost_kind="model",
+            role="task",
+            recovery_headroom=False,
+        )
+    assert runtime.service.get(runtime.budget_id, "alice").pending_operations == 1
+    reconciler = OpenRouterUsageReconciler(runtime.service, lambda owner, digest: None)
+    page = reconciler.sweep(limit=4)
+    assert [result.state for result in page.results] == ["released"]
+    snapshot = runtime.service.get(runtime.budget_id, "alice")
+    assert (snapshot.pending_operations, snapshot.reserved_credits) == (0, 0)
+    assert reconciler.sweep(limit=4).results == ()
 
 
 @pytest.mark.parametrize(

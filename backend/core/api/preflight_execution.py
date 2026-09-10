@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from typing import Any, Literal
 
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..billing import ProviderKeyVault, payload_uses_token_source
 from ..billing.budgets import BudgetConflictError, BudgetError, BudgetService
+from ..billing.model_dispatch import ModelHTTPResult
 from ..billing.model_gateway import ModelGateway
 from ..billing.protected_credentials import (
     ProtectedCredentialVault,
@@ -171,6 +173,24 @@ def _sample(payload: dict[str, Any]) -> dict[str, Any] | None:
     return eligible[0]
 
 
+def _provider_refusal(response: ModelHTTPResult) -> str:
+    """Summarize a provider's error answer for the check report.
+
+    Args:
+        response: Non-2xx model response returned through the metered route.
+
+    Returns:
+        The HTTP status, followed by the provider's own message when its body carries one.
+    """
+    try:
+        error = json.loads(response.content).get("error")
+    except (ValueError, AttributeError):
+        error = None
+    detail = error.get("message") if isinstance(error, dict) else error if isinstance(error, str) else None
+    summary = f"HTTP {response.status}"
+    return f"{summary}: {str(detail)[:200]}" if detail else summary
+
+
 def _verify_model_routes(gateway: ModelGateway, *, native: bool) -> list[dict[str, Any]]:
     """Verify each configured role through its real metered provider path.
 
@@ -192,13 +212,13 @@ def _verify_model_routes(gateway: ModelGateway, *, native: bool) -> list[dict[st
             body,
             {"anthropic-version": "2023-06-01"} if anthropic else {},
         )
+        ok = 200 <= response.status < 300
+        detail = f"The selected {route['role']} model rejected its setup request ({_provider_refusal(response)})."
         checks.append(
             _check(
                 f"model.{route['role']}",
-                "succeeded" if 200 <= response.status < 300 else "failed",
-                None
-                if 200 <= response.status < 300
-                else f"The selected {route['role']} model rejected its setup request.",
+                "succeeded" if ok else "failed",
+                None if ok else detail,
                 route["role"],
             )
         )

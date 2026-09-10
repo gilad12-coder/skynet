@@ -570,7 +570,7 @@ def test_no_charge_or_release_for_work_without_dispatch(engine: Engine) -> None:
 
 
 def test_refused_dispatch_is_rejected_only_without_any_provider_trace(engine: Engine) -> None:
-    """Return coverage for a creation the provider refused, never for one that may have started."""
+    """Return coverage for a refusal, retained or not, never for work that may have started."""
     service = BudgetService(engine=engine)
     budget = service.create("alice", 20, idempotency_key="draft")
     refusal = {"evidence_key": "refusal", "evidence": {"status_code": 400}}
@@ -589,11 +589,17 @@ def test_refused_dispatch_is_rejected_only_without_any_provider_trace(engine: En
     service.mark_dispatched(started.id, "alice", "provider-session")
     with pytest.raises(BudgetUnreconciledError):
         service.reject(started.id, "alice", **refusal)
-    uncertain = _reserve(service, budget.id, key="uncertain")
-    service.mark_dispatched(uncertain.id, "alice")
-    service.mark_pending(uncertain.id, "alice", evidence_key="partial", evidence={"seen": True})
+    retained = _reserve(service, budget.id, key="retained")
+    service.mark_dispatched(retained.id, "alice")
+    service.mark_pending(retained.id, "alice", evidence_key="answer", evidence={"status_code": 429})
+    assert service.reject(retained.id, "alice", **refusal).state == "released"
+    partial = _reserve(service, budget.id, key="partial")
+    service.mark_dispatched(partial.id, "alice")
+    service.settle(
+        partial.id, "alice", evidence_key="partial", actual_credits="0.5", evidence={"seen": True}, final=False
+    )
     with pytest.raises(BudgetUnreconciledError):
-        service.reject(uncertain.id, "alice", **refusal)
+        service.reject(partial.id, "alice", **refusal)
     assert service.get(budget.id, "alice").pending_operations == 2
 
 

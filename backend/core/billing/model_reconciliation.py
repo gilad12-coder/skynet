@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal
+from typing import Any
 
 import httpx
 
@@ -12,6 +13,35 @@ from .model_dispatch import OpenRouterDispatcher
 from .operation_pricing import ChargePolicy, exact_nonnegative, json_fingerprint
 from .runtime import BudgetRuntime, UsagePendingError
 from .vercel_reconciliation import ReconciliationPage, ReconciliationResult
+
+
+def _stored_refusal(documents: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    """Return the provider's refusal when every retained receipt proves no generation existed.
+
+    Runtimes that predate immediate refusal release parked such answers as pending usage;
+    their stored documents still carry the provider's complete error answer.
+
+    Args:
+        documents: Evidence documents recorded for the operation, oldest first.
+
+    Returns:
+        The latest refusal, or None when any receipt names a generation, reports usage,
+        was interrupted, or is not an OpenRouter error answer.
+    """
+    if not documents:
+        return None
+    for document in documents:
+        status = document.get("status")
+        if (
+            document.get("provider") != "openrouter"
+            or document.get("request_id") is not None
+            or document.get("usage") is not None
+            or document.get("interrupted") is not False
+            or not isinstance(status, int)
+            or status < 400
+        ):
+            return None
+    return documents[-1]
 
 
 class OpenRouterUsageReconciler:
@@ -36,7 +66,8 @@ class OpenRouterUsageReconciler:
             client: Optional deterministic HTTP test transport.
 
         Returns:
-            Confirmed operation with cumulative exact settlement.
+            Confirmed operation with cumulative exact settlement, or the released hold of a
+            stored refusal that names no generation.
 
         Raises:
             UsagePendingError: When identity, credentials, or final billing evidence is unavailable.
@@ -48,6 +79,12 @@ class OpenRouterUsageReconciler:
         if prices.get("provider") != "openrouter" or operation.cost_kind != "model":
             raise UsagePendingError("This operation is not an admitted OpenRouter generation.")
         identity = operation.provider_request_id
+        if not identity:
+            refusal = _stored_refusal(record.evidence)
+            if refusal is not None:
+                return self.service.reject(
+                    operation_id, username, evidence_key=f"openrouter-refusal:{operation_id}", evidence=refusal
+                )
         digest = prices.get("credential_fingerprint")
         key = self.resolve_key(username, str(digest)) if digest else None
         if not identity or not key or json_fingerprint(key) != digest:

@@ -18,7 +18,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from ..storage.models import (
@@ -915,10 +915,10 @@ class BudgetService:
         evidence_key: str,
         evidence: Mapping[str, Any],
     ) -> OperationSnapshot:
-        """Release a dispatched hold whose creation the provider refused before anything existed.
+        """Release a dispatched or retained hold whose request the provider refused outright.
 
         Args:
-            operation_id: Dispatched attempt that never received a provider identity.
+            operation_id: Dispatched or pending attempt with no provider identity and no settled usage.
             username: Authenticated owner.
             evidence_key: Immutable identity of the refusal.
             evidence: Raw provider refusal proving nothing was created.
@@ -928,7 +928,8 @@ class BudgetService:
 
         Raises:
             BudgetConflictError: If the attempt was never dispatched and should be released instead.
-            BudgetUnreconciledError: If the attempt may have reached the provider.
+            BudgetUnreconciledError: If the attempt received a provider identity or settled usage, so
+                it may have reached the provider.
         """
         key = _identifier(evidence_key)
         document = dict(evidence)
@@ -938,12 +939,24 @@ class BudgetService:
                 return self._operation_snapshot(session, operation, budget, wallet)
             if operation.state == "reserved":
                 raise BudgetConflictError("Unstarted work is released, not rejected.")
-            recorded = session.scalar(
+            settled = session.scalar(
                 select(ExecutionUsageEvidenceModel.id)
-                .where(ExecutionUsageEvidenceModel.operation_id == operation_id)
+                .where(
+                    ExecutionUsageEvidenceModel.operation_id == operation_id,
+                    or_(
+                        ExecutionUsageEvidenceModel.issue.is_(None),
+                        ExecutionUsageEvidenceModel.issue != "usage_pending",
+                    ),
+                )
                 .limit(1)
             )
-            if operation.state != "dispatched" or operation.provider_request_id is not None or recorded is not None:
+            if (
+                operation.state not in _DISPATCHED_STATES
+                or operation.provider_request_id is not None
+                or operation.actual_units
+                or operation.actual_wallet_units
+                or settled is not None
+            ):
                 raise BudgetUnreconciledError("Work that may have reached the provider requires usage reconciliation.")
             now = datetime.now(UTC)
             session.add(
