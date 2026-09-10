@@ -1290,14 +1290,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setFurthestReachedStep(Math.max(reachable, WIZARD_STAGE[pendingRestore.furthest]));
   }, [pendingRestore, validateStep]);
 
-  // A passed check held on its own stage settles as the wizard leaves it; one
-  // run on the way to another stage lingers and clears itself.
+  // A passed execution check held on the Optimization stage settles as the
+  // wizard leaves it; one run on the way to another stage, and a scorer test
+  // run from the evaluator step, linger and clear themselves.
   const settleHeldCheck = () => {
     const progress = preflight.progress.state;
-    if (progress?.status !== "succeeded") return;
-    const stage =
-      progress.scope === "evaluation" ? WIZARD_STAGE.evaluation : WIZARD_STAGE.optimization;
-    if (step === stage) preflight.progress.clear();
+    if (progress?.status !== "succeeded" || progress.scope !== "execution") return;
+    if (step === WIZARD_STAGE.optimization) preflight.progress.clear();
   };
   const goTo = (idx: number) => {
     navigationRevisionRef.current += 1;
@@ -1391,14 +1390,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           return;
         }
       }
-      // A check that runs from its own stage is a page of its own: the wizard
-      // holds on the result, and the next Continue moves on. A pass reused
-      // from an earlier run moves on at once.
-      if (target === WIZARD_STAGE.optimization) {
-        const reused = Boolean(preflight.reusable("evaluation"));
-        if (!(await ensureEvaluatorChecked("evaluation"))) return;
-        if (!reused && step === WIZARD_STAGE.evaluation) return;
-      }
+      // The one mandatory check runs once the configuration is complete, on the
+      // way out of Optimization: evaluator, sandbox and every model in one pass.
+      // Run from its own stage it is a page of its own: the wizard holds on the
+      // result, and the next Continue moves on. A pass reused from an earlier
+      // run moves on at once.
       if (target > WIZARD_STAGE.optimization) {
         const reused = Boolean(preflight.reusable("execution"));
         if (!(await ensureEvaluatorChecked("execution"))) return;
@@ -1419,9 +1415,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     resumedRef.current = true;
     const progress = preflight.progress.state;
     if (!progress || progress.identity !== preflight.identity) return;
+    // Only the execution pass moves the wizard; a scorer test settles where it ran.
+    if (progress.scope !== "execution") return;
     // A pass is already its own page; a run still going is joined.
     if (progress.status !== "running") return;
-    void advance(progress.scope === "evaluation" ? WIZARD_STAGE.optimization : WIZARD_STAGE.review);
+    void advance(WIZARD_STAGE.review);
   });
 
   const handleNext = async () => {

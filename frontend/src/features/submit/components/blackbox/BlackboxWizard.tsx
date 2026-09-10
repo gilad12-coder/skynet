@@ -8,14 +8,12 @@ import { msg } from "@/shared/lib/messages";
 import { useCredits } from "@/features/billing";
 import { SubmitSplashOverlay } from "@/shared/ui/submit-splash-overlay";
 import { TERMS } from "@/shared/lib/terms";
-import type { PreflightScope } from "@/shared/types/wizard-preflight";
 
 import { useBlackboxWizard, type BlackboxRecipe } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig, slideVariants } from "../../constants";
 import { budgetShortfall } from "../../lib/budget-limit";
 import { toastBudgetShortfall } from "../../lib/budget-toast";
 import { focusField } from "../../lib/focus-field";
-import type { ValidationProgress } from "../../lib/preflight-store";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../../lib/wizard-steps";
 import { SubmitStepper } from "../SubmitStepper";
 import { SubmitNav } from "../SubmitNav";
@@ -31,7 +29,7 @@ import { BlackboxScorerStep } from "./BlackboxScorerStep";
 import { BlackboxOptimizerStep } from "./BlackboxOptimizerStep";
 import { BlackboxReviewStep } from "./BlackboxReviewStep";
 
-type EvaluationStep = "cases" | "scorer" | "split" | "budget" | "check";
+type EvaluationStep = "cases" | "scorer" | "split" | "budget";
 const GOAL_STEPS = ["goal"] as const;
 const OPTIMIZATION_STEPS = ["strategy", "model", "check"] as const;
 const REVIEW_STEPS = ["review"] as const;
@@ -67,14 +65,10 @@ export function BlackboxWizard({
   const [evaluationPart, setEvaluationPart] = useState(0);
   const [optimizationPart, setOptimizationPart] = useState(0);
 
-  // The split only exists once there are cases to divide; the stage's check
-  // closes it either way.
+  // The split only exists once there are cases to divide.
   const hasCases = Boolean(w.parsedCases?.rowCount);
   const evaluationSteps = useMemo<readonly EvaluationStep[]>(
-    () =>
-      hasCases
-        ? ["budget", "cases", "scorer", "split", "check"]
-        : ["budget", "cases", "scorer", "check"],
+    () => (hasCases ? ["budget", "cases", "scorer", "split"] : ["budget", "cases", "scorer"]),
     [hasCases],
   );
   const activeEvaluationPart = Math.min(evaluationPart, evaluationSteps.length - 1);
@@ -116,33 +110,35 @@ export function BlackboxWizard({
         : w.stageIssue(w.step)
       : null;
 
-  // Each stage ends on its check: the last pass for this setup, or what
-  // Continue will run.
-  const evaluationResult = w.preflight.progress.completed("evaluation");
+  // Optimization ends on the one setup check: the last pass for this setup,
+  // or what Continue will run.
   const executionResult = w.preflight.progress.completed("execution");
-  const checkPage = (scope: PreflightScope, result: ValidationProgress | null) => {
-    if (result) return <ValidationFrame state={result} settled />;
-    const prior = w.preflight.evidence[scope];
-    const stale = prior !== undefined && prior.identity !== w.preflight.identity;
-    return <ValidationPlan workflow="anything" scope={scope} stale={stale} />;
-  };
+  const priorExecution = w.preflight.evidence.execution;
+  const checkPage = executionResult ? (
+    <ValidationFrame state={executionResult} settled />
+  ) : (
+    <ValidationPlan
+      workflow="anything"
+      scope="execution"
+      stale={priorExecution !== undefined && priorExecution.identity !== w.preflight.identity}
+    />
+  );
   const validation = w.preflight.progress.state;
-  // A passed check is shown on its own page, the last substep of its stage,
-  // which is where the stage reopens afterwards.
+  // A passed setup check is shown on its own page, the last substep of
+  // Optimization, which is where the stage reopens afterwards. A scorer test
+  // run from the evaluator step lingers and returns there by itself.
   const passedCheck = validation?.status === "succeeded" ? validation.scope : null;
   useEffect(() => {
-    if (passedCheck === "evaluation") setEvaluationPart(evaluationSteps.length - 1);
     if (passedCheck === "execution") setOptimizationPart(OPTIMIZATION_STEPS.length - 1);
-  }, [passedCheck, evaluationSteps]);
+  }, [passedCheck]);
   // A check that passed from its own stage is a page of its own: it stays,
   // with the navigation, until the user moves on.
   const held =
     validation?.status === "succeeded" &&
-    w.step ===
-      (validation.scope === "evaluation" ? WIZARD_STAGE.evaluation : WIZARD_STAGE.optimization);
+    validation.scope === "execution" &&
+    w.step === WIZARD_STAGE.optimization;
   const onCheckPage =
-    (w.step === WIZARD_STAGE.evaluation && activeEvaluationStep === "check") ||
-    (w.step === WIZARD_STAGE.optimization && OPTIMIZATION_STEPS[optimizationPart] === "check");
+    w.step === WIZARD_STAGE.optimization && OPTIMIZATION_STEPS[optimizationPart] === "check";
 
   const evaluationPanels: Record<EvaluationStep, ReactNode> = {
     cases: (
@@ -170,12 +166,11 @@ export function BlackboxWizard({
         <SplitSection w={w} totalRows={w.parsedCases?.rowCount ?? 0} />
       </div>
     ),
-    check: checkPage("evaluation", evaluationResult),
   };
   const optimizationPanels: readonly ReactNode[] = [
     <BlackboxOptimizerStep key="strategy" w={w} part="strategy" />,
     <BlackboxOptimizerStep key="model" w={w} part="model" />,
-    checkPage("execution", executionResult),
+    checkPage,
   ];
 
   const shortfall = budgetShortfall(w.costBracket, w.tokenSource, {
@@ -189,12 +184,6 @@ export function BlackboxWizard({
       return;
     }
     const next = evaluationSteps[activeEvaluationPart + 1];
-    // The check page opens on the last pass; without one, Continue runs the
-    // check, which holds the wizard there.
-    if (next === "check" && !evaluationResult) {
-      await w.handleNext();
-      return;
-    }
     if (next) {
       setEvaluationPart(activeEvaluationPart + 1);
       return;

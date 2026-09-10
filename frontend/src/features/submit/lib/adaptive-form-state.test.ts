@@ -490,8 +490,32 @@ test("typing into a restored no-seed draft makes the starting point active", () 
   assert.equal(edited, true);
 });
 
+test("Anything Evaluation moves on to Optimization without a check", async () => {
+  const visited: number[] = [];
+  const scopes: string[] = [];
+  const advance = evaluate(variable(wizard, "advance"), {
+    WIZARD_STAGE,
+    step: WIZARD_STAGE.evaluation,
+    advancingRef: { current: false },
+    mountedRef: { current: true },
+    setAdvancing: () => {},
+    setIssue: () => {},
+    validateStep: () => true,
+    goTo: (stage: number) => visited.push(stage),
+    settleHeldCheck: () => {},
+    preflight: { reusable: () => null },
+    ensureEvaluatorChecked: async (scope: string) => {
+      scopes.push(scope);
+      return {};
+    },
+  });
+  await advance(WIZARD_STAGE.optimization);
+  assert.deepEqual(scopes, []);
+  assert.deepEqual(visited, [WIZARD_STAGE.optimization]);
+});
+
 for (const success of [true, false]) {
-  test(`Anything Evaluation waits for a successful scorer check: ${success}`, async () => {
+  test(`Anything Optimization waits for one successful setup check: ${success}`, async () => {
     const visited: number[] = [];
     const scopes: string[] = [];
     const advance = evaluate(variable(wizard, "advance"), {
@@ -510,18 +534,18 @@ for (const success of [true, false]) {
         return success ? {} : null;
       },
     });
-    await advance(WIZARD_STAGE.optimization);
-    assert.deepEqual(scopes, ["evaluation"]);
-    assert.deepEqual(visited, success ? [WIZARD_STAGE.optimization] : []);
+    await advance(WIZARD_STAGE.review);
+    assert.deepEqual(scopes, ["execution"]);
+    assert.deepEqual(visited, success ? [WIZARD_STAGE.review] : []);
   });
 }
 
-test("Anything holds on a check run from Evaluation and moves on with a reused pass", async () => {
+test("Anything holds on a check run from Optimization and moves on with a reused pass", async () => {
   const visited: number[] = [];
   let reusable: object | null = null;
   const advance = evaluate(variable(wizard, "advance"), {
     WIZARD_STAGE,
-    step: WIZARD_STAGE.evaluation,
+    step: WIZARD_STAGE.optimization,
     advancingRef: { current: false },
     mountedRef: { current: true },
     setAdvancing: () => {},
@@ -532,16 +556,16 @@ test("Anything holds on a check run from Evaluation and moves on with a reused p
     preflight: { reusable: () => reusable },
     ensureEvaluatorChecked: async () => ({}),
   });
-  await advance(WIZARD_STAGE.optimization);
+  await advance(WIZARD_STAGE.review);
   assert.deepEqual(visited, []);
   reusable = {};
-  await advance(WIZARD_STAGE.optimization);
-  assert.deepEqual(visited, [WIZARD_STAGE.optimization]);
+  await advance(WIZARD_STAGE.review);
+  assert.deepEqual(visited, [WIZARD_STAGE.review]);
 });
 
 for (const path of ["../hooks/use-submit-wizard.ts", "../hooks/use-blackbox-wizard.ts"]) {
   const hook = source(path);
-  test(`${path}: leaving a stage settles only the check held on it`, () => {
+  test(`${path}: leaving Optimization settles only the setup check held on it`, () => {
     const settle = (step: number, state: { status: string; scope: string } | null) => {
       let cleared = 0;
       evaluate(variable(hook, "settleHeldCheck"), {
@@ -559,7 +583,8 @@ for (const path of ["../hooks/use-submit-wizard.ts", "../hooks/use-blackbox-wiza
       return cleared;
     };
     assert.equal(settle(WIZARD_STAGE.optimization, { status: "succeeded", scope: "execution" }), 1);
-    assert.equal(settle(WIZARD_STAGE.evaluation, { status: "succeeded", scope: "evaluation" }), 1);
+    assert.equal(settle(WIZARD_STAGE.evaluation, { status: "succeeded", scope: "evaluation" }), 0);
+    assert.equal(settle(WIZARD_STAGE.optimization, { status: "succeeded", scope: "evaluation" }), 0);
     assert.equal(settle(WIZARD_STAGE.review, { status: "succeeded", scope: "execution" }), 0);
     assert.equal(settle(WIZARD_STAGE.optimization, { status: "running", scope: "execution" }), 0);
     assert.equal(settle(WIZARD_STAGE.optimization, null), 0);
@@ -714,29 +739,25 @@ test("inherited evaluator picker opens the effective model instead of stale expl
 
 const blackboxView = source("../components/blackbox/BlackboxWizard.tsx");
 
-test("Evaluation ends on its check page, with the split only when there are cases", () => {
+test("Evaluation ends on the split, which exists only when there are cases", () => {
   for (const hasCases of [false, true]) {
     const steps = evaluate(variable(blackboxView, "evaluationSteps"), { hasCases })();
     assert.deepEqual(
       Array.from(steps),
-      hasCases
-        ? ["budget", "cases", "scorer", "split", "check"]
-        : ["budget", "cases", "scorer", "check"],
+      hasCases ? ["budget", "cases", "scorer", "split"] : ["budget", "cases", "scorer"],
     );
   }
 });
 
-test("Continue from the split runs the check, opens the last pass, and moves on from the check page", async () => {
-  let part = 3;
+test("Continue walks the Evaluation substeps and moves on from the last one without a check", async () => {
+  let part = 2;
   let advanced = 0;
-  let evaluationResult: object | null = null;
-  const steps = ["budget", "cases", "scorer", "split", "check"];
+  const steps = ["budget", "cases", "scorer", "split"];
   const next = () =>
     evaluate(variable(blackboxView, "handleEvaluationNext"), {
       activeEvaluationStep: steps[part],
       activeEvaluationPart: part,
       evaluationSteps: steps,
-      evaluationResult,
       shortfall: null,
       toastBudgetShortfall: () => {},
       setEvaluationPart: (value: number) => {
@@ -750,13 +771,10 @@ test("Continue from the split runs the check, opens the last pass, and moves on 
     })();
   await next();
   assert.equal(steps[part], "split");
-  assert.equal(advanced, 1);
-  evaluationResult = {};
+  assert.equal(advanced, 0);
   await next();
-  assert.equal(steps[part], "check");
+  assert.equal(steps[part], "split");
   assert.equal(advanced, 1);
-  await next();
-  assert.equal(advanced, 2);
 });
 
 test("agent model errors and review edits route back to scorer settings", () => {

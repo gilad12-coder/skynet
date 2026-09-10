@@ -1767,14 +1767,12 @@ export function useSubmitWizard() {
       : currentEvidence
         ? "stale"
         : "idle";
-  // A passed check held on its own stage settles as the wizard leaves it; one
-  // run on the way to another stage lingers and clears itself.
+  // A passed setup check held on the Optimization stage settles as the wizard
+  // leaves it; one run on the way to another stage lingers and clears itself.
   const settleHeldCheck = () => {
     const progress = preflight.progress.state;
-    if (progress?.status !== "succeeded") return;
-    const stage =
-      progress.scope === "evaluation" ? WIZARD_STAGE.evaluation : WIZARD_STAGE.optimization;
-    if (step === stage) preflight.progress.clear();
+    if (progress?.status !== "succeeded" || progress.scope !== "execution") return;
+    if (step === WIZARD_STAGE.optimization) preflight.progress.clear();
   };
   const goNext = () => {
     navigationRevisionRef.current += 1;
