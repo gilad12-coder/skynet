@@ -63,31 +63,27 @@ test("iteration limits apply only to a single Meta-Harness run", () => {
   for (const engine of ["gepa", "best_of_n", "autoresearch", null] as const) {
     assert.equal(supportsIterationLimit("single", engine), false);
   }
-  for (const mode of ["auto", "plateau"] as const) {
-    assert.equal(supportsIterationLimit(mode, "meta_harness"), false);
-    assert.equal(supportsIterationLimit(mode, null), false);
-  }
+  assert.equal(supportsIterationLimit("auto", "meta_harness"), false);
+  assert.equal(supportsIterationLimit("auto", null), false);
 });
 
-test("Auto and Plateau require the complete server recipe even when its lanes are listed", () => {
-  for (const mode of ["auto", "plateau"] as const) {
-    assert.equal(engineSelectionIssue({ ...selection, mode }), null);
-    assert.deepEqual(
-      engineSelectionIssue({
-        ...selection,
-        mode,
-        catalog: { ...catalog, auto_available: false, auto_unavailable_reason: "Missing CLI" },
-      }),
-      {
-        key: "submit.blackbox.run_disabled.auto_reason",
-        params: { reason: "Missing CLI" },
-      },
-    );
-    assert.equal(
-      engineSelectionIssue({ ...selection, mode, hasParts: true })?.key,
-      "submit.blackbox.validation.auto_parts",
-    );
-  }
+test("Auto requires the complete server recipe even when its lanes are listed", () => {
+  assert.equal(engineSelectionIssue({ ...selection, mode: "auto" }), null);
+  assert.deepEqual(
+    engineSelectionIssue({
+      ...selection,
+      mode: "auto",
+      catalog: { ...catalog, auto_available: false, auto_unavailable_reason: "Missing CLI" },
+    }),
+    {
+      key: "submit.blackbox.run_disabled.auto_reason",
+      params: { reason: "Missing CLI" },
+    },
+  );
+  assert.equal(
+    engineSelectionIssue({ ...selection, mode: "auto", hasParts: true })?.key,
+    "submit.blackbox.validation.auto_parts",
+  );
 });
 
 test("missing or legacy capabilities cannot authorize an Auto run", () => {
@@ -111,7 +107,6 @@ test("native engines accept text evaluation in the managed sandbox without an ag
     assert.equal(usesNativeProposer("single", engine), true);
   }
   assert.equal(usesNativeProposer("auto", null), true);
-  assert.equal(usesNativeProposer("plateau", null), true);
   assert.equal(usesNativeProposer("single", "gepa"), false);
   assert.equal(usesNativeProposer("single", "best_of_n"), false);
 });
@@ -150,7 +145,7 @@ test("parts follow each single engine's capabilities", () => {
 });
 
 test("Meta-Harness recipes require training cases without moving validation data", () => {
-  for (const mode of ["auto", "plateau", "single"] as const) {
+  for (const mode of ["auto", "single"] as const) {
     assert.equal(
       engineSelectionIssue({ ...selection, mode, engine: "meta_harness", trainingCaseCount: 0 })
         ?.key,

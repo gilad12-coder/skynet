@@ -42,11 +42,11 @@ import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { ModelRoleRow } from "../blackbox/ModelRoleRow";
 import { formatCredits } from "@/features/billing";
 import { useUserPrefs } from "@/features/settings";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
-import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import { aggregateTokenSource, chargeableBracket } from "../../lib/cost-bracket";
 import { WIZARD_STAGE, type WizardStageId } from "../../lib/wizard-steps";
 import { focusField } from "../../lib/focus-field";
@@ -431,18 +431,22 @@ export function SummaryStep({
               {summaryTab === 2 && (
                 <div className="space-y-2 pointer-events-none">
                   {jobType === "run" ? (
-                    <div className="space-y-2">
-                      <ModelChip
-                        config={modelConfig}
-                        roleLabel={msg("submit.blackbox.roles.task.label")}
-                        onClick={() => {}}
-                      />
-                      {w.optimizerName.toLowerCase() === "gepa" && secondModelConfig?.name && (
+                    <div className="space-y-3">
+                      <ModelRoleRow role={msg("submit.blackbox.roles.task.label")}>
                         <ModelChip
-                          config={secondModelConfig}
-                          roleLabel={msg("submit.blackbox.roles.optimization.label")}
+                          config={modelConfig}
+                          roleLabel={msg("submit.blackbox.roles.task.label")}
                           onClick={() => {}}
                         />
+                      </ModelRoleRow>
+                      {w.optimizerName.toLowerCase() === "gepa" && secondModelConfig?.name && (
+                        <ModelRoleRow role={msg("submit.blackbox.roles.optimization.label")}>
+                          <ModelChip
+                            config={secondModelConfig}
+                            roleLabel={msg("submit.blackbox.roles.optimization.label")}
+                            onClick={() => {}}
+                          />
+                        </ModelRoleRow>
                       )}
                     </div>
                   ) : (
@@ -701,23 +705,6 @@ export function SummaryStep({
             })}
           </span>
         </div>
-        {w.budgetSession.budget && (
-          <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            {(
-              [
-                ["submit.budget.setup_spent", w.budgetSession.budget.setup_spent_credits],
-                ["submit.budget.run_spent", w.budgetSession.budget.run_spent_credits],
-                ["submit.budget.reserved", w.budgetSession.budget.reserved_credits],
-                ["submit.budget.available", w.budgetSession.budget.available_credits],
-              ] as const
-            ).map(([label, amount]) => (
-              <div key={label}>
-                <dt>{msg(label)}</dt>
-                <dd dir="auto">{formatBudgetAmount(amount, locale)}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
         {budgetUncapped ? (
           <p className="mt-1.5 text-[11px] text-[#8C7A6B]">{msg("submit.budget.uncapped_short")}</p>
         ) : (

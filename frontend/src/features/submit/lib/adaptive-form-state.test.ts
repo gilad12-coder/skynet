@@ -184,46 +184,57 @@ function splitState(mode = "manual") {
   };
 }
 
+const splitCard = source("../components/SplitRecommendationCard.tsx");
+
+// The card's own toggle hands the chosen mode to the wizard: Manual selection
+// keeps whatever fractions are set, Use recommendation restores the plan.
+function chooseMode(bindings: ReturnType<typeof splitState>["bindings"], mode: "auto" | "manual") {
+  const button = find(
+    splitCard,
+    (node) =>
+      ts.isJsxAttribute(node) &&
+      node.name.getText() === "onClick" &&
+      node.getText().includes("onChange(mode)"),
+  ) as ts.JsxAttribute;
+  assert.ok(button.initializer && ts.isJsxExpression(button.initializer));
+  evaluate(button.initializer.expression!, { onChange: bindings.setSplitMode, mode })();
+}
+
 for (const mode of ["manual", "auto"]) {
-  test(`opening split settings enables manual editing from ${mode} without changing values`, () => {
+  test(`Manual selection from ${mode} keeps the current values`, () => {
     const { state, bindings } = splitState(mode);
-    const toggle = evaluate(variable(splitSection, "setEditing"), {
-      ...bindings,
-      setEditingState: () => {},
-    });
     const before = structuredClone(state);
-    toggle(true);
+    chooseMode(bindings, "manual");
     assert.deepEqual(state, { ...before, mode: "manual" });
   });
 }
 
-test("closing split editing preserves manual fractions", () => {
-  const { state, bindings } = splitState();
-  const before = structuredClone(state);
-  evaluate(variable(splitSection, "setEditing"), { ...bindings, setEditingState: () => {} })(false);
-  assert.deepEqual(state, before);
-});
-
 test("Use recommendation restores the planned fractions, shuffle and seed", () => {
   const { state, bindings } = splitState();
-  const button = find(
-    splitSection,
-    (node) =>
-      ts.isJsxAttribute(node) &&
-      node.name.getText() === "onClick" &&
-      node.getText().includes('setSplitMode("auto")'),
-  ) as ts.JsxAttribute;
-  assert.ok(button.initializer && ts.isJsxExpression(button.initializer));
-  evaluate(button.initializer.expression!, { ...bindings, setEditingState: () => {} })();
+  chooseMode(bindings, "auto");
   assert.equal(state.mode, "auto");
   assert.deepEqual(state.split, bindings.splitPlan.fractions);
   assert.equal(state.shuffle, true);
   assert.equal(state.seed, 42);
 });
 
+test("the manual fields and their example counts only render under Manual selection", () => {
+  const gate = find(
+    splitSection,
+    (node) =>
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken &&
+      node.left.getText() === 'splitMode === "manual"',
+  ) as ts.BinaryExpression;
+  for (const field of ["train", "val", "test"]) {
+    assert.ok(gate.right.getText().includes(`id="split-${field}"`));
+    assert.ok(gate.right.getText().includes(`examples(counts.${field})`));
+  }
+});
+
 for (const field of ["train", "val", "test"] as const) {
-  test(`editing ${field} switches to manual before applying the value`, () => {
-    const { state, bindings } = splitState("auto");
+  test(`editing ${field} applies the value and stays manual`, () => {
+    const { state, bindings } = splitState();
     const input = find(
       splitSection,
       (node) =>
@@ -250,6 +261,7 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
     };
     const bindings = {
       WIZARD_STAGE,
+      step: WIZARD_STAGE.evaluation,
       advancingRef: { current: false },
       mountedRef: { current: true },
       setAdvancing: () => {},
@@ -258,6 +270,8 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
       goTo: (stage: number) => {
         visited.push(stage);
       },
+      settleHeldCheck: () => {},
+      preflight: { reusable: () => null },
       ensureSetupChecked: check,
       ensureEvaluatorChecked: check,
     };
@@ -268,6 +282,33 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
     await advance(WIZARD_STAGE.review);
     assert.deepEqual(scopes, ["execution"]);
     assert.equal(visited.at(-1), WIZARD_STAGE.review);
+  });
+
+  test(`${path}: a check run from Optimization holds there and a reused pass moves on`, async () => {
+    const visited: number[] = [];
+    let settled = 0;
+    let reusable: object | null = null;
+    const advance = evaluate(variable(hook, "advance"), {
+      WIZARD_STAGE,
+      step: WIZARD_STAGE.optimization,
+      advancingRef: { current: false },
+      mountedRef: { current: true },
+      setAdvancing: () => {},
+      setIssue: () => {},
+      validateStep: () => true,
+      goTo: (stage: number) => visited.push(stage),
+      settleHeldCheck: () => {
+        settled += 1;
+      },
+      preflight: { reusable: () => reusable },
+      ensureSetupChecked: async () => ({}),
+    });
+    await advance(WIZARD_STAGE.review);
+    assert.deepEqual(visited, []);
+    reusable = {};
+    await advance(WIZARD_STAGE.review);
+    assert.deepEqual(visited, [WIZARD_STAGE.review]);
+    assert.equal(settled, 2);
   });
 
   test(`${path}: missing budget belongs to Optimization and blocks Review`, async () => {
@@ -292,6 +333,7 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
       goTo: (stage: number) => {
         visited.push(stage);
       },
+      settleHeldCheck: () => {},
       ensureSetupChecked: () => assert.fail("Preflight ran without a budget"),
       ensureEvaluatorChecked: () => assert.fail("Preflight ran without a budget"),
     });
@@ -314,12 +356,14 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
 
 for (const path of ["../components/SubmitWizard.tsx"]) {
   const component = source(path);
-  test(`${path}: budget is the last panel before summary, holds until the limit covers the estimate, and Back returns to it`, async () => {
+  test(`${path}: budget toasts while it falls short, Continue runs the check from it, and Back from the summary returns to the check page`, async () => {
     const steps = evaluate(variable(component, "OPTIMIZATION_STEPS"), {});
     let part = 1;
-    let summaryOpened = false;
+    let summaryOpened = 0;
     let returned = false;
-    let covered = true;
+    let blocked = false;
+    let toasted = 0;
+    let executionResult: object | null = null;
     const setOptimizationPart = (update: number | ((previous: number) => number)) => {
       part = typeof update === "function" ? update(part) : update;
     };
@@ -327,32 +371,42 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
       evaluate(variable(component, "handleOptimizationNext"), {
         optimizationPart: part,
         OPTIMIZATION_STEPS: steps,
+        executionResult,
         setOptimizationPart,
-        budgetMode: "managed",
-        limitCoversEstimate: () => covered,
+        shortfall: blocked ? { kind: "limit", needed: 236 } : null,
+        toastBudgetShortfall: () => {
+          toasted += 1;
+        },
         w: {
           handleNext: async () => {
-            summaryOpened = true;
+            summaryOpened += 1;
           },
-          costBracket: {},
-          maxCostCredits: 120,
-          budgetUncapped: false,
         },
       })();
     await next();
     assert.equal(steps[part], "budget");
-    assert.equal(summaryOpened, false);
-    covered = false;
+    assert.equal(summaryOpened, 0);
+    blocked = true;
     await next();
     assert.equal(steps[part], "budget");
-    assert.equal(summaryOpened, false);
-    covered = true;
+    assert.equal(summaryOpened, 0);
+    assert.equal(toasted, 1);
+    blocked = false;
     await next();
-    assert.equal(summaryOpened, true);
+    assert.equal(steps[part], "budget");
+    assert.equal(summaryOpened, 1);
+    assert.equal(toasted, 1);
+    executionResult = {};
+    await next();
+    assert.equal(steps[part], "check");
+    assert.equal(summaryOpened, 1);
+    await next();
+    assert.equal(summaryOpened, 2);
     part = 0;
     evaluate(variable(component, "onBack"), {
       WIZARD_STAGE,
       OPTIMIZATION_STEPS: steps,
+      held: false,
       setOptimizationPart,
       w: {
         step: WIZARD_STAGE.review,
@@ -362,6 +416,27 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
       },
     })();
     assert.equal(returned, true);
+    assert.equal(steps[part], "check");
+    let cleared = 0;
+    evaluate(variable(component, "onBack"), {
+      WIZARD_STAGE,
+      OPTIMIZATION_STEPS: steps,
+      held: true,
+      optimizationPart: part,
+      setOptimizationPart,
+      w: {
+        step: WIZARD_STAGE.optimization,
+        preflight: {
+          progress: {
+            clear: () => {
+              cleared += 1;
+            },
+          },
+        },
+        goPrev: () => assert.fail("Back from the check page left the stage"),
+      },
+    })();
+    assert.equal(cleared, 1);
     assert.equal(steps[part], "budget");
   });
 
@@ -415,26 +490,104 @@ test("typing into a restored no-seed draft makes the starting point active", () 
   assert.equal(edited, true);
 });
 
+test("Anything Evaluation moves on to Optimization without a check", async () => {
+  const visited: number[] = [];
+  const scopes: string[] = [];
+  const advance = evaluate(variable(wizard, "advance"), {
+    WIZARD_STAGE,
+    step: WIZARD_STAGE.evaluation,
+    advancingRef: { current: false },
+    mountedRef: { current: true },
+    setAdvancing: () => {},
+    setIssue: () => {},
+    validateStep: () => true,
+    goTo: (stage: number) => visited.push(stage),
+    settleHeldCheck: () => {},
+    preflight: { reusable: () => null },
+    ensureEvaluatorChecked: async (scope: string) => {
+      scopes.push(scope);
+      return {};
+    },
+  });
+  await advance(WIZARD_STAGE.optimization);
+  assert.deepEqual(scopes, []);
+  assert.deepEqual(visited, [WIZARD_STAGE.optimization]);
+});
+
 for (const success of [true, false]) {
-  test(`Anything Evaluation waits for a successful scorer check: ${success}`, async () => {
+  test(`Anything Optimization waits for one successful setup check: ${success}`, async () => {
     const visited: number[] = [];
     const scopes: string[] = [];
     const advance = evaluate(variable(wizard, "advance"), {
       WIZARD_STAGE,
+      step: WIZARD_STAGE.goal,
       advancingRef: { current: false },
       mountedRef: { current: true },
       setAdvancing: () => {},
       setIssue: () => {},
       validateStep: () => true,
       goTo: (stage: number) => visited.push(stage),
+      settleHeldCheck: () => {},
+      preflight: { reusable: () => null },
       ensureEvaluatorChecked: async (scope: string) => {
         scopes.push(scope);
         return success ? {} : null;
       },
     });
-    await advance(WIZARD_STAGE.optimization);
-    assert.deepEqual(scopes, ["evaluation"]);
-    assert.deepEqual(visited, success ? [WIZARD_STAGE.optimization] : []);
+    await advance(WIZARD_STAGE.review);
+    assert.deepEqual(scopes, ["execution"]);
+    assert.deepEqual(visited, success ? [WIZARD_STAGE.review] : []);
+  });
+}
+
+test("Anything holds on a check run from Optimization and moves on with a reused pass", async () => {
+  const visited: number[] = [];
+  let reusable: object | null = null;
+  const advance = evaluate(variable(wizard, "advance"), {
+    WIZARD_STAGE,
+    step: WIZARD_STAGE.optimization,
+    advancingRef: { current: false },
+    mountedRef: { current: true },
+    setAdvancing: () => {},
+    setIssue: () => {},
+    validateStep: () => true,
+    goTo: (stage: number) => visited.push(stage),
+    settleHeldCheck: () => {},
+    preflight: { reusable: () => reusable },
+    ensureEvaluatorChecked: async () => ({}),
+  });
+  await advance(WIZARD_STAGE.review);
+  assert.deepEqual(visited, []);
+  reusable = {};
+  await advance(WIZARD_STAGE.review);
+  assert.deepEqual(visited, [WIZARD_STAGE.review]);
+});
+
+for (const path of ["../hooks/use-submit-wizard.ts", "../hooks/use-blackbox-wizard.ts"]) {
+  const hook = source(path);
+  test(`${path}: leaving Optimization settles only the setup check held on it`, () => {
+    const settle = (step: number, state: { status: string; scope: string } | null) => {
+      let cleared = 0;
+      evaluate(variable(hook, "settleHeldCheck"), {
+        WIZARD_STAGE,
+        step,
+        preflight: {
+          progress: {
+            state,
+            clear: () => {
+              cleared += 1;
+            },
+          },
+        },
+      })();
+      return cleared;
+    };
+    assert.equal(settle(WIZARD_STAGE.optimization, { status: "succeeded", scope: "execution" }), 1);
+    assert.equal(settle(WIZARD_STAGE.evaluation, { status: "succeeded", scope: "evaluation" }), 0);
+    assert.equal(settle(WIZARD_STAGE.optimization, { status: "succeeded", scope: "evaluation" }), 0);
+    assert.equal(settle(WIZARD_STAGE.review, { status: "succeeded", scope: "execution" }), 0);
+    assert.equal(settle(WIZARD_STAGE.optimization, { status: "running", scope: "execution" }), 0);
+    assert.equal(settle(WIZARD_STAGE.optimization, null), 0);
   });
 }
 
@@ -537,24 +690,27 @@ test("model-only selection and cloning do not inject sampling overrides", () => 
 
 for (const parameter of ["temperature", "max_tokens"]) {
   test(`picker preserves explicit ${parameter} and allows clearing it`, () => {
-    const change = find(
-      modelModal,
-      (node) =>
-        ts.isJsxAttribute(node) &&
-        node.name.getText() === "onChange" &&
-        node.getText().includes(`${parameter}:`),
-    ) as ts.JsxAttribute;
-    assert.ok(change.initializer && ts.isJsxExpression(change.initializer));
     let draft: Record<string, unknown> = { name: "model" };
-    const onChange = evaluate(change.initializer.expression!, {
+    const bindings = {
       setDraft: (update: (state: typeof draft) => typeof draft) => {
         draft = update(draft);
       },
-    });
-    const value = parameter === "temperature" ? "0.25" : "4096";
-    onChange({ target: { value } });
-    assert.equal(draft[parameter], Number(value));
-    onChange({ target: { value: "" } });
+    };
+    const stepperHandler = (name: string) => {
+      const attribute = find(
+        modelModal,
+        (node) =>
+          ts.isJsxAttribute(node) &&
+          node.name.getText() === name &&
+          node.getText().includes(`${parameter}:`),
+      ) as ts.JsxAttribute;
+      assert.ok(attribute.initializer && ts.isJsxExpression(attribute.initializer));
+      return evaluate(attribute.initializer.expression!, bindings);
+    };
+    const value = parameter === "temperature" ? 0.25 : 4096;
+    stepperHandler("onChange")(value);
+    assert.equal(draft[parameter], value);
+    stepperHandler("onClear")();
     assert.equal(draft[parameter], undefined);
     assert.equal(draft.name, "model");
   });
@@ -583,7 +739,7 @@ test("inherited evaluator picker opens the effective model instead of stale expl
 
 const blackboxView = source("../components/blackbox/BlackboxWizard.tsx");
 
-test("Evaluation proceeds from the scorer to split or Optimization without an execution step", () => {
+test("Evaluation ends on the split, which exists only when there are cases", () => {
   for (const hasCases of [false, true]) {
     const steps = evaluate(variable(blackboxView, "evaluationSteps"), { hasCases })();
     assert.deepEqual(
@@ -591,6 +747,34 @@ test("Evaluation proceeds from the scorer to split or Optimization without an ex
       hasCases ? ["budget", "cases", "scorer", "split"] : ["budget", "cases", "scorer"],
     );
   }
+});
+
+test("Continue walks the Evaluation substeps and moves on from the last one without a check", async () => {
+  let part = 2;
+  let advanced = 0;
+  const steps = ["budget", "cases", "scorer", "split"];
+  const next = () =>
+    evaluate(variable(blackboxView, "handleEvaluationNext"), {
+      activeEvaluationStep: steps[part],
+      activeEvaluationPart: part,
+      evaluationSteps: steps,
+      shortfall: null,
+      toastBudgetShortfall: () => {},
+      setEvaluationPart: (value: number) => {
+        part = value;
+      },
+      w: {
+        handleNext: async () => {
+          advanced += 1;
+        },
+      },
+    })();
+  await next();
+  assert.equal(steps[part], "split");
+  assert.equal(advanced, 0);
+  await next();
+  assert.equal(steps[part], "split");
+  assert.equal(advanced, 1);
 });
 
 test("agent model errors and review edits route back to scorer settings", () => {

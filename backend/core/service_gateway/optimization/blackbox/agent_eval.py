@@ -55,6 +55,8 @@ CHECK_KEY = "check_command"
 _SETUP_ALLOWANCE_SECONDS = 600.0
 # What a box needs beyond its commands: booting, the file writes and the answer read.
 _BOX_OVERHEAD_SECONDS = 60.0
+# The readiness probe's box only boots and checks the harness install.
+READINESS_LIFETIME_SECONDS = 180.0
 _OUTPUT_CHARS = 20_000
 _TRANSCRIPT_CHARS = 4_000
 _STEP_CHARS = 6_000
@@ -280,6 +282,24 @@ def _stream_step(
 
 # Three dead runs cover both sandboxes in flight plus one more, so a single
 # flaky box never aborts a run.
+def case_lifetime_seconds(target_timeout_seconds: float, setup_steps: int) -> float:
+    """Return the box lifetime one case needs before any ceiling applies.
+
+    Each step gets its timeout plus the KILL wrapper's grace, on top of the
+    box's own overhead, so a slow install can never eat into the agent's
+    run time.
+
+    Args:
+        target_timeout_seconds: The agent's own run allowance.
+        setup_steps: How many install, setup and check commands run around it.
+
+    Returns:
+        The lifetime, in seconds.
+    """
+    steps = [target_timeout_seconds] + [_SETUP_ALLOWANCE_SECONDS] * setup_steps
+    return _BOX_OVERHEAD_SECONDS + sum(step + KILL_GRACE_SECONDS for step in steps)
+
+
 def _check_command(case: Any) -> str | None:
     """Return the case's in-sandbox check command, when it ships a usable one.
 
@@ -381,7 +401,7 @@ class SandboxAgentScorer:
         """
         if not getattr(self._runtime, "protected", False):
             raise ServiceError("Agent readiness requires a protected sandbox runtime.")
-        lifetime = min(180.0, self._max_lifetime_seconds)
+        lifetime = min(READINESS_LIFETIME_SECONDS, self._max_lifetime_seconds)
         spec = SandboxSpec(
             lifetime_seconds=lifetime,
             env=self._launch.env,
@@ -601,10 +621,8 @@ class SandboxAgentScorer:
     def _lifetime_seconds(self, case: Any) -> float:
         """Return a box lifetime that covers every step's own allowance.
 
-        Each step gets its timeout plus the KILL wrapper's grace, on top of
-        the box's own overhead, so a slow install can never eat into the
-        agent's run time. Only the lifetime ceiling can, and then
-        :meth:`_execute` shortens the run to what is left.
+        Only the lifetime ceiling can cut into the agent's run time, and
+        then :meth:`_execute` shortens the run to what is left.
 
         Args:
             case: The task, for its optional ``check_command``.
@@ -612,16 +630,10 @@ class SandboxAgentScorer:
         Returns:
             The lifetime, in seconds.
         """
-        steps = [self._target.timeout_seconds]
-        steps += [
-            _SETUP_ALLOWANCE_SECONDS
-            for command in (self._launch.install_command, self._target.setup_command)
-            if command
-        ]
+        setup_steps = sum(1 for command in (self._launch.install_command, self._target.setup_command) if command)
         if _check_command(case) is not None:
-            steps.append(_SETUP_ALLOWANCE_SECONDS)
-        total = _BOX_OVERHEAD_SECONDS + sum(step + KILL_GRACE_SECONDS for step in steps)
-        return min(total, self._max_lifetime_seconds)
+            setup_steps += 1
+        return min(case_lifetime_seconds(self._target.timeout_seconds, setup_steps), self._max_lifetime_seconds)
 
     def _attempt(self, files: dict[str, str], case: Any, label: str, run: AgentRun) -> dict[str, Any]:
         """Open one box under a fresh name, drive it and close it.

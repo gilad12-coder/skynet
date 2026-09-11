@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 
 import { Input } from "@/shared/ui/primitives/input";
-import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -65,9 +64,7 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
         id="bb-job-description"
         label={msg("auto.features.submit.components.steps.basicsstep.4")}
         value={jobDescription}
-        onChange={(value) => {
-          if (value.length <= 280) setJobDescription(value);
-        }}
+        onChange={(value) => setJobDescription(value)}
         placeholder={formatMsg("auto.features.submit.components.steps.basicsstep.template.1", {
           p1: TERMS.optimization,
         })}
@@ -81,22 +78,7 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
             tip={tip("submit.description")}
             open={descriptionOpen}
             onOpenChange={setDescriptionOpen}
-            trailing={
-              <>
-                <span
-                  className={cn(
-                    "text-[0.625rem] tabular-nums transition-colors",
-                    jobDescription.length > 280
-                      ? "text-destructive font-medium"
-                      : "text-muted-foreground/50",
-                  )}
-                >
-                  {jobDescription.length}
-                  {msg("auto.features.submit.components.steps.basicsstep.5")}
-                </span>
-                {trigger}
-              </>
-            }
+            trailing={trigger}
           >
             {textarea}
           </Disclosure>

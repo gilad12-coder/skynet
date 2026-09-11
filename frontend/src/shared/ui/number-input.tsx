@@ -9,6 +9,8 @@ interface NumberInputProps {
   id?: string;
   value: number | "";
   onChange: (value: number) => void;
+  /** Called when the field is emptied; without it the last value stands until a new one is typed. */
+  onClear?: () => void;
   min?: number;
   max?: number;
   step?: number;
@@ -20,6 +22,7 @@ export function NumberInput({
   id,
   value,
   onChange,
+  onClear,
   min,
   max,
   step = 1,
@@ -51,7 +54,11 @@ export function NumberInput({
   }, [value, decimals]);
 
   const commitText = (raw: string) => {
-    if (raw === "" || raw === ".") return;
+    if (raw === "") {
+      onClear?.();
+      return;
+    }
+    if (raw === ".") return;
     const n = parseFloat(raw);
     if (!isNaN(n)) onChange(round(clamp(n)));
   };
@@ -61,16 +68,16 @@ export function NumberInput({
     setText(format(next));
   };
 
+  // A step that would leave the range lands on its edge, so a coarse step
+  // (256 tokens above a floor of 1) still reaches the floor and the ceiling.
   const decrement = () => {
-    const next = round(numValue - step);
-    if (min != null && next < min) return;
-    setValue(next);
+    if (min != null && numValue <= min) return;
+    setValue(clamp(round(numValue - step)));
   };
 
   const increment = () => {
-    const next = round(numValue + step);
-    if (max != null && next > max) return;
-    setValue(next);
+    if (max != null && numValue >= max) return;
+    setValue(clamp(round(numValue + step)));
   };
 
   return (

@@ -26,7 +26,7 @@ from ..billing.recovery_admission import (
     validate_recovery_plan,
     validate_recovery_runtime,
 )
-from ..config import settings
+from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, settings
 from ..constants import (
     OPTIMIZATION_TYPE_TAGGING,
     PAYLOAD_OVERVIEW_DATASET_ROWS,
@@ -90,7 +90,9 @@ def _current_recovery_runtime(payload: dict[str, Any], optimization_type: str | 
             "vercel",
             {
                 "image": image,
-                "lifetime_seconds": min(settings.vercel_sandbox_max_lifetime_seconds, 86_400),
+                "lifetime_seconds": min(
+                    settings.vercel_sandbox_max_lifetime_seconds, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
+                ),
             },
         )
     except (TypeError, ValueError) as error:

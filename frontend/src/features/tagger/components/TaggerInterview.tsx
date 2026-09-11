@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   ArrowCounterClockwise,
@@ -133,6 +134,7 @@ export function TaggerInterview({
   onRestart,
   onConfirmRubric,
 }: Props) {
+  useCompletionNotification(busy, () => msg("notify.interview.turn"));
   const [draft, setDraft] = useState("");
   const done = assist.interview.done;
   // Skipping asks the interviewer to finish with its best guess, so it only

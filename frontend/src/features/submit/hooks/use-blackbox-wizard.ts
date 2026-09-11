@@ -61,6 +61,7 @@ import {
 } from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { suggestedRunName } from "../lib/budget";
+import { splitExampleCounts } from "../lib/split-example-counts";
 import { detectLanguage, looksLikeCode, type SeedLanguage } from "../lib/seed-format";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import type { WizardIssue } from "../lib/wizard-issue";
@@ -193,7 +194,6 @@ function scorerTemplateFor(recipe: BlackboxRecipe): string {
 // backend caps the value at 600.
 const SCORER_TIMEOUT_SECONDS = 300;
 const DEFAULT_MAX_SCORER_RUNS = 100;
-const DEFAULT_PATIENCE = 40;
 
 function parseOptionalNumber(value: string): number | undefined {
   const trimmed = value.trim();
@@ -348,10 +348,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     };
   }, []);
 
-  const [strategyMode, setStrategyMode] = useState<"auto" | "single" | "plateau">("auto");
+  const [strategyMode, setStrategyMode] = useState<"auto" | "single">("auto");
   const [engine, setEngine] = useState<BlackboxEngineId | null>(null);
   const proposerRuntime = "vercel" as const;
-  const [patience, setPatience] = useState(DEFAULT_PATIENCE);
   const [engineCatalogResult, setEngineCatalogResult] = useState<{
     target: BlackboxTarget["kind"];
     data: BlackboxEngineCatalogResponse | null;
@@ -507,17 +506,17 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerDependencyLock(d.scorerDependencyLock ?? null);
     setScorerModel(d.scorerModel);
     setScorerModelMode(d.scorerModelMode);
-    setStrategyMode(d.strategyMode);
+    // Drafts saved with the retired plateau relay open as Auto.
+    setStrategyMode(d.strategyMode === "single" ? "single" : "auto");
     setEngine(d.engine);
-    setPatience(d.patience);
     setMaxScorerRuns(d.maxScorerRuns);
     setMaxIterations(d.maxIterations);
     setStopAtScore(d.stopAtScore);
     setReflectionModel(d.reflectionModel);
   }, [draftSnapshot]);
 
-  // Auto and Plateau relay pick engines themselves, so only a hand-picked engine
-  // shapes the recommended split.
+  // Auto picks engines itself, so only a hand-picked engine shapes the
+  // recommended split.
   useDatasetProfiling({
     parsedDataset: parsedCases,
     columnRoles: caseColumnRoles,
@@ -621,13 +620,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           setParsedCases(rows);
           setCasesName(String(basics.name || cloneId));
         }
-        if (basics.split) {
-          setSplit({ ...defaultSplit, ...basics.split });
-          // Cloned splits are intentional — pin the wizard to manual so the
-          // profiling effect doesn't clobber them when the cases reload.
-          splitModeRef.current = "manual";
-          setSplitModeState("manual");
-        }
+        // The cloned split stays on hand for manual selection, but the mode
+        // starts where every new optimization does: on the saved preference,
+        // so the recommendation applies unless the user prefers manual.
+        if (basics.split) setSplit({ ...defaultSplit, ...basics.split });
+        const cloneDefaultMode = readPref("wizardSplitMode");
+        splitModeRef.current = cloneDefaultMode;
+        setSplitModeState(cloneDefaultMode);
         if (basics.shuffle != null) setShuffle(basics.shuffle);
         if (basics.seed != null) setSeed(basics.seed);
 
@@ -653,9 +652,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
           const strategy = source.strategy;
           if (strategy) {
-            setStrategyMode(strategy.mode);
+            // Jobs run with the retired plateau relay clone as Auto.
+            setStrategyMode(strategy.mode === "single" ? "single" : "auto");
             setEngine(strategy.engine ?? null);
-            if (strategy.patience != null) setPatience(strategy.patience);
           }
           const budget = source.budget;
           if (budget) {
@@ -677,7 +676,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         // validates, so a stale clone lands where it needs repair.
         if (source) setPendingRestore({ stage: "review", furthest: "review" });
         setCloneReady(true);
-        toast.success(msg("submit.clone.success"));
       })
       .catch(() => {
         draftsRef.current.compareClone("anything", null);
@@ -859,12 +857,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         max_iterations: iterationLimitSupported && maxIterations !== "" ? maxIterations : undefined,
         stop_at_score: parseOptionalNumber(stopAtScore),
       },
-      strategy:
-        strategyMode === "single"
-          ? { mode: "single", engine }
-          : strategyMode === "plateau"
-            ? { mode: "plateau", patience }
-            : { mode: "auto" },
+      strategy: strategyMode === "single" ? { mode: "single", engine } : { mode: "auto" },
       proposer_runtime: proposerRuntime,
       target: buildTarget(),
       task_model_config:
@@ -918,7 +911,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       const requestPayload = buildSubmissionPayload(overrideCode);
       const initialIdentity = preflight.identity;
       let completed: WizardPreflightResponse | null | undefined;
-      preflight.progress.start();
+      preflight.progress.start(scope);
       setDryRun({ status: "running" });
       try {
         if (requestPayload.scorer.kind === "python") {
@@ -1008,7 +1001,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         preflight.progress.finish(response.status, undefined, response);
         return { response, evidence, outcome };
       } catch (error) {
-        preflight.progress.finish("failed", error instanceof Error ? error.message : msg("submit.preflight.failed"));
+        // A cancelled check leaves no trace; a failed one stays on screen.
+        if (error instanceof Error && error.name === "AbortError") preflight.progress.clear();
+        else
+          preflight.progress.finish(
+            "failed",
+            error instanceof Error ? error.message : msg("submit.preflight.failed"),
+          );
         throw error;
       } finally {
         if (!completed && mountedRef.current && attempt === dryRunAttemptRef.current)
@@ -1141,11 +1140,24 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     reasoningEffort: interview.reasoningEffort,
   });
 
+  // A fresh set of cases deserves a fresh recommendation: the mode returns to
+  // the user's saved preference so the profiling effect applies the new plan
+  // when they prefer the recommendation, and stays out of the way when they
+  // prefer manual.
+  const resetSplitModeForNewCases = () => {
+    const mode = readPref("wizardSplitMode");
+    splitModeRef.current = mode;
+    setSplitModeState(mode);
+    setSplitPlan(null);
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      setParsedCases(await parseDatasetFile(file));
+      const cases = await parseDatasetFile(file);
+      resetSplitModeForNewCases();
+      setParsedCases(cases);
       setCasesName(file.name);
     } catch {
       toast.error(msg("submit.dataset.file_error"));
@@ -1156,6 +1168,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setLibraryOpen(false);
     try {
       const res = await getDatasetRows(dataset.id);
+      resetSplitModeForNewCases();
       setParsedCases({
         columns: res.columns.length > 0 ? res.columns : Object.keys(res.rows[0] ?? {}),
         rows: res.rows,
@@ -1174,15 +1187,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const selectedEngine = engineCatalog?.engines.find((e) => e.id === engine) ?? null;
   const trainingCaseCount = parsedCases?.rows.length
-    ? Math.floor(parsedCases.rows.length * split.train)
+    ? splitExampleCounts(parsedCases.rows.length, split).train
     : null;
-  const autoEngineLabels = useMemo<string[]>(
-    () =>
-      (engineCatalog?.auto_engines ?? []).map(
-        (id) => engineCatalog?.engines.find((e) => e.id === id)?.label ?? id,
-      ),
-    [engineCatalog],
-  );
   const runDisabledReason = useMemo<string | null>(() => {
     if (engineCatalogFailed) return msg("submit.blackbox.engines.check_failed");
     const issue = engineSelectionIssue({
@@ -1284,11 +1290,20 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setFurthestReachedStep(Math.max(reachable, WIZARD_STAGE[pendingRestore.furthest]));
   }, [pendingRestore, validateStep]);
 
+  // A passed execution check held on the Optimization stage settles as the
+  // wizard leaves it; one run on the way to another stage, and a scorer test
+  // run from the evaluator step, linger and clear themselves.
+  const settleHeldCheck = () => {
+    const progress = preflight.progress.state;
+    if (progress?.status !== "succeeded" || progress.scope !== "execution") return;
+    if (step === WIZARD_STAGE.optimization) preflight.progress.clear();
+  };
   const goTo = (idx: number) => {
     navigationRevisionRef.current += 1;
     dryRunAttemptRef.current += 1;
     setDryRun((current) => (current.status === "running" ? { status: "idle" } : current));
     preflight.cancel();
+    settleHeldCheck();
     validationToastRef.current?.dismiss();
     setDirection(idx > step ? 1 : -1);
     setStep(idx);
@@ -1306,7 +1321,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     const navigation = navigationRevisionRef.current;
     let identity = preflight.identity;
     const t = beginValidationToast(
-      preflight.feedback,
+      preflight.feedback(scope),
       `wizard-validate-${++validationAttemptRef.current}`,
       msg("submit.validation.toast.running"),
     );
@@ -1368,22 +1383,45 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setAdvancing(true);
     setIssue(null);
     try {
+      settleHeldCheck();
       for (let i = 0; i < target; i++) {
         if (!validateStep(i, true)) {
           goTo(i);
           return;
         }
       }
-      if (target === WIZARD_STAGE.optimization && !(await ensureEvaluatorChecked("evaluation")))
-        return;
-      if (target > WIZARD_STAGE.optimization && !(await ensureEvaluatorChecked("execution")))
-        return;
+      // The one mandatory check runs once the configuration is complete, on the
+      // way out of Optimization: evaluator, sandbox and every model in one pass.
+      // Run from its own stage it is a page of its own: the wizard holds on the
+      // result, and the next Continue moves on. A pass reused from an earlier
+      // run moves on at once.
+      if (target > WIZARD_STAGE.optimization) {
+        const reused = Boolean(preflight.reusable("execution"));
+        if (!(await ensureEvaluatorChecked("execution"))) return;
+        if (!reused && step === WIZARD_STAGE.optimization) return;
+      }
       goTo(target);
     } finally {
       advancingRef.current = false;
       if (mountedRef.current) setAdvancing(false);
     }
   };
+  // A check the user walked away from is picked up where it stands: the frame
+  // already shows it, and its outcome holds or moves the wizard on the way
+  // Next would have. One that finished while they were gone is its own page.
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current || !hydratedRef.current || pendingRestore) return;
+    resumedRef.current = true;
+    const progress = preflight.progress.state;
+    if (!progress || progress.identity !== preflight.identity) return;
+    // Only the execution pass moves the wizard; a scorer test settles where it ran.
+    if (progress.scope !== "execution") return;
+    // A pass is already its own page; a run still going is joined.
+    if (progress.status !== "running") return;
+    void advance(WIZARD_STAGE.review);
+  });
+
   const handleNext = async () => {
     await advance(step + 1);
   };
@@ -1520,7 +1558,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       strategyMode,
       engine,
       proposerRuntime,
-      patience,
       maxScorerRuns,
       maxIterations,
       stopAtScore,
@@ -1662,11 +1699,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     proposerRuntime,
     nativeProposer,
     iterationLimitSupported,
-    patience,
-    setPatience,
     engineCatalog,
     selectedEngine,
-    autoEngineLabels,
     runDisabledReason,
     optimizationFamily,
     maxScorerRuns,

@@ -40,6 +40,7 @@ CLAUDE.md
 
 # Screenshots
 *.png
+!frontend/public/notification-icon.png
 
 # Environment variables (NEVER commit secrets)
 .env

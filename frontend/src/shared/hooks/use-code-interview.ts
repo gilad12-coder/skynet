@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
+import { msg } from "@/shared/lib/messages";
 
 import { readPref } from "@/features/settings";
 import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
@@ -88,6 +90,8 @@ export function useCodeInterview(args: UseCodeInterviewArgs): CodeInterviewState
 
   const [turns, setTurns] = React.useState<InterviewTurn[]>([]);
   const [busy, setBusy] = React.useState(false);
+  // The turn notifies from the hook, so it still does after the panel has left the screen.
+  useCompletionNotification(busy, () => msg("notify.interview.turn"));
   const [streamText, setStreamText] = React.useState("");
   const [thinking, setThinking] = React.useState<AgentThinking | null>(null);
   const [options, setOptions] = React.useState<InterviewOption[]>([]);

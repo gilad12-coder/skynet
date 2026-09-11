@@ -4,9 +4,9 @@ import type { ReactNode } from "react";
 import { HelpTip } from "@/shared/ui/help-tip";
 
 /**
- * One model role as the wizard explains it: "Role · binding" on the first
- * line, with what the role does in the role's tooltip, and the picker or the
- * actions that change it below. The chip inside names the model.
+ * One model role as the wizard explains it: "Role · binding" as a label above
+ * the picker, with what the role does in the label's tooltip, and the chip or
+ * the actions that change it below. The chip names the model.
  */
 export function ModelRoleRow({
   id,
@@ -31,7 +31,7 @@ export function ModelRoleRow({
     <div
       id={id}
       tabIndex={-1}
-      className="space-y-2 rounded-lg border border-border/50 bg-muted/20 p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+      className="space-y-2 rounded-lg outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
     >
       {(role || binding) && (
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">

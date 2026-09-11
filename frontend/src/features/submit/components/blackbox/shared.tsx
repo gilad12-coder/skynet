@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, type ReactNode } from "react";
+import { Children, useId, type ReactNode } from "react";
 import { motion, useReducedMotion, type Transition } from "framer-motion";
 import {
   Card,
@@ -11,6 +11,7 @@ import {
 } from "@/shared/ui/primitives/card";
 import { Label } from "@/shared/ui/primitives/label";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { cn } from "@/shared/lib/utils";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { radioNavigationIndex } from "../../lib/radio-navigation";
@@ -61,7 +62,9 @@ export function StepCard({
         {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
       {/* Positioned so an expanded textarea covers the fields, not the page. */}
-      <CardContent className="relative space-y-5 px-4 sm:px-6">{children}</CardContent>
+      {Children.toArray(children).length > 0 && (
+        <CardContent className="relative space-y-5 px-4 sm:px-6">{children}</CardContent>
+      )}
     </Card>
   );
 }
@@ -115,6 +118,9 @@ export interface SegmentedOption<T extends string> {
   value: T;
   label: string;
   desc?: string;
+  // Shown while the option is hovered or focused; explains it without taking
+  // a line in the card.
+  tip?: string;
 }
 
 /** Pill toggle in the wizard's segmented style; grows to any option count. */
@@ -146,7 +152,7 @@ export function Segmented<T extends string>({
     >
       {options.map((o, index) => {
         const selected = o.value === value;
-        return (
+        const button = (
           <button
             key={o.value}
             type="button"
@@ -198,6 +204,15 @@ export function Segmented<T extends string>({
               ) : null}
             </span>
           </button>
+        );
+        if (!o.tip) return button;
+        return (
+          <Tooltip key={o.value}>
+            <TooltipTrigger asChild>{button}</TooltipTrigger>
+            <TooltipContent className="max-w-64 text-center leading-relaxed" dir={getActiveDir()}>
+              {o.tip}
+            </TooltipContent>
+          </Tooltip>
         );
       })}
     </div>

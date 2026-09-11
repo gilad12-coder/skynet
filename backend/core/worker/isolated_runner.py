@@ -27,6 +27,7 @@ from core.worker.preflight import run_dspy_preflight
 from core.worker.subprocess_runner import run_service_in_subprocess
 
 EVENT_PREFIX = "SKYNET_JOB_EVENT "
+INCOMPATIBLE_IMAGE_MESSAGE = "The sandbox backend image is incompatible with this worker revision and runtime."
 _CHECKPOINT_PATH = re.compile(r"(?:(?:pair_\d+|gepa)/)?gepa_state\.bin\Z")
 
 
@@ -75,20 +76,72 @@ def _export_checkpoints(directory: Path, events: EventQueue, seen: dict[str, str
             seen[relative] = digest
 
 
+def _short(value: Any) -> str:
+    """Render one identity value, abbreviating digests and revisions.
+
+    Args:
+        value: Python version, package version, source digest, or revision.
+
+    Returns:
+        The value as text, cut to its leading twelve characters when it is a hash.
+    """
+    text = str(value)
+    return text[:12] if len(text) > 16 else text
+
+
+def _leaves(identity: dict[str, Any]) -> dict[str, Any]:
+    """Flatten the dependency map so every identity part has one name.
+
+    Args:
+        identity: Runtime identity as the worker or guest computed it.
+
+    Returns:
+        Python version, each dependency version, source digest, and revision by name.
+    """
+    leaves: dict[str, Any] = {}
+    for key, value in identity.items():
+        if isinstance(value, dict):
+            leaves.update(value)
+        else:
+            leaves[key] = value
+    return leaves
+
+
+def _identity_mismatch(expected: dict[str, Any], actual: dict[str, Any]) -> str:
+    """Name each part of the runtime identity the image and its worker disagree on.
+
+    Args:
+        expected: Identity the worker computed for itself.
+        actual: Identity this guest computed inside the image.
+
+    Returns:
+        One sentence listing the differing parts, image value first.
+    """
+    theirs, ours = _leaves(expected), _leaves(actual)
+    parts = [
+        f"{name}: {_short(ours.get(name))} in the image, {_short(theirs.get(name))} in the worker"
+        for name in sorted(set(theirs) | set(ours))
+        if theirs.get(name) != ours.get(name)
+    ]
+    return "; ".join(parts) + "."
+
+
 def main() -> None:
     """Load the scoped request and execute the normal service entry point."""
     document = json.loads(Path(sys.argv[1]).read_text())
     events = EventQueue(document["nonce"])
     expected_runtime = document.get("runtime_identity")
-    if expected_runtime is not None and runtime_identity() != expected_runtime:
-        events.put(
-            {
-                "type": "error",
-                "error": "The sandbox backend image is incompatible with this worker revision and runtime.",
-                "traceback": "",
-            }
-        )
-        return
+    if expected_runtime is not None:
+        actual_runtime = runtime_identity()
+        if actual_runtime != expected_runtime:
+            events.put(
+                {
+                    "type": "error",
+                    "error": f"{INCOMPATIBLE_IMAGE_MESSAGE} {_identity_mismatch(expected_runtime, actual_runtime)}",
+                    "traceback": "",
+                }
+            )
+            return
     tools_route = document["payload"].pop("_skynet_tools_route", None)
     if tools_route is not None:
         if not os.environ.get("SKYNET_BUDGET_RELAY_URL"):

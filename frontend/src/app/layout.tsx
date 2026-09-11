@@ -22,6 +22,7 @@ import {
   SettingsModal,
 } from "@/features/settings";
 import { StorageQuotaModalHost } from "@/features/storage";
+import { PreflightNotifications } from "@/features/submit";
 import { CreditProvider, ByokKeysProvider, InsufficientCreditsModalHost } from "@/features/billing";
 import { AppSkeletonTheme } from "@/shared/ui/skeleton";
 import { msg } from "@/shared/lib/messages";
@@ -260,6 +261,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <TelemetryProvider />
             <StorageQuotaModalHost />
             <ToastContainer />
+            <PreflightNotifications />
           </LocaleProvider>
         </DeviceClassProvider>
       </body>

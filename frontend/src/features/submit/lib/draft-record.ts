@@ -105,10 +105,9 @@ export interface AnythingDraftData {
   scorerDependencyLock?: ScorerDependencyLock | null;
   scorerModel: ModelConfig;
   scorerModelMode: ScoringModelMode;
-  strategyMode: "auto" | "single" | "plateau";
+  strategyMode: "auto" | "single";
   engine: BlackboxEngineId | null;
   proposerRuntime?: BlackboxProposerRuntime;
-  patience: number;
   maxScorerRuns: number;
   maxIterations: number | "";
   stopAtScore: string;
@@ -172,8 +171,11 @@ export function sanitizeProgramDraft(raw: WizardDraftData): WizardDraftData {
   return {
     ...data,
     executionRuntime: "vercel",
-    codeAssistMode: data.codeAssistMode ?? "manual",
-    splitMode: data.splitMode ?? "manual",
+    // Drafts from before a mode was stored start where a new optimization
+    // does: the agent writes the code and the split follows the
+    // recommendation.
+    codeAssistMode: data.codeAssistMode ?? "auto",
+    splitMode: data.splitMode ?? "auto",
     reactConfig: { ...data.reactConfig, mcpAuthHeader: "" },
     modelConfig: stripModelSecrets(data.modelConfig),
     secondModelConfig: data.secondModelConfig ? stripModelSecrets(data.secondModelConfig) : null,

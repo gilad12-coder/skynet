@@ -158,15 +158,14 @@ def test_compositions_refuse_named_parts(tmp_path: Path) -> None:
     Args:
         tmp_path: Artifact directory.
     """
-    for mode in ("auto", "plateau"):
-        with pytest.raises(ServiceError, match="text starting point"):
-            auto.run_strategy(
-                BlackboxStrategy(mode=mode),
-                Task({"a": "seed"}),
-                EvalServer(score, max_evals=8),
-                make_ctx(str(tmp_path)),
-                caps=CAPS,
-            )
+    with pytest.raises(ServiceError, match="text starting point"):
+        auto.run_strategy(
+            BlackboxStrategy(),
+            Task({"a": "seed"}),
+            EvalServer(score, max_evals=8),
+            make_ctx(str(tmp_path)),
+            caps=CAPS,
+        )
 
 
 def test_engine_failure_never_falls_back_to_seed(tmp_path: Path, fixture_engines: None) -> None:
@@ -192,26 +191,8 @@ def test_engine_failure_never_falls_back_to_seed(tmp_path: Path, fixture_engines
         )
 
 
-def test_plateau_uses_upstream_shared_budget(tmp_path: Path, fixture_engines: None) -> None:
-    """Bound relay slices using upstream's aggregate-score scheduler.
-
-    Args:
-        tmp_path: Artifact directory.
-        fixture_engines: Deterministic fixture.
-    """
-    server = EvalServer(score, max_evals=20)
-    result, lanes = auto.run_strategy(
-        BlackboxStrategy(mode="plateau", patience=5), Task("seed"), server, make_ctx(str(tmp_path)), caps=CAPS
-    )
-    assert 0 < server.used <= 20
-    assert all(lane.phase == "relay" for lane in lanes)
-    assert result.total_evals == server.used
-    assert result.best_score == -1.0
-    assert "all_results" not in result.metadata
-
-
-def test_relay_stops_after_cumulative_spend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Prevent repeated native slices from each receiving a fresh total allowance.
+def test_auto_continuation_stops_after_cumulative_spend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse the continuation a fresh allowance once exploration spent the run's budget.
 
     Args:
         tmp_path: Artifact directory.
@@ -241,19 +222,18 @@ def test_relay_stops_after_cumulative_spend(tmp_path: Path, monkeypatch: pytest.
 
     monkeypatch.setattr(auto, "get_engine", lambda name, caps: SpendingEngine(name))
     context = make_ctx(
-        str(tmp_path), remaining_cost_usd=lambda: max(0.0, 8.0 - spent[0]), proposer_token_budget_usd=8.0
+        str(tmp_path), remaining_cost_usd=lambda: max(0.0, 12.0 - spent[0]), proposer_token_budget_usd=12.0
     )
     with pytest.raises(BudgetReached, match="budget") as stopped:
         auto.run_strategy(
-            BlackboxStrategy(mode="plateau", patience=5),
+            BlackboxStrategy(),
             Task("seed"),
             EvalServer(score, max_evals=100),
             context,
             caps=CAPS,
         )
-    assert stopped.value.result.best_candidate == "seed:gepa"
-    assert stopped.value.result.best_score == -2.0
-    assert stopped.value.result.metadata["selection_source"] == "completed_lane_incumbent"
+    assert stopped.value.result.best_candidate == "seed:meta_harness"
+    assert stopped.value.result.best_score == -1.0
     assert stopped.value.evidence["selection_scope"] == "training"
-    assert spent[0] == 8.0
-    assert len(starts) == 2
+    assert spent[0] == 12.0
+    assert sorted(starts) == ["autoresearch", "gepa", "meta_harness"]

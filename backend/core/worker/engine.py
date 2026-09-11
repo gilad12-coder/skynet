@@ -937,6 +937,11 @@ class BackgroundWorker:
                         ),
                         allow_private_tools=settings.discover_allow_private,
                     )
+                    # The wizard leaves the ceiling unset for a budget without a
+                    # limit, while the guest's proposer still plans its spend
+                    # against one, so the parent hands it the ledger's allowance.
+                    if optimization_type == OPTIMIZATION_TYPE_BLACKBOX and payload_dict.get("max_cost_credits") is None:
+                        payload_dict["max_cost_credits"] = budget_gateway.cost_ceiling_credits()
                 if has_exposed_execution_credentials(
                     payload_dict,
                     allow_parent_model_routes=budget_gateway is not None,

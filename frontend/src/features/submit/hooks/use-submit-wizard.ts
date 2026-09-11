@@ -56,6 +56,7 @@ import {
   cloneReactToolFilter,
   cloneRows,
   cloneSourceRecipe,
+  cloneWorkflowSpec,
 } from "../lib/clone-payload";
 import { buildLiveMcpToolSource } from "../lib/react-tool-filter";
 import { buildSignatureTemplate } from "../lib/build-signature";
@@ -668,6 +669,7 @@ export function useSubmitWizard() {
   // reload) so the user lands on the same step with inputs intact. A blank
   // start leaves a clone/share URL to populate the form itself.
   const restoredRef = useRef(false);
+  const restoreWalkedRef = useRef(false);
   // The draft's stage is applied one render after its fields, so the
   // prerequisite walk (below validateStep) checks the restored state rather
   // than the empty initial one.
@@ -702,9 +704,9 @@ export function useSubmitWizard() {
     setModuleName(d.moduleName);
     setModuleChosen(d.moduleChosen);
     setOptimizerName(d.optimizerName);
-    setCodeAssistMode(d.codeAssistMode ?? "manual");
-    splitModeRef.current = d.splitMode ?? "manual";
-    setSplitModeState(d.splitMode ?? "manual");
+    setCodeAssistMode(d.codeAssistMode ?? readPref("wizardCodeAssist"));
+    splitModeRef.current = d.splitMode ?? readPref("wizardSplitMode");
+    setSplitModeState(d.splitMode ?? readPref("wizardSplitMode"));
     setReactConfig({ ...d.reactConfig, mcpAuthHeader: "" });
     if (d.workflowSpec) {
       replaceWorkflowSpec(d.workflowSpec);
@@ -1495,6 +1497,15 @@ export function useSubmitWizard() {
         // A clone is a complete prior submission — its module (absent = the
         // predict default) is already decided, so the picker never reopens.
         setModuleChosen(true);
+        // A workflow run stores its graph, not a top-level signature. Restore
+        // it as a settled (non-pristine) spec so the starter-graph seed effect
+        // leaves the cloned canvas alone instead of re-seeding it from scratch.
+        const workflow = cloneWorkflowSpec(payload);
+        if (workflow) {
+          replaceWorkflowSpec(workflow);
+          workflowPristineRef.current = false;
+          setWorkflowTouched(true);
+        }
         if (payload.optimizer_name) setOptimizerName(String(payload.optimizer_name));
         if (payload.signature_code) {
           setSignatureCode(String(payload.signature_code));
@@ -1513,13 +1524,13 @@ export function useSubmitWizard() {
         setColumnRoles(cloneColumnRoles(payload, rows.columns));
       }
 
-      if (basics.split) {
-        setSplit({ ...defaultSplit, ...basics.split });
-        // Cloned splits are intentional — pin the wizard to manual so the
-        // auto-profile effect doesn't clobber them when the dataset reloads.
-        splitModeRef.current = "manual";
-        setSplitModeState("manual");
-      }
+      // The cloned split stays on hand for manual selection, but the mode
+      // starts where every new optimization does: on the saved preference,
+      // so the recommendation applies unless the user prefers manual.
+      if (basics.split) setSplit({ ...defaultSplit, ...basics.split });
+      const cloneDefaultMode = readPref("wizardSplitMode");
+      splitModeRef.current = cloneDefaultMode;
+      setSplitModeState(cloneDefaultMode);
 
       if (basics.shuffle != null) setShuffle(basics.shuffle);
       if (basics.seed != null) setSeed(basics.seed);
@@ -1621,7 +1632,6 @@ export function useSubmitWizard() {
         setPendingRestore({ stage: "review", furthest: "review" });
       }
       setCloneReady(true);
-      toast.success(msg("submit.clone.success"));
     };
 
     // Share / public clone: hydrate from the scrubbed composite — token-gated for
@@ -1767,10 +1777,18 @@ export function useSubmitWizard() {
       : currentEvidence
         ? "stale"
         : "idle";
+  // A passed setup check held on the Optimization stage settles as the wizard
+  // leaves it; one run on the way to another stage lingers and clears itself.
+  const settleHeldCheck = () => {
+    const progress = preflight.progress.state;
+    if (progress?.status !== "succeeded" || progress.scope !== "execution") return;
+    if (step === WIZARD_STAGE.optimization) preflight.progress.clear();
+  };
   const goNext = () => {
     navigationRevisionRef.current += 1;
     validationToastRef.current?.dismiss();
     preflight.cancel();
+    settleHeldCheck();
     if (step < LAST_WIZARD_STAGE) {
       setDirection(1);
       setStep((s) => {
@@ -1784,6 +1802,7 @@ export function useSubmitWizard() {
     navigationRevisionRef.current += 1;
     validationToastRef.current?.dismiss();
     preflight.cancel();
+    settleHeldCheck();
     if (step > 0) {
       setDirection(-1);
       setStep((s) => s - 1);
@@ -1793,6 +1812,7 @@ export function useSubmitWizard() {
     navigationRevisionRef.current += 1;
     validationToastRef.current?.dismiss();
     preflight.cancel();
+    settleHeldCheck();
     setDirection(idx > step ? 1 : -1);
     setStep(idx);
     setFurthestReachedStep((prev) => Math.max(prev, idx));
@@ -1967,6 +1987,7 @@ export function useSubmitWizard() {
   useEffect(() => {
     if (!pendingRestore) return;
     setPendingRestore(null);
+    restoreWalkedRef.current = true;
     const target = WIZARD_STAGE[pendingRestore.stage];
     const furthest = Math.max(target, WIZARD_STAGE[pendingRestore.furthest]);
     let open = target;
@@ -2110,19 +2131,43 @@ export function useSubmitWizard() {
     setAdvancing(true);
     setIssue(null);
     try {
+      settleHeldCheck();
       for (let i = 0; i < target; i++) {
         if (!validateStep(i, true, true)) {
           goTo(i);
           return;
         }
       }
-      if (target > WIZARD_STAGE.optimization && !(await ensureSetupChecked("execution"))) return;
+      // A check that runs from its own stage is a page of its own: the wizard
+      // holds on the result, and the next Continue moves on. A pass reused
+      // from an earlier run moves on at once.
+      if (target > WIZARD_STAGE.optimization) {
+        const reused = Boolean(preflight.reusable("execution"));
+        if (!(await ensureSetupChecked("execution"))) return;
+        if (!reused && step === WIZARD_STAGE.optimization) return;
+      }
       if (mountedRef.current) goTo(target);
     } finally {
       advancingRef.current = false;
       if (mountedRef.current) setAdvancing(false);
     }
   };
+
+  // A check the user walked away from is picked up where it stands: the frame
+  // already shows it, and its outcome holds or moves the wizard on the way
+  // Next would have. One that finished while they were gone is its own page.
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current || !hydratedRef.current || pendingRestore) return;
+    if (draftSnapshot && !restoreWalkedRef.current) return;
+    resumedRef.current = true;
+    const progress = preflight.progress.state;
+    if (!progress || progress.identity !== preflight.identity) return;
+    if (progress.scope !== "execution") return;
+    // A pass is already its own page; a run still going is joined.
+    if (progress.status !== "running") return;
+    void advance(WIZARD_STAGE.review);
+  });
 
   const handleNext = async () => {
     await advance(step + 1);
@@ -2243,7 +2288,7 @@ export function useSubmitWizard() {
     const navigation = navigationRevisionRef.current;
     const identity = preflight.identity;
     const t = beginValidationToast(
-      preflight.feedback,
+      preflight.feedback(scope),
       `wizard-validate-${++validationAttemptRef.current}`,
       msg("submit.validation.toast.running"),
     );

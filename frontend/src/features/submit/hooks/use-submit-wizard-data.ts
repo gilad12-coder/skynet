@@ -1,3 +1,5 @@
+"use client";
+
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { getModelCatalog, cachedCatalog } from "@/shared/lib/model-catalog";
 import { profileDataset } from "@/shared/lib/api";

@@ -34,14 +34,6 @@ class BudgetExhaustedError(RuntimeError):
     """Raised by :class:`EvalServer` once its scorer-run cap is reached."""
 
 
-class PlateauReachedError(BudgetExhaustedError):
-    """Raised by a lane whose :class:`PlateauWatch` saw no improvement for too long.
-
-    A subclass of the budget error on purpose: engines already treat that
-    as "stop and hand back your best", which is exactly what a plateau asks.
-    """
-
-
 class ScorerAbortError(RuntimeError):
     """Raised by a scorer to stop the whole run.
 
@@ -49,58 +41,6 @@ class ScorerAbortError(RuntimeError):
     version from killing a run; this one passes through untouched because the
     scorer has established that no version can be scored.
     """
-
-
-class PlateauWatch:
-    """Counts scorer runs since the last improvement and trips at ``patience``.
-
-    Attached to one lane's :class:`EvalServer`; the lane's best mean score
-    is compared against the best the run had seen when the lane started,
-    so only a version that beats the run's record resets the count.
-    """
-
-    def __init__(self, patience: int, *, best_score: float | None = None) -> None:
-        """Create a watch.
-
-        Args:
-            patience: Scorer runs without improvement before the lane stops.
-            best_score: The run's best score so far; the bar to beat.
-        """
-        self.patience = patience
-        self.best_score = best_score
-        self.stalled = 0
-        self.tripped = False
-        self._lock = threading.Lock()
-
-    @property
-    def exhausted(self) -> bool:
-        """Return True once ``patience`` runs passed without improvement."""
-        return self.stalled >= self.patience
-
-    def after_eval(self, server: EvalServer) -> None:
-        """Fold one finished evaluation into the count.
-
-        Args:
-            server: The lane's server, whose best mean is the lane's progress.
-        """
-        score = server.best_score
-        with self._lock:
-            if score is not None and (self.best_score is None or score > self.best_score):
-                self.best_score, self.stalled = score, 0
-            else:
-                self.stalled += 1
-
-    def check(self) -> None:
-        """Stop the lane once it is exhausted.
-
-        Raises:
-            PlateauReachedError: When ``patience`` runs passed without improvement.
-        """
-        with self._lock:
-            if self.stalled < self.patience:
-                return
-            self.tripped = True
-        raise PlateauReachedError(f"no improvement in the last {self.patience} scorer runs")
 
 
 def candidate_key(candidate: Candidate) -> str:
@@ -246,7 +186,6 @@ class EvalServer:
         max_evals: int,
         parent: EvalServer | None = None,
         on_eval: EvalListener | None = None,
-        watch: PlateauWatch | None = None,
     ) -> None:
         """Create a server over ``scorer`` with a cap of ``max_evals`` calls.
 
@@ -255,14 +194,11 @@ class EvalServer:
             max_evals: Maximum scorer calls this server will make.
             parent: Server whose budget this one is a slice of, if any.
             on_eval: Listener called with ``(server, score)`` after each root eval.
-            watch: Plateau watch that ends this server's budget early once
-                its lane stops improving.
         """
         self._scorer = scorer
         self.max_evals = max_evals
         self._parent = parent
         self._on_eval = on_eval
-        self._watch = watch
         self.used = 0
         self._records: dict[str, CandidateRecord] = {}
         # Root only: the latest score per (version, case) an engine paid for,
@@ -283,31 +219,23 @@ class EvalServer:
         return server
 
     @property
-    def plateaued(self) -> bool:
-        """Return True when this server's plateau watch has run out of patience."""
-        return self._watch is not None and self._watch.exhausted
-
-    @property
     def remaining(self) -> int:
-        """Return how many scorer calls this server may still make (0 once plateaued)."""
-        if self.plateaued:
-            return 0
+        """Return how many scorer calls this server may still make."""
         own = max(0, self.max_evals - self.used)
         if self._parent is None:
             return own
         return min(own, self._parent.remaining)
 
-    def lane(self, max_evals: int, *, watch: PlateauWatch | None = None) -> EvalServer:
+    def lane(self, max_evals: int) -> EvalServer:
         """Open a sub-budget of at most ``max_evals`` calls against this server.
 
         Args:
             max_evals: Cap for the lane; clamped to what remains here.
-            watch: Plateau watch that ends the lane early once it stops improving.
 
         Returns:
             A child server whose evaluations count against both budgets.
         """
-        return EvalServer(self._scorer, max_evals=min(max_evals, self.remaining), parent=self, watch=watch)
+        return EvalServer(self._scorer, max_evals=min(max_evals, self.remaining), parent=self)
 
     def evaluate(self, candidate: Candidate, example: Any = None) -> tuple[float, SideInfo]:
         """Score one candidate on one case (or on its own in single-task mode).
@@ -341,11 +269,8 @@ class EvalServer:
         while server is not None:
             with server._lock:
                 server._record(candidate, score, side_info)
-            # A primed score cost no scorer run, so it neither counts toward a
-            # lane's plateau patience nor ticks the progress listener.
-            if primed is None and server._watch is not None:
-                server._watch.after_eval(server)
             server = server._parent
+        # A primed score cost no scorer run, so it does not tick the progress listener.
         if primed is None and root._on_eval is not None:
             with root._lock:
                 root._on_eval(root, score)
@@ -404,10 +329,7 @@ class EvalServer:
         Raises:
             BudgetExhaustedError: When this server or an ancestor has no
                 calls left; no budget in the chain is touched in that case.
-            PlateauReachedError: When this server's lane stopped improving.
         """
-        if self._watch is not None:
-            self._watch.check()
         with self._lock:
             if self.used >= self.max_evals:
                 raise BudgetExhaustedError(f"scorer-run budget of {self.max_evals} exhausted")

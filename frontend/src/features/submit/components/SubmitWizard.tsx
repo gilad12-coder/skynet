@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import { ValidationProgressModal } from "./ValidationProgressModal";
+import { ValidationFrame, ValidationGate, ValidationPlan } from "./ValidationFrame";
 import { msg } from "@/shared/lib/messages";
+import { useCredits } from "@/features/billing";
 
 import { TotalBudgetCard } from "./TotalBudgetCard";
 import { WizardIssueNotice } from "./WizardIssueNotice";
@@ -12,7 +13,8 @@ import { WizardSubsteps } from "./WizardSubsteps";
 import { aggregateTokenSource } from "../lib/cost-bracket";
 import { useSubmitWizard } from "../hooks/use-submit-wizard";
 import { emptyModelConfig, slideVariants } from "../constants";
-import { limitCoversEstimate } from "../lib/budget-limit";
+import { budgetShortfall } from "../lib/budget-limit";
+import { toastBudgetShortfall } from "../lib/budget-toast";
 import { focusField } from "../lib/focus-field";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { SubmitStepper } from "./SubmitStepper";
@@ -28,7 +30,7 @@ import { SummaryStep } from "./steps/SummaryStep";
 import { SplitSection } from "./steps/SplitSection";
 
 const EVALUATION_STEPS = ["dataset", "code", "split"] as const;
-const OPTIMIZATION_STEPS = ["parameters", "models", "budget"] as const;
+const OPTIMIZATION_STEPS = ["parameters", "models", "budget", "check"] as const;
 const REVIEW_STEPS = ["review"] as const;
 const CODE_FIELDS = new Set(["signature-editor", "metric-editor", "react-config"]);
 
@@ -42,6 +44,7 @@ function evaluationPartFor(field?: string): number | null {
 
 export function SubmitWizard({ header }: { header?: ReactNode }) {
   const w = useSubmitWizard();
+  const wallet = useCredits();
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
@@ -101,11 +104,37 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
     <CodeStep key="code" w={w} part="code" />,
     <SplitSection key="split" w={w} totalRows={w.parsedDataset?.rowCount ?? 0} />,
   ];
+  // The stage ends on its check: the last pass for this setup, or what
+  // Continue will run.
+  const executionResult = w.preflight.progress.completed("execution");
+  const priorExecution = w.preflight.evidence.execution;
   const optimizationPanels: readonly ReactNode[] = [
     <ParamsStep key="parameters" w={w} />,
     <ModelStep key="models" w={w} />,
     <TotalBudgetCard key="budget" w={w} mode={budgetMode} />,
+    executionResult ? (
+      <ValidationFrame key="check" state={executionResult} settled />
+    ) : (
+      <ValidationPlan
+        key="check"
+        workflow="dspy"
+        scope="execution"
+        stale={priorExecution !== undefined && priorExecution.identity !== w.preflight.identity}
+      />
+    ),
   ];
+  const validation = w.preflight.progress.state;
+  // A passed check is shown on its own page, the last optimization substep,
+  // which is where the stage reopens afterwards.
+  const passedCheck = validation?.status === "succeeded";
+  useEffect(() => {
+    if (passedCheck) setOptimizationPart(OPTIMIZATION_STEPS.length - 1);
+  }, [passedCheck]);
+  // A check that passed from its own stage is a page of its own: it stays,
+  // with the navigation, until the user moves on.
+  const held = validation?.status === "succeeded" && w.step === WIZARD_STAGE.optimization;
+  const onCheckPage =
+    w.step === WIZARD_STAGE.optimization && OPTIMIZATION_STEPS[optimizationPart] === "check";
 
   const handleEvaluationNext = async () => {
     if (evaluationPart < EVALUATION_STEPS.length - 1) {
@@ -115,13 +144,24 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
     await w.handleNext();
   };
 
+  const shortfall = budgetShortfall(w.costBracket, budgetMode, {
+    uncapped: w.budgetUncapped,
+    limit: w.maxCostCredits,
+    balance: wallet.available ? wallet.totalCredits : null,
+  });
   const handleOptimizationNext = async () => {
-    if (
-      OPTIMIZATION_STEPS[optimizationPart] === "budget" &&
-      !limitCoversEstimate(w.costBracket, budgetMode, w.budgetUncapped ? null : w.maxCostCredits)
-    )
+    if (OPTIMIZATION_STEPS[optimizationPart] === "budget" && shortfall) {
+      toastBudgetShortfall(shortfall);
       return;
-    if (optimizationPart < OPTIMIZATION_STEPS.length - 1) {
+    }
+    const next = OPTIMIZATION_STEPS[optimizationPart + 1];
+    // The check page opens on the last pass; without one, Continue runs the
+    // check, which holds the wizard there.
+    if (next === "check" && !executionResult) {
+      await w.handleNext();
+      return;
+    }
+    if (next) {
       setOptimizationPart((current) => current + 1);
       return;
     }
@@ -166,6 +206,8 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
   };
 
   const onBack = () => {
+    // Leaving a held result settles it into its page.
+    if (held) w.preflight.progress.clear();
     if (w.step === WIZARD_STAGE.evaluation && evaluationPart > 0) {
       setEvaluationPart((current) => current - 1);
       return;
@@ -185,49 +227,59 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
         : w.handleNext;
   const showSubmit = w.step === WIZARD_STAGE.review;
   const containerWidthClass =
-    w.step === WIZARD_STAGE.evaluation &&
-    ((evaluationPart === 1 && w.codeAssistMode === "auto") ||
-      (evaluationPart === 0 && dataPreviewOpen && dataPreviewExpanded && !!w.parsedDataset))
-      ? "max-w-6xl"
-      : "max-w-2xl";
+    validation || onCheckPage
+      ? "max-w-3xl"
+      : w.step === WIZARD_STAGE.evaluation &&
+          ((evaluationPart === 1 && w.codeAssistMode === "auto") ||
+            (evaluationPart === 0 && dataPreviewOpen && dataPreviewExpanded && !!w.parsedDataset))
+        ? "max-w-6xl"
+        : "max-w-2xl";
 
   return (
     <div
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
-      <ValidationProgressModal preflight={w.preflight} />
-      <SubmitStepper w={w} />
+      <SubmitStepper w={w} locked={validation !== null && !held} />
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">
-        <AnimatePresence mode="wait" custom={w.direction}>
-          <motion.div
-            key={w.step}
-            data-tutorial={`wizard-stage-${stage}`}
-            custom={w.direction}
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.1 }}
-          >
-            {issue && (
-              <WizardIssueNotice
-                issue={issue}
-                onFix={() => goToField(issue.stage, issue.fieldId)}
-              />
-            )}
-            {stageViews[stage]}
-          </motion.div>
-        </AnimatePresence>
+        <ValidationGate
+          validation={validation}
+          direction={w.direction}
+          hold={held}
+          onBack={w.preflight.progress.clear}
+        >
+          <AnimatePresence mode="wait" custom={w.direction}>
+            <motion.div
+              key={w.step}
+              data-tutorial={`wizard-stage-${stage}`}
+              custom={w.direction}
+              variants={slideVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.1 }}
+            >
+              {issue && (
+                <WizardIssueNotice
+                  issue={issue}
+                  onFix={() => goToField(issue.stage, issue.fieldId)}
+                />
+              )}
+              {stageViews[stage]}
+            </motion.div>
+          </AnimatePresence>
+        </ValidationGate>
       </div>
 
-      <SubmitNav
-        w={w}
-        onBack={onBack}
-        onNext={onNext}
-        backDisabled={w.step === WIZARD_STAGE.goal}
-        showSubmit={showSubmit}
-      />
+      {(validation === null || held) && (
+        <SubmitNav
+          w={w}
+          onBack={onBack}
+          onNext={onNext}
+          backDisabled={w.step === WIZARD_STAGE.goal}
+          showSubmit={showSubmit}
+        />
+      )}
 
       <ModelConfigModal
         open={!!w.editingModel}

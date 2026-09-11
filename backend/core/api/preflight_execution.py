@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from ..billing import ProviderKeyVault, payload_uses_token_source
 from ..billing.budgets import BudgetConflictError, BudgetError, BudgetService
+from ..billing.model_dispatch import ModelHTTPResult
 from ..billing.model_gateway import ModelGateway
 from ..billing.protected_credentials import (
     ProtectedCredentialVault,
@@ -21,12 +24,16 @@ from ..config import settings
 from ..constants import OPTIMIZATION_TYPE_BLACKBOX, TOKEN_SOURCE_MANAGED
 from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
 from ..models.common import SplitFractions
+from ..service_gateway.optimization.blackbox.preflight import preflight_lifetime_seconds
 from ..service_gateway.optimization.data import split_examples
 from ..storage.preflights import PreflightStore
 from ..worker.vercel_dspy import run_vercel_dspy
 from .model_billing import normalize_model_token_sources
 from .preflight_progress import report_preflight_phase
 from .routers.execution_budgets import ExecutionBudgetResponse, budget_http_error, budget_response
+
+# One sample prediction and its metric call, with room for a slow program.
+_DSPY_PREFLIGHT_LIFETIME_SECONDS = 1800
 
 
 class WizardPreflightRequest(BaseModel):
@@ -166,6 +173,24 @@ def _sample(payload: dict[str, Any]) -> dict[str, Any] | None:
     return eligible[0]
 
 
+def _provider_refusal(response: ModelHTTPResult) -> str:
+    """Summarize a provider's error answer for the check report.
+
+    Args:
+        response: Non-2xx model response returned through the metered route.
+
+    Returns:
+        The HTTP status, followed by the provider's own message when its body carries one.
+    """
+    try:
+        error = json.loads(response.content).get("error")
+    except (ValueError, AttributeError):
+        error = None
+    detail = error.get("message") if isinstance(error, dict) else error if isinstance(error, str) else None
+    summary = f"HTTP {response.status}"
+    return f"{summary}: {str(detail)[:200]}" if detail else summary
+
+
 def _verify_model_routes(gateway: ModelGateway, *, native: bool) -> list[dict[str, Any]]:
     """Verify each configured role through its real metered provider path.
 
@@ -187,13 +212,13 @@ def _verify_model_routes(gateway: ModelGateway, *, native: bool) -> list[dict[st
             body,
             {"anthropic-version": "2023-06-01"} if anthropic else {},
         )
+        ok = 200 <= response.status < 300
+        detail = f"The selected {route['role']} model rejected its setup request ({_provider_refusal(response)})."
         checks.append(
             _check(
                 f"model.{route['role']}",
-                "succeeded" if 200 <= response.status < 300 else "failed",
-                None
-                if 200 <= response.status < 300
-                else f"The selected {route['role']} model rejected its setup request.",
+                "succeeded" if ok else "failed",
+                None if ok else detail,
                 route["role"],
             )
         )
@@ -321,7 +346,9 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
                 default_token_source=str(parent_payload.get("token_source") or "managed"),
             )
             parent_request = request.model_copy(update={"payload": parent_payload})
-            status, result = _perform_preflight(parent_request, user, budgets, snapshot, claim.document)
+            status, result = _perform_preflight(
+                parent_request, user, budgets, snapshot, claim.document, attempt=claim.attempt
+            )
             snapshot = budgets.get(request.execution_budget_id, user.username)
             if snapshot.pending_operations:
                 status = "pending"
@@ -336,7 +363,13 @@ def run_preflight(request: WizardPreflightRequest, user: Any, job_store: Any) ->
 
 
 def _perform_preflight(
-    request: WizardPreflightRequest, user: Any, budgets: BudgetService, snapshot: Any, document: dict[str, Any]
+    request: WizardPreflightRequest,
+    user: Any,
+    budgets: BudgetService,
+    snapshot: Any,
+    document: dict[str, Any],
+    *,
+    attempt: int,
 ) -> tuple[str, dict[str, Any]]:
     """Execute the owned attempt and finalize its transports before publishing evidence.
 
@@ -346,6 +379,7 @@ def _perform_preflight(
         budgets: Shared operation ledger.
         snapshot: Generation read after the execution claim.
         document: Durable identity of this setup attempt.
+        attempt: Number of this physical run of the setup row.
 
     Returns:
         Actual readiness outcome and preserved results, including pending usage.
@@ -397,21 +431,33 @@ def _perform_preflight(
                 phase="setup",
             )
         )
-        bind_protected_sandbox(gateway, settings, workflow=request.workflow, owner_id=document["id"])
+        # The box's hold is priced on its whole lifetime, so a check gets the
+        # time its own work can take rather than the run's configured ceiling.
+        lifetime_seconds = (
+            math.ceil(preflight_lifetime_seconds(payload))
+            if request.workflow == "anything"
+            else _DSPY_PREFLIGHT_LIFETIME_SECONDS
+        )
+        bind_protected_sandbox(
+            gateway,
+            settings,
+            workflow=request.workflow,
+            owner_id=document["id"],
+            lifetime_seconds=lifetime_seconds,
+        )
         protected = gateway.protect_payload(
             payload,
             managed_key=settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else "",
             allow_private_tools=settings.discover_allow_private,
         )
+        # The ledger keys the run's sandbox hold by this identity, and a settled
+        # or released hold from an earlier run would block a new dispatch under
+        # the same key, so every run of the row carries its own number.
+        identity = f"{document['id']}-{attempt}"
         result = (
-            _verify_anything(
-                gateway,
-                protected,
-                scope=request.scope,
-                identity=document["id"],
-            )
+            _verify_anything(gateway, protected, scope=request.scope, identity=identity)
             if request.workflow == "anything"
-            else _verify_dspy(protected, scope=request.scope, identity=document["id"])
+            else _verify_dspy(protected, scope=request.scope, identity=identity)
         )
         if request.workflow == "dspy" and request.scope == "execution":
             result["checks"].extend(_verify_model_routes(gateway, native=False))

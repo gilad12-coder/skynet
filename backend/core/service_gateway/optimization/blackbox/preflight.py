@@ -14,12 +14,44 @@ from ....models import BlackboxRunRequest
 from ....models.blackbox import BlackboxScorer, BlackboxTarget
 from ....models.common import SplitFractions
 from ..data import split_examples
+from .agent_eval import READINESS_LIFETIME_SECONDS, case_lifetime_seconds
 from .harness import GatewayConfig
 from .native_runtime import NativeOptions, check_native_runtime
 from .sandbox import SandboxRuntime, sandbox_runtime_context
 from .sandbox_scorer import SandboxPythonScorer, scorer_gateway
 from .scorer import build_scorer
 from .service import _agent_scorer, validate_blackbox_payload
+
+# What a scorer box needs around the evaluator's own timeout: booting and the install.
+_SCORER_BOX_OVERHEAD_SECONDS = 60.0
+# What the outer box spends around its inner boxes: booting, importing the
+# runner, the model route checks and the native runtime probe's three minutes.
+_PREFLIGHT_OVERHEAD_SECONDS = 600.0
+
+
+def preflight_lifetime_seconds(payload: dict[str, Any]) -> float:
+    """Return the outer box lifetime one setup check can need.
+
+    A box reserves credits for its whole lifetime the moment it opens, so
+    the check gets the time its own inner boxes can take on top of the fixed
+    overhead, not the run's configured ceiling: that is hours longer and its
+    hold refused most spending limits before a single check ran.
+
+    Args:
+        payload: Canonical scorer and target inputs.
+
+    Returns:
+        The lifetime, in seconds, before the configured ceiling applies.
+    """
+    scorer = BlackboxScorer.model_validate(payload.get("scorer") or {})
+    target = BlackboxTarget.model_validate(payload.get("target") or {})
+    # The readiness probe and the sample score each open a scorer box.
+    seconds = _PREFLIGHT_OVERHEAD_SECONDS + 2 * (scorer.timeout_seconds + _SCORER_BOX_OVERHEAD_SECONDS)
+    if target.kind == "agent":
+        # The harness is probed in its own box before one case runs with
+        # every setup step it could carry.
+        seconds += READINESS_LIFETIME_SECONDS + case_lifetime_seconds(target.timeout_seconds, setup_steps=3)
+    return seconds
 
 
 def _check(key: str, status: str, message: str | None = None, field: str | None = None) -> dict[str, Any]:
@@ -101,7 +133,7 @@ def verify_anything_in_sandbox(
             runtime=runtime,
             gateway=scorer_gateway(scorer.model, settings) if scorer.model else None,
             timeout_seconds=scorer.timeout_seconds,
-            lifetime_seconds=scorer.timeout_seconds + 60,
+            lifetime_seconds=scorer.timeout_seconds + _SCORER_BOX_OVERHEAD_SECONDS,
             install_command=scorer.install_command,
             dependency_lock=scorer.dependency_lock.model_dump(mode="json") if scorer.dependency_lock else None,
             job_id=identity,

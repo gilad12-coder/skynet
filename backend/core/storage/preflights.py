@@ -88,6 +88,7 @@ class PreflightClaim:
     document: dict[str, Any]
     token: str | None
     generation: int
+    attempt: int = 0
 
 
 def _utc(value: datetime) -> datetime:
@@ -403,7 +404,7 @@ class PreflightStore:
             row.claim_token, row.execution_generation = str(uuid4()), budget.generation
             row.lease_expires_at = now + timedelta(seconds=self.lease_seconds)
             session.flush()
-            return PreflightClaim(preflight_document(row), row.claim_token, budget.generation)
+            return PreflightClaim(preflight_document(row), row.claim_token, budget.generation, row.attempt)
 
     def renew(self, identity: str, *, claim_token: str) -> bool:
         """Extend only a live owner whose shared budget generation is still current.

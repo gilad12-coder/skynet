@@ -18,7 +18,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from ..storage.models import (
@@ -737,7 +737,10 @@ class BudgetService:
                 if not budget.uncapped:
                     remaining = budget.total_credits * CREDIT_SCALE - budget.settled_units
                     if scope > remaining:
-                        raise BudgetInsufficientError("The next operation exceeds the remaining total budget.")
+                        raise BudgetInsufficientError(
+                            f"The next operation needs up to {ceil_credits(scope)} credits, but only "
+                            f"{max(remaining, 0) // CREDIT_SCALE} of the {budget.total_credits}-credit limit remain."
+                        )
                     if scope > remaining - budget.reserved_units:
                         raise BudgetInFlightError("Covered work must settle before this operation can fit.")
                 held = account_committed_credits(session, username)
@@ -902,6 +905,79 @@ class BudgetService:
             budget.wallet_reserved_units -= operation.max_wallet_units
             operation.state = "released"
             operation.updated_at = budget.updated_at = datetime.now(UTC)
+            return self._operation_snapshot(session, operation, budget, wallet)
+
+    def reject(
+        self,
+        operation_id: str,
+        username: str,
+        *,
+        evidence_key: str,
+        evidence: Mapping[str, Any],
+    ) -> OperationSnapshot:
+        """Release a dispatched or retained hold whose request the provider refused outright.
+
+        Args:
+            operation_id: Dispatched or pending attempt with no provider identity and no settled usage.
+            username: Authenticated owner.
+            evidence_key: Immutable identity of the refusal.
+            evidence: Raw provider refusal proving nothing was created.
+
+        Returns:
+            Released operation without a usage charge.
+
+        Raises:
+            BudgetConflictError: If the attempt was never dispatched and should be released instead.
+            BudgetUnreconciledError: If the attempt received a provider identity or settled usage, so
+                it may have reached the provider.
+        """
+        key = _identifier(evidence_key)
+        document = dict(evidence)
+        with self._transaction() as session:
+            wallet, budget, operation = self._operation(session, operation_id, username)
+            if operation.state == "released":
+                return self._operation_snapshot(session, operation, budget, wallet)
+            if operation.state == "reserved":
+                raise BudgetConflictError("Unstarted work is released, not rejected.")
+            settled = session.scalar(
+                select(ExecutionUsageEvidenceModel.id)
+                .where(
+                    ExecutionUsageEvidenceModel.operation_id == operation_id,
+                    or_(
+                        ExecutionUsageEvidenceModel.issue.is_(None),
+                        ExecutionUsageEvidenceModel.issue != "usage_pending",
+                    ),
+                )
+                .limit(1)
+            )
+            if (
+                operation.state not in _DISPATCHED_STATES
+                or operation.provider_request_id is not None
+                or operation.actual_units
+                or operation.actual_wallet_units
+                or settled is not None
+            ):
+                raise BudgetUnreconciledError("Work that may have reached the provider requires usage reconciliation.")
+            now = datetime.now(UTC)
+            session.add(
+                ExecutionUsageEvidenceModel(
+                    id=str(uuid4()),
+                    operation_id=operation_id,
+                    evidence_key=key,
+                    fingerprint=_fingerprint({"refusal": document}),
+                    actual_units=operation.actual_units,
+                    actual_wallet_units=operation.actual_wallet_units,
+                    billed_credits=0,
+                    final=True,
+                    issue="rejected",
+                    evidence=document,
+                    created_at=now,
+                )
+            )
+            budget.reserved_units -= operation.max_units
+            budget.wallet_reserved_units -= operation.max_wallet_units
+            operation.state = "released"
+            operation.updated_at = budget.updated_at = now
             return self._operation_snapshot(session, operation, budget, wallet)
 
     def trim_recovery_headroom(

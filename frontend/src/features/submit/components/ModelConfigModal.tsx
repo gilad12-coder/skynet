@@ -17,8 +17,9 @@ import { ModelPicker, modelSupportsThinking } from "./ModelPicker";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { modelProviderSlug } from "@/shared/lib/model-provider";
 import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
-import { Input } from "@/shared/ui/primitives/input";
+import { NumberInput } from "@/shared/ui/number-input";
 import { Disclosure } from "./Disclosure";
+import { MOBILE_NUMBER_INPUT_CLASS } from "./blackbox/shared";
 import { cn } from "@/shared/lib/utils";
 import type { ModelConfig, CatalogModel } from "@/shared/types/api";
 import { HelpTip } from "@/shared/ui/help-tip";
@@ -388,22 +389,19 @@ export function ModelConfigModal({
                         {msg("auto.features.submit.components.modelconfigmodal.5")}
                       </HelpTip>
                     </Label>
-                    <Input
+                    <NumberInput
                       id={`${parametersId}-temperature`}
-                      type="number"
                       min={0}
                       max={2}
-                      step="any"
+                      step={0.1}
                       value={draft.temperature ?? ""}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setDraft((current) => ({
-                          ...current,
-                          temperature: value === "" ? undefined : Number(value),
-                        }));
-                      }}
-                      dir="ltr"
-                      className="min-h-[44px] text-base lg:min-h-0 lg:text-sm"
+                      onChange={(value) =>
+                        setDraft((current) => ({ ...current, temperature: value }))
+                      }
+                      onClear={() =>
+                        setDraft((current) => ({ ...current, temperature: undefined }))
+                      }
+                      className={MOBILE_NUMBER_INPUT_CLASS}
                     />
                   </div>
                   <div className="space-y-2">
@@ -412,21 +410,16 @@ export function ModelConfigModal({
                         {msg("auto.features.submit.components.modelconfigmodal.7")}
                       </HelpTip>
                     </Label>
-                    <Input
+                    <NumberInput
                       id={`${parametersId}-max-tokens`}
-                      type="number"
                       min={1}
-                      step={1}
+                      step={256}
                       value={draft.max_tokens ?? ""}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setDraft((current) => ({
-                          ...current,
-                          max_tokens: value === "" ? undefined : Number(value),
-                        }));
-                      }}
-                      dir="ltr"
-                      className="min-h-[44px] text-base lg:min-h-0 lg:text-sm"
+                      onChange={(value) =>
+                        setDraft((current) => ({ ...current, max_tokens: value }))
+                      }
+                      onClear={() => setDraft((current) => ({ ...current, max_tokens: undefined }))}
+                      className={MOBILE_NUMBER_INPUT_CLASS}
                     />
                   </div>
 

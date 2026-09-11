@@ -16,6 +16,6 @@ export const config = {
     // because a public (Explore-corpus) run must be openable signed-out — the
     // detail gate probes the anonymous public composite itself and bounces to
     // /login only when the run turns out not to be public.
-    "/((?!login|terms|privacy|optimizations|api/auth|api/register|api/webauthn|api/2fa|_next/static|_next/image|favicon\\.svg|robots\\.txt|sitemap\\.xml).*)",
+    "/((?!login|terms|privacy|optimizations|api/auth|api/register|api/webauthn|api/2fa|_next/static|_next/image|favicon\\.svg|notification-icon\\.png|robots\\.txt|sitemap\\.xml).*)",
   ],
 };

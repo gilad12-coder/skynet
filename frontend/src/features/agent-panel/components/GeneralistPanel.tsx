@@ -1,16 +1,11 @@
 "use client";
 
 import * as React from "react";
+import { useCompletionNotification } from "@/shared/hooks/use-completion-notification";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import {
-  ClockCounterClockwise,
-  SidebarSimple,
-  Plus,
-  Sparkle,
-  MagicWand,
-} from "@/shared/ui/icons";
+import { ClockCounterClockwise, SidebarSimple, Plus, Sparkle, MagicWand } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
@@ -254,6 +249,12 @@ export function GeneralistPanel({ wizardState }: GeneralistPanelProps = {}) {
     onConversationMeta: handleConversationMeta,
   });
   const streaming = agent.status === "streaming";
+  // Any conversation still streaming or waiting its turn keeps the user's
+  // notification pending; it fires once they have all settled.
+  useCompletionNotification(
+    streaming || agent.status === "queued" || agent.backgroundBusyCount > 0,
+    () => msg(agent.status === "error" ? "notify.agent.failed" : "notify.agent.replied"),
+  );
   // A queued turn locks the composer like a streaming one — its stop button
   // cancels the queued run before it ever reaches the server.
   const activeBusy = streaming || agent.status === "queued";

@@ -141,17 +141,31 @@ def test_missing_final_metrics_can_arrive_after_stop(ledger: BudgetService) -> N
     assert identities == ["session-one"]
 
 
-@pytest.mark.parametrize(
-    "receipt", [{**RECEIPT, "networkTransfer": {"ingress": 3, "egress": 0}}, {**RECEIPT, "status": "running"}]
-)
-def test_uncertain_usage_retains_full_coverage(ledger: BudgetService, receipt: dict[str, Any]) -> None:
-    """Never turn raw transfer or unfinished runtime into guessed charges or released holds.
+def test_control_plane_transfer_settles_from_stored_stop_evidence(ledger: BudgetService) -> None:
+    """Settle a deny-all sandbox whose stored stop receipt reports control-plane bytes without a provider call.
 
     Args:
         ledger: Private ledger fixture.
-        receipt: Provider usage that cannot establish a final charge.
     """
     operation = _admit(ledger)
+    receipt = {**RECEIPT, "networkTransfer": {"ingress": 21_124, "egress": 7_548}}
+    ledger.mark_pending(operation.id, "alice", evidence_key="stop", evidence={"sessions": {"session-one": receipt}})
+    settled = VercelUsageReconciler(ledger, _unavailable).reconcile(operation.id, "alice")
+    assert settled.state == "settled"
+    expected = ChargePolicy("sandbox").convert(vercel_actual_usd(RECEIPT, session_id="session-one", vcpus=2)).total
+    assert settled.actual_credits == expected
+    assert settled.budget.reserved_credits == 0
+    assert settled.budget.billed_credits == 1
+
+
+def test_unfinished_runtime_retains_full_coverage(ledger: BudgetService) -> None:
+    """Never turn an unfinished runtime into guessed charges or released holds.
+
+    Args:
+        ledger: Private ledger fixture.
+    """
+    operation = _admit(ledger)
+    receipt = {**RECEIPT, "status": "running"}
     with pytest.raises(UsagePendingError):
         VercelUsageReconciler(ledger, lambda session_id: receipt).reconcile(operation.id, "alice")
     current = ledger.get_operation(operation.id, "alice")

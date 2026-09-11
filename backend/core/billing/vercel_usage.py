@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 
+from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
+from .budgets import BudgetError
 from .operation_pricing import (
     ChargePolicy,
     OperationQuote,
@@ -109,7 +111,7 @@ def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
     if (
         isinstance(lifetime_ms, bool)
         or not isinstance(lifetime_ms, int)
-        or not 0 < lifetime_ms <= 86_400_000
+        or not 0 < lifetime_ms <= VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS * 1000
         or isinstance(vcpus, bool)
         or not isinstance(vcpus, int)
         or vcpus not in {1, *range(2, 33, 2)}
@@ -154,6 +156,21 @@ def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
     )
 
 
+def _offline_admission(price_snapshot: Mapping[str, Any] | None) -> bool:
+    """Report whether the admitted request denied all sandbox network and exposed no ports.
+
+    Args:
+        price_snapshot: Original admission, absent for standalone pricing checks.
+
+    Returns:
+        True only when the admitted request left no billable network path.
+    """
+    if price_snapshot is None:
+        return False
+    request = price_snapshot.get("request")
+    return isinstance(request, Mapping) and request.get("network_disabled") is True and request.get("ports") == []
+
+
 def vercel_actual_usd(
     session: Mapping[str, Any], *, session_id: str, vcpus: int, price_snapshot: Mapping[str, Any] | None = None
 ) -> Decimal:
@@ -196,9 +213,12 @@ def vercel_actual_usd(
         raise UsagePendingError("Vercel has not reported final network transfer.")
     ingress = _integer(network.get("ingress"), "network ingress")
     egress = _integer(network.get("egress"), "network egress")
-    # The public counters are usage, not billing totals. Unexpected traffic
-    # needs reconciliation; classifying all ingress as paid would overcharge.
-    if ingress or egress:
+    # The public counters are usage, not billing totals. Vercel reports a few
+    # KB of control-plane traffic (file uploads, command streams) even for a
+    # deny-all sandbox with no exposed ports, which the admitted quote already
+    # excludes from billing. Only an unknown admission leaves the transfer
+    # unclassified, and charging it as paid egress would overcharge.
+    if (ingress or egress) and not _offline_admission(price_snapshot):
         raise UsagePendingError("Offline Vercel transfer needs provider billing classification before settlement.")
     try:
         regional = rates[region]
@@ -218,6 +238,24 @@ def vercel_actual_usd(
         + Decimal(cpu_ms) * cpu_rate / _MS_PER_HOUR
         + Decimal(_memory_ms(stopped - started) * vcpus * 2) * memory_rate / _MS_PER_HOUR
     )
+
+
+def _refused_creation(error: BaseException) -> httpx.Response | None:
+    """Return the provider's answer when it refused the create call itself.
+
+    Args:
+        error: Failure raised while creating a sandbox.
+
+    Returns:
+        The 4xx response to the creation request, or None for any other failure.
+    """
+    response = getattr(error, "response", None)
+    if not isinstance(response, httpx.Response) or not 400 <= response.status_code < 500:
+        return None
+    request = response.request
+    if request.method != "POST" or request.url.host != "vercel.com" or request.url.path != "/api/v3/sandboxes":
+        return None
+    return response
 
 
 class VercelUsageReservation:
@@ -306,6 +344,35 @@ class VercelUsageReservation:
                 evidence_key=json_fingerprint(evidence),
                 evidence=evidence,
             )
+
+    def fail(self, error: BaseException) -> None:
+        """Release the hold when the provider refused creation outright, otherwise retain it.
+
+        A 4xx answer to the create call proves no session came into being, so
+        its coverage goes back to the budget instead of waiting for a
+        reconciliation with nothing to reconcile. Every other failure,
+        including a lost response, keeps the hold pending.
+
+        Args:
+            error: Failure raised while creating or confirming the sandbox.
+        """
+        response = _refused_creation(error) if self.session_id is None and not self._sessions else None
+        if response is not None:
+            try:
+                self.runtime.service.reject(
+                    self.operation.id,
+                    self.runtime.username,
+                    evidence_key=f"vercel-refusal:{self.operation.id}",
+                    evidence={
+                        "provider": "vercel",
+                        "status_code": response.status_code,
+                        "message": str(error)[:1000],
+                    },
+                )
+                return
+            except BudgetError:
+                pass
+        self.pending()
 
     def settle(self) -> None:
         """Settle one fully stopped session at actual cost, retaining uncertainty.

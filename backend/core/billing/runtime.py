@@ -41,6 +41,9 @@ class PaidResult(Generic[T]):
     evidence: Mapping[str, Any]
     provider_request_id: str | None = None
     final: bool = True
+    # A complete provider error that names no generation and reports no usage; its
+    # coverage returns immediately because no receipt will ever confirm a charge.
+    refused: bool = False
 
 
 class BudgetRuntime:
@@ -251,6 +254,14 @@ class BudgetRuntime:
             if result.provider_request_id:
                 self.service.mark_dispatched(operation.id, self.username, result.provider_request_id)
             if result.provider_usd is None:
+                if result.refused:
+                    self.service.reject(
+                        operation.id,
+                        self.username,
+                        evidence_key=json_fingerprint(dict(result.evidence)),
+                        evidence=dict(result.evidence),
+                    )
+                    return result.value
                 self.service.mark_pending(
                     operation.id,
                     self.username,

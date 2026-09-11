@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
 from core.billing.signals import BudgetReached
 from core.constants import (
@@ -31,7 +30,6 @@ from core.models.blackbox import (
     BLACKBOX_ENGINE_BEST_OF_N,
     BLACKBOX_ENGINE_GEPA,
     BlackboxRunRequest,
-    BlackboxStrategy,
     ScorerDryRunRequest,
 )
 from core.models.results import ModelTokenUsage
@@ -541,46 +539,10 @@ _JUDGE_SCORER_CODE = (
 )
 
 
-def test_plateau_run_relays_between_engines(
-    fake_lm: FakeReflectionLM, tmp_path: Path, fake_native_proposers: list[tuple[str, EngineContext]]
-) -> None:
-    """Preserve upstream adaptive scheduling and its shared evaluation budget.
-
-    Args:
-        fake_lm: Metered model fake used by GEPA slices.
-        tmp_path: Per-test artifact directory.
-        fake_native_proposers: Captured native invocations without paid model calls.
-    """
-    sink: list[tuple[str, dict[str, Any]]] = []
-
-    response = run_blackbox_optimization(
-        _payload(strategy={"mode": "plateau", "patience": 5}, budget={"max_scorer_runs": 40}, max_cost_credits=100),
-        artifact_id="job-plateau",
-        progress_callback=lambda e, m: sink.append((e, m)),
-        gepa_log_dir_path=str(tmp_path),
-    )
-
-    assert response.strategy_mode == "plateau"
-    assert response.lanes[0].engine == "gepa"
-    assert {lane.phase for lane in response.lanes} == {"relay"}
-    assert len(response.lanes) >= 2
-    assert {engine for engine, _ in fake_native_proposers} == {"autoresearch", "meta_harness"}
-    assert response.total_scorer_runs <= 40
-    assert response.optimized_test_metric >= response.baseline_test_metric
-    assert response.details["adaptive_switches"] >= 2
-    assert response.details["adaptive_schedule"][0]["engine_idx"] == 0
-    assert all(step["eval_delta"] <= 5 for step in response.details["adaptive_schedule"])
-    assert "stage_results" not in response.details
-    assert len([event for event, _ in sink if event == PROGRESS_LANE_STARTED]) == len(response.lanes)
-    assert len([event for event, _ in sink if event == PROGRESS_LANE_COMPLETED]) == len(response.lanes)
-    response.model_dump_json()
-
-
 @pytest.mark.parametrize(
     "strategy",
     [
         {"mode": "auto"},
-        {"mode": "plateau"},
         {"mode": "single", "engine": "autoresearch"},
         {"mode": "single", "engine": "meta_harness"},
     ],
@@ -615,15 +577,13 @@ def test_unavailable_native_recipe_fails_before_building_a_scorer(
     ("strategy", "requires_train"),
     [
         ({"mode": "auto"}, True),
-        ({"mode": "plateau"}, True),
         ({"mode": "single", "engine": "meta_harness"}, True),
         ({"mode": "single", "engine": "gepa"}, False),
         ({"mode": "single", "engine": "autoresearch"}, False),
     ],
 )
-@pytest.mark.parametrize("train_fraction", [0.0, 0.01])
 def test_empty_training_split_rejected_only_for_meta_harness_recipes(
-    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str], requires_train: bool, train_fraction: float
+    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str], requires_train: bool
 ) -> None:
     """Protect Meta-Harness from dropping validation-only data without relocating any cases.
 
@@ -631,14 +591,13 @@ def test_empty_training_split_rejected_only_for_meta_harness_recipes(
         monkeypatch: Pytest fixture for deterministic runtime capabilities.
         strategy: Upstream recipe being validated.
         requires_train: Whether the recipe includes Meta-Harness.
-        train_fraction: Fraction that rounds to zero training cases.
     """
     monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
     monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
     payload = _payload(
         strategy=strategy,
         max_cost_credits=100,
-        split_fractions={"train": train_fraction, "val": 0.8, "test": 0.2 - train_fraction},
+        split_fractions={"train": 0.0, "val": 0.8, "test": 0.2},
     )
     before = payload.model_dump()
 
@@ -657,6 +616,26 @@ def test_empty_training_split_rejected_only_for_meta_harness_recipes(
             run_blackbox_optimization(payload, artifact_id="empty-training")
     else:
         validate_blackbox_payload(payload)
+
+    assert payload.model_dump() == before
+
+
+def test_smallest_training_share_keeps_one_case_for_meta_harness(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give a training share too small to round to a case one case, so Meta-Harness accepts it.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+    """
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
+    payload = _payload(
+        strategy={"mode": "single", "engine": "meta_harness"},
+        max_cost_credits=100,
+        split_fractions={"train": 0.01, "val": 0.8, "test": 0.19},
+    )
+    before = payload.model_dump()
+
+    validate_blackbox_payload(payload)
 
     assert payload.model_dump() == before
 
@@ -687,7 +666,6 @@ def test_combined_usage_preserves_distinct_native_model_keys() -> None:
     ("strategy", "native"),
     [
         ({"mode": "auto"}, True),
-        ({"mode": "plateau"}, True),
         ({"mode": "single", "engine": "meta_harness"}, True),
         ({"mode": "single", "engine": "autoresearch"}, True),
         ({"mode": "single", "engine": "gepa"}, False),
@@ -728,15 +706,6 @@ def test_native_model_controls_are_rejected_without_restricting_direct_engines(
             validate_blackbox_payload(payload)
     else:
         validate_blackbox_payload(payload)
-
-
-def test_strategy_patience_has_bounds() -> None:
-    """Patience below five runs or above ten thousand is rejected at validation."""
-    assert BlackboxStrategy(mode="plateau").patience == 40
-    with pytest.raises(ValidationError):
-        BlackboxStrategy(mode="plateau", patience=4)
-    with pytest.raises(ValidationError):
-        BlackboxStrategy(mode="plateau", patience=10_001)
 
 
 def test_scorer_llm_usage_is_billed_with_the_run(
@@ -1193,3 +1162,22 @@ def test_budget_stop_before_completed_baseline_has_no_result(fake_lm, tmp_path, 
         run_blackbox_optimization(_payload(), artifact_id="budget-fixture", gepa_log_dir_path=str(tmp_path))
 
     assert caught.value.result is None
+
+
+@pytest.mark.parametrize(
+    "strategy",
+    [{"mode": "auto"}, {"mode": "single", "engine": "meta_harness"}],
+)
+def test_budget_backed_native_run_leaves_its_cost_ceiling_to_the_ledger(
+    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str]
+) -> None:
+    """Demand a cost ceiling only from a native run that no execution budget backs.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+        strategy: Upstream recipe being validated.
+    """
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    validate_blackbox_payload(_payload(strategy=strategy, execution_budget_id="budget-1"), verify_scorer=False)
+    with pytest.raises(ServiceError, match="Set a total credit budget"):
+        validate_blackbox_payload(_payload(strategy=strategy), verify_scorer=False)

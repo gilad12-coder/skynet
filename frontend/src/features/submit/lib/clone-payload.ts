@@ -1,5 +1,5 @@
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
-import type { SplitFractions } from "@/shared/types/api";
+import type { SplitFractions, WorkflowSpec } from "@/shared/types/api";
 import type { ColumnRole } from "../constants";
 
 /**
@@ -111,4 +111,19 @@ export function cloneReactToolFilter(payload: ClonePayload): string[] | null | u
   if (!("tool_filter" in record) || record.tool_filter == null) return null;
   if (!Array.isArray(record.tool_filter)) return [];
   return record.tool_filter.filter((name): name is string => typeof name === "string");
+}
+
+/**
+ * The stored workflow graph of a Program run that used the workflow module,
+ * or null when the payload carries none — every other module submits a single
+ * `signature_code` instead. A shape check keeps a legacy or malformed payload
+ * out: the canvas is driven by `nodes` and `edges`, and the Start step seeds a
+ * fresh starter graph when they're absent.
+ */
+export function cloneWorkflowSpec(payload: ClonePayload): WorkflowSpec | null {
+  const spec = payload.workflow;
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return null;
+  const record = spec as Record<string, unknown>;
+  if (!Array.isArray(record.nodes) || !Array.isArray(record.edges)) return null;
+  return spec as WorkflowSpec;
 }

@@ -617,6 +617,18 @@ class ModelGateway:
             snapshot["blocked_reason"] = "generation_fenced"
         return snapshot
 
+    def cost_ceiling_credits(self) -> int:
+        """Return the credits a guest may plan its own spending against.
+
+        Returns:
+            The budget's total, or for a budget without a limit whatever the
+            account can still fund; never below one credit so the guest's
+            ceiling stays a valid request field.
+        """
+        snapshot = self.runtime.service.get(self.runtime.budget_id, self.runtime.username)
+        ceiling = snapshot.available_credits if snapshot.uncapped else snapshot.total_credits
+        return max(1, int(ceiling))
+
     def protect_payload(
         self,
         payload: dict[str, Any],

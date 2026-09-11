@@ -259,6 +259,10 @@ class OpenRouterDispatcher:
                 if reconciled is not None:
                     amount, record = reconciled
                     evidence["generation"] = record
+            # An error answer that names no generation and reports no usage is the provider
+            # refusing the request before anything billable existed (rate limits, moderation,
+            # malformed bodies); holding its coverage would wait on a receipt never written.
+            refused = status >= 400 and identity is None and usage is None and not interrupted
             result = ModelHTTPResult(status, content_type, content)
             if interrupted:
                 result = ModelHTTPResult(
@@ -278,6 +282,7 @@ class OpenRouterDispatcher:
                 provider_usd=amount,
                 evidence=evidence,
                 provider_request_id=identity,
+                refused=refused,
             )
 
         return self.runtime.execute(

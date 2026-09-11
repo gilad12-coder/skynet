@@ -569,6 +569,40 @@ def test_no_charge_or_release_for_work_without_dispatch(engine: Engine) -> None:
         assert session.scalar(select(func.count()).select_from(ExecutionUsageEvidenceModel)) == 0
 
 
+def test_refused_dispatch_is_rejected_only_without_any_provider_trace(engine: Engine) -> None:
+    """Return coverage for a refusal, retained or not, never for work that may have started."""
+    service = BudgetService(engine=engine)
+    budget = service.create("alice", 20, idempotency_key="draft")
+    refusal = {"evidence_key": "refusal", "evidence": {"status_code": 400}}
+    operation = _reserve(service, budget.id)
+    with pytest.raises(BudgetConflictError):
+        service.reject(operation.id, "alice", **refusal)
+    service.mark_dispatched(operation.id, "alice")
+    assert service.reject(operation.id, "alice", **refusal).state == "released"
+    assert service.reject(operation.id, "alice", **refusal).state == "released"
+    assert service.get(budget.id, "alice").reserved_credits == 0
+    assert _balance(engine) == 50
+    with Session(engine) as session:
+        evidence = session.scalar(select(ExecutionUsageEvidenceModel))
+        assert (evidence.issue, evidence.final, evidence.billed_credits) == ("rejected", True, 0)
+    started = _reserve(service, budget.id, key="started")
+    service.mark_dispatched(started.id, "alice", "provider-session")
+    with pytest.raises(BudgetUnreconciledError):
+        service.reject(started.id, "alice", **refusal)
+    retained = _reserve(service, budget.id, key="retained")
+    service.mark_dispatched(retained.id, "alice")
+    service.mark_pending(retained.id, "alice", evidence_key="answer", evidence={"status_code": 429})
+    assert service.reject(retained.id, "alice", **refusal).state == "released"
+    partial = _reserve(service, budget.id, key="partial")
+    service.mark_dispatched(partial.id, "alice")
+    service.settle(
+        partial.id, "alice", evidence_key="partial", actual_credits="0.5", evidence={"seen": True}, final=False
+    )
+    with pytest.raises(BudgetUnreconciledError):
+        service.reject(partial.id, "alice", **refusal)
+    assert service.get(budget.id, "alice").pending_operations == 2
+
+
 def test_attempt_identity_binds_configuration_and_retry_number(engine: Engine) -> None:
     """Reserve each paid retry separately while identical HTTP delivery reuses its hold."""
     service = BudgetService(engine=engine)

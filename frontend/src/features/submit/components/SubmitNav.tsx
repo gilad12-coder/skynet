@@ -3,10 +3,9 @@
 import { CaretLeft, CaretRight, CaretDown, CircleNotch } from "@/shared/ui/icons";
 import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/shared/ui/primitives/button";
-import { formatCredits } from "@/features/billing";
 import { TERMS } from "@/shared/lib/terms";
-import { formatMsg, msg } from "@/shared/lib/messages";
-import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { msg } from "@/shared/lib/messages";
+import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 import { LAST_WIZARD_STAGE } from "../lib/wizard-steps";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
@@ -19,8 +18,6 @@ type NavContext = Pick<
   | "handleSubmit"
   | "submitting"
   | "advancing"
-  | "maxCostCredits"
-  | "budgetUncapped"
 > & {
   // Why the run cannot start right now (an engine that cannot run here yet);
   // the button stays visible so the reason stays visible with it.
@@ -52,8 +49,6 @@ export function SubmitNav({
     handleSubmit,
     submitting,
     advancing,
-    maxCostCredits,
-    budgetUncapped,
   } = w;
   const runDisabledReason = w.runDisabledReason ?? null;
 
@@ -131,19 +126,6 @@ export function SubmitNav({
               {msg("auto.features.submit.components.submitnav.4")}
               {TERMS.optimization}
             </span>
-            {budgetUncapped ? (
-              <span className="text-xs font-normal text-primary-foreground/75" dir="auto">
-                {msg("submit.budget.uncapped_short")}
-              </span>
-            ) : (
-              maxCostCredits != null && (
-                <span className="text-xs font-normal text-primary-foreground/75" dir="auto">
-                  {formatMsg("submit.nav.run_cap", {
-                    credits: formatCredits(maxCostCredits, getActiveIntlLocale()),
-                  })}
-                </span>
-              )
-            )}
             {runDisabledReason && (
               <span className="text-xs font-normal text-primary-foreground/90" dir="auto">
                 {runDisabledReason}

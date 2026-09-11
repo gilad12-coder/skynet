@@ -6,7 +6,7 @@ import math
 import re
 from typing import Any
 
-from ..config import Settings
+from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, Settings
 from ..service_gateway.optimization.blackbox.sandbox import (
     JOB_TAG,
     VercelCredentials,
@@ -74,7 +74,7 @@ def runtime_cost_profile(settings: Settings, workflow: str, runtime: str) -> dic
             "maximum_lifetime_seconds": None,
             "vcpus": 2,
         }
-    lifetime = min(settings.vercel_sandbox_max_lifetime_seconds, 86_400)
+    lifetime = min(settings.vercel_sandbox_max_lifetime_seconds, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS)
     request = {
         "image": image,
         "lifetime_ms": max(1, math.ceil(lifetime * 1000)),
@@ -123,7 +123,9 @@ def bind_protected_sandbox(
     assert image is not None
     assert settings.vercel_token is not None
     configured_lifetime = settings.vercel_sandbox_max_lifetime_seconds
-    lifetime = min(lifetime_seconds or configured_lifetime, configured_lifetime, 86_400)
+    lifetime = min(
+        lifetime_seconds or configured_lifetime, configured_lifetime, VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
+    )
     runtime = VercelSandboxRuntime(
         VercelCredentials(
             token=settings.vercel_token.get_secret_value(),

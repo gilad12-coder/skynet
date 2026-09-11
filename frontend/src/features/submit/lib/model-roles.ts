@@ -81,7 +81,7 @@ export function resolveScoringModel(input: {
 
 /** Which proposer the optimization model drives for the chosen strategy. */
 export function optimizationModelFamily(
-  strategyMode: "auto" | "single" | "plateau",
+  strategyMode: "auto" | "single",
   engine: BlackboxEngineId | null,
 ): OptimizationModelFamily {
   if (strategyMode !== "single") return "auto";

@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
+import logging
 import queue
+import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from core.exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION
 from core.service_gateway.optimization.blackbox.sandbox import CommandResult
 from core.worker import vercel_dspy
+from core.worker.checkpoint_compat import runtime_identity, source_digest
 
 
 class FakeSession:
@@ -30,7 +35,11 @@ class FakeSession:
 
     def run(self, command: str, **kwargs: Any) -> CommandResult:
         """Emit fragmented checkpoint and successful optimizer frames."""
-        request = json.loads(next(iter(self.files.values())))
+        [request_path] = [path for path in self.files if path.endswith("/request.json")]
+        [archive_path] = [path for path in self.files if path.endswith("/source.tgz.b64")]
+        assert command.index(f"base64 -d {archive_path} | tar -xzf -") < command.index("core.worker.isolated_runner")
+        assert 'PYTHONSAFEPATH=1 PYTHONPATH="$PWD"/' in command
+        request = json.loads(self.files[request_path])
         assert "_budget_gateway_descriptor" not in request["payload"]
         assert request["runtime_identity"]["gepa_revision"] == "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
         prefix = f"{vercel_dspy.EVENT_PREFIX}{request['nonce']} "
@@ -118,7 +127,7 @@ def test_remote_preflight_never_reads_submitted_checkpoint_directory(
         events,
         "spawn",
     )
-    request = json.loads(next(iter(session.files.values())))
+    request = json.loads(session.files[next(path for path in session.files if path.endswith("/request.json"))])
     assert "_gepa_log_dir" not in request["payload"]
     assert request["checkpoints"] == {}
     assert request["export_checkpoints"] is False
@@ -126,3 +135,85 @@ def test_remote_preflight_never_reads_submitted_checkpoint_directory(
     assert session.closed
     assert events.get_nowait() == {"type": "preflight_phase", "phase": "evaluator"}
     assert events.get_nowait()["type"] == "result"
+
+
+def test_parent_ships_the_source_its_identity_covers(tmp_path: Path) -> None:
+    """Unpack the staged archive and hash it the way a guest does.
+
+    Args:
+        tmp_path: Stand-in for the guest's session directory.
+    """
+    archive = base64.b64decode(vercel_dspy._source_archive())
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+        tar.extractall(tmp_path, filter="data")
+    assert source_digest(tmp_path / "core") == runtime_identity()["source_sha256"]
+    assert (tmp_path / "core/worker/isolated_runner.py").is_file()
+    assert (tmp_path / "core/i18n_locales/he.json").is_file()
+    assert not list((tmp_path / "core").rglob("tests"))
+    assert not list((tmp_path / "core").rglob("__pycache__"))
+
+
+class CrashingSession(FakeSession):
+    """Die before the entrypoint, the way an image missing this revision's modules does."""
+
+    def __init__(self, stderr: str) -> None:
+        """Keep the traceback the guest would print."""
+        super().__init__()
+        self.stderr = stderr
+
+    def run(self, command: str, **kwargs: Any) -> CommandResult:
+        """Stream only stderr and exit 1 without framing any event."""
+        kwargs["on_output"]("stderr", self.stderr)
+        return CommandResult(1, stderr=self.stderr)
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected", "kind"),
+    [
+        (
+            "Traceback (most recent call last):\n"
+            '  File "/app/core/worker/isolated_runner.py", line 26, in <module>\n'
+            "    from core.worker.preflight import run_dspy_preflight\n"
+            "ModuleNotFoundError: No module named 'core.service_gateway.datasets.split_counts'\n",
+            "The sandbox backend image is incompatible with this worker revision and runtime. "
+            "ModuleNotFoundError: No module named 'core.service_gateway.datasets.split_counts'",
+            DETERMINISTIC_FAILURE,
+        ),
+        (
+            "Traceback (most recent call last):\n"
+            '  File "<frozen runpy>", line 198, in _run_module_as_main\n'
+            "PermissionError: [Errno 13] Permission denied: '/app/.deno'\n",
+            "The Vercel optimizer exited without a complete result (exit 1). "
+            "PermissionError: [Errno 13] Permission denied: '/app/.deno'",
+            INFRASTRUCTURE_INTERRUPTION,
+        ),
+    ],
+)
+def test_guest_crash_names_its_cause(
+    stderr: str, expected: str, kind: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Carry the guest's last stderr line into the failure and keep the traceback in the log."""
+    session = CrashingSession(stderr)
+    monkeypatch.setattr(vercel_dspy, "RemoteSandboxRuntime", lambda *_args: SimpleNamespace(open=lambda _spec: session))
+    events: queue.Queue = queue.Queue()
+    with caplog.at_level(logging.ERROR, logger="core.worker.vercel_dspy"):
+        vercel_dspy.run_vercel_dspy(
+            {
+                "_budget_gateway_descriptor": {
+                    "url": "http://127.0.0.1:9876",
+                    "control_token": "control",
+                    "image": "backend@sha256:" + "a" * 64,
+                    "lifetime_seconds": 600,
+                },
+            },
+            "job-crash",
+            events,
+            "spawn",
+        )
+    assert session.closed
+    event = events.get_nowait()
+    assert event["type"] == "error"
+    assert event["error"] == expected
+    assert event["failure_kind"] == kind
+    assert "Traceback (most recent call last):" in caplog.text
+    assert events.empty()

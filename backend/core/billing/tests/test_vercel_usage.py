@@ -12,6 +12,7 @@ import httpx
 import pytest
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session
+from vercel.sandbox import SandboxApiError
 
 from core.billing.budgets import BudgetInsufficientError, BudgetService
 from core.billing.operation_pricing import UnpricedOperationError
@@ -99,6 +100,7 @@ def test_quote_covers_all_regions_and_settles_cpu_separately_from_wall_time() ->
         {"ports": [8080]},
         {"persistent": True},
         {"lifetime_ms": 0},
+        {"lifetime_ms": 18_000_001},
         {"vcpus": 3},
     ],
 )
@@ -127,12 +129,25 @@ def test_unconfirmed_usage_is_not_fabricated_or_misclassified(change: dict[str, 
         vercel_actual_usd({**RECEIPT, **change}, session_id="session-one", vcpus=2)
 
 
+def test_control_plane_transfer_settles_only_under_an_offline_admission() -> None:
+    """Exclude a deny-all sandbox's control-plane bytes from the charge, never traffic an admission allowed."""
+    snapshot = quote_vercel_sandbox(CREATE).price_snapshot
+    receipt = {**RECEIPT, "networkTransfer": {"ingress": 21_124, "egress": 7_548}}
+    assert vercel_actual_usd(receipt, session_id="session-one", vcpus=2, price_snapshot=snapshot) == vercel_actual_usd(
+        RECEIPT, session_id="session-one", vcpus=2, price_snapshot=snapshot
+    )
+    connected = {**snapshot, "request": {**CREATE, "network_disabled": False}}
+    with pytest.raises(UsagePendingError, match="classification"):
+        vercel_actual_usd(receipt, session_id="session-one", vcpus=2, price_snapshot=connected)
+
+
 def _mock_provider(
     monkeypatch: pytest.MonkeyPatch,
     runtime: BudgetRuntime,
     *,
     receipt: dict[str, Any] | None = None,
     fail_create: bool = False,
+    reject_create: bool = False,
 ) -> list[httpx.Request]:
     """Install a real Python SDK transport with deterministic Vercel API responses.
 
@@ -141,6 +156,7 @@ def _mock_provider(
         runtime: Ledger whose pre-dispatch hold is asserted by the provider.
         receipt: Optional stopped-session metadata override.
         fail_create: Simulate a network failure after creation may have been accepted.
+        reject_create: Answer the first create call with the 400 Vercel returns for a lifetime above its ceiling.
 
     Returns:
         Captured provider requests for replay and lifecycle assertions.
@@ -159,6 +175,14 @@ def _mock_provider(
             assert body["ports"] == []
             assert body["networkPolicy"] == {"mode": "deny-all"}
             assert body["resources"] == {"vcpus": 2, "memory": 4096}
+            first_creation = not any(earlier.url.path.endswith("/v3/sandboxes") for earlier in requests[:-1])
+            if reject_create and first_creation:
+                return httpx.Response(
+                    400,
+                    json={
+                        "error": {"code": "bad_request", "message": "Invalid request: `timeout` should be <= 18000000."}
+                    },
+                )
             if fail_create:
                 raise httpx.ReadError("creation response lost", request=request)
             active = {
@@ -196,11 +220,9 @@ def _sandbox_runtime(runtime: BudgetRuntime) -> VercelSandboxRuntime:
     )
 
 
-def _spec(lifetime_seconds: int = 120) -> SandboxSpec:
+def _spec(lifetime_seconds: int = 120, key: str = "evaluation-one") -> SandboxSpec:
     """Use an offline sandbox identity stable across delivery retries."""
-    return SandboxSpec(
-        lifetime_seconds=lifetime_seconds, name="sandbox-one", network_disabled=True, operation_key="evaluation-one"
-    )
+    return SandboxSpec(lifetime_seconds=lifetime_seconds, name="sandbox-one", network_disabled=True, operation_key=key)
 
 
 def test_real_sdk_stop_metrics_are_preserved_and_settled_once(
@@ -225,24 +247,23 @@ def test_real_sdk_stop_metrics_are_preserved_and_settled_once(
         assert evidence.evidence["session"]["networkTransfer"] == {"ingress": 0, "egress": 0}
 
 
-def test_uncertain_network_keeps_hold_and_destroys_compute(database: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stop costs while preserving coverage for transfer with unknown billing classification."""
+def test_control_plane_transfer_is_recorded_and_settled(database: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Settle a deny-all sandbox at CPU and memory cost while keeping its reported transfer as evidence."""
     runtime = _runtime(database)
     requests = _mock_provider(monkeypatch, runtime, receipt={"networkTransfer": {"ingress": 42, "egress": 1}})
     sandbox = _sandbox_runtime(runtime).open(_spec())
-    with pytest.raises(UsagePendingError, match="classification"):
-        sandbox.close()
+    sandbox.close()
     assert requests[-1].method == "DELETE"
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.reserved_credits > 0
-    assert snapshot.billed_credits == 0
-    assert snapshot.pending_operations == 1
+    assert snapshot.reserved_credits == 0
+    assert snapshot.billed_credits == 1
+    assert snapshot.pending_operations == 0
+    assert snapshot.setup_spent_credits == Decimal("0.300504445")
     with Session(database) as session:
-        evidence = list(
-            session.scalars(select(ExecutionUsageEvidenceModel).order_by(ExecutionUsageEvidenceModel.created_at))
-        )[-1]
-        assert evidence.issue == "usage_pending"
-        assert evidence.evidence["sessions"]["session-one"]["networkTransfer"] == {"ingress": 42, "egress": 1}
+        evidence = session.scalar(
+            select(ExecutionUsageEvidenceModel).where(ExecutionUsageEvidenceModel.final.is_(True))
+        )
+        assert evidence.evidence["session"]["networkTransfer"] == {"ingress": 42, "egress": 1}
 
 
 def test_lost_creation_response_is_pending_and_never_repeated(
@@ -258,6 +279,35 @@ def test_lost_creation_response_is_pending_and_never_repeated(
         sandbox_runtime.open(_spec())
     assert len(requests) == 1
     assert runtime.service.get(runtime.budget_id, "alice").pending_operations == 1
+
+
+def test_refused_creation_releases_the_hold_and_admits_the_next_attempt(
+    database: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Give back coverage the provider refused outright and record the refusal as final evidence."""
+    runtime = _runtime(database)
+    requests = _mock_provider(monkeypatch, runtime, reject_create=True)
+    sandbox_runtime = _sandbox_runtime(runtime)
+    with pytest.raises(SandboxApiError, match="18000000"):
+        sandbox_runtime.open(_spec())
+    assert [request.method for request in requests] == ["POST"]
+    snapshot = runtime.service.get(runtime.budget_id, "alice")
+    assert snapshot.pending_operations == 0
+    assert snapshot.reserved_credits == 0
+    assert snapshot.billed_credits == 0
+    with Session(database) as session:
+        assert session.scalar(select(ExecutionOperationModel)).state == "released"
+        evidence = session.scalar(select(ExecutionUsageEvidenceModel))
+        assert evidence.issue == "rejected"
+        assert evidence.final is True
+        assert evidence.billed_credits == 0
+        assert evidence.evidence["status_code"] == 400
+    sandbox_runtime.open(_spec(key="evaluation-two")).close()
+    assert sum(request.url.path.endswith("/v3/sandboxes") for request in requests) == 2
+    snapshot = runtime.service.get(runtime.budget_id, "alice")
+    assert snapshot.pending_operations == 0
+    assert snapshot.reserved_credits == 0
+    assert snapshot.billed_credits == 1
 
 
 def test_insufficient_sandbox_coverage_never_calls_provider(database: Engine, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -3,14 +3,16 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import { ValidationProgressModal } from "../ValidationProgressModal";
+import { ValidationFrame, ValidationGate, ValidationPlan } from "../ValidationFrame";
 import { msg } from "@/shared/lib/messages";
+import { useCredits } from "@/features/billing";
 import { SubmitSplashOverlay } from "@/shared/ui/submit-splash-overlay";
 import { TERMS } from "@/shared/lib/terms";
 
 import { useBlackboxWizard, type BlackboxRecipe } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig, slideVariants } from "../../constants";
-import { limitCoversEstimate } from "../../lib/budget-limit";
+import { budgetShortfall } from "../../lib/budget-limit";
+import { toastBudgetShortfall } from "../../lib/budget-toast";
 import { focusField } from "../../lib/focus-field";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../../lib/wizard-steps";
 import { SubmitStepper } from "../SubmitStepper";
@@ -25,12 +27,12 @@ import { BlackboxStartStep } from "./BlackboxStartStep";
 import { BlackboxCasesStep } from "./BlackboxCasesStep";
 import { BlackboxScorerStep } from "./BlackboxScorerStep";
 import { BlackboxOptimizerStep } from "./BlackboxOptimizerStep";
-import { BlackboxReviewStep } from "./BlackboxReviewStep";
+import { BlackboxSummaryStep } from "./BlackboxSummaryStep";
 
 type EvaluationStep = "cases" | "scorer" | "split" | "budget";
 const GOAL_STEPS = ["goal"] as const;
-const OPTIMIZATION_STEPS = ["strategy", "model"] as const;
-const REVIEW_STEPS = ["review"] as const;
+const OPTIMIZATION_STEPS = ["strategy", "model", "check"] as const;
+const REVIEW_STEPS = ["basics", "summary"] as const;
 
 /** The evaluation substep that holds a field, so a problem opens where it is fixed. */
 function evaluationStepFor(field: string | undefined, hasCases: boolean): EvaluationStep | null {
@@ -57,10 +59,15 @@ export function BlackboxWizard({
   initialRecipe: BlackboxRecipe;
 }) {
   const w = useBlackboxWizard(initialRecipe);
+  const wallet = useCredits();
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
   const [optimizationPart, setOptimizationPart] = useState(0);
+  // Review splits into its own two substeps: the basics get a Continue gate of
+  // their own before the summary carousel opens.
+  const [reviewPart, setReviewPart] = useState(0);
+  const activeReviewPart = Math.min(reviewPart, REVIEW_STEPS.length - 1);
 
   // The split only exists once there are cases to divide.
   const hasCases = Boolean(w.parsedCases?.rowCount);
@@ -107,6 +114,36 @@ export function BlackboxWizard({
         : w.stageIssue(w.step)
       : null;
 
+  // Optimization ends on the one setup check: the last pass for this setup,
+  // or what Continue will run.
+  const executionResult = w.preflight.progress.completed("execution");
+  const priorExecution = w.preflight.evidence.execution;
+  const checkPage = executionResult ? (
+    <ValidationFrame state={executionResult} settled />
+  ) : (
+    <ValidationPlan
+      workflow="anything"
+      scope="execution"
+      stale={priorExecution !== undefined && priorExecution.identity !== w.preflight.identity}
+    />
+  );
+  const validation = w.preflight.progress.state;
+  // A passed setup check is shown on its own page, the last substep of
+  // Optimization, which is where the stage reopens afterwards. A scorer test
+  // run from the evaluator step lingers and returns there by itself.
+  const passedCheck = validation?.status === "succeeded" ? validation.scope : null;
+  useEffect(() => {
+    if (passedCheck === "execution") setOptimizationPart(OPTIMIZATION_STEPS.length - 1);
+  }, [passedCheck]);
+  // A check that passed from its own stage is a page of its own: it stays,
+  // with the navigation, until the user moves on.
+  const held =
+    validation?.status === "succeeded" &&
+    validation.scope === "execution" &&
+    w.step === WIZARD_STAGE.optimization;
+  const onCheckPage =
+    w.step === WIZARD_STAGE.optimization && OPTIMIZATION_STEPS[optimizationPart] === "check";
+
   const evaluationPanels: Record<EvaluationStep, ReactNode> = {
     cases: (
       <div id="bb-cases" tabIndex={-1} className="outline-none">
@@ -137,15 +174,21 @@ export function BlackboxWizard({
   const optimizationPanels: readonly ReactNode[] = [
     <BlackboxOptimizerStep key="strategy" w={w} part="strategy" />,
     <BlackboxOptimizerStep key="model" w={w} part="model" />,
+    checkPage,
   ];
 
+  const shortfall = budgetShortfall(w.costBracket, w.tokenSource, {
+    uncapped: w.budgetUncapped,
+    limit: w.maxCostCredits,
+    balance: wallet.available ? wallet.totalCredits : null,
+  });
   const handleEvaluationNext = async () => {
-    if (
-      activeEvaluationStep === "budget" &&
-      !limitCoversEstimate(w.costBracket, w.tokenSource, w.budgetUncapped ? null : w.maxCostCredits)
-    )
+    if (activeEvaluationStep === "budget" && shortfall) {
+      toastBudgetShortfall(shortfall);
       return;
-    if (activeEvaluationPart < evaluationSteps.length - 1) {
+    }
+    const next = evaluationSteps[activeEvaluationPart + 1];
+    if (next) {
       setEvaluationPart(activeEvaluationPart + 1);
       return;
     }
@@ -153,12 +196,21 @@ export function BlackboxWizard({
   };
 
   const handleOptimizationNext = async () => {
-    if (optimizationPart < OPTIMIZATION_STEPS.length - 1) {
+    const next = OPTIMIZATION_STEPS[optimizationPart + 1];
+    if (next === "check" && !executionResult) {
+      await w.handleNext();
+      return;
+    }
+    if (next) {
       setOptimizationPart((current) => current + 1);
       return;
     }
+    setReviewPart(0);
     await w.handleNext();
   };
+
+  // The basics substep gates the summary: Continue opens the summary carousel.
+  const handleReviewNext = () => setReviewPart(REVIEW_STEPS.length - 1);
 
   const stageViews: Record<WizardStageId, ReactNode> = {
     goal: (
@@ -185,22 +237,33 @@ export function BlackboxWizard({
       </WizardSubsteps>
     ),
     review: (
-      <WizardSubsteps active={0} ariaLabel={msg("submit.stage.review")} steps={REVIEW_STEPS}>
-        <div className="space-y-4 md:space-y-6">
+      <WizardSubsteps
+        active={activeReviewPart}
+        ariaLabel={msg("submit.stage.review")}
+        steps={REVIEW_STEPS}
+      >
+        {activeReviewPart === 0 ? (
           <BlackboxBasicsStep w={w} />
-          <BlackboxReviewStep w={w} onEditField={handleEditField} />
-        </div>
+        ) : (
+          <BlackboxSummaryStep w={w} />
+        )}
       </WizardSubsteps>
     ),
   };
 
   const onBack = () => {
+    // Leaving a held result settles it into its page.
+    if (held) w.preflight.progress.clear();
     if (w.step === WIZARD_STAGE.evaluation && activeEvaluationPart > 0) {
       setEvaluationPart(activeEvaluationPart - 1);
       return;
     }
     if (w.step === WIZARD_STAGE.optimization && optimizationPart > 0) {
       setOptimizationPart((current) => current - 1);
+      return;
+    }
+    if (w.step === WIZARD_STAGE.review && activeReviewPart > 0) {
+      setReviewPart((current) => current - 1);
       return;
     }
     if (w.step === WIZARD_STAGE.review) setOptimizationPart(OPTIMIZATION_STEPS.length - 1);
@@ -211,8 +274,11 @@ export function BlackboxWizard({
       ? handleEvaluationNext
       : w.step === WIZARD_STAGE.optimization
         ? handleOptimizationNext
-        : w.handleNext;
-  const showSubmit = w.step === WIZARD_STAGE.review;
+        : w.step === WIZARD_STAGE.review
+          ? handleReviewNext
+          : w.handleNext;
+  const showSubmit =
+    w.step === WIZARD_STAGE.review && activeReviewPart === REVIEW_STEPS.length - 1;
   // Auto mode seats the agent pane beside the form on the Goal stage and the
   // scorer, so those take the wide column; plain forms keep the narrow one.
   const wideAuthoringPanel =
@@ -225,45 +291,58 @@ export function BlackboxWizard({
     dataPreviewOpen &&
     dataPreviewExpanded &&
     !!w.parsedCases;
-  const containerWidthClass = wideAuthoringPanel || wideDataPreview ? "max-w-6xl" : "max-w-2xl";
+  const containerWidthClass =
+    validation || onCheckPage
+      ? "max-w-3xl"
+      : wideAuthoringPanel || wideDataPreview
+        ? "max-w-6xl"
+        : "max-w-2xl";
 
   return (
     <div
       className={`mx-auto w-full min-w-0 space-y-4 pb-6 transition-[max-width] duration-300 md:-mt-4 md:space-y-6 md:pb-8 ${containerWidthClass}`}
     >
-      <ValidationProgressModal preflight={w.preflight} />
-      <SubmitStepper w={w} />
+      <SubmitStepper w={w} locked={validation !== null && !held} />
 
       <div className="relative overflow-hidden pt-[10px]" data-tutorial="submit-wizard">
-        <AnimatePresence mode="wait" custom={w.direction}>
-          <motion.div
-            key={w.step}
-            data-tutorial={`wizard-stage-${stage}`}
-            custom={w.direction}
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ duration: 0.1 }}
-          >
-            {issue && (
-              <WizardIssueNotice
-                issue={issue}
-                onFix={() => handleEditField(issue.stage, issue.fieldId)}
-              />
-            )}
-            {stageViews[stage]}
-          </motion.div>
-        </AnimatePresence>
+        <ValidationGate
+          validation={validation}
+          direction={w.direction}
+          hold={held}
+          onBack={w.preflight.progress.clear}
+        >
+          <AnimatePresence mode="wait" custom={w.direction}>
+            <motion.div
+              key={w.step}
+              data-tutorial={`wizard-stage-${stage}`}
+              custom={w.direction}
+              variants={slideVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.1 }}
+            >
+              {issue && (
+                <WizardIssueNotice
+                  issue={issue}
+                  onFix={() => handleEditField(issue.stage, issue.fieldId)}
+                />
+              )}
+              {stageViews[stage]}
+            </motion.div>
+          </AnimatePresence>
+        </ValidationGate>
       </div>
 
-      <SubmitNav
-        w={w}
-        onBack={onBack}
-        onNext={onNext}
-        backDisabled={w.step === WIZARD_STAGE.goal}
-        showSubmit={showSubmit}
-      />
+      {(validation === null || held) && (
+        <SubmitNav
+          w={w}
+          onBack={onBack}
+          onNext={onNext}
+          backDisabled={w.step === WIZARD_STAGE.goal}
+          showSubmit={showSubmit}
+        />
+      )}
 
       <ModelConfigModal
         open={!!w.editingModel}

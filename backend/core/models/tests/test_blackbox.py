@@ -64,7 +64,6 @@ def test_only_gepa_accepts_separate_named_parts() -> None:
     "strategy",
     [
         {"mode": "auto"},
-        {"mode": "plateau"},
         {"mode": "single", "engine": "meta_harness"},
         {"mode": "single", "engine": "autoresearch"},
         {"mode": "single", "engine": "best_of_n"},
@@ -124,7 +123,6 @@ def test_agent_target_rejects_mismatched_task_model_role() -> None:
         ({"mode": "single", "engine": "gepa"}, False),
         ({"mode": "single", "engine": "best_of_n"}, False),
         ({"mode": "auto"}, False),
-        ({"mode": "plateau"}, False),
     ],
 )
 def test_iteration_limit_requires_single_meta_harness(strategy: dict[str, str], supported: bool) -> None:
