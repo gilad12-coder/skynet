@@ -128,7 +128,7 @@ function ModelRow({
           <span className="truncate">{label}</span>
         </span>
       </HelpTip>
-      <div className="pointer-events-none w-[60%] shrink-0">{children}</div>
+      <div className="pointer-events-none w-[72%] shrink-0">{children}</div>
     </div>
   );
 }
@@ -384,7 +384,10 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       tipText={msg("submit.blackbox.roles.task.desc")}
                     >
                       <ModelChip
-                        config={targetModel}
+                        config={{
+                          ...targetModel,
+                          token_source: targetModel.token_source ?? "managed",
+                        }}
                         roleLabel={taskLabel}
                         onClick={() => {}}
                         className="w-full"
