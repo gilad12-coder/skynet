@@ -105,6 +105,11 @@ function Mono({ children }: { children: ReactNode }) {
  * A model-role line shaped like {@link Row}: the role title on the start with
  * its tooltip, the read-only model chip on the end. The chip is inert here, so
  * its pointer affordances are muted while the label stays hoverable for the tip.
+ *
+ * The chip column is a fixed fraction of the row so every role's chip renders
+ * at the exact same width regardless of model name or how many settings it
+ * carries; the chip fills that column and wraps its temperature/token pills
+ * under the name.
  */
 function ModelRow({
   label,
@@ -117,13 +122,13 @@ function ModelRow({
 }) {
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border/40 py-2.5">
-      <HelpTip text={tipText}>
+      <HelpTip text={tipText} className="min-w-0">
         <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          <Cpu className="size-3.5" />
+          <Cpu className="size-3.5 shrink-0" />
           <span className="truncate">{label}</span>
         </span>
       </HelpTip>
-      <div className="pointer-events-none min-w-0 max-w-[62%]">{children}</div>
+      <div className="pointer-events-none w-[60%] shrink-0">{children}</div>
     </div>
   );
 }
@@ -378,14 +383,24 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       label={taskLabel}
                       tipText={msg("submit.blackbox.roles.task.desc")}
                     >
-                      <ModelChip config={targetModel} roleLabel={taskLabel} onClick={() => {}} />
+                      <ModelChip
+                        config={targetModel}
+                        roleLabel={taskLabel}
+                        onClick={() => {}}
+                        className="w-full"
+                      />
                     </ModelRow>
                   )}
                   <ModelRow
                     label={optLabel}
                     tipText={msg(OPTIMIZATION_MODEL_DESCRIPTION[optimizationFamily])}
                   >
-                    <ModelChip config={reflectionModel} roleLabel={optLabel} onClick={() => {}} />
+                    <ModelChip
+                      config={reflectionModel}
+                      roleLabel={optLabel}
+                      onClick={() => {}}
+                      className="w-full"
+                    />
                   </ModelRow>
                   {scorerUsesModel ? (
                     <ModelRow label={scoringLabel} tipText={tip("submit.blackbox.scorer_model")}>
@@ -394,6 +409,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                           config={resolvedScorerModel}
                           roleLabel={scoringLabel}
                           onClick={() => {}}
+                          className="w-full"
                         />
                       ) : (
                         <span className="text-sm text-muted-foreground">{notChosen}</span>
