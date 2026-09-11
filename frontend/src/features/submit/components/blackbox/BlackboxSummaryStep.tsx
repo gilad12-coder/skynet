@@ -37,6 +37,7 @@ import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { chargeableBracket } from "../../lib/cost-bracket";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
+import { Figure, buildEstimateSections } from "../EstimateBreakdown";
 import { ModelRoleRow } from "./ModelRoleRow";
 
 /** One key/value line: an icon-and-label on the start, its value on the end. */
@@ -146,6 +147,10 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
   const locale = getActiveIntlLocale();
   const byok = tokenSource === "byok";
   const estimate = chargeableBracket(costBracket, tokenSource);
+  const estimateLabel = byok
+    ? msg("submit.summary.estimate_fee")
+    : msg("submit.summary.estimate_cost");
+  const { estimateSections } = buildEstimateSections(estimate, locale);
 
   const displayName = jobName.trim() || suggestedName;
   const notChosen = msg("submit.blackbox.roles.not_chosen");
@@ -474,17 +479,22 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                 <div className="space-y-3">
                   <Row
                     icon={<Coins className="size-3.5" />}
-                    label={
-                      byok ? msg("submit.summary.estimate_fee") : msg("submit.summary.estimate_cost")
-                    }
+                    label={estimateLabel}
                     tipText={tip("submit.estimate")}
                   >
-                    {/* Isolate "low–high" as one LTR run (U+2066…U+2069) so the en-dash
-                        between the two number groups doesn't flip them under RTL. */}
-                    {formatMsg("submit.summary.estimate_range", {
-                      low: `⁦${formatCredits(estimate.lowCredits, locale)}`,
-                      high: `${formatCredits(estimate.highCredits, locale)}⁩`,
-                    })}
+                    {/* The value opens the same calculation the main budget card
+                        unfolds, built from the bracket's trace. Isolate "low–high"
+                        as one LTR run (U+2066…U+2069) so the en-dash between the two
+                        number groups doesn't flip them under RTL. */}
+                    <Figure
+                      label={estimateLabel}
+                      value={formatMsg("submit.summary.estimate_range", {
+                        low: `⁦${formatCredits(estimate.lowCredits, locale)}`,
+                        high: `${formatCredits(estimate.highCredits, locale)}⁩`,
+                      })}
+                      sections={estimateSections}
+                      className="text-sm"
+                    />
                   </Row>
                   {w.budgetSession.budget && (
                     <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
