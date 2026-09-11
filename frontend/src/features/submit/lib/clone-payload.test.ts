@@ -7,6 +7,7 @@ import {
   cloneReactToolFilter,
   cloneRows,
   cloneSourceRecipe,
+  cloneWorkflowSpec,
 } from "./clone-payload.ts";
 
 const programPayload = {
@@ -108,4 +109,19 @@ test("cloneReactToolFilter keeps the legacy full-roster contract distinct from n
   assert.equal(cloneReactToolFilter({ tool_source: { kind: "live_mcp" } }), null);
   assert.equal(cloneReactToolFilter({ tool_source: { tool_filter: null } }), null);
   assert.equal(cloneReactToolFilter({}), undefined);
+});
+
+test("cloneWorkflowSpec returns a stored workflow graph and nothing else", () => {
+  const graph = { nodes: [{ id: "n1", kind: "signature" }], edges: [] };
+  assert.equal(cloneWorkflowSpec({ workflow: graph }), graph);
+  assert.equal(cloneWorkflowSpec({ workflow: { nodes: [], edges: [] } })?.nodes.length, 0);
+});
+
+test("cloneWorkflowSpec rejects a missing or malformed graph", () => {
+  assert.equal(cloneWorkflowSpec(programPayload), null);
+  assert.equal(cloneWorkflowSpec({}), null);
+  assert.equal(cloneWorkflowSpec({ workflow: null }), null);
+  assert.equal(cloneWorkflowSpec({ workflow: [] }), null);
+  assert.equal(cloneWorkflowSpec({ workflow: { nodes: [] } }), null);
+  assert.equal(cloneWorkflowSpec({ workflow: { nodes: "x", edges: [] } }), null);
 });

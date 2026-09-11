@@ -56,6 +56,7 @@ import {
   cloneReactToolFilter,
   cloneRows,
   cloneSourceRecipe,
+  cloneWorkflowSpec,
 } from "../lib/clone-payload";
 import { buildLiveMcpToolSource } from "../lib/react-tool-filter";
 import { buildSignatureTemplate } from "../lib/build-signature";
@@ -1496,6 +1497,15 @@ export function useSubmitWizard() {
         // A clone is a complete prior submission — its module (absent = the
         // predict default) is already decided, so the picker never reopens.
         setModuleChosen(true);
+        // A workflow run stores its graph, not a top-level signature. Restore
+        // it as a settled (non-pristine) spec so the starter-graph seed effect
+        // leaves the cloned canvas alone instead of re-seeding it from scratch.
+        const workflow = cloneWorkflowSpec(payload);
+        if (workflow) {
+          replaceWorkflowSpec(workflow);
+          workflowPristineRef.current = false;
+          setWorkflowTouched(true);
+        }
         if (payload.optimizer_name) setOptimizerName(String(payload.optimizer_name));
         if (payload.signature_code) {
           setSignatureCode(String(payload.signature_code));
