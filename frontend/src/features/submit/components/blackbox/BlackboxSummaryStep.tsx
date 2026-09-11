@@ -32,7 +32,6 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { chargeableBracket } from "../../lib/cost-bracket";
@@ -496,23 +495,6 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       className="text-sm"
                     />
                   </Row>
-                  {w.budgetSession.budget && (
-                    <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                      {(
-                        [
-                          ["submit.budget.setup_spent", w.budgetSession.budget.setup_spent_credits],
-                          ["submit.budget.run_spent", w.budgetSession.budget.run_spent_credits],
-                          ["submit.budget.reserved", w.budgetSession.budget.reserved_credits],
-                          ["submit.budget.available", w.budgetSession.budget.available_credits],
-                        ] as const
-                      ).map(([label, amount]) => (
-                        <div key={label}>
-                          <dt>{msg(label)}</dt>
-                          <dd dir="auto" className="underline underline-offset-2">{formatBudgetAmount(amount, locale)}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  )}
                 </div>
               )}
             </motion.div>
