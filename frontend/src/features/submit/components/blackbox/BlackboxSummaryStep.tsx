@@ -24,7 +24,6 @@ import {
   Warning,
 } from "@/shared/ui/icons";
 import { cn } from "@/shared/lib/utils";
-import { Badge } from "@/shared/ui/primitives/badge";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { formatCredits } from "@/features/billing";
@@ -129,7 +128,6 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
     metricCode,
     scorerUrl,
     scorerUsesModel,
-    scorerModelMode,
     resolvedScorerModel,
     scorerInstall,
     strategyMode,
@@ -364,14 +362,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       <ModelChip config={reflectionModel} roleLabel={optLabel} onClick={() => {}} />
                     </ModelRoleRow>
                     {scorerUsesModel ? (
-                      <ModelRoleRow
-                        role={scoringLabel}
-                        binding={msg(
-                          scorerModelMode === "inherit"
-                            ? "submit.blackbox.roles.scoring.inherited"
-                            : "submit.blackbox.roles.scoring.custom",
-                        )}
-                      >
+                      <ModelRoleRow role={scoringLabel}>
                         {resolvedScorerModel ? (
                           <ModelChip
                             config={resolvedScorerModel}
@@ -415,33 +406,27 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       {harnessLabel(harness)}
                     </Row>
                   )}
-                  <div className="flex items-center justify-between gap-3 py-2.5">
-                    <HelpTip text={tip("submit.blackbox.budget")}>
-                      <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                        <Gauge className="size-3.5" />
-                        <span className="truncate">{msg("submit.blackbox.review.budget")}</span>
-                      </span>
-                    </HelpTip>
-                    <span className="flex max-w-[60%] flex-wrap justify-end gap-1.5">
-                      <Badge variant="outline">
-                        {formatMsg("submit.blackbox.review.budget_runs", { runs: maxScorerRuns })}
-                      </Badge>
-                      {iterationLimitSupported && maxIterations !== "" && (
-                        <Badge variant="outline">
-                          {formatMsg("submit.blackbox.review.budget_iterations", {
+                  <Row
+                    icon={<Gauge className="size-3.5" />}
+                    label={msg("submit.blackbox.review.budget")}
+                    tipText={tip("submit.blackbox.budget")}
+                  >
+                    {[
+                      formatMsg("submit.blackbox.review.budget_runs", { runs: maxScorerRuns }),
+                      iterationLimitSupported && maxIterations !== ""
+                        ? formatMsg("submit.blackbox.review.budget_iterations", {
                             n: maxIterations,
-                          })}
-                        </Badge>
-                      )}
-                      {stopAtScore.trim() && (
-                        <Badge variant="outline">
-                          {formatMsg("submit.blackbox.review.budget_stop", {
+                          })
+                        : null,
+                      stopAtScore.trim()
+                        ? formatMsg("submit.blackbox.review.budget_stop", {
                             score: stopAtScore.trim(),
-                          })}
-                        </Badge>
-                      )}
-                    </span>
-                  </div>
+                          })
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </Row>
                   {runDisabledReason && (
                     <span
                       className="mt-1 flex items-start gap-1.5 text-xs text-amber-700"
@@ -456,17 +441,15 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
 
               {summaryTab === 4 && (
                 <div className="space-y-3">
-                  <Row
-                    icon={<Code className="size-3.5" />}
-                    label={msg("submit.blackbox.scorer.title")}
-                    tipText={tip("submit.blackbox.review_scorer")}
-                  >
-                    {scorerKind === "python" ? (
-                      msg("submit.blackbox.scorer.kind.python")
-                    ) : (
+                  {scorerKind !== "python" && (
+                    <Row
+                      icon={<Code className="size-3.5" />}
+                      label={msg("submit.blackbox.scorer.title")}
+                      tipText={tip("submit.blackbox.review_scorer")}
+                    >
                       <Mono>{scorerUrl}</Mono>
-                    )}
-                  </Row>
+                    </Row>
+                  )}
                   {scorerKind === "python" && metricCode.trim() && (
                     <div dir="ltr">
                       <CodeEditor
@@ -490,27 +473,23 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
               )}
 
               {summaryTab === 5 && (
-                <div className="rounded-xl border border-[#C8B9A8]/50 bg-[#FAF8F5] px-3.5 py-3 shadow-[0_1px_2px_rgba(61,46,34,0.04)]">
-                  <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                    <HelpTip text={tip("submit.estimate")}>
-                      <span className="flex items-center gap-2 text-[13px] font-semibold text-[#3D2E22]">
-                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-[#C8A882]/15 text-[#A8895E]">
-                          <Gauge className="h-3 w-3" />
-                        </span>
-                        {byok ? msg("submit.summary.estimate_fee") : msg("submit.summary.estimate_cost")}
-                      </span>
-                    </HelpTip>
-                    <span className="text-[13px] font-medium text-[#3D2E22] sm:text-end" dir="auto">
-                      {/* Isolate "low–high" as one LTR run (U+2066…U+2069) so the en-dash
-                          between the two number groups doesn't flip them under RTL. */}
-                      {formatMsg("submit.summary.estimate_range", {
-                        low: `⁦${formatCredits(estimate.lowCredits, locale)}`,
-                        high: `${formatCredits(estimate.highCredits, locale)}⁩`,
-                      })}
-                    </span>
-                  </div>
+                <div className="space-y-3">
+                  <Row
+                    icon={<Coins className="size-3.5" />}
+                    label={
+                      byok ? msg("submit.summary.estimate_fee") : msg("submit.summary.estimate_cost")
+                    }
+                    tipText={tip("submit.estimate")}
+                  >
+                    {/* Isolate "low–high" as one LTR run (U+2066…U+2069) so the en-dash
+                        between the two number groups doesn't flip them under RTL. */}
+                    {formatMsg("submit.summary.estimate_range", {
+                      low: `⁦${formatCredits(estimate.lowCredits, locale)}`,
+                      high: `${formatCredits(estimate.highCredits, locale)}⁩`,
+                    })}
+                  </Row>
                   {w.budgetSession.budget && (
-                    <dl className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                       {(
                         [
                           ["submit.budget.setup_spent", w.budgetSession.budget.setup_spent_credits],
@@ -527,10 +506,10 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                     </dl>
                   )}
                   {budgetUncapped ? (
-                    <p className="mt-1.5 text-[11px] text-[#8C7A6B]">{msg("submit.budget.uncapped_short")}</p>
+                    <p className="text-xs text-muted-foreground">{msg("submit.budget.uncapped_short")}</p>
                   ) : (
                     maxCostCredits != null && (
-                      <p className="mt-1.5 text-[11px] text-[#8C7A6B]">
+                      <p className="text-xs text-muted-foreground">
                         {formatMsg("submit.summary.estimate_capped", {
                           cap: formatCredits(maxCostCredits, locale),
                         })}
