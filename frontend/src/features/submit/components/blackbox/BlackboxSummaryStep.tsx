@@ -141,8 +141,6 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
     optimizationFamily,
     costBracket,
     tokenSource,
-    maxCostCredits,
-    budgetUncapped,
   } = w;
 
   const locale = getActiveIntlLocale();
@@ -175,7 +173,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
     },
     {
       id: "cases",
-      label: msg("submit.blackbox.cases.title"),
+      label: msg("submit.stage.evaluation"),
       icon: <Database className="size-3.5" />,
     },
     {
@@ -304,7 +302,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                 <div className="space-y-4">
                   <Row
                     icon={<FileText className="size-3.5" />}
-                    label={msg("submit.blackbox.cases.title")}
+                    label={msg("submit.stage.evaluation")}
                     tipText={tip("submit.blackbox.review_cases")}
                   >
                     {parsedCases
@@ -500,21 +498,10 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       ).map(([label, amount]) => (
                         <div key={label}>
                           <dt>{msg(label)}</dt>
-                          <dd dir="auto">{formatBudgetAmount(amount, locale)}</dd>
+                          <dd dir="auto" className="underline underline-offset-2">{formatBudgetAmount(amount, locale)}</dd>
                         </div>
                       ))}
                     </dl>
-                  )}
-                  {budgetUncapped ? (
-                    <p className="text-xs text-muted-foreground">{msg("submit.budget.uncapped_short")}</p>
-                  ) : (
-                    maxCostCredits != null && (
-                      <p className="text-xs text-muted-foreground">
-                        {formatMsg("submit.summary.estimate_capped", {
-                          cap: formatCredits(maxCostCredits, locale),
-                        })}
-                      </p>
-                    )
                   )}
                 </div>
               )}
