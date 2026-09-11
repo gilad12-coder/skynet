@@ -239,7 +239,6 @@ export function ValidationFrame({
       ? phaseForCheck(failedCheck.key, thrown)
       : current
     : null;
-  const elapsed = duration((state.finishedAt ?? now) - state.startedAt);
   const score = response?.scorer_result?.score ?? undefined;
 
   // A phase can appear twice (a run resumed after usage settled reports its
@@ -346,13 +345,6 @@ export function ValidationFrame({
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.75rem]">{title}</h2>
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-0.5 text-xs tabular-nums text-muted-foreground"
-              dir="ltr"
-            >
-              <Clock className="size-3.5" aria-hidden="true" />
-              {elapsed}
-            </span>
             <AnimatePresence initial={false}>
               {showEta && (
                 <motion.span
