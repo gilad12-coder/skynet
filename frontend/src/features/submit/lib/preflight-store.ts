@@ -81,6 +81,9 @@ export interface PreflightBudgetSession {
   readonly draft: { executionBudgetRef?: { id: string; revision: number } };
   ensure(): Promise<ExecutionBudget>;
   adopt(budget: ExecutionBudget): Promise<void>;
+  // Optional: a session that persists carries a pass with its budget so a
+  // restored draft can reuse it; one without it just keeps the pass in memory.
+  recordEvidence?(scope: PreflightScope, evidence: StoredPreflightEvidence): Promise<void>;
 }
 
 export interface PreflightStoreDependencies {
@@ -153,6 +156,28 @@ export class PreflightStore {
 
   detach(workflow: PreflightWorkflow, session: PreflightBudgetSession): void {
     if (this.attached.get(workflow) === session) this.attached.delete(workflow);
+  }
+
+  /**
+   * Rehydrate passed evidence carried with a restored draft. Only fills a scope
+   * that has nothing in memory, so a fresher in-session check is never displaced;
+   * reuse still runs through `reusable`, which re-checks identity and budget.
+   */
+  seed(
+    workflow: PreflightWorkflow,
+    evidence: Partial<Record<PreflightScope, StoredPreflightEvidence>> | undefined,
+  ): void {
+    if (!evidence) return;
+    this.update(workflow, (state) => {
+      let next = state.evidence;
+      for (const scope of Object.keys(evidence) as PreflightScope[]) {
+        const stored = evidence[scope];
+        if (!stored || next[scope]) continue;
+        if (next === state.evidence) next = { ...state.evidence };
+        next[scope] = stored;
+      }
+      return next === state.evidence ? state : { ...state, evidence: next };
+    });
   }
 
   reusable(
@@ -242,6 +267,8 @@ export class PreflightStore {
         ...state,
         evidence: { ...state.evidence, [scope]: { identity, response } },
       }));
+      if (response.status === "succeeded" && response.may_advance)
+        await this.persistEvidence(session, scope, { identity, response });
       this.finish(workflow, response.status, undefined, response);
       return response;
     })();
@@ -389,6 +416,19 @@ export class PreflightStore {
       progress.identity === identity
     ) {
       this.clear(workflow);
+    }
+  }
+
+  /** Carry a pass to the draft; a wizard that has already left is fine -- the server keeps it. */
+  private async persistEvidence(
+    session: PreflightBudgetSession,
+    scope: PreflightScope,
+    evidence: StoredPreflightEvidence,
+  ): Promise<void> {
+    try {
+      await session.recordEvidence?.(scope, evidence);
+    } catch (failure) {
+      if (!isAbortError(failure)) throw failure;
     }
   }
 

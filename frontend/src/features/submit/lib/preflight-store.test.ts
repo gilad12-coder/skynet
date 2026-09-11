@@ -2,11 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExecutionBudget } from "../../../shared/types/execution-budget.ts";
 import type {
+  PreflightScope,
   WizardPreflightPayload,
   WizardPreflightRequest,
   WizardPreflightResponse,
 } from "../../../shared/types/wizard-preflight.ts";
-import { reusableSuccessfulPreflight, reusableTerminalPreflight } from "./preflight-outcome.ts";
+import {
+  reusableSuccessfulPreflight,
+  reusableTerminalPreflight,
+  type StoredPreflightEvidence,
+} from "./preflight-outcome.ts";
 import {
   PreflightStore,
   type PreflightBudgetSession,
@@ -39,14 +44,22 @@ const failed = (b = budget()): WizardPreflightResponse =>
     budget: b,
   }) as WizardPreflightResponse;
 
-const session = (id = "budget"): PreflightBudgetSession & { adopted: ExecutionBudget[] } => {
+type RecordedEvidence = { scope: PreflightScope; evidence: StoredPreflightEvidence };
+const session = (
+  id = "budget",
+): PreflightBudgetSession & { adopted: ExecutionBudget[]; recorded: RecordedEvidence[] } => {
   const adopted: ExecutionBudget[] = [];
+  const recorded: RecordedEvidence[] = [];
   return {
     draft: { executionBudgetRef: { id, revision: 1 } },
     adopted,
+    recorded,
     ensure: async () => budget(id),
     adopt: async (b) => {
       adopted.push(b);
+    },
+    recordEvidence: async (scope, evidence) => {
+      recorded.push({ scope, evidence });
     },
   };
 };
@@ -160,6 +173,51 @@ test("a confirmed failure is served from evidence instead of being re-checked", 
   // A new budget cannot claim the old evidence and checks afresh.
   await store.run("anything", "evaluation", payload, session("other"));
   assert.equal(calls, 2);
+});
+
+test("a passed check is carried to the draft; a failure is not", async () => {
+  let outcome = succeeded();
+  const store = build(async () => outcome);
+
+  const pass = session();
+  await store.run("dspy", "execution", payload, pass);
+  assert.equal(pass.recorded.length, 1);
+  assert.equal(pass.recorded[0].scope, "execution");
+  assert.equal(pass.recorded[0].evidence.response.status, "succeeded");
+
+  outcome = failed();
+  const fail = session();
+  await store.run("dspy", "evaluation", payload, fail);
+  assert.equal(fail.recorded.length, 0);
+});
+
+test("seeded evidence rehydrates a pass and is reused without a check", async () => {
+  let calls = 0;
+  const store = build(async () => {
+    calls += 1;
+    return succeeded();
+  });
+  const identity = preflightIdentity("dspy", payload);
+  store.seed("dspy", { execution: { identity, response: succeeded() } });
+  assert.ok(store.reusable("dspy", "execution", identity, "budget"));
+
+  const response = await store.run("dspy", "execution", payload, session());
+  assert.equal(response.status, "succeeded");
+  assert.equal(calls, 0);
+});
+
+test("seed keeps a fresher in-session pass and fills only empty scopes", async () => {
+  const store = build(async () => succeeded());
+  await store.run("dspy", "execution", payload, session());
+  const live = store.getState("dspy").evidence.execution!;
+
+  store.seed("dspy", {
+    execution: { identity: "stale", response: succeeded() },
+    evaluation: { identity: "seeded", response: succeeded() },
+  });
+
+  assert.equal(store.getState("dspy").evidence.execution, live);
+  assert.equal(store.getState("dspy").evidence.evaluation!.identity, "seeded");
 });
 
 test("the progress timeline moves through phases and finishes once", () => {

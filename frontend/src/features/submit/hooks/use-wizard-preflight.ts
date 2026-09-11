@@ -82,6 +82,9 @@ export function useWizardPreflight(
   useEffect(() => {
     mounted.current = true;
     store.attach(workflow, budget);
+    // A restored draft carries the passes it last acknowledged; seed them so a
+    // returning setup shows verified at once instead of re-running the check.
+    store.seed(workflow, budget.draft.preflightEvidence);
     return () => {
       mounted.current = false;
       store.detach(workflow, budget);
