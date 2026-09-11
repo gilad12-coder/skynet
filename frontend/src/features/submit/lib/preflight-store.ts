@@ -18,7 +18,11 @@ import type {
   WizardPreflightRequest,
   WizardPreflightResponse,
 } from "@/shared/types/wizard-preflight";
-import type { reusableSuccessfulPreflight, StoredPreflightEvidence } from "./preflight-outcome";
+import type {
+  reusableSuccessfulPreflight,
+  reusableTerminalPreflight,
+  StoredPreflightEvidence,
+} from "./preflight-outcome";
 import type { preflightIdentity } from "./validation-evidence";
 import type { waitForPreflightUsage } from "./wait-for-preflight-usage";
 
@@ -89,6 +93,7 @@ export interface PreflightStoreDependencies {
   translate(key: string): string;
   identity: typeof preflightIdentity;
   reusable: typeof reusableSuccessfulPreflight;
+  reusableTerminal: typeof reusableTerminalPreflight;
   settleUsage: typeof waitForPreflightUsage;
   now?: () => number;
   wait?: (signal?: AbortSignal) => Promise<void>;
@@ -156,8 +161,17 @@ export class PreflightStore {
     identity: string,
     budgetId: string | undefined,
   ): WizardPreflightResponse | null {
-    const response = this.deps.reusable(this.getState(workflow).evidence, scope, identity);
-    // Evidence is claimed against one budget; a new budget needs its own.
+    return this.forBudget(
+      this.deps.reusable(this.getState(workflow).evidence, scope, identity),
+      budgetId,
+    );
+  }
+
+  /** Evidence is claimed against one budget; a new budget needs its own. */
+  private forBudget(
+    response: WizardPreflightResponse | null,
+    budgetId: string | undefined,
+  ): WizardPreflightResponse | null {
     return response && budgetId && response.budget.id === budgetId ? response : null;
   }
 
@@ -168,13 +182,14 @@ export class PreflightStore {
     session: PreflightBudgetSession,
   ): Promise<WizardPreflightResponse> {
     const identity = this.deps.identity(workflow, payload);
-    const completed = this.reusable(
-      workflow,
-      scope,
-      identity,
+    // A config already settled -- passed, or confirmed to fail -- is served from
+    // evidence, never checked a second time. A pass advances; a failure stays a
+    // failure, shown without another round-trip through "Checking your setup".
+    const reused = this.forBudget(
+      this.deps.reusableTerminal(this.getState(workflow).evidence, scope, identity),
       session.draft.executionBudgetRef?.id,
     );
-    if (completed) return Promise.resolve(completed);
+    if (reused) return Promise.resolve(reused);
 
     const key = `${workflow}:${scope}:${identity}`;
     const inFlight = this.runs.get(key);

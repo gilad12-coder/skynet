@@ -13,6 +13,7 @@ import type {
 import type { ExecutionBudgetSession } from "../lib/execution-budget-session";
 import {
   reusableSuccessfulPreflight,
+  reusableTerminalPreflight,
   type StoredPreflightEvidence,
 } from "../lib/preflight-outcome";
 import {
@@ -37,6 +38,7 @@ const store = new PreflightStore({
   translate: (key) => msg(key as MessageKey),
   identity: preflightIdentity,
   reusable: reusableSuccessfulPreflight,
+  reusableTerminal: reusableTerminalPreflight,
   settleUsage: waitForPreflightUsage,
 });
 

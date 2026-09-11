@@ -19,6 +19,23 @@ export function reusableSuccessfulPreflight(
     : null;
 }
 
+/**
+ * Reuse a settled outcome -- a pass that may advance, or a confirmed failure --
+ * for the same scope and input identity, so a config already checked is not
+ * checked again. A pending result is never reused: it is still waiting on
+ * something a fresh run may resolve.
+ */
+export function reusableTerminalPreflight(
+  evidence: Partial<Record<PreflightScope, StoredPreflightEvidence>>,
+  scope: PreflightScope,
+  identity: string,
+): WizardPreflightResponse | null {
+  const candidate = evidence[scope];
+  if (candidate?.identity !== identity) return null;
+  if (candidate.response.status === "failed") return candidate.response;
+  return reusableSuccessfulPreflight(evidence, scope, identity);
+}
+
 /** Advance only on server-attested success or the one safe later-stage dependency. */
 export function preflightMayAdvance(
   response: WizardPreflightResponse,

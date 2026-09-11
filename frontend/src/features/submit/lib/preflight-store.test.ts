@@ -6,7 +6,7 @@ import type {
   WizardPreflightRequest,
   WizardPreflightResponse,
 } from "../../../shared/types/wizard-preflight.ts";
-import { reusableSuccessfulPreflight } from "./preflight-outcome.ts";
+import { reusableSuccessfulPreflight, reusableTerminalPreflight } from "./preflight-outcome.ts";
 import {
   PreflightStore,
   type PreflightBudgetSession,
@@ -26,6 +26,16 @@ const succeeded = (b = budget()): WizardPreflightResponse =>
     status: "succeeded",
     may_advance: true,
     checks: [],
+    budget: b,
+  }) as WizardPreflightResponse;
+
+const failed = (b = budget()): WizardPreflightResponse =>
+  ({
+    id: "evidence",
+    fingerprint: "f",
+    status: "failed",
+    may_advance: false,
+    checks: [{ key: "setup", status: "failed", message: "bad setup" }],
     budget: b,
   }) as WizardPreflightResponse;
 
@@ -68,6 +78,7 @@ function build(
     translate: (key) => `t:${key}`,
     identity: preflightIdentity,
     reusable: reusableSuccessfulPreflight,
+    reusableTerminal: reusableTerminalPreflight,
     settleUsage: waitForPreflightUsage,
     now: () => (clock += 1),
     wait: immediate,
@@ -121,6 +132,33 @@ test("evidence outlives the wizard and is reused for the same budget only", asyn
   await store.run("dspy", "execution", payload, again);
   assert.equal(calls, 1);
   await store.run("dspy", "execution", payload, session("other"));
+  assert.equal(calls, 2);
+});
+
+test("a confirmed failure is served from evidence instead of being re-checked", async () => {
+  let calls = 0;
+  const store = build(async () => {
+    calls += 1;
+    return failed();
+  });
+  const s = session();
+  store.attach("anything", s);
+
+  const first = await store.run("anything", "evaluation", payload, s);
+  assert.equal(first.status, "failed");
+  assert.equal(calls, 1);
+
+  const identity = store.getState("anything").evidence.evaluation!.identity;
+  // A failure blocks advancing, so it is never offered as a reusable pass...
+  assert.equal(store.reusable("anything", "evaluation", identity, "budget"), null);
+
+  // ...but the same config comes straight from evidence, not a second check.
+  const again = await store.run("anything", "evaluation", payload, s);
+  assert.equal(again, first);
+  assert.equal(calls, 1);
+
+  // A new budget cannot claim the old evidence and checks afresh.
+  await store.run("anything", "evaluation", payload, session("other"));
   assert.equal(calls, 2);
 });
 

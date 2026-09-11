@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { WizardPreflightResponse } from "@/shared/types/wizard-preflight";
+import type { PreflightScope, WizardPreflightResponse } from "@/shared/types/wizard-preflight";
 import {
   preflightMayAdvance,
   preflightPendingMessageKey,
   reusableSuccessfulPreflight,
+  reusableTerminalPreflight,
 } from "./preflight-outcome.ts";
 
 const budget = {
@@ -64,6 +65,23 @@ test("only matching completed success is reused before another request", () => {
     ),
     null,
   );
+});
+
+test("a settled outcome is reusable for the same config; a pending one is not", () => {
+  const succeeded = response("succeeded", true);
+  const failed = response("failed", false);
+  const pending = response("pending", false, "usage_reconciliation");
+  const terminal = (
+    stored: WizardPreflightResponse,
+    scope: PreflightScope,
+    identity: string,
+  ) => reusableTerminalPreflight({ execution: { identity: "current", response: stored } }, scope, identity);
+
+  assert.equal(terminal(succeeded, "execution", "current"), succeeded);
+  assert.equal(terminal(failed, "execution", "current"), failed);
+  assert.equal(terminal(pending, "execution", "current"), null);
+  assert.equal(terminal(failed, "execution", "changed"), null);
+  assert.equal(terminal(failed, "evaluation", "current"), null);
 });
 
 test("only an explicit evaluation dependency can advance while pending", () => {
