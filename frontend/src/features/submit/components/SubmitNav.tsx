@@ -1,6 +1,7 @@
 "use client";
 
 import { CaretLeft, CaretRight, CaretDown, CircleNotch } from "@/shared/ui/icons";
+import { motion, useReducedMotion } from "framer-motion";
 import { Button } from "@/shared/ui/primitives/button";
 import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
@@ -40,6 +41,7 @@ export function SubmitNav({
   backDisabled,
   showSubmit,
 }: SubmitNavProps) {
+  const reducedMotion = useReducedMotion();
   const {
     step,
     goPrev,
@@ -97,7 +99,7 @@ export function SubmitNav({
   }
 
   return (
-    <button
+    <motion.button
       type="button"
       onClick={onSubmit ?? handleSubmit}
       disabled={submitting || advancing || runDisabledReason !== null}
@@ -106,22 +108,19 @@ export function SubmitNav({
       title={runDisabledReason ?? undefined}
       data-tutorial="submit-button"
       data-telemetry="submit-run"
-      className="group relative w-full cursor-pointer overflow-hidden rounded-2xl bg-primary px-6 py-5 text-base font-semibold text-primary-foreground shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12),0_10px_22px_-12px_rgba(61,46,34,0.5)] outline-none transition-[transform,box-shadow] duration-200 ease-out enabled:hover:-translate-y-0.5 enabled:hover:shadow-[inset_0_1px_0_0_rgba(255,255,255,0.16),0_18px_32px_-12px_rgba(61,46,34,0.58)] enabled:active:translate-y-0 enabled:active:scale-[0.98] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
+      animate={runDisabledReason || reducedMotion ? { scale: 1 } : { scale: [1, 1.01, 1] }}
+      transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
+      className="group relative w-full rounded-2xl bg-primary text-primary-foreground font-semibold text-base pt-5 pb-7 cursor-pointer transition-all duration-300 hover:shadow-[0_0_30px_rgba(61,46,34,0.35)] hover:scale-[1.01] active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
     >
-      {/* A soft top-down sheen lifts the flat fill into a tactile surface. */}
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/10 to-transparent"
-      />
       {submitting || advancing ? (
-        <span className="relative flex items-center justify-center gap-2">
+        <span className="flex items-center justify-center gap-2">
           <CircleNotch className="size-5 animate-spin motion-reduce:animate-none" />
           {advancing
             ? msg("submit.nav.validating")
             : msg("auto.features.submit.components.submitnav.3")}
         </span>
       ) : (
-        <div className="relative flex flex-col items-center gap-2">
+        <div className="flex flex-col items-center gap-4">
           <span className="flex flex-col items-center gap-1">
             <span>
               {msg("auto.features.submit.components.submitnav.4")}
@@ -133,16 +132,13 @@ export function SubmitNav({
               </span>
             )}
           </span>
-          <div
-            aria-hidden="true"
-            className="flex flex-col items-center -space-y-2 text-primary-foreground/60 transition-colors duration-200 group-hover:text-primary-foreground [&>svg]:animate-[cascadeDown_1.4s_ease-in-out_infinite] group-hover:[&>svg]:animate-[cascadeDownHyper_0.6s_ease-out_infinite] motion-reduce:[&>svg]:animate-none motion-reduce:group-hover:[&>svg]:animate-none"
-          >
-            <CaretDown className="size-4 [animation-delay:0s]" />
-            <CaretDown className="size-4 [animation-delay:0.18s] group-hover:[animation-delay:0.1s]" />
-            <CaretDown className="size-4 [animation-delay:0.36s] group-hover:[animation-delay:0.2s]" />
+          <div className="flex flex-col items-center -space-y-7 h-0 overflow-visible opacity-70 group-hover:opacity-100 transition-opacity duration-200 [&>svg]:animate-[cascadeDown_1s_ease-in-out_infinite] group-hover:[&>svg]:animate-[cascadeDownHyper_0.5s_ease-out_infinite] motion-reduce:[&>svg]:animate-none motion-reduce:group-hover:[&>svg]:animate-none">
+            <CaretDown className="size-10 [animation-delay:0s] group-hover:[animation-delay:0s]" />
+            <CaretDown className="size-10 [animation-delay:0.15s] group-hover:[animation-delay:0.08s]" />
+            <CaretDown className="size-10 [animation-delay:0.3s] group-hover:[animation-delay:0.16s]" />
           </div>
         </div>
       )}
-    </button>
+    </motion.button>
   );
 }
