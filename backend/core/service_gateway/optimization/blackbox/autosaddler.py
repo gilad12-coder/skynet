@@ -18,7 +18,7 @@ import logging
 import random
 from typing import Any
 
-from ....exceptions import ServiceError
+from ....exceptions import InfrastructureInterruptionError, ServiceError
 from ..budget_stop import BudgetReached
 from .feedback import emit_candidate, emit_scorer_feedback, scorer_feedback_text
 from .protocol import (
@@ -106,7 +106,17 @@ class AutoSaddlerEngine:
                 batch_rows = self._score_rows(server, incumbent, batch, cache, ctx, case_ids, iteration)
                 failures = sorted(batch_rows, key=lambda row: row[1])[:_MAX_FEEDBACK_CASES]
 
-                proposal, diagnosis = _diagnose_patch(ctx, incumbent, failures, task, lessons)
+                try:
+                    proposal, diagnosis = _diagnose_patch(ctx, incumbent, failures, task, lessons)
+                except InfrastructureInterruptionError:
+                    # A transient transport blip on the reflection call must not sink the
+                    # whole run: skip this round and keep the incumbent, mirroring GEPA's
+                    # graceful degradation so the seed is still returned.
+                    logger.info(
+                        "AutoSaddler reflection interrupted at iteration %d; skipping the round.",
+                        iteration,
+                    )
+                    continue
                 if proposal is None or proposal == incumbent:
                     continue
 

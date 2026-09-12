@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from core.exceptions import ServiceError
+from core.exceptions import InfrastructureInterruptionError, ServiceError
 
 from ...budget_stop import BudgetReached
 from ..autosaddler import AutoSaddlerEngine
@@ -212,3 +212,38 @@ def test_autosaddler_budget_stop_during_seed_scoring_reports_the_seed(tmp_path: 
     assert exc.result is not None
     assert exc.result.best_candidate == "bcd"
     assert exc.result.best_score is None
+
+
+def test_autosaddler_survives_a_reflection_transport_failure(tmp_path: Path) -> None:
+    """Skip the diagnosis rounds whose reflection call is interrupted, keeping the seed."""
+
+    class _InterruptedLM:
+        """Reflection model whose every patch call trips the trusted transport."""
+
+        def __init__(self) -> None:
+            """Start with no calls recorded."""
+            self.calls = 0
+
+        def __call__(self, prompt: str) -> str:
+            """Fail every reflection with a transport interruption.
+
+            Args:
+                prompt: The engine's patch instruction (unused).
+
+            Raises:
+                InfrastructureInterruptionError: On every call.
+            """
+            self.calls += 1
+            raise InfrastructureInterruptionError("The trusted parent model transport was interrupted.")
+
+    lm = _InterruptedLM()
+    server = EvalServer(vowel_scorer, max_evals=50)
+    task = Task(seed_candidate="bcd", train_set=[{"id": "t"}], val_set=[{"id": "a"}])
+
+    result = AutoSaddlerEngine().run(task, server, _ctx(tmp_path, lm, max_iterations=2))
+
+    assert result.best_candidate == "bcd"
+    assert result.best_score == 0.0
+    assert result.metadata["iterations"] == 2
+    assert result.metadata["accepted"] == 0
+    assert lm.calls >= 1
