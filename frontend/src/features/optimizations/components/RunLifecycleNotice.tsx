@@ -158,6 +158,10 @@ export function RunLifecycleNotice({
   );
 
   if (!budgetStop && !budgetPause && !recovery && !budget) return null;
+  // An unavailable recovery attempt has nothing to act on, so its notice — and
+  // the budget recap that rode with it — is dropped; live runs and budget
+  // stops/pauses still surface on their own.
+  if (!budgetStop && !budgetPause && recovery && recoveryState === "unavailable") return null;
   const [titleKey, bodyKey] = recovery ? RECOVERY_COPY[recoveryState] : RECOVERY_COPY.unavailable;
   const budgetHalt = budgetStop || budgetPause;
   const recovering = !budgetHalt && recoveryState === "recovering";
