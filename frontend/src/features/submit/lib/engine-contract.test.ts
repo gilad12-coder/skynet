@@ -11,7 +11,7 @@ import {
 const catalog: BlackboxEngineCatalogResponse = {
   target_kind: "text",
   sandbox_available: true,
-  auto_engines: ["gepa", "autoresearch", "meta_harness"],
+  auto_engines: ["gepa", "autoresearch", "meta_harness", "autosaddler"],
   auto_available: true,
   auto_unavailable_reason: null,
   auto_checkpoint_recovery_supported: false,

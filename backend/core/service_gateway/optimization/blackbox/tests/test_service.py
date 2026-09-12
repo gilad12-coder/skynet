@@ -211,10 +211,10 @@ def test_run_scores_baseline_and_optimized_on_the_holdout(fake_lm: FakeReflectio
 def test_auto_run_hands_off_between_engines(
     fake_lm: FakeReflectionLM, tmp_path: Path, fake_native_proposers: list[tuple[str, EngineContext]]
 ) -> None:
-    """Run the exact upstream three-engine exploration recipe before GEPA continuation.
+    """Run every upstream exploration lane before the GEPA continuation.
 
     Args:
-        fake_lm: Metered model fake used by the real GEPA implementation.
+        fake_lm: Metered model fake used by the real in-process implementations.
         tmp_path: Per-test artifact directory.
         fake_native_proposers: Captured native invocations without paid model calls.
     """
@@ -229,10 +229,11 @@ def test_auto_run_hands_off_between_engines(
 
     assert response.optimizer_name == "auto"
     assert response.strategy_mode == "auto"
-    assert {(lane.engine, lane.phase) for lane in response.lanes[:3]} == {
+    assert {(lane.engine, lane.phase) for lane in response.lanes[:4]} == {
         ("gepa", "explore"),
         ("autoresearch", "explore"),
         ("meta_harness", "explore"),
+        ("autosaddler", "explore"),
     }
     assert (response.lanes[-1].engine, response.lanes[-1].phase) == ("gepa", "continue")
     assert response.engine_used == "gepa"

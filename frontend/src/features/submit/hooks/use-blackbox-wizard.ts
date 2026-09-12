@@ -1257,7 +1257,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             "submit.blackbox.validation.reflection_model_required",
             "bb-optimization-model",
           );
-        if (strategyMode === "auto" && maxScorerRuns < 4)
+        if (strategyMode === "auto" && maxScorerRuns < 5)
           return fail("submit.blackbox.validation.auto_budget", "bb-max-runs");
         if (maxScorerRuns < 1)
           return fail("submit.blackbox.validation.budget_required", "bb-max-runs");

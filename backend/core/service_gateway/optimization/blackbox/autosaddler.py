@@ -307,7 +307,7 @@ def _select_batch(cases: list[Any], iteration: int, seed: int) -> list[Any]:
     """
     if len(cases) <= _BATCH_SIZE:
         return list(cases)
-    return random.Random((seed, iteration)).sample(cases, _BATCH_SIZE)
+    return random.Random(hash((seed, iteration))).sample(cases, _BATCH_SIZE)
 
 
 def _diagnose_patch(

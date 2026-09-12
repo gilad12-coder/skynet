@@ -266,12 +266,12 @@ export function BlackboxOptimizerStep({
                 id="bb-max-runs"
                 value={maxScorerRuns}
                 onChange={setMaxScorerRuns}
-                min={strategyMode === "auto" ? 4 : 1}
+                min={strategyMode === "auto" ? 5 : 1}
                 max={100000}
                 step={10}
                 className={MOBILE_NUMBER_INPUT_CLASS}
               />
-              {strategyMode === "auto" && maxScorerRuns < 4 && (
+              {strategyMode === "auto" && maxScorerRuns < 5 && (
                 <p className="text-xs text-amber-700" role="status">
                   {msg("submit.blackbox.validation.auto_budget")}
                 </p>
