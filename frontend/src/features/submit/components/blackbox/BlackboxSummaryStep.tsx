@@ -95,16 +95,29 @@ function Note({
   // Start collapsed so long text never flashes full before measurement lands.
   const [overflows, setOverflows] = useState(true);
   const [collapsedHeight, setCollapsedHeight] = useState(DEFAULT_COLLAPSED_NOTE_HEIGHT);
+  const [fullHeight, setFullHeight] = useState<number>();
 
+  // Measure both heights in pixels (and keep them fresh on reflow) so the
+  // toggle animates number-to-number in both directions. framer-motion snaps
+  // instead of animating when a height transition starts from the "auto"
+  // keyword, so the expanded state must be an explicit pixel height too.
   useIsomorphicLayoutEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
-    const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
-    const collapsed = Number.isFinite(lineHeight)
-      ? lineHeight * COLLAPSED_NOTE_LINES
-      : DEFAULT_COLLAPSED_NOTE_HEIGHT;
-    setCollapsedHeight(collapsed);
-    setOverflows(el.scrollHeight > collapsed + 1);
+    const measure = () => {
+      const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
+      const collapsed = Number.isFinite(lineHeight)
+        ? lineHeight * COLLAPSED_NOTE_LINES
+        : DEFAULT_COLLAPSED_NOTE_HEIGHT;
+      setCollapsedHeight(collapsed);
+      setFullHeight(el.scrollHeight);
+      setOverflows(el.scrollHeight > collapsed + 1);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [children]);
 
   const clamped = overflows && !expanded;
@@ -119,7 +132,7 @@ function Note({
       </HelpTip>
       <motion.div
         initial={false}
-        animate={{ height: clamped ? collapsedHeight : "auto" }}
+        animate={{ height: clamped ? collapsedHeight : (fullHeight ?? "auto") }}
         // The initial collapse (measurement landing) is instant; only real toggles animate.
         transition={{ duration: reducedMotion || !interacted ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
         className="overflow-hidden"
