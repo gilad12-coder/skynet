@@ -2099,7 +2099,7 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     assert text.json()["target_kind"] == "text"
     assert text.json()["sandbox_available"] is True
     by_id = {engine["id"]: engine for engine in text.json()["engines"]}
-    assert list(by_id) == ["gepa", "best_of_n", "autoresearch", "meta_harness"]
+    assert list(by_id) == ["gepa", "best_of_n", "autoresearch", "meta_harness", "autosaddler"]
     assert by_id["gepa"]["available"] is True
     assert by_id["gepa"]["supports_parts"] is True
     assert by_id["gepa"]["checkpoint_recovery_supported"] is True

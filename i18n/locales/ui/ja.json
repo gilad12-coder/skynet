@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "評価のフィードバックを使って、より良いプロンプトやコードを提案します。",
   "submit.blackbox.roles.optimization.desc.meta_harness": "以前のコード、スコア、実行トレースを調べて、改善した harness を提案します。",
   "submit.blackbox.roles.optimization.desc.autoresearch": "選択した AutoResearch エンジンの実験提案を駆動します。",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "評価のフィードバックから最も弱いケースを診断し、バージョンを書き直して、検証済みの改善のみを残します。",
   "submit.blackbox.roles.optimization.also_scoring": "評価ステージで別のスコアリングモデルを選ばない限り、別々のスコアリング呼び出しで採点も行います。",
   "submit.blackbox.roles.scoring.label": "評価モデル",
   "submit.blackbox.roles.scoring.inherited": "最適化と同じ",

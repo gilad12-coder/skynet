@@ -580,6 +580,7 @@ def test_unavailable_native_recipe_fails_before_building_a_scorer(
         ({"mode": "single", "engine": "meta_harness"}, True),
         ({"mode": "single", "engine": "gepa"}, False),
         ({"mode": "single", "engine": "autoresearch"}, False),
+        ({"mode": "single", "engine": "autosaddler"}, False),
     ],
 )
 def test_empty_training_split_rejected_only_for_meta_harness_recipes(

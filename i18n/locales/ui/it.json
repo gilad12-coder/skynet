@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "Usa il feedback della valutazione per proporre prompt o codice migliori.",
   "submit.blackbox.roles.optimization.desc.meta_harness": "Esamina codice, punteggi e tracce di esecuzione precedenti per proporre harness migliorati.",
   "submit.blackbox.roles.optimization.desc.autoresearch": "Guida le proposte di esperimenti del motore AutoResearch selezionato.",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "Diagnostica i casi più deboli dal feedback della valutazione, poi riscrive la versione e mantiene solo i miglioramenti verificati.",
   "submit.blackbox.roles.optimization.also_scoring": "Assegna anche i punteggi, in chiamate di scoring separate, a meno che tu non scelga un altro modello di scoring in Valutazione.",
   "submit.blackbox.roles.scoring.label": "Modello di valutazione",
   "submit.blackbox.roles.scoring.inherited": "Uguale all'ottimizzazione",

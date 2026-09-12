@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "משתמש במשוב מההערכה כדי להציע פרומפטים או קוד טובים יותר.",
   "submit.blackbox.roles.optimization.desc.meta_harness": "בוחן קוד קודם, ציונים ותיעוד ריצות כדי להציע harness משופר.",
   "submit.blackbox.roles.optimization.desc.autoresearch": "מניע את הצעות הניסויים של מנוע ה-AutoResearch שנבחר.",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "מאבחן את המקרים החלשים ביותר לפי משוב ההערכה, משכתב את הגרסה ושומר רק שיפורים מאומתים.",
   "submit.blackbox.roles.optimization.also_scoring": "הוא גם מנקד, בקריאות ניקוד נפרדות, אלא אם תבחרו מודל ניקוד אחר בשלב ההערכה.",
   "submit.blackbox.roles.scoring.label": "מודל ההערכה",
   "submit.blackbox.roles.scoring.inherited": "כמו האופטימיזציה",
