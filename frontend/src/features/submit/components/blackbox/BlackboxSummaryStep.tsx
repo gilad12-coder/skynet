@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   User,
   Code,
@@ -67,7 +67,16 @@ function Row({
   );
 }
 
-/** A long-form field shown as a label above its wrapped, clamped text. */
+const COLLAPSED_NOTE_LINES = 4;
+// text-sm line-height (1.25rem) x four lines; the exact value is measured below.
+const DEFAULT_COLLAPSED_NOTE_HEIGHT = 80;
+
+// The clamp height must be measured before paint so the note renders already
+// collapsed with no full-height flash; useLayoutEffect warns during SSR, so
+// fall back to useEffect off the client.
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+/** A long-form field: a label above its wrapped text, expandable when it overflows four lines. */
 function Note({
   icon,
   label,
@@ -80,16 +89,25 @@ function Note({
   children: ReactNode;
 }) {
   const bodyRef = useRef<HTMLParagraphElement>(null);
+  const reducedMotion = useReducedMotion();
   const [expanded, setExpanded] = useState(false);
-  const [clamped, setClamped] = useState(false);
+  const [interacted, setInteracted] = useState(false);
+  // Start collapsed so long text never flashes full before measurement lands.
+  const [overflows, setOverflows] = useState(true);
+  const [collapsedHeight, setCollapsedHeight] = useState(DEFAULT_COLLAPSED_NOTE_HEIGHT);
 
-  // Only offer the toggle when the text actually overflows the four-line clamp,
-  // measured while collapsed so the affordance survives expansion.
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const el = bodyRef.current;
-    if (!el || expanded) return;
-    setClamped(el.scrollHeight > el.clientHeight + 1);
-  }, [children, expanded]);
+    if (!el) return;
+    const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
+    const collapsed = Number.isFinite(lineHeight)
+      ? lineHeight * COLLAPSED_NOTE_LINES
+      : DEFAULT_COLLAPSED_NOTE_HEIGHT;
+    setCollapsedHeight(collapsed);
+    setOverflows(el.scrollHeight > collapsed + 1);
+  }, [children]);
+
+  const clamped = overflows && !expanded;
 
   return (
     <div className="space-y-1.5 border-b border-border/40 py-2.5">
@@ -99,17 +117,24 @@ function Note({
           {label}
         </span>
       </HelpTip>
-      <p
-        ref={bodyRef}
-        className={cn("whitespace-pre-wrap text-sm text-foreground", !expanded && "line-clamp-4")}
-        dir="auto"
+      <motion.div
+        initial={false}
+        animate={{ height: clamped ? collapsedHeight : "auto" }}
+        // The initial collapse (measurement landing) is instant; only real toggles animate.
+        transition={{ duration: reducedMotion || !interacted ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
+        className="overflow-hidden"
       >
-        {children}
-      </p>
-      {clamped && (
+        <p ref={bodyRef} className="whitespace-pre-wrap text-sm text-foreground" dir="auto">
+          {children}
+        </p>
+      </motion.div>
+      {overflows && (
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => {
+            setInteracted(true);
+            setExpanded((v) => !v);
+          }}
           className="text-xs font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
         >
           {msg(expanded ? "shared.expandable_textarea.collapse" : "shared.expandable_textarea.expand")}
