@@ -445,6 +445,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                     <Row
                       icon={<Wrench className="size-3.5" />}
                       label={msg("submit.blackbox.review.execution")}
+                      tipText={tip("submit.blackbox.harness")}
                     >
                       {harnessLabel(harness)}
                     </Row>
