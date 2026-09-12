@@ -3425,7 +3425,7 @@
   "submit.blackbox.optimizer.desc": "How to search, how much to spend and when to stop.",
   "submit.blackbox.optimizer.model_title": "Model and limits",
   "submit.blackbox.strategy.auto": "Auto",
-  "submit.blackbox.strategy.auto_desc": "GEPA, AutoResearch and Meta-Harness explore; the leader continues",
+  "submit.blackbox.strategy.auto_desc": "GEPA, AutoResearch, Meta-Harness and AutoSaddler explore; the leader continues",
   "submit.blackbox.strategy.single": "Single engine",
   "submit.blackbox.strategy.single_desc": "The whole budget goes to one engine",
   "submit.blackbox.engines.label": "Engines",

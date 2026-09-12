@@ -2691,7 +2691,7 @@
   "submit.blackbox.step.split": "חלוקה",
   "submit.blackbox.step.start": "נקודת התחלה",
   "submit.blackbox.strategy.auto": "אוטומטי",
-  "submit.blackbox.strategy.auto_desc": "GEPA, AutoResearch ו-Meta-Harness בוחנים הצעות; המוביל ממשיך",
+  "submit.blackbox.strategy.auto_desc": "GEPA, AutoResearch, Meta-Harness ו-AutoSaddler בוחנים הצעות; המוביל ממשיך",
   "submit.blackbox.strategy.single": "מנוע אחד",
   "submit.blackbox.strategy.single_desc": "כל התקציב למנוע שבוחרים",
   "submit.blackbox.validation.agent_model_required": "בחרו מודל לסוכן",
