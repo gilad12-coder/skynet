@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -79,6 +79,18 @@ function Note({
   tipText: string;
   children: ReactNode;
 }) {
+  const bodyRef = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+
+  // Only offer the toggle when the text actually overflows the four-line clamp,
+  // measured while collapsed so the affordance survives expansion.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el || expanded) return;
+    setClamped(el.scrollHeight > el.clientHeight + 1);
+  }, [children, expanded]);
+
   return (
     <div className="space-y-1.5 border-b border-border/40 py-2.5">
       <HelpTip text={tipText}>
@@ -87,9 +99,22 @@ function Note({
           {label}
         </span>
       </HelpTip>
-      <p className="line-clamp-4 whitespace-pre-wrap text-sm text-foreground" dir="auto">
+      <p
+        ref={bodyRef}
+        className={cn("whitespace-pre-wrap text-sm text-foreground", !expanded && "line-clamp-4")}
+        dir="auto"
+      >
         {children}
       </p>
+      {clamped && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="text-xs font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+        >
+          {msg(expanded ? "shared.expandable_textarea.collapse" : "shared.expandable_textarea.expand")}
+        </button>
+      )}
     </div>
   );
 }
