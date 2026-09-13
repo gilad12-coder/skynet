@@ -25,6 +25,7 @@ BLACKBOX_ENGINE_GEPA = "gepa"
 BLACKBOX_ENGINE_BEST_OF_N = "best_of_n"
 BLACKBOX_ENGINE_AUTORESEARCH = "autoresearch"
 BLACKBOX_ENGINE_META_HARNESS = "meta_harness"
+BLACKBOX_ENGINE_AUTOSADDLER = "autosaddler"
 BLACKBOX_STRATEGY_AUTO = "auto"
 BLACKBOX_TARGET_TEXT = "text"
 BLACKBOX_TARGET_AGENT = "agent"
@@ -44,6 +45,10 @@ BLACKBOX_HARNESSES = (
 )
 # Engines that accept a multi-part (named files) starting point.
 BLACKBOX_MULTI_PART_ENGINES = frozenset({BLACKBOX_ENGINE_GEPA})
+# Single-mode engines that honor an explicit iteration cap.
+BLACKBOX_ITERATION_LIMIT_ENGINES = frozenset(
+    {BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER}
+)
 # Stands in for ``module_name`` in the job overview and notifications, where
 # DSPy jobs record the program they optimized.
 BLACKBOX_MODULE_NAME = "blackbox"
@@ -94,7 +99,7 @@ class BlackboxScorer(BaseModel):
 # Hard stops for a run. ``max_scorer_runs`` caps optimizer-driven scorer
 # calls (the baseline/final test-set evaluations are outside the cap);
 # ``max_iterations`` caps proposer rounds for the engines that iterate
-# (Meta-Harness); ``stop_at_score`` ends the run early once a version
+# (Meta-Harness, AutoSaddler); ``stop_at_score`` ends the run early once a version
 # reaches it.
 class BlackboxBudget(BaseModel):
     max_scorer_runs: int = Field(default=200, ge=1, le=100_000)
@@ -258,9 +263,12 @@ class BlackboxRunRequest(BaseModel):
         if self.target.kind != BLACKBOX_TARGET_AGENT and self.task_model_settings is not None:
             raise ValueError("task_model_config is only used when the evaluated target is an agent.")
         if self.budget.max_iterations is not None and (
-            self.strategy.mode != "single" or self.strategy.engine != BLACKBOX_ENGINE_META_HARNESS
+            self.strategy.mode != "single"
+            or self.strategy.engine not in BLACKBOX_ITERATION_LIMIT_ENGINES
         ):
-            raise ValueError("An iteration limit is only supported by single Meta-Harness runs.")
+            raise ValueError(
+                "An iteration limit is only supported by single Meta-Harness or AutoSaddler runs."
+            )
         return self
 
 

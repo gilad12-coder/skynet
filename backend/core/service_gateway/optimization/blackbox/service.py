@@ -229,8 +229,8 @@ def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: boo
             )
             if not splits.train:
                 raise ServiceError("Meta-Harness and compositions containing it require at least one training case.")
-    if payload.strategy.mode == "auto" and payload.budget.max_scorer_runs < 4:
-        raise ServiceError("Auto needs at least four scorer runs.")
+    if payload.strategy.mode == "auto" and payload.budget.max_scorer_runs < len(AUTO_ENGINES) + 1:
+        raise ServiceError(f"Auto needs at least {len(AUTO_ENGINES) + 1} scorer runs.")
     if verify_scorer and payload.scorer.kind == "python":
         validate_scorer_code(str(payload.scorer.metric_code))
 

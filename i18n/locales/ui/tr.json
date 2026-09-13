@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "Daha iyi prompt'lar veya kod önermek için değerlendirme geri bildirimini kullanır.",
   "submit.blackbox.roles.optimization.desc.meta_harness": "İyileştirilmiş harness'ler önermek için önceki kodu, puanları ve yürütme izlerini inceler.",
   "submit.blackbox.roles.optimization.desc.autoresearch": "Seçilen AutoResearch motorunun deney önerilerini yönlendirir.",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "Değerlendirme geri bildiriminden en zayıf durumları teşhis eder, ardından sürümü yeniden yazar ve yalnızca doğrulanmış iyileştirmeleri tutar.",
   "submit.blackbox.roles.optimization.also_scoring": "Değerlendirme aşamasında farklı bir puanlama modeli seçmediğiniz sürece, ayrı puanlama çağrılarında puanlamayı da yapar.",
   "submit.blackbox.roles.scoring.label": "Değerlendirici modeli",
   "submit.blackbox.roles.scoring.inherited": "Optimizasyonla aynı",

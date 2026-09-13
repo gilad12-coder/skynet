@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "يستخدم ملاحظات التقييم لاقتراح موجّهات أو كود أفضل.",
   "submit.blackbox.roles.optimization.desc.meta_harness": "يفحص الكود السابق والدرجات وسجلات التنفيذ لاقتراح harness محسّن.",
   "submit.blackbox.roles.optimization.desc.autoresearch": "يقود مقترحات التجارب لمحرّك AutoResearch المحدد.",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "يشخّص أضعف الحالات من ملاحظات التقييم، ثم يعيد كتابة الإصدار ويحتفظ فقط بالتحسينات المؤكَّدة.",
   "submit.blackbox.roles.optimization.also_scoring": "يقوم أيضًا بإعطاء الدرجات، في استدعاءات منفصلة، ما لم تختر نموذج مُقيِّم مختلفًا في مرحلة التقييم.",
   "submit.blackbox.roles.scoring.label": "نموذج التقييم",
   "submit.blackbox.roles.scoring.inherited": "نفس نموذج التحسين",

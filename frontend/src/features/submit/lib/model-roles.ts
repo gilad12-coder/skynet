@@ -10,7 +10,12 @@ import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 export type ScoringModelMode = "inherit" | "explicit";
 
 /** The engine families whose proposer the optimization model drives. */
-export type OptimizationModelFamily = "gepa" | "meta_harness" | "autoresearch" | "auto";
+export type OptimizationModelFamily =
+  | "gepa"
+  | "meta_harness"
+  | "autoresearch"
+  | "autosaddler"
+  | "auto";
 
 /**
  * Credential-free identity of a model configuration. Two configs with the
@@ -88,6 +93,7 @@ export function optimizationModelFamily(
   if (strategyMode === "single") {
     if (engine === "meta_harness") return "meta_harness";
     if (engine === "autoresearch") return "autoresearch";
+    if (engine === "autosaddler") return "autosaddler";
   }
   return "gepa";
 }
@@ -98,4 +104,5 @@ export const OPTIMIZATION_MODEL_DESCRIPTION: Readonly<Record<OptimizationModelFa
     gepa: "submit.blackbox.roles.optimization.desc.gepa",
     meta_harness: "submit.blackbox.roles.optimization.desc.meta_harness",
     autoresearch: "submit.blackbox.roles.optimization.desc.autoresearch",
+    autosaddler: "submit.blackbox.roles.optimization.desc.autosaddler",
   };

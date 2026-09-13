@@ -23,7 +23,7 @@ from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, T
 
 GEPA_REVISION = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
 GEPA_SOURCE = f"git+https://github.com/gepa-ai/gepa@{GEPA_REVISION}"
-AUTO_ENGINES = ("gepa", "autoresearch", "meta_harness")
+AUTO_ENGINES = ("gepa", "autoresearch", "meta_harness", "autosaddler")
 
 
 def upstream_task(task: Task, name: str) -> UpstreamTask:

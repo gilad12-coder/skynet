@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "बेहतर प्रॉम्प्ट या कोड सुझाने के लिए मूल्यांकन फ़ीडबैक का उपयोग करता है।",
   "submit.blackbox.roles.optimization.desc.meta_harness": "बेहतर harness सुझाने के लिए पिछले कोड, स्कोर और निष्पादन ट्रेस की जाँच करता है।",
   "submit.blackbox.roles.optimization.desc.autoresearch": "चुने गए AutoResearch इंजन के प्रयोग प्रस्तावों को संचालित करता है।",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "मूल्यांकन फ़ीडबैक से सबसे कमज़ोर मामलों का निदान करता है, फिर संस्करण को फिर से लिखता है और केवल सत्यापित सुधार रखता है।",
   "submit.blackbox.roles.optimization.also_scoring": "यह अलग स्कोरिंग कॉल में स्कोर भी देता है, जब तक आप मूल्यांकन में कोई अलग स्कोरिंग मॉडल न चुनें।",
   "submit.blackbox.roles.scoring.label": "मूल्यांकन मॉडल",
   "submit.blackbox.roles.scoring.inherited": "ऑप्टिमाइज़ेशन जैसा ही",

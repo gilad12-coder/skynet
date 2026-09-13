@@ -84,7 +84,7 @@ def _fixture_engines(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_auto_matches_direct_pinned_recipe(tmp_path: Path, fixture_engines: None) -> None:
-    """Match upstream's three-lane winner and seed a fresh GEPA continuation.
+    """Match upstream's per-engine winner and seed a fresh GEPA continuation.
 
     Args:
         tmp_path: Artifact directory.
@@ -98,13 +98,14 @@ def test_auto_matches_direct_pinned_recipe(tmp_path: Path, fixture_engines: None
             for name in AUTO_ENGINES
         ],
     )
-    server = EvalServer(score, max_evals=8)
+    total_evals = 2 * (len(AUTO_ENGINES) + 1)
+    server = EvalServer(score, max_evals=total_evals)
     result, lanes = auto.run_strategy(BlackboxStrategy(), Task("seed"), server, make_ctx(str(tmp_path)), caps=CAPS)
     assert result.best_candidate == f"{direct.best_candidate}:gepa"
     assert result.best_score == direct.best_score == -1.0
-    assert server.used == result.total_evals == 8
-    assert sorted(lane.engine for lane in lanes[:3]) == sorted(AUTO_ENGINES)
-    assert [lane.phase for lane in lanes] == ["explore", "explore", "explore", "continue"]
+    assert server.used == result.total_evals == total_evals
+    assert sorted(lane.engine for lane in lanes[: len(AUTO_ENGINES)]) == sorted(AUTO_ENGINES)
+    assert [lane.phase for lane in lanes] == ["explore"] * len(AUTO_ENGINES) + ["continue"]
     assert result.metadata["upstream_source"] == GEPA_SOURCE
     assert result.metadata["upstream_recipe"] == "omni-gepa"
     assert "all_results" not in result.metadata
@@ -140,15 +141,19 @@ def test_missing_recipe_engine_rejects_before_scoring(tmp_path: Path) -> None:
 
 
 def test_auto_rejects_too_small_budget(tmp_path: Path, fixture_engines: None) -> None:
-    """Reject before work when all four recipe allocations cannot fit.
+    """Reject before work when the per-lane and continuation shares cannot all fit.
 
     Args:
         tmp_path: Artifact directory.
         fixture_engines: Deterministic fixture.
     """
-    with pytest.raises(ServiceError, match="four scorer"):
+    with pytest.raises(ServiceError, match="scorer runs"):
         auto.run_strategy(
-            BlackboxStrategy(), Task("seed"), EvalServer(score, max_evals=3), make_ctx(str(tmp_path)), caps=CAPS
+            BlackboxStrategy(),
+            Task("seed"),
+            EvalServer(score, max_evals=len(AUTO_ENGINES)),
+            make_ctx(str(tmp_path)),
+            caps=CAPS,
         )
 
 
@@ -221,8 +226,11 @@ def test_auto_continuation_stops_after_cumulative_spend(tmp_path: Path, monkeypa
             return result
 
     monkeypatch.setattr(auto, "get_engine", lambda name, caps: SpendingEngine(name))
+    # Fund exactly one 4.0 slice per exploration lane so the run's budget is spent
+    # before the continuation, whatever engines the recipe explores.
+    budget = 4.0 * len(AUTO_ENGINES)
     context = make_ctx(
-        str(tmp_path), remaining_cost_usd=lambda: max(0.0, 12.0 - spent[0]), proposer_token_budget_usd=12.0
+        str(tmp_path), remaining_cost_usd=lambda: max(0.0, budget - spent[0]), proposer_token_budget_usd=budget
     )
     with pytest.raises(BudgetReached, match="budget") as stopped:
         auto.run_strategy(
@@ -235,5 +243,5 @@ def test_auto_continuation_stops_after_cumulative_spend(tmp_path: Path, monkeypa
     assert stopped.value.result.best_candidate == "seed:meta_harness"
     assert stopped.value.result.best_score == -1.0
     assert stopped.value.evidence["selection_scope"] == "training"
-    assert spent[0] == 12.0
-    assert sorted(starts) == ["autoresearch", "gepa", "meta_harness"]
+    assert spent[0] == budget
+    assert sorted(starts) == sorted(AUTO_ENGINES)

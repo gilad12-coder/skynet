@@ -295,8 +295,13 @@ def run_strategy(
         raise ServiceError("The upstream Auto recipe requires a text starting point; use GEPA for named parts.")
     for name in AUTO_ENGINES:
         get_engine(name, caps)
-    if strategy.mode == "auto" and server.remaining < 4:
-        raise ServiceError("Auto needs at least four scorer runs: three exploration lanes and one continuation.")
+    lane_count = len(AUTO_ENGINES)
+    # One even share per exploration lane plus a matching share for the GEPA continuation.
+    share = 1.0 / (lane_count + 1)
+    if strategy.mode == "auto" and server.remaining < lane_count + 1:
+        raise ServiceError(
+            f"Auto needs at least {lane_count + 1} scorer runs: {lane_count} exploration lanes and one continuation."
+        )
 
     def configuration(name: str, phase: str, allowance: int, fraction: float) -> OptimizeAnythingConfig:
         """Partition resources while leaving scheduling and winner selection upstream.
@@ -331,12 +336,12 @@ def run_strategy(
         "name": Path(ctx.run_dir).name,
     }
     try:
-        per_lane = server.remaining // 4
-        continuation_allowance = server.remaining - 3 * per_lane
+        per_lane = server.remaining // (lane_count + 1)
+        continuation_allowance = server.remaining - lane_count * per_lane
         winner = optimize_best_of(
             **kwargs,
-            configs=[configuration(name, "explore", per_lane, 0.25) for name in AUTO_ENGINES],
-            max_workers=3,
+            configs=[configuration(name, "explore", per_lane, share) for name in AUTO_ENGINES],
+            max_workers=lane_count,
         )
     except BudgetReached as exc:
         exc.result = _completed_lane_incumbent(lanes, server, exc.result)
@@ -387,7 +392,7 @@ def run_strategy(
         progress_callback=continuation_progress,
         proposer_token_budget_usd=None
         if ctx.proposer_token_budget_usd is None
-        else ctx.proposer_token_budget_usd * 0.25,
+        else ctx.proposer_token_budget_usd * share,
     )
     continuation_server = server.lane(min(continuation_allowance, server.remaining))
     if progress_callback is not None:
