@@ -39,7 +39,11 @@ import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
 import { Figure, buildEstimateSections } from "../EstimateBreakdown";
 import { ModelRoleRow } from "./ModelRoleRow";
 
-/** One key/value line: an icon-and-label on the start, its value on the end. */
+/**
+ * One key/value line: an icon-and-label on the start, its value on the end.
+ * Every row carries a jargon tooltip on its label, so `tipText` is required —
+ * keeping the summary's tooltips uniform across all rows.
+ */
 function Row({
   icon,
   label,
@@ -48,7 +52,7 @@ function Row({
 }: {
   icon: ReactNode;
   label: ReactNode;
-  tipText?: string;
+  tipText: string;
   children: ReactNode;
 }) {
   const head = (
@@ -59,7 +63,7 @@ function Row({
   );
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border/40 py-2.5">
-      {tipText ? <HelpTip text={tipText}>{head}</HelpTip> : head}
+      <HelpTip text={tipText}>{head}</HelpTip>
       <span className="max-w-[55%] break-words text-end text-sm font-medium" dir="auto">
         {children}
       </span>
@@ -337,7 +341,11 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       </div>
                     </div>
                   )}
-                  <Row icon={<Shuffle className="size-3.5" />} label={msg("submit.blackbox.review.cases_shuffled")}>
+                  <Row
+                    icon={<Shuffle className="size-3.5" />}
+                    label={msg("submit.blackbox.review.cases_shuffled")}
+                    tipText={tip("data.shuffle_explanation")}
+                  >
                     {shuffle
                       ? msg("auto.features.submit.components.steps.summarystep.literal.9")
                       : msg("auto.features.submit.components.steps.summarystep.literal.10")}
@@ -404,6 +412,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                     <Row
                       icon={<Wrench className="size-3.5" />}
                       label={msg("submit.blackbox.review.execution")}
+                      tipText={tip("submit.blackbox.harness")}
                     >
                       {harnessLabel(harness)}
                     </Row>
