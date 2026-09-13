@@ -3659,6 +3659,7 @@
   "submit.budget.calc.role.optimization": "מודל האופטימיזציה",
   "submit.budget.calc.role.judge": "מודל ההערכה",
   "submit.budget.calc.role_formula": "{share} מהטוקנים: {inputShare} קלט במחיר {inputRate} ו-{outputShare} פלט במחיר {outputRate} למיליון טוקנים",
+  "submit.budget.calc.role_share": "{share} מהטוקנים",
   "submit.budget.calc.role_unpriced": "ללא מחיר בקטלוג, ולכן חלים תעריפי ברירת המחדל",
   "submit.budget.calc.managed_total": "מחויב בקרדיטים",
   "submit.budget.calc.credits_conversion": "עלות ספק {cost} × תוספת {markup} ÷ {credit} לקרדיט, בעיגול כלפי מעלה",

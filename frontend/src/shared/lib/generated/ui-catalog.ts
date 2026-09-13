@@ -2895,6 +2895,7 @@ export type MessageKey =
   | "submit.budget.calc.role.optimization"
   | "submit.budget.calc.role.task"
   | "submit.budget.calc.role_formula"
+  | "submit.budget.calc.role_share"
   | "submit.budget.calc.role_unpriced"
   | "submit.budget.calc.runtime_formula"
   | "submit.budget.calc.show"
@@ -6651,6 +6652,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.budget.calc.role.optimization": "מודל האופטימיזציה",
   "submit.budget.calc.role.task": "מודל המשימה",
   "submit.budget.calc.role_formula": "{share} מהטוקנים: {inputShare} קלט במחיר {inputRate} ו-{outputShare} פלט במחיר {outputRate} למיליון טוקנים",
+  "submit.budget.calc.role_share": "{share} מהטוקנים",
   "submit.budget.calc.role_unpriced": "ללא מחיר בקטלוג, ולכן חלים תעריפי ברירת המחדל",
   "submit.budget.calc.runtime_formula": "לפחות {hold} הקרדיטים שמוחזקים עם תחילת הריצה; עד {high} קרדיטים לסשן × {sessions} סשנים, בעיגול כלפי מעלה",
   "submit.budget.calc.show": "הצגת אופן החישוב של הנתון",
@@ -17983,6 +17985,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.budget.calc.role.optimization": "Optimization model",
   "submit.budget.calc.role.task": "Task model",
   "submit.budget.calc.role_formula": "{share} of the tokens: {inputShare} input at {inputRate} and {outputShare} output at {outputRate} per million tokens",
+  "submit.budget.calc.role_share": "{share} of tokens",
   "submit.budget.calc.role_unpriced": "Not priced in the catalog, so default rates apply",
   "submit.budget.calc.runtime_formula": "At least the {hold} credits held when the run starts; up to {high} credits per session × {sessions} sessions, rounded up",
   "submit.budget.calc.show": "Show how this figure is calculated",
