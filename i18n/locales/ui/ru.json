@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "Использует обратную связь от оценки, чтобы предлагать лучшие промпты или код.",
   "submit.blackbox.roles.optimization.desc.meta_harness": "Изучает предыдущий код, оценки и трассы выполнения, чтобы предлагать улучшенные harness.",
   "submit.blackbox.roles.optimization.desc.autoresearch": "Управляет предложениями экспериментов выбранного движка AutoResearch.",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "Диагностирует самые слабые случаи по обратной связи от оценки, затем переписывает версию и сохраняет только подтверждённые улучшения.",
   "submit.blackbox.roles.optimization.also_scoring": "Она также выставляет оценки в отдельных вызовах, если только вы не выберете другую модель оценивания на этапе «Оценка».",
   "submit.blackbox.roles.scoring.label": "Модель оценивания",
   "submit.blackbox.roles.scoring.inherited": "Как у оптимизации",

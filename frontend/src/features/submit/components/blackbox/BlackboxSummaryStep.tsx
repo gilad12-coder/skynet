@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import {
   User,
   Code,
@@ -37,9 +37,12 @@ import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { chargeableBracket } from "../../lib/cost-bracket";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
 import { Figure, buildEstimateSections } from "../EstimateBreakdown";
-import { ModelRoleRow } from "./ModelRoleRow";
 
-/** One key/value line: an icon-and-label on the start, its value on the end. */
+/**
+ * One key/value line: an icon-and-label on the start, its value on the end.
+ * Every row carries a jargon tooltip on its label, so `tipText` is required —
+ * keeping the summary's tooltips uniform across all rows.
+ */
 function Row({
   icon,
   label,
@@ -48,7 +51,7 @@ function Row({
 }: {
   icon: ReactNode;
   label: ReactNode;
-  tipText?: string;
+  tipText: string;
   children: ReactNode;
 }) {
   const head = (
@@ -59,7 +62,7 @@ function Row({
   );
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border/40 py-2.5">
-      {tipText ? <HelpTip text={tipText}>{head}</HelpTip> : head}
+      <HelpTip text={tipText}>{head}</HelpTip>
       <span className="max-w-[55%] break-words text-end text-sm font-medium" dir="auto">
         {children}
       </span>
@@ -67,7 +70,16 @@ function Row({
   );
 }
 
-/** A long-form field shown as a label above its wrapped, clamped text. */
+const COLLAPSED_NOTE_LINES = 4;
+// text-sm line-height (1.25rem) x four lines; the exact value is measured below.
+const DEFAULT_COLLAPSED_NOTE_HEIGHT = 80;
+
+// The clamp height must be measured before paint so the note renders already
+// collapsed with no full-height flash; useLayoutEffect warns during SSR, so
+// fall back to useEffect off the client.
+const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+/** A long-form field: a label above its wrapped text, expandable when it overflows four lines. */
 function Note({
   icon,
   label,
@@ -79,6 +91,40 @@ function Note({
   tipText: string;
   children: ReactNode;
 }) {
+  const bodyRef = useRef<HTMLParagraphElement>(null);
+  const reducedMotion = useReducedMotion();
+  const [expanded, setExpanded] = useState(false);
+  const [interacted, setInteracted] = useState(false);
+  // Start collapsed so long text never flashes full before measurement lands.
+  const [overflows, setOverflows] = useState(true);
+  const [collapsedHeight, setCollapsedHeight] = useState(DEFAULT_COLLAPSED_NOTE_HEIGHT);
+  const [fullHeight, setFullHeight] = useState<number>();
+
+  // Measure both heights in pixels (and keep them fresh on reflow) so the
+  // toggle animates number-to-number in both directions. framer-motion snaps
+  // instead of animating when a height transition starts from the "auto"
+  // keyword, so the expanded state must be an explicit pixel height too.
+  useIsomorphicLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => {
+      const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
+      const collapsed = Number.isFinite(lineHeight)
+        ? lineHeight * COLLAPSED_NOTE_LINES
+        : DEFAULT_COLLAPSED_NOTE_HEIGHT;
+      setCollapsedHeight(collapsed);
+      setFullHeight(el.scrollHeight);
+      setOverflows(el.scrollHeight > collapsed + 1);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [children]);
+
+  const clamped = overflows && !expanded;
+
   return (
     <div className="space-y-1.5 border-b border-border/40 py-2.5">
       <HelpTip text={tipText}>
@@ -87,9 +133,29 @@ function Note({
           {label}
         </span>
       </HelpTip>
-      <p className="line-clamp-4 whitespace-pre-wrap text-sm text-foreground" dir="auto">
-        {children}
-      </p>
+      <motion.div
+        initial={false}
+        animate={{ height: clamped ? collapsedHeight : (fullHeight ?? "auto") }}
+        // The initial collapse (measurement landing) is instant; only real toggles animate.
+        transition={{ duration: reducedMotion || !interacted ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
+        className="overflow-hidden"
+      >
+        <p ref={bodyRef} className="whitespace-pre-wrap text-sm text-foreground" dir="auto">
+          {children}
+        </p>
+      </motion.div>
+      {overflows && (
+        <button
+          type="button"
+          onClick={() => {
+            setInteracted(true);
+            setExpanded((v) => !v);
+          }}
+          className="text-xs font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+        >
+          {msg(expanded ? "shared.expandable_textarea.collapse" : "shared.expandable_textarea.expand")}
+        </button>
+      )}
     </div>
   );
 }
@@ -99,6 +165,38 @@ function Mono({ children }: { children: ReactNode }) {
     <span className="font-mono text-xs" dir="ltr">
       {children}
     </span>
+  );
+}
+
+/**
+ * A model-role line shaped like {@link Row}: the role title on the start with
+ * its tooltip, the read-only model chip on the end. The chip is inert here, so
+ * its pointer affordances are muted while the label stays hoverable for the tip.
+ *
+ * The chip column is a fixed fraction of the row so every role's chip renders
+ * at the exact same width regardless of model name or how many settings it
+ * carries; the chip fills that column and wraps its temperature/token pills
+ * under the name.
+ */
+function ModelRow({
+  label,
+  tipText,
+  children,
+}: {
+  label: ReactNode;
+  tipText: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-border/40 py-2.5">
+      <HelpTip text={tipText} className="min-w-0">
+        <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <Cpu className="size-3.5 shrink-0" />
+          <span className="truncate">{label}</span>
+        </span>
+      </HelpTip>
+      <div className="pointer-events-none w-[72%] shrink-0">{children}</div>
+    </div>
   );
 }
 
@@ -337,7 +435,11 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       </div>
                     </div>
                   )}
-                  <Row icon={<Shuffle className="size-3.5" />} label={msg("submit.blackbox.review.cases_shuffled")}>
+                  <Row
+                    icon={<Shuffle className="size-3.5" />}
+                    label={msg("submit.blackbox.review.cases_shuffled")}
+                    tipText={tip("data.shuffle_explanation")}
+                  >
                     {shuffle
                       ? msg("auto.features.submit.components.steps.summarystep.literal.9")
                       : msg("auto.features.submit.components.steps.summarystep.literal.10")}
@@ -346,46 +448,56 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
               )}
 
               {summaryTab === 2 && (
-                <div className="space-y-3">
-                  <div className="pointer-events-none space-y-3">
-                    {targetKind === "agent" && (
-                      <ModelRoleRow role={taskLabel}>
-                        <ModelChip
-                          config={targetModel}
-                          roleLabel={taskLabel}
-                          onClick={() => {}}
-                        />
-                      </ModelRoleRow>
-                    )}
-                    <ModelRoleRow
-                      role={optLabel}
-                      description={msg(OPTIMIZATION_MODEL_DESCRIPTION[optimizationFamily])}
+                <div className="space-y-0">
+                  {targetKind === "agent" && (
+                    <ModelRow
+                      label={taskLabel}
+                      tipText={msg("submit.blackbox.roles.task.desc")}
                     >
-                      <ModelChip config={reflectionModel} roleLabel={optLabel} onClick={() => {}} />
-                    </ModelRoleRow>
-                    {scorerUsesModel ? (
-                      <ModelRoleRow role={scoringLabel}>
-                        {resolvedScorerModel ? (
-                          <ModelChip
-                            config={resolvedScorerModel}
-                            roleLabel={scoringLabel}
-                            onClick={() => {}}
-                          />
-                        ) : (
-                          <span className="text-sm text-muted-foreground">{notChosen}</span>
-                        )}
-                      </ModelRoleRow>
-                    ) : (
-                      <div className="space-y-1">
-                        <span className="text-sm font-medium">
-                          {msg("submit.blackbox.roles.scoring.deterministic_label")}
-                        </span>
-                        <p className="text-xs text-muted-foreground">
-                          {msg("submit.blackbox.roles.scoring.deterministic_desc")}
-                        </p>
-                      </div>
-                    )}
-                  </div>
+                      <ModelChip
+                        config={{
+                          ...targetModel,
+                          token_source: targetModel.token_source ?? "managed",
+                        }}
+                        roleLabel={taskLabel}
+                        onClick={() => {}}
+                        className="w-full"
+                      />
+                    </ModelRow>
+                  )}
+                  <ModelRow
+                    label={optLabel}
+                    tipText={msg(OPTIMIZATION_MODEL_DESCRIPTION[optimizationFamily])}
+                  >
+                    <ModelChip
+                      config={reflectionModel}
+                      roleLabel={optLabel}
+                      onClick={() => {}}
+                      className="w-full"
+                    />
+                  </ModelRow>
+                  {scorerUsesModel ? (
+                    <ModelRow label={scoringLabel} tipText={tip("submit.blackbox.scorer_model")}>
+                      {resolvedScorerModel ? (
+                        <ModelChip
+                          config={resolvedScorerModel}
+                          roleLabel={scoringLabel}
+                          onClick={() => {}}
+                          className="w-full"
+                        />
+                      ) : (
+                        <span className="text-sm text-muted-foreground">{notChosen}</span>
+                      )}
+                    </ModelRow>
+                  ) : (
+                    <Note
+                      icon={<Cpu className="size-3.5" />}
+                      label={msg("submit.blackbox.roles.scoring.deterministic_label")}
+                      tipText={tip("submit.blackbox.roles")}
+                    >
+                      {msg("submit.blackbox.roles.scoring.deterministic_desc")}
+                    </Note>
+                  )}
                 </div>
               )}
 
@@ -404,6 +516,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                     <Row
                       icon={<Wrench className="size-3.5" />}
                       label={msg("submit.blackbox.review.execution")}
+                      tipText={tip("submit.blackbox.harness")}
                     >
                       {harnessLabel(harness)}
                     </Row>

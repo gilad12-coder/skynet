@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "利用评估反馈提出更好的提示词或代码。",
   "submit.blackbox.roles.optimization.desc.meta_harness": "检查此前的代码、分数和执行轨迹，以提出改进的 harness。",
   "submit.blackbox.roles.optimization.desc.autoresearch": "驱动所选 AutoResearch 引擎的实验提案。",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "根据评估反馈诊断最薄弱的案例，然后重写版本，只保留经过验证的改进。",
   "submit.blackbox.roles.optimization.also_scoring": "除非您在“评估”中选择了不同的评分模型，它还会在单独的评分调用中负责评分。",
   "submit.blackbox.roles.scoring.label": "评估模型",
   "submit.blackbox.roles.scoring.inherited": "与优化模型相同",

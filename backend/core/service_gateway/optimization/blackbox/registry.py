@@ -12,11 +12,13 @@ from dataclasses import dataclass
 from ....exceptions import ServiceError
 from ....models.blackbox import (
     BLACKBOX_ENGINE_AUTORESEARCH,
+    BLACKBOX_ENGINE_AUTOSADDLER,
     BLACKBOX_ENGINE_BEST_OF_N,
     BLACKBOX_ENGINE_GEPA,
     BLACKBOX_ENGINE_META_HARNESS,
 )
 from .autoresearch import AutoResearchEngine
+from .autosaddler import AutoSaddlerEngine
 from .best_of_n import BestOfNEngine
 from .gepa_engine import GepaEngine
 from .meta_harness import MetaHarnessEngine
@@ -119,6 +121,12 @@ ENGINES: dict[str, EngineSpec] = {
         description="A coding-agent proposer searches harness code using candidate and evaluation history.",
         factory=MetaHarnessEngine,
         requires_proposer=True,
+    ),
+    BLACKBOX_ENGINE_AUTOSADDLER: EngineSpec(
+        id=BLACKBOX_ENGINE_AUTOSADDLER,
+        label="AutoSaddler",
+        description="Diagnoses per-case failures with the reflection model and patches the version, keeping only verified gains.",
+        factory=AutoSaddlerEngine,
     ),
 }
 

@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "از بازخورد ارزیابی برای پیشنهاد پرامپت‌ها یا کد بهتر استفاده می‌کند.",
   "submit.blackbox.roles.optimization.desc.meta_harness": "کد، امتیازها و ردپاهای اجرای قبلی را بررسی می‌کند تا harness بهبودیافته پیشنهاد دهد.",
   "submit.blackbox.roles.optimization.desc.autoresearch": "پیشنهادهای آزمایش موتور AutoResearch انتخاب‌شده را هدایت می‌کند.",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "ضعیف‌ترین موارد را از بازخورد ارزیابی تشخیص می‌دهد، سپس نسخه را بازنویسی می‌کند و فقط بهبودهای تأییدشده را نگه می‌دارد.",
   "submit.blackbox.roles.optimization.also_scoring": "در فراخوانی‌های امتیازدهی جداگانه هم امتیاز می‌دهد، مگر اینکه در مرحله ارزیابی مدل امتیازدهی دیگری انتخاب کنید.",
   "submit.blackbox.roles.scoring.label": "مدل ارزیاب",
   "submit.blackbox.roles.scoring.inherited": "همان مدل بهینه‌سازی",

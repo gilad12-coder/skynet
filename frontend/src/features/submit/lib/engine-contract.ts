@@ -16,7 +16,7 @@ export function supportsIterationLimit(
   mode: BlackboxStrategy["mode"],
   engine: BlackboxEngineId | null,
 ): boolean {
-  return mode === "single" && engine === "meta_harness";
+  return mode === "single" && (engine === "meta_harness" || engine === "autosaddler");
 }
 
 interface EngineIssue {

@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "Utilise les retours d'évaluation pour proposer de meilleurs prompts ou un meilleur code.",
   "submit.blackbox.roles.optimization.desc.meta_harness": "Examine le code, les scores et les traces d'exécution précédents pour proposer des harness améliorés.",
   "submit.blackbox.roles.optimization.desc.autoresearch": "Pilote les propositions d'expériences du moteur AutoResearch sélectionné.",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "Diagnostique les cas les plus faibles à partir des retours d'évaluation, puis réécrit la version et ne conserve que les gains vérifiés.",
   "submit.blackbox.roles.optimization.also_scoring": "Il attribue aussi les scores, dans des appels de scoring séparés, sauf si vous choisissez un autre modèle de scoring dans Évaluation.",
   "submit.blackbox.roles.scoring.label": "Modèle d’évaluation",
   "submit.blackbox.roles.scoring.inherited": "Identique à l'optimisation",

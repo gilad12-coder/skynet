@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "평가 피드백을 활용해 더 나은 프롬프트나 코드를 제안합니다.",
   "submit.blackbox.roles.optimization.desc.meta_harness": "이전 코드, 점수, 실행 트레이스를 검토해 개선된 harness를 제안합니다.",
   "submit.blackbox.roles.optimization.desc.autoresearch": "선택한 AutoResearch 엔진의 실험 제안을 이끕니다.",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "평가 피드백에서 가장 취약한 사례를 진단한 뒤 버전을 다시 작성하고 검증된 개선만 유지합니다.",
   "submit.blackbox.roles.optimization.also_scoring": "평가 단계에서 다른 채점 모델을 선택하지 않으면, 별도의 채점 호출에서 채점도 수행합니다.",
   "submit.blackbox.roles.scoring.label": "평가 모델",
   "submit.blackbox.roles.scoring.inherited": "최적화와 동일",

@@ -3507,6 +3507,7 @@
   "submit.blackbox.roles.optimization.desc.gepa": "利用評估反饋去提出更好嘅提示或者程式碼。",
   "submit.blackbox.roles.optimization.desc.meta_harness": "檢查之前嘅程式碼、分數同執行紀錄，去提出改良嘅 harness。",
   "submit.blackbox.roles.optimization.desc.autoresearch": "推動所選 AutoResearch 引擎嘅實驗提案。",
+  "submit.blackbox.roles.optimization.desc.autosaddler": "根據評估反饋診斷最弱嘅案例，然後改寫版本，只保留驗證過嘅改進。",
   "submit.blackbox.roles.optimization.also_scoring": "除非你喺「評估」揀咗另一個評分模型，否則佢亦會喺獨立嘅評分呼叫入面負責評分。",
   "submit.blackbox.roles.scoring.label": "評估模型",
   "submit.blackbox.roles.scoring.inherited": "同最佳化模型一樣",

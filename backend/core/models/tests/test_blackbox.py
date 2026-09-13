@@ -119,6 +119,7 @@ def test_agent_target_rejects_mismatched_task_model_role() -> None:
     ("strategy", "supported"),
     [
         ({"mode": "single", "engine": "meta_harness"}, True),
+        ({"mode": "single", "engine": "autosaddler"}, True),
         ({"mode": "single", "engine": "autoresearch"}, False),
         ({"mode": "single", "engine": "gepa"}, False),
         ({"mode": "single", "engine": "best_of_n"}, False),

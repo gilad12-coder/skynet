@@ -2099,7 +2099,7 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     assert text.json()["target_kind"] == "text"
     assert text.json()["sandbox_available"] is True
     by_id = {engine["id"]: engine for engine in text.json()["engines"]}
-    assert list(by_id) == ["gepa", "best_of_n", "autoresearch", "meta_harness"]
+    assert list(by_id) == ["gepa", "best_of_n", "autoresearch", "meta_harness", "autosaddler"]
     assert by_id["gepa"]["available"] is True
     assert by_id["gepa"]["supports_parts"] is True
     assert by_id["gepa"]["checkpoint_recovery_supported"] is True
@@ -2111,7 +2111,7 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     assert by_id["meta_harness"]["available"] is True
     assert by_id["meta_harness"]["requires_agent_target"] is False
     assert {key for key, engine in by_id.items() if engine["supports_parts"]} == {"gepa"}
-    assert text.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness"]
+    assert text.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler"]
     assert text.json()["auto_available"] is True
     assert text.json()["auto_unavailable_reason"] is None
     assert text.json()["auto_checkpoint_recovery_supported"] is False
@@ -2127,7 +2127,7 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     agent_by_id = {engine["id"]: engine for engine in agent.json()["engines"]}
     assert agent_by_id["meta_harness"]["available"] is True
     assert agent_by_id["meta_harness"]["unavailable_reason"] is None
-    assert agent.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness"]
+    assert agent.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler"]
 
 
 def test_blackbox_engine_catalog_surfaces_the_missing_sandbox_reason(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2168,7 +2168,7 @@ def test_blackbox_engine_catalog_checks_the_managed_sandbox(monkeypatch: pytest.
 
     catalog = client.get("/blackbox/engines").json()
 
-    assert catalog["auto_engines"] == ["gepa", "autoresearch", "meta_harness"]
+    assert catalog["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler"]
     assert catalog["auto_available"] is False
     assert "Managed sandbox is missing" in catalog["auto_unavailable_reason"]
     assert catalog["proposer_runtimes"][0]["available"] is False
