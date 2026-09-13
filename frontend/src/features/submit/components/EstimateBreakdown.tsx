@@ -1,14 +1,7 @@
 "use client";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
-import {
-  CREDIT_USD_VALUE,
-  MARKUP,
-  PLATFORM_FEE_FRACTION,
-  formatCredits,
-  formatUsd,
-  type TokenSourceMode,
-} from "@/features/billing";
+import { PLATFORM_FEE_FRACTION, formatCredits } from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
@@ -18,7 +11,6 @@ import { runtimeStartHold, type ChargedBracket, type RoleCostTrace } from "../li
 
 const ISOLATE_START = "⁦";
 const ISOLATE_END = "⁩";
-const TOKENS_PER_MILLION = 1_000_000;
 
 export interface CalcStep {
   label: string;
@@ -92,8 +84,6 @@ export function buildEstimateSections(
     isolate(
       new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 0 }).format(value),
     );
-  const usd = (value: number) => isolate(formatUsd(value, locale));
-  const usdRange = (low: number, high: number) => `${usd(low)}–${usd(high)}`;
   const creditSpan = (low: number, high: number) => `${credits(low)}–${credits(high)}`;
   const creditRange = (low: number, high: number) =>
     formatMsg("submit.summary.estimate_range", { low: credits(low), high: credits(high) });
@@ -146,16 +136,11 @@ export function buildEstimateSections(
       },
     ],
   };
-  const roleUsd = (source: TokenSourceMode, end: "lowUsd" | "highUsd") =>
-    trace.roles
-      .filter((role) => role.tokenSource === source)
-      .reduce((sum, role) => sum + role[end], 0);
-  const conversion = (low: number, high: number) =>
-    formatMsg("submit.budget.calc.credits_conversion", {
-      cost: usdRange(low, high),
-      markup: factor(MARKUP),
-      credit: usd(CREDIT_USD_VALUE),
-    });
+  // Show each model's share of the projected tokens and the charge in credits,
+  // never the raw provider cost or the markup multiplier that would expose the
+  // margin. Shares are normalised so they read as a fraction of the whole run
+  // regardless of any grid-sweep multiple carried on tokenShare.
+  const totalTokenShare = trace.roles.reduce((sum, role) => sum + role.tokenShare, 0);
   const pricingSection: CalcSection = {
     title: msg("submit.budget.calc.pricing"),
     steps: [
@@ -163,21 +148,15 @@ export function buildEstimateSections(
         label: role.modelLabel
           ? `${roleLabel(role.role)} · ${role.modelLabel}`
           : roleLabel(role.role),
-        formula: formatMsg("submit.budget.calc.role_formula", {
-          share: percent(role.tokenShare),
-          inputShare: percent(trace.inputTokenShare),
-          inputRate: usd(role.inputCostPerToken * TOKENS_PER_MILLION),
-          outputShare: percent(1 - trace.inputTokenShare),
-          outputRate: usd(role.outputCostPerToken * TOKENS_PER_MILLION),
-        }),
         note: role.priced ? undefined : msg("submit.budget.calc.role_unpriced"),
-        value: usdRange(role.lowUsd, role.highUsd),
+        value: formatMsg("submit.budget.calc.role_share", {
+          share: percent(totalTokenShare > 0 ? role.tokenShare / totalTokenShare : 0),
+        }),
       })),
       ...(charge.managedHigh > 0
         ? [
             {
               label: msg("submit.budget.calc.managed_total"),
-              formula: conversion(roleUsd("managed", "lowUsd"), roleUsd("managed", "highUsd")),
               value: creditRange(charge.managedLow, charge.managedHigh),
               result: true,
             },
@@ -187,7 +166,6 @@ export function buildEstimateSections(
         ? [
             {
               label: msg("submit.budget.calc.byok_full"),
-              formula: conversion(roleUsd("byok", "lowUsd"), roleUsd("byok", "highUsd")),
               value: creditRange(charge.byokFullLow, charge.byokFullHigh),
             },
             {
