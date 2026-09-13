@@ -18,9 +18,19 @@ export function requestNotificationPermission(): void {
   }
 }
 
-/** Always notify, even with the app in front: the OS log is the point. */
+/** True while the user is looking at this tab: it is the foreground tab and its window holds OS focus. */
+function tabInForeground(): boolean {
+  return (
+    typeof document !== "undefined" &&
+    document.visibilityState === "visible" &&
+    document.hasFocus()
+  );
+}
+
+/** Notify only when the user is away; alerting the tab they are already reading is pure noise. */
 export function notifyUser(title: string): void {
   if (!supported() || Notification.permission !== "granted") return;
+  if (tabInForeground()) return;
   try {
     // The OS shows the browser as the sender; the site's mark rides along as the image.
     const notification = new Notification(title, { icon: "/notification-icon.png" });
