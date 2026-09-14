@@ -243,8 +243,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [objective, setObjective] = useState("");
   const [background, setBackground] = useState("");
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("auto");
-  const targetKind = resolveExecutionKind(executionMode);
-  const setTargetKind = useCallback((kind: "text" | "agent") => setExecutionMode(kind), []);
   const [harness, setHarness] = useState<BlackboxHarness>("pi");
   // The model the agent harness runs on: what the run optimizes for, and no
   // part of the scorer. It carries only a name — the sandbox reaches it
@@ -350,6 +348,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const [strategyMode, setStrategyMode] = useState<"auto" | "single">("auto");
   const [engine, setEngine] = useState<BlackboxEngineId | null>(null);
+  // Only a harness-based engine can hand the candidate to an agent; a plain
+  // text engine scores it directly whatever the recipe asked for.
+  const targetKind =
+    usesNativeProposer(strategyMode, engine) ? resolveExecutionKind(executionMode) : "text";
+  const setTargetKind = useCallback((kind: "text" | "agent") => setExecutionMode(kind), []);
   const proposerRuntime = "vercel" as const;
   const [engineCatalogResult, setEngineCatalogResult] = useState<{
     target: BlackboxTarget["kind"];
@@ -1223,12 +1226,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       case WIZARD_STAGE.evaluation: {
         if (!budgetUncapped && maxCostCredits == null)
           return fail("budget.invalid", "totalBudgetInput");
-        if (targetKind === "agent") {
-          if (!parsedCases?.rowCount)
-            return fail("submit.blackbox.validation.cases_required", "bb-cases");
-          if (!targetModel.name.trim())
-            return fail("submit.blackbox.validation.agent_model_required", "bb-task-model");
-        }
+        if (targetKind === "agent" && !parsedCases?.rowCount)
+          return fail("submit.blackbox.validation.cases_required", "bb-cases");
         if (scorerKind === "python" && !metricCode.trim())
           return fail("submit.blackbox.validation.scorer_code_required", "bb-scorer-code");
         if (scorerUsesModel && !resolvedScorerModel?.name.trim())
@@ -1257,6 +1256,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             "submit.blackbox.validation.reflection_model_required",
             "bb-optimization-model",
           );
+        if (targetKind === "agent" && !targetModel.name.trim())
+          return fail("submit.blackbox.validation.agent_model_required", "bb-task-model");
         if (strategyMode === "auto" && maxScorerRuns < 5)
           return fail("submit.blackbox.validation.auto_budget", "bb-max-runs");
         if (maxScorerRuns < 1)

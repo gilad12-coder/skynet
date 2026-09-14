@@ -23,6 +23,8 @@ from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, T
 
 GEPA_REVISION = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
 GEPA_SOURCE = f"git+https://github.com/gepa-ai/gepa@{GEPA_REVISION}"
+AUTOSADDLER_REVISION = "9df6d2e3e1d3946057243690bca28e136fa81179"
+AUTOSADDLER_SOURCE = f"git+https://github.com/microsoft/AutoSaddler@{AUTOSADDLER_REVISION}"
 AUTO_ENGINES = ("gepa", "autoresearch", "meta_harness", "autosaddler")
 
 

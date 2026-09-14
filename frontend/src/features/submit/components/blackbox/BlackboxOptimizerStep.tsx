@@ -6,7 +6,9 @@ import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import { NumberInput } from "@/shared/ui/number-input";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { HarnessLogo } from "@/shared/ui/harness-logo";
 import { ModelChip } from "@/shared/ui/model-chip";
+import { BLACKBOX_HARNESSES, harnessLabel } from "@/shared/lib/blackbox-harness";
 import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -46,6 +48,11 @@ export function BlackboxOptimizerStep({
     runDisabledReason,
     seedMode,
     targetKind,
+    setTargetKind,
+    harness,
+    setHarness,
+    targetModel,
+    setTargetModel,
     maxScorerRuns,
     setMaxScorerRuns,
     maxIterations,
@@ -64,6 +71,7 @@ export function BlackboxOptimizerStep({
   const engines = engineCatalog?.engines ?? [];
   const single = strategyMode === "single";
   const optimizationLabel = msg("submit.blackbox.roles.optimization.label");
+  const agentModelLabel = msg("submit.blackbox.start.agent_model_label");
 
   return (
     <StepCard
@@ -93,6 +101,93 @@ export function BlackboxOptimizerStep({
               },
             ]}
           />
+
+          {nativeProposer && (
+            <Segmented<"text" | "agent">
+              label={msg("submit.blackbox.start.target_label")}
+              value={targetKind}
+              onChange={setTargetKind}
+              options={[
+                {
+                  value: "text",
+                  label: msg("submit.blackbox.start.target.text"),
+                  desc: msg("submit.blackbox.start.target.text_desc"),
+                },
+                {
+                  value: "agent",
+                  label: msg("submit.blackbox.start.target.agent"),
+                  desc: msg("submit.blackbox.start.target.agent_desc"),
+                },
+              ]}
+            />
+          )}
+
+          {nativeProposer && targetKind === "agent" && (
+            <div id="bb-harness" tabIndex={-1} className="space-y-2 outline-none">
+              <Label>
+                <HelpTip text={tip("submit.blackbox.harness")}>
+                  {msg("submit.blackbox.start.harness_label")}
+                </HelpTip>
+              </Label>
+              <div
+                className="flex flex-wrap gap-2"
+                role="radiogroup"
+                aria-label={msg("submit.blackbox.start.harness_label")}
+              >
+                {BLACKBOX_HARNESSES.map((h) => {
+                  const selected = harness === h;
+                  return (
+                    <button
+                      key={h}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      tabIndex={selected ? 0 : -1}
+                      onKeyDown={(event) => {
+                        if (
+                          ![
+                            "ArrowLeft",
+                            "ArrowRight",
+                            "ArrowUp",
+                            "ArrowDown",
+                            "Home",
+                            "End",
+                          ].includes(event.key)
+                        )
+                          return;
+                        event.preventDefault();
+                        const buttons = Array.from(
+                          event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                            '[role="radio"]',
+                          ) ?? [],
+                        );
+                        const index = buttons.indexOf(event.currentTarget);
+                        const next = radioNavigationIndex(
+                          event.key,
+                          index,
+                          buttons.length,
+                          getActiveDir() === "rtl",
+                        );
+                        if (next === null) return;
+                        buttons[next]?.focus();
+                        buttons[next]?.click();
+                      }}
+                      onClick={() => setHarness(h)}
+                      className={cn(
+                        "flex min-h-[44px] items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+                        selected
+                          ? "border-primary bg-primary/5"
+                          : "border-border/50 bg-background/60 hover:border-border",
+                      )}
+                    >
+                      <HarnessLogo harness={h} size={18} />
+                      <span className="font-medium">{harnessLabel(h)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {targetKind === "agent" && engineCatalog && !engineCatalog.sandbox_available && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[0.75rem] text-amber-700">
@@ -255,6 +350,33 @@ export function BlackboxOptimizerStep({
               }
             />
           </ModelRoleRow>
+
+          {targetKind === "agent" && (
+            <ModelRoleRow
+              id="bb-task-model"
+              role={agentModelLabel}
+              description={msg("submit.blackbox.roles.task.desc")}
+              tip={tip("blackbox.config.agent_model")}
+            >
+              <ModelChip
+                config={targetModel}
+                modelDefaultsOnly
+                className={MOBILE_MODEL_CHIP_CLASS}
+                roleLabel={agentModelLabel}
+                required
+                catalogModels={catalog?.models}
+                onClick={() =>
+                  setEditingModel({
+                    config: targetModel,
+                    onSave: setTargetModel,
+                    label: agentModelLabel,
+                    modelDefaultsOnly: true,
+                  })
+                }
+                onRemove={targetModel.name ? () => setTargetModel(emptyModelConfig()) : undefined}
+              />
+            </ModelRoleRow>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field

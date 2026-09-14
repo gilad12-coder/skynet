@@ -69,10 +69,10 @@ class _SequenceModel:
 
 def test_registry_requires_native_proposer_availability() -> None:
     """Keep native algorithms visible in the catalog but reject unavailable runtimes."""
-    assert available_engine_ids() == [BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_BEST_OF_N, BLACKBOX_ENGINE_AUTOSADDLER]
+    assert available_engine_ids() == [BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_BEST_OF_N]
     assert isinstance(get_engine(BLACKBOX_ENGINE_GEPA), GepaEngine)
     assert isinstance(get_engine(BLACKBOX_ENGINE_BEST_OF_N), BestOfNEngine)
-    for engine_id in (BLACKBOX_ENGINE_AUTORESEARCH, BLACKBOX_ENGINE_META_HARNESS):
+    for engine_id in (BLACKBOX_ENGINE_AUTORESEARCH, BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER):
         assert ENGINES[engine_id].factory is not None
         with pytest.raises(ServiceError, match="proposer runtime is not configured"):
             get_engine(engine_id)
@@ -98,12 +98,12 @@ def test_registry_native_algorithms_do_not_depend_on_candidate_target(sandbox: b
 def test_registry_filters_multi_part_engines() -> None:
     """Expose named-component inputs only for engines whose pinned adapter supports them."""
     assert available_engine_ids(parts=True) == [BLACKBOX_ENGINE_GEPA]
-    assert available_engine_ids(_NATIVE_CAPS, parts=True) == [BLACKBOX_ENGINE_GEPA]
+    assert available_engine_ids(_NATIVE_CAPS, parts=True) == [BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_AUTOSADDLER]
 
 
 def test_registry_rejects_unknown_engine() -> None:
     """Name only algorithms runnable with the supplied execution capabilities."""
-    with pytest.raises(ServiceError, match=r"Unknown engine 'nope'\. Available engines: gepa, best_of_n, autosaddler\."):
+    with pytest.raises(ServiceError, match=r"Unknown engine 'nope'\. Available engines: gepa, best_of_n\."):
         get_engine("nope")
     with pytest.raises(
         ServiceError, match=r"Available engines: gepa, best_of_n, autoresearch, meta_harness, autosaddler\."

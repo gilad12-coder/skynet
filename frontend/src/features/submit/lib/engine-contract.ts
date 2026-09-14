@@ -9,7 +9,12 @@ export function usesNativeProposer(
   mode: BlackboxStrategy["mode"],
   engine: BlackboxEngineId | null,
 ): boolean {
-  return mode !== "single" || engine === "meta_harness" || engine === "autoresearch";
+  return (
+    mode !== "single" ||
+    engine === "meta_harness" ||
+    engine === "autoresearch" ||
+    engine === "autosaddler"
+  );
 }
 
 export function supportsIterationLimit(

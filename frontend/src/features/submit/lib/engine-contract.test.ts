@@ -35,7 +35,9 @@ const catalog: BlackboxEngineCatalogResponse = {
       checkpoint_restore_reason: null,
     },
   ],
-  engines: (["gepa", "best_of_n", "autoresearch", "meta_harness"] as BlackboxEngineId[]).map(
+  engines: (
+    ["gepa", "best_of_n", "autoresearch", "meta_harness", "autosaddler"] as BlackboxEngineId[]
+  ).map(
     (id) => ({
       id,
       label: id,
@@ -102,7 +104,7 @@ test("missing or legacy capabilities cannot authorize an Auto run", () => {
 });
 
 test("native engines accept text evaluation in the managed sandbox without an agent target", () => {
-  for (const engine of ["meta_harness", "autoresearch"] as const) {
+  for (const engine of ["meta_harness", "autoresearch", "autosaddler"] as const) {
     assert.equal(engineSelectionIssue({ ...selection, mode: "single", engine }), null);
     assert.equal(usesNativeProposer("single", engine), true);
   }

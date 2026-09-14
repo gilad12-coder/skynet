@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -45,6 +46,7 @@ class FakeSession:
         self.timeout = timeout
         self.incomplete_usage = incomplete_usage
         self.no_incumbent = False
+        self.candidate: Any = "better"
 
     def write_files(self, files: dict[str, str]) -> None:
         """Persist files as an in-memory child filesystem.
@@ -80,7 +82,7 @@ class FakeSession:
             return CommandResult(exit_code=0)
         payload = json.loads(self.files["native_input.json"])
         request_id = "a" * 32
-        request = {"id": request_id, "candidate": "better", "example": {"id": "case"}}
+        request = {"id": request_id, "candidate": self.candidate, "example": {"id": "case"}}
         line = f"SKYNET_NATIVE_RPC {payload['nonce']} {json.dumps(request)}\n"
         sink = kwargs["on_output"]
         sink("stdout", "unrelated upstream log\n" + line[:17])
@@ -88,10 +90,10 @@ class FakeSession:
         sink("stdout", line)
         response = json.loads(self.files[f"rpc/{request_id}.json"])
         if "score" in response:
-            progress = {"candidate_id": 0, "candidate": "better", "score": response["score"], "total_evals": 1}
+            progress = {"candidate_id": 0, "candidate": self.candidate, "score": response["score"], "total_evals": 1}
             sink("stdout", f"SKYNET_NATIVE_PROGRESS {payload['nonce']} {json.dumps(progress)}\n")
         document = {
-            "best_candidate": "better",
+            "best_candidate": self.candidate,
             "best_score": response.get("score"),
             "total_evals": 1,
             "metadata": {"adapter_cost": 0.01},
@@ -153,7 +155,7 @@ class ReadinessSession(FakeSession):
         self.calls.append((command, kwargs))
         if self.bootstrap is not None and len(self.calls) == 1:
             return self.bootstrap
-        return CommandResult(exit_code=1 if self.fail else 0, stdout='{"ready": true}\n')
+        return CommandResult(exit_code=1 if self.fail else 0, stdout='{"ready": true, "autosaddler": true}\n')
 
     def close(self) -> None:
         """Always record closure while preserving an unresolved sandbox usage signal."""
@@ -184,6 +186,8 @@ def test_native_readiness_checks_selected_isolation_without_search(
     assert check_native_runtime(options) == {
         "runtime": "vercel",
         "gepa_source": native_runtime.GEPA_SOURCE,
+        "autosaddler_source": native_runtime.AUTOSADDLER_REVISION,
+        "autosaddler_ready": True,
         "claude_version": native_runtime.CLAUDE_VERSION,
     }
     assert adapter.spec.network_disabled is True
@@ -622,3 +626,98 @@ def test_real_native_runner_drives_upstream_with_fake_cli(tmp_path: Path, engine
     assert result["usage_by_model"]["claude-test"]["total_tokens"] == 10
     assert result["usage_complete"] is True
     assert (tmp_path / "native_artifacts.tar.gz.b64").stat().st_size > 0
+
+
+def test_autosaddler_bootstrap_pins_upstream_into_a_python_312_venv() -> None:
+    """Install the pinned AutoSaddler revision on its own interpreter instead of the GEPA archive."""
+    command = _bootstrap_command("vercel", engine_id="autosaddler")
+    assert f"uv venv --python {native_runtime._AUTOSADDLER_PYTHON} native_venv" in command
+    assert "uv pip install --python native_venv/bin/python --no-deps" in command
+    assert native_runtime.AUTOSADDLER_REVISION in command
+    assert f"sys.version_info >= {native_runtime.AUTOSADDLER_PYTHON_FLOOR!r}" in command
+    assert "import autosaddler.v2.core.engine" in command
+    assert "native_source.tar.gz.b64" not in command
+    protected = _bootstrap_command("vercel", protected=True, engine_id="autosaddler")
+    assert "uv venv" not in protected
+    assert f"sys.version_info >= {native_runtime.AUTOSADDLER_PYTHON_FLOOR!r}" in protected
+    assert "import autosaddler.v2.core.engine" in protected
+
+
+def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
+    """Ship the self-contained runner with every prompt and skill of the Skynet plugin."""
+    files = native_runtime._runner_files("autosaddler")
+    assert set(files) == {
+        "autosaddler_runner.py",
+        "autosaddler_plugin/SYSTEM.md",
+        "autosaddler_plugin/prompts/diagnose_patch.md",
+        "autosaddler_plugin/prompts/evolve.md",
+        "autosaddler_plugin/prompts/reflect.md",
+        "autosaddler_plugin/skills/candidate-patch/SKILL.md",
+        "autosaddler_plugin/skills/patch-verification/SKILL.md",
+    }
+    assert all(text.strip() for text in files.values())
+    assert set(native_runtime._runner_files("meta_harness")) == {"native_runner.py"}
+
+
+def test_autosaddler_transport_scores_named_parts_without_the_gepa_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Send the AutoSaddler runner and plugin, accept a parts candidate and record the upstream revision."""
+    monkeypatch.setattr(native_runtime, "_source_archive", MagicMock(side_effect=AssertionError("unused")))
+    session = FakeSession()
+    session.candidate = {"system": "better", "user": "ask"}
+    runtime = FakeRuntime(session)
+    calls: list[tuple[Any, Any]] = []
+
+    def score(candidate: Any, example: Any) -> tuple[float, dict[str, Any]]:
+        """Record the parts candidate the parent scored."""
+        calls.append((candidate, example))
+        return 0.75, {}
+
+    task = Task({"system": "seed", "user": "ask"}, train_set=[{"id": "a"}], val_set=[{"id": "b"}])
+    result = run_native_engine("autosaddler", task, EvalServer(score, max_evals=3), _context(tmp_path, runtime))
+
+    assert calls == [({"system": "better", "user": "ask"}, {"id": "case"})]
+    assert result.best_candidate == {"system": "better", "user": "ask"}
+    assert result.metadata["upstream_source"] == native_runtime.AUTOSADDLER_SOURCE
+    assert result.metadata["upstream_revision"] == native_runtime.AUTOSADDLER_REVISION
+    payload = json.loads(session.files["native_input.json"])
+    assert payload["source"] == native_runtime.AUTOSADDLER_REVISION
+    assert payload["task"]["seed_candidate"] == {"system": "seed", "user": "ask"}
+    assert "native_source.tar.gz.b64" not in session.files
+    assert "autosaddler_plugin/SYSTEM.md" in session.files
+    assert "autosaddler_runner.py" in session.calls[1][0]
+    assert "native_runner.py" not in session.calls[1][0]
+    assert session.closed
+
+
+def test_autosaddler_transport_rejects_a_candidate_of_the_wrong_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Refuse to score text when the task carries named parts instead of crashing the scorer."""
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    session = FakeSession()
+    runtime = FakeRuntime(session)
+    scorer = MagicMock(return_value=(0.5, {}))
+    task = Task({"system": "seed", "user": "ask"}, train_set=[{"id": "a"}], val_set=[{"id": "b"}])
+    with pytest.raises(ServiceError, match="invalid candidate shape"):
+        run_native_engine("autosaddler", task, EvalServer(scorer, max_evals=3), _context(tmp_path, runtime))
+    scorer.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("task", "message"),
+    [
+        (Task(None, train_set=[{"id": "a"}, {"id": "b"}]), "requires a seed candidate"),
+        (Task("seed", train_set=[{"id": "a"}]), "at least two visible examples"),
+        (Task("seed"), "at least two visible examples"),
+    ],
+)
+def test_autosaddler_transport_needs_a_seed_and_two_visible_examples(tmp_path: Path, task: Task, message: str) -> None:
+    """Fail before launching a sandbox when upstream has nothing to patch or confirm against."""
+    runtime = FakeRuntime(FakeSession())
+    with pytest.raises(ServiceError, match=message):
+        run_native_engine(
+            "autosaddler", task, EvalServer(lambda *_: (0.5, {}), max_evals=3), _context(tmp_path, runtime)
+        )
+    assert runtime.spec is None

@@ -125,8 +125,13 @@ ENGINES: dict[str, EngineSpec] = {
     BLACKBOX_ENGINE_AUTOSADDLER: EngineSpec(
         id=BLACKBOX_ENGINE_AUTOSADDLER,
         label="AutoSaddler",
-        description="Diagnoses per-case failures with the reflection model and patches the version, keeping only verified gains.",
+        description=(
+            "A coding agent diagnoses training failures and patches the version; "
+            "only patches confirmed on held-out development cases are kept."
+        ),
         factory=AutoSaddlerEngine,
+        supports_parts=True,
+        requires_proposer=True,
     ),
 }
 

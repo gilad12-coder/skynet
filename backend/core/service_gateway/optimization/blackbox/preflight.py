@@ -16,7 +16,7 @@ from ....models.common import SplitFractions
 from ..data import split_examples
 from .agent_eval import READINESS_LIFETIME_SECONDS, case_lifetime_seconds
 from .harness import GatewayConfig
-from .native_runtime import NativeOptions, check_native_runtime
+from .native_runtime import NATIVE_ENGINES, NativeOptions, check_native_runtime
 from .sandbox import SandboxRuntime, sandbox_runtime_context
 from .sandbox_scorer import SandboxPythonScorer, scorer_gateway
 from .scorer import build_scorer
@@ -220,10 +220,10 @@ def verify_anything_in_sandbox(
                 public = {key: value for key, value in payload.items() if not key.startswith("_")}
                 typed = BlackboxRunRequest.model_validate(public)
                 validate_blackbox_payload(typed, verify_scorer=False)
-                native = typed.strategy.mode != "single" or typed.strategy.engine in {"meta_harness", "autoresearch"}
+                native = typed.strategy.mode != "single" or typed.strategy.engine in NATIVE_ENGINES
                 if native:
                     route = typed.reflection_model_settings.extra[ROUTE_KEY]
-                    check_native_runtime(
+                    readiness = check_native_runtime(
                         NativeOptions(
                             runtime=typed.proposer_runtime,
                             model=route["model"],
@@ -233,6 +233,17 @@ def verify_anything_in_sandbox(
                             sandbox_runtime=runtime,
                         )
                     )
+                    # Auto merely loses its AutoSaddler lane on such an image;
+                    # a single AutoSaddler run has nothing left to do.
+                    if (
+                        typed.strategy.mode == "single"
+                        and typed.strategy.engine == "autosaddler"
+                        and not readiness.get("autosaddler_ready")
+                    ):
+                        raise ServiceError(
+                            "This runtime does not ship the pinned AutoSaddler package on Python 3.12; "
+                            "choose another engine or Auto."
+                        )
                 checks.append(_check("optimizer", "succeeded"))
         finally:
             try:
