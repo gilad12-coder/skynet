@@ -876,7 +876,7 @@ export interface BillingWalletResponse {
 
 /** Fetch the caller's credit wallet. Reads work even without Stripe. */
 export function getWallet() {
-  return request<BillingWalletResponse>("/billing/wallet");
+  return cachedGet<BillingWalletResponse>("/billing/wallet", 0);
 }
 
 /** One day's billed run spend (the usage dashboard's time series). */
@@ -1469,7 +1469,7 @@ export interface DatasetSharingState {
 
 /** List the caller's saved datasets plus those shared with them, with usage. */
 export function listDatasets() {
-  return request<DatasetListResponse>("/datasets/library");
+  return cachedGet<DatasetListResponse>("/datasets/library", 0);
 }
 
 /** Fetch one saved dataset's rows and saved column schema (viewer+). */
@@ -1702,7 +1702,7 @@ export interface StorageUsageResponse {
 
 /** Fetch the caller's unified storage usage backing the meter and quota modal. */
 export function getStorageUsage() {
-  return request<StorageUsageResponse>("/usage/storage");
+  return cachedGet<StorageUsageResponse>("/usage/storage", 0);
 }
 
 /**
