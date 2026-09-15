@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "独立生成起点的多个改写版本，得分最高者胜出。",
   "submit.blackbox.proposer.effort": "推理强度",
   "submit.blackbox.proposer.effort.default": "沿用 harness 默认值",
   "submit.blackbox.proposer.effort.high": "高",

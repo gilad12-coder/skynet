@@ -378,22 +378,24 @@ export function BlackboxOptimizerStep({
                           </SelectContent>
                         </Select>
                       </Field>
-                      <Field
-                        label={msg("submit.blackbox.proposer.max_thinking_tokens")}
-                        htmlFor="bb-proposer-thinking"
-                        tip="submit.blackbox.proposer_thinking"
-                      >
-                        <NumberInput
-                          id="bb-proposer-thinking"
-                          value={proposer.max_thinking_tokens ?? ""}
-                          onChange={(value) => updateProposer({ max_thinking_tokens: value })}
-                          onClear={() => updateProposer({ max_thinking_tokens: null })}
-                          min={1024}
-                          max={128000}
-                          step={1024}
-                          className={MOBILE_NUMBER_INPUT_CLASS}
-                        />
-                      </Field>
+                      {knobs.thinking && (
+                        <Field
+                          label={msg("submit.blackbox.proposer.max_thinking_tokens")}
+                          htmlFor="bb-proposer-thinking"
+                          tip="submit.blackbox.proposer_thinking"
+                        >
+                          <NumberInput
+                            id="bb-proposer-thinking"
+                            value={proposer.max_thinking_tokens ?? ""}
+                            onChange={(value) => updateProposer({ max_thinking_tokens: value })}
+                            onClear={() => updateProposer({ max_thinking_tokens: null })}
+                            min={1024}
+                            max={128000}
+                            step={1024}
+                            className={MOBILE_NUMBER_INPUT_CLASS}
+                          />
+                        </Field>
+                      )}
                     </>
                   )}
                   {knobs.candidates && (

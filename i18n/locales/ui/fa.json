@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "بازنویسی‌های مستقلی از نقطهٔ شروع تولید می‌کند؛ بازنویسی با بالاترین امتیاز برنده می‌شود.",
   "submit.blackbox.proposer.effort": "میزان تلاش استدلال",
   "submit.blackbox.proposer.effort.default": "پیش‌فرض هارنس",
   "submit.blackbox.proposer.effort.high": "زیاد",

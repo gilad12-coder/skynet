@@ -71,6 +71,7 @@ import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/prefligh
 import {
   DEFAULT_PROPOSER,
   engineSelectionIssue,
+  submittedProposer,
   supportsIterationLimit,
   usesNativeProposer,
 } from "../lib/engine-contract";
@@ -873,7 +874,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       },
       strategy: strategyMode === "single" ? { mode: "single", engine } : { mode: "auto" },
       proposer_runtime: proposerRuntime,
-      proposer: nativeProposer ? proposer : undefined,
+      proposer: nativeProposer ? submittedProposer(proposer, strategyMode, engine) : undefined,
       target: buildTarget(),
       task_model_config:
         targetKind === "agent"

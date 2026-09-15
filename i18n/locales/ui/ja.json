@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "開始点の書き換えを独立に複数生成し、最も高いスコアのものを採用します。",
   "submit.blackbox.proposer.effort": "推論の深さ",
   "submit.blackbox.proposer.effort.default": "ハーネスの既定値",
   "submit.blackbox.proposer.effort.high": "高",

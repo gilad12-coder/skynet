@@ -33,11 +33,32 @@ export const DEFAULT_PROPOSER: BlackboxProposer = {
 export function proposerKnobs(
   mode: BlackboxStrategy["mode"],
   engine: BlackboxEngineId | null,
-): { candidates: boolean; ralph: boolean } {
+): { thinking: boolean; candidates: boolean; ralph: boolean } {
   const auto = mode !== "single";
   return {
+    // AutoSaddler's Claude provider takes an effort level but no thinking budget.
+    thinking: auto || engine === "meta_harness" || engine === "autoresearch",
     candidates: auto || engine === "meta_harness",
     ralph: auto || engine === "autoresearch",
+  };
+}
+
+/** The proposer block to submit: knobs the form hides for this strategy go back to their defaults. */
+export function submittedProposer(
+  proposer: BlackboxProposer,
+  mode: BlackboxStrategy["mode"],
+  engine: BlackboxEngineId | null,
+): BlackboxProposer {
+  const knobs = proposerKnobs(mode, engine);
+  const reasoning = proposerTunesReasoning(proposer.harness);
+  return {
+    ...proposer,
+    effort: reasoning ? (proposer.effort ?? null) : null,
+    max_thinking_tokens:
+      reasoning && knobs.thinking ? (proposer.max_thinking_tokens ?? null) : null,
+    max_candidates_per_iter: knobs.candidates ? (proposer.max_candidates_per_iter ?? null) : null,
+    ralph: knobs.ralph ? (proposer.ralph ?? DEFAULT_PROPOSER.ralph) : DEFAULT_PROPOSER.ralph,
+    max_no_eval_seconds: knobs.ralph ? (proposer.max_no_eval_seconds ?? null) : null,
   };
 }
 

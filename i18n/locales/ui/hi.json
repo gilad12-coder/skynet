@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "शुरुआती बिंदु के स्वतंत्र पुनर्लेखन बनाता है; सबसे ऊँचे स्कोर वाला जीतता है।",
   "submit.blackbox.proposer.effort": "तर्क का प्रयास",
   "submit.blackbox.proposer.effort.default": "हार्नेस का डिफ़ॉल्ट",
   "submit.blackbox.proposer.effort.high": "उच्च",

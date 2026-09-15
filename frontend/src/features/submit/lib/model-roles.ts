@@ -12,6 +12,7 @@ export type ScoringModelMode = "inherit" | "explicit";
 /** The engine families whose proposer the optimization model drives. */
 export type OptimizationModelFamily =
   | "gepa"
+  | "best_of_n"
   | "meta_harness"
   | "autoresearch"
   | "autosaddler"
@@ -94,6 +95,7 @@ export function optimizationModelFamily(
     if (engine === "meta_harness") return "meta_harness";
     if (engine === "autoresearch") return "autoresearch";
     if (engine === "autosaddler") return "autosaddler";
+    if (engine === "best_of_n") return "best_of_n";
   }
   return "gepa";
 }
@@ -102,6 +104,7 @@ export const OPTIMIZATION_MODEL_DESCRIPTION: Readonly<Record<OptimizationModelFa
   {
     auto: "submit.blackbox.roles.optimization.desc.auto",
     gepa: "submit.blackbox.roles.optimization.desc.gepa",
+    best_of_n: "submit.blackbox.roles.optimization.desc.best_of_n",
     meta_harness: "submit.blackbox.roles.optimization.desc.meta_harness",
     autoresearch: "submit.blackbox.roles.optimization.desc.autoresearch",
     autosaddler: "submit.blackbox.roles.optimization.desc.autosaddler",

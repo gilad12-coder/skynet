@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "Génère des réécritures indépendantes du point de départ ; celle qui obtient le meilleur score l'emporte.",
   "submit.blackbox.proposer.effort": "Effort de raisonnement",
   "submit.blackbox.proposer.effort.default": "Valeur par défaut du harnais",
   "submit.blackbox.proposer.effort.high": "Élevé",

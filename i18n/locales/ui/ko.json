@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "시작점을 독립적으로 여러 번 다시 작성하고, 점수가 가장 높은 것을 채택합니다.",
   "submit.blackbox.proposer.effort": "추론 강도",
   "submit.blackbox.proposer.effort.default": "하네스 기본값",
   "submit.blackbox.proposer.effort.high": "높음",

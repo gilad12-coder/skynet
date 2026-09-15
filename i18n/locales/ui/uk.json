@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "Створює незалежні переробки початкової точки; перемагає варіант із найвищою оцінкою.",
   "submit.blackbox.proposer.effort": "Глибина міркувань",
   "submit.blackbox.proposer.effort.default": "За замовчуванням для харнесу",
   "submit.blackbox.proposer.effort.high": "Висока",

@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "Genera reescrituras independientes del punto de partida; gana la de mejor puntuación.",
   "submit.blackbox.proposer.effort": "Esfuerzo de razonamiento",
   "submit.blackbox.proposer.effort.default": "Valor predeterminado del arnés",
   "submit.blackbox.proposer.effort.high": "Alto",

@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "Başlangıç noktasının bağımsız yeniden yazımlarını üretir; en yüksek puanı alan kazanır.",
   "submit.blackbox.proposer.effort": "Akıl yürütme eforu",
   "submit.blackbox.proposer.effort.default": "Harness varsayılanı",
   "submit.blackbox.proposer.effort.high": "Yüksek",

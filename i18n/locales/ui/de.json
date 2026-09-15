@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "Erzeugt unabhängige Umformulierungen des Ausgangspunkts; die mit der besten Bewertung gewinnt.",
   "submit.blackbox.proposer.effort": "Denkaufwand",
   "submit.blackbox.proposer.effort.default": "Standard des Harness",
   "submit.blackbox.proposer.effort.high": "Hoch",

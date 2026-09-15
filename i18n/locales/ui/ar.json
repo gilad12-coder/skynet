@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "يولّد إعادات صياغة مستقلة لنقطة البداية؛ وتفوز الصياغة صاحبة أعلى درجة.",
   "submit.blackbox.proposer.effort": "جهد الاستدلال",
   "submit.blackbox.proposer.effort.default": "الإعداد الافتراضي للبيئة",
   "submit.blackbox.proposer.effort.high": "مرتفع",

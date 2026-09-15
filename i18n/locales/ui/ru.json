@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "Создаёт независимые переработки исходной точки; побеждает вариант с наивысшей оценкой.",
   "submit.blackbox.proposer.effort": "Глубина рассуждений",
   "submit.blackbox.proposer.effort.default": "По умолчанию для харнеса",
   "submit.blackbox.proposer.effort.high": "Высокая",

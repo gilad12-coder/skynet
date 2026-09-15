@@ -1,4 +1,5 @@
 {
+  "submit.blackbox.roles.optimization.desc.best_of_n": "Genera riscritture indipendenti del punto di partenza; vince quella con il punteggio migliore.",
   "submit.blackbox.proposer.effort": "Sforzo di ragionamento",
   "submit.blackbox.proposer.effort.default": "Predefinito dell'harness",
   "submit.blackbox.proposer.effort.high": "Alto",

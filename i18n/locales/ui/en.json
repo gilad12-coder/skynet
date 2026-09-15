@@ -3522,6 +3522,7 @@
   "submit.blackbox.roles.task.desc": "Runs the prompt, program or harness you are improving.",
   "submit.blackbox.roles.optimization.label": "Optimization model",
   "submit.blackbox.roles.optimization.desc.gepa": "Uses evaluation feedback to propose better prompts or code.",
+  "submit.blackbox.roles.optimization.desc.best_of_n": "Samples independent rewrites of the starting point; the best-scoring one wins.",
   "submit.blackbox.roles.optimization.desc.meta_harness": "Examines previous code, scores and execution traces to propose improved harnesses.",
   "submit.blackbox.roles.optimization.desc.autoresearch": "Drives the selected AutoResearch engine's experiment proposals.",
   "submit.blackbox.roles.optimization.desc.autosaddler": "Runs the AutoSaddler coding agent that diagnoses failing training cases and patches the version; only patches confirmed on held-out cases are kept.",
