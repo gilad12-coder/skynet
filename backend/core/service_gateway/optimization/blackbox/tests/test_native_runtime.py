@@ -188,6 +188,8 @@ def test_native_readiness_checks_selected_isolation_without_search(
     assert check_native_runtime(options) == {
         "runtime": "vercel",
         "gepa_source": native_runtime.GEPA_SOURCE,
+        "meta_harness_source": native_runtime.META_HARNESS_REVISION,
+        "autoresearch_source": native_runtime.AUTORESEARCH_REVISION,
         "autosaddler_source": native_runtime.AUTOSADDLER_REVISION,
         "autosaddler_ready": True,
         "claude_version": native_runtime.CLAUDE_VERSION,
@@ -529,7 +531,6 @@ def test_artifact_restore_rejects_parent_traversal(tmp_path: Path) -> None:
         ("autoresearch", "success"),
         ("meta_harness", "success"),
         ("meta_harness", "abort"),
-        ("autoresearch", "untested"),
         ("autoresearch", "repeated"),
     ],
 )
@@ -550,10 +551,10 @@ def test_real_native_runner_drives_upstream_with_fake_cli(tmp_path: Path, engine
         "headers={'Content-Type':'application/json'})\n"
         " urllib.request.urlopen(request).read()\n"
         " if os.environ.get('FAKE_REPEAT'): urllib.request.urlopen(request).read()\n"
-        " pathlib.Path('best_candidate.txt').write_text(os.environ.get('FAKE_FINAL_CANDIDATE','better'))\n"
         "else:\n"
+        " assert '--tools' in args and '--append-system-prompt' in args\n"
         " pathlib.Path('agents/better.txt').write_text('better')\n"
-        " pathlib.Path('state/pending_eval_iter1.json').write_text(json.dumps({'candidates':[{'name':'better','file':'agents/better.txt'}]}))\n"
+        " pathlib.Path('logs/run/pending_eval.json').write_text(json.dumps({'candidates':[{'name':'better','file':'agents/better.txt'}]}))\n"
         "out=pathlib.Path.home()/'.claude/projects/test'; out.mkdir(parents=True,exist_ok=True)\n"
         "message={'type':'assistant','sessionId':session,'message':{'id':'m1','model':'claude-test',"
         "'usage':{'input_tokens':7,'output_tokens':3}}}\n"
@@ -579,8 +580,6 @@ def test_real_native_runner_drives_upstream_with_fake_cli(tmp_path: Path, engine
         payload["task"]["train_set"] = [{"id": "a"}, {"id": "b"}]
     (tmp_path / "input.json").write_text(json.dumps(payload))
     env = {"PATH": f"{binary}{os.pathsep}/usr/bin:/bin", "HOME": str(tmp_path), "PYTHONUNBUFFERED": "1"}
-    if variant == "untested":
-        env["FAKE_FINAL_CANDIDATE"] = "untested"
     if variant == "repeated":
         env["FAKE_REPEAT"] = "1"
     process = subprocess.Popen(
@@ -600,13 +599,12 @@ def test_real_native_runner_drives_upstream_with_fake_cli(tmp_path: Path, engine
             score = 0.8 if request["candidate"] == "better" else float(request["example"]["id"] == "a")
             if variant == "repeated" and requests == 0:
                 score = 1.0
-            response = {"error": "parent scorer failed"} if abort else {"score": score, "info": {}}
+            failing = abort and request["candidate"] == "better"
+            response = {"error": "parent scorer failed"} if failing else {"score": score, "info": {}}
             (tmp_path / "rpc" / f"{request['id']}.json").write_text(json.dumps(response))
             requests += 1
         stderr = process.stderr.read()
-        assert process.wait(timeout=25) == int(abort or variant == "untested"), (
-            tmp_path / "native_result.json"
-        ).read_text() + stderr
+        assert process.wait(timeout=25) == int(abort), (tmp_path / "native_result.json").read_text() + stderr
     finally:
         if process.poll() is None:
             process.kill()
@@ -615,11 +613,8 @@ def test_real_native_runner_drives_upstream_with_fake_cli(tmp_path: Path, engine
     assert (tmp_path / "invocations.txt").read_text().splitlines() == ["called"]
     if abort:
         assert "parent scorer failed" in result["error"]
-        assert result["usage_by_model"]["claude-test"]["total_tokens"] == 10
-        return
-    if variant == "untested":
-        assert "fidelity check failed" in result["error"]
-        assert result["best_candidate"] == "untested"
+        assert result["interrupted_incumbent"]["best_candidate"] == "seed"
+        assert result["interrupted_incumbent"]["best_score"] == 0.5
         assert result["usage_by_model"]["claude-test"]["total_tokens"] == 10
         return
     assert requests == (4 if engine_id == "meta_harness" else 2 if variant == "repeated" else 1)
@@ -659,7 +654,16 @@ def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
         "autosaddler_plugin/skills/patch-verification/SKILL.md",
     }
     assert all(text.strip() for text in files.values())
-    assert set(native_runtime._runner_files("meta_harness")) == {"native_runner.py", "harness_bridge.py"}
+    assert set(native_runtime._runner_files("meta_harness")) == {
+        "native_runner.py",
+        "native_engines.py",
+        "harness_bridge.py",
+        "upstream_prompts/meta_harness/SKILL.md",
+        "upstream_prompts/meta_harness/LICENSE",
+        "upstream_prompts/meta_harness/NOTICE.md",
+        "upstream_prompts/autoresearch/program.md",
+        "upstream_prompts/autoresearch/NOTICE.md",
+    }
 
 
 def test_autosaddler_transport_scores_named_parts_without_the_gepa_archive(
@@ -745,10 +749,9 @@ def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path
         " request=urllib.request.Request(url+'/evaluate',data=json.dumps({'candidate':'better'}).encode(),"
         "headers={'Content-Type':'application/json'})\n"
         " urllib.request.urlopen(request).read()\n"
-        " pathlib.Path('best_candidate.txt').write_text('better')\n"
         "else:\n"
         " pathlib.Path('agents/better.txt').write_text('better')\n"
-        " pathlib.Path('state/pending_eval_iter1.json').write_text(json.dumps({'candidates':[{'name':'better','file':'agents/better.txt'}]}))\n"
+        " pathlib.Path('logs/run/pending_eval.json').write_text(json.dumps({'candidates':[{'name':'better','file':'agents/better.txt'}]}))\n"
         "print(json.dumps({'type':'message_end','message':{'role':'assistant','content':[{'type':'text','text':'done'}],"
         "'usage':{'input':7,'output':3}}}))\n"
     )

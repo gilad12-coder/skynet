@@ -43,7 +43,14 @@ from .sandbox import (
     sandbox_unavailable_reason,
     unique_sandbox_name,
 )
-from .upstream import AUTOSADDLER_REVISION, AUTOSADDLER_SOURCE
+from .upstream import (
+    AUTORESEARCH_REVISION,
+    AUTORESEARCH_SOURCE,
+    AUTOSADDLER_REVISION,
+    AUTOSADDLER_SOURCE,
+    META_HARNESS_REVISION,
+    META_HARNESS_SOURCE,
+)
 
 GEPA_SOURCE = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
 CLAUDE_VERSION = "2.1.259"
@@ -60,8 +67,15 @@ _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _UUID = re.compile(r"^[0-9a-f]{32}$")
 NATIVE_ENGINES = frozenset({"meta_harness", "autoresearch", "autosaddler"})
+_UPSTREAMS = {
+    "meta_harness": (META_HARNESS_SOURCE, META_HARNESS_REVISION),
+    "autoresearch": (AUTORESEARCH_SOURCE, AUTORESEARCH_REVISION),
+    "autosaddler": (AUTOSADDLER_SOURCE, AUTOSADDLER_REVISION),
+}
 _AUTOSADDLER_RUNNER_FILE = "autosaddler_runner.py"
 _BRIDGE_FILE = "harness_bridge.py"
+_ENGINES_FILE = "native_engines.py"
+_PROMPTS_DIR = "upstream_prompts"
 _AUTOSADDLER_PLUGIN_DIR = "autosaddler_plugin"
 # Upstream AutoSaddler v2 declares Python 3.12+ (its usage dataclasses rely on
 # 3.12 default semantics), so its guest carries its own interpreter and a
@@ -174,7 +188,7 @@ def _source_archive() -> str:
 
 
 def _runner_files(engine_id: str) -> dict[str, str]:
-    """Collect the sandbox-side runner and, for AutoSaddler, its Skynet plugin assets.
+    """Collect the sandbox-side runner plus the pinned upstream prompts or plugin it drives.
 
     Args:
         engine_id: Native engine being launched.
@@ -184,7 +198,16 @@ def _runner_files(engine_id: str) -> dict[str, str]:
     """
     bridge = {_BRIDGE_FILE: Path(harness_bridge.__file__).read_text(encoding="utf-8")}
     if engine_id != "autosaddler":
-        return {**bridge, _RUNNER_FILE: Path(native_runner.__file__).read_text(encoding="utf-8")}
+        engines = Path(native_runner.__file__).with_name(_ENGINES_FILE)
+        files = {
+            **bridge,
+            _RUNNER_FILE: Path(native_runner.__file__).read_text(encoding="utf-8"),
+            _ENGINES_FILE: engines.read_text(encoding="utf-8"),
+        }
+        prompts_root = engines.with_name(_PROMPTS_DIR)
+        for asset in sorted(path for path in prompts_root.rglob("*") if path.is_file()):
+            files[f"{_PROMPTS_DIR}/{asset.relative_to(prompts_root).as_posix()}"] = asset.read_text(encoding="utf-8")
+        return files
     runner = Path(native_runner.__file__).with_name(_AUTOSADDLER_RUNNER_FILE)
     plugin_root = runner.with_name(_AUTOSADDLER_PLUGIN_DIR)
     files = {**bridge, _AUTOSADDLER_RUNNER_FILE: runner.read_text(encoding="utf-8")}
@@ -365,9 +388,8 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
                 + _failure_detail(installed, install_timeout)
             )
         probe = (
-            "import importlib.util,json,subprocess,sys; import native_runner, autosaddler_runner; "
-            "from gepa.oa.registry import get_engine_cls; "
-            "[get_engine_cls(name) for name in ('meta_harness','autoresearch')]; "
+            "import importlib.util,json,subprocess,sys; import native_runner, autosaddler_runner, native_engines; "
+            "native_engines.check_assets(); "
             f"autosaddler=sys.version_info >= {AUTOSADDLER_PYTHON_FLOOR!r} "
             "and importlib.util.find_spec('autosaddler') is not None; "
             "prefix=[]; "
@@ -397,6 +419,8 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
         return {
             "runtime": options.runtime,
             "gepa_source": GEPA_SOURCE,
+            "meta_harness_source": META_HARNESS_REVISION,
+            "autoresearch_source": AUTORESEARCH_REVISION,
             "autosaddler_source": AUTOSADDLER_REVISION,
             "autosaddler_ready": bool(ready.get("autosaddler")),
             "claude_version": CLAUDE_VERSION,
@@ -637,11 +661,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         else {}
     )
     source = None if autosaddler else _source_archive()
-    upstream_source, upstream_revision = (
-        (AUTOSADDLER_SOURCE, AUTOSADDLER_REVISION)
-        if autosaddler
-        else (f"git+https://github.com/gepa-ai/gepa@{GEPA_SOURCE}", GEPA_SOURCE)
-    )
+    upstream_source, upstream_revision = _UPSTREAMS[engine_id]
     runner_file = _AUTOSADDLER_RUNNER_FILE if autosaddler else _RUNNER_FILE
     proposer = options.proposer
     launch = build_launch(

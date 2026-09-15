@@ -163,6 +163,28 @@ def parse_codex_output(stdout: str) -> tuple[str | None, Usage]:
     return text, usage
 
 
+def parse_opencode_output(stdout: str) -> tuple[str | None, Usage]:
+    """Read the last completed text part and summed step usage from ``opencode run --format json``.
+
+    Args:
+        stdout: Captured harness output.
+
+    Returns:
+        The final assistant text (``None`` when absent) and the usage total.
+    """
+    text: str | None = None
+    usage: Usage = {}
+    for event in _json_lines(stdout):
+        kind = event.get("type")
+        part = event.get("part") or {}
+        if kind == "text" and part.get("text"):
+            text = str(part["text"]).strip()
+        elif kind == "step_finish":
+            tokens = part.get("tokens") or {}
+            usage = _add_usage(usage, _usage(tokens.get("input"), tokens.get("output")))
+    return text, usage
+
+
 def parse_claude_output(stdout: str) -> tuple[str | None, Usage]:
     """Read the result and usage from ``claude -p --output-format json``.
 
@@ -190,6 +212,7 @@ PARSERS = {
     "plain": parse_plain_output,
     "pi": parse_pi_output,
     "codex": parse_codex_output,
+    "opencode": parse_opencode_output,
     "claude": parse_claude_output,
 }
 
@@ -500,6 +523,7 @@ def _cli_parser() -> argparse.ArgumentParser:
         "--max-turns",
         "--allowedTools",
         "--disallowedTools",
+        "--tools",
         "--add-dir",
         "--append-system-prompt",
         "--system-prompt",

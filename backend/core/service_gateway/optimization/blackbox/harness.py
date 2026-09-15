@@ -28,7 +28,14 @@ from ....models.blackbox import (
     BLACKBOX_HARNESS_PRIME,
     BlackboxTarget,
 )
-from .harness_bridge import PARSERS, parse_claude_output, parse_codex_output, parse_pi_output, parse_plain_output
+from .harness_bridge import (
+    PARSERS,
+    parse_claude_output,
+    parse_codex_output,
+    parse_opencode_output,
+    parse_pi_output,
+    parse_plain_output,
+)
 
 PROVIDER = "skynet"
 PROMPT_FILE = "task/PROMPT.md"
@@ -379,9 +386,9 @@ def _opencode_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
         instructions_file="AGENTS.md",
         install_command=_npm_install("opencode", "opencode-ai", OPENCODE_VERSION),
         files={"opencode.json": json.dumps(config, indent=2)},
-        run_command=f'opencode run --model "{PROVIDER}/${ENV_MODEL}" {_PROMPT_ARG}',
+        run_command=f'opencode run --format json --model "{PROVIDER}/${ENV_MODEL}" {_PROMPT_ARG}',
         env=_base_env(model, gateway),
-        parse_output=parse_plain_output,
+        parse_output=parse_opencode_output,
     )
 
 

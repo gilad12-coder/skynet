@@ -25,22 +25,22 @@ from typing import Any
 
 from gepa.oa.budget import BudgetTracker
 from gepa.oa.config import OptimizeAnythingConfig
-from gepa.oa.engines.autoresearch import _best_aggregate_candidate
 from gepa.oa.eval_server import EvalServer
-from gepa.oa.registry import get_engine_cls
 from gepa.oa.task import Task
 
 try:
-    from . import harness_bridge
-except ImportError:  # In the sandbox this file runs as a script beside the bridge.
-    _bridge_spec = importlib.util.spec_from_file_location(
-        "harness_bridge", Path(__file__).with_name("harness_bridge.py")
-    )
-    assert _bridge_spec is not None
-    assert _bridge_spec.loader is not None
-    harness_bridge = importlib.util.module_from_spec(_bridge_spec)
-    sys.modules["harness_bridge"] = harness_bridge
-    _bridge_spec.loader.exec_module(harness_bridge)
+    from . import harness_bridge, native_engines
+except ImportError:  # In the sandbox this file runs as a script beside its sibling modules.
+    _sibling_modules = {}
+    for _sibling in ("harness_bridge", "native_engines"):
+        _spec = importlib.util.spec_from_file_location(_sibling, Path(__file__).with_name(f"{_sibling}.py"))
+        assert _spec is not None
+        assert _spec.loader is not None
+        _sibling_modules[_sibling] = importlib.util.module_from_spec(_spec)
+        sys.modules[_sibling] = _sibling_modules[_sibling]
+        _spec.loader.exec_module(_sibling_modules[_sibling])
+    harness_bridge = _sibling_modules["harness_bridge"]
+    native_engines = _sibling_modules["native_engines"]
 
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
@@ -372,11 +372,10 @@ def _has_evaluated_single_result(server: EvalServer, output_dir: Path, candidate
     return False
 
 
-def _budget_incumbent(engine_id: str, engine: Any, task: Task, server: EvalServer, output_dir: Path) -> dict[str, Any]:
+def _budget_incumbent(engine: Any, task: Task, server: EvalServer, output_dir: Path) -> dict[str, Any]:
     """Retain an incumbent published by the upstream engine before interruption.
 
     Args:
-        engine_id: Pinned native engine.
         engine: Interrupted upstream instance.
         task: Unchanged task and visible evaluation scope.
         server: Completed evaluation evidence.
@@ -385,28 +384,10 @@ def _budget_incumbent(engine_id: str, engine: Any, task: Task, server: EvalServe
     Returns:
         An evaluated candidate envelope, or an empty mapping when none was published.
     """
-    pending = getattr(engine, "_pending_tempdir", None)
-    work_dir = Path(pending.name) if pending is not None else Path(engine.run_dir)
-    if engine_id == "meta_harness":
-        frontier = engine._read_frontier(work_dir / "state/frontier.json")
-        score = engine._best_score(work_dir / "state/frontier.json")
-        filename = frontier.get("best_candidate_file")
-        if not isinstance(filename, str):
-            return {}
-        candidate_path = (work_dir / filename).resolve()
-        if not candidate_path.is_relative_to(work_dir.resolve()) or not candidate_path.is_file():
-            return {}
-        candidate = candidate_path.read_text(encoding="utf-8")
-    elif task.has_dataset:
-        selected = _best_aggregate_candidate(server)
-        if selected is None:
-            return {}
-        candidate, score = selected
-    else:
-        best_file = work_dir / "best_candidate.txt"
-        if not best_file.is_file():
-            return {}
-        candidate, score = best_file.read_text(encoding="utf-8"), server.best_score
+    selected = engine.incumbent(server)
+    if selected is None:
+        return {}
+    candidate, score = selected
     if not isinstance(score, int | float) or not math.isfinite(score):
         return {}
     if task.has_dataset:
@@ -492,7 +473,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     )
     mailbox = EvaluatorMailbox(payload["nonce"], float(payload["timeout_seconds"]))
     server = ProgressEvalServer(task, mailbox, config, output_dir)
-    engine = get_engine_cls(payload["engine_id"])(config)
+    engine = native_engines.ENGINES[payload["engine_id"]](config)
     document: dict[str, Any] = {}
     finished = threading.Event()
 
@@ -536,9 +517,9 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         document.pop("best_candidate", None)
         document.pop("best_score", None)
         document["stop_reason"] = "budget_reached"
-        document.update(_budget_incumbent(payload["engine_id"], engine, task, server, output_dir))
+        document.update(_budget_incumbent(engine, task, server, output_dir))
     if document.get("error"):
-        document["interrupted_incumbent"] = _budget_incumbent(payload["engine_id"], engine, task, server, output_dir)
+        document["interrupted_incumbent"] = _budget_incumbent(engine, task, server, output_dir)
     best_score = document.get("best_score")
     if (
         not document.get("error")
@@ -551,9 +532,6 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             "Upstream result fidelity check failed: the selected candidate and score were not evaluated together."
         )
     paths = [("upstream", output_dir), ("work", Path(config.run_dir)), ("sessions", Path.home() / ".claude/projects")]
-    pending = getattr(engine, "_pending_tempdir", None)
-    if pending is not None:
-        paths.append(("interrupted-work", Path(pending.name)))
     document["usage_by_model"] = collect_usage([path for _, path in paths], payload["model"])
     metadata = document.get("metadata", {})
     had_session = bool(metadata.get("session_id") or metadata.get("session_ids"))

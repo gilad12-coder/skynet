@@ -33,6 +33,7 @@ from ..harness import (
 from ..harness_bridge import (
     parse_claude_output,
     parse_codex_output,
+    parse_opencode_output,
     parse_pi_output,
     parse_plain_output,
 )
@@ -164,8 +165,8 @@ def test_opencode_launch_names_the_gateway_model() -> None:
     config = json.loads(launch.files["opencode.json"])
     assert config["model"] == "skynet/target-model"
     assert config["provider"]["skynet"]["options"]["apiKey"] == "{env:SKYNET_API_KEY}"
-    assert 'opencode run --model "skynet/$SKYNET_MODEL"' in launch.run_command
-    assert launch.parse_output is parse_plain_output
+    assert 'opencode run --format json --model "skynet/$SKYNET_MODEL"' in launch.run_command
+    assert launch.parse_output is parse_opencode_output
 
 
 @pytest.mark.parametrize(
@@ -358,6 +359,23 @@ def test_parse_codex_output_reads_agent_message_and_turn_usage() -> None:
     assert parse_codex_output(stdout) == ("the answer", {"input_tokens": 8, "output_tokens": 4})
 
 
+def test_parse_opencode_output_reads_text_parts_and_step_usage() -> None:
+    """The last completed text part is the answer; every step_finish adds its tokens."""
+    stdout = "\n".join(
+        [
+            json.dumps({"type": "step_start", "part": {"type": "step-start"}}),
+            json.dumps({"type": "tool_use", "part": {"type": "tool", "tool": "read"}}),
+            json.dumps({"type": "step_finish", "part": {"tokens": {"input": 5, "output": 2, "reasoning": 0}}}),
+            json.dumps({"type": "text", "part": {"type": "text", "text": "draft"}}),
+            json.dumps({"type": "text", "part": {"type": "text", "text": " the answer \n"}}),
+            json.dumps({"type": "step_finish", "part": {"tokens": {"input": 3, "output": 2}}}),
+            "not json",
+        ]
+    )
+    assert parse_opencode_output(stdout) == ("the answer", {"input_tokens": 8, "output_tokens": 4})
+    assert parse_opencode_output("") == (None, {})
+
+
 def test_parse_claude_output_finds_the_result_object() -> None:
     """Claude parsing reads the result and usage whether or not the JSON is the whole output."""
     whole = json.dumps({"result": "done", "usage": {"input_tokens": 2, "output_tokens": 3}})
@@ -371,7 +389,7 @@ def test_parse_claude_output_finds_the_result_object() -> None:
 
 @pytest.mark.parametrize(
     ("harness", "output_format"),
-    [("pi", "pi"), ("codex", "codex"), ("claude_code", "claude"), ("opencode", "plain"), ("prime", "pi")],
+    [("pi", "pi"), ("codex", "codex"), ("claude_code", "claude"), ("opencode", "opencode"), ("prime", "pi")],
 )
 def test_launch_payload_names_the_parser_for_every_built_in_harness(harness: str, output_format: str) -> None:
     """Serialize a launch so the sandbox bridge can pick the right output parser by name."""
