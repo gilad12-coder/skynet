@@ -4,6 +4,8 @@ import { test } from "node:test";
 import type { BlackboxEngineCatalogResponse, BlackboxEngineId } from "@/shared/types/api";
 import {
   engineSelectionIssue,
+  proposerKnobs,
+  proposerTunesReasoning,
   supportsIterationLimit,
   usesNativeProposer,
 } from "./engine-contract.ts";
@@ -168,4 +170,17 @@ test("Meta-Harness recipes require training cases without moving validation data
       null,
     );
   }
+});
+
+test("proposer knobs follow the engine that reads them, and Auto exposes them all", () => {
+  assert.deepEqual(proposerKnobs("single", "meta_harness"), { candidates: true, ralph: false });
+  assert.deepEqual(proposerKnobs("single", "autoresearch"), { candidates: false, ralph: true });
+  assert.deepEqual(proposerKnobs("single", "autosaddler"), { candidates: false, ralph: false });
+  assert.deepEqual(proposerKnobs("auto", null), { candidates: true, ralph: true });
+});
+
+test("reasoning knobs appear only for the Claude Code proposer", () => {
+  assert.equal(proposerTunesReasoning("claude_code"), true);
+  for (const harness of ["pi", "codex", "opencode", "prime"] as const)
+    assert.equal(proposerTunesReasoning(harness), false);
 });

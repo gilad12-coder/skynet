@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import shlex
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,6 +28,7 @@ from ....models.blackbox import (
     BLACKBOX_HARNESS_PRIME,
     BlackboxTarget,
 )
+from .harness_bridge import PARSERS, parse_claude_output, parse_codex_output, parse_pi_output, parse_plain_output
 
 PROVIDER = "skynet"
 PROMPT_FILE = "task/PROMPT.md"
@@ -43,6 +44,9 @@ PLACEHOLDERS = ("{model}", "{gateway_url}", "{api_key}", "{prompt_file}", "{answ
 
 Usage = dict[str, int]
 OutputParser = Callable[[str], tuple[str | None, Usage]]
+# The parser a launch names must also exist inside the sandbox, where the
+# bridge replays it without Skynet on the path; the bridge owns the table.
+_PARSER_NAMES = {parser: name for name, parser in PARSERS.items()}
 
 _PROMPT_ARG = f'"$(cat "${ENV_PROMPT_FILE}")"'
 
@@ -213,137 +217,6 @@ def _base_env(model: str, gateway: GatewayConfig) -> dict[str, str]:
     }
 
 
-def _json_lines(stdout: str) -> Iterator[dict[str, Any]]:
-    """Yield every line of ``stdout`` that parses as a JSON object.
-
-    Args:
-        stdout: Captured harness output.
-
-    Yields:
-        Parsed event objects, skipping anything that is not JSON.
-    """
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(event, dict):
-            yield event
-
-
-def _usage(input_tokens: Any, output_tokens: Any) -> Usage:
-    """Normalize a token pair into the usage shape the run record carries.
-
-    Args:
-        input_tokens: Prompt tokens, or ``None``.
-        output_tokens: Completion tokens, or ``None``.
-
-    Returns:
-        ``{"input_tokens": n, "output_tokens": m}`` with missing values as 0.
-    """
-    return {"input_tokens": int(input_tokens or 0), "output_tokens": int(output_tokens or 0)}
-
-
-def _add_usage(total: Usage, extra: Usage) -> Usage:
-    """Sum two usage records.
-
-    Args:
-        total: Running total.
-        extra: Usage to add.
-
-    Returns:
-        The summed usage.
-    """
-    return {key: total.get(key, 0) + extra.get(key, 0) for key in ("input_tokens", "output_tokens")}
-
-
-def _parse_plain_output(stdout: str) -> tuple[str | None, Usage]:
-    """Treat the whole output as the answer; nothing reports usage.
-
-    Args:
-        stdout: Captured harness output.
-
-    Returns:
-        The stripped output (``None`` when empty) and an empty usage record.
-    """
-    text = stdout.strip()
-    return (text or None), {}
-
-
-def _parse_pi_output(stdout: str) -> tuple[str | None, Usage]:
-    """Read the last assistant message and summed usage from Pi's ``--mode json`` stream.
-
-    Args:
-        stdout: Captured harness output.
-
-    Returns:
-        The final assistant text (``None`` when absent) and the usage total.
-    """
-    text: str | None = None
-    usage: Usage = {}
-    for event in _json_lines(stdout):
-        if event.get("type") != "message_end":
-            continue
-        message = event.get("message") or {}
-        if message.get("role") != "assistant":
-            continue
-        parts = [part.get("text", "") for part in message.get("content") or [] if part.get("type") == "text"]
-        if any(parts):
-            text = "\n".join(part for part in parts if part).strip()
-        used = message.get("usage") or {}
-        usage = _add_usage(usage, _usage(used.get("input"), used.get("output")))
-    return text, usage
-
-
-def _parse_codex_output(stdout: str) -> tuple[str | None, Usage]:
-    """Read the last agent message and turn usage from ``codex exec --json``.
-
-    Args:
-        stdout: Captured harness output.
-
-    Returns:
-        The final agent text (``None`` when absent) and the usage total.
-    """
-    text: str | None = None
-    usage: Usage = {}
-    for event in _json_lines(stdout):
-        kind = event.get("type")
-        if kind == "item.completed":
-            item = event.get("item") or {}
-            if item.get("type") == "agent_message" and item.get("text"):
-                text = str(item["text"]).strip()
-        elif kind == "turn.completed":
-            used = event.get("usage") or {}
-            usage = _add_usage(usage, _usage(used.get("input_tokens"), used.get("output_tokens")))
-    return text, usage
-
-
-def _parse_claude_output(stdout: str) -> tuple[str | None, Usage]:
-    """Read the result and usage from ``claude -p --output-format json``.
-
-    Args:
-        stdout: Captured harness output.
-
-    Returns:
-        The result text (``None`` when absent) and the usage total.
-    """
-    candidates = [stdout.strip(), *reversed(stdout.strip().splitlines())]
-    for raw in candidates:
-        try:
-            payload = json.loads(raw)
-        except ValueError:
-            continue
-        if isinstance(payload, dict) and "result" in payload:
-            used = payload.get("usage") or {}
-            result = payload.get("result")
-            text = str(result).strip() if result else None
-            return (text or None), _usage(used.get("input_tokens"), used.get("output_tokens"))
-    return None, {}
-
-
 def _pi_models_json(model: str, gateway: GatewayConfig) -> tuple[dict[str, Any], str]:
     """Build Pi's ``models.json`` for the gateway and the ``--model`` argument that selects the entry.
 
@@ -406,7 +279,7 @@ def _pi_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
             f"pi --mode json --no-session --provider {PROVIDER} --model {model_arg} {_PROMPT_ARG}"
         ),
         env=_base_env(model, gateway),
-        parse_output=_parse_pi_output,
+        parse_output=parse_pi_output,
     )
 
 
@@ -442,7 +315,7 @@ def _codex_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
             f"--dangerously-bypass-approvals-and-sandbox --json {_PROMPT_ARG}"
         ),
         env=_base_env(model, gateway),
-        parse_output=_parse_codex_output,
+        parse_output=parse_codex_output,
     )
 
 
@@ -476,7 +349,7 @@ def _claude_code_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
             f'claude -p {_PROMPT_ARG} --model "${ENV_MODEL}" --output-format json --dangerously-skip-permissions'
         ),
         env=env,
-        parse_output=_parse_claude_output,
+        parse_output=parse_claude_output,
     )
 
 
@@ -508,7 +381,7 @@ def _opencode_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
         files={"opencode.json": json.dumps(config, indent=2)},
         run_command=f'opencode run --model "{PROVIDER}/${ENV_MODEL}" {_PROMPT_ARG}',
         env=_base_env(model, gateway),
-        parse_output=_parse_plain_output,
+        parse_output=parse_plain_output,
     )
 
 
@@ -538,7 +411,7 @@ def _prime_agent_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
             f"prime-agent --mode json --no-session --provider {PROVIDER} --model {model_arg} {_PROMPT_ARG}"
         ),
         env=env,
-        parse_output=_parse_pi_output,
+        parse_output=parse_pi_output,
     )
 
 
@@ -604,7 +477,7 @@ def build_launch(target: BlackboxTarget, gateway: GatewayConfig, *, protected: b
             install_command=_fill(target.install_command, model, gateway, protected=protected),
             run_command=run_command,
             env=_base_env(model, gateway),
-            parse_output=_parse_plain_output,
+            parse_output=parse_plain_output,
         )
     factory = _CATALOG.get(target.harness)
     if factory is None:
@@ -634,3 +507,22 @@ def build_launch(target: BlackboxTarget, gateway: GatewayConfig, *, protected: b
         env=env,
         parse_output=launch.parse_output,
     )
+
+
+def launch_payload(launch: HarnessLaunch) -> dict[str, Any]:
+    """Serialize a launch so the sandbox bridge can replay it without Skynet code.
+
+    Args:
+        launch: Fully filled harness launch.
+
+    Returns:
+        JSON-ready launch description keyed the way ``harness_bridge`` reads it.
+    """
+    return {
+        "instructions_file": launch.instructions_file,
+        "run_command": launch.run_command,
+        "install_command": launch.install_command,
+        "files": dict(launch.files),
+        "env": dict(launch.env),
+        "output_format": _PARSER_NAMES[launch.parse_output],
+    }

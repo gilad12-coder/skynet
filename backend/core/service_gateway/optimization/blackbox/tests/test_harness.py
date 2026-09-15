@@ -27,11 +27,14 @@ from ..harness import (
     PRIME_AGENT_VERSION,
     PROMPT_FILE,
     GatewayConfig,
-    _parse_claude_output,
-    _parse_codex_output,
-    _parse_pi_output,
-    _parse_plain_output,
     build_launch,
+    launch_payload,
+)
+from ..harness_bridge import (
+    parse_claude_output,
+    parse_codex_output,
+    parse_pi_output,
+    parse_plain_output,
 )
 
 _GATEWAY = GatewayConfig(url="https://gw.example/v1", api_key="secret-key")
@@ -63,7 +66,7 @@ def test_pi_launch_wires_the_gateway_provider_and_json_stream() -> None:
     assert provider["models"][0]["id"] == "target-model"
     assert 'cp .skynet/pi/models.json "$HOME/.pi/agent/models.json"' in launch.run_command
     assert "pi --mode json --no-session --provider skynet --model" in launch.run_command
-    assert launch.parse_output is _parse_pi_output
+    assert launch.parse_output is parse_pi_output
 
 
 def test_pi_launch_bounds_reasoning_behind_openrouter() -> None:
@@ -138,7 +141,7 @@ def test_codex_launch_writes_a_gateway_config_toml() -> None:
     assert "stream_max_retries = 0" in config
     assert json.dumps(_GATEWAY.url) in config
     assert 'CODEX_HOME="$PWD/.skynet/codex" codex exec' in launch.run_command
-    assert launch.parse_output is _parse_codex_output
+    assert launch.parse_output is parse_codex_output
 
 
 def test_claude_code_launch_strips_the_v1_suffix_for_the_anthropic_sdk() -> None:
@@ -150,7 +153,7 @@ def test_claude_code_launch_strips_the_v1_suffix_for_the_anthropic_sdk() -> None
     assert launch.env["ANTHROPIC_AUTH_TOKEN"] == "secret-key"
     assert launch.files == {}
     assert "claude -p" in launch.run_command
-    assert launch.parse_output is _parse_claude_output
+    assert launch.parse_output is parse_claude_output
 
 
 def test_opencode_launch_names_the_gateway_model() -> None:
@@ -162,7 +165,7 @@ def test_opencode_launch_names_the_gateway_model() -> None:
     assert config["model"] == "skynet/target-model"
     assert config["provider"]["skynet"]["options"]["apiKey"] == "{env:SKYNET_API_KEY}"
     assert 'opencode run --model "skynet/$SKYNET_MODEL"' in launch.run_command
-    assert launch.parse_output is _parse_plain_output
+    assert launch.parse_output is parse_plain_output
 
 
 @pytest.mark.parametrize(
@@ -204,7 +207,7 @@ def test_prime_agent_launch_reuses_the_pi_gateway_config_in_its_own_agent_dir() 
     assert provider["models"][0]["id"] == "target-model"
     assert launch.run_command.startswith('PRIME_AGENT_CODING_AGENT_DIR="$PWD/.skynet/prime" prime-agent --mode json')
     assert '--no-session --provider skynet --model "$SKYNET_MODEL"' in launch.run_command
-    assert launch.parse_output is _parse_pi_output
+    assert launch.parse_output is parse_pi_output
 
 
 def test_prime_agent_launch_pins_the_release_tarball_and_bootstraps_the_kernel() -> None:
@@ -245,7 +248,7 @@ def test_custom_launch_fills_placeholders() -> None:
     assert launch.instructions_file == "AGENTS.md"
     assert launch.install_command == "setup target-model"
     assert launch.run_command == f"agent target-model {_GATEWAY.url} secret-key {PROMPT_FILE} {ANSWER_FILE}"
-    assert launch.parse_output is _parse_plain_output
+    assert launch.parse_output is parse_plain_output
 
 
 def test_catalog_overrides_replace_the_default_commands() -> None:
@@ -257,7 +260,7 @@ def test_catalog_overrides_replace_the_default_commands() -> None:
     assert launch.install_command == "my-install target-model"
     assert launch.run_command == f"my-run {PROMPT_FILE}"
     assert ".skynet/pi/models.json" in launch.files
-    assert launch.parse_output is _parse_pi_output
+    assert launch.parse_output is parse_pi_output
 
 
 def test_protected_custom_gateway_placeholder_uses_guest_endpoint() -> None:
@@ -304,8 +307,8 @@ def test_unknown_harness_is_a_typed_error() -> None:
 
 def test_parse_plain_output_strips_and_reports_none_when_empty() -> None:
     """Plain output is the stripped text, or None when blank, with no usage."""
-    assert _parse_plain_output("  hello \n") == ("hello", {})
-    assert _parse_plain_output("   ") == (None, {})
+    assert parse_plain_output("  hello \n") == ("hello", {})
+    assert parse_plain_output("   ") == (None, {})
 
 
 def test_parse_pi_output_takes_the_last_assistant_message_and_sums_usage() -> None:
@@ -337,7 +340,7 @@ def test_parse_pi_output_takes_the_last_assistant_message_and_sums_usage() -> No
         ]
     )
 
-    text, usage = _parse_pi_output(stdout)
+    text, usage = parse_pi_output(stdout)
 
     assert text == "second\nline"
     assert usage == {"input_tokens": 13, "output_tokens": 12}
@@ -352,15 +355,28 @@ def test_parse_codex_output_reads_agent_message_and_turn_usage() -> None:
         ]
     )
 
-    assert _parse_codex_output(stdout) == ("the answer", {"input_tokens": 8, "output_tokens": 4})
+    assert parse_codex_output(stdout) == ("the answer", {"input_tokens": 8, "output_tokens": 4})
 
 
 def test_parse_claude_output_finds_the_result_object() -> None:
     """Claude parsing reads the result and usage whether or not the JSON is the whole output."""
     whole = json.dumps({"result": "done", "usage": {"input_tokens": 2, "output_tokens": 3}})
-    assert _parse_claude_output(whole) == ("done", {"input_tokens": 2, "output_tokens": 3})
+    assert parse_claude_output(whole) == ("done", {"input_tokens": 2, "output_tokens": 3})
 
     trailing = "chatter\n" + json.dumps({"result": "later", "usage": {"input_tokens": 1, "output_tokens": 1}})
-    assert _parse_claude_output(trailing) == ("later", {"input_tokens": 1, "output_tokens": 1})
+    assert parse_claude_output(trailing) == ("later", {"input_tokens": 1, "output_tokens": 1})
 
-    assert _parse_claude_output(json.dumps({"foo": "bar"})) == (None, {})
+    assert parse_claude_output(json.dumps({"foo": "bar"})) == (None, {})
+
+
+@pytest.mark.parametrize(
+    ("harness", "output_format"),
+    [("pi", "pi"), ("codex", "codex"), ("claude_code", "claude"), ("opencode", "plain"), ("prime", "pi")],
+)
+def test_launch_payload_names_the_parser_for_every_built_in_harness(harness: str, output_format: str) -> None:
+    """Serialize a launch so the sandbox bridge can pick the right output parser by name."""
+    payload = launch_payload(build_launch(_target(harness), _GATEWAY))
+    assert payload["output_format"] == output_format
+    assert payload["run_command"]
+    assert payload["instructions_file"]
+    assert set(payload) == {"instructions_file", "run_command", "install_command", "files", "env", "output_format"}

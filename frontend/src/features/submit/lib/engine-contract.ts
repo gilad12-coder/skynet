@@ -1,6 +1,8 @@
 import type {
   BlackboxEngineCatalogResponse,
   BlackboxEngineId,
+  BlackboxHarness,
+  BlackboxProposer,
   BlackboxStrategy,
 } from "@/shared/types/api";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
@@ -15,6 +17,33 @@ export function usesNativeProposer(
     engine === "autoresearch" ||
     engine === "autosaddler"
   );
+}
+
+/** What a fresh wizard sends when the user never touches the proposer settings. */
+export const DEFAULT_PROPOSER: BlackboxProposer = {
+  harness: "claude_code",
+  effort: null,
+  max_thinking_tokens: null,
+  max_candidates_per_iter: null,
+  ralph: true,
+  max_no_eval_seconds: null,
+};
+
+/** Which engine-specific proposer knobs the strategy exposes; Auto may run any engine. */
+export function proposerKnobs(
+  mode: BlackboxStrategy["mode"],
+  engine: BlackboxEngineId | null,
+): { candidates: boolean; ralph: boolean } {
+  const auto = mode !== "single";
+  return {
+    candidates: auto || engine === "meta_harness",
+    ralph: auto || engine === "autoresearch",
+  };
+}
+
+/** Effort and thinking budget are Claude Code CLI flags; other harnesses ignore them. */
+export function proposerTunesReasoning(harness: BlackboxHarness): boolean {
+  return harness === "claude_code";
 }
 
 export function supportsIterationLimit(

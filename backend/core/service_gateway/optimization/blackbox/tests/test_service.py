@@ -1217,3 +1217,23 @@ def test_budget_backed_native_run_leaves_its_cost_ceiling_to_the_ledger(
     validate_blackbox_payload(_payload(strategy=strategy, execution_budget_id="budget-1"), verify_scorer=False)
     with pytest.raises(ServiceError, match="Set a total credit budget"):
         validate_blackbox_payload(_payload(strategy=strategy), verify_scorer=False)
+
+
+def test_proposer_accepts_any_offered_harness_and_rejects_unlaunchable_ones() -> None:
+    """Let the request pick the proposer harness and engine knobs while refusing shapes the sandbox cannot run."""
+    request = _payload(proposer={"harness": "pi", "effort": "high", "max_candidates_per_iter": 2, "ralph": False})
+    assert request.proposer.harness == "pi"
+    assert request.proposer.effort == "high"
+    assert request.proposer.max_candidates_per_iter == 2
+    assert request.proposer.ralph is False
+    assert _payload().proposer.harness == "claude_code"
+    custom = _payload(proposer={"harness": "custom", "run_command": "my-agent {prompt_file}"})
+    assert custom.proposer.run_command == "my-agent {prompt_file}"
+    with pytest.raises(ValueError, match="harness"):
+        _payload(proposer={"harness": "aider"})
+    with pytest.raises(ValueError, match="run_command"):
+        _payload(proposer={"harness": "custom"})
+    with pytest.raises(ValueError, match="effort"):
+        _payload(proposer={"effort": "extreme"})
+    with pytest.raises(ValueError):
+        _payload(proposer={"max_thinking_tokens": 10})

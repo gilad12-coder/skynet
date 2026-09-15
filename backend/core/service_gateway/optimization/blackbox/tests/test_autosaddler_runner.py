@@ -190,3 +190,100 @@ def test_runner_climbs_with_upstream_engine_and_reports_usage(tmp_path: Path) ->
     assert result["usage_complete"] is True
     assert (tmp_path / "native_artifacts.tar.gz.b64").stat().st_size > 0
     assert (tmp_path / "autosaddler-run" / "result.json").exists()
+
+
+def test_runner_drives_upstream_through_a_configured_harness(tmp_path: Path) -> None:
+    """Run the pinned upstream loop with a non-Claude harness rendered into the workspace by upstream."""
+    python = _upstream_python()
+    if python is None:
+        pytest.skip(f"set {_PYTHON_ENV} to a Python 3.12 interpreter with the pinned autosaddler package")
+    (tmp_path / "rpc").mkdir()
+    agent = tmp_path / "agent.py"
+    agent.write_text(
+        "import json, os, pathlib\n"
+        "assert pathlib.Path('AGENTS.md').read_text() and pathlib.Path(os.environ['SKYNET_PROMPT_FILE']).read_text()\n"
+        "schema = pathlib.Path('.autosaddler/session_output_schema.json').read_text()\n"
+        "context = json.loads(pathlib.Path('.autosaddler/session_context.json').read_text())\n"
+        "if 'diagnosis' in schema:\n"
+        "    kind = 'diagnose_patch'\n"
+        "    components = json.loads(pathlib.Path('candidate.json').read_text())\n"
+        "    output = {'schema_version': 'skynet-autosaddler-diagnosis/v1', 'intent': 'add vowels',"
+        " 'diagnosis': 'too few vowels', 'expected_effect': 'higher density',"
+        " 'updates': {name: text + 'aaa' for name, text in components.items()}}\n"
+        "elif 'evolution' in schema:\n"
+        "    kind = 'evolve'\n"
+        "    output = {'schema_version': 'skynet-autosaddler-evolution/v1', 'parent_ids': [context['candidate_ids'][-1]],"
+        " 'component_sources': {}, 'rationale': 'continue'}\n"
+        "else:\n"
+        "    kind = 'reflect'\n"
+        "    output = {'schema_version': 'skynet-autosaddler-reflection/v1', 'lessons': []}\n"
+        "pathlib.Path('.autosaddler/session_output.json').write_text(json.dumps(output))\n"
+        "with (pathlib.Path.home() / 'sessions.log').open('a') as log: log.write(kind + '\\n')\n"
+        "print('done')\n"
+    )
+    payload = {
+        "nonce": "testnonce",
+        "engine_id": "autosaddler",
+        "model": "claude-test",
+        "sandbox": False,
+        "max_token_cost": 0.05,
+        "max_evals": 12,
+        "max_concurrency": 1,
+        "max_iterations": 2,
+        "timeout_seconds": 60,
+        "source": native_runtime.AUTOSADDLER_REVISION,
+        "proposer": {
+            "harness": "custom",
+            "run_command": f'"{python}" "{agent}"',
+            "instructions_file": "AGENTS.md",
+            "output_format": "plain",
+            "files": {},
+            "env": {},
+            "model": "claude-test",
+            "price": {"input": 0.0, "output": 0.0},
+        },
+        "task": {
+            "name": "test",
+            "seed_candidate": "bcd",
+            "objective": "maximize vowel density",
+            "train_set": [{"id": "a"}, {"id": "b"}],
+            "val_set": [{"id": "c"}],
+        },
+    }
+    (tmp_path / "input.json").write_text(json.dumps(payload))
+    # The sandbox ships only the runner and the bridge; running from the package
+    # directory would shadow upstream ``autosaddler`` with Skynet's engine module.
+    for name, text in native_runtime._runner_files("autosaddler").items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PYTHONUNBUFFERED": "1"}
+    process = subprocess.Popen(
+        [python, "autosaddler_runner.py", "input.json"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        for line in process.stdout:
+            if not line.startswith("SKYNET_NATIVE_RPC testnonce "):
+                continue
+            request = json.loads(line.split(" ", 2)[2])
+            response = {"score": _vowel_fraction(request["candidate"]), "info": {"feedback": "counted"}}
+            (tmp_path / "rpc" / f"{request['id']}.json").write_text(json.dumps(response))
+        stderr = process.stderr.read()
+        result_file = tmp_path / "native_result.json"
+        assert process.wait(timeout=60) == 0, (result_file.read_text() if result_file.exists() else "") + stderr
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    result = json.loads((tmp_path / "native_result.json").read_text())
+    assert "error" not in result, result
+    assert result["best_candidate"] == "bcdaaaaaa"
+    assert result["metadata"]["iterations"] == 2
+    assert "type: custom" in (tmp_path / "autosaddler-run" / "resolved_config.yaml").read_text()
+    sessions = (tmp_path / "sessions.log").read_text().split()
+    assert sessions.count("diagnose_patch") == 2
+    assert list((tmp_path / ".skynet-bridge").iterdir())

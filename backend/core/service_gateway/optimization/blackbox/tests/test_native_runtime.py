@@ -18,13 +18,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from core.billing.pricing import model_token_costs
 from core.billing.runtime import UsagePendingError
 from core.exceptions import ServiceError
+from core.models.blackbox import BlackboxProposer, BlackboxTarget
 from core.service_gateway.language_models import total_tokens_from_history, usage_by_model_from_history
 from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededError
 
-from .. import native_runner, native_runtime
-from ..harness import GatewayConfig
+from .. import harness_bridge, native_runner, native_runtime
+from ..harness import GatewayConfig, build_launch, launch_payload
 from ..native_runtime import NativeOptions, _bootstrap_command, check_native_runtime, run_native_engine
 from ..protocol import EvalServer, ScorerAbortError, Task
 from ..sandbox import CommandResult, SandboxSpec
@@ -648,6 +650,7 @@ def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
     files = native_runtime._runner_files("autosaddler")
     assert set(files) == {
         "autosaddler_runner.py",
+        "harness_bridge.py",
         "autosaddler_plugin/SYSTEM.md",
         "autosaddler_plugin/prompts/diagnose_patch.md",
         "autosaddler_plugin/prompts/evolve.md",
@@ -656,7 +659,7 @@ def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
         "autosaddler_plugin/skills/patch-verification/SKILL.md",
     }
     assert all(text.strip() for text in files.values())
-    assert set(native_runtime._runner_files("meta_harness")) == {"native_runner.py"}
+    assert set(native_runtime._runner_files("meta_harness")) == {"native_runner.py", "harness_bridge.py"}
 
 
 def test_autosaddler_transport_scores_named_parts_without_the_gepa_archive(
@@ -721,3 +724,137 @@ def test_autosaddler_transport_needs_a_seed_and_two_visible_examples(tmp_path: P
             "autosaddler", task, EvalServer(lambda *_: (0.5, {}), max_evals=3), _context(tmp_path, runtime)
         )
     assert runtime.spec is None
+
+
+@pytest.mark.parametrize("engine_id", ["autoresearch", "meta_harness"])
+def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path, engine_id: str) -> None:
+    """Run the unchanged upstream engines against a non-Claude harness through the ``claude`` shim."""
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "python3").symlink_to(sys.executable)
+    fake_pi = binary / "pi"
+    fake_pi.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, re, sys, urllib.request\n"
+        "with (pathlib.Path.home()/'invocations.txt').open('a') as history: history.write(' '.join(sys.argv[1:7])+'\\n')\n"
+        "assert pathlib.Path(os.environ['SKYNET_PROMPT_FILE']).read_text()\n"
+        "assert os.environ['SKYNET_API_KEY'] == 'real-key' and os.environ['SKYNET_MODEL'] == 'claude-test'\n"
+        "assert pathlib.Path('AGENTS.md').read_text() and json.loads(pathlib.Path('.skynet/pi/models.json').read_text())\n"
+        "if pathlib.Path('eval.sh').exists():\n"
+        " script=pathlib.Path('eval.sh').read_text(); url=re.search(r'SERVER_URL=\"([^\"]+)\"',script).group(1)\n"
+        " request=urllib.request.Request(url+'/evaluate',data=json.dumps({'candidate':'better'}).encode(),"
+        "headers={'Content-Type':'application/json'})\n"
+        " urllib.request.urlopen(request).read()\n"
+        " pathlib.Path('best_candidate.txt').write_text('better')\n"
+        "else:\n"
+        " pathlib.Path('agents/better.txt').write_text('better')\n"
+        " pathlib.Path('state/pending_eval_iter1.json').write_text(json.dumps({'candidates':[{'name':'better','file':'agents/better.txt'}]}))\n"
+        "print(json.dumps({'type':'message_end','message':{'role':'assistant','content':[{'type':'text','text':'done'}],"
+        "'usage':{'input':7,'output':3}}}))\n"
+    )
+    fake_pi.chmod(0o755)
+    (tmp_path / "rpc").mkdir()
+    launch = build_launch(
+        BlackboxTarget(kind="agent", harness="pi", model="claude-test"),
+        GatewayConfig(url="https://gw.example/v1", api_key=harness_bridge.KEY_TOKEN),
+    )
+    payload = {
+        "nonce": "testnonce",
+        "engine_id": engine_id,
+        "model": "claude-test",
+        "sandbox": False,
+        "max_token_cost": 0.05,
+        "max_evals": 4,
+        "max_concurrency": 1,
+        "max_iterations": 1,
+        "timeout_seconds": 20,
+        "proposer": {
+            **launch_payload(launch),
+            "harness": "pi",
+            "model": "claude-test",
+            "price": {"input": 0.0, "output": 0.0},
+            "effort": "high",
+        },
+        "task": {"name": "test", "seed_candidate": "seed"},
+    }
+    if engine_id == "meta_harness":
+        payload["task"]["train_set"] = [{"id": "a"}, {"id": "b"}]
+    (tmp_path / "input.json").write_text(json.dumps(payload))
+    env = {
+        "PATH": f"{binary}{os.pathsep}/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "PYTHONUNBUFFERED": "1",
+        harness_bridge.KEY_ENV: "real-key",
+    }
+    process = subprocess.Popen(
+        [sys.executable, native_runner.__file__, "input.json"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        for line in process.stdout:
+            if not line.startswith("SKYNET_NATIVE_RPC testnonce "):
+                continue
+            request = json.loads(line.split(" ", 2)[2])
+            score = 0.8 if request["candidate"] == "better" else float(request["example"]["id"] == "a")
+            (tmp_path / "rpc" / f"{request['id']}.json").write_text(json.dumps({"score": score, "info": {}}))
+        stderr = process.stderr.read()
+        assert process.wait(timeout=25) == 0, (tmp_path / "native_result.json").read_text() + stderr
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    result = json.loads((tmp_path / "native_result.json").read_text())
+    invocations = (tmp_path / "invocations.txt").read_text().splitlines()
+    assert len(invocations) == 1
+    assert "--mode json" in invocations[0]
+    assert result["best_candidate"] == "better"
+    assert result["best_score"] == 0.8
+    assert result["usage_by_model"]["claude-test"]["total_tokens"] == 10
+    assert result["usage_complete"] is True
+    assert (tmp_path / harness_bridge.SHIM_DIR / "claude").exists()
+    assert harness_bridge.KEY_TOKEN not in next(tmp_path.rglob(".skynet/pi/models.json")).read_text()
+    assert list((tmp_path / ".claude" / "projects").rglob("*.jsonl"))
+
+
+def test_bootstrap_installs_only_the_selected_proposer_harness() -> None:
+    """Skip the Claude CLI install and probe the chosen harness when the proposer is not Claude Code."""
+    pi_bootstrap = _bootstrap_command("vercel", harness="pi", install_command="npm install -g pi@1.2.3")
+    assert "npm install -g pi@1.2.3" in pi_bootstrap
+    assert "@anthropic-ai/claude-code" not in pi_bootstrap
+    assert "pi --version" in pi_bootstrap
+    protected = _bootstrap_command("vercel", protected=True, harness="pi", install_command="npm install -g pi@1.2.3")
+    assert "npm install" not in protected
+    assert "pi --version" in protected
+    custom = _bootstrap_command("vercel", harness="custom", install_command="pip install my-agent")
+    assert "pip install my-agent" in custom
+    assert "--version" not in custom.split("pip install my-agent", 1)[1].split("native-python", 1)[0]
+    assert "@anthropic-ai/claude-code" in _bootstrap_command("vercel")
+
+
+def test_run_native_engine_serializes_the_proposer_without_the_gateway_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ship the chosen harness launch and knobs in the payload while the key only travels through the env."""
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    session = FakeSession()
+    runtime = FakeRuntime(session)
+    ctx = _context(tmp_path, runtime)
+    proposer = BlackboxProposer(harness="codex", effort="high", max_candidates_per_iter=3, ralph=False)
+    ctx.native_options = replace(ctx.native_options, proposer=proposer)
+    run_native_engine("autoresearch", Task("seed"), EvalServer(lambda c, e: (0.5, {}), max_evals=3), ctx)
+    payload = json.loads(session.files["native_input.json"])
+    assert payload["proposer"]["harness"] == "codex"
+    assert payload["proposer"]["output_format"] == "codex"
+    assert payload["proposer"]["effort"] == "high"
+    assert payload["proposer"]["max_candidates_per_iter"] == 3
+    assert payload["proposer"]["ralph"] is False
+    assert list(payload["proposer"]["price"].values()) == list(model_token_costs("claude-test"))
+    assert "secret" not in session.files["native_input.json"]
+    assert harness_bridge.KEY_TOKEN in session.files["native_input.json"]
+    assert session.calls[1][1]["env"][harness_bridge.KEY_ENV] == "skynet-managed"
+    assert "codex --version" in session.calls[0][0]
+    assert "@anthropic-ai/claude-code" not in session.calls[0][0]

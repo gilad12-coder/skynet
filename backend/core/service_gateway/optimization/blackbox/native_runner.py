@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import importlib.util
 import io
 import json
 import math
@@ -28,6 +29,18 @@ from gepa.oa.engines.autoresearch import _best_aggregate_candidate
 from gepa.oa.eval_server import EvalServer
 from gepa.oa.registry import get_engine_cls
 from gepa.oa.task import Task
+
+try:
+    from . import harness_bridge
+except ImportError:  # In the sandbox this file runs as a script beside the bridge.
+    _bridge_spec = importlib.util.spec_from_file_location(
+        "harness_bridge", Path(__file__).with_name("harness_bridge.py")
+    )
+    assert _bridge_spec is not None
+    assert _bridge_spec.loader is not None
+    harness_bridge = importlib.util.module_from_spec(_bridge_spec)
+    sys.modules["harness_bridge"] = harness_bridge
+    _bridge_spec.loader.exec_module(harness_bridge)
 
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
@@ -414,6 +427,38 @@ def _budget_incumbent(engine_id: str, engine: Any, task: Task, server: EvalServe
     }
 
 
+def _engine_knobs(engine_id: str, proposer: dict[str, Any]) -> dict[str, Any]:
+    """Translate the request's proposer settings into the upstream engine config.
+
+    Args:
+        engine_id: Upstream engine being configured.
+        proposer: Proposer block of the parent payload.
+
+    Returns:
+        Only the keys the named engine's config dataclass accepts, minus unset ones.
+    """
+    if engine_id == "meta_harness":
+        names = ("max_candidates_per_iter", "effort", "max_thinking_tokens")
+    else:
+        names = ("ralph", "max_no_eval_seconds", "effort", "max_thinking_tokens")
+    return {name: proposer[name] for name in names if proposer.get(name) is not None}
+
+
+def _install_proposer(proposer: dict[str, Any]) -> None:
+    """Put the configured harness behind the ``claude`` command the upstream engines run.
+
+    Args:
+        proposer: Proposer block of the parent payload.
+    """
+    if not proposer or proposer.get("harness") == "claude_code":
+        return
+    config_file = Path("proposer.json").resolve()
+    config_file.write_text(json.dumps(proposer), encoding="utf-8")
+    os.environ[harness_bridge.CONFIG_ENV] = str(config_file)
+    shim_dir = harness_bridge.install_shim(Path.home(), Path(harness_bridge.__file__).resolve(), sys.executable)
+    os.environ["PATH"] = f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+
+
 def execute(payload: dict[str, Any]) -> dict[str, Any]:
     """Run the exact upstream engine and capture its result and histories.
 
@@ -428,7 +473,9 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("task", {}).get("test_set") is not None:
         raise ValueError("Held-out examples must not enter the native optimizer.")
     task = Task(**payload["task"])
-    config_values: dict[str, Any] = {"model": payload["model"]}
+    proposer = payload.get("proposer") or {}
+    _install_proposer(proposer)
+    config_values: dict[str, Any] = {"model": payload["model"], **_engine_knobs(payload["engine_id"], proposer)}
     if payload["engine_id"] == "meta_harness" and payload.get("max_iterations") is not None:
         config_values["max_iterations"] = payload["max_iterations"]
     output_dir = Path("upstream-artifacts").resolve()

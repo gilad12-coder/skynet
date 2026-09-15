@@ -18,6 +18,7 @@ import type {
   BlackboxCandidate,
   BlackboxEngineCatalogResponse,
   BlackboxEngineId,
+  BlackboxProposer,
   BlackboxHarness,
   BlackboxRunRequest,
   BlackboxScorer,
@@ -68,6 +69,7 @@ import type { WizardIssue } from "../lib/wizard-issue";
 import { preflightDestination } from "../lib/preflight-destination";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import {
+  DEFAULT_PROPOSER,
   engineSelectionIssue,
   supportsIterationLimit,
   usesNativeProposer,
@@ -354,6 +356,11 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     usesNativeProposer(strategyMode, engine) ? resolveExecutionKind(executionMode) : "text";
   const setTargetKind = useCallback((kind: "text" | "agent") => setExecutionMode(kind), []);
   const proposerRuntime = "vercel" as const;
+  const [proposer, setProposer] = useState<BlackboxProposer>(DEFAULT_PROPOSER);
+  const updateProposer = useCallback(
+    (patch: Partial<BlackboxProposer>) => setProposer((prev) => ({ ...prev, ...patch })),
+    [],
+  );
   const [engineCatalogResult, setEngineCatalogResult] = useState<{
     target: BlackboxTarget["kind"];
     data: BlackboxEngineCatalogResponse | null;
@@ -512,6 +519,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     // Drafts saved with the retired plateau relay open as Auto.
     setStrategyMode(d.strategyMode === "single" ? "single" : "auto");
     setEngine(d.engine);
+    setProposer({ ...DEFAULT_PROPOSER, ...d.proposer });
     setMaxScorerRuns(d.maxScorerRuns);
     setMaxIterations(d.maxIterations);
     setStopAtScore(d.stopAtScore);
@@ -659,6 +667,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             setStrategyMode(strategy.mode === "single" ? "single" : "auto");
             setEngine(strategy.engine ?? null);
           }
+          // A custom proposer command has no picker, so such clones keep the default.
+          if (source.proposer && BLACKBOX_HARNESSES.includes(source.proposer.harness))
+            setProposer({ ...DEFAULT_PROPOSER, ...source.proposer });
           const budget = source.budget;
           if (budget) {
             if (budget.max_scorer_runs != null) setMaxScorerRuns(budget.max_scorer_runs);
@@ -862,6 +873,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       },
       strategy: strategyMode === "single" ? { mode: "single", engine } : { mode: "auto" },
       proposer_runtime: proposerRuntime,
+      proposer: nativeProposer ? proposer : undefined,
       target: buildTarget(),
       task_model_config:
         targetKind === "agent"
@@ -1559,6 +1571,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       strategyMode,
       engine,
       proposerRuntime,
+      proposer,
       maxScorerRuns,
       maxIterations,
       stopAtScore,
@@ -1698,6 +1711,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     engine,
     setEngine,
     proposerRuntime,
+    proposer,
+    updateProposer,
     nativeProposer,
     iterationLimitSupported,
     engineCatalog,

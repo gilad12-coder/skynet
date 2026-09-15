@@ -749,6 +749,7 @@ def _run_job(
             gateway=gateway,
             budget_route=budget_route,
             max_token_cost=token_budget,
+            proposer=payload.proposer,
         )
 
     task = Task(

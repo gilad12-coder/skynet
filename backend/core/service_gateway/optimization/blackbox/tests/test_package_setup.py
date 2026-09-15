@@ -144,11 +144,19 @@ def test_setup_bootstraps_without_installed_packaging(tmp_path: Path) -> None:
     assert result["result"]["artifacts"] == []
     assert result["result"]["imports"] == ["json"]
 
-    request.write_text(json.dumps({
-        "action": "resolve", "code": "import json",
-        "requirements": ["package @ https://elsewhere.invalid/pkg.whl"], "route": {},
-    }))
-    subprocess.run([str(python), "-I", str(setup), str(request)], capture_output=True, text=True, timeout=30, check=True)
+    request.write_text(
+        json.dumps(
+            {
+                "action": "resolve",
+                "code": "import json",
+                "requirements": ["package @ https://elsewhere.invalid/pkg.whl"],
+                "route": {},
+            }
+        )
+    )
+    subprocess.run(
+        [str(python), "-I", str(setup), str(request)], capture_output=True, text=True, timeout=30, check=True
+    )
     rejected = json.loads((tmp_path / "result.json").read_text())
     assert rejected["ok"] is False
     assert "direct URLs" in rejected["error"]

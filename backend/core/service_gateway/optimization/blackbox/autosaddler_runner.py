@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import importlib.util
 import io
 import json
 import math
@@ -41,12 +42,28 @@ try:
     from autosaddler.v2.prompting import assets as as_assets
     from autosaddler.v2.prompting.history import build_history_bundle
     from autosaddler.v2.prompting.models import SessionSpec
+    from autosaddler.v2.prompting.models import Usage as SessionUsage
+    from autosaddler.v2.providers.base import BaseAgentProvider, TransportOutcome
     from autosaddler.v2.providers.claude import ClaudeAgentProvider, ClaudeProviderConfig
+    from autosaddler.v2.providers.workspace_renderer import WorkspaceRenderer
     from autosaddler.v2.storage.local import LocalRunStore
 except ImportError:  # Upstream needs Python 3.12; parent-side tests still import the helpers.
     as_domain = as_policies = as_ports = as_assets = None
     AutoSaddlerEngine = RunState = ComponentMapHarnessSpace = None
     build_history_bundle = SessionSpec = ClaudeAgentProvider = ClaudeProviderConfig = LocalRunStore = None
+    SessionUsage = BaseAgentProvider = TransportOutcome = WorkspaceRenderer = None
+
+try:
+    from . import harness_bridge
+except ImportError:  # In the sandbox this file runs as a script beside the bridge.
+    _bridge_spec = importlib.util.spec_from_file_location(
+        "harness_bridge", Path(__file__).with_name("harness_bridge.py")
+    )
+    assert _bridge_spec is not None
+    assert _bridge_spec.loader is not None
+    harness_bridge = importlib.util.module_from_spec(_bridge_spec)
+    sys.modules["harness_bridge"] = harness_bridge
+    _bridge_spec.loader.exec_module(harness_bridge)
 
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
@@ -64,6 +81,13 @@ _SESSION_CONTEXT_PATH = ".autosaddler/session_context.json"
 _TRAINING_EVIDENCE_PATH = ".autosaddler/training_evidence.json"
 _PROMPT_ASSETS_PATH = ".autosaddler/prompt_assets.json"
 _CAPABILITIES = frozenset({"read_workspace", "edit_workspace", "load_skills"})
+# Every harness but Claude Code brings its own tools; the renderer only needs
+# to know each capability is available. ``.agents/skills`` is the shared
+# skill location pi, codex and opencode all discover.
+_HARNESS_CAPABILITY_TOOLS = dict.fromkeys(
+    ("read_workspace", "edit_workspace", "run_commands", "load_skills", "network"), ()
+)
+_HARNESS_SKILL_DIRECTORY = ".agents/skills"
 _ARTIFACT_PREFIXES = {"train": "evaluations", "development": "quarantine/dev", "test": "post_optimization/test"}
 _MIN_CASES = 2
 
@@ -824,6 +848,81 @@ class SkynetPromptPack:
         return payload.decode("utf-8")
 
 
+class HarnessTransport:
+    """Run one rendered AutoSaddler session through a Skynet agent harness."""
+
+    def __init__(self, proposer: dict[str, Any], model: str) -> None:
+        """Remember the launch to replay for every session.
+
+        Args:
+            proposer: Serialized harness launch from the parent payload.
+            model: Model identifier the harness routes to.
+        """
+        self.proposer = proposer
+        self.model = model
+
+    async def run(self, session: Any, timeout_seconds: float) -> Any:
+        """Drive the harness in the rendered workspace and report what it used.
+
+        The instruction file the renderer wrote already carries the system
+        context, so the harness only receives the task prompt.
+
+        Args:
+            session: Rendered session with workspace, prompt and identifiers.
+            timeout_seconds: Session deadline enforced on the harness process.
+
+        Returns:
+            Transport outcome whose raw response is the harness's final message.
+
+        Raises:
+            TimeoutError: When the harness did not finish within the deadline.
+        """
+        outcome = await asyncio.to_thread(
+            harness_bridge.run_session,
+            self.proposer,
+            workspace=Path(session.workspace),
+            prompt=session.task_prompt,
+            model=self.model,
+            session_dir=Path.home() / harness_bridge.SESSIONS_DIR / str(session.session_id),
+            timeout_seconds=timeout_seconds,
+        )
+        if outcome.timed_out:
+            raise TimeoutError(f"Harness session {session.session_id} exceeded {timeout_seconds:.0f}s")
+        failed = outcome.returncode != 0
+        usage = SessionUsage(
+            input_tokens=outcome.usage.get("input_tokens", 0),
+            output_tokens=outcome.usage.get("output_tokens", 0),
+            model=self.model,
+            provider_cost=outcome.cost_usd or None,
+            duration_seconds=outcome.duration_seconds,
+            status="failed" if failed else "success",
+            error_type="HarnessExit" if failed else None,
+            usage_incomplete=not outcome.usage,
+        )
+        detail = (outcome.stderr or outcome.stdout).strip()[-2000:]
+        raw = outcome.text if outcome.text is not None else f"Harness exited with {outcome.returncode}: {detail}"
+        return TransportOutcome(raw_response=raw, usage=(usage,))
+
+
+def harness_provider(proposer: dict[str, Any], model: str) -> Any:
+    """Build the upstream provider for a non-Claude proposer harness.
+
+    Args:
+        proposer: Serialized harness launch from the parent payload.
+        model: Model identifier the harness routes to.
+
+    Returns:
+        A ``BaseAgentProvider`` rendering the harness's instruction file.
+    """
+    renderer = WorkspaceRenderer(
+        provider=str(proposer["harness"]),
+        instruction_file=str(proposer.get("instructions_file") or "AGENTS.md"),
+        skill_directory=_HARNESS_SKILL_DIRECTORY,
+        capability_tools=_HARNESS_CAPABILITY_TOOLS,
+    )
+    return BaseAgentProvider(renderer, HarnessTransport(proposer, model))
+
+
 class UsageTrackingProvider:
     """Accumulate per-model token usage from every upstream agent session."""
 
@@ -1055,17 +1154,19 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             },
         },
     )
-    provider = UsageTrackingProvider(
-        ClaudeAgentProvider(
+    proposer = payload.get("proposer") or {"harness": "claude_code"}
+    if proposer.get("harness") == "claude_code":
+        inner = ClaudeAgentProvider(
             ClaudeProviderConfig(
                 model=model,
-                effort=None,
+                effort=proposer.get("effort"),
                 permission_mode="bypassPermissions",
                 base_url=os.environ["ANTHROPIC_BASE_URL"],
             )
-        ),
-        model,
-    )
+        )
+    else:
+        inner = harness_provider(proposer, model)
+    provider = UsageTrackingProvider(inner, model)
     max_evals = int(payload["max_evals"])
     max_iterations = payload.get("max_iterations") or max_evals
     policies = as_policies.PolicyBundle(
@@ -1080,7 +1181,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             "schema_version": "skynet-autosaddler-run/v1",
             "engine": "autosaddler",
             "source": payload.get("source"),
-            "provider": {"type": "claude", "model": model},
+            "provider": {"type": proposer.get("harness", "claude_code"), "model": model},
             "optimization": {
                 "task_selection": {"type": "fixed", "batch_size": policies.task_selection.batch_size},
                 "acceptance": {"type": "matched_valid_strict_improvement"},

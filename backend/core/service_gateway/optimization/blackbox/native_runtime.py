@@ -21,14 +21,16 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from ....billing.model_gateway import raise_gateway_stop
+from ....billing.pricing import model_token_costs
 from ....billing.runtime import UsagePendingError
 from ....config import Settings, settings
 from ....exceptions import ServiceError
+from ....models.blackbox import BLACKBOX_HARNESS_CLAUDE_CODE, BlackboxProposer, BlackboxTarget
 from ..budget_stop import BudgetReached
-from . import native_runner
+from . import harness_bridge, native_runner
 from .agent_eval import gateway_from_settings
 from .feedback import emit_candidate
-from .harness import GatewayConfig
+from .harness import GatewayConfig, build_launch, launch_payload, pinned_harness_check
 from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, Task
 from .runner import side_info_json_default
 from .sandbox import (
@@ -59,6 +61,7 @@ _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _UUID = re.compile(r"^[0-9a-f]{32}$")
 NATIVE_ENGINES = frozenset({"meta_harness", "autoresearch", "autosaddler"})
 _AUTOSADDLER_RUNNER_FILE = "autosaddler_runner.py"
+_BRIDGE_FILE = "harness_bridge.py"
 _AUTOSADDLER_PLUGIN_DIR = "autosaddler_plugin"
 # Upstream AutoSaddler v2 declares Python 3.12+ (its usage dataclasses rely on
 # 3.12 default semantics), so its guest carries its own interpreter and a
@@ -110,6 +113,7 @@ class NativeOptions:
     gateway: GatewayConfig = field(repr=False)
     max_token_cost: float
     timeout_seconds: float = 2400.0
+    proposer: BlackboxProposer = field(default_factory=BlackboxProposer)
     budget_route: dict[str, str] | None = field(default=None, repr=False)
     sandbox_runtime: SandboxRuntime | None = None
     usage_by_model: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -178,11 +182,12 @@ def _runner_files(engine_id: str) -> dict[str, str]:
     Returns:
         Relative file paths mapped to their text.
     """
+    bridge = {_BRIDGE_FILE: Path(harness_bridge.__file__).read_text(encoding="utf-8")}
     if engine_id != "autosaddler":
-        return {_RUNNER_FILE: Path(native_runner.__file__).read_text(encoding="utf-8")}
+        return {**bridge, _RUNNER_FILE: Path(native_runner.__file__).read_text(encoding="utf-8")}
     runner = Path(native_runner.__file__).with_name(_AUTOSADDLER_RUNNER_FILE)
     plugin_root = runner.with_name(_AUTOSADDLER_PLUGIN_DIR)
-    files = {_AUTOSADDLER_RUNNER_FILE: runner.read_text(encoding="utf-8")}
+    files = {**bridge, _AUTOSADDLER_RUNNER_FILE: runner.read_text(encoding="utf-8")}
     for asset in sorted(plugin_root.rglob("*.md")):
         files[f"{_AUTOSADDLER_PLUGIN_DIR}/{asset.relative_to(plugin_root).as_posix()}"] = asset.read_text(
             encoding="utf-8"
@@ -190,18 +195,50 @@ def _runner_files(engine_id: str) -> dict[str, str]:
     return files
 
 
-def _bootstrap_command(runtime: str, *, protected: bool = False, engine_id: str = "meta_harness") -> str:
+def _harness_setup(harness: str, install_command: str | None, *, protected: bool) -> tuple[str, str]:
+    """Return the install step and the version assertion for the proposer harness.
+
+    Args:
+        harness: Proposer harness identifier.
+        install_command: Launch install command for a built-in or custom harness.
+        protected: Whether the offline image must already carry the harness.
+
+    Returns:
+        ``(install, check)`` shell fragments, each ending in ``"; "`` or empty.
+    """
+    if harness == BLACKBOX_HARNESS_CLAUDE_CODE:
+        install = (
+            f'if ! claude --version 2>/dev/null | grep -q "^{re.escape(CLAUDE_VERSION)} "; then '
+            f'npm install --global --prefix "$HOME/.local" @anthropic-ai/claude-code@{CLAUDE_VERSION}; fi; '
+        )
+        return ("" if protected else install), f'claude --version | grep -q "^{re.escape(CLAUDE_VERSION)} "; '
+    check = pinned_harness_check(harness)
+    install = f"{install_command}; " if install_command and not protected else ""
+    return install, (f"{check}; " if check else "")
+
+
+def _bootstrap_command(
+    runtime: str,
+    *,
+    protected: bool = False,
+    engine_id: str = "meta_harness",
+    harness: str = BLACKBOX_HARNESS_CLAUDE_CODE,
+    install_command: str | None = None,
+) -> str:
     """Build installation and preflight commands with immutable package versions.
 
     Args:
         runtime: Selected managed execution environment.
         protected: Require dependencies already present in the immutable offline image.
         engine_id: Native engine whose interpreter and packages are prepared.
+        harness: Proposer harness the engine drives.
+        install_command: Install step of a non-Claude proposer harness.
 
     Returns:
         Shell command that prepares the isolated source and runtime.
     """
     autosaddler = engine_id == "autosaddler"
+    harness_install, harness_check = _harness_setup(harness, install_command, protected=protected)
     floor = AUTOSADDLER_PYTHON_FLOOR if autosaddler else PYTHON_FLOOR
     prepare = (
         "set -eu; mkdir -p .claude .cache .local native_vendor rpc; "
@@ -217,9 +254,7 @@ def _bootstrap_command(runtime: str, *, protected: bool = False, engine_id: str 
             f"uv venv --python {_AUTOSADDLER_PYTHON} native_venv; "
             f"uv pip install --python native_venv/bin/python --no-deps {pins}; "
             'printf "%s\\n" "$PWD/native_venv/bin/python" > native-python.txt; '
-            "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; "
-            f'if ! claude --version 2>/dev/null | grep -q "^{re.escape(CLAUDE_VERSION)} "; then '
-            f'npm install --global --prefix "$HOME/.local" @anthropic-ai/claude-code@{CLAUDE_VERSION}; fi; '
+            "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; " + harness_install
         )
     elif not protected:
         prepare += (
@@ -230,9 +265,7 @@ def _bootstrap_command(runtime: str, *, protected: bool = False, engine_id: str 
             "python3 -m pip install --disable-pip-version-check --no-deps --user uv==0.9.13; "
             '"$HOME/.local/bin/uv" python install 3.11.9; '
             '"$HOME/.local/bin/uv" python find 3.11.9 > native-python.txt; fi; '
-            "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; "
-            f'if ! claude --version 2>/dev/null | grep -q "^{re.escape(CLAUDE_VERSION)} "; then '
-            f'npm install --global --prefix "$HOME/.local" @anthropic-ai/claude-code@{CLAUDE_VERSION}; fi; '
+            "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; " + harness_install
         )
     else:
         prepare += "command -v python3 > native-python.txt; "
@@ -244,8 +277,8 @@ def _bootstrap_command(runtime: str, *, protected: bool = False, engine_id: str 
     if not autosaddler:
         prepare += f'"$(cat native-python.txt)" -c {shlex.quote(extract)}; '
     prepare += (
-        f'claude --version | grep -q "^{re.escape(CLAUDE_VERSION)} "; '
-        f'"$(cat native-python.txt)" -c '
+        harness_check
+        + '"$(cat native-python.txt)" -c '
         + shlex.quote(
             f"import sys; assert sys.version_info >= {floor!r}, "
             f"'Native optimizers need Python {'.'.join(map(str, floor))} or newer'"
@@ -610,6 +643,19 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         else (f"git+https://github.com/gepa-ai/gepa@{GEPA_SOURCE}", GEPA_SOURCE)
     )
     runner_file = _AUTOSADDLER_RUNNER_FILE if autosaddler else _RUNNER_FILE
+    proposer = options.proposer
+    launch = build_launch(
+        BlackboxTarget(
+            kind="agent",
+            harness=proposer.harness,
+            model=options.model,
+            install_command=proposer.install_command,
+            run_command=proposer.run_command,
+        ),
+        GatewayConfig(url=options.gateway.url, api_key=harness_bridge.KEY_TOKEN),
+        protected=options.budget_route is not None,
+    )
+    input_price, output_price = model_token_costs(options.model)
     lifetime = options.timeout_seconds + _INSTALL_ALLOWANCE
     lifetime = min(lifetime, settings.vercel_sandbox_max_lifetime_seconds)
     spec = SandboxSpec(
@@ -642,6 +688,17 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             "max_iterations": ctx.max_iterations,
             "stop_at_score": ctx.stop_at_score,
             "timeout_seconds": options.timeout_seconds,
+            "proposer": {
+                **launch_payload(launch),
+                "harness": proposer.harness,
+                "model": options.model,
+                "price": {"input": input_price, "output": output_price},
+                "effort": proposer.effort,
+                "max_thinking_tokens": proposer.max_thinking_tokens,
+                "max_candidates_per_iter": proposer.max_candidates_per_iter,
+                "ralph": proposer.ralph,
+                "max_no_eval_seconds": proposer.max_no_eval_seconds,
+            },
             "task": {
                 "name": engine_id,
                 "seed_candidate": task.seed_candidate,
@@ -659,7 +716,13 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             }
         )
         installed = session.run(
-            _bootstrap_command(options.runtime, protected=options.budget_route is not None, engine_id=engine_id),
+            _bootstrap_command(
+                options.runtime,
+                protected=options.budget_route is not None,
+                engine_id=engine_id,
+                harness=proposer.harness,
+                install_command=launch.install_command,
+            ),
             timeout_seconds=min(_INSTALL_ALLOWANCE, lifetime - 1.0),
         )
         if not installed.ok or installed.timed_out:
@@ -669,10 +732,12 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         env = {
             "ANTHROPIC_BASE_URL": (relay or options.gateway.url).removesuffix("/v1"),
             "ANTHROPIC_AUTH_TOKEN": "skynet-managed" if headers else options.gateway.api_key,
+            harness_bridge.KEY_ENV: "skynet-managed" if headers else options.gateway.api_key,
             "DISABLE_AUTOUPDATER": "1",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
             "CI": "1",
             "NO_COLOR": "1",
+            **({"SKYNET_BUDGET_RELAY_URL": relay} if relay else {}),
         }
         command = (
             'export HOME="$PWD"; export PATH="$HOME/.local/bin:$PATH"; '

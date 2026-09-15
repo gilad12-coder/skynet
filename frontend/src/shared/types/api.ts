@@ -618,6 +618,20 @@ export interface BlackboxStrategy {
   engine?: BlackboxEngineId | null;
 }
 
+export type BlackboxProposerEffort = "low" | "medium" | "high" | "max";
+
+/** The coding agent that drives a harness-based engine's optimization loop. */
+export interface BlackboxProposer {
+  harness: BlackboxHarness;
+  install_command?: string | null;
+  run_command?: string | null;
+  effort?: BlackboxProposerEffort | null;
+  max_thinking_tokens?: number | null;
+  max_candidates_per_iter?: number | null;
+  ralph?: boolean;
+  max_no_eval_seconds?: number | null;
+}
+
 export interface BlackboxRunRequest {
   execution_budget_id?: string;
   execution_budget_revision?: number;
@@ -640,6 +654,7 @@ export interface BlackboxRunRequest {
   budget: BlackboxBudget;
   strategy: BlackboxStrategy;
   proposer_runtime?: BlackboxProposerRuntime;
+  proposer?: BlackboxProposer;
   target: BlackboxTarget;
   task_model_config?: ModelConfig | null;
   reflection_model_config: ModelConfig;
