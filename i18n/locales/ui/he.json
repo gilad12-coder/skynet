@@ -3286,6 +3286,8 @@
   "trajectory.blackbox.legend.score": "הטבעת מתמלאת לפי ציון המועמד",
   "meta_harness.panel.title": "מסלול הטיפוס",
   "meta_harness.explainer": "Meta-Harness משכתב את הגרסה הטובה ביותר עד כה ומנקד כל מועמד על כל המקרים, ולכן הריצה מטפסת במקום להתפצל: כל צעד שומר את הטוב ביותר ומציע ממנו שוב.",
+  "meta_harness.explainer.autoresearch": "AutoResearch נותן לסוכן הקוד לשכתב את הגרסה הטובה ביותר עד כה ומנקד כל ניסיון על כל המקרים, ולכן הריצה מטפסת במקום להתפצל: כל צעד שומר את הטוב ביותר ועורך ממנו שוב.",
+  "meta_harness.explainer.autosaddler": "AutoSaddler מאבחן את המקרים הנכשלים, מציע תיקון ומנקד כל מועמד על מקרי הפיתוח, ולכן הריצה מטפסת במקום להתפצל: כל גרסה שומרת את הטוב ביותר ומשפרת אותו שוב.",
   "meta_harness.header.versions": "{n} גרסאות",
   "meta_harness.scrubber.label": "סינון לפי גרסה",
   "pipeline.stage.skipped": "דולג",

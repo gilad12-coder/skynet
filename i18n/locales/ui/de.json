@@ -1,4 +1,6 @@
 {
+  "meta_harness.explainer.autoresearch": "AutoResearch lässt den Coding-Agenten die bisher beste Version umschreiben und bewertet jeden Versuch auf allen Fällen, sodass der Lauf klettert statt sich zu verzweigen: Jeder Schritt behält die beste Version und bearbeitet sie erneut.",
+  "meta_harness.explainer.autosaddler": "AutoSaddler diagnostiziert die fehlgeschlagenen Fälle, schlägt eine Korrektur vor und bewertet jeden Kandidaten auf den Entwicklungsfällen, sodass der Lauf klettert statt sich zu verzweigen: Jede Version behält die beste und verfeinert sie erneut.",
   "submit.blackbox.roles.optimization.desc.best_of_n": "Erzeugt unabhängige Umformulierungen des Ausgangspunkts; die mit der besten Bewertung gewinnt.",
   "submit.blackbox.proposer.effort": "Denkaufwand",
   "submit.blackbox.proposer.effort.default": "Standard des Harness",

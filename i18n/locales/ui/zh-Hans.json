@@ -1,4 +1,6 @@
 {
+  "meta_harness.explainer.autoresearch": "AutoResearch 让编码代理改写迄今最好的版本，并在所有案例上为每次尝试评分，因此运行是向上攀升而不是分支：每一步都保留最好的版本，再从它继续修改。",
+  "meta_harness.explainer.autosaddler": "AutoSaddler 诊断失败的案例、提出修正，并在开发案例上为每个候选评分，因此运行是向上攀升而不是分支：每个版本都保留最好的，再继续打磨。",
   "submit.blackbox.roles.optimization.desc.best_of_n": "独立生成起点的多个改写版本，得分最高者胜出。",
   "submit.blackbox.proposer.effort": "推理强度",
   "submit.blackbox.proposer.effort.default": "沿用 harness 默认值",

@@ -6,7 +6,7 @@ import json
 import math
 import secrets
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -51,13 +51,16 @@ def upstream_task(task: Task, name: str) -> UpstreamTask:
     )
 
 
-def upstream_server(task: Task, server: EvalServer, ctx: EngineContext) -> UpstreamEvalServer:
+def upstream_server(
+    task: Task, server: EvalServer, ctx: EngineContext, on_eval: Callable[[Any, Any, float], None] | None = None
+) -> UpstreamEvalServer:
     """Keep upstream evaluations inside Skynet's run-wide scoring allowance.
 
     Args:
         task: Optimization inputs.
         server: Skynet's accounting and scorer boundary.
         ctx: Workspace and concurrency settings.
+        on_eval: Called with the candidate, case and score after each scorer run, if given.
 
     Returns:
         An unstarted upstream server for an in-process engine.
@@ -76,12 +79,15 @@ def upstream_server(task: Task, server: EvalServer, ctx: EngineContext) -> Upstr
             The score and feedback.
         """
         try:
-            return server.evaluate(candidate, example)
+            score, info = server.evaluate(candidate, example)
         except BudgetReached as exc:
             stops.append(exc)
             raise BudgetExhausted(str(exc)) from exc
         except BudgetExhaustedError as exc:
             raise BudgetExhausted(str(exc)) from exc
+        if on_eval is not None:
+            on_eval(candidate, example, score)
+        return score, info
 
     upstream = UpstreamEvalServer(
         upstream_task(task, Path(ctx.run_dir).name),

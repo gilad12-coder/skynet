@@ -17,9 +17,12 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from gepa.oa.config import OptimizeAnythingConfig
+from gepa.oa.task import Task as UpstreamTask
 
 from core.billing.pricing import model_token_costs
 from core.billing.runtime import UsagePendingError
+from core.constants import PROGRESS_CANDIDATE, PROGRESS_CASE_SCORED
 from core.exceptions import ServiceError
 from core.models.blackbox import BlackboxProposer, BlackboxTarget
 from core.service_gateway.language_models import total_tokens_from_history, usage_by_model_from_history
@@ -861,3 +864,90 @@ def test_run_native_engine_serializes_the_proposer_without_the_gateway_key(
     assert session.calls[1][1]["env"][harness_bridge.KEY_ENV] == "skynet-managed"
     assert "codex --version" in session.calls[0][0]
     assert "@anthropic-ai/claude-code" not in session.calls[0][0]
+
+
+class _RecordingMailbox:
+    """Child-side mailbox stand-in that scores by vowel density and records progress lines."""
+
+    def __init__(self) -> None:
+        """Start with no recorded progress."""
+        self.lines: list[dict[str, Any]] = []
+
+    def evaluate(self, candidate: Any, example: Any = None) -> tuple[float, dict[str, Any]]:
+        """Score a text by its vowel density, ignoring the case.
+
+        Args:
+            candidate: Text under evaluation.
+            example: Ignored.
+
+        Returns:
+            Vowel density and empty side information.
+        """
+        return sum(ch in "aeiou" for ch in candidate) / max(1, len(candidate)), {}
+
+    def emit(self, prefix: str, payload: dict[str, Any]) -> None:
+        """Record one progress payload.
+
+        Args:
+            prefix: Ignored line prefix.
+            payload: Progress payload the server reports.
+        """
+        self.lines.append(payload)
+
+
+def test_child_server_streams_cases_of_a_full_sweep_then_the_version(tmp_path: Path) -> None:
+    """A sweep over every visible case streams each case, and the version carries them all.
+
+    Args:
+        tmp_path: Upstream evaluation artifacts.
+    """
+    mailbox = _RecordingMailbox()
+    task = UpstreamTask("seed", train_set=[{"id": "a"}, {"id": "b"}])
+    server = native_runner.ProgressEvalServer(
+        task, mailbox, OptimizeAnythingConfig(max_evals=8, max_concurrency=1), tmp_path
+    )
+
+    server.evaluate_examples("aeiou", split="train")
+    server.log_progress(1.0, candidate="aeiou")
+    server.evaluate_examples("xyz", example_ids=["a"])
+    server.log_progress(0.0, candidate="xyz")
+
+    cases = [line for line in mailbox.lines if line.get("event") == "case_scored"]
+    versions = [line for line in mailbox.lines if "candidate" in line]
+    assert [(line["candidate_id"], line["example_id"], line["score"], line["total"]) for line in cases] == [
+        (0, "0", 1.0, 2),
+        (0, "1", 1.0, 2),
+    ]
+    assert [line["candidate_id"] for line in versions] == [0, 1]
+    assert versions[0]["per_example"] == [("0", 1.0), ("1", 1.0)]
+    assert versions[0]["total_evals"] == 2
+    assert versions[1]["per_example"] == []
+
+
+def test_mailbox_relays_case_scores_and_per_case_versions() -> None:
+    """Parent-side progress lines become case_scored and candidate events with case scores."""
+    sink: list[tuple[str, dict[str, Any]]] = []
+    mailbox = native_runtime._EvaluatorMailbox(
+        FakeSession(),
+        EvalServer(lambda *_: (1.0, {}), max_evals=3),
+        "nonce",
+        progress_callback=lambda event, metrics: sink.append((event, metrics)),
+    )
+
+    mailbox.on_output(
+        "stdout",
+        'SKYNET_NATIVE_PROGRESS nonce {"event": "case_scored", "candidate_id": 0, "example_id": "1", "score": 0.5, "total": 2}\n'
+        'SKYNET_NATIVE_PROGRESS nonce {"event": "case_scored", "candidate_id": true, "example_id": "0", "score": 1.0, "total": 2}\n'
+        'SKYNET_NATIVE_PROGRESS nonce {"candidate_id": 0, "candidate": "seed", "score": 0.75, "total_evals": 2, '
+        '"per_example": [["0", 1.0], ["1", 0.5], ["2", null]]}\n',
+    )
+
+    assert mailbox.error is None
+    assert sink[0] == (PROGRESS_CASE_SCORED, {"trial": 0, "example_id": "1", "score": 0.5, "total": 2})
+    assert len(sink) == 2
+    event, candidate = sink[1]
+    assert event == PROGRESS_CANDIDATE
+    assert candidate["candidate_id"] == "0"
+    assert candidate["parent_id"] is None
+    assert candidate["score"] == 0.75
+    assert candidate["per_example"] == [{"id": "0", "score": 1.0}, {"id": "1", "score": 0.5}]

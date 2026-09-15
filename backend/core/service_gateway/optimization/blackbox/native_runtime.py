@@ -29,7 +29,7 @@ from ....models.blackbox import BLACKBOX_HARNESS_CLAUDE_CODE, BlackboxProposer, 
 from ..budget_stop import BudgetReached
 from . import harness_bridge, native_runner
 from .agent_eval import gateway_from_settings
-from .feedback import emit_candidate
+from .feedback import emit_candidate, emit_case_scored
 from .harness import GatewayConfig, build_launch, launch_payload, pinned_harness_check
 from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, Task
 from .runner import side_info_json_default
@@ -491,21 +491,38 @@ class _EvaluatorMailbox:
                     self.error = self.error or exc
 
     def _progress(self, event: dict[str, Any]) -> None:
-        """Emit only completed aggregate checkpoints reported by upstream.
+        """Relay a child checkpoint: one scored case of a sweep, or a completed aggregate.
 
         Args:
-            event: Candidate and aggregate score reported by upstream log_progress.
+            event: Case score or candidate aggregate reported by the child.
         """
         score = event.get("score")
-        if not isinstance(score, float | int) or not math.isfinite(score):
+        candidate_id = event.get("candidate_id")
+        if not _finite(score) or isinstance(candidate_id, bool) or not isinstance(candidate_id, int):
             return
+        if event.get("event") == "case_scored":
+            total = event.get("total")
+            if isinstance(total, int) and not isinstance(total, bool):
+                emit_case_scored(
+                    self.progress_callback,
+                    trial=candidate_id,
+                    example_id=str(event.get("example_id", "?")),
+                    score=float(score),
+                    total=total,
+                )
+            return
+        per_example = event.get("per_example")
         emit_candidate(
             self.progress_callback,
-            candidate_id=str(event["candidate_id"]),
+            candidate_id=str(candidate_id),
             parent_id=None,
             generation=0,
             score=float(score),
-            per_example=[],
+            per_example=[
+                (str(example_id), float(value))
+                for example_id, value in (per_example if isinstance(per_example, list) else [])
+                if _finite(value)
+            ],
             candidate=event["candidate"],
             discovered_at_evals=int(event["total_evals"]),
             iteration=None,
@@ -548,6 +565,18 @@ class _EvaluatorMailbox:
                 self.error = self.error or exc
                 self._responses[request_id] = json.dumps({"error": "The parent evaluator returned invalid feedback."})
         self.session.write_files({f"rpc/{request_id}.json": self._responses[request_id]})
+
+
+def _finite(value: Any) -> bool:
+    """Whether a child-reported score is a finite number.
+
+    Args:
+        value: Score field of a progress line.
+
+    Returns:
+        ``True`` for finite ints and floats, ``False`` for anything else.
+    """
+    return isinstance(value, float | int) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def _candidate_shape_ok(candidate: Any, str_mode: bool) -> bool:

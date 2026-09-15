@@ -43,6 +43,7 @@ except ImportError:  # In the sandbox this file runs as a script beside its sibl
     native_engines = _sibling_modules["native_engines"]
 
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
+_PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _TOKEN_NAMES = ("prompt_tokens", "completion_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 _PROC_ROOT = Path("/proc")
@@ -126,7 +127,7 @@ class EvaluatorMailbox:
 
 
 class ProgressEvalServer(EvalServer):
-    """Forward aggregate checkpoints after upstream records them normally."""
+    """Forward aggregate checkpoints, and the case scores behind them, as upstream records them."""
 
     def __init__(self, task: Task, mailbox: EvaluatorMailbox, config: OptimizeAnythingConfig, output_dir: Path) -> None:
         """Bind the upstream evaluator and its additive progress transport.
@@ -138,6 +139,8 @@ class ProgressEvalServer(EvalServer):
             output_dir: Persisted upstream evaluation artifacts.
         """
         self.mailbox = mailbox
+        self._sweeps: dict[str, dict[str, Any]] = {}
+        self._sweep_lock = threading.Lock()
         super().__init__(
             task,
             mailbox.evaluate,
@@ -145,11 +148,89 @@ class ProgressEvalServer(EvalServer):
             max_concurrency=config.max_concurrency,
             output_dir=output_dir,
         )
+        # Cases are named by position, as the other engines name them, so the
+        # run view lines a native version's cases up with the rest of the run.
+        self._case_ids = {id(example): str(index) for index, example in enumerate(self._examples.values())}
+
+    def _sweep_targets(self, example_ids: list[str] | None, split: str | None) -> list[str]:
+        """Mirror the case selection upstream ``evaluate_examples`` makes.
+
+        Args:
+            example_ids: Explicit case ids, if the caller named them.
+            split: Split name otherwise, ``"all"`` for train and val.
+
+        Returns:
+            The ids of the cases upstream will score.
+        """
+        if example_ids is not None:
+            return [eid for eid in example_ids if eid in self._examples]
+        if split is not None:
+            splits = ("train", "val") if split == "all" else (split,)
+            return [eid for name in splits for eid in self._split_ids.get(name, [])]
+        return list(self._split_ids["train"])
+
+    def evaluate_examples(
+        self, candidate: str, example_ids: list[str] | None = None, split: str | None = None
+    ) -> tuple[float, dict[str, Any]]:
+        """Score a candidate on cases, streaming the sweep when it covers every visible case.
+
+        Upstream logs a checkpoint only for a sweep of every visible case, so
+        only such a sweep streams case by case; a partial probe would otherwise
+        leave a version half-scored in the run view for good.
+
+        Args:
+            candidate: Candidate to score.
+            example_ids: Explicit case ids, if the caller named them.
+            split: Split name otherwise.
+
+        Returns:
+            The unchanged upstream aggregate and per-case details.
+        """
+        targets = self._sweep_targets(example_ids, split)
+        if set(targets) == set(self._agent_visible_ids()):
+            with self._sweep_lock:
+                self._sweeps[_candidate_key(candidate)] = {
+                    "candidate_id": self._register_candidate(candidate),
+                    "total": len(targets),
+                    "scores": [],
+                }
+        return super().evaluate_examples(candidate, example_ids, split)
+
+    def evaluate(self, candidate: str, example: Any | None = None, **kwargs: Any) -> tuple[float, dict[str, Any]]:
+        """Score one case, announcing it when it belongs to a streaming sweep.
+
+        Args:
+            candidate: Candidate to score.
+            example: Case to score it on, or ``None`` in single-task mode.
+            **kwargs: Extra evaluator arguments upstream forwards.
+
+        Returns:
+            The unchanged upstream score and side information.
+        """
+        score, info = super().evaluate(candidate, example, **kwargs)
+        with self._sweep_lock:
+            sweep = self._sweeps.get(_candidate_key(candidate))
+        if sweep is None or example is None or not isinstance(score, float | int) or not math.isfinite(score):
+            return score, info
+        example_id = self._case_ids.get(id(example), "?")
+        with self._sweep_lock:
+            sweep["scores"].append((example_id, float(score)))
+        self.mailbox.emit(
+            _PROGRESS_PREFIX,
+            {
+                "event": "case_scored",
+                "candidate_id": sweep["candidate_id"],
+                "example_id": example_id,
+                "score": float(score),
+                "total": sweep["total"],
+            },
+        )
+        return score, info
 
     def log_progress(
         self, val_score: float, candidate: str | None = None, reflection_cost: float = 0.0
     ) -> dict[str, Any]:
-        """Forward an upstream aggregate without constructing candidate ancestry.
+        """Forward an upstream aggregate, with its sweep's case scores, without constructing ancestry.
 
         Args:
             val_score: Aggregate score computed by the unchanged upstream engine.
@@ -161,16 +242,31 @@ class ProgressEvalServer(EvalServer):
         """
         result = super().log_progress(val_score, candidate, reflection_cost)
         if isinstance(candidate, str) and math.isfinite(val_score):
+            with self._sweep_lock:
+                sweep = self._sweeps.pop(_candidate_key(candidate), None)
             self.mailbox.emit(
-                "SKYNET_NATIVE_PROGRESS ",
+                _PROGRESS_PREFIX,
                 {
                     "candidate_id": self._register_candidate(candidate),
                     "candidate": candidate,
                     "score": val_score,
                     "total_evals": self.budget.used,
+                    "per_example": [] if sweep is None else list(sweep["scores"]),
                 },
             )
         return result
+
+
+def _candidate_key(candidate: Any) -> str:
+    """Key a candidate the way upstream's registry does.
+
+    Args:
+        candidate: Candidate text, or a legacy mapping.
+
+    Returns:
+        The text itself, or its sorted JSON form.
+    """
+    return candidate if isinstance(candidate, str) else json.dumps(candidate, sort_keys=True)
 
 
 def _number(value: Any) -> int:

@@ -1982,6 +1982,8 @@ export type MessageKey =
   | "meta_harness.axis.score"
   | "meta_harness.axis.version"
   | "meta_harness.explainer"
+  | "meta_harness.explainer.autoresearch"
+  | "meta_harness.explainer.autosaddler"
   | "meta_harness.header.versions"
   | "meta_harness.legend.improved"
   | "meta_harness.legend.lineage"
@@ -5757,6 +5759,8 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "meta_harness.axis.score": "ציון",
   "meta_harness.axis.version": "גרסה",
   "meta_harness.explainer": "Meta-Harness משכתב את הגרסה הטובה ביותר עד כה ומנקד כל מועמד על כל המקרים, ולכן הריצה מטפסת במקום להתפצל: כל צעד שומר את הטוב ביותר ומציע ממנו שוב.",
+  "meta_harness.explainer.autoresearch": "AutoResearch נותן לסוכן הקוד לשכתב את הגרסה הטובה ביותר עד כה ומנקד כל ניסיון על כל המקרים, ולכן הריצה מטפסת במקום להתפצל: כל צעד שומר את הטוב ביותר ועורך ממנו שוב.",
+  "meta_harness.explainer.autosaddler": "AutoSaddler מאבחן את המקרים הנכשלים, מציע תיקון ומנקד כל מועמד על מקרי הפיתוח, ולכן הריצה מטפסת במקום להתפצל: כל גרסה שומרת את הטוב ביותר ומשפרת אותו שוב.",
   "meta_harness.header.versions": "{n} גרסאות",
   "meta_harness.legend.improved": "עקפה את הטובה ביותר",
   "meta_harness.legend.lineage": "שוכתבה מ",
@@ -17146,6 +17150,8 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "meta_harness.axis.score": "Score",
   "meta_harness.axis.version": "Version",
   "meta_harness.explainer": "Meta-Harness rewrites the best version so far and scores every candidate on all cases, so the run climbs instead of branching: each step keeps the best and proposes again from there.",
+  "meta_harness.explainer.autoresearch": "AutoResearch has the coding agent rewrite the best version so far and scores every attempt on all cases, so the run climbs instead of branching: each step keeps the best and edits from it again.",
+  "meta_harness.explainer.autosaddler": "AutoSaddler diagnoses the failing cases, proposes a fix and scores every candidate on the development cases, so the run climbs instead of branching: each version keeps the best and refines it again.",
   "meta_harness.header.versions": "{n} versions",
   "meta_harness.legend.improved": "Beat the best so far",
   "meta_harness.legend.lineage": "Rewritten from",

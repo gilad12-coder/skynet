@@ -287,6 +287,7 @@ class SkynetEvaluator:
         max_concurrency: int,
         stop_at_score: float | None,
         fingerprint: str,
+        development_case_ids: Sequence[str] = (),
     ) -> None:
         """Bind the evaluator to the parent transport and run layout.
 
@@ -297,6 +298,7 @@ class SkynetEvaluator:
             max_concurrency: Parallel scorer requests the parent admits.
             stop_at_score: Development aggregate that ends the search early.
             fingerprint: Stable identity of the scorer for upstream observations.
+            development_case_ids: Development cases in split order, which names them by position.
         """
         self.mailbox = mailbox
         self.harness_space = harness_space
@@ -305,6 +307,10 @@ class SkynetEvaluator:
         self.fingerprint = fingerprint
         self.components: dict[str, dict[str, str]] = {}
         self.best_development: dict[str, Any] | None = None
+        # The run view orders versions numerically, so each candidate that
+        # reaches development gets the next version number in arrival order.
+        self.versions: dict[str, int] = {}
+        self.case_ids = {case_id: str(index) for index, case_id in enumerate(development_case_ids)}
         self._semaphore = asyncio.Semaphore(max(1, max_concurrency))
 
     def components_of(self, candidate: Any) -> dict[str, str]:
@@ -341,9 +347,11 @@ class SkynetEvaluator:
         """
         value = candidate_value(self.components_of(candidate))
         context.artifact_dir.mkdir(parents=True, exist_ok=True)
+        if context.purpose == "development":
+            self.versions.setdefault(candidate.candidate_id, len(self.versions))
         observations = await asyncio.gather(
             *(
-                self._observe(candidate.candidate_id, value, case, repetition, context)
+                self._observe(candidate.candidate_id, value, case, repetition, context, total=len(cases))
                 for case in cases
                 for repetition in range(context.repetitions)
             )
@@ -362,10 +370,12 @@ class SkynetEvaluator:
             ),
         )
         if context.purpose == "development":
-            self._report_development(candidate.candidate_id, value, evaluation.aggregate_score)
+            self._report_development(candidate.candidate_id, value, evaluation.aggregate_score, observations)
         return evaluation
 
-    async def _observe(self, candidate_id: str, value: Any, case: Any, repetition: int, context: Any) -> Any:
+    async def _observe(
+        self, candidate_id: str, value: Any, case: Any, repetition: int, context: Any, *, total: int
+    ) -> Any:
         """Score one case once, reusing an observation upstream already recorded.
 
         Args:
@@ -374,6 +384,7 @@ class SkynetEvaluator:
             case: Case to score.
             repetition: Repetition index.
             context: Upstream evaluation context.
+            total: How many cases the evaluation covers.
 
         Returns:
             The recorded upstream observation.
@@ -403,6 +414,19 @@ class SkynetEvaluator:
                 disposition = "success"
             else:
                 disposition = "task_failure"
+            # Repetitions re-score the same case, so only the first fills the
+            # version's case in the run view; the aggregate averages them.
+            if context.purpose == "development" and repetition == 0 and math.isfinite(score):
+                self.mailbox.emit(
+                    _PROGRESS_PREFIX,
+                    {
+                        "event": "case_scored",
+                        "candidate_id": self.versions[candidate_id],
+                        "example_id": self.case_ids.get(case.case_id, "?"),
+                        "score": score,
+                        "total": total,
+                    },
+                )
             observation = as_domain.Observation.create(
                 candidate_id=candidate_id,
                 case_id=case.case_id,
@@ -417,13 +441,16 @@ class SkynetEvaluator:
             sink.complete(attempt_id, observation, cost)
             return observation
 
-    def _report_development(self, candidate_id: str, value: Any, score: float | None) -> None:
-        """Publish a completed development aggregate to the parent.
+    def _report_development(
+        self, candidate_id: str, value: Any, score: float | None, observations: Sequence[Any]
+    ) -> None:
+        """Publish a completed development aggregate, with its case scores, to the parent.
 
         Args:
             candidate_id: Upstream candidate identity.
             value: Skynet candidate shape.
             score: Mean development score, if every case produced one.
+            observations: The evaluation's per-case observations.
 
         Raises:
             TargetReached: When the aggregate meets the stop target.
@@ -432,9 +459,21 @@ class SkynetEvaluator:
             return
         if self.best_development is None or score > self.best_development["best_score"]:
             self.best_development = {"best_candidate": value, "best_score": score, "candidate_id": candidate_id}
+        per_case: dict[str, list[float]] = {}
+        for observation in observations:
+            if observation.score is not None:
+                per_case.setdefault(observation.case_id, []).append(float(observation.score))
         self.mailbox.emit(
             _PROGRESS_PREFIX,
-            {"candidate_id": candidate_id, "candidate": value, "score": score, "total_evals": self.mailbox.total_evals},
+            {
+                "candidate_id": self.versions[candidate_id],
+                "candidate": value,
+                "score": score,
+                "total_evals": self.mailbox.total_evals,
+                "per_example": [
+                    (self.case_ids.get(case_id, "?"), sum(values) / len(values)) for case_id, values in per_case.items()
+                ],
+            },
         )
         if self.stop_at_score is not None and score >= self.stop_at_score:
             raise TargetReached(f"Development score {score} reached the target {self.stop_at_score}.")
@@ -1127,6 +1166,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         max_concurrency=int(payload.get("max_concurrency", 1)),
         stop_at_score=payload.get("stop_at_score"),
         fingerprint=as_domain.sha256_digest(as_domain.canonical_json({"evaluator": "skynet-parent-scorer"})),
+        development_case_ids=[case.case_id for case in development_cases],
     )
     scenario = as_ports.ScenarioComponents(
         name=_PLUGIN_NAME,

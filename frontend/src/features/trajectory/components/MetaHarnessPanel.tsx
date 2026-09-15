@@ -7,7 +7,7 @@ import type { OptimizationStatusResponse } from "@/shared/types/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/primitives/card";
 import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
-import { formatMsg, msg } from "@/shared/lib/messages";
+import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { useLiteMode } from "@/features/settings";
 import {
   extractCandidates,
@@ -54,21 +54,30 @@ function isLive(job: OptimizationStatusResponse): boolean {
   return job.status === "running" || job.status === "validating" || job.status === "pending";
 }
 
+// Each climbing engine explains its own loop; Meta-Harness keeps the default.
+const ENGINE_EXPLAINERS: Record<string, MessageKey> = {
+  autoresearch: "meta_harness.explainer.autoresearch",
+  autosaddler: "meta_harness.explainer.autosaddler",
+};
+
 export interface MetaHarnessPanelProps {
   job: OptimizationStatusResponse;
+  // The hill-climbing engine that produced the versions: meta_harness,
+  // autoresearch or autosaddler.
+  engine: string;
   // Run configuration of the black-box run, forwarded to the drawer so it
   // names versions by kind and shows per-case scores only when cases exist.
   blackbox?: BlackboxTrajectoryContext | null;
 }
 
 /**
- * Run view of a meta-harness lane. The engine hill-climbs — it rewrites the
- * best version so far and scores every candidate on all cases — so the run is
- * a climb rather than a tree: the chart lays versions out in scoring order
+ * Run view of a hill-climbing lane (Meta-Harness, AutoResearch, AutoSaddler).
+ * The engine rewrites the best version so far and scores every candidate on
+ * all cases, so the run is a climb rather than a tree: the chart lays versions out in scoring order
  * with the best so far as a staircase, and a version's drawer shows how it did
  * case by case, each score opening the agent run behind it.
  */
-export function MetaHarnessPanel({ job, blackbox }: MetaHarnessPanelProps) {
+export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProps) {
   const live = isLive(job);
   const lite = useLiteMode();
   const blackboxCtx = blackbox ?? BLACKBOX_FALLBACK;
@@ -229,7 +238,7 @@ export function MetaHarnessPanel({ job, blackbox }: MetaHarnessPanelProps) {
           <div className="min-w-0 space-y-1">
             <CardTitle className="text-base flex min-w-0 items-center gap-2">
               <TrendUp className="size-4 text-[#7C6350]" aria-hidden="true" />
-              <HelpTip text={msg("meta_harness.explainer")}>
+              <HelpTip text={msg(ENGINE_EXPLAINERS[engine] ?? "meta_harness.explainer")}>
                 <span className="font-bold tracking-tight">{msg("meta_harness.panel.title")}</span>
               </HelpTip>
             </CardTitle>

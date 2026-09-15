@@ -2978,6 +2978,8 @@
   "trajectory.blackbox.legend.score": "Ring fills with the candidate's score",
   "meta_harness.panel.title": "Climb",
   "meta_harness.explainer": "Meta-Harness rewrites the best version so far and scores every candidate on all cases, so the run climbs instead of branching: each step keeps the best and proposes again from there.",
+  "meta_harness.explainer.autoresearch": "AutoResearch has the coding agent rewrite the best version so far and scores every attempt on all cases, so the run climbs instead of branching: each step keeps the best and edits from it again.",
+  "meta_harness.explainer.autosaddler": "AutoSaddler diagnoses the failing cases, proposes a fix and scores every candidate on the development cases, so the run climbs instead of branching: each version keeps the best and refines it again.",
   "meta_harness.header.versions": "{n} versions",
   "meta_harness.scrubber.label": "Filter by version",
   "pipeline.stage.skipped": "Skipped",

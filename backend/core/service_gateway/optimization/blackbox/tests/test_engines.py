@@ -215,6 +215,30 @@ def test_best_of_n_keeps_completed_incumbent_when_next_candidate_is_partial(tmp_
     assert len(result.metadata["bon_cost_log"]) == 1
 
 
+def test_best_of_n_streams_each_completed_sample_as_a_root(tmp_path: Path) -> None:
+    """Announce every fully scored sample, with its case scores, and never a partial one."""
+    model = _SequenceModel(["aeiou", "xyz", "cut short"])
+    sink: list[tuple[str, dict[str, Any]]] = []
+    server = EvalServer(vowel_scorer, max_evals=5)
+    task = Task(seed_candidate="seed", train_set=[{"id": "a"}, {"id": "b"}])
+    ctx = EngineContext(
+        reflection_lm=model,
+        run_dir=str(tmp_path),
+        progress_callback=lambda event, metrics: sink.append((event, metrics)),
+    )
+    result = BestOfNEngine().run(task, server, ctx)
+
+    candidates = [metrics for event, metrics in sink if event == PROGRESS_CANDIDATE]
+    assert [row["candidate_id"] for row in candidates] == ["0", "1"]
+    assert all(row["parent_id"] is None and row["generation"] == 0 for row in candidates)
+    assert candidates[0]["prompt"] == {"current_candidate": "aeiou"}
+    assert candidates[0]["per_example"] == [{"id": "0", "score": 1.0}, {"id": "1", "score": 1.0}]
+    assert candidates[0]["score"] == pytest.approx(result.best_score)
+    assert candidates[1]["score"] == pytest.approx(0.0)
+    assert [row["discovered_at_evals"] for row in candidates] == [2, 4]
+    assert server.used == 5
+
+
 @pytest.mark.parametrize("seed", ["seed", None])
 @pytest.mark.parametrize("budget", [0, 1])
 def test_best_of_n_does_not_invent_a_seed_score(tmp_path: Path, seed: str | None, budget: int) -> None:

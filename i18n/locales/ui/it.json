@@ -1,4 +1,6 @@
 {
+  "meta_harness.explainer.autoresearch": "AutoResearch fa riscrivere all'agente di codice la migliore versione finora e valuta ogni tentativo su tutti i casi, così l'esecuzione sale invece di ramificarsi: ogni passo conserva la migliore e la modifica di nuovo.",
+  "meta_harness.explainer.autosaddler": "AutoSaddler diagnostica i casi falliti, propone una correzione e valuta ogni candidato sui casi di sviluppo, così l'esecuzione sale invece di ramificarsi: ogni versione conserva la migliore e la affina di nuovo.",
   "submit.blackbox.roles.optimization.desc.best_of_n": "Genera riscritture indipendenti del punto di partenza; vince quella con il punteggio migliore.",
   "submit.blackbox.proposer.effort": "Sforzo di ragionamento",
   "submit.blackbox.proposer.effort.default": "Predefinito dell'harness",

@@ -1,4 +1,6 @@
 {
+  "meta_harness.explainer.autoresearch": "AutoResearch はコーディングエージェントにこれまでの最良バージョンを書き直させ、各試行をすべてのケースで採点するため、実行は分岐せずに登っていきます。各ステップで最良を保持し、そこから再び編集します。",
+  "meta_harness.explainer.autosaddler": "AutoSaddler は失敗したケースを診断して修正を提案し、各候補を開発ケースで採点するため、実行は分岐せずに登っていきます。各バージョンで最良を保持し、それを再び磨き上げます。",
   "submit.blackbox.roles.optimization.desc.best_of_n": "開始点の書き換えを独立に複数生成し、最も高いスコアのものを採用します。",
   "submit.blackbox.proposer.effort": "推論の深さ",
   "submit.blackbox.proposer.effort.default": "ハーネスの既定値",

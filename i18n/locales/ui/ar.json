@@ -1,4 +1,6 @@
 {
+  "meta_harness.explainer.autoresearch": "يجعل AutoResearch وكيل البرمجة يعيد كتابة أفضل نسخة حتى الآن ويقيّم كل محاولة على جميع الحالات، لذا يتسلّق التشغيل بدلاً من التفرّع: كل خطوة تحتفظ بالأفضل وتعدّل انطلاقاً منه من جديد.",
+  "meta_harness.explainer.autosaddler": "يشخّص AutoSaddler الحالات الفاشلة ويقترح إصلاحاً ويقيّم كل مرشّح على حالات التطوير، لذا يتسلّق التشغيل بدلاً من التفرّع: كل نسخة تحتفظ بالأفضل وتحسّنه من جديد.",
   "submit.blackbox.roles.optimization.desc.best_of_n": "يولّد إعادات صياغة مستقلة لنقطة البداية؛ وتفوز الصياغة صاحبة أعلى درجة.",
   "submit.blackbox.proposer.effort": "جهد الاستدلال",
   "submit.blackbox.proposer.effort.default": "الإعداد الافتراضي للبيئة",

@@ -1,4 +1,6 @@
 {
+  "meta_harness.explainer.autoresearch": "AutoResearch, kodlama ajanına şimdiye kadarki en iyi sürümü yeniden yazdırır ve her denemeyi tüm vakalarda puanlar; böylece çalışma dallanmak yerine tırmanır: her adım en iyiyi korur ve ondan yeniden düzenler.",
+  "meta_harness.explainer.autosaddler": "AutoSaddler başarısız vakaları teşhis eder, bir düzeltme önerir ve her adayı geliştirme vakalarında puanlar; böylece çalışma dallanmak yerine tırmanır: her sürüm en iyiyi korur ve onu yeniden iyileştirir.",
   "submit.blackbox.roles.optimization.desc.best_of_n": "Başlangıç noktasının bağımsız yeniden yazımlarını üretir; en yüksek puanı alan kazanır.",
   "submit.blackbox.proposer.effort": "Akıl yürütme eforu",
   "submit.blackbox.proposer.effort.default": "Harness varsayılanı",

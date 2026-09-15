@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -161,8 +162,11 @@ def test_runner_climbs_with_upstream_engine_and_reports_usage(tmp_path: Path) ->
         text=True,
     )
     scored: list[tuple[str, str]] = []
+    progress: list[dict[str, Any]] = []
     try:
         for line in process.stdout:
+            if line.startswith("SKYNET_NATIVE_PROGRESS testnonce "):
+                progress.append(json.loads(line.split(" ", 2)[2]))
             if not line.startswith("SKYNET_NATIVE_RPC testnonce "):
                 continue
             request = json.loads(line.split(" ", 2)[2])
@@ -190,6 +194,13 @@ def test_runner_climbs_with_upstream_engine_and_reports_usage(tmp_path: Path) ->
     assert result["usage_complete"] is True
     assert (tmp_path / "native_artifacts.tar.gz.b64").stat().st_size > 0
     assert (tmp_path / "autosaddler-run" / "result.json").exists()
+    cases = [event for event in progress if event.get("event") == "case_scored"]
+    versions = [event for event in progress if "candidate" in event]
+    assert versions
+    assert [event["candidate_id"] for event in versions] == list(range(len(versions)))
+    assert all(len(event["per_example"]) == cases[0]["total"] for event in versions)
+    assert {event["candidate_id"] for event in cases} == set(range(len(versions)))
+    assert all(event["example_id"].isdigit() and event["total"] >= 1 for event in cases)
 
 
 def test_runner_drives_upstream_through_a_configured_harness(tmp_path: Path) -> None:

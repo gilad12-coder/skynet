@@ -1,4 +1,6 @@
 {
+  "meta_harness.explainer.autoresearch": "AutoResearch는 코딩 에이전트가 지금까지의 최고 버전을 다시 쓰게 하고 모든 시도를 전체 케이스에서 채점하므로, 실행은 가지를 치지 않고 올라갑니다. 각 단계는 최고를 유지하고 거기서 다시 편집합니다.",
+  "meta_harness.explainer.autosaddler": "AutoSaddler는 실패한 케이스를 진단하고 수정을 제안하며 모든 후보를 개발 케이스에서 채점하므로, 실행은 가지를 치지 않고 올라갑니다. 각 버전은 최고를 유지하고 다시 다듬습니다.",
   "submit.blackbox.roles.optimization.desc.best_of_n": "시작점을 독립적으로 여러 번 다시 작성하고, 점수가 가장 높은 것을 채택합니다.",
   "submit.blackbox.proposer.effort": "추론 강도",
   "submit.blackbox.proposer.effort.default": "하네스 기본값",
