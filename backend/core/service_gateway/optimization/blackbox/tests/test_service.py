@@ -35,6 +35,7 @@ from core.models.blackbox import (
 from core.models.results import ModelTokenUsage
 
 from .. import autoresearch as autoresearch_mod
+from .. import autosaddler as autosaddler_mod
 from .. import meta_harness as meta_harness_mod
 from .. import scorer as scorer_mod
 from .. import service as service_mod
@@ -142,6 +143,7 @@ def fake_native_proposers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, En
 
     monkeypatch.setattr(autoresearch_mod, "run_native_engine", run_native)
     monkeypatch.setattr(meta_harness_mod, "run_native_engine", run_native)
+    monkeypatch.setattr(autosaddler_mod, "run_native_engine", run_native)
     return invocations
 
 
@@ -237,7 +239,7 @@ def test_auto_run_hands_off_between_engines(
     }
     assert (response.lanes[-1].engine, response.lanes[-1].phase) == ("gepa", "continue")
     assert response.engine_used == "gepa"
-    assert {engine for engine, _ in fake_native_proposers} == {"autoresearch", "meta_harness"}
+    assert {engine for engine, _ in fake_native_proposers} == {"autoresearch", "meta_harness", "autosaddler"}
     assert all(ctx.native_options.model == "fake/model" for _, ctx in fake_native_proposers)
     assert all(ctx.native_options.runtime == "vercel" for _, ctx in fake_native_proposers)
     assert all(ctx.native_options.max_token_cost > 0 for _, ctx in fake_native_proposers)
@@ -620,6 +622,38 @@ def test_empty_training_split_rejected_only_for_meta_harness_recipes(
         validate_blackbox_payload(payload)
 
     assert payload.model_dump() == before
+
+
+@pytest.mark.parametrize(
+    ("cases", "accepted"),
+    [
+        (_CASES[:1], False),
+        (_CASES[:2], True),
+    ],
+)
+def test_autosaddler_needs_two_visible_cases(
+    monkeypatch: pytest.MonkeyPatch, cases: list[dict[str, Any]], accepted: bool
+) -> None:
+    """Reject a single AutoSaddler run that cannot both diagnose and confirm a patch.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+        cases: Uploaded cases before the split.
+        accepted: Whether the payload should pass validation.
+    """
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
+    payload = _payload(
+        strategy={"mode": "single", "engine": "autosaddler"},
+        max_cost_credits=100,
+        cases=cases,
+        split_fractions={"train": 1.0, "val": 0.0, "test": 0.0},
+    )
+    if accepted:
+        validate_blackbox_payload(payload)
+    else:
+        with pytest.raises(ServiceError, match="at least two"):
+            validate_blackbox_payload(payload)
 
 
 def test_smallest_training_share_keeps_one_case_for_meta_harness(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1183,3 +1217,23 @@ def test_budget_backed_native_run_leaves_its_cost_ceiling_to_the_ledger(
     validate_blackbox_payload(_payload(strategy=strategy, execution_budget_id="budget-1"), verify_scorer=False)
     with pytest.raises(ServiceError, match="Set a total credit budget"):
         validate_blackbox_payload(_payload(strategy=strategy), verify_scorer=False)
+
+
+def test_proposer_accepts_any_offered_harness_and_rejects_unlaunchable_ones() -> None:
+    """Let the request pick the proposer harness and engine knobs while refusing shapes the sandbox cannot run."""
+    request = _payload(proposer={"harness": "pi", "effort": "high", "max_candidates_per_iter": 2, "ralph": False})
+    assert request.proposer.harness == "pi"
+    assert request.proposer.effort == "high"
+    assert request.proposer.max_candidates_per_iter == 2
+    assert request.proposer.ralph is False
+    assert _payload().proposer.harness == "claude_code"
+    custom = _payload(proposer={"harness": "custom", "run_command": "my-agent {prompt_file}"})
+    assert custom.proposer.run_command == "my-agent {prompt_file}"
+    with pytest.raises(ValueError, match="harness"):
+        _payload(proposer={"harness": "aider"})
+    with pytest.raises(ValueError, match="run_command"):
+        _payload(proposer={"harness": "custom"})
+    with pytest.raises(ValueError, match="effort"):
+        _payload(proposer={"effort": "extreme"})
+    with pytest.raises(ValueError):
+        _payload(proposer={"max_thinking_tokens": 10})

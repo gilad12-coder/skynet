@@ -18,6 +18,7 @@ import type {
   BlackboxCandidate,
   BlackboxEngineCatalogResponse,
   BlackboxEngineId,
+  BlackboxProposer,
   BlackboxHarness,
   BlackboxRunRequest,
   BlackboxScorer,
@@ -68,7 +69,9 @@ import type { WizardIssue } from "../lib/wizard-issue";
 import { preflightDestination } from "../lib/preflight-destination";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import {
+  DEFAULT_PROPOSER,
   engineSelectionIssue,
+  submittedProposer,
   supportsIterationLimit,
   usesNativeProposer,
 } from "../lib/engine-contract";
@@ -243,8 +246,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [objective, setObjective] = useState("");
   const [background, setBackground] = useState("");
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("auto");
-  const targetKind = resolveExecutionKind(executionMode);
-  const setTargetKind = useCallback((kind: "text" | "agent") => setExecutionMode(kind), []);
   const [harness, setHarness] = useState<BlackboxHarness>("pi");
   // The model the agent harness runs on: what the run optimizes for, and no
   // part of the scorer. It carries only a name — the sandbox reaches it
@@ -350,7 +351,17 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const [strategyMode, setStrategyMode] = useState<"auto" | "single">("auto");
   const [engine, setEngine] = useState<BlackboxEngineId | null>(null);
+  // Only a harness-based engine can hand the candidate to an agent; a plain
+  // text engine scores it directly whatever the recipe asked for.
+  const targetKind =
+    usesNativeProposer(strategyMode, engine) ? resolveExecutionKind(executionMode) : "text";
+  const setTargetKind = useCallback((kind: "text" | "agent") => setExecutionMode(kind), []);
   const proposerRuntime = "vercel" as const;
+  const [proposer, setProposer] = useState<BlackboxProposer>(DEFAULT_PROPOSER);
+  const updateProposer = useCallback(
+    (patch: Partial<BlackboxProposer>) => setProposer((prev) => ({ ...prev, ...patch })),
+    [],
+  );
   const [engineCatalogResult, setEngineCatalogResult] = useState<{
     target: BlackboxTarget["kind"];
     data: BlackboxEngineCatalogResponse | null;
@@ -509,6 +520,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     // Drafts saved with the retired plateau relay open as Auto.
     setStrategyMode(d.strategyMode === "single" ? "single" : "auto");
     setEngine(d.engine);
+    setProposer({ ...DEFAULT_PROPOSER, ...d.proposer });
     setMaxScorerRuns(d.maxScorerRuns);
     setMaxIterations(d.maxIterations);
     setStopAtScore(d.stopAtScore);
@@ -656,6 +668,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             setStrategyMode(strategy.mode === "single" ? "single" : "auto");
             setEngine(strategy.engine ?? null);
           }
+          // A custom proposer command has no picker, so such clones keep the default.
+          if (source.proposer && BLACKBOX_HARNESSES.includes(source.proposer.harness))
+            setProposer({ ...DEFAULT_PROPOSER, ...source.proposer });
           const budget = source.budget;
           if (budget) {
             if (budget.max_scorer_runs != null) setMaxScorerRuns(budget.max_scorer_runs);
@@ -859,6 +874,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       },
       strategy: strategyMode === "single" ? { mode: "single", engine } : { mode: "auto" },
       proposer_runtime: proposerRuntime,
+      proposer: nativeProposer ? submittedProposer(proposer, strategyMode, engine) : undefined,
       target: buildTarget(),
       task_model_config:
         targetKind === "agent"
@@ -1223,12 +1239,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       case WIZARD_STAGE.evaluation: {
         if (!budgetUncapped && maxCostCredits == null)
           return fail("budget.invalid", "totalBudgetInput");
-        if (targetKind === "agent") {
-          if (!parsedCases?.rowCount)
-            return fail("submit.blackbox.validation.cases_required", "bb-cases");
-          if (!targetModel.name.trim())
-            return fail("submit.blackbox.validation.agent_model_required", "bb-task-model");
-        }
+        if (targetKind === "agent" && !parsedCases?.rowCount)
+          return fail("submit.blackbox.validation.cases_required", "bb-cases");
         if (scorerKind === "python" && !metricCode.trim())
           return fail("submit.blackbox.validation.scorer_code_required", "bb-scorer-code");
         if (scorerUsesModel && !resolvedScorerModel?.name.trim())
@@ -1257,6 +1269,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             "submit.blackbox.validation.reflection_model_required",
             "bb-optimization-model",
           );
+        if (targetKind === "agent" && !targetModel.name.trim())
+          return fail("submit.blackbox.validation.agent_model_required", "bb-task-model");
         if (strategyMode === "auto" && maxScorerRuns < 5)
           return fail("submit.blackbox.validation.auto_budget", "bb-max-runs");
         if (maxScorerRuns < 1)
@@ -1558,6 +1572,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       strategyMode,
       engine,
       proposerRuntime,
+      proposer,
       maxScorerRuns,
       maxIterations,
       stopAtScore,
@@ -1697,6 +1712,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     engine,
     setEngine,
     proposerRuntime,
+    proposer,
+    updateProposer,
     nativeProposer,
     iterationLimitSupported,
     engineCatalog,

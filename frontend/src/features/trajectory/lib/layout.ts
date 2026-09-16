@@ -62,24 +62,29 @@ export function layoutTrajectory(
     });
   }
 
-  let root: TrajectoryNode | null = null;
+  // Every parentless version is a root: an engine that samples independently
+  // (Best-of-N) grows a row of them side by side rather than one tree.
+  const roots: TrajectoryNode[] = [];
   for (const node of byId.values()) {
     if (node.parent_id === null) {
-      if (root === null) root = node;
+      roots.push(node);
       continue;
     }
     const parent = byId.get(node.parent_id);
     if (parent !== undefined) parent.children.push(node);
   }
-  if (root === null) {
+  roots.sort((a, b) => Number(a.candidate_id) - Number(b.candidate_id));
+  if (roots.length === 0) {
     // No parent_id=null candidate. Fall back to the lowest-id node so the
     // tree still renders even on malformed payloads.
-    root = candidates
-      .map((c) => byId.get(c.candidate_id))
-      .filter((n): n is TrajectoryNode => n !== undefined)
-      .sort((a, b) => Number(a.candidate_id) - Number(b.candidate_id))[0] ?? null;
+    const lowest =
+      candidates
+        .map((c) => byId.get(c.candidate_id))
+        .filter((n): n is TrajectoryNode => n !== undefined)
+        .sort((a, b) => Number(a.candidate_id) - Number(b.candidate_id))[0] ?? null;
+    if (lowest !== null) roots.push(lowest);
   }
-  if (root === null) {
+  if (roots.length === 0) {
     return {
       nodes: [],
       ghosts: [],
@@ -105,7 +110,7 @@ export function layoutTrajectory(
     node.subtreeWidth = Math.max(1, total);
     return node.subtreeWidth;
   };
-  computeWidth(root);
+  for (const root of roots) computeWidth(root);
 
   const place = (node: TrajectoryNode, leftSlot: number, depth: number): void => {
     node.y = depth * NODE_GAP_Y + TOP_PAD;
@@ -124,7 +129,11 @@ export function layoutTrajectory(
       node.x = (first.x + last.x) / 2;
     }
   };
-  place(root, 0, 0);
+  let rootSlot = 0;
+  for (const root of roots) {
+    place(root, rootSlot, 0);
+    rootSlot += root.subtreeWidth;
+  }
 
   let winnerId: string | null = null;
   let bestScore = -Infinity;

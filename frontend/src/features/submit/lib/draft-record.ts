@@ -2,6 +2,7 @@ import type {
   ScorerDependencyLock,
   BlackboxEngineId,
   BlackboxHarness,
+  BlackboxProposer,
   BlackboxProposerRuntime,
   ExecutionRuntime,
   ModelConfig,
@@ -108,6 +109,8 @@ export interface AnythingDraftData {
   strategyMode: "auto" | "single";
   engine: BlackboxEngineId | null;
   proposerRuntime?: BlackboxProposerRuntime;
+  // Drafts saved before the proposer became configurable lack it.
+  proposer?: BlackboxProposer;
   maxScorerRuns: number;
   maxIterations: number | "";
   stopAtScore: string;

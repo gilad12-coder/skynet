@@ -87,7 +87,7 @@ from .agent_runs import PHASE_BASELINE, PHASE_FINAL, AgentRunRecorder, AgentRunS
 from .auto import LaneOutcome, run_strategy
 from .feedback import without_images
 from .harness import GatewayConfig
-from .native_runtime import NativeOptions, native_runtime_unavailable_reason
+from .native_runtime import NATIVE_ENGINES, NativeOptions, native_runtime_unavailable_reason
 from .protocol import Candidate, EngineContext, EvalServer, Result, ScorerFn, Task, candidate_key
 from .registry import ENGINES, EngineCapabilities, get_engine
 from .runner import side_info_json_default
@@ -204,7 +204,7 @@ def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: boo
     else:
         for name in AUTO_ENGINES:
             get_engine(name, caps)
-    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in {"meta_harness", "autoresearch"}
+    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in NATIVE_ENGINES
     if needs_native:
         model = payload.reflection_model_settings
         if (
@@ -229,6 +229,17 @@ def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: boo
             )
             if not splits.train:
                 raise ServiceError("Meta-Harness and compositions containing it require at least one training case.")
+        if payload.strategy.mode == "single" and payload.strategy.engine == "autosaddler":
+            visible = 0
+            if payload.cases:
+                splits = split_examples(
+                    list(payload.cases), payload.split_fractions, shuffle=payload.shuffle, seed=payload.seed
+                )
+                visible = len(splits.train) + len(splits.val)
+            if visible < 2:
+                raise ServiceError(
+                    "AutoSaddler needs at least two training or validation cases to diagnose and confirm patches."
+                )
     if payload.strategy.mode == "auto" and payload.budget.max_scorer_runs < len(AUTO_ENGINES) + 1:
         raise ServiceError(f"Auto needs at least {len(AUTO_ENGINES) + 1} scorer runs.")
     if verify_scorer and payload.scorer.kind == "python":
@@ -716,11 +727,9 @@ def _run_job(
     reflection_lm, reflection_durations_ms = _reflection_caller(lm)
     token_budget = None
     if payload.max_cost_credits is not None:
-        source_fraction = (
-            PLATFORM_FEE_FRACTION if payload.reflection_model_settings.token_source == "byok" else 1.0
-        )
+        source_fraction = PLATFORM_FEE_FRACTION if payload.reflection_model_settings.token_source == "byok" else 1.0
         token_budget = payload.max_cost_credits * CREDIT_USD_VALUE / (MARKUP * source_fraction)
-    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in {"meta_harness", "autoresearch"}
+    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in NATIVE_ENGINES
     native_options = None
     if needs_native:
         budget_route = payload.reflection_model_settings.extra.get(ROUTE_KEY)
@@ -740,6 +749,7 @@ def _run_job(
             gateway=gateway,
             budget_route=budget_route,
             max_token_cost=token_budget,
+            proposer=payload.proposer,
         )
 
     task = Task(
