@@ -655,6 +655,9 @@ const ClimbContent = memo(function ClimbContent({
           const isNewest = point.id === newestId;
           const isWinner = point.id === model.bestId;
           const winnerShown = isWinner && layers.winner;
+          // The seed is the baseline the climb starts from, not a version the
+          // harness wrote, so it keeps its ring but no disc or id label.
+          const isSeed = version.candidate.parent_id === null;
           const shown = versionShown(point, layers);
           const coreStroke = isSelected
             ? NODE_CORE_STROKE_SELECTED
@@ -753,29 +756,33 @@ const ClimbContent = memo(function ClimbContent({
                   version.improved ? IMPROVED_FILL : REGRESSED_FILL,
                   ringFraction(version.score, layout.domain),
                 )}
-                <circle
-                  cx={point.x}
-                  cy={point.y}
-                  r={INNER_R}
-                  fill={winnerShown ? WINNER_FILL : NODE_CORE_FILL}
-                  stroke={coreStroke}
-                  strokeWidth={isSelected ? 1.4 : 0.8}
-                  style={{
-                    transition: "fill 250ms ease, stroke 120ms ease, stroke-width 120ms ease",
-                  }}
-                />
-                <text
-                  x={point.x}
-                  y={point.y + 4.5}
-                  textAnchor="middle"
-                  fontFamily="var(--font-mono, monospace)"
-                  fontSize="13"
-                  fontWeight={700}
-                  fill="#1c1612"
-                  pointerEvents="none"
-                >
-                  {displayCandidateId(point.id)}
-                </text>
+                {isSeed ? null : (
+                  <>
+                    <circle
+                      cx={point.x}
+                      cy={point.y}
+                      r={INNER_R}
+                      fill={winnerShown ? WINNER_FILL : NODE_CORE_FILL}
+                      stroke={coreStroke}
+                      strokeWidth={isSelected ? 1.4 : 0.8}
+                      style={{
+                        transition: "fill 250ms ease, stroke 120ms ease, stroke-width 120ms ease",
+                      }}
+                    />
+                    <text
+                      x={point.x}
+                      y={point.y + 4.5}
+                      textAnchor="middle"
+                      fontFamily="var(--font-mono, monospace)"
+                      fontSize="13"
+                      fontWeight={700}
+                      fill="#1c1612"
+                      pointerEvents="none"
+                    >
+                      {displayCandidateId(point.id)}
+                    </text>
+                  </>
+                )}
                 {isWinner ? (
                   <LayerFade show={layers.winner} reduceMotion={reduceMotion}>
                     <WinnerBadge x={point.x} y={point.y + R + 4} />
