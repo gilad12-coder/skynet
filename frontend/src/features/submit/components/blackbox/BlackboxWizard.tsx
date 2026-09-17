@@ -84,11 +84,7 @@ export function BlackboxWizard({
         if (key) setEvaluationPart(Math.max(0, evaluationSteps.indexOf(key)));
       }
       if (stage === "optimization")
-        setOptimizationPart(
-          field === "bb-optimization-model" || field === "bb-task-model" || field === "bb-max-runs"
-            ? 1
-            : 0,
-        );
+        setOptimizationPart(field === "bb-optimization-model" || field === "bb-max-runs" ? 1 : 0);
     },
     [evaluationSteps, hasCases],
   );

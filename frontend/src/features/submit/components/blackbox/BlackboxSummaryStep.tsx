@@ -228,9 +228,6 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
     seedParts,
     objective,
     background,
-    targetKind,
-    harness,
-    targetModel,
     parsedCases,
     split,
     shuffle,
@@ -268,7 +265,6 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
 
   const displayName = jobName.trim() || suggestedName;
   const notChosen = msg("submit.blackbox.roles.not_chosen");
-  const taskLabel = msg("submit.blackbox.roles.task.label");
   const optLabel = msg("submit.blackbox.roles.optimization.label");
   const scoringLabel = msg("submit.blackbox.roles.scoring.label");
 
@@ -470,19 +466,6 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
 
               {summaryTab === 2 && (
                 <div className="space-y-0">
-                  {targetKind === "agent" && (
-                    <ModelRow label={taskLabel} tipText={msg("submit.blackbox.roles.task.desc")}>
-                      <ModelChip
-                        config={{
-                          ...targetModel,
-                          token_source: targetModel.token_source ?? "managed",
-                        }}
-                        roleLabel={taskLabel}
-                        onClick={() => {}}
-                        className="w-full"
-                      />
-                    </ModelRow>
-                  )}
                   <ModelRow
                     label={optLabel}
                     tipText={msg(OPTIMIZATION_MODEL_DESCRIPTION[optimizationFamily])}
@@ -530,15 +513,6 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       ? msg("submit.blackbox.strategy.auto")
                       : (selectedEngine?.label ?? msg("submit.blackbox.strategy.single"))}
                   </Row>
-                  {targetKind === "agent" && (
-                    <Row
-                      icon={<Wrench className="size-3.5" />}
-                      label={msg("submit.blackbox.review.execution")}
-                      tipText={tip("submit.blackbox.harness")}
-                    >
-                      {harnessLabel(harness)}
-                    </Row>
-                  )}
                   {nativeProposer && (
                     <Row
                       icon={<Robot className="size-3.5" />}

@@ -32,16 +32,13 @@ export function BlackboxCasesStep({
     handlePickFromLibrary,
     libraryOpen,
     setLibraryOpen,
-    targetKind,
   } = w;
 
   return (
     <StepCard
       title={msg("submit.blackbox.cases.title")}
       tip={msg("submit.blackbox.cases.none_hint")}
-      description={msg(
-        targetKind === "agent" ? "submit.blackbox.cases.desc_agent" : "submit.blackbox.cases.desc",
-      )}
+      description={msg("submit.blackbox.cases.desc")}
     >
       <DatasetPreviewLayout
         data={parsedCases}
