@@ -174,28 +174,24 @@ test("Meta-Harness recipes require training cases without moving validation data
 
 test("proposer knobs follow the engine that reads them, and Auto exposes them all", () => {
   assert.deepEqual(proposerKnobs("single", "meta_harness"), {
-    thinking: true,
     candidates: true,
     ralph: false,
   });
   assert.deepEqual(proposerKnobs("single", "autoresearch"), {
-    thinking: true,
     candidates: false,
     ralph: true,
   });
   assert.deepEqual(proposerKnobs("single", "autosaddler"), {
-    thinking: false,
     candidates: false,
     ralph: false,
   });
-  assert.deepEqual(proposerKnobs("auto", null), { thinking: true, candidates: true, ralph: true });
+  assert.deepEqual(proposerKnobs("auto", null), { candidates: true, ralph: true });
 });
 
 test("submitted proposer resets every knob the form hides for the engine", () => {
   const tuned = {
     ...DEFAULT_PROPOSER,
     effort: "high" as const,
-    max_thinking_tokens: 8192,
     max_candidates_per_iter: 4,
     ralph: false,
     max_no_eval_seconds: 600,
@@ -207,7 +203,6 @@ test("submitted proposer resets every knob the form hides for the engine", () =>
   });
   assert.deepEqual(submittedProposer(tuned, "single", "autosaddler"), {
     ...tuned,
-    max_thinking_tokens: null,
     max_candidates_per_iter: null,
     ralph: true,
     max_no_eval_seconds: null,
@@ -226,7 +221,6 @@ test("submitted proposer resets every knob the form hides for the engine", () =>
     ...tuned,
     harness: "opencode",
     effort: null,
-    max_thinking_tokens: null,
     max_candidates_per_iter: null,
     max_no_eval_seconds: stall,
   });

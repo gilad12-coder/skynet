@@ -23,12 +23,14 @@ export function usesNativeProposer(
  * What a fresh wizard sends when the user never touches the proposer settings.
  *
  * The stall timeout has no control: half an hour without a new score covers a
- * slow scorer pass while still cutting a wedged agent loose.
+ * slow scorer pass while still cutting a wedged agent loose. The thinking
+ * budget is never set: a fixed budget would silence the effort level, which
+ * is the one reasoning control the form offers.
  */
 export const DEFAULT_PROPOSER: BlackboxProposer = {
   harness: "claude_code",
   effort: null,
-  max_thinking_tokens: 32_768,
+  max_thinking_tokens: null,
   max_candidates_per_iter: 3,
   ralph: true,
   max_no_eval_seconds: 1_800,
@@ -38,11 +40,9 @@ export const DEFAULT_PROPOSER: BlackboxProposer = {
 export function proposerKnobs(
   mode: BlackboxStrategy["mode"],
   engine: BlackboxEngineId | null,
-): { thinking: boolean; candidates: boolean; ralph: boolean } {
+): { candidates: boolean; ralph: boolean } {
   const auto = mode !== "single";
   return {
-    // AutoSaddler's Claude provider takes an effort level but no thinking budget.
-    thinking: auto || engine === "meta_harness" || engine === "autoresearch",
     candidates: auto || engine === "meta_harness",
     ralph: auto || engine === "autoresearch",
   };
@@ -59,15 +59,14 @@ export function submittedProposer(
   return {
     ...proposer,
     effort: reasoning ? (proposer.effort ?? null) : null,
-    max_thinking_tokens:
-      reasoning && knobs.thinking ? (proposer.max_thinking_tokens ?? null) : null,
+    max_thinking_tokens: null,
     max_candidates_per_iter: knobs.candidates ? (proposer.max_candidates_per_iter ?? null) : null,
     ralph: knobs.ralph ? (proposer.ralph ?? DEFAULT_PROPOSER.ralph) : DEFAULT_PROPOSER.ralph,
     max_no_eval_seconds: knobs.ralph ? DEFAULT_PROPOSER.max_no_eval_seconds : null,
   };
 }
 
-/** Effort and thinking budget are Claude Code CLI flags; other harnesses ignore them. */
+/** Effort is a Claude Code CLI flag; other harnesses ignore it. */
 export function proposerTunesReasoning(harness: BlackboxHarness): boolean {
   return harness === "claude_code";
 }
