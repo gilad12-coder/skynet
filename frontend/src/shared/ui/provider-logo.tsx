@@ -3,17 +3,25 @@
 import * as React from "react";
 import {
   Anthropic,
+  Cerebras,
   Cohere,
+  Crusoe,
+  DeepInfra,
   DeepSeek,
   Fireworks,
+  Friendli,
   Gemini,
   Groq,
   Meta,
   Minimax,
   Mistral,
   Moonshot,
+  Morph,
+  Nebius,
+  Novita,
   OpenAI,
   OpenRouter,
+  SambaNova,
   Together,
   XAI,
   ZAI,
@@ -59,7 +67,7 @@ function renderBrand(slug: string, size: number): React.ReactNode {
       return <Gemini.Avatar size={size} />;
     case "xai":
       return <XAI.Avatar size={size} />;
-    case "z-ai":
+    case "zai":
       return <ZAI.Avatar size={size} />;
     case "deepseek":
       return <DeepSeek.Avatar size={size} />;
@@ -80,6 +88,22 @@ function renderBrand(slug: string, size: number): React.ReactNode {
       return <Fireworks.Avatar size={size} />;
     case "cohere":
       return <Cohere.Avatar size={size} />;
+    case "cerebras":
+      return <Cerebras.Avatar size={size} />;
+    case "novita":
+      return <Novita.Avatar size={size} />;
+    case "deepinfra":
+      return <DeepInfra.Avatar size={size} />;
+    case "sambanova":
+      return <SambaNova.Avatar size={size} />;
+    case "nebius":
+      return <Nebius.Avatar size={size} />;
+    case "crusoe":
+      return <Crusoe.Avatar size={size} />;
+    case "friendliai":
+      return <Friendli.Avatar size={size} />;
+    case "morph":
+      return <Morph.Avatar size={size} />;
     case "openrouter":
       return <OpenRouter.Avatar size={size} />;
     default:

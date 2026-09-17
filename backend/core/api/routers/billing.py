@@ -14,14 +14,20 @@ Stripe-backed reads report unavailability, and mutations raise
 
 from __future__ import annotations
 
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Lock
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from ...billing import ProviderKeyVault, StripeBillingService
+from ...billing.byok_vault import ProviderKeyView, ResolvedConnection
 from ...billing.service import CUSTOM_CREDITS_MAX, CUSTOM_CREDITS_MIN
+from ...provider_registry import BYOK_TO_LITELLM_PROVIDER
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import (
@@ -29,8 +35,12 @@ from ..model_catalog import (
     CatalogProvider,
     ModelCatalogResponse,
     get_byok_catalog_cached,
+    narrow_models_to_served,
+    probe_byok_provider_models,
 )
 from .models import discover_models_at_endpoint
+
+logger = logging.getLogger(__name__)
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
@@ -61,62 +71,169 @@ def _parse_instant(value: str | None, default: datetime) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+# Live ``/models`` listings are refetched per account at most this often; a key
+# save/verify/remove clears the entry immediately so the picker never lags a
+# mutation. The signature guards against a stale hit after an out-of-band change.
+_BYOK_USER_CATALOG_TTL_SECONDS = 300
+_byok_user_catalog_cache: dict[str, tuple[tuple, float, ModelCatalogResponse]] = {}
+_byok_user_catalog_lock = Lock()
+
+
+def _invalidate_byok_user_catalog(username: str | None = None) -> None:
+    """Drop the cached per-account BYOK catalog for one account, or all.
+
+    Args:
+        username: Account whose entry is dropped; ``None`` clears every entry.
+    """
+    with _byok_user_catalog_lock:
+        if username is None:
+            _byok_user_catalog_cache.clear()
+        else:
+            _byok_user_catalog_cache.pop(username, None)
+
+
+def _live_model_index(view: ProviderKeyView, resolved: ResolvedConnection | None) -> dict[str, dict] | None:
+    """Fetch the models one verified connection can actually reach.
+
+    A custom endpoint is discovered through the SSRF-validated path (uncapped,
+    since this feeds a user-facing picker rather than an agent tool); a native
+    provider key is probed at the provider's own ``/models`` URL.
+
+    Args:
+        view: The verified connection's masked view.
+        resolved: Its decrypted secret and endpoint, or ``None`` when the vault
+            could not decrypt it.
+
+    Returns:
+        The reachable model index keyed by ID, or ``None`` when nothing could
+        be listed and the caller should fall back to the static registry.
+    """
+    if resolved is None:
+        return None
+    if view.api_base:
+        discovered = discover_models_at_endpoint(view.api_base, resolved.secret, limit=None)
+        if discovered.error:
+            logger.warning("BYOK model discovery for %s failed: %s", view.provider, discovered.error)
+            return None
+        return {model_id: {} for model_id in discovered.models}
+    prefix = BYOK_TO_LITELLM_PROVIDER.get(view.provider, view.provider)
+    return probe_byok_provider_models(prefix, resolved.secret)
+
+
+def _custom_endpoint_models(view: ProviderKeyView, model_ids: list[str]) -> list[CatalogModel]:
+    """Shape discovered custom-endpoint ids as catalog entries.
+
+    Args:
+        view: The custom connection the ids were discovered through.
+        model_ids: Raw ids the endpoint listed.
+
+    Returns:
+        One ``openai/``- or ``openrouter/``-prefixed entry per non-empty id.
+    """
+    models: list[CatalogModel] = []
+    seen: set[str] = set()
+    for model_id in model_ids:
+        bare = model_id.strip().strip("/")
+        if not bare:
+            continue
+        if view.provider == "openrouter":
+            value = f"openrouter/{bare.removeprefix('openrouter/')}"
+        else:
+            value = f"openai/{bare.removeprefix('openai/')}"
+        if value in seen:
+            continue
+        seen.add(value)
+        models.append(
+            CatalogModel(
+                value=value,
+                label=bare,
+                provider=view.provider,
+                byok_provider=view.provider,
+                available=True,
+            )
+        )
+    return models
+
+
 def _byok_catalog_for_user(vault: ProviderKeyVault, username: str) -> ModelCatalogResponse:
-    """Combine the public BYOK catalog with verified custom connections.
+    """List only the models the account's verified BYOK keys can actually run.
+
+    Each verified connection contributes exactly the models routable through
+    it: a custom endpoint's own listing, or the static registry entries for
+    that provider narrowed to what its native ``/models`` endpoint reports for
+    the user's key. Providers without a verified key contribute nothing, so an
+    OpenRouter-served model can never appear under a direct-provider key (or
+    vice versa). When a provider exposes no listing (Anthropic, Gemini, Cohere)
+    or the probe fails, the static registry list stands in.
 
     Args:
         vault: Encrypted provider-connection vault.
-        username: Account whose verified custom endpoints are discovered.
+        username: Account whose verified connections are surfaced.
 
     Returns:
-        Account-scoped catalog containing static and custom models.
+        Account-scoped catalog; empty when the account has no verified key.
     """
+    verified = [view for view in vault.list_keys(username).keys if view.status == "verified"]
+    signature = tuple((view.id, view.provider, view.api_base, view.added_at) for view in verified)
+    now = time.monotonic()
+    with _byok_user_catalog_lock:
+        hit = _byok_user_catalog_cache.get(username)
+        if hit is not None and hit[0] == signature and now - hit[1] < _BYOK_USER_CATALOG_TTL_SECONDS:
+            return hit[2]
+    if not verified:
+        return ModelCatalogResponse(providers=[], models=[])
+
     base = get_byok_catalog_cached()
-    providers = list(base.providers)
-    models = list(base.models)
-    provider_keys = {provider.slug for provider in providers}
-    model_keys = {(model.provider, model.value) for model in models}
-    for view in vault.list_keys(username).keys:
-        if view.status != "verified" or not view.api_base:
+    static_by_prefix: dict[str, list[CatalogModel]] = {}
+    for model in base.models:
+        static_by_prefix.setdefault(model.provider, []).append(model)
+    static_providers = {provider.slug: provider for provider in base.providers}
+
+    # Decrypt on the request thread — the vault's SQL session is not shared
+    # across threads — and only fan the network listings out to the pool.
+    jobs: list[tuple[ProviderKeyView, ResolvedConnection | None]] = []
+    for view in verified:
+        try:
+            jobs.append((view, vault.resolve_connection(username, view.provider)))
+        except DomainError as exc:
+            logger.warning("BYOK connection %s is unusable for %s: %s", view.provider, username, exc.detail)
+            jobs.append((view, None))
+    with ThreadPoolExecutor(max_workers=min(8, len(jobs))) as pool:
+        listings = list(pool.map(lambda job: _live_model_index(*job), jobs))
+
+    providers: list[CatalogProvider] = []
+    models: list[CatalogModel] = []
+    for (view, _resolved), listing in zip(jobs, listings, strict=True):
+        prefix = BYOK_TO_LITELLM_PROVIDER.get(view.provider, view.provider)
+        static = static_by_prefix.get(prefix, [])
+        if view.api_base and listing is not None:
+            provider_models = _custom_endpoint_models(view, list(listing))
+        elif listing is not None:
+            provider_models = narrow_models_to_served(prefix, static, listing, byok_provider=view.provider)
+        else:
+            provider_models = [model.model_copy(update={"byok_provider": view.provider}) for model in static]
+        if not provider_models:
             continue
-        resolved = vault.resolve_connection(username, view.provider)
-        if resolved is None:
-            continue
-        discovered = discover_models_at_endpoint(view.api_base, resolved.secret)
-        if discovered.error:
-            continue
-        if view.provider not in provider_keys:
+        if view.api_base:
+            static_label = static_providers[prefix].label if prefix in static_providers else view.provider
             providers.append(
                 CatalogProvider(
                     slug=view.provider,
-                    label=view.label or view.provider,
+                    label=view.label or static_label,
                     default_base_url=view.api_base,
                     has_env_key=True,
                 )
             )
-            provider_keys.add(view.provider)
-        for model_id in discovered.models:
-            bare = model_id.strip().strip("/")
-            if not bare:
-                continue
-            if view.provider == "openrouter":
-                value = f"openrouter/{bare.removeprefix('openrouter/')}"
-            else:
-                value = f"openai/{bare.removeprefix('openai/')}"
-            key = (view.provider, value)
-            if key in model_keys:
-                continue
-            models.append(
-                CatalogModel(
-                    value=value,
-                    label=bare,
-                    provider=view.provider,
-                    byok_provider=view.provider,
-                    available=True,
-                )
-            )
-            model_keys.add(key)
-    return ModelCatalogResponse(providers=providers, models=models)
+        elif prefix in static_providers:
+            providers.append(static_providers[prefix].model_copy(update={"has_env_key": True}))
+        else:
+            providers.append(CatalogProvider(slug=prefix, label=view.label or view.provider, has_env_key=True))
+        models.extend(provider_models)
+
+    response = ModelCatalogResponse(providers=providers, models=models)
+    with _byok_user_catalog_lock:
+        _byok_user_catalog_cache[username] = (signature, now, response)
+    return response
 
 
 class FreeGrantResponse(BaseModel):
@@ -630,6 +747,7 @@ def create_billing_router(*, job_store) -> APIRouter:
             api_base=body.api_base,
             params=body.params,
         )
+        _invalidate_byok_user_catalog(user.username)
         return ProviderKeyResponse(
             id=view.id,
             provider=view.provider,
@@ -659,6 +777,7 @@ def create_billing_router(*, job_store) -> APIRouter:
             The masked view carrying the fresh verification status.
         """
         view = vault.verify_key(user.username, provider)
+        _invalidate_byok_user_catalog(user.username)
         return ProviderKeyResponse(
             id=view.id,
             provider=view.provider,
@@ -688,6 +807,7 @@ def create_billing_router(*, job_store) -> APIRouter:
             The caller's remaining masked keys.
         """
         vault.remove_key(user.username, provider)
+        _invalidate_byok_user_catalog(user.username)
         snapshot = vault.list_keys(user.username)
         return ProviderKeysResponse(
             keys=[

@@ -58,7 +58,12 @@ def test_registry_and_budget_are_account_owned(monkeypatch: pytest.MonkeyPatch) 
         assert seen[0]["registry_url"] == "https://registry.example/simple"
         assert seen[0]["owner"] == "alice"
         assert seen[0]["execution_budget_id"] == "owned-budget"
+        assert seen[0]["seed_candidate"] is None
         assert seen[0]["key"] == seen[1]["key"]
+        candidate_body = {**body, "seed_candidate": "import pyrender"}
+        assert client.post("/wizard/scorer-dependencies", json=candidate_body).status_code == 200
+        assert seen[-1]["seed_candidate"] == "import pyrender"
+        assert seen[-1]["key"] != seen[0]["key"]
         app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser("bob", "user", ())
         assert client.post("/wizard/scorer-dependencies", json=body).status_code == 200
         assert seen[-1]["registry_url"] == "https://pypi.org/simple"

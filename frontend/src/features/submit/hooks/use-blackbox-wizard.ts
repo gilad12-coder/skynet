@@ -88,7 +88,7 @@ import {
 } from "../lib/validation-evidence";
 import type { PreflightScope, WizardPreflightResponse } from "@/shared/types/wizard-preflight";
 import { useWizardPreflight } from "./use-wizard-preflight";
-import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { formatBudgetUsd } from "@/features/billing";
 import { namedSeedParts, seedPartsIssue } from "../lib/seed-parts";
 import { beginValidationToast, type ValidationToast } from "../lib/validation-toast";
 import {
@@ -727,6 +727,18 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     return parts.length ? Object.fromEntries(parts.map((p) => [p.key.trim(), p.value])) : null;
   }, [seedMode, seedText, seedParts]);
 
+  // The seed candidate runs inside the scorer box, so its imports belong in the
+  // dependency lock — but the signed lock binds only to the scorer source, so
+  // its seed provenance is tracked here to re-resolve when the seed changes.
+  const seedCandidateRef = useRef(seedCandidate);
+  useEffect(() => {
+    seedCandidateRef.current = seedCandidate;
+  }, [seedCandidate]);
+  const resolvedSeedKeyRef = useRef<string>(JSON.stringify(seedCandidate ?? null));
+  useEffect(() => {
+    resolvedSeedKeyRef.current = JSON.stringify(seedCandidateRef.current ?? null);
+  }, [scorerDependencyLock]);
+
   const scoringBinding = useMemo(
     () =>
       resolveScoringModel({
@@ -942,16 +954,19 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             .map((byte) => byte.toString(16).padStart(2, "0"))
             .join("");
           const lock = requestPayload.scorer.dependency_lock;
+          const seedKey = JSON.stringify(requestPayload.seed_candidate ?? null);
           if (
             !lock ||
             lock.code_sha256 !== digest ||
-            JSON.stringify(lock.requirements) !== JSON.stringify(requirements)
+            JSON.stringify(lock.requirements) !== JSON.stringify(requirements) ||
+            resolvedSeedKeyRef.current !== seedKey
           ) {
             const currentBudget = await budgetSession.ensure();
             preflight.progress.phase("dependencies");
             const resolved = await resolveScorerDependencies({
               code,
               requirements,
+              seed_candidate: requestPayload.seed_candidate,
               execution_budget_id: currentBudget.id,
               execution_budget_revision: currentBudget.revision,
             });
@@ -1354,7 +1369,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       if (response.status === "succeeded" && preflightMayAdvance(response, scope)) {
         const locale = getActiveIntlLocale();
         t.succeed(
-          `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetAmount(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetAmount(response.budget.available_credits, locale)}`,
+          `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetUsd(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetUsd(response.budget.available_credits, locale)}`,
         );
         return response;
       }

@@ -53,7 +53,7 @@ def interactions(
         def dispatch() -> PaidResult[None]:
             """Record the call after the wallet and request budget accepted it."""
             snapshot = runtime.service.get(runtime.budget_id, runtime.username)
-            assert snapshot.reserved_credits == 3
+            assert snapshot.reserved_credits == 2
             state["calls"].append(
                 {
                     "identity": identity,
@@ -140,7 +140,7 @@ def test_interaction_closes_caller_budget_and_replays_without_a_second_charge(
     )
 
     assert first["outputs"] == {"answer": "sandboxed"}
-    assert first["credits_charged"] == "1.5"
+    assert first["credits_charged"] == "1"
     assert first["budget"]["total_credits"] == 10
     assert first["budget"]["state"] == "closed"
     assert first["budget"]["reserved_credits"] == "0"

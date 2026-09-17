@@ -5,6 +5,8 @@ import {
   totalCredits,
   walletStatus,
   formatCredits,
+  formatCreditsUsd,
+  formatBudgetUsd,
   formatUsd,
   formatResetDate,
   EMPTY_WALLET,
@@ -55,6 +57,19 @@ test("formatUsd keeps sub-cent precision but two decimals otherwise", () => {
   assert.equal(formatUsd(1, "en-US"), "$1.00");
   assert.equal(formatUsd(0, "en-US"), "$0.00");
   assert.equal(formatUsd(0.003, "en-US"), "$0.003");
+});
+
+test("formatCreditsUsd renders a credit balance in dollars at par", () => {
+  assert.equal(formatCreditsUsd(4512, "en-US"), "$45.12");
+  assert.equal(formatCreditsUsd(500, "en-US"), "$5.00");
+  assert.equal(formatCreditsUsd(0, "en-US"), "$0.00");
+});
+
+test("formatBudgetUsd renders a decimal credit string in dollars", () => {
+  assert.equal(formatBudgetUsd("116.06994", "en-US"), "$1.16");
+  assert.equal(formatBudgetUsd("2000", "en-US"), "$20.00");
+  // A fraction of a cent keeps sub-cent precision instead of collapsing to $0.00.
+  assert.equal(formatBudgetUsd("0.4", "en-US"), "$0.004");
 });
 
 test("formatResetDate renders the reset date in the given locale", () => {

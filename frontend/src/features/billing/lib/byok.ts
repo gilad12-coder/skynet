@@ -41,23 +41,54 @@ export interface ProviderKey {
 }
 
 /**
- * Providers offered for BYOK. The platform brokers every LLM call through
- * OpenRouter, so it is the only key worth bringing — a direct-provider key
- * would pay for models the catalog never offers. Mirrors the backend
- * `BYOK_PROVIDER_SLUGS` registry (a parity test pins the two).
+ * Providers offered for BYOK. A key here runs its provider *directly* — the
+ * run bridge injects the key + endpoint onto the model, so the provider (not
+ * OpenRouter) bills the tokens. Order and slugs mirror the backend
+ * `BYOK_PROVIDER_SLUGS` registry exactly (a parity test pins the two); a
+ * provider whose LiteLLM prefix differs from its slug is bridged below.
+ * `placeholder` hints the key shape where the provider has a recognizable one.
  */
 export const BYOK_PROVIDERS: ByokProviderInfo[] = [
   { slug: "openrouter", label: "OpenRouter", placeholder: "sk-or-…" },
+  { slug: "openai", label: "OpenAI", placeholder: "sk-…" },
+  { slug: "anthropic", label: "Anthropic", placeholder: "sk-ant-…" },
+  { slug: "google", label: "Google Gemini", placeholder: "AIza…" },
+  { slug: "xai", label: "xAI (Grok)", placeholder: "xai-…" },
+  { slug: "groq", label: "Groq", placeholder: "gsk_…" },
+  { slug: "deepseek", label: "DeepSeek", placeholder: "sk-…" },
+  { slug: "together", label: "Together AI", placeholder: "…" },
+  { slug: "mistral", label: "Mistral AI", placeholder: "…" },
+  { slug: "moonshot", label: "Moonshot (Kimi)", placeholder: "sk-…" },
+  { slug: "cohere", label: "Cohere", placeholder: "…" },
+  { slug: "fireworks", label: "Fireworks AI", placeholder: "fw_…" },
+  { slug: "cerebras", label: "Cerebras", placeholder: "csk-…" },
+  { slug: "novita", label: "Novita AI", placeholder: "sk_…" },
+  { slug: "deepinfra", label: "DeepInfra", placeholder: "…" },
+  { slug: "sambanova", label: "SambaNova", placeholder: "…" },
+  { slug: "nebius", label: "Nebius AI Studio", placeholder: "…" },
+  { slug: "minimax", label: "MiniMax", placeholder: "…" },
+  { slug: "zai", label: "Z.AI (GLM)", placeholder: "…" },
+  { slug: "meta", label: "Meta Llama", placeholder: "…" },
+  { slug: "gmi", label: "GMI Cloud", placeholder: "…" },
+  { slug: "crusoe", label: "Crusoe", placeholder: "…" },
+  { slug: "friendliai", label: "FriendliAI", placeholder: "…" },
+  { slug: "morph", label: "Morph", placeholder: "…" },
 ];
 
 /**
  * Maps a BYOK provider slug to the LiteLLM provider prefix its models carry in
- * the catalog. Only the slugs that differ are listed; everything else is
- * identity — empty today with OpenRouter as the sole provider. Mirrors the
- * backend `byok_provider_for_litellm` so the model picker can narrow the BYOK
+ * the catalog. Only the slugs whose two names differ are listed; every other
+ * slug is identity. Mirrors the backend `BYOK_TO_LITELLM_PROVIDER` bridge
+ * exactly (a parity test pins the two) so the model picker can narrow the BYOK
  * catalog to the providers the user has actually connected.
  */
-const BYOK_TO_LITELLM_PROVIDER: Record<string, string> = {};
+const BYOK_TO_LITELLM_PROVIDER: Record<string, string> = {
+  google: "gemini",
+  together: "together_ai",
+  cohere: "cohere_chat",
+  fireworks: "fireworks_ai",
+  meta: "meta_llama",
+};
 
 /** The LiteLLM provider prefix a BYOK provider slug's catalog models carry. */
 export function litellmProviderForByok(slug: string): string {

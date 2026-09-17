@@ -26,7 +26,7 @@ import { SkynetDatePicker, toISODate } from "@/shared/ui/skynet-date-picker";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { Button } from "@/shared/ui/primitives/button";
 import { useCredits } from "../providers/credit-provider";
-import { formatCredits, formatResetDate, type UsageEntry } from "../lib/credit";
+import { formatCredits, formatCreditsUsd, formatResetDate, type UsageEntry } from "../lib/credit";
 
 /** A fixed look-back preset. `all` drops the lower bound. */
 type PresetRange = "7d" | "30d" | "90d" | "all";
@@ -267,8 +267,13 @@ function StatCard({ icon: Icon, label, value }: { icon: Icon; label: string; val
   );
 }
 
-/** Billed credits over time. Lite mode falls back to a table. */
-function SpendChart({ buckets }: { buckets: Bucket[] }) {
+/**
+ * Billed spend over time, shown in dollars. The bucket values stay in credits
+ * (the ledger's unit); every display path — Y-axis ticks, tooltip, and the Lite
+ * table — renders them through `formatCreditsUsd` so the chart reads in the same
+ * dollars as the "Spent" stat above it. Lite mode falls back to a table.
+ */
+function SpendChart({ buckets, locale }: { buckets: Bucket[]; locale: string }) {
   const lite = useLiteMode();
   if (buckets.length === 0) return <ChartEmptyState message={msg("usage.empty.title")} />;
   if (lite) {
@@ -277,7 +282,12 @@ function SpendChart({ buckets }: { buckets: Bucket[] }) {
         rows={buckets}
         columns={[
           { key: "label", label: msg("usage.col.day") },
-          { key: "billed", label: msg("usage.series.billed"), align: "end" },
+          {
+            key: "billed",
+            label: msg("usage.series.billed"),
+            align: "end",
+            format: (value) => formatCreditsUsd(value as number, locale),
+          },
         ]}
       />
     );
@@ -302,10 +312,11 @@ function SpendChart({ buckets }: { buckets: Bucket[] }) {
             tick={{ fontSize: 10 }}
             className="fill-muted-foreground"
             allowDecimals={false}
-            width={36}
+            width={52}
+            tickFormatter={(value: number) => formatCreditsUsd(value, locale)}
           />
           <Tooltip
-            content={<ChartTooltip />}
+            content={<ChartTooltip formatValue={(value) => formatCreditsUsd(value, locale)} />}
             cursor={{ fill: "var(--color-chart-5)", opacity: 0.35 }}
           />
           <Bar
@@ -353,7 +364,7 @@ function ModelBreakdown({
       <ChartTable
         rows={rows.map((row) => ({
           model: row.model ? modelDisplayName(row.model) : msg("usage.model.unknown"),
-          credits: formatCredits(row.credits, locale),
+          credits: formatCreditsUsd(row.credits, locale),
           runs: row.runs,
           tokens: rowTokens(row) > 0 ? formatTokens(rowTokens(row), locale) : "—",
         }))}
@@ -396,7 +407,7 @@ function ModelBreakdown({
                   </span>
                 )}
                 <span dir="ltr" className="text-xs font-medium tabular-nums text-foreground">
-                  {formatCredits(row.credits, locale)}
+                  {formatCreditsUsd(row.credits, locale)}
                 </span>
               </span>
             </div>
@@ -452,7 +463,7 @@ function RunBreakdown({ entries, locale }: { entries: BillingUsageEntry[]; local
             )}
           </span>
           <span dir="ltr" className="shrink-0 text-sm font-medium tabular-nums text-foreground">
-            −{formatCredits(-run.credits, locale)}
+            −{formatCreditsUsd(-run.credits, locale)}
           </span>
         </li>
       ))}
@@ -502,7 +513,7 @@ function LedgerRow({ entry, locale }: { entry: BillingUsageEntry; locale: string
             )}
           >
             {credited ? "+" : "−"}
-            {formatCredits(Math.abs(entry.credits), locale)}
+            {formatCreditsUsd(Math.abs(entry.credits), locale)}
           </span>
         )}
         <span dir="ltr" className="text-[0.6875rem] text-muted-foreground/70">
@@ -693,7 +704,7 @@ export function UsageTab() {
         <StatCard
           icon={Coins}
           label={msg("usage.stat.spent")}
-          value={formatCredits(data.billed_credits, locale)}
+          value={formatCreditsUsd(data.billed_credits, locale)}
         />
         <StatCard
           icon={Sparkle}
@@ -704,7 +715,7 @@ export function UsageTab() {
 
       <div className="flex flex-col gap-3">
         <PanelHeading>{msg("usage.panel.over_time")}</PanelHeading>
-        <SpendChart buckets={buckets} />
+        <SpendChart buckets={buckets} locale={locale} />
       </div>
 
       <div

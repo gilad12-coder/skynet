@@ -34,6 +34,7 @@ from core.billing.service import (
     committed_spend_credits,
     cost_ceiling_budget,
     platform_fee_credits_for_usage,
+    purchase_fee_cents,
     run_cost_credits,
 )
 from core.config import settings
@@ -61,7 +62,7 @@ def _usages(input_tokens: int, output_tokens: int = 0) -> list[ModelUsage]:
 
     Pricing is then deterministic (the module default 1e-6 input / 3e-6 output ×
     MARKUP) regardless of LiteLLM's live table, so a debit's credit cost is stable
-    across versions. ``_usages(100_000)`` ≈ 15 credits; ``_usages(200_000)`` ≈ 30.
+    across versions. ``_usages(100_000)`` ≈ 10 credits; ``_usages(200_000)`` ≈ 20.
     """
     return [ModelUsage(model="test/unpriced", input_tokens=input_tokens, output_tokens=output_tokens)]
 
@@ -105,6 +106,19 @@ def test_pricing_policy_no_subsidy_packs_at_par() -> None:
     # One credit is one cent, so at-par packs must grant exactly the Stripe
     # unit_amount provisioned in scripts/provision_stripe.py ($5 / $20 / $50).
     assert PACK_CREDITS == {"starter": 500, "plus": 2000, "pro": 5000}
+
+
+def test_purchase_fee_cents_matches_openrouter() -> None:
+    """The card fee is 5.5% of the credit value with an $0.80 floor, rounded up to the cent."""
+    # OpenRouter's worked example: a $5 (500-credit) buy costs ~$5.80, i.e. an
+    # $0.80 fee where 5.5% (27.5c) is below the floor.
+    assert purchase_fee_cents(500) == 80
+    assert purchase_fee_cents(CUSTOM_CREDITS_MIN) == 80
+    # Above the floor the percentage governs and is rounded up to the next cent.
+    assert purchase_fee_cents(2000) == 110
+    assert purchase_fee_cents(5000) == 275
+    # 1637 * 5.5% = 90.035c, so the fee rounds up to 91c (over the $0.80 floor).
+    assert purchase_fee_cents(1637) == 91
 
 
 def test_wallet_reports_empty_grant_for_new_account(engine: object) -> None:
@@ -720,6 +734,11 @@ def test_custom_checkout_builds_ad_hoc_price_and_metadata(engine: object, config
     price_data = line_items[0]["price_data"]
     assert price_data["unit_amount"] == 1234
     assert price_data["currency"] == "usd"
+    # A second line carries the OpenRouter-style card fee; the credits line stays
+    # at par and the granted credits (metadata) are unchanged by the fee.
+    fee_data = line_items[1]["price_data"]
+    assert fee_data["unit_amount"] == purchase_fee_cents(1234)
+    assert fee_data["currency"] == "usd"
     metadata = captured["metadata"]
     assert isinstance(metadata, dict)
     assert metadata["credits"] == "1234"

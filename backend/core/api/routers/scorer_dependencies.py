@@ -21,6 +21,7 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 class ScorerDependenciesRequest(BaseModel):
     code: str = Field(max_length=200_000)
     requirements: list[str] = Field(default_factory=list, max_length=100)
+    seed_candidate: str | dict[str, str] | None = None
     execution_budget_id: str
     execution_budget_revision: int
 
@@ -53,6 +54,7 @@ def create_scorer_dependencies_router(*, job_store: Any) -> APIRouter:
         payload = {
             "scorer": {"kind": "python", "metric_code": body.code},
             "requirements": body.requirements,
+            "seed_candidate": body.seed_candidate,
             "runtime_image": settings.vercel_sandbox_image,
             "registry_url": registry,
             "dependency_registry": registry,

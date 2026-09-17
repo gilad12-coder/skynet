@@ -87,6 +87,42 @@ def test_inference_ignores_strings_stdlib_and_injected_helpers() -> None:
         package_setup.infer_requirements("import json", ["package @ https://elsewhere.invalid/pkg.whl"])
 
 
+def test_inference_folds_seed_candidate_imports() -> None:
+    """Fold a seed candidate's third-party imports into the scorer's requirements."""
+    requirements, imports = package_setup.infer_requirements(
+        "import json\ndef score(candidate): ...\n",
+        [],
+        candidate="import skynet_absent_candidate_pkg\nimport json",
+    )
+    assert requirements == ["skynet_absent_candidate_pkg"]
+    assert imports == ["json", "skynet_absent_candidate_pkg"]
+
+
+def test_inference_scans_dict_candidate_and_ignores_non_python() -> None:
+    """Scan every named candidate part while ignoring parts that are not Python code."""
+    requirements, imports = package_setup.infer_requirements(
+        "def score(candidate): ...\n",
+        [],
+        candidate={
+            "solver": "import skynet_absent_candidate_pkg",
+            "prompt": "You are a helpful assistant. Respond in JSON.",
+        },
+    )
+    assert requirements == ["skynet_absent_candidate_pkg"]
+    assert imports == ["skynet_absent_candidate_pkg"]
+
+
+def test_overrides_bypass_seed_candidate_scan() -> None:
+    """Honor explicit overrides verbatim without folding in candidate imports."""
+    requirements, imports = package_setup.infer_requirements(
+        "def score(candidate): ...\n",
+        ["explicit-package==1.0"],
+        candidate="import skynet_absent_candidate_pkg",
+    )
+    assert requirements == ["explicit-package==1.0"]
+    assert imports == ["skynet_absent_candidate_pkg"]
+
+
 def test_resolution_preserves_budget_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Stop resolution with the parent's budget signal instead of a missing-package error.
 

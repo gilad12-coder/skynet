@@ -61,8 +61,8 @@ def test_final_request_caps_include_cache_and_output_overrides() -> None:
     policy = ChargePolicy("managed_model")
     first = price_text_request(original, CATALOG, policy)
     changed = price_text_request({**original, "max_tokens": 500}, CATALOG, policy)
-    assert first.quote.maximum.total == Decimal("2.6775")
-    assert changed.quote.maximum.total == Decimal("3.9375")
+    assert first.quote.maximum.total == Decimal("1.785")
+    assert changed.quote.maximum.total == Decimal("2.625")
     assert first.quote.request_fingerprint != changed.quote.request_fingerprint
     assert first.body["provider"]["max_price"]["completion"] == 20
     assert "provider" not in original
@@ -95,7 +95,7 @@ def test_paid_provider_failure_settles_and_is_not_replayed(database: Engine) -> 
         if request.method == "GET":
             return httpx.Response(200, json={"data": CATALOG})
         calls.append(request)
-        assert runtime.service.get(runtime.budget_id, "alice").reserved_credits == Decimal("2.6775")
+        assert runtime.service.get(runtime.budget_id, "alice").reserved_credits == Decimal("1.785")
         return httpx.Response(
             500, json={"id": "gen-one", "error": "failed after inference", "usage": {"cost": "0.004"}}
         )
@@ -113,7 +113,7 @@ def test_paid_provider_failure_settles_and_is_not_replayed(database: Engine) -> 
     assert result.status == 500
     snapshot = runtime.service.get(runtime.budget_id, "alice")
     assert len(calls) == 1
-    assert snapshot.setup_spent_credits == Decimal("0.6")
+    assert snapshot.setup_spent_credits == Decimal("0.4")
     assert snapshot.billed_credits == 1
     assert snapshot.reserved_credits == 0
 
@@ -158,9 +158,9 @@ def test_each_physical_retry_has_separate_coverage_and_delivery_replay_is_dedupl
 
     assert (first.status, second.status) == (503, 200)
     assert len(posts) == 2
-    assert held_before_dispatch == [Decimal("2.6775"), Decimal("2.6775")]
+    assert held_before_dispatch == [Decimal("1.785"), Decimal("1.785")]
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.setup_spent_credits == Decimal("0.9")
+    assert snapshot.setup_spent_credits == Decimal("0.6")
     assert snapshot.reserved_credits == 0
     with Session(database) as session:
         operations = session.scalars(select(ExecutionOperationModel).order_by(ExecutionOperationModel.attempt)).all()
@@ -214,7 +214,7 @@ def test_missing_usage_remains_reserved_without_a_fake_zero_charge(database: Eng
         with pytest.raises(UsagePendingError):
             dispatcher.dispatch("/chat/completions", REQUEST)
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.reserved_credits == Decimal("2.6775")
+    assert snapshot.reserved_credits == Decimal("1.785")
     assert snapshot.setup_spent_credits == 0
     assert snapshot.pending_operations == 1
     with Session(database) as session:
@@ -232,11 +232,13 @@ def test_anthropic_stream_merges_final_cost_without_inventing_zero() -> None:
 
 
 def test_sandbox_cost_has_no_model_markup() -> None:
-    """Pass sandbox dollars through at cost while retaining the approved model policy."""
+    """Pass sandbox and managed dollars through at cost; charge BYOK only the platform fee."""
     assert ChargePolicy("sandbox").convert(Decimal("0.01")).total == 1
-    assert ChargePolicy("managed_model").convert(Decimal("0.01")).total == Decimal("1.5")
+    # MARKUP is 1.0 (runs at cost), so a managed model bills its par credit value.
+    assert ChargePolicy("managed_model").convert(Decimal("0.01")).total == 1
     byok = ChargePolicy("byok_model").convert(Decimal("0.01"))
-    assert byok.total == byok.wallet == Decimal("0.42")
+    # PLATFORM_FEE_FRACTION 0.05 of the par cost — OpenRouter's BYOK fee.
+    assert byok.total == byok.wallet == Decimal("0.05")
 
 
 def test_responses_dispatch_reserves_the_actual_protocol_body(database: Engine) -> None:
@@ -287,5 +289,5 @@ def test_responses_dispatch_reserves_the_actual_protocol_body(database: Engine) 
     assert response.status == 200
     assert len(calls) == 1
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.setup_spent_credits == Decimal("0.3")
+    assert snapshot.setup_spent_credits == Decimal("0.2")
     assert snapshot.reserved_credits == 0

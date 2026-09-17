@@ -27,7 +27,7 @@ import {
 } from "@/features/billing";
 
 /** GEPA metric-call budgets by `auto` tier — mirrors the backend `_AUTO_BUDGETS`. */
-const AUTO_METRIC_CALLS: Record<string, number> = {
+export const AUTO_METRIC_CALLS: Record<string, number> = {
   light: 500,
   medium: 2000,
   heavy: 8000,
@@ -451,13 +451,43 @@ export function aggregateTokenSource(configs: ModelConfig[]): TokenSourceMode {
  * bounding a runaway.
  */
 export function defaultCeilingForBracket(bracket: CostBracket): number {
-  const withHeadroom = Math.ceil(bracket.highCredits * 1.15);
-  return roundToNiceCap(withHeadroom);
+  return defaultCeilingTrace(bracket).ceilingCredits;
+}
+
+/** Headroom applied to the bracket's high end before rounding it into a cap. */
+const CEILING_HEADROOM_FACTOR = 1.15;
+
+/** The steps from a bracket's high end to its default cap, for surfaces that show the working. */
+export interface CeilingTrace {
+  highCredits: number;
+  headroomFactor: number;
+  withHeadroomCredits: number;
+  /** The rounding step the cap was lifted to (10 credits under 500, 50 above). */
+  stepCredits: number;
+  ceilingCredits: number;
+}
+
+/** Derive the default cap and every intermediate value behind it. */
+export function defaultCeilingTrace(bracket: CostBracket): CeilingTrace {
+  const withHeadroom = Math.ceil(bracket.highCredits * CEILING_HEADROOM_FACTOR);
+  const stepCredits = niceCapStep(withHeadroom);
+  return {
+    highCredits: bracket.highCredits,
+    headroomFactor: CEILING_HEADROOM_FACTOR,
+    withHeadroomCredits: withHeadroom,
+    stepCredits,
+    ceilingCredits: roundToNiceCap(withHeadroom),
+  };
+}
+
+/** The readable step a cap is rounded up to: 10s under 500 credits, 50s above. */
+function niceCapStep(credits: number): number {
+  return credits < 500 ? 10 : 50;
 }
 
 /** Round a credit cap up to a readable step (10s under 500, 50s above). */
 function roundToNiceCap(credits: number): number {
   if (credits <= 0) return 1;
-  const step = credits < 500 ? 10 : 50;
+  const step = niceCapStep(credits);
   return Math.ceil(credits / step) * step;
 }

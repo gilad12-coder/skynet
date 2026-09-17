@@ -45,16 +45,70 @@ STATUS_UNVERIFIED = "unverified"
 STATUS_VERIFIED = "verified"
 STATUS_INVALID = "invalid"
 
+def _bearer_probe(url: str) -> dict[str, str]:
+    """Build a verify probe for an OpenAI-style ``Authorization: Bearer`` API.
+
+    Most providers authenticate a bare ``GET`` of their model-list endpoint with
+    a bearer token and answer ``401`` to a bad one — exactly the verdict shape
+    :meth:`ProviderKeyVault._probe` needs — so their probe differs only in URL.
+
+    Args:
+        url: The provider's model-list endpoint (its key-introspection endpoint
+            when it has one), reached with the user's key as a bearer token.
+
+    Returns:
+        A probe mapping with the URL and a secret-templated ``Authorization``
+        header.
+    """
+    return {"url": url, "header_name": "Authorization", "header_value": "Bearer {secret}"}
+
+
 # Providers a user may bring a key for. Mirrors the frontend ``BYOK_PROVIDERS``
-# catalog; the value is how the verify probe reaches each provider. The
-# OpenRouter key-introspection endpoint authenticates the credential without
-# spending model tokens. ``header`` is templated with the secret at probe time.
+# catalog (keyed by the same vault slugs the registry pins); the value is how the
+# verify probe reaches each provider. Most authenticate a bare model-list GET
+# with a bearer token (:func:`_bearer_probe`); OpenRouter uses its
+# key-introspection endpoint, and Anthropic/Google carry their own auth-header
+# shapes. ``header_value`` is templated with the secret at probe time;
+# ``extra_header_value`` is a fixed header sent verbatim.
 _PROVIDER_PROBES: dict[str, dict[str, str]] = {
     "openrouter": {
         "url": "https://openrouter.ai/api/v1/key",
         "header_name": "Authorization",
         "header_value": "Bearer {secret}",
     },
+    "openai": _bearer_probe("https://api.openai.com/v1/models"),
+    "anthropic": {
+        "url": "https://api.anthropic.com/v1/models",
+        "header_name": "x-api-key",
+        "header_value": "{secret}",
+        "extra_header_name": "anthropic-version",
+        "extra_header_value": "2023-06-01",
+    },
+    "google": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models",
+        "header_name": "x-goog-api-key",
+        "header_value": "{secret}",
+    },
+    "xai": _bearer_probe("https://api.x.ai/v1/models"),
+    "groq": _bearer_probe("https://api.groq.com/openai/v1/models"),
+    "deepseek": _bearer_probe("https://api.deepseek.com/models"),
+    "together": _bearer_probe("https://api.together.xyz/v1/models"),
+    "mistral": _bearer_probe("https://api.mistral.ai/v1/models"),
+    "moonshot": _bearer_probe("https://api.moonshot.ai/v1/models"),
+    "cohere": _bearer_probe("https://api.cohere.ai/v1/models"),
+    "fireworks": _bearer_probe("https://api.fireworks.ai/inference/v1/models"),
+    "cerebras": _bearer_probe("https://api.cerebras.ai/v1/models"),
+    "novita": _bearer_probe("https://api.novita.ai/v3/openai/models"),
+    "deepinfra": _bearer_probe("https://api.deepinfra.com/v1/openai/models"),
+    "sambanova": _bearer_probe("https://api.sambanova.ai/v1/models"),
+    "nebius": _bearer_probe("https://api.studio.nebius.ai/v1/models"),
+    "minimax": _bearer_probe("https://api.minimax.io/v1/models"),
+    "zai": _bearer_probe("https://api.z.ai/api/paas/v4/models"),
+    "meta": _bearer_probe("https://api.llama.com/compat/v1/models"),
+    "gmi": _bearer_probe("https://api.gmi-serving.com/v1/models"),
+    "crusoe": _bearer_probe("https://managed-inference-api-proxy.crusoecloud.com/v1/models"),
+    "friendliai": _bearer_probe("https://api.friendli.ai/serverless/v1/models"),
+    "morph": _bearer_probe("https://api.morphllm.com/v1/models"),
 }
 
 # How long a verify probe waits for the provider before giving up. A timeout is
@@ -457,7 +511,10 @@ class ProviderKeyVault:
         Decrypts the stored secret in memory only for the duration of the probe,
         updates the stored status to the probe's verdict, and returns the masked
         view. Used to re-check a key that was saved while the provider was
-        unreachable (status stuck at ``unverified``).
+        unreachable (status stuck at ``unverified``), and to re-confirm a working
+        key on demand. A re-test never demotes a ``verified`` key for a mere
+        outage: only a definitive rejection unseats it; an inconclusive probe
+        leaves the prior verdict intact.
 
         Args:
             username: Account the key belongs to.
@@ -485,8 +542,13 @@ class ProviderKeyVault:
                 row.updated_at = datetime.now(UTC)
                 session.commit()
                 raise DomainError("billing.byok_key_undecryptable", status=409, provider=provider) from exc
-            status = self._probe(provider, secret, row.api_base)
-            row.status = status
+            probe_status = self._probe(provider, secret, row.api_base)
+            # A manual re-test must never demote a working key for a mere outage:
+            # only a definitive rejection (401/403 -> invalid) unseats a verified
+            # key; an inconclusive probe leaves the prior verdict intact.
+            if probe_status == STATUS_UNVERIFIED and row.status == STATUS_VERIFIED:
+                probe_status = STATUS_VERIFIED
+            row.status = probe_status
             row.updated_at = datetime.now(UTC)
             view = _row_view(row)
             session.commit()

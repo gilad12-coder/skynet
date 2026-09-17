@@ -2,12 +2,13 @@
  * Credit-wallet domain model shared by the billing UI surfaces.
  *
  * Skynet runs on pay-as-you-go prepaid credits — the only plan: users buy
- * credit packs (at par, one credit per cent) and every run spends against
- * them; there is no free allowance. Credits are spendable on any model.
- * Credits are the unit of account; the dollar value is always shown alongside
- * (`CREDIT_USD_VALUE`). Pricing is provider cost times MARKUP (1.50: payment
- * fees, the CPU/storage share, and a profit margin; BYOK runs pay only the
- * infra + margin share): the platform never subsidizes a run.
+ * credit packs and every run spends against them; there is no free allowance.
+ * Credits are spendable on any model. A credit is simply a US cent, at par with
+ * the dollar — the same model OpenRouter uses: the balance operates in dollars
+ * and is called credits because, once bought, it can only be spent inside
+ * Skynet. Runs bill at true provider cost (no per-token markup); the platform's
+ * margin is the credit-purchase fee (`CREDIT_PURCHASE_FEE_*`), so it never
+ * subsidizes a run. A BYOK run is charged only a small platform fee.
  *
  * Everything here is framework-agnostic (no React / `next/*`) so it imports from
  * server components, client components, and the provider alike. Wallet values
@@ -37,6 +38,29 @@ export const CUSTOM_CREDITS_MAX = 100_000;
 
 /** Below this much spendable value the wallet reads as "running low" (calm, not alarming). */
 export const LOW_BALANCE_USD = 0.5;
+
+/**
+ * Card fee on a credit purchase, mirroring backend `purchase_fee_cents` and
+ * OpenRouter: 5.5% of the credit value with a $0.80 floor, charged on top of par
+ * credits. The buyer pays the credit value plus this fee; only the base credits
+ * are granted.
+ */
+export const CREDIT_PURCHASE_FEE_RATE = 0.055;
+export const CREDIT_PURCHASE_FEE_MINIMUM_USD = 0.8;
+
+/**
+ * The card fee for buying `credits`, in USD — 5.5% of the credit value (one
+ * credit is one cent) floored at $0.80 and rounded up to the cent. Mirrors
+ * backend `purchase_fee_cents`.
+ */
+export function purchaseFeeUsd(credits: number): number {
+  return Math.max(Math.ceil(credits * CREDIT_PURCHASE_FEE_RATE), 80) / 100;
+}
+
+/** What the buyer actually pays for `credits`: the par credit value plus the card fee. */
+export function purchaseTotalUsd(credits: number): number {
+  return creditsToUsd(credits) + purchaseFeeUsd(credits);
+}
 
 /** The one-time free grant that lets a new account try the platform. */
 export interface FreeGrant {
@@ -81,6 +105,11 @@ export function creditsToUsd(credits: number): number {
   return credits * CREDIT_USD_VALUE;
 }
 
+/** Convert a USD amount to whole credits (the inverse of `creditsToUsd`): $2.50 → 250. */
+export function usdToCredits(usd: number): number {
+  return Math.round(usd / CREDIT_USD_VALUE);
+}
+
 /** Total spendable credits = free grant remaining + purchased balance. */
 export function totalCredits(wallet: CreditWallet): number {
   return wallet.freeGrant.creditsRemaining + wallet.paidBalanceCredits;
@@ -111,6 +140,26 @@ export function formatUsd(usd: number, locale: string): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: fractionDigits,
   }).format(usd);
+}
+
+/**
+ * Locale-aware dollar rendering of a credit balance — the single way every UI
+ * surface shows a wallet figure. Credits are a par-USD unit (one credit is one
+ * cent), so a balance the API reports in credits is displayed to the user in
+ * dollars: `formatCreditsUsd(4512)` → `$45.12`.
+ */
+export function formatCreditsUsd(credits: number, locale: string): string {
+  return formatUsd(creditsToUsd(credits), locale);
+}
+
+/**
+ * Dollar rendering of a server-supplied decimal credit string (the raw values
+ * on the usage ledger and budget snapshots, e.g. `"116.06994"`). Keeps the
+ * fractional value rather than rounding to whole credits first, so a fraction of
+ * a cent still reads truthfully through `formatUsd`.
+ */
+export function formatBudgetUsd(value: string, locale: string): string {
+  return formatUsd(creditsToUsd(Number(value)), locale);
 }
 
 /** Locale-aware medium date (e.g. `Jul 1, 2026`) for ledger/settings date lines. */

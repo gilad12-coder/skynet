@@ -1,7 +1,8 @@
 "use client";
 
-import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { formatBudgetUsd } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { parseBudgetInput } from "@/shared/lib/budget-input";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -29,6 +30,7 @@ import {
   GridFour,
   Package,
   Cube,
+  Coins,
 } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 
@@ -98,6 +100,7 @@ import { ArtifactTab } from "./ArtifactTab";
 import { StageInfoModal } from "./StageInfoModal";
 import { PairSelectionStrip } from "./PairSelectionStrip";
 import { OverviewTab } from "./OverviewTab";
+import { BudgetTab } from "./BudgetTab";
 import { RunLifecycleNotice } from "./RunLifecycleNotice";
 import { isBudgetPause } from "../lib/run-lifecycle";
 import { RunCreditsChip } from "./RunCreditsChip";
@@ -112,7 +115,7 @@ import { useStreamWithPollFallback } from "@/shared/hooks/use-stream-with-poll-f
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 
 const BLACKBOX_LOG_FETCH_DELAY_MS = 3000;
-const PHONE_DETAIL_TABS = new Set(["overview", "playground", "artifact", "logs"]);
+const PHONE_DETAIL_TABS = new Set(["overview", "playground", "artifact", "logs", "budget"]);
 
 // Treat naive ISO timestamps (no trailing tz marker) as UTC — that matches the
 // backend, which stores UTC datetimes that Pydantic emits without a suffix.
@@ -256,9 +259,9 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab") ?? "overview";
   const [detailTab, setDetailTab] = useState(initialTab);
-  // Phones get the view-first subset: Overview, Usage (chat), Artifact, Logs.
-  // Data/Code/LM activity/Config are desk work; a deep link to one of those
-  // tabs lands on Overview instead of an empty pane.
+  // Phones get the view-first subset: Overview, Usage (chat), Artifact, Logs,
+  // Spending. Data/Code/LM activity/Config are desk work; a deep link to one of
+  // those tabs lands on Overview instead of an empty pane.
   const isPhone = useIsPhone();
   const activeDetailTab = isPhone && !PHONE_DETAIL_TABS.has(detailTab) ? "overview" : detailTab;
   // Expose for tutorial via the typed bridge (features/tutorial/lib/bridge.ts).
@@ -349,7 +352,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const [serveInfo, setServeInfo] = useState<ServeInfoResponse | null>(null);
   const [serveInfoError, setServeInfoError] = useState<string | null>(null);
   const [serveLoading, setServeLoading] = useState(false);
-  const [serveBudgetCredits, setServeBudgetCredits] = useState("10");
+  // Typed in dollars; "0.10" is the $0.10 (10-credit) default cap.
+  const [serveBudgetCredits, setServeBudgetCredits] = useState("0.10");
   const [runHistory, setRunHistory] = useState<
     Array<{
       inputs: Record<string, string>;
@@ -733,11 +737,15 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       );
       return;
     }
-    const maxCostCredits = Number(serveBudgetCredits);
-    if (!Number.isInteger(maxCostCredits) || maxCostCredits < 1) {
+    // The field is typed in dollars; the API is billed in credits (×100). A
+    // number input's value is always canonical (ASCII, "." decimal), parsed in
+    // a fixed locale rather than the UI's.
+    const parsedBudget = parseBudgetInput(serveBudgetCredits, "en");
+    if (parsedBudget.kind !== "value") {
       toast.error(msg("optimizations.serve.request_budget_invalid"));
       return;
     }
+    const maxCostCredits = parsedBudget.value;
     const idempotencyKey = crypto.randomUUID();
     // Abort any in-flight stream, then start a new one tagged with a fresh id
     streamAbortRef.current?.abort();
@@ -790,7 +798,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         if (res.credits_charged != null) {
           toast.success(
             formatMsg("optimizations.serve.request_spent", {
-              credits: formatBudgetAmount(String(res.credits_charged), getActiveIntlLocale()),
+              credits: formatBudgetUsd(String(res.credits_charged), getActiveIntlLocale()),
             }),
           );
         }
@@ -828,7 +836,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         if (res.credits_charged != null) {
           toast.success(
             formatMsg("optimizations.serve.request_spent", {
-              credits: formatBudgetAmount(String(res.credits_charged), getActiveIntlLocale()),
+              credits: formatBudgetUsd(String(res.credits_charged), getActiveIntlLocale()),
             }),
           );
         }
@@ -880,7 +888,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         if (res.credits_charged != null) {
           toast.success(
             formatMsg("optimizations.serve.request_spent", {
-              credits: formatBudgetAmount(String(res.credits_charged), getActiveIntlLocale()),
+              credits: formatBudgetUsd(String(res.credits_charged), getActiveIntlLocale()),
             }),
           );
         }
@@ -1088,6 +1096,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const showCodeTab = !jobIsBlackbox || !!metricCode;
   const showLmActivityTab =
     viewLmActivity != null || (job.blackbox_result?.usage_by_model?.length ?? 0) > 0;
+  const showBudgetTab = (job.execution_budget ?? job.terminal_evidence?.execution_budget) != null;
 
   const pairCount = effectiveJob?.grid_result?.pair_results.length ?? 0;
   const isBestPair =
@@ -1546,6 +1555,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   {msg("auto.app.optimizations.id.page.lm_activity")}
                 </TabsTrigger>
               )}
+              {showBudgetTab && (
+                <TabsTrigger value="budget" className={tabCls}>
+                  <Coins className="size-3.5" />
+                  {msg("optimization.budget.tab")}
+                </TabsTrigger>
+              )}
               {!isPhone && (
                 <TabsTrigger value="config" className={tabCls}>
                   <Gear className="size-3.5" />
@@ -1668,6 +1683,12 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 ) : (
                   job.blackbox_result && <BlackboxLMActivityTab result={job.blackbox_result} />
                 )}
+              </TabsContent>
+            )}
+
+            {showBudgetTab && (
+              <TabsContent value="budget" className="mt-4">
+                <BudgetTab job={job} />
               </TabsContent>
             )}
 

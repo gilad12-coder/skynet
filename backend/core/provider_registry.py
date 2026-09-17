@@ -22,14 +22,40 @@ from __future__ import annotations
 
 # Ordered ``(vault slug, LiteLLM provider prefix)`` for every BYOK provider. The
 # slug is what a user saves a key under (and how the vault keys it); the prefix
-# is what that provider's model ids carry in the catalog. The platform brokers
-# every LLM call through OpenRouter, so OpenRouter is the only key worth
-# bringing — a direct-provider key would pay for models the catalog never
-# offers. Self-hosted/on-prem gateways remain reachable through the vault's
-# custom ``api_base`` path, which accepts any slug. The bridge maps below stay
-# derived (empty today) so a future slug≠prefix provider needs no new plumbing.
+# is what that provider's model ids carry in the catalog. OpenRouter fronts the
+# platform's managed runs, but a BYOK key runs its provider *directly*: the run
+# bridge (``core.billing.byok_bridge``) resolves a model's prefix back to its
+# vault slug and injects the user's key + endpoint onto the ModelConfig, so the
+# provider — not OpenRouter — bills the tokens. Only LiteLLM-native, API-key
+# providers with a reachable verify endpoint belong here; self-hosted/on-prem or
+# other gateways remain reachable through the vault's custom ``api_base`` path,
+# which accepts any slug. Where a vault slug and its LiteLLM prefix differ (e.g.
+# ``google``/``gemini``), the bridge maps below pick it up with no new plumbing.
 BYOK_PROVIDER_SLUGS: tuple[tuple[str, str], ...] = (
     ("openrouter", "openrouter"),
+    ("openai", "openai"),
+    ("anthropic", "anthropic"),
+    ("google", "gemini"),
+    ("xai", "xai"),
+    ("groq", "groq"),
+    ("deepseek", "deepseek"),
+    ("together", "together_ai"),
+    ("mistral", "mistral"),
+    ("moonshot", "moonshot"),
+    ("cohere", "cohere_chat"),
+    ("fireworks", "fireworks_ai"),
+    ("cerebras", "cerebras"),
+    ("novita", "novita"),
+    ("deepinfra", "deepinfra"),
+    ("sambanova", "sambanova"),
+    ("nebius", "nebius"),
+    ("minimax", "minimax"),
+    ("zai", "zai"),
+    ("meta", "meta_llama"),
+    ("gmi", "gmi"),
+    ("crusoe", "crusoe"),
+    ("friendliai", "friendliai"),
+    ("morph", "morph"),
 )
 
 # vault slug -> LiteLLM prefix, listing only the providers whose two names differ

@@ -77,7 +77,7 @@ def test_truncated_stream_retains_charge_until_original_generation_settles(datab
         reconciler.reconcile(operation_id, "alice", client=client)
         assert len(calls) == read_count
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.setup_spent_credits == Decimal("0.6")
+    assert snapshot.setup_spent_credits == Decimal("0.4")
     assert snapshot.reserved_credits == 0
     assert len([call for call in calls if call.method == "POST"]) == 1
 

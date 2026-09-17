@@ -158,12 +158,19 @@ class DiscoverModelsResponse(BaseModel):
     total: int | None = None
 
 
-def discover_models_at_endpoint(base_url: str, api_key: str | None = None) -> DiscoverModelsResponse:
+def discover_models_at_endpoint(
+    base_url: str,
+    api_key: str | None = None,
+    *,
+    limit: int | None = AGENT_MAX_LIST,
+) -> DiscoverModelsResponse:
     """Fetch model ids from one validated OpenAI-compatible endpoint.
 
     Args:
         base_url: Provider API base URL.
         api_key: Optional bearer secret.
+        limit: Cap on returned ids (the agent-tool default); ``None`` returns
+            every id so a user-facing catalog is not silently clipped.
 
     Returns:
         Discovered model ids, or a bounded error response.
@@ -200,7 +207,7 @@ def discover_models_at_endpoint(base_url: str, api_key: str | None = None) -> Di
                 elif isinstance(item, str):
                     ids.append(item)
             sorted_ids = sorted(set(ids))
-            clipped, truncated, total = cap_list(sorted_ids, AGENT_MAX_LIST)
+            clipped, truncated, total = cap_list(sorted_ids, limit if limit is not None else len(sorted_ids))
             return DiscoverModelsResponse(
                 models=clipped,
                 base_url=base,

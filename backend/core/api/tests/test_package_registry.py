@@ -6,6 +6,7 @@ import runpy
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -18,7 +19,8 @@ from sqlalchemy.pool import StaticPool
 from ...storage.models import Base, PackageRegistryPreferenceModel
 from ..account_data_service import delete_account, export_account
 from ..auth import AuthenticatedUser, get_authenticated_user
-from ..routers.package_registry import DEFAULT_PACKAGE_INDEX, create_package_registry_router
+from ..routers import package_registry
+from ..routers.package_registry import DEFAULT_PACKAGE_INDEX, create_package_registry_router, probe_package_index
 
 
 def _client() -> tuple[TestClient, object, FastAPI]:
@@ -119,6 +121,136 @@ def test_account_export_and_delete_include_only_owned_registry() -> None:
             session.get(PackageRegistryPreferenceModel, "second@example.com").index_url
             == "https://second.example/simple"
         )
+
+
+class _FakeResponse:
+    """Minimal httpx.Response stand-in the probe reads for its verdict."""
+
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        content_type: str = "text/html",
+        text: str = "",
+        payload: object = None,
+        payload_error: bool = False,
+    ) -> None:
+        self.status_code = status_code
+        self.headers = {"content-type": content_type}
+        self.text = text
+        self._payload = payload
+        self._payload_error = payload_error
+
+    def json(self) -> object:
+        """Return the parsed body, or raise as httpx does on a non-JSON body."""
+        if self._payload_error:
+            raise ValueError("no json")
+        return self._payload
+
+
+def _probe_returning(response_or_error: object):
+    """Build an ``httpx.get`` replacement that yields one response or raises.
+
+    Args:
+        response_or_error: A fake response to return, or an exception to raise.
+
+    Returns:
+        A callable matching ``httpx.get``'s signature for monkeypatching.
+    """
+
+    def fake_get(url: str, **_kwargs: object) -> _FakeResponse:
+        if isinstance(response_or_error, Exception):
+            raise response_or_error
+        return response_or_error
+
+    return fake_get
+
+
+@pytest.mark.parametrize(
+    ("response_or_error", "ok", "reason", "status_code"),
+    [
+        (_FakeResponse(200, content_type="application/vnd.pypi.simple.v1+json", payload={"files": []}), True, "healthy", 200),
+        (_FakeResponse(200, text="<html><body><a href='pip-1.whl'>pip</a></body></html>"), True, "healthy", 200),
+        (_FakeResponse(403), False, "auth_required", 403),
+        (_FakeResponse(401), False, "auth_required", 401),
+        (_FakeResponse(404), False, "not_an_index", 404),
+        (_FakeResponse(200, text="<html><body>Welcome</body></html>"), False, "not_an_index", 200),
+        (_FakeResponse(200, content_type="application/json", payload={"detail": "nope"}), False, "not_an_index", 200),
+        (_FakeResponse(503), False, "bad_status", 503),
+        (httpx.TimeoutException("slow"), False, "timeout", None),
+        (httpx.ConnectError("no route"), False, "unreachable", None),
+    ],
+)
+def test_probe_classifies_index_health(
+    monkeypatch: pytest.MonkeyPatch,
+    response_or_error: object,
+    ok: bool,
+    reason: str,
+    status_code: int | None,
+) -> None:
+    """Map each probe outcome to a pass/fail verdict with the exact reason.
+
+    Args:
+        monkeypatch: Fixture swapping the network call for a canned outcome.
+        response_or_error: Fake response or exception the probe encounters.
+        ok: Expected pass/fail flag.
+        reason: Expected outcome slug.
+        status_code: Expected HTTP status carried on the verdict, if any.
+    """
+    monkeypatch.setattr(package_registry.httpx, "get", _probe_returning(response_or_error))
+    verdict = probe_package_index("https://packages.example.com/simple")
+    assert (verdict.ok, verdict.reason, verdict.status_code) == (ok, reason, status_code)
+
+
+def test_probe_targets_the_pip_sentinel_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fetch the pip project page under the given index root.
+
+    Args:
+        monkeypatch: Fixture capturing the URL the probe requests.
+    """
+    captured: dict[str, str] = {}
+
+    def fake_get(url: str, **_kwargs: object) -> _FakeResponse:
+        captured["url"] = url
+        return _FakeResponse(200, text="<a href='pip.whl'>pip</a>")
+
+    monkeypatch.setattr(package_registry.httpx, "get", fake_get)
+    probe_package_index("https://packages.example.com/simple")
+    assert captured["url"] == "https://packages.example.com/simple/pip/"
+
+
+def test_check_endpoint_reports_invalid_url_without_probing() -> None:
+    """Return a structured invalid-URL reason instead of a validation error."""
+    client, _engine, _app = _client()
+    response = client.post("/account/package-registry/check", json={"index_url": "http://insecure.example/simple"})
+    assert response.status_code == 200
+    assert response.json() == {"ok": False, "reason": "invalid_url", "status_code": None}
+
+
+def test_check_endpoint_normalizes_then_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Validate and normalize the URL before probing the sentinel page.
+
+    Args:
+        monkeypatch: Fixture capturing the normalized URL the probe requests.
+    """
+    captured: dict[str, str] = {}
+
+    def fake_get(url: str, **_kwargs: object) -> _FakeResponse:
+        captured["url"] = url
+        return _FakeResponse(200, content_type="application/vnd.pypi.simple.v1+json", payload={"files": []})
+
+    monkeypatch.setattr(package_registry.httpx, "get", fake_get)
+    client, _engine, _app = _client()
+    response = client.post("/account/package-registry/check", json={"index_url": "https://Packages.Example.com/team/simple/"})
+    assert response.json() == {"ok": True, "reason": "healthy", "status_code": 200}
+    assert captured["url"] == "https://packages.example.com/team/simple/pip/"
+
+
+def test_check_endpoint_requires_authentication() -> None:
+    """Deny an unauthenticated probe request."""
+    client, _engine, app = _client()
+    app.dependency_overrides.clear()
+    assert client.post("/account/package-registry/check", json={"index_url": DEFAULT_PACKAGE_INDEX}).status_code == 401
 
 
 def test_migration_accepts_startup_created_table() -> None:

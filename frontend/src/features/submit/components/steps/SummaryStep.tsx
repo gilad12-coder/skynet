@@ -43,7 +43,7 @@ import { TERMS } from "@/shared/lib/terms";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { ModelRoleRow } from "../blackbox/ModelRoleRow";
-import { formatCredits } from "@/features/billing";
+import { formatCreditsUsd } from "@/features/billing";
 import { useUserPrefs } from "@/features/settings";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
@@ -700,8 +700,8 @@ export function SummaryStep({
             {/* Isolate "low–high" as one LTR run (U+2066…U+2069) so the en-dash
                 between the two number groups doesn't flip them under RTL. */}
             {formatMsg("submit.summary.estimate_range", {
-              low: `\u2066${formatCredits(estimate.lowCredits, locale)}`,
-              high: `${formatCredits(estimate.highCredits, locale)}\u2069`,
+              low: `\u2066${formatCreditsUsd(estimate.lowCredits, locale)}`,
+              high: `${formatCreditsUsd(estimate.highCredits, locale)}\u2069`,
             })}
           </span>
         </div>
@@ -711,7 +711,7 @@ export function SummaryStep({
           maxCostCredits != null && (
             <p className="mt-1.5 text-[11px] text-[#8C7A6B]">
               {formatMsg("submit.summary.estimate_capped", {
-                cap: formatCredits(maxCostCredits, locale),
+                cap: formatCreditsUsd(maxCostCredits, locale),
               })}
             </p>
           )

@@ -734,7 +734,14 @@ class BackgroundWorker:
             self._touch_activity(worker_id)
 
             protected_execution = job_data.get("execution_budget_id") is not None
-            if not protected_execution and not self._allow_unprotected_test_execution:
+            # Black-box scoring only runs in the managed Vercel sandbox, so a
+            # black-box job always requires a funded protected run: the
+            # unprotected test escape hatch other run types use to dispatch a
+            # local subprocess never applies to it.
+            allow_unprotected = (
+                self._allow_unprotected_test_execution and optimization_type != OPTIMIZATION_TYPE_BLACKBOX
+            )
+            if not protected_execution and not allow_unprotected:
                 raise ValueError(
                     "This stored job predates protected execution. Submit it again to create a funded Vercel run."
                 )

@@ -10,10 +10,13 @@ export function ChartTooltip({
   active,
   payload,
   label,
+  formatValue,
 }: {
   active?: boolean;
   payload?: Array<{ value: number; name: string; color?: string }>;
   label?: string;
+  /** Optional per-value formatter (e.g. render a credit count as dollars). Defaults to the raw value. */
+  formatValue?: (value: number) => string;
 }) {
   if (!active || !payload?.length) return null;
   return (
@@ -36,7 +39,7 @@ export function ChartTooltip({
               className="font-mono font-semibold text-foreground ms-auto tabular-nums"
               dir="ltr"
             >
-              {p.value}
+              {formatValue ? formatValue(p.value) : p.value}
             </span>
           </div>
         ))}

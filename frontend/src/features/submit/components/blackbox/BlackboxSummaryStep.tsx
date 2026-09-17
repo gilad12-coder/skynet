@@ -23,11 +23,12 @@ import {
   Wrench,
   Robot,
   Warning,
+  CaretDown,
 } from "@/shared/ui/icons";
 import { cn } from "@/shared/lib/utils";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { HelpTip } from "@/shared/ui/help-tip";
-import { formatCredits } from "@/features/billing";
+import { formatCreditsUsd } from "@/features/billing";
 import { harnessLabel } from "@/shared/lib/blackbox-harness";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
@@ -128,12 +129,34 @@ function Note({
 
   return (
     <div className="space-y-1.5 border-b border-border/40 py-2.5">
-      <HelpTip text={tipText}>
-        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-          {icon}
-          {label}
-        </span>
-      </HelpTip>
+      <div className="flex items-center justify-between gap-2">
+        <HelpTip text={tipText}>
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            {icon}
+            {label}
+          </span>
+        </HelpTip>
+        {overflows && (
+          <button
+            type="button"
+            onClick={() => {
+              setInteracted(true);
+              setExpanded((v) => !v);
+            }}
+            aria-expanded={expanded}
+            aria-label={msg(
+              expanded
+                ? "shared.expandable_textarea.collapse"
+                : "shared.expandable_textarea.expand",
+            )}
+            className="-me-0.5 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+          >
+            <CaretDown
+              className={cn("size-3.5 transition-transform duration-200", expanded && "rotate-180")}
+            />
+          </button>
+        )}
+      </div>
       <motion.div
         initial={false}
         animate={{ height: clamped ? collapsedHeight : (fullHeight ?? "auto") }}
@@ -145,18 +168,6 @@ function Note({
           {children}
         </p>
       </motion.div>
-      {overflows && (
-        <button
-          type="button"
-          onClick={() => {
-            setInteracted(true);
-            setExpanded((v) => !v);
-          }}
-          className="text-xs font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
-        >
-          {msg(expanded ? "shared.expandable_textarea.collapse" : "shared.expandable_textarea.expand")}
-        </button>
-      )}
     </div>
   );
 }
@@ -250,7 +261,10 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
   const estimateLabel = byok
     ? msg("submit.summary.estimate_fee")
     : msg("submit.summary.estimate_cost");
-  const { estimateSections } = buildEstimateSections(estimate, locale);
+  const { estimateSections, estimateIntro, estimatePrinciples } = buildEstimateSections(
+    estimate,
+    locale,
+  );
 
   const displayName = jobName.trim() || suggestedName;
   const notChosen = msg("submit.blackbox.roles.not_chosen");
@@ -369,11 +383,15 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                     {startSummary}
                   </Row>
                   <Row
-                    icon={isPrivate ? <Lock className="size-3.5" /> : <Globe className="size-3.5" />}
+                    icon={
+                      isPrivate ? <Lock className="size-3.5" /> : <Globe className="size-3.5" />
+                    }
                     label={msg("submit.basics.privacy.label")}
                     tipText={tip("submit.privacy")}
                   >
-                    {msg(isPrivate ? "submit.basics.privacy.private" : "submit.basics.privacy.public")}
+                    {msg(
+                      isPrivate ? "submit.basics.privacy.private" : "submit.basics.privacy.public",
+                    )}
                   </Row>
                   <Row
                     icon={byok ? <Key className="size-3.5" /> : <Coins className="size-3.5" />}
@@ -453,10 +471,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
               {summaryTab === 2 && (
                 <div className="space-y-0">
                   {targetKind === "agent" && (
-                    <ModelRow
-                      label={taskLabel}
-                      tipText={msg("submit.blackbox.roles.task.desc")}
-                    >
+                    <ModelRow label={taskLabel} tipText={msg("submit.blackbox.roles.task.desc")}>
                       <ModelChip
                         config={{
                           ...targetModel,
@@ -615,10 +630,12 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                     <Figure
                       label={estimateLabel}
                       value={formatMsg("submit.summary.estimate_range", {
-                        low: `⁦${formatCredits(estimate.lowCredits, locale)}`,
-                        high: `${formatCredits(estimate.highCredits, locale)}⁩`,
+                        low: `⁦${formatCreditsUsd(estimate.lowCredits, locale)}`,
+                        high: `${formatCreditsUsd(estimate.highCredits, locale)}⁩`,
                       })}
                       sections={estimateSections}
+                      intro={estimateIntro}
+                      principles={estimatePrinciples}
                       className="text-sm"
                     />
                   </Row>

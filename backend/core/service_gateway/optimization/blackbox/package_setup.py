@@ -134,22 +134,64 @@ def _pip(arguments: list[str]) -> None:
         raise ValueError((completed.stderr or completed.stdout)[-6000:])
 
 
-def infer_requirements(code: str, overrides: list[str]) -> tuple[list[str], list[str]]:
-    """Inspect imports without executing scorer code and honor explicit package overrides.
+def _import_roots(tree: ast.AST) -> set[str]:
+    """Collect the top-level modules a parsed source imports.
 
     Args:
-        code: Current Python scorer source.
-        overrides: Complete optional package requirement list supplied by the user.
+        tree: A parsed Python module.
 
     Returns:
-        Missing-package requirements and imported root modules.
+        The distinct root module names of every absolute import.
     """
     roots: set[str] = set()
-    for node in ast.walk(ast.parse(code)):
+    for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             roots.update(alias.name.split(".")[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             roots.add(node.module.split(".")[0])
+    return roots
+
+
+def _candidate_roots(candidate: str | dict[str, str] | None) -> set[str]:
+    """Collect import roots a seed candidate triggers when the scorer runs it.
+
+    The optimizer executes candidates inside the scorer's box, so their
+    third-party imports must be installed even though they never appear in the
+    scorer source. A candidate that is not Python (a prompt, or code in another
+    language) does not parse and contributes nothing.
+
+    Args:
+        candidate: The seed candidate text, its named parts, or ``None``.
+
+    Returns:
+        The distinct top-level module names imported across the candidate.
+    """
+    parts = candidate.values() if isinstance(candidate, dict) else [candidate] if candidate else []
+    roots: set[str] = set()
+    for source in parts:
+        try:
+            tree = ast.parse(source)
+        except (SyntaxError, ValueError):
+            continue
+        roots |= _import_roots(tree)
+    return roots
+
+
+def infer_requirements(
+    code: str, overrides: list[str], candidate: str | dict[str, str] | None = None
+) -> tuple[list[str], list[str]]:
+    """Inspect scorer and seed-candidate imports without executing them, honoring overrides.
+
+    Args:
+        code: Current Python scorer source.
+        overrides: Complete optional package requirement list supplied by the user.
+        candidate: Seed candidate whose imports the scorer will trigger at run
+            time; scanned only when it parses as Python.
+
+    Returns:
+        Missing-package requirements and imported root modules.
+    """
+    roots = _import_roots(ast.parse(code)) | _candidate_roots(candidate)
     requirements = overrides or [
         _ALIASES.get(root, root)
         for root in sorted(roots)
@@ -164,7 +206,13 @@ def infer_requirements(code: str, overrides: list[str]) -> tuple[list[str], list
     return requirements, sorted(roots)
 
 
-def resolve(code: str, overrides: list[str], route: dict[str, str], directory: Path) -> dict[str, Any]:
+def resolve(
+    code: str,
+    overrides: list[str],
+    route: dict[str, str],
+    directory: Path,
+    candidate: str | dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Resolve missing imports to exact wheel versions using the configured registry.
 
     Args:
@@ -172,11 +220,12 @@ def resolve(code: str, overrides: list[str], route: dict[str, str], directory: P
         overrides: Optional complete package requirement list.
         route: Parent registry capability.
         directory: Private sandbox workspace.
+        candidate: Seed candidate whose imports the scorer triggers at run time.
 
     Returns:
         Reusable exact artifact lock for this source and runtime.
     """
-    requirements, roots = infer_requirements(code, overrides)
+    requirements, roots = infer_requirements(code, overrides, candidate)
     artifacts: dict[str, dict[str, Any]] = {}
     stopped: list[PackageSetupStoppedError] = []
 
@@ -326,7 +375,13 @@ def main() -> None:
     directory = source.parent.resolve()
     try:
         if document["action"] == "resolve":
-            result = resolve(document["code"], document["requirements"], document["route"], directory)
+            result = resolve(
+                document["code"],
+                document["requirements"],
+                document["route"],
+                directory,
+                document.get("candidate"),
+            )
         else:
             install(document["lock"], document["route"], directory)
             result = {"installed": True}

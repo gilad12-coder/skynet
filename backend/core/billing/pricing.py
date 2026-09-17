@@ -1,19 +1,21 @@
 """Per-model, per-token run pricing — the shared basis for estimate and charge.
 
 A run's credit cost is the real provider cost of its tokens (LiteLLM's
-``model_cost`` registry, input and output priced separately) times the platform
-:data:`MARKUP`, converted to credits at :data:`CREDIT_USD_VALUE`. The *same*
-function prices a projected token volume (the pre-run estimate) and a measured
-token volume (the post-run charge), so the two reconcile by construction — only
-their inputs differ.
+``model_cost`` registry, input and output priced separately), converted to
+credits at :data:`CREDIT_USD_VALUE` — one credit per cent, **at par with the
+dollar**. Runs are sold at true provider cost: :data:`MARKUP` is ``1.0``. The
+platform earns its margin the way OpenRouter does — on the credit-purchase
+(deposit) fee, not a per-token markup — so a credit is simply a US cent that can
+only be spent inside Skynet, never a separate inflated unit. The *same* function
+prices a projected token volume (the pre-run estimate) and a measured token
+volume (the post-run charge), so the two reconcile by construction — only their
+inputs differ.
 
-Model choice moves a run's price, and :data:`MARKUP` is the single re-priceable
-margin lever (mirrored by the frontend estimate) — currently 1.50: payment fees,
-a small infra share, and a profit margin on top, so the platform covers the CPU
-and storage behind a run and earns enough to offset fixed hosting while volume
-is low. The module is a leaf — it depends
-only on LiteLLM's static price table — so both the billing service and any
-estimator can import it without cycles.
+Model choice moves a run's price. :data:`MARKUP` stays a single re-priceable
+lever (mirrored by the frontend estimate) should a per-run margin ever be
+reintroduced, but at ``1.0`` it is a no-op and runs bill exactly what the tokens
+cost. The module is a leaf — it depends only on LiteLLM's static price table —
+so both the billing service and any estimator can import it without cycles.
 """
 
 from __future__ import annotations
@@ -24,27 +26,24 @@ from dataclasses import dataclass
 
 import litellm
 
-# One credit is worth one US cent; the markup that protects margin lives in
-# MARKUP (and the Stripe per-unit price), so credit counts stay legible.
+# One credit is worth one US cent, at par with the dollar: a credit is just a
+# cent that can only be spent inside Skynet. Buying credits carries a purchase
+# fee (see the credit module), which is where the platform's margin comes from —
+# not from the credit's spending value, which stays 1:1 with USD.
 CREDIT_USD_VALUE = 0.01
 
-# Margin multiplier applied to raw provider cost before converting to credits.
-# This is the single re-priceable margin lever for runs (it replaces the markup
-# that used to be implicit in the flat token→credit rate). Tune here; keep it in
-# step with the Stripe per-unit price so ledger and invoice agree.
-# 1.50 = 1.09 × 1.10 × 1.25: ~9% covers the percentage costs of moving the
-# money — OpenRouter's ~5.5% deposit fee on managed tokens and Stripe's ~2.9%
-# cut of what users pay (1.055 / 0.971 ≈ 1.09) — ~10% is a small infra share so
-# the CPU and storage a run consumes (optimization workers, artifact/DB
-# storage) are covered, and the remaining 25% is profit (~20% of what the user
-# pays) that offsets the fixed hosting bill while volume is low (1.20 was the
-# break-even point). Stripe's fixed $0.30 per purchase is deliberately not
-# covered (it amortizes to noise on normal pack sizes).
-MARKUP = 1.50
+# Multiplier applied to raw provider cost before converting to credits. Runs are
+# sold at true provider cost, so this is 1.0 (a no-op): the platform earns on the
+# credit-purchase fee, OpenRouter-style, not a per-token markup. It stays a named
+# lever, mirrored by the frontend estimate, so a per-run margin could be
+# reintroduced in one place if the model ever changes — keep the two in step.
+MARKUP = 1.0
 
-# Share of marked-up model credits charged when the provider usage is paid
-# directly through the user's key. Mirrored by the frontend estimate.
-PLATFORM_FEE_FRACTION = 0.28
+# The platform fee charged on a run whose provider tokens are paid directly
+# through the user's own key (BYOK): a small share of the equivalent model cost,
+# mirroring OpenRouter's 5% BYOK fee. The tokens are on the user's key, so this
+# is the only amount a BYOK run spends. Mirrored by the frontend estimate.
+PLATFORM_FEE_FRACTION = 0.05
 
 # Fallback per-token cost (USD) for a model LiteLLM does not price — a mid-tier
 # standard rate so an unknown model estimates and charges sanely rather than at
@@ -114,10 +113,11 @@ def raw_cost_usd(usages: Iterable[ModelUsage]) -> float:
 def credits_for_usage(usages: Iterable[ModelUsage]) -> int:
     """Convert per-model token usage to the credits it costs, rounding up.
 
-    Applies :data:`MARKUP` to the raw provider cost and divides by
-    :data:`CREDIT_USD_VALUE`. Any non-zero usage costs at least one credit (a
-    partial credit rounds up), so a run that consumed tokens is never billed
-    zero; zero usage costs zero.
+    Divides the raw provider cost (times :data:`MARKUP`, which is ``1.0`` — runs
+    bill at cost) by :data:`CREDIT_USD_VALUE`, so a run costs the true dollar
+    value of its tokens in par credits. Any non-zero usage costs at least one
+    credit (a partial credit rounds up), so a run that consumed tokens is never
+    billed zero; zero usage costs zero.
 
     Args:
         usages: Per-model input/output token counts (measured or projected).

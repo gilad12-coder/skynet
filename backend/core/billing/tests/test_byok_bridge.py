@@ -225,3 +225,53 @@ def test_inject_stamps_the_blackbox_scorer_model(vault: ProviderKeyVault) -> Non
     inject_byok_connections(payload, username="u@x.com", vault=vault)
     assert payload["reflection_model_config"]["extra"]["api_key"] == "sk-or-1111"
     assert payload["scorer"]["model"]["extra"]["api_key"] == "sk-or-1111"
+
+
+def test_inject_rejects_model_the_connection_cannot_route(vault: ProviderKeyVault) -> None:
+    """An OpenRouter-served model never rides a direct OpenAI key, and vice versa."""
+    with patch("core.billing.byok_vault.httpx.get", return_value=_ok_response()):
+        vault.save_key("u@x.com", "openai", "sk-openai-6666")
+    payload = {
+        "model_config": {
+            "name": "openrouter/openai/gpt-4o",
+            "token_source": "byok",
+            "byok_provider": "openai",
+            "extra": {},
+        }
+    }
+    with pytest.raises(DomainError) as exc:
+        inject_byok_connections(payload, username="u@x.com", vault=vault)
+    assert exc.value.status_code == 400
+    assert exc.value.code == "billing.byok_model_not_served"
+    assert "api_key" not in payload["model_config"]["extra"]
+
+
+def test_inject_allows_openai_prefix_through_custom_endpoint(vault: ProviderKeyVault) -> None:
+    """A custom ``api_base`` connection is OpenAI-compatible, so ``openai/`` routes through it."""
+    with patch("core.billing.byok_vault.httpx.get", return_value=_ok_response()):
+        vault.save_key("u@x.com", "google", "sk-gw-7777", api_base="https://gateway.example/v1")
+    payload = {
+        "model_config": {
+            "name": "openai/private-gemini",
+            "token_source": "byok",
+            "byok_provider": "google",
+            "extra": {},
+        }
+    }
+    inject_byok_connections(payload, username="u@x.com", vault=vault)
+    assert payload["model_config"]["extra"]["api_key"] == "sk-gw-7777"
+    assert payload["model_config"]["base_url"] == "https://gateway.example/v1"
+
+
+def test_enforce_byok_connections_blocks_unroutable_model(vault: ProviderKeyVault, engine: object) -> None:
+    """The submit gate refuses a model whose prefix its chosen key cannot serve."""
+    with patch("core.billing.byok_vault.httpx.get", return_value=_ok_response()):
+        vault.save_key("u@x.com", "openai", "sk-openai-8888")
+    job_store = SimpleNamespace(engine=engine)
+    with pytest.raises(DomainError) as exc:
+        _enforce_byok_connections(
+            job_store,
+            "u@x.com",
+            [ModelConfig(name="openrouter/openai/gpt-4o", token_source="byok", byok_provider="openai")],
+        )
+    assert exc.value.code == "billing.byok_model_not_served"

@@ -121,10 +121,10 @@ def test_continue_reuses_matching_success_and_preserves_setup_spend(setup_client
     assert first.status_code == 200
     assert first.json()["status"] == "succeeded"
     assert first.json()["may_advance"] is True
-    assert first.json()["budget"]["setup_spent_credits"] == "1.5"
+    assert first.json()["budget"]["setup_spent_credits"] == "1"
     second = client.post("/wizard/preflight", json=_request(budget, {**PAYLOAD, "name": "Renamed", "is_private": True}))
     assert second.json()["id"] == first.json()["id"]
-    assert second.json()["budget"]["setup_spent_credits"] == "1.5"
+    assert second.json()["budget"]["setup_spent_credits"] == "1"
     assert len(calls) == 1
 
 
@@ -172,7 +172,7 @@ def test_scorer_changes_require_new_paid_verification(setup_client) -> None:
     changed = {**PAYLOAD, "scorer": {"kind": "python", "metric_code": "def score(candidate): return 0.5"}}
     second = client.post("/wizard/preflight", json=_request(budget, changed)).json()
     assert second["fingerprint"] != first["fingerprint"]
-    assert second["budget"]["setup_spent_credits"] == "3"
+    assert second["budget"]["setup_spent_credits"] == "2"
     assert len(calls) == 2
 
 

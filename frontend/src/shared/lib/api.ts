@@ -5,6 +5,7 @@ import type {
 } from "@/shared/types/wizard-preflight";
 import type {
   BlackboxAgentRunResponse,
+  BlackboxCandidate,
   ScorerDependencyLock,
   BlackboxEngineCatalogResponse,
   BlackboxRunRequest,
@@ -763,6 +764,7 @@ export interface AccountDeletionResult {
 export function resolveScorerDependencies(input: {
   code: string;
   requirements: string[];
+  seed_candidate?: BlackboxCandidate | null;
   execution_budget_id: string;
   execution_budget_revision: number;
 }) {
@@ -786,6 +788,22 @@ export function getPackageRegistry() {
 export function updatePackageRegistry(indexUrl: string) {
   return request<PackageRegistryPreference>("/account/package-registry", {
     method: "PUT",
+    body: JSON.stringify({ index_url: indexUrl }),
+  });
+}
+
+export interface PackageRegistryCheckResult {
+  ok: boolean;
+  /** Stable outcome slug the UI maps to a message (e.g. "healthy", "not_an_index"). */
+  reason: string;
+  /** HTTP status of the probe, when a response arrived — names the exact failure. */
+  status_code: number | null;
+}
+
+/** Probe a candidate index for reachability without persisting it. */
+export function checkPackageRegistry(indexUrl: string) {
+  return request<PackageRegistryCheckResult>("/account/package-registry/check", {
+    method: "POST",
     body: JSON.stringify({ index_url: indexUrl }),
   });
 }

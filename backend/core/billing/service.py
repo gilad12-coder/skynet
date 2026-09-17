@@ -60,6 +60,28 @@ PACK_CREDITS: dict[str, int] = {"starter": 500, "plus": 2000, "pro": 5000}
 CUSTOM_CREDITS_MIN = 50
 CUSTOM_CREDITS_MAX = 100_000
 
+# Card fee on a credit purchase, mirroring OpenRouter: 5.5% of the credit value
+# with an $0.80 floor, charged on top of par credits. The buyer pays base + fee;
+# the account is granted only the base credits. One credit is one cent, so the
+# credit count doubles as the base value in cents. Mirrored by the frontend's
+# purchaseFeeCents. A $5 (500-credit) top-up owes the floor: max(28, 80) = $0.80,
+# for a $5.80 charge.
+CREDIT_PURCHASE_FEE_RATE = 0.055
+CREDIT_PURCHASE_FEE_MINIMUM_CENTS = 80
+
+
+def purchase_fee_cents(credits: int) -> int:
+    """Return the card fee for buying ``credits``, in cents.
+
+    Args:
+        credits: Credit amount being purchased, which is also its value in cents.
+
+    Returns:
+        The fee to add to the charge, in cents, rounded up and never below the
+        $0.80 floor.
+    """
+    return max(math.ceil(credits * CREDIT_PURCHASE_FEE_RATE), CREDIT_PURCHASE_FEE_MINIMUM_CENTS)
+
 # One-time allowance a new account gets. 0 = no free credits: every credit
 # spent was paid for, so the platform never subsidizes tokens or compute.
 # Accounts whose grant was seeded while this was non-zero keep their remaining
@@ -71,14 +93,10 @@ FREE_GRANT_CREDITS = 0
 # treats such a row as having no real Stripe customer yet and provisions one.
 LOCAL_CUSTOMER_PREFIX = "local:"
 
-# Share of a run's full credit cost charged to a BYOK run — the provider tokens
-# are paid on the user's own key, but the run still consumes Skynet's CPU and
-# storage. Derived from the managed MARKUP's decomposition (~1.09 money-movement
-# × ~1.10 infra × 1.25 profit ≈ 1.50): everything but the money-movement slice
-# is (1.50 − 1.09)×raw = 0.41/1.50 ≈ 0.273 of the full cost, grossed up for
-# Stripe's ~2.9% cut of the money behind the fee credits (÷0.971) ≈ 0.28. No
-# OpenRouter deposit fee applies (no managed tokens) — the fee covers compute +
-# storage plus the same margin managed runs carry.
+# Share of a run's full equivalent credit cost charged to a BYOK run — the
+# provider tokens are paid on the user's own key, so this fee is all the run
+# spends. Set by :data:`PLATFORM_FEE_FRACTION` to mirror OpenRouter's 5% BYOK
+# fee: the platform's cut for brokering a request paid on someone else's key.
 # Ceiling handed to fee-less BYOK runs: far above any real run's full cost,
 # small enough to stay a safe int everywhere credits are summed.
 _BYOK_UNCAPPED_CEILING = 10**9
@@ -789,11 +807,15 @@ class StripeBillingService:
     def _create_checkout(self, username: str, line_item: dict[str, Any], pack_id: str, credits: int) -> str:
         """Create the Stripe Checkout Session shared by pack and custom top-ups.
 
+        The credits line stays at par; a second line carries the OpenRouter-style
+        card fee (:func:`purchase_fee_cents`) so the buyer pays base + fee while
+        the webhook still grants only the base ``credits`` from metadata.
+
         Args:
             username: Buyer identity; stamped into session metadata so the
                 webhook can credit the right account.
-            line_item: The single Stripe line item to charge (a fixed price id
-                or ad-hoc ``price_data``).
+            line_item: The credits line to charge (a fixed price id or ad-hoc
+                ``price_data``), before the purchase fee.
             pack_id: Pack id (or ``"custom"``) recorded in metadata for the
                 ledger description.
             credits: Credits the webhook grants once the session completes.
@@ -804,10 +826,18 @@ class StripeBillingService:
         stripe_mod = self._stripe()
         customer_id = self.get_or_create_customer(username)
         metadata = {"username": username, "pack_id": pack_id, "credits": str(credits)}
+        fee_item = {
+            "price_data": {
+                "currency": "usd",
+                "unit_amount": purchase_fee_cents(credits),
+                "product_data": {"name": "Card purchase fee"},
+            },
+            "quantity": 1,
+        }
         checkout = stripe_mod.checkout.Session.create(
             customer=customer_id,
             mode="payment",
-            line_items=[line_item],
+            line_items=[line_item, fee_item],
             billing_address_collection="required",
             customer_update={"address": "auto", "name": "auto"},
             invoice_creation={"enabled": True},
