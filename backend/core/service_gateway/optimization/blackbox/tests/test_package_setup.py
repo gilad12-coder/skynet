@@ -76,6 +76,98 @@ def test_resolve_and_install_exact_wheel(tmp_path: Path, monkeypatch: pytest.Mon
     assert "--hash=sha256:" + digest in (tmp_path / "locked.txt").read_text()
 
 
+def _wheel(name: str, version: str, requires: str | None = None) -> tuple[bytes, dict[str, Any]]:
+    """Build a pure-Python fixture wheel and the index entry advertising it.
+
+    Args:
+        name: Distribution and import name.
+        version: Distribution version.
+        requires: Optional ``Requires-Dist`` line.
+
+    Returns:
+        The wheel bytes and its index artifact.
+    """
+    archive = io.BytesIO()
+    metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+    if requires:
+        metadata += f"Requires-Dist: {requires}\n"
+    with zipfile.ZipFile(archive, "w") as wheel:
+        wheel.writestr(f"{name}/__init__.py", f"VERSION = {version!r}\n")
+        wheel.writestr(f"{name}-{version}.dist-info/METADATA", metadata)
+        wheel.writestr(
+            f"{name}-{version}.dist-info/WHEEL", "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+        )
+        wheel.writestr(f"{name}-{version}.dist-info/RECORD", "")
+    data = archive.getvalue()
+    digest = hashlib.sha256(data).hexdigest()
+    artifact = {
+        "filename": f"{name}-{version}-py3-none-any.whl",
+        "sha256": digest,
+        "url": f"https://registry.example/{name}-{version}.whl",
+        "requires_python": ">=3.11",
+    }
+    return data, artifact
+
+
+def test_extend_installs_only_what_a_later_candidate_adds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A candidate's new import installs its wheel while shared dependencies keep the locked version.
+
+    Args:
+        tmp_path: Isolated guest-like workspace.
+        monkeypatch: Fixture replacing only the parent transport.
+    """
+    base, extra = "skynet_base_fixture", "skynet_extra_fixture"
+    wheels = {
+        name: _wheel(*spec)
+        for name, spec in {
+            "base-1.0": (base, "1.0"),
+            "base-2.0": (base, "2.0"),
+            "extra-1.0": (extra, "1.0", f"{base}>=1.0"),
+        }.items()
+    }
+    by_digest = {artifact["sha256"]: data for data, artifact in wheels.values()}
+    index = {
+        base: [wheels["base-1.0"][1], wheels["base-2.0"][1]],
+        extra: [wheels["extra-1.0"][1]],
+    }
+    def request(route: dict[str, str], body: dict[str, Any]) -> dict[str, Any]:
+        """Emulate the scoped parent registry protocol.
+
+        Args:
+            route: Opaque test capability.
+            body: Requested package operation.
+
+        Returns:
+            Fixture index metadata or exact wheel bytes.
+        """
+        if body["action"] == "index":
+            return {"artifacts": index[body["project"].replace("-", "_")]}
+        data = by_digest[body["sha256"]]
+        return {"data": base64.b64encode(data[body["offset"] :]).decode(), "size": len(data)}
+
+    monkeypatch.setattr(package_setup, "_request", request)
+    lock = package_setup.resolve(f"import {base}\ndef score(c): return 1", [f"{base}==1.0"], {}, tmp_path)
+    assert [(a["name"], a["version"]) for a in lock["artifacts"]] == [(base.replace("_", "-"), "1.0")]
+    package_setup.install(lock, {}, tmp_path)
+
+    added = package_setup.extend(lock, f"import json\nimport {base}\nimport {extra}\n", {}, tmp_path)
+
+    assert added["imports"] == ["json", extra]
+    assert [(a["name"], a["version"]) for a in added["artifacts"]] == [(extra.replace("_", "-"), "1.0")]
+    installed = (tmp_path / "locked.txt").read_text()
+    assert extra.replace("_", "-") in installed
+    assert base not in installed
+    result = subprocess.run(
+        [sys.executable, "-c", f"import {base}, {extra}; print({base}.VERSION, {extra}.VERSION)"],
+        env={**os.environ, "PYTHONPATH": str(tmp_path / "site")},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.split() == ["1.0", "1.0"]
+    assert package_setup.extend(lock, f"import {extra}\n", {}, tmp_path) == {"imports": [extra], "artifacts": []}
+
+
 def test_inference_ignores_strings_stdlib_and_injected_helpers() -> None:
     """Infer executable imports while leaving image-provided libraries untouched."""
     requirements, imports = package_setup.infer_requirements(

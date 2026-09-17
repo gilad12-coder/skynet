@@ -38,6 +38,10 @@ Python scorer setup inspects imports in the selected sandbox and resolves missin
 
 The signed lock binds exact wheel versions, URLs, and hashes to the scorer source, Python patch version, and immutable sandbox image. Subsequent checks and runs install these artifacts into the private scorer workspace using `--no-index --no-deps --require-hashes`. An altered lock or changed source/image requires resolution again. The full scorer check executes after installation; resolving packages alone is not successful scorer evidence. Resolution and scorer checks use the same authorized setup budget and preserve pending usage and budget stops. Built-in image dependencies remain bound to the image digest. Registry downloads are limited to 256 MiB per wheel and 512 MiB per dependency set.
 
+Candidates the optimizer writes later may import packages the lock never saw. Before such a candidate scores, the parent scans its imports and runs the setup script's `extend` action in the same box: missing roots resolve against the account registry with every locked distribution pinned as a constraint, and only the new wheels install. The relay therefore keeps the index reachable under a lock, bounded by the same budget check and download ceiling. A candidate whose packages cannot be installed receives that failure as scorer feedback.
+
+The image ships OSMesa (`libosmesa6`, `libgl1`, `libglu1-mesa`) and the scorer runs with `PYOPENGL_PLATFORM=osmesa`, so PyOpenGL-based renderers such as pyrender work without a display or GPU.
+
 ## External evaluators and tools
 
 User-selected remote evaluators keep their original `POST {candidate, case}` protocol. The parent retains the selected endpoint and bearer credential, pins its permitted DNS address, verifies TLS for the original host, and disables redirects and transport retries. Private/loopback endpoints require the existing explicit `DISCOVER_ALLOW_PRIVATE` deployment opt-in; cloud metadata addresses remain denied. The guest receives an opaque evaluator-only capability, separate from model, tool, and sandbox controls.

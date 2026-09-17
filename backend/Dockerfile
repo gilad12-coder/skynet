@@ -41,12 +41,15 @@ WORKDIR /app
 
 ARG DEBIAN_MIRROR
 ARG NPM_CONFIG_REGISTRY
+# OSMesa gives PyOpenGL renderers (pyrender, trimesh viewers) a software GL
+# context in the headless sandbox; the scorer runs with PYOPENGL_PLATFORM=osmesa.
 RUN if [ -n "$DEBIAN_MIRROR" ]; then \
         find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -exec \
             sed -i "s|http[s]\?://deb.debian.org|$DEBIAN_MIRROR|g; s|http[s]\?://security.debian.org|$DEBIAN_MIRROR|g" {} \; ; \
     fi \
     && apt-get update \
     && apt-get install -y --no-install-recommends build-essential ca-certificates curl unzip git \
+        libosmesa6 libgl1 libglu1-mesa \
     && rm -rf /var/lib/apt/lists/*
 
 # Use UID 1001 with GID 0 — works everywhere (Docker, Podman, OpenShift restricted-v2 SCC).
