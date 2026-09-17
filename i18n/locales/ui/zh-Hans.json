@@ -3666,7 +3666,6 @@
   "submit.draft.restore.retry": "重试",
   "submit.draft.restore.failed": "无法恢复已保存的设置。请重试或重新开始。",
   "submit.draft.restore.gone": "已保存的设置在此浏览器中已不可用。",
-  "submit.draft.save_failed": "无法在此浏览器中保存设置。请保持此标签页打开以免丢失。",
   "submit.draft.reset_failed": "无法清除已保存的设置。之前的草稿仍然可用。",
   "submit.recipe.choose_new": "开始新的{p1}设置",
   "submit.blackbox.runtime.label": "优化器运行位置",

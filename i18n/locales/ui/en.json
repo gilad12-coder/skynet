@@ -3621,7 +3621,6 @@
   "submit.draft.restore.retry": "Try again",
   "submit.draft.restore.failed": "The saved setup could not be restored. Try again or start new.",
   "submit.draft.restore.gone": "The saved setup is no longer available in this browser.",
-  "submit.draft.save_failed": "Your setup could not be saved in this browser. Keep this tab open so you don't lose it.",
   "submit.draft.reset_failed": "The saved setup could not be cleared. Your previous draft is still available.",
   "submit.recipe.choose_new": "Start a new {p1} setup",
   "submit.blackbox.runtime.label": "Run optimizer on",

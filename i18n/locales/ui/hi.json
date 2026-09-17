@@ -3666,7 +3666,6 @@
   "submit.draft.restore.retry": "फिर कोशिश करें",
   "submit.draft.restore.failed": "सहेजा गया सेटअप बहाल नहीं हो सका। फिर कोशिश करें या नया शुरू करें।",
   "submit.draft.restore.gone": "सहेजा गया सेटअप अब इस ब्राउज़र में उपलब्ध नहीं है।",
-  "submit.draft.save_failed": "आपका सेटअप इस ब्राउज़र में सहेजा नहीं जा सका। इसे खोने से बचाने के लिए यह टैब खुला रखें।",
   "submit.draft.reset_failed": "सहेजा गया सेटअप साफ़ नहीं हो सका। आपका पिछला ड्राफ़्ट अभी भी उपलब्ध है।",
   "submit.recipe.choose_new": "नया {p1} सेटअप शुरू करें",
   "submit.blackbox.runtime.label": "ऑप्टिमाइज़र कहाँ चलाएँ",

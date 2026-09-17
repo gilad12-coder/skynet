@@ -3621,7 +3621,6 @@
   "submit.draft.restore.retry": "לנסות שוב",
   "submit.draft.restore.failed": "לא ניתן היה לשחזר את ההגדרה השמורה. אפשר לנסות שוב או להתחיל מחדש.",
   "submit.draft.restore.gone": "ההגדרה השמורה כבר אינה זמינה בדפדפן הזה.",
-  "submit.draft.save_failed": "לא ניתן היה לשמור את ההגדרה בדפדפן הזה. כדאי להשאיר את הכרטיסייה פתוחה כדי לא לאבד אותה.",
   "submit.draft.reset_failed": "לא ניתן היה לנקות את ההגדרה השמורה. הטיוטה הקודמת עדיין זמינה.",
   "submit.recipe.choose_new": "להתחיל הגדרה חדשה של {p1}",
   "submit.blackbox.runtime.label": "מיקום הרצת האופטימייזר",

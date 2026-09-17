@@ -3666,7 +3666,6 @@
   "submit.draft.restore.retry": "Tekrar dene",
   "submit.draft.restore.failed": "Kaydedilen kurulum geri yüklenemedi. Tekrar deneyin veya yeniden başlayın.",
   "submit.draft.restore.gone": "Kaydedilen kurulum bu tarayıcıda artık kullanılamıyor.",
-  "submit.draft.save_failed": "Kurulumunuz bu tarayıcıya kaydedilemedi. Kaybetmemek için bu sekmeyi açık tutun.",
   "submit.draft.reset_failed": "Kaydedilen kurulum temizlenemedi. Önceki taslağınız hâlâ kullanılabilir.",
   "submit.recipe.choose_new": "Yeni bir {p1} kurulumu başlat",
   "submit.blackbox.runtime.label": "Optimizatörün çalışacağı yer",
