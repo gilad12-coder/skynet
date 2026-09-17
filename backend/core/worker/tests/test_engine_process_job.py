@@ -18,7 +18,6 @@ import pytest
 
 from core.exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION, ServiceError
 from core.i18n import CANCELLATION_REASON
-from core.models import BlackboxRunRequest
 from core.storage.base import JobStore
 
 from .. import engine as engine_module
@@ -770,55 +769,28 @@ _BLACKBOX_OVERVIEW: dict = {
 }
 
 
-def test_process_job_blackbox_validates_then_succeeds(
+def test_process_job_blackbox_without_budget_requires_vercel(
     worker: BackgroundWorker,
     store: FakeJobStore,
 ) -> None:
-    """A blackbox job is validated by the black-box validator, not the DSPy service, and completes."""
+    """A black-box job without a protected budget fails: scoring only runs in the Vercel sandbox.
+
+    The unprotected test escape hatch that lets other run types dispatch a local
+    subprocess never applies to black-box, so the job fails at the gate before any
+    validation or child process starts.
+    """
     store.seed_job("opt-bb", payload=_BLACKBOX_PAYLOAD, payload_overview=_BLACKBOX_OVERVIEW)
     worker.enqueue_job("opt-bb")
 
-    ctx, _proc = make_mp_context(
-        exitcode=0,
-        result_events=[
-            {
-                "type": EVENT_RESULT,
-                "result": {
-                    "baseline_test_metric": 0.2,
-                    "optimized_test_metric": 0.6,
-                    "best_candidate": "aeiou",
-                    "total_tokens": 42,
-                    "usage_by_model": [{"model": "gpt-4o", "input_tokens": 30, "output_tokens": 12}],
-                    "details": {"engine": "gepa"},
-                },
-            }
-        ],
-    )
-    worker._mp_ctx = ctx
-    worker._mp_start_method = "spawn"
-
     with (
         patch("core.worker.engine.notify_job_completed"),
-        patch("core.worker.engine.record_server_event") as record,
         patch("core.worker.engine.validate_blackbox_payload") as validate_bb,
-        patch.object(worker, "_get_service") as mock_svc,
     ):
-        mock_svc.return_value.validate_payload = MagicMock()
-        mock_svc.return_value.validate_grid_search_payload = MagicMock()
         worker._process_job("opt-bb", 0)
 
-    assert store._jobs["opt-bb"]["status"] == "success"
-    validate_bb.assert_called_once()
-    assert isinstance(validate_bb.call_args.args[0], BlackboxRunRequest)
-    mock_svc.return_value.validate_payload.assert_not_called()
-    mock_svc.return_value.validate_grid_search_payload.assert_not_called()
-    assert record.call_args.kwargs["properties"] == {
-        "status": "success",
-        "optimization_type": "blackbox",
-        "optimizer": "auto",
-        "model": "gpt-4o",
-        "token_source": "managed",
-    }
+    assert store._jobs["opt-bb"]["status"] == "failed"
+    assert "Vercel" in store._jobs["opt-bb"]["message"]
+    validate_bb.assert_not_called()
 
 
 def test_process_job_blackbox_validation_failure_marks_job_failed(

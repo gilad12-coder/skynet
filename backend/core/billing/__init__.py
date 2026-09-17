@@ -8,6 +8,7 @@ else imports ``stripe``.
 from __future__ import annotations
 
 from .byok_bridge import (
+    byok_prefix_routable,
     inject_byok_connections,
     payload_uses_token_source,
     provider_slug_for_model,
@@ -50,6 +51,7 @@ __all__ = [
     "StripeBillingService",
     "VaultSnapshot",
     "WalletSnapshot",
+    "byok_prefix_routable",
     "byok_provider_for_litellm",
     "check_float",
     "committed_spend_credits",

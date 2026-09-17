@@ -8,7 +8,7 @@ import { useLocale } from "@/shared/providers";
 import { useSettingsModal } from "@/features/settings";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import { useCredits } from "../providers/credit-provider";
-import { formatCredits } from "../lib/credit";
+import { formatCreditsUsd } from "../lib/credit";
 
 /**
  * Header credit-balance chip — the spine of the billing UI.
@@ -53,7 +53,7 @@ export function CreditBalanceChip({ className }: { className?: string }) {
         <button
           type="button"
           aria-label={formatMsg("billing.chip.aria", {
-            p1: !available ? msg("billing.chip.unavailable") : formatCredits(totalCredits, locale),
+            p1: !available ? msg("billing.chip.unavailable") : formatCreditsUsd(totalCredits, locale),
           })}
           aria-busy={syncing || undefined}
           className={cn(
@@ -87,7 +87,7 @@ export function CreditBalanceChip({ className }: { className?: string }) {
                 dir="ltr"
                 className={cn("tabular-nums", syncing && "animate-pulse text-muted-foreground")}
               >
-                {formatCredits(totalCredits, locale)}
+                {formatCreditsUsd(totalCredits, locale)}
               </span>
             </>
           )}
@@ -117,14 +117,14 @@ export function CreditBalanceChip({ className }: { className?: string }) {
                   dir="ltr"
                   className="inline-block text-2xl font-semibold text-foreground tabular-nums"
                 >
-                  {formatCredits(totalCredits, locale)}
+                  {formatCreditsUsd(totalCredits, locale)}
                 </span>
               </div>
               <dl className="flex flex-col gap-2 border-t border-border/40 px-4 py-3 text-xs">
                 <div className="flex items-center justify-between gap-3">
                   <dt className="text-muted-foreground">{msg("billing.popover.paid")}</dt>
                   <dd dir="ltr" className="font-medium text-foreground tabular-nums">
-                    {formatCredits(wallet.paidBalanceCredits, locale)}
+                    {formatCreditsUsd(wallet.paidBalanceCredits, locale)}
                   </dd>
                 </div>
                 {/* Only legacy accounts still hold a grant — new accounts have
@@ -134,10 +134,10 @@ export function CreditBalanceChip({ className }: { className?: string }) {
                   <div className="flex items-center justify-between gap-3">
                     <dt className="text-muted-foreground">{msg("billing.popover.free_grant")}</dt>
                     <dd dir="ltr" className="font-medium text-foreground tabular-nums">
-                      {formatCredits(wallet.freeGrant.creditsRemaining, locale)}
+                      {formatCreditsUsd(wallet.freeGrant.creditsRemaining, locale)}
                       <span className="text-muted-foreground">
                         {" / "}
-                        {formatCredits(wallet.freeGrant.creditsTotal, locale)}
+                        {formatCreditsUsd(wallet.freeGrant.creditsTotal, locale)}
                       </span>
                     </dd>
                   </div>

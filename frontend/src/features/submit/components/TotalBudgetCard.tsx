@@ -18,13 +18,12 @@ import {
   Wallet,
   WarningCircle,
 } from "@/shared/ui/icons";
-import { formatCredits, type TokenSourceMode } from "@/features/billing";
+import { formatBudgetUsd, formatCreditsUsd, type TokenSourceMode } from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
 import { cn } from "@/shared/lib/utils";
 
-import { parseBudgetInput } from "../lib/budget-input";
+import { creditsToBudgetText, parseBudgetInput } from "@/shared/lib/budget-input";
 import { chargeableBracket } from "../lib/cost-bracket";
 import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
@@ -113,33 +112,35 @@ export function TotalBudgetCard({
     costBracket.managedModelHighCredits > 0 && costBracket.byokModelHighCredits > 0;
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  // The field owns its text so the user can clear it or leave a typo visible
-  // with its error; an unreadable value stays unset instead of snapping to zero.
-  const [text, setText] = useState(maxCostCredits == null ? "" : String(maxCostCredits));
+  // The field is typed in dollars; the wizard state stays in credits. The field
+  // owns its text so the user can clear it or leave a typo visible with its
+  // error; an unreadable value stays unset instead of snapping to zero.
+  const [text, setText] = useState(
+    maxCostCredits == null ? "" : creditsToBudgetText(maxCostCredits, locale),
+  );
   useEffect(() => {
     setText((prev) => {
       const parsed = parseBudgetInput(prev, locale);
       const current = parsed.kind === "value" ? parsed.value : null;
       if (current === maxCostCredits) return prev;
-      return maxCostCredits == null ? "" : String(maxCostCredits);
+      return maxCostCredits == null ? "" : creditsToBudgetText(maxCostCredits, locale);
     });
   }, [maxCostCredits, locale]);
 
   const isolate = (value: string) => `${ISOLATE_START}${value}${ISOLATE_END}`;
-  const credits = (value: number) => isolate(formatCredits(value, locale));
-  const creditRange = (low: number, high: number) =>
-    formatMsg("submit.summary.estimate_range", { low: credits(low), high: credits(high) });
+  const dollars = (value: number) => isolate(formatCreditsUsd(value, locale));
+  const dollarRange = (low: number, high: number) =>
+    formatMsg("submit.summary.estimate_range", { low: dollars(low), high: dollars(high) });
   const unit = msg("submit.cost_ceiling.cap_unit");
-  const withUnit = (amount: string) => `${amount} ${unit}`;
-  const ledgerAmount = (amount: string) => withUnit(formatBudgetAmount(amount, locale));
-  const suggested = formatCredits(suggestedCeiling, locale);
+  const ledgerAmount = (amount: string) => formatBudgetUsd(amount, locale);
+  const suggested = creditsToBudgetText(suggestedCeiling, locale);
 
   const parsed = parseBudgetInput(text, locale);
   const minimum = minimumTotalCredits == null ? null : Math.ceil(minimumTotalCredits);
   const minimumMessage =
     minimum == null
       ? null
-      : formatMsg("submit.budget.minimum_total", { amount: formatCredits(minimum, locale) });
+      : formatMsg("submit.budget.minimum_total", { amount: formatCreditsUsd(minimum, locale) });
   const fieldError =
     parsed.kind === "invalid"
       ? formatMsg("submit.budget.error.invalid", { suggested })
@@ -170,10 +171,8 @@ export function TotalBudgetCard({
   const modelHigh = Math.max(modelLow, bracket.highCredits - bracket.runtimeHighCredits);
 
   // The calculation behind the estimate, step by step from the bracket's trace.
-  const { estimateSections, modelSections, runtimeSection } = buildEstimateSections(
-    bracket,
-    locale,
-  );
+  const { estimateSections, modelSections, runtimeSection, estimateIntro, estimatePrinciples } =
+    buildEstimateSections(bracket, locale);
 
   // The ledger figures are the server's; their layers show how they add up.
   const spent = budget ? sumDecimals(budget.setup_spent_credits, budget.run_spent_credits) : null;
@@ -203,7 +202,7 @@ export function TotalBudgetCard({
                 label: msg("submit.budget.label"),
                 value: budget.uncapped
                   ? msg("submit.budget.uncapped_short")
-                  : withUnit(formatCredits(budget.total_credits, locale)),
+                  : formatCreditsUsd(budget.total_credits, locale),
               },
               ledgerSteps.setup,
               ledgerSteps.run,
@@ -321,8 +320,10 @@ export function TotalBudgetCard({
                 </span>
                 <Figure
                   label={estimateLabel}
-                  value={creditRange(bracket.lowCredits, bracket.highCredits)}
+                  value={dollarRange(bracket.lowCredits, bracket.highCredits)}
                   sections={estimateSections}
+                  intro={estimateIntro}
+                  principles={estimatePrinciples}
                   className="self-start text-[13px] text-[#3D2E22] sm:self-auto sm:text-end"
                 />
               </div>
@@ -419,14 +420,14 @@ export function TotalBudgetCard({
                 label={msg(
                   mode === "byok" ? "submit.budget.details.fee" : "submit.budget.details.models",
                 )}
-                value={creditRange(modelLow, modelHigh)}
+                value={dollarRange(modelLow, modelHigh)}
                 sections={modelSections}
               />
               {runtimeAtCost && runtimeSection && (
                 <Row
                   icon={Terminal}
                   label={msg("submit.budget.details.runtime")}
-                  value={creditRange(charge.runtimeLow, charge.runtimeHigh)}
+                  value={dollarRange(charge.runtimeLow, charge.runtimeHigh)}
                   sections={[runtimeSection]}
                 />
               )}

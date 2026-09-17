@@ -134,6 +134,17 @@ export function ModelConfigModal({
   }, [mode, byokProviderKey]);
   const detectionModels = mode === "byok" ? (byokModels ?? undefined) : catalogModels;
 
+  // Recent chips follow the chosen source: a remembered managed model never
+  // shows under BYOK (and vice versa), and a chip whose model the active
+  // catalog no longer serves — a removed key, a retired model — is dropped.
+  const visibleRecent = React.useMemo(() => {
+    if (!recentConfigs?.length) return [];
+    const served = detectionModels ? new Set(detectionModels.map((m) => m.value)) : null;
+    return recentConfigs.filter(
+      (rc) => (rc.token_source ?? "managed") === mode && (!served || served.has(rc.name)),
+    );
+  }, [recentConfigs, detectionModels, mode]);
+
   // Sync draft when config changes externally (e.g. opening with different model)
   React.useEffect(() => {
     if (open) {
@@ -196,13 +207,13 @@ export function ModelConfigModal({
         <DialogTitleRow title={roleLabel} className="px-4 pt-4 sm:px-6 sm:pt-6" />
 
         <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6">
-          {recentConfigs && recentConfigs.length > 0 && (
+          {visibleRecent.length > 0 && (
             <div className="space-y-1.5">
               <Label className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
                 {msg("auto.features.submit.components.modelconfigmodal.2")}
               </Label>
               <div className="flex gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin" dir="ltr">
-                {recentConfigs.map((rc, i) => {
+                {visibleRecent.map((rc, i) => {
                   const isActive = draft.name === rc.name;
                   return (
                     <div

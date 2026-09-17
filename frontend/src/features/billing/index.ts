@@ -9,7 +9,10 @@ export { litellmProviderForByok } from "./lib/byok";
 export {
   CREDIT_USD_VALUE,
   creditsToUsd,
+  usdToCredits,
+  formatBudgetUsd,
   formatCredits,
+  formatCreditsUsd,
   formatUsd,
   type TokenSourceMode,
 } from "./lib/credit";

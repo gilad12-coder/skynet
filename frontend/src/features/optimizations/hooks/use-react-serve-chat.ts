@@ -3,6 +3,9 @@
 import * as React from "react";
 import { toast } from "react-toastify";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { formatBudgetUsd } from "@/features/billing";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { parseBudgetInput } from "@/shared/lib/budget-input";
 
 import type { AgentMessage, AgentStatus, AgentToolCall } from "@/shared/ui/agent/types";
 import type { ChatTurn, PendingApprovalPayload, TrustMode } from "@/features/agent-panel";
@@ -115,13 +118,17 @@ export function useReactServeChat(
 
   const runAgent = React.useCallback(
     (userMessage: string, history: AgentMessage[]): boolean => {
-      const maxCostCredits = Number(budgetRef.current);
-      if (!Number.isInteger(maxCostCredits) || maxCostCredits < 1) {
+      // The field is typed in dollars; the API is billed in credits (×100). A
+      // number input's value is always canonical (ASCII, "." decimal), so it is
+      // parsed in a fixed locale rather than the UI's.
+      const parsedBudget = parseBudgetInput(budgetRef.current, "en");
+      if (parsedBudget.kind !== "value") {
         setStatus("error");
         setStatusLabel("");
         setError(msg("optimizations.serve.request_budget_invalid"));
         return false;
       }
+      const maxCostCredits = parsedBudget.value;
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -211,7 +218,7 @@ export function useReactServeChat(
             if (result.credits_charged != null) {
               toast.success(
                 formatMsg("optimizations.serve.request_spent", {
-                  credits: result.credits_charged,
+                  credits: formatBudgetUsd(String(result.credits_charged), getActiveIntlLocale()),
                 }),
               );
             }

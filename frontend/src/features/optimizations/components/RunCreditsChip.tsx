@@ -4,7 +4,7 @@ import { Coins } from "@/shared/ui/icons";
 import { useLocale } from "@/shared/providers";
 import { useSettingsModal } from "@/features/settings";
 import { msg } from "@/shared/lib/messages";
-import { formatCredits } from "@/features/billing";
+import { formatCreditsUsd } from "@/features/billing";
 import { readBilling } from "../lib/run-billing";
 
 /**
@@ -32,7 +32,7 @@ export function RunCreditsChip({ details }: { details?: Record<string, unknown> 
       className="flex min-h-[44px] items-center gap-1.5 tabular-nums transition-colors hover:text-foreground sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
     >
       <Coins className="size-3.5" aria-hidden="true" />
-      {formatCredits(billing.credits, locale)}
+      {formatCreditsUsd(billing.credits, locale)}
     </button>
   );
 }

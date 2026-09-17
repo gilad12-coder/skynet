@@ -3,7 +3,7 @@
 import { Fragment, type ReactElement, type ReactNode } from "react";
 import Link from "next/link";
 import { CaretRight, Coins, Database, Tag } from "@/shared/ui/icons";
-import { creditsToUsd, formatCredits, formatUsd, useCredits } from "@/features/billing";
+import { formatCreditsUsd, useCredits } from "@/features/billing";
 import { useSettingsModal } from "@/features/settings";
 import { formatBytes } from "@/shared/lib/formatters";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -254,13 +254,7 @@ export function WorkspaceStrip() {
             dir="ltr"
             className="text-xl font-bold leading-none tracking-tight text-foreground tabular-nums"
           >
-            {formatCredits(walletTotal, locale)}
-          </span>
-          <span aria-hidden className="text-xs text-muted-foreground">
-            ≈
-          </span>
-          <span dir="ltr" className="text-xs text-muted-foreground">
-            {formatUsd(creditsToUsd(walletTotal), "en")}
+            {formatCreditsUsd(walletTotal, locale)}
           </span>
         </div>
         {wallet.usage.length === 0 ? (
@@ -279,7 +273,7 @@ export function WorkspaceStrip() {
                 dir="ltr"
               >
                 {entry.credits > 0 ? "+" : ""}
-                {formatCredits(entry.credits, locale)}
+                {formatCreditsUsd(entry.credits, locale)}
               </span>
             </div>
           ))

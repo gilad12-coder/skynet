@@ -179,6 +179,7 @@ def _run_dependencies(
                         "action": "resolve",
                         "code": payload["scorer"]["metric_code"],
                         "requirements": payload.get("requirements", []),
+                        "candidate": payload.get("seed_candidate"),
                         "route": payload["_skynet_packages_route"],
                     }
                 ),

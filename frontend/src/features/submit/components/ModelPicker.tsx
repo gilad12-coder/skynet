@@ -14,6 +14,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { modelProviderSlug } from "@/shared/lib/model-provider";
+import { litellmProviderForByok } from "@/features/billing";
 import type { CatalogModel, CatalogProvider } from "@/shared/types/api";
 
 interface ModelPickerProps {
@@ -28,8 +29,8 @@ interface ModelPickerProps {
   /** Constrain picks to this provider slug (e.g. "openai"). */
   providerFilter?: string;
   /**
-   * In BYOK mode the picker lists the BYOK catalog (every offered provider's
-   * models, independent of platform keys) instead of the managed catalog,
+   * In BYOK mode the picker lists the account's BYOK catalog (only models the
+   * user's verified keys can actually serve) instead of the managed catalog,
    * narrowed to `byokProviders` — the LiteLLM provider slugs the user has saved
    * a key for.
    */
@@ -131,9 +132,14 @@ export function ModelPicker({
 
   const allModels: CatalogModel[] = React.useMemo(() => {
     let staticModels = activeCatalog?.models ?? [];
-    // In BYOK mode, only surface models for providers the user has connected.
+    // In BYOK mode, only surface models the user's saved keys can route to.
+    // The server already scopes the catalog per account; this guards a stale
+    // client cache. Custom-endpoint entries carry the vault slug, so resolve
+    // it to the LiteLLM prefix before matching.
     if (byokMode) {
-      staticModels = staticModels.filter((m) => byokProviderSet.has(m.provider));
+      staticModels = staticModels.filter((m) =>
+        byokProviderSet.has(litellmProviderForByok(m.byok_provider ?? m.provider)),
+      );
     }
     return providerFilter
       ? staticModels.filter((m) => m.provider === providerFilter)

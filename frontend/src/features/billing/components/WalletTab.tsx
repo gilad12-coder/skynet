@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { motion } from "framer-motion";
-import { ArrowSquareOut, CircleNotch, Coins, CreditCard, Plus, Sparkle } from "@/shared/ui/icons";
+import { ArrowSquareOut, CircleNotch, Coins, CreditCard, PencilSimple, Plus, Sparkle } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
@@ -11,6 +11,7 @@ import { useLocale } from "@/shared/providers";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import { Button } from "@/shared/ui/primitives/button";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
 import {
   createBillingPortalSession,
   createCheckoutSession,
@@ -26,10 +27,10 @@ import {
   CREDIT_PACKS,
   CUSTOM_CREDITS_MAX,
   CUSTOM_CREDITS_MIN,
-  creditsToUsd,
-  formatCredits,
+  formatCreditsUsd,
   formatResetDate,
   formatUsd,
+  purchaseTotalUsd,
   type CreditPack,
 } from "../lib/credit";
 
@@ -70,9 +71,13 @@ function AddCreditsControls() {
   const [buying, setBuying] = React.useState(false);
 
   const pack: CreditPack | undefined = CREDIT_PACKS.find((p) => p.id === selection);
-  const customCredits = Number(customDraft || "0");
+  // The custom field is typed in whole dollars; credits are the par ×100 value
+  // the checkout API is denominated in.
+  const customCredits = Number(customDraft || "0") * 100;
   const customValid = customCredits >= CUSTOM_CREDITS_MIN && customCredits <= CUSTOM_CREDITS_MAX;
-  const usd = pack ? pack.usd : creditsToUsd(customCredits);
+  // The buy button quotes what the buyer is charged: par credit value plus the
+  // card fee (5.5%, $0.80 floor), itemized as its own line on Stripe checkout.
+  const usd = purchaseTotalUsd(pack ? pack.credits : customCredits);
   const priceLabel = Number.isInteger(usd) ? formatUsdWhole(usd, locale) : formatUsd(usd, locale);
 
   const onBuy = async () => {
@@ -124,7 +129,7 @@ function AddCreditsControls() {
               />
             )}
             <span dir="ltr" className="relative z-10">
-              {formatCredits(p.credits, locale)}
+              {formatUsdWhole(p.usd, locale)}
             </span>
           </button>
         );
@@ -148,7 +153,7 @@ function AddCreditsControls() {
           }}
           onFocus={() => setSelection("custom")}
           inputMode="numeric"
-          maxLength={6}
+          maxLength={4}
           dir="ltr"
           placeholder={msg("billing.plans.credits.custom")}
           aria-label={msg("billing.plans.credits.custom_amount_aria")}
@@ -274,7 +279,7 @@ function TransactionHistory() {
                     {transaction.credits == null
                       ? msg("billing.transactions.purchase")
                       : formatMsg("billing.transactions.credits", {
-                          p1: formatCredits(transaction.credits, locale),
+                          p1: formatCreditsUsd(transaction.credits, locale),
                         })}
                   </span>
                   <span dir="ltr" className="text-xs text-muted-foreground">
@@ -373,16 +378,22 @@ function BillingDetails() {
           <h3 id="billing-profile-heading" className="text-sm font-semibold text-foreground">
             {msg("billing.profile.title")}
           </h3>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={unavailable || portalFlow !== null}
-            onClick={() => void openPortal("manage")}
-            className="min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
-          >
-            {portalFlow === "manage" && <CircleNotch className="animate-spin" aria-hidden="true" />}
-            {msg("billing.profile.edit")}
-          </Button>
+          <TooltipButton tooltip={msg("billing.profile.edit")}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={unavailable || portalFlow !== null}
+              onClick={() => void openPortal("manage")}
+              className="size-[44px] text-muted-foreground hover:text-foreground sm:size-8"
+              aria-label={msg("billing.profile.edit")}
+            >
+              {portalFlow === "manage" ? (
+                <CircleNotch className="size-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <PencilSimple className="size-4" aria-hidden="true" />
+              )}
+            </Button>
+          </TooltipButton>
         </div>
         <dl className="divide-y divide-border/35 border-y border-border/35">
           {[
@@ -409,20 +420,22 @@ function BillingDetails() {
           <h3 id="payment-methods-heading" className="text-sm font-semibold text-foreground">
             {msg("billing.payment_methods.title")}
           </h3>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={unavailable || portalFlow !== null}
-            onClick={() => void openPortal("payment_method")}
-            className="min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
-          >
-            {portalFlow === "payment_method" ? (
-              <CircleNotch className="animate-spin" aria-hidden="true" />
-            ) : (
-              <Plus aria-hidden="true" />
-            )}
-            {msg("billing.payment_methods.add")}
-          </Button>
+          <TooltipButton tooltip={msg("billing.payment_methods.add")}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={unavailable || portalFlow !== null}
+              onClick={() => void openPortal("payment_method")}
+              className="size-[44px] text-muted-foreground hover:text-foreground sm:size-8"
+              aria-label={msg("billing.payment_methods.add")}
+            >
+              {portalFlow === "payment_method" ? (
+                <CircleNotch className="size-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Plus className="size-4" aria-hidden="true" />
+              )}
+            </Button>
+          </TooltipButton>
         </div>
         {profile.payment_methods.length === 0 ? (
           <div className="flex items-center gap-2 border-y border-border/35 py-4 text-xs text-muted-foreground">
@@ -472,7 +485,8 @@ function BillingDetails() {
  *
  * A calm, left-aligned balance block (not a centered hero metric) and the
  * add-credits row. Billing details, payment methods, and transaction history
- * follow below. Balances read in credits only — no dollar equivalent is shown.
+ * follow below. Balances read in dollars — credits are a par-USD unit shown to
+ * the user as their dollar value.
  */
 export function WalletTab() {
   const { totalCredits, status, syncing, loading, available, loadError, refresh } = useCredits();
@@ -500,7 +514,7 @@ export function WalletTab() {
               {msg("billing.popover.title")}
             </span>
             <div className="flex items-center gap-2" aria-busy={syncing || undefined}>
-              {/* Same gold coin as the header chip so the balance reads as credits at a glance. */}
+              {/* Same gold coin as the header chip so the balance reads the same in both places. */}
               <Coins
                 className={cn(
                   "size-6 shrink-0",
@@ -517,7 +531,7 @@ export function WalletTab() {
                   syncing && "animate-pulse text-muted-foreground",
                 )}
               >
-                {available ? formatCredits(totalCredits, locale) : "—"}
+                {available ? formatCreditsUsd(totalCredits, locale) : "—"}
               </span>
             </div>
             {/* Low balance stays an operational metric here too — same calm line as
@@ -531,7 +545,10 @@ export function WalletTab() {
         </div>
 
         <div>
-          <SettingsRow icon={Sparkle} label={msg("billing.action.add_credits")}>
+          <SettingsRow
+            icon={Sparkle}
+            label={msg("billing.action.add_credits")}
+          >
             <AddCreditsControls />
           </SettingsRow>
         </div>

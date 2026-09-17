@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { formatCredits } from "@/features/billing";
+import { formatCreditsUsd } from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
@@ -34,9 +34,6 @@ interface WalletResult {
   usage?: UsageEntry[];
 }
 
-/** One credit == $0.01 (mirrors the billing slice's CREDIT_USD_VALUE). */
-const CREDIT_USD = 0.01;
-
 function extractWallet(call: AgentToolCall): WalletResult | null {
   const payload = (call.payload ?? {}) as Record<string, unknown>;
   const result = payload.result;
@@ -50,25 +47,22 @@ function totalCredits(w: WalletResult): number {
   return (w.free_grant?.credits_remaining ?? 0) + (w.paid_balance_credits ?? 0);
 }
 
-function fmtCredits(n: number): string {
-  return formatCredits(n, getActiveIntlLocale());
-}
-
+/** A credit count as its dollar value — credits are a par-USD unit (one credit is one cent). */
 function fmtUsd(credits: number): string {
-  return `$${(credits * CREDIT_USD).toFixed(2)}`;
+  return formatCreditsUsd(credits, getActiveIntlLocale());
 }
 
 function buildSummary(w: WalletResult | null, isRunning: boolean): string | null {
   if (isRunning || !w) return null;
   return formatMsg("auto.features.agent.panel.components.walletcard.summary", {
-    p1: fmtCredits(totalCredits(w)),
+    p1: fmtUsd(totalCredits(w)),
   });
 }
 
 /**
- * Result card for ``get_wallet_for_agent`` — the caller's spendable credits
- * (free grant + paid balance) as a headline with its USD value, a
- * free-grant / paid-balance split, and the most recent ledger entries.
+ * Result card for ``get_wallet_for_agent`` — the caller's spendable balance in
+ * dollars (free grant + paid balance) as a headline, a free-grant / paid-balance
+ * split, and the most recent ledger entries.
  */
 export function WalletCard({ call }: WalletCardProps) {
   const wallet = extractWallet(call);
@@ -85,11 +79,8 @@ export function WalletCard({ call }: WalletCardProps) {
   const customBody = (
     <div className="space-y-3">
       <div dir="ltr" className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span dir="ltr" className="inline-flex items-baseline gap-x-1.5">
-          <span className="text-[1.25rem] font-semibold tabular-nums text-foreground">
-            {fmtCredits(total)}
-          </span>
-          <span className="text-[0.625rem] text-muted-foreground/55">≈ {fmtUsd(total)}</span>
+        <span className="text-[1.25rem] font-semibold tabular-nums text-foreground">
+          {fmtUsd(total)}
         </span>
         <span className="text-[0.6875rem] text-muted-foreground/70">
           {msg("auto.features.agent.panel.components.walletcard.title")}
@@ -105,14 +96,14 @@ export function WalletCard({ call }: WalletCardProps) {
             value={
               grant.credits_remaining == null
                 ? null
-                : `${fmtCredits(grant.credits_remaining)} / ${fmtCredits(grant.credits_total ?? 0)}`
+                : `${fmtUsd(grant.credits_remaining)} / ${fmtUsd(grant.credits_total ?? 0)}`
             }
             valueDir="ltr"
           />
         )}
         <StatTile
           label={msg("auto.features.agent.panel.components.walletcard.paid_balance")}
-          value={fmtCredits(wallet.paid_balance_credits ?? 0)}
+          value={fmtUsd(wallet.paid_balance_credits ?? 0)}
           valueDir="ltr"
         />
       </dl>
@@ -142,7 +133,7 @@ export function WalletCard({ call }: WalletCardProps) {
 
 function CreditDelta({ credits }: { credits: number }) {
   const positive = credits > 0;
-  const text = positive ? `+${fmtCredits(credits)}` : fmtCredits(credits);
+  const text = positive ? `+${fmtUsd(credits)}` : fmtUsd(credits);
   return (
     <span
       dir="ltr"

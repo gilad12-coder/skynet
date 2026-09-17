@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from ...billing import (
     ProviderKeyVault,
     StripeBillingService,
+    byok_prefix_routable,
     byok_provider_for_litellm,
     committed_spend_credits,
     cost_ceiling_budget,
@@ -733,7 +734,9 @@ def _enforce_byok_connections(job_store, username: str, model_configs: list[Mode
 
     Raises:
         DomainError: 400 ``billing.byok_missing_connection`` listing the providers
-            the account has no saved connection for.
+            the account has no saved connection for, or
+            ``billing.byok_model_not_served`` when a model's prefix names a
+            provider its chosen connection cannot route to.
     """
     engine = getattr(job_store, "engine", None)
     if engine is None or not username:
@@ -743,19 +746,25 @@ def _enforce_byok_connections(job_store, username: str, model_configs: list[Mode
     # key is saved under the vault slug (``google``, ``together``); bridge the two
     # exactly as the run path does so the gate sees the same connections it will.
     providers: set[str] = set()
+    routes: list[tuple[str, str | None, str]] = []
     for config in model_configs:
         if config.token_source != TOKEN_SOURCE_BYOK:
             continue
+        name = config.normalized_identifier()
+        prefix = provider_slug_for_model(name)
         provider = (config.byok_provider or "").strip()
-        if not provider:
-            prefix = provider_slug_for_model(config.normalized_identifier())
-            if prefix is not None:
-                provider = byok_provider_for_litellm(prefix)
+        if not provider and prefix is not None:
+            provider = byok_provider_for_litellm(prefix)
         if provider:
             providers.add(provider)
+            routes.append((name, prefix, provider))
     missing = sorted(provider for provider in providers if not vault.has_verified_connection(username, provider))
     if missing:
         raise DomainError("billing.byok_missing_connection", status=400, provider=", ".join(missing))
+    api_bases = {view.provider: view.api_base for view in vault.list_keys(username).keys if view.status == "verified"}
+    for name, prefix, provider in routes:
+        if not byok_prefix_routable(prefix, provider, api_base=api_bases.get(provider)):
+            raise DomainError("billing.byok_model_not_served", status=400, model=name, provider=provider)
 
 
 def _scrubbed_tool_source(tool_source) -> dict | None:

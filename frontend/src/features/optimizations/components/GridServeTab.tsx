@@ -1,7 +1,8 @@
 "use client";
 
-import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { formatBudgetUsd } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { parseBudgetInput } from "@/shared/lib/budget-input";
 
 /**
  * Grid-level serve playground — lets the user pick any successful pair
@@ -101,7 +102,8 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
   } | null>(null);
   const [serveLoading, setServeLoading] = useState(false);
   const [serveError, setServeError] = useState<string | null>(null);
-  const [requestBudgetCredits, setRequestBudgetCredits] = useState("10");
+  // Typed in dollars; "0.10" is the $0.10 (10-credit) default cap.
+  const [requestBudgetCredits, setRequestBudgetCredits] = useState("0.10");
 
   const streamReqIdRef = useRef(0);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -159,11 +161,15 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
 
   const handleServe = async (overrideInputs?: Record<string, string>) => {
     if (!serveInfo || selectedPair == null) return;
-    const maxCostCredits = Number(requestBudgetCredits);
-    if (!Number.isInteger(maxCostCredits) || maxCostCredits < 1) {
+    // The field is typed in dollars; the API is billed in credits (×100). A
+    // number input's value is always canonical (ASCII, "." decimal), parsed in
+    // a fixed locale rather than the UI's.
+    const parsedBudget = parseBudgetInput(requestBudgetCredits, "en");
+    if (parsedBudget.kind !== "value") {
       toast.error(msg("optimizations.serve.request_budget_invalid"));
       return;
     }
+    const maxCostCredits = parsedBudget.value;
     const inputs = overrideInputs ?? readInputs();
     const missing = serveInfo.input_fields.filter((f) => !inputs[f]?.trim());
     if (missing.length > 0) {
@@ -226,7 +232,7 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
           if (res.credits_charged != null) {
             toast.success(
               formatMsg("optimizations.serve.request_spent", {
-                credits: formatBudgetAmount(String(res.credits_charged), getActiveIntlLocale()),
+                credits: formatBudgetUsd(String(res.credits_charged), getActiveIntlLocale()),
               }),
             );
           }

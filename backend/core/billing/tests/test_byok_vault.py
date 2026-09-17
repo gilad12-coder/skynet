@@ -190,6 +190,27 @@ def test_verify_key_reprobe_updates_status(engine: object, vault_key: str) -> No
     assert reverified.status == STATUS_VERIFIED
 
 
+def test_verify_key_keeps_verified_on_inconclusive_reprobe(engine: object, vault_key: str) -> None:
+    """A re-test that can't reach the provider leaves a verified key verified."""
+    vault = ProviderKeyVault(engine=engine)
+    with patch("core.billing.byok_vault.httpx.get", return_value=_probe_response(200)):
+        view = vault.save_key("u@x.com", "openrouter", "sk-live-9999")
+    assert view.status == STATUS_VERIFIED
+    with patch("core.billing.byok_vault.httpx.get", side_effect=httpx.ConnectError("down")):
+        rechecked = vault.verify_key("u@x.com", "openrouter")
+    assert rechecked.status == STATUS_VERIFIED
+
+
+def test_verify_key_demotes_verified_on_rejection(engine: object, vault_key: str) -> None:
+    """A definitive rejection still unseats a previously verified key."""
+    vault = ProviderKeyVault(engine=engine)
+    with patch("core.billing.byok_vault.httpx.get", return_value=_probe_response(200)):
+        vault.save_key("u@x.com", "openrouter", "sk-live-1111")
+    with patch("core.billing.byok_vault.httpx.get", return_value=_probe_response(401)):
+        rechecked = vault.verify_key("u@x.com", "openrouter")
+    assert rechecked.status == STATUS_INVALID
+
+
 def test_verify_key_missing_raises_404(engine: object, vault_key: str) -> None:
     """Verifying a provider with no stored key raises 404."""
     vault = ProviderKeyVault(engine=engine)

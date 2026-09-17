@@ -17,9 +17,15 @@ registerHooks({
   },
 });
 
-const { chargeableBracket, projectCostBracket, runtimeCostProjection, runtimeStartHold } =
-  await import("./cost-bracket.ts");
-const { platformFeeCredits } = await import(billingUrl);
+const {
+  chargeableBracket,
+  defaultCeilingForBracket,
+  defaultCeilingTrace,
+  projectCostBracket,
+  runtimeCostProjection,
+  runtimeStartHold,
+} = await import("./cost-bracket.ts");
+const { platformFeeCredits, MARKUP } = await import(billingUrl);
 
 function model(value: string, input: number, output: number) {
   return {
@@ -178,8 +184,11 @@ test("traces the inputs and intermediate values behind the bracket", () => {
     trace.roles
       .filter((role) => role.tokenSource === source)
       .reduce((sum, role) => sum + role[end], 0);
-  assert.equal(Math.ceil((usd("managed", "lowUsd") * 1.5) / 0.01), bracket.managedModelLowCredits);
-  assert.equal(Math.ceil((usd("byok", "highUsd") * 1.5) / 0.01), bracket.byokModelHighCredits);
+  assert.equal(
+    Math.ceil((usd("managed", "lowUsd") * MARKUP) / 0.01),
+    bracket.managedModelLowCredits,
+  );
+  assert.equal(Math.ceil((usd("byok", "highUsd") * MARKUP) / 0.01), bracket.byokModelHighCredits);
 });
 
 test("explains a full-evals budget and an unpriced model", () => {
@@ -254,4 +263,29 @@ test("the runtime start hold is one full-lifetime session, and only when billed 
     ),
     0,
   );
+});
+
+test("the ceiling trace shows the working behind the default cap", () => {
+  const small = projectCostBracket({
+    ...base,
+    modelRoles: [{ role: "task", model: cheap, tokenSource: "managed", tokenShare: 1 }],
+  });
+  const large = projectCostBracket({
+    ...base,
+    maxMetricCalls: "8000",
+    datasetRows: 2000,
+    modelRoles: [{ role: "task", model: expensive, tokenSource: "managed", tokenShare: 1 }],
+  });
+
+  for (const bracket of [small, large]) {
+    const trace = defaultCeilingTrace(bracket);
+    assert.equal(trace.highCredits, bracket.highCredits);
+    assert.equal(trace.withHeadroomCredits, Math.ceil(bracket.highCredits * trace.headroomFactor));
+    assert.equal(trace.ceilingCredits % trace.stepCredits, 0);
+    assert.ok(trace.ceilingCredits >= trace.withHeadroomCredits);
+    assert.ok(trace.ceilingCredits - trace.withHeadroomCredits < trace.stepCredits);
+    assert.equal(trace.ceilingCredits, defaultCeilingForBracket(bracket));
+  }
+  assert.equal(defaultCeilingTrace(small).stepCredits, 10);
+  assert.equal(defaultCeilingTrace(large).stepCredits, 50);
 });

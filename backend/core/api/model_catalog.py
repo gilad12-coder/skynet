@@ -247,6 +247,106 @@ _PROVIDER_META: dict[str, tuple[str, list[_DataCenter]]] = {
             )
         ],
     ),
+    "deepinfra": (
+        "DeepInfra",
+        [
+            _DataCenter(
+                base_url="https://api.deepinfra.com/v1/openai",
+                models_url="https://api.deepinfra.com/v1/openai/models",
+                env_var="DEEPINFRA_API_KEY",
+            )
+        ],
+    ),
+    "sambanova": (
+        "SambaNova",
+        [
+            _DataCenter(
+                base_url="https://api.sambanova.ai/v1",
+                models_url="https://api.sambanova.ai/v1/models",
+                env_var="SAMBANOVA_API_KEY",
+            )
+        ],
+    ),
+    "nebius": (
+        "Nebius AI Studio",
+        [
+            _DataCenter(
+                base_url="https://api.studio.nebius.ai/v1",
+                models_url="https://api.studio.nebius.ai/v1/models",
+                env_var="NEBIUS_API_KEY",
+            )
+        ],
+    ),
+    "minimax": (
+        "MiniMax",
+        [
+            _DataCenter(
+                base_url="https://api.minimax.io/v1",
+                models_url="https://api.minimax.io/v1/models",
+                env_var="MINIMAX_API_KEY",
+            )
+        ],
+    ),
+    "zai": (
+        "Z.AI (GLM)",
+        [
+            _DataCenter(
+                base_url="https://api.z.ai/api/paas/v4",
+                models_url="https://api.z.ai/api/paas/v4/models",
+                env_var="ZAI_API_KEY",
+            )
+        ],
+    ),
+    "meta_llama": (
+        "Meta Llama",
+        [
+            _DataCenter(
+                base_url="https://api.llama.com/compat/v1",
+                models_url="https://api.llama.com/compat/v1/models",
+                env_var="LLAMA_API_KEY",
+            )
+        ],
+    ),
+    "gmi": (
+        "GMI Cloud",
+        [
+            _DataCenter(
+                base_url="https://api.gmi-serving.com/v1",
+                models_url="https://api.gmi-serving.com/v1/models",
+                env_var="GMI_API_KEY",
+            )
+        ],
+    ),
+    "crusoe": (
+        "Crusoe",
+        [
+            _DataCenter(
+                base_url="https://managed-inference-api-proxy.crusoecloud.com/v1",
+                models_url="https://managed-inference-api-proxy.crusoecloud.com/v1/models",
+                env_var="CRUSOE_API_KEY",
+            )
+        ],
+    ),
+    "friendliai": (
+        "FriendliAI",
+        [
+            _DataCenter(
+                base_url="https://api.friendli.ai/serverless/v1",
+                models_url="https://api.friendli.ai/serverless/v1/models",
+                env_var="FRIENDLI_TOKEN",
+            )
+        ],
+    ),
+    "morph": (
+        "Morph",
+        [
+            _DataCenter(
+                base_url="https://api.morphllm.com/v1",
+                models_url="https://api.morphllm.com/v1/models",
+                env_var="MORPH_API_KEY",
+            )
+        ],
+    ),
     "ollama": ("Ollama (self-hosted)", [_DataCenter(base_url="http://localhost:11434")]),
 }
 
@@ -471,7 +571,22 @@ def _probe_deployed_models(provider_slug: str, data_center: _DataCenter) -> dict
     api_key = os.getenv(env_var)
     if not api_key:
         return None
+    return _fetch_models_index(provider_slug, url, api_key)
 
+
+def _fetch_models_index(provider_slug: str, url: str, api_key: str) -> dict[str, dict] | None:
+    """Fetch an OpenAI-compatible ``/models`` listing with an explicit key.
+
+    Args:
+        provider_slug: LiteLLM provider key, used only for log context.
+        url: The provider's ``/models`` endpoint.
+        api_key: Bearer credential presented to the endpoint.
+
+    Returns:
+        A mapping of each listed model ID to its raw item dict (empty for
+        bare-string entries), or ``None`` when the request fails or the
+        response shape is unexpected.
+    """
     # Fireworks (and some other providers) reject the default
     # ``Python-urllib/3.x`` UA with 403 — set an explicit one.
     headers = {
@@ -875,6 +990,102 @@ def get_byok_catalog_cached() -> ModelCatalogResponse:
     if _byok_cached is None:
         _byok_cached = get_byok_catalog()
     return _byok_cached
+
+
+def probe_byok_provider_models(provider_slug: str, api_key: str) -> dict[str, dict] | None:
+    """List the models a user's own key can reach at a provider's native endpoint.
+
+    Args:
+        provider_slug: LiteLLM provider key (e.g. ``"openai"``, ``"openrouter"``).
+        api_key: The user's decrypted provider secret.
+
+    Returns:
+        The provider's ``/models`` index keyed by model ID, or ``None`` when the
+        provider exposes no OpenAI-compatible listing (Anthropic, Gemini,
+        Cohere) or the request fails — the caller then keeps the static list.
+    """
+    meta = _PROVIDER_META.get(provider_slug)
+    if meta is None:
+        return None
+    url = next((dc.models_url for dc in meta[1] if dc.label is None and dc.models_url), None)
+    if not url:
+        return None
+    return _fetch_models_index(provider_slug, url, api_key)
+
+
+def _probe_item_declares_chat(item: dict) -> bool:
+    """Decide whether a probe item explicitly identifies itself as a chat model.
+
+    Stricter than :func:`_probe_item_is_chat`: an item with no modality or type
+    signal is *not* chat here, because this gate admits models the static
+    registry has never heard of and OpenAI's listing mixes in embeddings,
+    Whisper and DALL·E entries that carry no annotation at all.
+
+    Args:
+        item: The raw provider item dict.
+
+    Returns:
+        ``True`` only when the item declares text output or a chat type.
+    """
+    arch = item.get("architecture")
+    if isinstance(arch, dict):
+        modalities = arch.get("output_modalities")
+        if isinstance(modalities, list):
+            return "text" in modalities
+    return item.get("type") == "chat"
+
+
+def narrow_models_to_served(
+    provider_slug: str,
+    static_models: list[CatalogModel],
+    deployed: dict[str, dict],
+    *,
+    byok_provider: str,
+) -> list[CatalogModel]:
+    """Keep only the static models a live ``/models`` listing actually serves.
+
+    A registry entry survives when its bare ID (or full prefixed value) appears
+    in ``deployed``. Listed models absent from the registry are appended only
+    when the item explicitly declares itself a chat model, so a key that
+    unlocks a brand-new model still surfaces it without admitting embeddings
+    or audio endpoints.
+
+    Args:
+        provider_slug: LiteLLM provider key the static entries belong to.
+        static_models: Registry-derived entries for that provider.
+        deployed: Live model index from :func:`probe_byok_provider_models`.
+        byok_provider: Vault slug stamped on every returned model.
+
+    Returns:
+        The served subset of ``static_models`` followed by explicit-chat
+        probe-only models, all tagged with ``byok_provider``.
+    """
+    kept: list[CatalogModel] = []
+    seen: set[str] = set()
+    for model in static_models:
+        bare = model.value.removeprefix(f"{provider_slug}/")
+        if bare in deployed or model.value in deployed:
+            kept.append(model.model_copy(update={"byok_provider": byok_provider}))
+            seen.add(bare)
+    for model_id, item in deployed.items():
+        bare = model_id.removeprefix(f"{provider_slug}/")
+        if bare in seen or not _probe_item_declares_chat(item):
+            continue
+        seen.add(bare)
+        kept.append(
+            CatalogModel(
+                value=_probe_prefixed_id(provider_slug, model_id),
+                label=_make_label(model_id),
+                provider=provider_slug,
+                byok_provider=byok_provider,
+                supports_thinking=_probe_item_supports_thinking(item),
+                supports_vision=_probe_item_supports_vision(item),
+                available=True,
+                max_input_tokens=_probe_item_max_input_tokens(item),
+            )
+        )
+    kept.sort(key=lambda m: m.value)
+    return kept
 
 
 def require_known_model(model: str | None) -> None:

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..api.errors import DomainError
 from ..constants import TOKEN_SOURCE_BYOK
 from ..models.common import ModelConfig
 from .byok_vault import ProviderKeyVault, byok_provider_for_litellm, safe_connection_params
@@ -48,6 +49,30 @@ def provider_slug_for_model(name: str) -> str | None:
     if "/" not in stripped:
         return None
     return stripped.split("/", 1)[0] or None
+
+
+def byok_prefix_routable(prefix: str | None, provider: str, *, api_base: str | None) -> bool:
+    """Decide whether a model prefix can be served through a saved connection.
+
+    A native key only serves its own provider's models (``openrouter/...`` never
+    rides an ``openai`` key, and vice versa). A connection with a custom
+    ``api_base`` is an OpenAI-compatible endpoint, so it additionally accepts the
+    ``openai/`` prefix the custom catalog emits for it.
+
+    Args:
+        prefix: The model string's LiteLLM provider prefix, or ``None`` for a
+            bare id (which carries nothing to contradict the connection).
+        provider: The vault slug of the connection that will authenticate it.
+        api_base: The connection's custom endpoint, if any.
+
+    Returns:
+        ``True`` when the connection can route the model.
+    """
+    if prefix is None:
+        return True
+    if byok_provider_for_litellm(prefix) == provider:
+        return True
+    return bool(api_base) and prefix == "openai"
 
 
 def _model_config_dicts(payload_dict: dict[str, Any]) -> list[dict[str, Any]]:
@@ -143,6 +168,8 @@ def inject_byok_connections(
         ValueError: When a model's provider has no saved connection — the run
             cannot authenticate, so it is failed with a clear message rather than
             silently falling back to a platform key.
+        DomainError: 400 ``billing.byok_model_not_served`` when the model's
+            prefix names a provider the chosen connection cannot route to.
     """
     for cfg in _model_config_dicts(payload_dict):
         if (cfg.get("token_source") or default_token_source) != TOKEN_SOURCE_BYOK:
@@ -160,6 +187,13 @@ def inject_byok_connections(
             raise ValueError(
                 f"No saved {provider} connection for this account. "
                 "Add one in Settings → Providers to run with your own key."
+            )
+        if not byok_prefix_routable(prefix, provider, api_base=resolved.api_base):
+            raise DomainError(
+                "billing.byok_model_not_served",
+                status=400,
+                model=str(cfg.get("name", "")),
+                provider=provider,
             )
         extra = cfg.get("extra")
         extra = {} if not isinstance(extra, dict) else safe_connection_params(extra)

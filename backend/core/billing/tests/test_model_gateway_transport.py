@@ -335,7 +335,7 @@ def test_remote_runtime_streams_and_metered_mailbox_scrubs_protocol(gateway: Mod
     assert "private prompt" not in result.stdout
     assert "SKYNET_MODEL_" not in "".join(output)
     assert gateway._seed_marker_count == 1
-    assert gateway.runtime.service.get(gateway.runtime.budget_id, "alice").setup_spent_credits == Decimal("0.15")
+    assert gateway.runtime.service.get(gateway.runtime.budget_id, "alice").setup_spent_credits == Decimal("0.1")
     assert "upstream-secret" not in json.dumps(protected)
 
 
@@ -420,7 +420,7 @@ def test_mailbox_retries_have_independent_coverage_and_duplicate_frames_do_not_r
     assert len(holds) == 2
     assert all(hold > 0 for hold in holds)
     snapshot = gateway.runtime.service.get(gateway.runtime.budget_id, gateway.runtime.username)
-    assert snapshot.setup_spent_credits == Decimal("0.3")
+    assert snapshot.setup_spent_credits == Decimal("0.2")
     assert snapshot.reserved_credits == 0
     with Session(gateway.runtime.service._engine) as session:
         operations = session.scalars(

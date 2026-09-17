@@ -59,6 +59,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "billing.byok_key_not_found": "No saved key for provider '{provider}'.",
     "billing.byok_key_undecryptable": "The stored key for '{provider}' can't be decrypted; re-enter it.",
     "billing.byok_missing_connection": "No saved key for {provider}. Add a connection in Settings → Providers to run with your own key.",
+    "billing.byok_model_not_served": "{model} is not served through your saved {provider} key. Pick a model listed under that provider.",
     "billing.not_configured": "Billing is not configured on this deployment.",
     "billing.unknown_pack": "Unknown credit pack '{pack_id}'.",
     "billing.webhook_invalid": "Stripe webhook signature verification failed.",

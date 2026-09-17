@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import litellm
 import pytest
 
@@ -547,3 +549,18 @@ def test_background_refresh_swaps_cache_and_clears_flag_on_success(
         assert mc._refresh_in_flight is False
     finally:
         mc._cached_response = prev
+
+
+def test_probe_byok_provider_models_uses_native_listing_with_user_key() -> None:
+    """A user's own key is presented to the provider's native ``/models`` URL."""
+    with patch.object(mc, "_fetch_models_index", return_value={"gpt-4o": {}}) as fetch:
+        assert mc.probe_byok_provider_models("openai", "sk-user") == {"gpt-4o": {}}
+    fetch.assert_called_once_with("openai", "https://api.openai.com/v1/models", "sk-user")
+
+
+def test_probe_byok_provider_models_skips_providers_without_a_listing() -> None:
+    """Providers with no OpenAI-compatible listing return ``None`` so the static list stands."""
+    with patch.object(mc, "_fetch_models_index") as fetch:
+        assert mc.probe_byok_provider_models("anthropic", "sk-user") is None
+        assert mc.probe_byok_provider_models("not-a-provider", "sk-user") is None
+    fetch.assert_not_called()

@@ -1,6 +1,6 @@
 "use client";
 
-import { formatCredits } from "@/features/billing";
+import { formatCreditsUsd } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 import { Coins, SealCheck, Sparkle, User, WarningCircle } from "@/shared/ui/icons";
@@ -119,7 +119,7 @@ export function TaggerResultsSummary({ assist, annotations, onFlaggedPass }: Pro
         ))}
         {credits > 0 && (
           <StatCell
-            value={formatCredits(credits, getActiveIntlLocale())}
+            value={formatCreditsUsd(credits, getActiveIntlLocale())}
             icon={Coins}
             label={msg("tagger.results.recap.credits")}
             hint={msg("tagger.results.recap.credits_hint")}

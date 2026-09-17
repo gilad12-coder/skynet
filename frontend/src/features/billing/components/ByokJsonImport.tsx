@@ -1,11 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { CaretDown, CheckCircle, CircleNotch, ShieldCheck, Warning } from "@/shared/ui/icons";
+import { CaretDown, CheckCircle, CircleNotch, Eraser, Lightbulb, ShieldCheck, Warning } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { Button } from "@/shared/ui/primitives/button";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { useByokKeys } from "../providers/byok-provider";
 import { BYOK_PROVIDERS } from "../lib/byok";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
@@ -280,20 +281,41 @@ export function ByokJsonImport() {
               <span>{msg("settings.keys.json_optional")}</span>
             </div>
             <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
-              <Button variant="ghost" size="sm" onClick={handleUseExample}>
-                {msg("settings.keys.json_use_example")}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={handleFormat} disabled={!text.trim()}>
-                {msg("settings.keys.json_format")}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowResults(true)}
-                disabled={!text.trim()}
-              >
-                {msg("settings.keys.json_validate")}
-              </Button>
+              <TooltipButton tooltip={msg("settings.keys.json_use_example")}>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={handleUseExample}
+                  className="size-[44px] text-muted-foreground hover:text-foreground sm:size-8"
+                  aria-label={msg("settings.keys.json_use_example")}
+                >
+                  <Lightbulb className="size-4" aria-hidden="true" />
+                </Button>
+              </TooltipButton>
+              <TooltipButton tooltip={msg("settings.keys.json_format")}>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={handleFormat}
+                  disabled={!text.trim()}
+                  className="size-[44px] text-muted-foreground hover:text-foreground sm:size-8"
+                  aria-label={msg("settings.keys.json_format")}
+                >
+                  <Eraser className="size-4" aria-hidden="true" />
+                </Button>
+              </TooltipButton>
+              <TooltipButton tooltip={msg("settings.keys.json_validate")}>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => setShowResults(true)}
+                  disabled={!text.trim()}
+                  className="size-[44px] sm:size-8"
+                  aria-label={msg("settings.keys.json_validate")}
+                >
+                  <CheckCircle className="size-4" aria-hidden="true" />
+                </Button>
+              </TooltipButton>
             </div>
           </div>
 

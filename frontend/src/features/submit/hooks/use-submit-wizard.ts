@@ -80,7 +80,7 @@ import {
 import { useWizardDrafts } from "./use-wizard-drafts";
 import { useExecutionBudget } from "./use-execution-budget";
 import { useWizardPreflight } from "./use-wizard-preflight";
-import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { formatBudgetUsd } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import type {
   ExecutionRuntimeCatalog,
@@ -2307,7 +2307,7 @@ export function useSubmitWizard() {
         if (response.status === "succeeded") {
           const locale = getActiveIntlLocale();
           t.succeed(
-            `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetAmount(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetAmount(response.budget.available_credits, locale)}`,
+            `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetUsd(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetUsd(response.budget.available_credits, locale)}`,
           );
         } else {
           t.pending(msg(preflightPendingMessageKey(response)));

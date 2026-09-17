@@ -10,7 +10,7 @@ import { resumeJob, updateExecutionBudget } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
 import { formatBlackboxScore, formatPercent } from "@/shared/lib/formatters";
-import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { creditsToUsd, formatBudgetUsd, usdToCredits } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import {
   budgetResultKind,
@@ -157,7 +157,9 @@ export function RunLifecycleNotice({
     [],
   );
 
-  if (!budgetStop && !budgetPause && !recovery && !budget) return null;
+  // The plain budget recap now lives in its own tab; only actionable lifecycle
+  // states (stop, pause, recovery) keep an inline notice, with their recap.
+  if (!budgetStop && !budgetPause && !recovery) return null;
   // An unavailable recovery attempt has nothing to act on, so its notice — and
   // the budget recap that rode with it — is dropped; live runs and budget
   // stops/pauses still surface on their own.
@@ -183,7 +185,7 @@ export function RunLifecycleNotice({
         : formatPercent(score)
       : null;
   const locale = getActiveIntlLocale();
-  const amount = (value: string | number) => formatBudgetAmount(String(value), locale);
+  const amount = (value: string | number) => formatBudgetUsd(String(value), locale);
 
   // Continuing needs a limit the run can actually spend under: above the
   // measured projection for a pause, and above what is already committed for
@@ -341,9 +343,10 @@ export function RunLifecycleNotice({
             </label>
             <NumberInput
               id={limitInputId}
-              value={requested}
-              onChange={setRequestedLimit}
-              min={minimumLimit}
+              value={creditsToUsd(requested)}
+              onChange={(dollars) => setRequestedLimit(usdToCredits(dollars))}
+              min={creditsToUsd(minimumLimit)}
+              step={0.01}
               className="w-36"
               disabled={raising || settling}
             />

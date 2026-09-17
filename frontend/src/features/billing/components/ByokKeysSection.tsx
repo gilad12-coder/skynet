@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, CircleNotch, Key, PencilSimple, Trash, X } from "@/shared/ui/icons";
+import { CircleNotch, FloppyDisk, Key, PencilSimple, SealCheck, Trash, X } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
@@ -144,21 +144,28 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
               {msg("settings.keys.add")}
             </Button>
           )}
-          {saved && saved.status !== "verified" && !editing && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={verifying}
-              onClick={handleVerify}
-              className="min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
-            >
-              {verifying ? (
-                <CircleNotch className="size-3.5 animate-spin" />
-              ) : (
-                <Check className="size-3.5" />
-              )}
-              {verifying ? msg("settings.keys.verifying") : msg("settings.keys.verify")}
-            </Button>
+          {saved && !editing && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={verifying}
+                  onClick={handleVerify}
+                  className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                  aria-label={msg("settings.keys.verify")}
+                >
+                  {verifying ? (
+                    <CircleNotch className="size-3.5 animate-spin" />
+                  ) : (
+                    <SealCheck className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {verifying ? msg("settings.keys.verifying") : msg("settings.keys.verify")}
+              </TooltipContent>
+            </Tooltip>
           )}
           {saved && !editing && (
             <>
@@ -218,27 +225,40 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
               }}
               className="h-[44px] flex-1 sm:h-8 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
             />
-            <Button
-              size="sm"
-              onClick={handleSave}
-              disabled={!secret.trim() || saving}
-              className="min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
-            >
-              {saving ? (
-                <CircleNotch className="size-3.5 animate-spin" />
-              ) : (
-                msg("settings.keys.save")
-              )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setEditing(false)}
-              className="size-[44px] self-end sm:size-8 sm:self-auto [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
-              aria-label={msg("settings.keys.cancel")}
-            >
-              <X className="size-3.5" />
-            </Button>
+            <div className="flex items-center justify-end gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    onClick={handleSave}
+                    disabled={!secret.trim() || saving}
+                    className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                    aria-label={msg("settings.keys.save")}
+                  >
+                    {saving ? (
+                      <CircleNotch className="size-3.5 animate-spin" />
+                    ) : (
+                      <FloppyDisk className="size-3.5" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{msg("settings.keys.save")}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setEditing(false)}
+                    className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                    aria-label={msg("settings.keys.cancel")}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{msg("settings.keys.cancel")}</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
           <Input
             dir="ltr"

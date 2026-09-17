@@ -26,7 +26,8 @@ export interface ReactServeChatProps {
 // (`/serve/{id}/chat`) and the absence of wizard concerns differ.
 export function ReactServeChat({ optimizationId }: ReactServeChatProps) {
   const { mode: trustMode, next: cycleTrust } = useTrustMode();
-  const [requestBudgetCredits, setRequestBudgetCredits] = React.useState("10");
+  // Typed in dollars; "0.10" is the $0.10 (10-credit) default cap.
+  const [requestBudgetCredits, setRequestBudgetCredits] = React.useState("0.10");
   const agent = useReactServeChat(optimizationId, trustMode, requestBudgetCredits);
   const [draft, setDraft] = React.useState("");
   const streaming = agent.status === "streaming";
@@ -79,8 +80,8 @@ export function ReactServeChat({ optimizationId }: ReactServeChatProps) {
           <label className="flex shrink-0 items-center gap-1.5">
             <input
               type="number"
-              min={1}
-              step={1}
+              min={0.01}
+              step={0.01}
               value={requestBudgetCredits}
               onChange={(event) => setRequestBudgetCredits(event.target.value)}
               disabled={streaming}

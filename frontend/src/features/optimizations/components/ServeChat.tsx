@@ -1,6 +1,6 @@
 "use client";
 
-import { formatBudgetAmount } from "@/shared/lib/format-budget-amount";
+import { formatBudgetUsd } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 import { useRef, useState } from "react";
@@ -187,7 +187,7 @@ export function ServeChat({
                   {run.creditsCharged != null && (
                     <p className="mt-1 text-[0.6875rem] text-muted-foreground">
                       {formatMsg("optimizations.serve.request_spent", {
-                        credits: formatBudgetAmount(
+                        credits: formatBudgetUsd(
                           String(run.creditsCharged),
                           getActiveIntlLocale(),
                         ),
@@ -297,8 +297,8 @@ export function ServeChat({
           <label className="flex shrink-0 items-center gap-1.5">
             <input
               type="number"
-              min={1}
-              step={1}
+              min={0.01}
+              step={0.01}
               value={requestBudgetCredits}
               onChange={(event) => onRequestBudgetCreditsChange(event.target.value)}
               disabled={serveLoading}
