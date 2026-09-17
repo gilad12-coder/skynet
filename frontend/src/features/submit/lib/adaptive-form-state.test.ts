@@ -777,7 +777,7 @@ test("Continue walks the Evaluation substeps and moves on from the last one with
   assert.equal(advanced, 1);
 });
 
-test("scorer edits route to scorer settings and agent model errors open the model panel", () => {
+test("scorer edits route to scorer settings and model errors open the model panel", () => {
   const route = find(
     blackboxView,
     (node) => ts.isFunctionDeclaration(node) && node.name?.text === "evaluationStepFor",
@@ -785,7 +785,7 @@ test("scorer edits route to scorer settings and agent model errors open the mode
   const evaluationStepFor = evaluate(route, {});
   for (const hasCases of [false, true]) {
     assert.equal(evaluationStepFor("bb-scorer-code", hasCases), "scorer");
-    assert.equal(evaluationStepFor("bb-task-model", hasCases), null);
+    assert.equal(evaluationStepFor("bb-optimization-model", hasCases), null);
   }
   const steps = evaluate(variable(blackboxView, "OPTIMIZATION_STEPS"), {});
   let part = -1;
@@ -793,6 +793,6 @@ test("scorer edits route to scorer settings and agent model errors open the mode
     setOptimizationPart: (value: number) => {
       part = value;
     },
-  })("optimization", "bb-task-model");
+  })("optimization", "bb-optimization-model");
   assert.equal(steps[part], "model");
 });

@@ -31,10 +31,6 @@ function anythingDraft(overrides: Partial<AnythingDraftData> = {}): AnythingDraf
     objective: "",
     background: "",
     targetKind: "text",
-    harness: "pi",
-    targetModel: { name: "" },
-    targetTimeout: 600,
-    targetConcurrency: 2,
     parsedCases: null,
     casesName: "",
     split: { train: 0.6, val: 0.2, test: 0.2 },
@@ -166,7 +162,7 @@ test("recipeToOpen prefers the active workflow while it still has content", () =
 test("an identical clone matches a saved draft despite navigation and key order", () => {
   const clone = anythingDraft({
     objective: "Improve the answer",
-    targetModel: { name: "model", extra: { temperature: 0.4, max_tokens: 100 } },
+    reflectionModel: { name: "model", extra: { temperature: 0.4, max_tokens: 100 } },
   });
   const record: WizardDraftRecord = {
     version: 1,
@@ -183,7 +179,7 @@ test("an identical clone matches a saved draft despite navigation and key order"
         stage: "review",
         furthestStage: "review",
         setupSpent: 5,
-        targetModel: { extra: { max_tokens: 100, temperature: 0.4 }, name: "model" },
+        reflectionModel: { extra: { max_tokens: 100, temperature: 0.4 }, name: "model" },
       },
     },
   };
@@ -192,7 +188,7 @@ test("an identical clone matches a saved draft despite navigation and key order"
     { jobName: "A renamed clone" },
     { objective: "A different goal" },
     { metricCode: "def evaluate(candidate): return 1" },
-    { targetModel: { name: "another-model" } },
+    { reflectionModel: { name: "another-model" } },
     { maxCostCredits: 25 },
     { split: { train: 0.8, val: 0.1, test: 0.1 } },
     { seedParts: [{ key: "instruction", value: "New instructions" }] },

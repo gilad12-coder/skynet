@@ -2,11 +2,6 @@
 
 import { scorerCallsModel } from "../lib/scorer-dependencies";
 
-import {
-  restoreExecutionMode,
-  resolveExecutionKind,
-  type ExecutionMode,
-} from "../lib/execution-intent";
 import { resolveScorerDependencies } from "@/shared/lib/api";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,11 +14,9 @@ import type {
   BlackboxEngineCatalogResponse,
   BlackboxEngineId,
   BlackboxProposer,
-  BlackboxHarness,
   BlackboxRunRequest,
   BlackboxScorer,
   ScorerDependencyLock,
-  BlackboxTarget,
   ModelConfig,
   ScorerDryRunResponse,
   SplitFractions,
@@ -53,13 +46,7 @@ import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import type { MessageKey } from "@/shared/lib/generated/ui-catalog";
 import type { ValidationResult } from "@/shared/ui/code-editor";
 
-import {
-  DEFAULT_TARGET_CONCURRENCY,
-  DEFAULT_TARGET_TIMEOUT,
-  defaultSplit,
-  emptyModelConfig,
-  type ColumnRole,
-} from "../constants";
+import { defaultSplit, emptyModelConfig, type ColumnRole } from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import { suggestedRunName } from "../lib/budget";
 import { splitExampleCounts } from "../lib/split-example-counts";
@@ -245,16 +232,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [seedParts, setSeedParts] = useState<SeedPart[]>([{ key: "", value: "" }]);
   const [objective, setObjective] = useState("");
   const [background, setBackground] = useState("");
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>("auto");
-  const [harness, setHarness] = useState<BlackboxHarness>("pi");
-  // The model the agent harness runs on: what the run optimizes for, and no
-  // part of the scorer. It carries only a name — the sandbox reaches it
-  // through the platform gateway, so the rest of the config would be dead
-  // weight.
-  const [targetModel, setTargetModel] = useState<ModelConfig>({ name: "" });
-  const [targetTimeout, setTargetTimeout] = useState(DEFAULT_TARGET_TIMEOUT);
-  const [targetConcurrency, setTargetConcurrency] = useState(DEFAULT_TARGET_CONCURRENCY);
-
   const [parsedCases, setParsedCases] = useState<ParsedDataset | null>(null);
   const [casesName, setCasesName] = useState("");
   const [split, setSplit] = useState<SplitFractions>(defaultSplit);
@@ -351,11 +328,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const [strategyMode, setStrategyMode] = useState<"auto" | "single">("auto");
   const [engine, setEngine] = useState<BlackboxEngineId | null>(null);
-  // Only a harness-based engine can hand the candidate to an agent; a plain
-  // text engine scores it directly whatever the recipe asked for.
-  const targetKind =
-    usesNativeProposer(strategyMode, engine) ? resolveExecutionKind(executionMode) : "text";
-  const setTargetKind = useCallback((kind: "text" | "agent") => setExecutionMode(kind), []);
   const proposerRuntime = "vercel" as const;
   const [proposer, setProposer] = useState<BlackboxProposer>(DEFAULT_PROPOSER);
   const updateProposer = useCallback(
@@ -363,13 +335,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     [],
   );
   const [engineCatalogResult, setEngineCatalogResult] = useState<{
-    target: BlackboxTarget["kind"];
     data: BlackboxEngineCatalogResponse | null;
   } | null>(null);
-  const currentCatalogResult =
-    engineCatalogResult?.target === targetKind ? engineCatalogResult : null;
-  const engineCatalog = currentCatalogResult?.data ?? null;
-  const engineCatalogFailed = currentCatalogResult !== null && engineCatalog === null;
+  const engineCatalog = engineCatalogResult?.data ?? null;
+  const engineCatalogFailed = engineCatalogResult !== null && engineCatalog === null;
   const [maxScorerRuns, setMaxScorerRuns] = useState(DEFAULT_MAX_SCORER_RUNS);
   const [maxIterations, setMaxIterations] = useState<number | "">("");
   const [stopAtScore, setStopAtScore] = useState("");
@@ -497,11 +466,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setScorerManuallyEdited(d.scorerManuallyEdited || !!d.metricCode.trim());
     setObjective(d.objective);
     setBackground(d.background);
-    setExecutionMode(restoreExecutionMode(d));
-    setHarness(d.harness);
-    setTargetModel(d.targetModel);
-    setTargetTimeout(d.targetTimeout);
-    setTargetConcurrency(d.targetConcurrency);
     setParsedCases(d.parsedCases);
     setCasesName(d.casesName);
     splitModeRef.current = d.splitMode;
@@ -543,17 +507,17 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   useEffect(() => {
     let cancelled = false;
-    getBlackboxEngines(targetKind)
+    getBlackboxEngines("text")
       .then((res) => {
-        if (!cancelled) setEngineCatalogResult({ target: targetKind, data: res });
+        if (!cancelled) setEngineCatalogResult({ data: res });
       })
       .catch(() => {
-        if (!cancelled) setEngineCatalogResult({ target: targetKind, data: null });
+        if (!cancelled) setEngineCatalogResult({ data: null });
       });
     return () => {
       cancelled = true;
     };
-  }, [targetKind]);
+  }, []);
 
   // A `?clone=` link hydrates the wizard from the source run's stored payload
   // (server-scrubbed: no model api_key, no remote-scorer secret). The clone
@@ -609,22 +573,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           // redraft them.
           setSeedManuallyEdited(true);
           setScorerManuallyEdited(true);
-
-          const target = source.target;
-          if (target) {
-            setTargetKind(target.kind);
-            // A cloned job may name a harness the wizard no longer offers
-            // ("custom"); the select can't show it, so the default stays.
-            if (target.harness && BLACKBOX_HARNESSES.includes(target.harness))
-              setHarness(target.harness);
-            if (source.task_model_config?.name) {
-              setTargetModel({ ...emptyModelConfig(), ...source.task_model_config });
-            } else if (target.model) {
-              setTargetModel({ name: target.model });
-            }
-            if (target.timeout_seconds != null) setTargetTimeout(target.timeout_seconds);
-            if (target.concurrency != null) setTargetConcurrency(target.concurrency);
-          }
         }
 
         const rows = cloneRows(stored);
@@ -785,17 +733,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     ],
   );
 
-  const buildTarget = (): BlackboxTarget =>
-    targetKind === "text"
-      ? { kind: "text" }
-      : {
-          kind: "agent",
-          harness,
-          model: targetModel.name.trim(),
-          timeout_seconds: targetTimeout,
-          concurrency: targetConcurrency,
-        };
-
   const costBracket: CostBracket = useMemo(() => {
     const findModel = (config: ModelConfig) =>
       config.name.trim()
@@ -808,16 +745,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         tokenSource: effectiveReflectionModel.token_source ?? "managed",
         tokenShare: 1,
       },
-      ...(targetKind === "agent" && targetModel.name.trim()
-        ? [
-            {
-              role: "task" as const,
-              model: findModel(targetModel),
-              tokenSource: targetModel.token_source ?? "managed",
-              tokenShare: 1,
-            },
-          ]
-        : []),
       ...(scorerUsesModel && resolvedScorerModel?.name.trim()
         ? [
             {
@@ -843,8 +770,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     });
   }, [
     effectiveReflectionModel,
-    targetKind,
-    targetModel,
     scorerUsesModel,
     resolvedScorerModel,
     catalog,
@@ -855,7 +780,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   ]);
   const tokenSource = aggregateTokenSource([
     effectiveReflectionModel,
-    ...(targetKind === "agent" ? [targetModel] : []),
     ...(scorerUsesModel && resolvedScorerModel ? [resolvedScorerModel] : []),
   ]);
   const suggestedCeiling = useMemo(
@@ -887,11 +811,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       strategy: strategyMode === "single" ? { mode: "single", engine } : { mode: "auto" },
       proposer_runtime: proposerRuntime,
       proposer: nativeProposer ? submittedProposer(proposer, strategyMode, engine) : undefined,
-      target: buildTarget(),
-      task_model_config:
-        targetKind === "agent"
-          ? prepareModelConfig(proposerModelConfig(targetModel, true))
-          : undefined,
+      target: { kind: "text" },
       reflection_model_config: reflection,
       token_source: tokenSource,
       is_private: isPrivate,
@@ -1079,10 +999,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       recipe,
       objective,
       background,
-      target_kind: targetKind,
+      target_kind: "text",
       scorer_has_model: scorerUsesModel && (resolvedScorerModel?.name.trim().length ?? 0) > 0,
     }),
-    [recipe, objective, background, targetKind, scorerUsesModel, resolvedScorerModel],
+    [recipe, objective, background, scorerUsesModel, resolvedScorerModel],
   );
 
   // Restored or cloned authored artifacts must survive the first render before hydration.
@@ -1108,7 +1028,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     parsedDataset: parsedCases,
     columnRoles: NO_ROLES,
     columnKinds: NO_KINDS,
-    jobModel: targetKind === "agent" ? targetModel.name : reflectionModel.name,
+    jobModel: reflectionModel.name,
     blackbox: authoringContext,
   });
   // Over a blank objective the interviewer asks for it first and reports the
@@ -1254,8 +1174,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       case WIZARD_STAGE.evaluation: {
         if (!budgetUncapped && maxCostCredits == null)
           return fail("budget.invalid", "totalBudgetInput");
-        if (targetKind === "agent" && !parsedCases?.rowCount)
-          return fail("submit.blackbox.validation.cases_required", "bb-cases");
         if (scorerKind === "python" && !metricCode.trim())
           return fail("submit.blackbox.validation.scorer_code_required", "bb-scorer-code");
         if (scorerUsesModel && !resolvedScorerModel?.name.trim())
@@ -1284,8 +1202,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             "submit.blackbox.validation.reflection_model_required",
             "bb-optimization-model",
           );
-        if (targetKind === "agent" && !targetModel.name.trim())
-          return fail("submit.blackbox.validation.agent_model_required", "bb-task-model");
         if (strategyMode === "auto" && maxScorerRuns < 5)
           return fail("submit.blackbox.validation.auto_budget", "bb-max-runs");
         if (maxScorerRuns < 1)
@@ -1512,7 +1428,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       track(TelemetryEvent.BlackboxSubmitted, {
         strategy: strategyMode,
         engine: engine ?? "auto",
-        target: targetKind,
+        target: "text",
         scorer: scorerKind,
         has_cases: parsedCases != null,
       });
@@ -1541,7 +1457,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   // The draft never carries credentials: a restored BYOK model comes back
   // without its key and shows as missing credentials.
-  const safeTargetModel = useMemo(() => stripModelSecrets(targetModel), [targetModel]);
   const safeScorerModel = useMemo(() => stripModelSecrets(scorerModel), [scorerModel]);
   const safeReflectionModel = useMemo(() => stripModelSecrets(reflectionModel), [reflectionModel]);
   // Every commit hands the saver the serializable snapshot; it debounces and
@@ -1564,12 +1479,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       scorerManuallyEdited,
       objective,
       background,
-      targetKind,
-      executionMode,
-      harness,
-      targetModel: safeTargetModel,
-      targetTimeout,
-      targetConcurrency,
+      targetKind: "text",
       parsedCases,
       casesName,
       split,
@@ -1666,18 +1576,6 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setObjective,
     background,
     setBackground,
-    targetKind,
-    setTargetKind,
-    executionMode,
-    setExecutionMode,
-    harness,
-    setHarness,
-    targetModel,
-    setTargetModel,
-    targetTimeout,
-    setTargetTimeout,
-    targetConcurrency,
-    setTargetConcurrency,
     parsedCases,
     casesName,
     handleFileUpload,

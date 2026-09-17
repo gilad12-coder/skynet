@@ -1,6 +1,5 @@
 "use client";
 
-import type { KeyboardEvent } from "react";
 import { Warning } from "@/shared/ui/icons";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Input } from "@/shared/ui/primitives/input";
@@ -20,12 +19,12 @@ import { ModelChip } from "@/shared/ui/model-chip";
 import { BLACKBOX_HARNESSES, harnessLabel } from "@/shared/lib/blackbox-harness";
 import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
-import { formatMsg, msg } from "@/shared/lib/messages";
+import { msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { radioNavigationIndex } from "../../lib/radio-navigation";
 import { proposerKnobs, proposerTunesReasoning } from "../../lib/engine-contract";
 
-import type { BlackboxProposerEffort } from "@/shared/types/api";
+import type { BlackboxHarness, BlackboxProposerEffort } from "@/shared/types/api";
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig } from "../../constants";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
@@ -39,21 +38,6 @@ import {
 } from "./shared";
 
 const PROPOSER_EFFORTS: readonly BlackboxProposerEffort[] = ["low", "medium", "high", "max"];
-
-/** Arrow-key navigation shared by every pill radiogroup on this step. */
-function moveRadioFocus(event: KeyboardEvent<HTMLButtonElement>): void {
-  if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key))
-    return;
-  event.preventDefault();
-  const buttons = Array.from(
-    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [],
-  );
-  const index = buttons.indexOf(event.currentTarget);
-  const next = radioNavigationIndex(event.key, index, buttons.length, getActiveDir() === "rtl");
-  if (next === null) return;
-  buttons[next]?.focus();
-  buttons[next]?.click();
-}
 
 const MOBILE_MODEL_CHIP_CLASS =
   "min-h-[44px] max-lg:[&_button]:min-h-[44px] max-lg:[&_button]:min-w-[44px] max-lg:[&_button]:opacity-100";
@@ -77,12 +61,6 @@ export function BlackboxOptimizerStep({
     iterationLimitSupported,
     runDisabledReason,
     seedMode,
-    targetKind,
-    setTargetKind,
-    harness,
-    setHarness,
-    targetModel,
-    setTargetModel,
     maxScorerRuns,
     setMaxScorerRuns,
     maxIterations,
@@ -103,7 +81,6 @@ export function BlackboxOptimizerStep({
   const knobs = proposerKnobs(strategyMode, engine);
   const reasoningKnobs = proposerTunesReasoning(proposer.harness);
   const optimizationLabel = msg("submit.blackbox.roles.optimization.label");
-  const agentModelLabel = msg("submit.blackbox.start.agent_model_label");
 
   return (
     <StepCard
@@ -133,76 +110,6 @@ export function BlackboxOptimizerStep({
               },
             ]}
           />
-
-          {nativeProposer && (
-            <Segmented<"text" | "agent">
-              label={msg("submit.blackbox.start.target_label")}
-              value={targetKind}
-              onChange={setTargetKind}
-              options={[
-                {
-                  value: "text",
-                  label: msg("submit.blackbox.start.target.text"),
-                  desc: msg("submit.blackbox.start.target.text_desc"),
-                },
-                {
-                  value: "agent",
-                  label: msg("submit.blackbox.start.target.agent"),
-                  desc: msg("submit.blackbox.start.target.agent_desc"),
-                },
-              ]}
-            />
-          )}
-
-          {nativeProposer && targetKind === "agent" && (
-            <div id="bb-harness" tabIndex={-1} className="space-y-2 outline-none">
-              <Label>
-                <HelpTip text={tip("submit.blackbox.harness")}>
-                  {msg("submit.blackbox.start.harness_label")}
-                </HelpTip>
-              </Label>
-              <div
-                className="flex flex-wrap gap-2"
-                role="radiogroup"
-                aria-label={msg("submit.blackbox.start.harness_label")}
-              >
-                {BLACKBOX_HARNESSES.map((h) => {
-                  const selected = harness === h;
-                  return (
-                    <button
-                      key={h}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      tabIndex={selected ? 0 : -1}
-                      onKeyDown={moveRadioFocus}
-                      onClick={() => setHarness(h)}
-                      className={cn(
-                        "flex min-h-[44px] items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
-                        selected
-                          ? "border-primary bg-primary/5"
-                          : "border-border/50 bg-background/60 hover:border-border",
-                      )}
-                    >
-                      <HarnessLogo harness={h} size={18} />
-                      <span className="font-medium">{harnessLabel(h)}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {targetKind === "agent" && engineCatalog && !engineCatalog.sandbox_available && (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[0.75rem] text-amber-700">
-              <Warning className="mt-0.5 size-4 shrink-0" />
-              <span>
-                {formatMsg("submit.blackbox.engines.sandbox_missing", {
-                  reason: engineCatalog.sandbox_reason ?? "",
-                })}
-              </span>
-            </div>
-          )}
 
           {single && (
             <div id="bb-engines" tabIndex={-1} className="space-y-2 outline-none">
@@ -310,144 +217,134 @@ export function BlackboxOptimizerStep({
           )}
 
           {nativeProposer && (
-            <div id="bb-proposer" tabIndex={-1} className="space-y-3 outline-none">
-              <Label>
-                <HelpTip text={tip("submit.blackbox.proposer")}>
-                  {msg("submit.blackbox.proposer.label")}
-                </HelpTip>
-              </Label>
-              <div
-                className="flex flex-wrap gap-2"
-                role="radiogroup"
-                aria-label={msg("submit.blackbox.proposer.label")}
+            // One two-column grid: the harness and its reasoning effort share
+            // the first row, and the engine-specific knobs fill in below.
+            <div id="bb-proposer" tabIndex={-1} className="grid gap-4 outline-none sm:grid-cols-2">
+              <Field
+                label={msg("submit.blackbox.proposer.label")}
+                htmlFor="bb-proposer-harness"
+                tip="submit.blackbox.proposer"
               >
-                {BLACKBOX_HARNESSES.map((h) => {
-                  const selected = proposer.harness === h;
-                  return (
-                    <button
-                      key={h}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      tabIndex={selected ? 0 : -1}
-                      onKeyDown={moveRadioFocus}
-                      onClick={() => updateProposer({ harness: h })}
-                      className={cn(
-                        "flex min-h-[44px] items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
-                        selected
-                          ? "border-primary bg-primary/5"
-                          : "border-border/50 bg-background/60 hover:border-border",
-                      )}
-                    >
-                      <HarnessLogo harness={h} size={18} />
-                      <span className="font-medium">{harnessLabel(h)}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              {(reasoningKnobs || knobs.candidates || knobs.ralph) && (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {reasoningKnobs && (
-                    <>
-                      <Field
-                        label={msg("submit.blackbox.proposer.effort")}
-                        htmlFor="bb-proposer-effort"
-                        tip="submit.blackbox.proposer_effort"
-                      >
-                        <Select
-                          value={proposer.effort ?? "default"}
-                          onValueChange={(value) =>
-                            updateProposer({
-                              effort:
-                                value === "default" ? null : (value as BlackboxProposerEffort),
-                            })
-                          }
-                        >
-                          <SelectTrigger id="bb-proposer-effort" className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="default">
-                              {msg("submit.blackbox.proposer.effort.default")}
-                            </SelectItem>
-                            {PROPOSER_EFFORTS.map((effort) => (
-                              <SelectItem key={effort} value={effort}>
-                                {msg(`submit.blackbox.proposer.effort.${effort}`)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      {knobs.thinking && (
-                        <Field
-                          label={msg("submit.blackbox.proposer.max_thinking_tokens")}
-                          htmlFor="bb-proposer-thinking"
-                          tip="submit.blackbox.proposer_thinking"
-                        >
-                          <NumberInput
-                            id="bb-proposer-thinking"
-                            value={proposer.max_thinking_tokens ?? ""}
-                            onChange={(value) => updateProposer({ max_thinking_tokens: value })}
-                            onClear={() => updateProposer({ max_thinking_tokens: null })}
-                            min={1024}
-                            max={128000}
-                            step={1024}
-                            className={MOBILE_NUMBER_INPUT_CLASS}
-                          />
-                        </Field>
-                      )}
-                    </>
-                  )}
-                  {knobs.candidates && (
-                    <Field
-                      label={msg("submit.blackbox.proposer.max_candidates")}
-                      htmlFor="bb-proposer-candidates"
-                      tip="submit.blackbox.proposer_candidates"
-                    >
-                      <NumberInput
-                        id="bb-proposer-candidates"
-                        value={proposer.max_candidates_per_iter ?? ""}
-                        onChange={(value) => updateProposer({ max_candidates_per_iter: value })}
-                        onClear={() => updateProposer({ max_candidates_per_iter: null })}
-                        min={1}
-                        max={8}
-                        className={MOBILE_NUMBER_INPUT_CLASS}
+                <Select
+                  value={proposer.harness}
+                  onValueChange={(value) => updateProposer({ harness: value as BlackboxHarness })}
+                >
+                  <SelectTrigger
+                    id="bb-proposer-harness"
+                    className={cn("w-full", MOBILE_INPUT_CLASS)}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {BLACKBOX_HARNESSES.map((h) => (
+                      <SelectItem key={h} value={h}>
+                        <span className="flex items-center gap-2">
+                          <HarnessLogo harness={h} size={16} />
+                          <span>{harnessLabel(h)}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field
+                label={msg("submit.blackbox.proposer.effort")}
+                htmlFor="bb-proposer-effort"
+                tip="submit.blackbox.proposer_effort"
+              >
+                <Select
+                  value={reasoningKnobs ? (proposer.effort ?? "default") : "default"}
+                  disabled={!reasoningKnobs}
+                  onValueChange={(value) =>
+                    updateProposer({
+                      effort: value === "default" ? null : (value as BlackboxProposerEffort),
+                    })
+                  }
+                >
+                  <SelectTrigger
+                    id="bb-proposer-effort"
+                    className={cn("w-full", MOBILE_INPUT_CLASS)}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="default">
+                      {msg("submit.blackbox.proposer.effort.default")}
+                    </SelectItem>
+                    {PROPOSER_EFFORTS.map((effort) => (
+                      <SelectItem key={effort} value={effort}>
+                        {msg(`submit.blackbox.proposer.effort.${effort}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              {reasoningKnobs && knobs.thinking && (
+                <Field
+                  label={msg("submit.blackbox.proposer.max_thinking_tokens")}
+                  htmlFor="bb-proposer-thinking"
+                  tip="submit.blackbox.proposer_thinking"
+                >
+                  <NumberInput
+                    id="bb-proposer-thinking"
+                    value={proposer.max_thinking_tokens ?? ""}
+                    onChange={(value) => updateProposer({ max_thinking_tokens: value })}
+                    onClear={() => updateProposer({ max_thinking_tokens: null })}
+                    min={1024}
+                    max={128000}
+                    step={1024}
+                    className={MOBILE_NUMBER_INPUT_CLASS}
+                  />
+                </Field>
+              )}
+              {knobs.candidates && (
+                <Field
+                  label={msg("submit.blackbox.proposer.max_candidates")}
+                  htmlFor="bb-proposer-candidates"
+                  tip="submit.blackbox.proposer_candidates"
+                >
+                  <NumberInput
+                    id="bb-proposer-candidates"
+                    value={proposer.max_candidates_per_iter ?? ""}
+                    onChange={(value) => updateProposer({ max_candidates_per_iter: value })}
+                    onClear={() => updateProposer({ max_candidates_per_iter: null })}
+                    min={1}
+                    max={8}
+                    className={MOBILE_NUMBER_INPUT_CLASS}
+                  />
+                </Field>
+              )}
+              {knobs.ralph && (
+                <>
+                  <Field
+                    label={msg("submit.blackbox.proposer.ralph")}
+                    htmlFor="bb-proposer-ralph"
+                    tip="submit.blackbox.proposer_ralph"
+                  >
+                    <div className="flex min-h-[44px] items-center">
+                      <Switch
+                        id="bb-proposer-ralph"
+                        checked={proposer.ralph ?? true}
+                        onCheckedChange={(checked) => updateProposer({ ralph: checked })}
                       />
-                    </Field>
-                  )}
-                  {knobs.ralph && (
-                    <>
-                      <Field
-                        label={msg("submit.blackbox.proposer.ralph")}
-                        htmlFor="bb-proposer-ralph"
-                        tip="submit.blackbox.proposer_ralph"
-                      >
-                        <div className="flex min-h-[44px] items-center">
-                          <Switch
-                            id="bb-proposer-ralph"
-                            checked={proposer.ralph ?? true}
-                            onCheckedChange={(checked) => updateProposer({ ralph: checked })}
-                          />
-                        </div>
-                      </Field>
-                      <Field
-                        label={msg("submit.blackbox.proposer.max_no_eval")}
-                        htmlFor="bb-proposer-no-eval"
-                        tip="submit.blackbox.proposer_no_eval"
-                      >
-                        <NumberInput
-                          id="bb-proposer-no-eval"
-                          value={proposer.max_no_eval_seconds ?? ""}
-                          onChange={(value) => updateProposer({ max_no_eval_seconds: value })}
-                          onClear={() => updateProposer({ max_no_eval_seconds: null })}
-                          min={1}
-                          max={7200}
-                          className={MOBILE_NUMBER_INPUT_CLASS}
-                        />
-                      </Field>
-                    </>
-                  )}
-                </div>
+                    </div>
+                  </Field>
+                  <Field
+                    label={msg("submit.blackbox.proposer.max_no_eval")}
+                    htmlFor="bb-proposer-no-eval"
+                    tip="submit.blackbox.proposer_no_eval"
+                  >
+                    <NumberInput
+                      id="bb-proposer-no-eval"
+                      value={proposer.max_no_eval_seconds ?? ""}
+                      onChange={(value) => updateProposer({ max_no_eval_seconds: value })}
+                      onClear={() => updateProposer({ max_no_eval_seconds: null })}
+                      min={1}
+                      max={7200}
+                      className={MOBILE_NUMBER_INPUT_CLASS}
+                    />
+                  </Field>
+                </>
               )}
             </div>
           )}
@@ -497,33 +394,6 @@ export function BlackboxOptimizerStep({
               }
             />
           </ModelRoleRow>
-
-          {targetKind === "agent" && (
-            <ModelRoleRow
-              id="bb-task-model"
-              role={agentModelLabel}
-              description={msg("submit.blackbox.roles.task.desc")}
-              tip={tip("blackbox.config.agent_model")}
-            >
-              <ModelChip
-                config={targetModel}
-                modelDefaultsOnly
-                className={MOBILE_MODEL_CHIP_CLASS}
-                roleLabel={agentModelLabel}
-                required
-                catalogModels={catalog?.models}
-                onClick={() =>
-                  setEditingModel({
-                    config: targetModel,
-                    onSave: setTargetModel,
-                    label: agentModelLabel,
-                    modelDefaultsOnly: true,
-                  })
-                }
-                onRemove={targetModel.name ? () => setTargetModel(emptyModelConfig()) : undefined}
-              />
-            </ModelRoleRow>
-          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field

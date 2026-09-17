@@ -1,7 +1,6 @@
 import type {
   ScorerDependencyLock,
   BlackboxEngineId,
-  BlackboxHarness,
   BlackboxProposer,
   BlackboxProposerRuntime,
   ExecutionRuntime,
@@ -87,11 +86,6 @@ export interface AnythingDraftData {
   objective: string;
   background: string;
   targetKind: "text" | "agent";
-  executionMode?: "auto" | "text" | "agent";
-  harness: BlackboxHarness;
-  targetModel: ModelConfig;
-  targetTimeout: number;
-  targetConcurrency: number;
   parsedCases: ParsedDataset | null;
   casesName: string;
   split: SplitFractions;
@@ -192,7 +186,6 @@ export function sanitizeAnythingDraft(data: AnythingDraftData): AnythingDraftDat
   return {
     ...data,
     proposerRuntime: "vercel",
-    targetModel: stripModelSecrets(data.targetModel),
     scorerModel: stripModelSecrets(data.scorerModel),
     reflectionModel: stripModelSecrets(data.reflectionModel),
   };
