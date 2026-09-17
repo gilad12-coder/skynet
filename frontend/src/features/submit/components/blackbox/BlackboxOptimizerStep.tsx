@@ -20,14 +20,14 @@ import { BLACKBOX_HARNESSES, harnessLabel } from "@/shared/lib/blackbox-harness"
 import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { msg } from "@/shared/lib/messages";
-import { getActiveDir } from "@/shared/lib/runtime-locale";
-import { radioNavigationIndex } from "../../lib/radio-navigation";
-import { proposerKnobs, proposerTunesReasoning } from "../../lib/engine-contract";
+import { Carousel } from "@/features/agent-panel";
+import { DEFAULT_PROPOSER, proposerKnobs, proposerTunesReasoning } from "../../lib/engine-contract";
 
 import type { BlackboxHarness, BlackboxProposerEffort } from "@/shared/types/api";
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { emptyModelConfig } from "../../constants";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
+import { EngineSlide } from "./EngineSlide";
 import { ModelRoleRow } from "./ModelRoleRow";
 import {
   Field,
@@ -78,6 +78,7 @@ export function BlackboxOptimizerStep({
 
   const engines = engineCatalog?.engines ?? [];
   const single = strategyMode === "single";
+  const selectedEngineIndex = engines.findIndex((e) => e.id === engine);
   const knobs = proposerKnobs(strategyMode, engine);
   const reasoningKnobs = proposerTunesReasoning(proposer.harness);
   const optimizationLabel = msg("submit.blackbox.roles.optimization.label");
@@ -112,107 +113,48 @@ export function BlackboxOptimizerStep({
           />
 
           {single && (
-            <div id="bb-engines" tabIndex={-1} className="space-y-2 outline-none">
-              <Label>
-                <HelpTip text={tip("submit.blackbox.engines")}>
-                  {msg("submit.blackbox.engines.label")}
-                </HelpTip>
-              </Label>
-              <div
-                className="grid gap-2 sm:grid-cols-2"
-                role="radiogroup"
-                aria-label={msg("submit.blackbox.engines.label")}
-              >
-                {engines.map((e) => {
-                  // Only a seed shape the engine cannot take blocks the choice.
-                  // An engine that cannot run yet stays selectable and
-                  // configurable; Run is what waits for it.
-                  const partsBlocked = seedMode === "parts" && !e.supports_parts;
-                  const selected = engine === e.id;
-                  return (
-                    <button
-                      key={e.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      tabIndex={
-                        selected ||
-                        (!engine &&
-                          engines.find((item) => seedMode !== "parts" || item.supports_parts)
-                            ?.id === e.id)
-                          ? 0
-                          : -1
-                      }
-                      onKeyDown={(event) => {
-                        if (
-                          ![
-                            "ArrowLeft",
-                            "ArrowRight",
-                            "ArrowUp",
-                            "ArrowDown",
-                            "Home",
-                            "End",
-                          ].includes(event.key)
-                        )
-                          return;
-                        event.preventDefault();
-                        const buttons = Array.from(
-                          event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
-                            '[role="radio"]:not(:disabled)',
-                          ) ?? [],
-                        );
-                        const index = buttons.indexOf(event.currentTarget);
-                        const next = radioNavigationIndex(
-                          event.key,
-                          index,
-                          buttons.length,
-                          getActiveDir() === "rtl",
-                        );
-                        if (next === null) return;
-                        buttons[next]?.focus();
-                        buttons[next]?.click();
-                      }}
-                      disabled={partsBlocked}
-                      onClick={() => setEngine(e.id)}
-                      className={cn(
-                        "flex min-h-[44px] flex-col items-start gap-1 rounded-lg border p-3 text-start transition-colors",
-                        selected
-                          ? "border-primary bg-primary/5"
-                          : "border-border/50 bg-background/60",
-                        !partsBlocked && !selected && "cursor-pointer hover:border-primary/50",
-                        partsBlocked && "opacity-60",
-                      )}
-                    >
-                      <span className="flex w-full items-center gap-2">
-                        <span className="text-sm font-medium">{e.label}</span>
-                        <span className="ms-auto flex gap-1">
-                          {!e.available && (
-                            <Badge variant="secondary" size="sm">
-                              {msg("submit.blackbox.engines.not_runnable")}
-                            </Badge>
-                          )}
-                        </span>
-                      </span>
-                      <span className="text-[0.6875rem] leading-relaxed text-muted-foreground">
-                        {e.description}
-                      </span>
-                      {!e.available && e.unavailable_reason && (
-                        <span
-                          className="text-[0.6875rem] leading-relaxed text-amber-700"
-                          dir="auto"
-                        >
-                          {e.unavailable_reason}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-                {engineCatalog && engines.length === 0 && (
-                  <p className="text-xs text-muted-foreground">
+            <div id="bb-engines" tabIndex={-1} className="@container outline-none">
+              {engineCatalog && engines.length === 0 ? (
+                <>
+                  <Label>
+                    <HelpTip text={tip("submit.blackbox.engines")}>
+                      {msg("submit.blackbox.engines.label")}
+                    </HelpTip>
+                  </Label>
+                  <p className="mt-2 text-xs text-muted-foreground">
                     {msg("submit.blackbox.engines.none")}
                   </p>
-                )}
-              </div>
+                </>
+              ) : (
+                <Carousel
+                  items={engines}
+                  itemKey={(e) => e.id}
+                  renderItem={(e) => (
+                    <EngineSlide
+                      engine={e}
+                      selected={engine === e.id}
+                      // Only a seed shape the engine cannot take blocks the
+                      // choice. An engine that cannot run yet stays selectable
+                      // and configurable; Run is what waits for it.
+                      blocked={seedMode === "parts" && !e.supports_parts}
+                      onChoose={() => setEngine(e.id)}
+                    />
+                  )}
+                  // The field label rides the carousel's own header row,
+                  // opposite the position counter, like the module picker.
+                  title={
+                    <Label>
+                      <HelpTip text={tip("submit.blackbox.engines")}>
+                        {msg("submit.blackbox.engines.label")}
+                      </HelpTip>
+                    </Label>
+                  }
+                  ariaLabel={msg("submit.blackbox.engines.carousel_aria")}
+                  jumpIndices={selectedEngineIndex >= 0 ? [selectedEngineIndex] : undefined}
+                  followJumps
+                  fluid
+                />
+              )}
             </div>
           )}
 
@@ -287,9 +229,13 @@ export function BlackboxOptimizerStep({
                 >
                   <NumberInput
                     id="bb-proposer-thinking"
-                    value={proposer.max_thinking_tokens ?? ""}
+                    value={
+                      proposer.max_thinking_tokens ?? DEFAULT_PROPOSER.max_thinking_tokens ?? ""
+                    }
                     onChange={(value) => updateProposer({ max_thinking_tokens: value })}
-                    onClear={() => updateProposer({ max_thinking_tokens: null })}
+                    onClear={() =>
+                      updateProposer({ max_thinking_tokens: DEFAULT_PROPOSER.max_thinking_tokens })
+                    }
                     min={1024}
                     max={128000}
                     step={1024}
@@ -305,9 +251,17 @@ export function BlackboxOptimizerStep({
                 >
                   <NumberInput
                     id="bb-proposer-candidates"
-                    value={proposer.max_candidates_per_iter ?? ""}
+                    value={
+                      proposer.max_candidates_per_iter ??
+                      DEFAULT_PROPOSER.max_candidates_per_iter ??
+                      ""
+                    }
                     onChange={(value) => updateProposer({ max_candidates_per_iter: value })}
-                    onClear={() => updateProposer({ max_candidates_per_iter: null })}
+                    onClear={() =>
+                      updateProposer({
+                        max_candidates_per_iter: DEFAULT_PROPOSER.max_candidates_per_iter,
+                      })
+                    }
                     min={1}
                     max={8}
                     className={MOBILE_NUMBER_INPUT_CLASS}
@@ -315,36 +269,21 @@ export function BlackboxOptimizerStep({
                 </Field>
               )}
               {knobs.ralph && (
-                <>
-                  <Field
-                    label={msg("submit.blackbox.proposer.ralph")}
-                    htmlFor="bb-proposer-ralph"
-                    tip="submit.blackbox.proposer_ralph"
-                  >
-                    <div className="flex min-h-[44px] items-center">
-                      <Switch
-                        id="bb-proposer-ralph"
-                        checked={proposer.ralph ?? true}
-                        onCheckedChange={(checked) => updateProposer({ ralph: checked })}
-                      />
-                    </div>
-                  </Field>
-                  <Field
-                    label={msg("submit.blackbox.proposer.max_no_eval")}
-                    htmlFor="bb-proposer-no-eval"
-                    tip="submit.blackbox.proposer_no_eval"
-                  >
-                    <NumberInput
-                      id="bb-proposer-no-eval"
-                      value={proposer.max_no_eval_seconds ?? ""}
-                      onChange={(value) => updateProposer({ max_no_eval_seconds: value })}
-                      onClear={() => updateProposer({ max_no_eval_seconds: null })}
-                      min={1}
-                      max={7200}
-                      className={MOBILE_NUMBER_INPUT_CLASS}
-                    />
-                  </Field>
-                </>
+                // A toggle reads as a row, not a column: it takes the full
+                // width with its label at the start and the switch at the end.
+                <div className="flex min-h-[44px] items-center justify-between gap-3 rounded-lg border border-border/50 bg-background/60 px-3 py-2 sm:col-span-2">
+                  <Label htmlFor="bb-proposer-ralph" className="cursor-pointer">
+                    <HelpTip text={tip("submit.blackbox.proposer_ralph")}>
+                      {msg("submit.blackbox.proposer.ralph")}
+                    </HelpTip>
+                  </Label>
+                  <Switch
+                    id="bb-proposer-ralph"
+                    checked={proposer.ralph ?? true}
+                    onCheckedChange={(checked) => updateProposer({ ralph: checked })}
+                    className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
+                  />
+                </div>
               )}
             </div>
           )}

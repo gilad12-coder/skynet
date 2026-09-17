@@ -200,7 +200,11 @@ test("submitted proposer resets every knob the form hides for the engine", () =>
     ralph: false,
     max_no_eval_seconds: 600,
   };
-  assert.deepEqual(submittedProposer(tuned, "auto", null), tuned);
+  const stall = DEFAULT_PROPOSER.max_no_eval_seconds;
+  assert.deepEqual(submittedProposer(tuned, "auto", null), {
+    ...tuned,
+    max_no_eval_seconds: stall,
+  });
   assert.deepEqual(submittedProposer(tuned, "single", "autosaddler"), {
     ...tuned,
     max_thinking_tokens: null,
@@ -216,6 +220,7 @@ test("submitted proposer resets every knob the form hides for the engine", () =>
   assert.deepEqual(submittedProposer(tuned, "single", "autoresearch"), {
     ...tuned,
     max_candidates_per_iter: null,
+    max_no_eval_seconds: stall,
   });
   assert.deepEqual(submittedProposer({ ...tuned, harness: "opencode" }, "single", "autoresearch"), {
     ...tuned,
@@ -223,6 +228,7 @@ test("submitted proposer resets every knob the form hides for the engine", () =>
     effort: null,
     max_thinking_tokens: null,
     max_candidates_per_iter: null,
+    max_no_eval_seconds: stall,
   });
 });
 

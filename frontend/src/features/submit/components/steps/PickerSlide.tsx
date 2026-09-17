@@ -72,13 +72,17 @@ export function PickerSlide({
  * accessible name — the same string in both, which is what keeps the hover
  * label and the screen-reader label from drifting apart.
  */
-function ChooseButton({
+export function ChooseButton({
   name,
   selected = false,
+  disabled = false,
   onClick,
 }: {
   name: string;
   selected?: boolean;
+  // The option cannot be taken as things stand (e.g. the seed shape rules it
+  // out); the slide says why, the button just refuses.
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -89,6 +93,7 @@ function ChooseButton({
         className="mt-2 size-[44px] rounded-full lg:size-10"
         aria-label={name}
         aria-pressed={selected}
+        disabled={disabled}
         onClick={onClick}
       >
         <Check />

@@ -19,14 +19,19 @@ export function usesNativeProposer(
   );
 }
 
-/** What a fresh wizard sends when the user never touches the proposer settings. */
+/**
+ * What a fresh wizard sends when the user never touches the proposer settings.
+ *
+ * The stall timeout has no control: half an hour without a new score covers a
+ * slow scorer pass while still cutting a wedged agent loose.
+ */
 export const DEFAULT_PROPOSER: BlackboxProposer = {
   harness: "claude_code",
   effort: null,
-  max_thinking_tokens: null,
-  max_candidates_per_iter: null,
+  max_thinking_tokens: 32_768,
+  max_candidates_per_iter: 3,
   ralph: true,
-  max_no_eval_seconds: null,
+  max_no_eval_seconds: 1_800,
 };
 
 /** Which engine-specific proposer knobs the strategy exposes; Auto may run any engine. */
@@ -58,7 +63,7 @@ export function submittedProposer(
       reasoning && knobs.thinking ? (proposer.max_thinking_tokens ?? null) : null,
     max_candidates_per_iter: knobs.candidates ? (proposer.max_candidates_per_iter ?? null) : null,
     ralph: knobs.ralph ? (proposer.ralph ?? DEFAULT_PROPOSER.ralph) : DEFAULT_PROPOSER.ralph,
-    max_no_eval_seconds: knobs.ralph ? (proposer.max_no_eval_seconds ?? null) : null,
+    max_no_eval_seconds: knobs.ralph ? DEFAULT_PROPOSER.max_no_eval_seconds : null,
   };
 }
 
