@@ -143,6 +143,28 @@ export function useWizardDraftController({
     toast.warn(msg("submit.draft.save_failed"), { toastId: SAVE_FAILED_TOAST });
   }, []);
 
+  const discardDraft = useCallback(
+    async (saver: DraftSaver): Promise<boolean> => {
+      try {
+        await saver.reset();
+      } catch {
+        toast.error(msg("submit.draft.reset_failed"));
+        return false;
+      }
+      if (accountRef.current) {
+        channelRef.current?.post({
+          type: "reset",
+          accountId: accountRef.current,
+          resetGeneration: saver.resetFence,
+        });
+      }
+      dismissOffer();
+      saver.hold(false);
+      return true;
+    },
+    [dismissOffer],
+  );
+
   const startNew = useCallback(async (): Promise<boolean> => {
     const saver = saverRef.current;
     if (!saver) {
@@ -150,24 +172,10 @@ export function useWizardDraftController({
       transitions.current.onStartNew();
       return true;
     }
-    try {
-      await saver.reset();
-    } catch {
-      toast.error(msg("submit.draft.reset_failed"));
-      return false;
-    }
-    if (accountRef.current) {
-      channelRef.current?.post({
-        type: "reset",
-        accountId: accountRef.current,
-        resetGeneration: saver.resetFence,
-      });
-    }
-    dismissOffer();
-    saver.hold(false);
+    if (!(await discardDraft(saver))) return false;
     transitions.current.onStartNew();
     return true;
-  }, [dismissOffer]);
+  }, [discardDraft, dismissOffer]);
 
   const renderOffer = useCallback(
     (continueDraft: () => void) => (
@@ -206,14 +214,27 @@ export function useWizardDraftController({
       .then(({ record: fresh, resetGeneration }) => {
         if (offerRef.current !== current || accountRef.current !== account) return;
         if (clone) {
-          setComparingClone(false);
           if (!fresh || !hasMeaningfulDraft(fresh)) {
             saver.adopt(null, resetGeneration);
             saver.hold(false);
             dismissOffer();
             return;
           }
-          if (!clone.data || !matchesClonedDraft(fresh, clone.recipe, clone.data)) return;
+          // A clone that failed to load leaves the saved draft as the only
+          // thing worth offering.
+          if (!clone.data) {
+            setComparingClone(false);
+            return;
+          }
+          if (!matchesClonedDraft(fresh, clone.recipe, clone.data)) {
+            // Cloning was an explicit choice, so the clone replaces whatever
+            // was left behind rather than asking over the already filled form.
+            void discardDraft(saver).then((ok) => {
+              if (!ok && offerRef.current === current) setComparingClone(false);
+            });
+            return;
+          }
+          setComparingClone(false);
         }
         const recipe = recipeToOpen(fresh);
         if (!fresh || !recipe) {
