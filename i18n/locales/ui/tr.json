@@ -193,6 +193,8 @@
   "submit.blackbox.cases.title": "Değerlendirme örnekleri",
   "submit.blackbox.cases.upload": "Dosya yükle",
   "submit.blackbox.engines.label": "Motorlar",
+  "submit.blackbox.engines.carousel_aria": "Optimizasyon motorları",
+  "submit.blackbox.engines.choose": "{p1} kullan",
   "submit.blackbox.engines.none": "Bu hedef için kullanılabilir motor yok.",
   "submit.blackbox.engines.sandbox_missing": "Korumalı alan yapılandırılmadı: {reason}",
   "submit.blackbox.engines.unavailable": "Kullanılamıyor",

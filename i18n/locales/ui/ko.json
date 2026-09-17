@@ -193,6 +193,8 @@
   "submit.blackbox.cases.title": "평가 사례",
   "submit.blackbox.cases.upload": "파일 업로드",
   "submit.blackbox.engines.label": "엔진",
+  "submit.blackbox.engines.carousel_aria": "최적화 엔진",
+  "submit.blackbox.engines.choose": "{p1} 사용",
   "submit.blackbox.engines.none": "이 대상에 사용할 수 있는 엔진이 없습니다.",
   "submit.blackbox.engines.sandbox_missing": "샌드박스가 구성되지 않음: {reason}",
   "submit.blackbox.engines.unavailable": "사용 불가",

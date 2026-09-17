@@ -193,6 +193,8 @@
   "submit.blackbox.cases.title": "موارد ارزیابی",
   "submit.blackbox.cases.upload": "بارگذاری فایل",
   "submit.blackbox.engines.label": "موتورها",
+  "submit.blackbox.engines.carousel_aria": "موتورهای بهینه‌سازی",
+  "submit.blackbox.engines.choose": "استفاده از {p1}",
   "submit.blackbox.engines.none": "هیچ موتوری برای این مقصد در دسترس نیست.",
   "submit.blackbox.engines.sandbox_missing": "سندباکس پیکربندی نشده است: {reason}",
   "submit.blackbox.engines.unavailable": "در دسترس نیست",

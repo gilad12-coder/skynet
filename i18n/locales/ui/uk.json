@@ -193,6 +193,8 @@
   "submit.blackbox.cases.title": "Приклади для оцінювання",
   "submit.blackbox.cases.upload": "Завантажити файл",
   "submit.blackbox.engines.label": "Рушії",
+  "submit.blackbox.engines.carousel_aria": "Рушії оптимізації",
+  "submit.blackbox.engines.choose": "Використати {p1}",
   "submit.blackbox.engines.none": "Для цієї цілі немає доступних рушіїв.",
   "submit.blackbox.engines.sandbox_missing": "Пісочницю не налаштовано: {reason}",
   "submit.blackbox.engines.unavailable": "Недоступно",

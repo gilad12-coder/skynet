@@ -193,6 +193,8 @@
   "submit.blackbox.cases.title": "评估案例",
   "submit.blackbox.cases.upload": "上传文件",
   "submit.blackbox.engines.label": "引擎",
+  "submit.blackbox.engines.carousel_aria": "优化引擎",
+  "submit.blackbox.engines.choose": "使用 {p1}",
   "submit.blackbox.engines.none": "该目标没有可用的引擎。",
   "submit.blackbox.engines.sandbox_missing": "沙箱未配置：{reason}",
   "submit.blackbox.engines.unavailable": "不可用",

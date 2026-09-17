@@ -193,6 +193,8 @@
   "submit.blackbox.cases.title": "Evaluationsfälle",
   "submit.blackbox.cases.upload": "Datei hochladen",
   "submit.blackbox.engines.label": "Engines",
+  "submit.blackbox.engines.carousel_aria": "Optimierungs-Engines",
+  "submit.blackbox.engines.choose": "{p1} verwenden",
   "submit.blackbox.engines.none": "Für dieses Ziel sind keine Engines verfügbar.",
   "submit.blackbox.engines.sandbox_missing": "Sandbox nicht konfiguriert: {reason}",
   "submit.blackbox.engines.unavailable": "Nicht verfügbar",

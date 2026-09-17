@@ -193,6 +193,8 @@
   "submit.blackbox.cases.title": "Casi di valutazione",
   "submit.blackbox.cases.upload": "Carica file",
   "submit.blackbox.engines.label": "Motori",
+  "submit.blackbox.engines.carousel_aria": "Motori di ottimizzazione",
+  "submit.blackbox.engines.choose": "Usa {p1}",
   "submit.blackbox.engines.none": "Nessun motore è disponibile per questo target.",
   "submit.blackbox.engines.sandbox_missing": "Sandbox non configurata: {reason}",
   "submit.blackbox.engines.unavailable": "Non disponibile",

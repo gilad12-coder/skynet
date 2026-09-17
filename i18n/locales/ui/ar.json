@@ -193,6 +193,8 @@
   "submit.blackbox.cases.title": "حالات التقييم",
   "submit.blackbox.cases.upload": "رفع ملف",
   "submit.blackbox.engines.label": "المحرّكات",
+  "submit.blackbox.engines.carousel_aria": "محرّكات التحسين",
+  "submit.blackbox.engines.choose": "استخدام {p1}",
   "submit.blackbox.engines.none": "لا تتوفّر محرّكات لهذا الهدف.",
   "submit.blackbox.engines.sandbox_missing": "بيئة الحماية غير مُهيّأة: {reason}",
   "submit.blackbox.engines.unavailable": "غير متاح",

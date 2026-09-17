@@ -193,6 +193,8 @@
   "submit.blackbox.cases.title": "Cas d’évaluation",
   "submit.blackbox.cases.upload": "Importer un fichier",
   "submit.blackbox.engines.label": "Moteurs",
+  "submit.blackbox.engines.carousel_aria": "Moteurs d'optimisation",
+  "submit.blackbox.engines.choose": "Utiliser {p1}",
   "submit.blackbox.engines.none": "Aucun moteur n'est disponible pour cette cible.",
   "submit.blackbox.engines.sandbox_missing": "Bac à sable non configuré : {reason}",
   "submit.blackbox.engines.unavailable": "Indisponible",

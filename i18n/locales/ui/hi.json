@@ -193,6 +193,8 @@
   "submit.blackbox.cases.title": "मूल्यांकन मामले",
   "submit.blackbox.cases.upload": "फ़ाइल अपलोड करें",
   "submit.blackbox.engines.label": "इंजन",
+  "submit.blackbox.engines.carousel_aria": "ऑप्टिमाइज़ेशन इंजन",
+  "submit.blackbox.engines.choose": "{p1} का उपयोग करें",
   "submit.blackbox.engines.none": "इस लक्ष्य के लिए कोई इंजन उपलब्ध नहीं है।",
   "submit.blackbox.engines.sandbox_missing": "सैंडबॉक्स कॉन्फ़िगर नहीं है: {reason}",
   "submit.blackbox.engines.unavailable": "अनुपलब्ध",

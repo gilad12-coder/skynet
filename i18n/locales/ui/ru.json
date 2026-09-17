@@ -193,6 +193,8 @@
   "submit.blackbox.cases.title": "Примеры для оценки",
   "submit.blackbox.cases.upload": "Загрузить файл",
   "submit.blackbox.engines.label": "Движки",
+  "submit.blackbox.engines.carousel_aria": "Движки оптимизации",
+  "submit.blackbox.engines.choose": "Использовать {p1}",
   "submit.blackbox.engines.none": "Для этого объекта нет доступных движков.",
   "submit.blackbox.engines.sandbox_missing": "Песочница не настроена: {reason}",
   "submit.blackbox.engines.unavailable": "Недоступно",
