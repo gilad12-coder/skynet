@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import shlex
+import sys
 import threading
 import time
 import uuid
@@ -60,6 +61,8 @@ _DEFAULT_PROBE_TIMEOUT_SECONDS = 45.0
 _PROBE_LIFETIME_ALLOWANCE_SECONDS = 120.0
 # apt plus a few wheels finish in about a minute; a stalled mirror must not eat the box's lifetime.
 _INSTALL_TIMEOUT_SECONDS = 600.0
+DEPENDENCIES_DIR = ".skynet-dependencies"
+_DEPENDENCIES_TIMEOUT_SECONDS = 300.0
 _STDERR_TAIL_CHARS = 2_000
 _OPENROUTER_PREFIX = "openrouter/"
 _OPENROUTER_URL = "https://openrouter.ai/api/v1"
@@ -318,6 +321,9 @@ class SandboxPythonScorer:
         self._code = code
         self._install_command = (install_command or "").strip() or None
         self._dependency_lock = dict(dependency_lock) if dependency_lock is not None else None
+        # Import roots already accounted for: the lock's, plus those of every
+        # candidate scanned since, whether or not their packages installed.
+        self._covered: set[str] = set(self._dependency_lock["imports"]) if self._dependency_lock is not None else set()
         self._dependency_route = (
             dict(dependency_route)
             if dependency_route is not None
@@ -390,6 +396,9 @@ class SandboxPythonScorer:
             "gateway": self._gateway.runner_payload() if self._gateway is not None else None,
         }
         with self._lock:
+            blocked = self._extend(candidate)
+            if blocked is not None:
+                return ScorerProbeResult(score=None, side_info={}, error=blocked)
             try:
                 result = self._invoke(payload)
             except (ServiceError, BudgetError, UsagePendingError):
@@ -469,6 +478,9 @@ class SandboxPythonScorer:
             env={
                 **({ENV_API_KEY: self._env_key} if self._env_key else {}),
                 **({"PYTHONPATH": ".skynet-dependencies/site"} if self._dependency_lock is not None else {}),
+                # The protected image has no display or GPU; PyOpenGL-based renderers
+                # (pyrender and friends) would otherwise try to open an X display.
+                **({"PYOPENGL_PLATFORM": "osmesa"} if self._protected else {}),
             }
             or None,
             timeout_seconds=self._timeout_seconds,
@@ -521,32 +533,8 @@ class SandboxPythonScorer:
         if self._dependency_lock is not None:
             if not self._dependency_route.get("token"):
                 raise ServiceError("Pinned dependencies require the protected package relay.")
-            directory = ".skynet-dependencies"
-            session.write_files(
-                {
-                    f"{directory}/setup.py": Path(package_setup.__file__).read_text(),
-                    f"{directory}/request.json": json.dumps(
-                        {
-                            "action": "install",
-                            "lock": self._dependency_lock,
-                            "route": self._dependency_route,
-                        }
-                    ),
-                }
-            )
-            result = session.run(
-                f"python3 {directory}/setup.py {directory}/request.json",
-                timeout_seconds=300,
-            )
-            raw = session.read_file(f"{directory}/result.json")
-            outcome = json.loads(raw) if raw else {}
-            _raise_control(outcome)
-            if not result.ok or not outcome.get("ok"):
-                raise ServiceError(
-                    outcome.get("error")
-                    or _tail(result.stderr or result.stdout)
-                    or "Pinned package installation did not complete."
-                )
+            session.write_files({f"{DEPENDENCIES_DIR}/setup.py": Path(package_setup.__file__).read_text()})
+            self._setup(session, "install", {"lock": self._dependency_lock})
         if self._install_command is None:
             return
         logger.info("scorer sandbox: install running (allowance %.0fs)", _INSTALL_TIMEOUT_SECONDS)
@@ -560,6 +548,79 @@ class SandboxPythonScorer:
                 f"scorer install command failed (exit {result.exit_code}): {_tail(result.stderr or result.stdout)}"
             )
         logger.info("scorer sandbox: install done in %.1fs", time.perf_counter() - started)
+
+    def _setup(self, session: SandboxSession, action: str, request: Mapping[str, Any]) -> dict[str, Any]:
+        """Run one dependency operation in the box through the parent's package relay.
+
+        Args:
+            session: The open box.
+            action: ``install`` or ``extend``.
+            request: The operation's inputs beyond the action and relay route.
+
+        Returns:
+            The operation's result document.
+
+        Raises:
+            ServiceError: When the operation failed or produced no result.
+        """
+        session.write_files(
+            {
+                f"{DEPENDENCIES_DIR}/request.json": json.dumps(
+                    {"action": action, "route": self._dependency_route, **request}
+                )
+            }
+        )
+        result = session.run(
+            f"python3 {DEPENDENCIES_DIR}/setup.py {DEPENDENCIES_DIR}/request.json",
+            timeout_seconds=_DEPENDENCIES_TIMEOUT_SECONDS,
+        )
+        raw = session.read_file(f"{DEPENDENCIES_DIR}/result.json")
+        outcome = json.loads(raw) if raw else {}
+        _raise_control(outcome)
+        if not result.ok or not outcome.get("ok"):
+            raise ServiceError(
+                outcome.get("error")
+                or _tail(result.stderr or result.stdout)
+                or "Pinned package installation did not complete."
+            )
+        return dict(outcome.get("result") or {})
+
+    def _extend(self, candidate: Candidate) -> str | None:
+        """Install the packages ``candidate`` imports that no earlier scan covered.
+
+        The optimizer writes candidates the signed lock never saw, so each new
+        import root costs one setup run in the box before the candidate scores.
+        A failed install is the candidate's problem, reported as scorer feedback
+        rather than ending the job; budget stops still propagate.
+
+        Args:
+            candidate: The version about to be scored.
+
+        Returns:
+            Why the candidate cannot run, or ``None`` when its imports are satisfied.
+        """
+        if self._dependency_lock is None:
+            return None
+        roots = {
+            root
+            for root in package_setup._candidate_roots(candidate)
+            if root not in sys.stdlib_module_names and root != "skynet"
+        } - self._covered
+        if not roots:
+            return None
+        self._covered |= roots
+        logger.info("scorer sandbox: candidate imports %s; extending dependencies", ", ".join(sorted(roots)))
+        session = self._open()
+        try:
+            added = self._setup(session, "extend", {"lock": self._dependency_lock, "candidate": candidate})
+        except ServiceError as error:
+            return f"candidate packages could not be installed: {error}"
+        self._dependency_lock = {
+            **self._dependency_lock,
+            "imports": sorted(set(self._dependency_lock["imports"]) | set(added.get("imports") or [])),
+            "artifacts": [*self._dependency_lock["artifacts"], *(added.get("artifacts") or [])],
+        }
+        return None
 
     def _discard(self) -> None:
         """Close the box, if any, so the next call opens a fresh one."""

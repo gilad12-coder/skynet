@@ -20,6 +20,7 @@ from ..harness import GatewayConfig
 from ..sandbox import CommandResult, LocalSubprocessRuntime, OutputSink
 from ..sandbox_scorer import (
     CALLS_DIR,
+    DEPENDENCIES_DIR,
     RUNNER_FILE,
     RUNNER_SOURCE,
     SandboxPythonScorer,
@@ -123,6 +124,53 @@ class _InstallSession(_RunnerSession):
             self.timeouts.append(timeout_seconds)
             return self._install
         return super().run(command, env=env, timeout_seconds=timeout_seconds, on_output=on_output)
+
+
+class _SetupSession(_RunnerSession):
+    """Runner session that also plays the dependency setup script from its request file."""
+
+    def __init__(self, respond: Responder, extend: dict[str, Any]) -> None:
+        """Remember how an ``extend`` request is answered.
+
+        Args:
+            respond: Turns the call payload into an output document.
+            extend: The setup script's result document for ``extend`` requests.
+        """
+        super().__init__(respond)
+        self._extend = extend
+        self.requests: list[dict[str, Any]] = []
+
+    def run(
+        self,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+        timeout_seconds: float | None = None,
+        on_output: OutputSink | None = None,
+    ) -> CommandResult:
+        """Answer setup requests from the recorded request file, runner calls as usual.
+
+        Args:
+            command: The command line.
+            env: Per-call environment.
+            timeout_seconds: Per-call timeout.
+
+        Returns:
+            The command result.
+        """
+        if "setup.py" not in command:
+            return super().run(command, env=env, timeout_seconds=timeout_seconds, on_output=on_output)
+        self.commands.append(command)
+        request = json.loads(self.files[f"{DEPENDENCIES_DIR}/request.json"])
+        self.requests.append(request)
+        outcome = {"ok": True, "result": {"installed": True}} if request["action"] == "install" else self._extend
+        self.files[f"{DEPENDENCIES_DIR}/result.json"] = json.dumps(outcome)
+        return CommandResult(exit_code=0)
+
+
+_LOCK = {"python": "3.12.0", "imports": ["json", "numpy"], "artifacts": [{"name": "numpy", "sha256": "n" * 64}]}
+_ROUTE = {"url": "http://relay.test", "token": "package-token"}
+_SETUP_COMMAND = f"python3 {DEPENDENCIES_DIR}/setup.py {DEPENDENCIES_DIR}/request.json"
 
 
 def _runtime(respond: Responder, *, injects_headers: bool = False) -> FakeSandboxRuntime:
@@ -615,3 +663,65 @@ def test_sandbox_scorer_caps_the_lifetime_at_the_configured_ceiling(monkeypatch:
         lifetimes.append(runtime.specs[0].lifetime_seconds)
 
     assert lifetimes == [100.0, 50.0, 100.0]
+
+
+def test_sandbox_scorer_extends_the_lock_when_a_candidate_imports_something_new() -> None:
+    """A candidate's new third-party import triggers one extend run; the merged lock reinstalls in a new box."""
+    added = {"ok": True, "result": {"imports": ["pyrender"], "artifacts": [{"name": "pyrender", "sha256": "p" * 64}]}}
+    runtime = FakeSandboxRuntime(lambda: _SetupSession(lambda payload: _OK, added))
+    scorer = SandboxPythonScorer(
+        "def score(c): return 1",
+        runtime=runtime,
+        gateway=None,
+        timeout_seconds=5,
+        dependency_lock=_LOCK,
+        dependency_route=_ROUTE,
+    )
+
+    assert scorer("import numpy\nimport json\n") == (0.5, {})
+    assert scorer("import pyrender\nimport os\n") == (0.5, {})
+    assert scorer("import pyrender\n") == (0.5, {})
+
+    [box] = runtime.sessions
+    assert box.commands == [
+        _SETUP_COMMAND,
+        f"python3 {RUNNER_FILE} {CALLS_DIR}/000001",
+        _SETUP_COMMAND,
+        f"python3 {RUNNER_FILE} {CALLS_DIR}/000002",
+        f"python3 {RUNNER_FILE} {CALLS_DIR}/000003",
+    ]
+    assert [request["action"] for request in box.requests] == ["install", "extend"]
+    assert box.requests[1]["candidate"] == "import pyrender\nimport os\n"
+    assert box.requests[1]["lock"] == _LOCK
+    assert box.requests[1]["route"] == _ROUTE
+
+    scorer._discard()
+    assert scorer("import pyrender\n") == (0.5, {})
+    [_, fresh] = runtime.sessions
+    assert fresh.requests[0]["action"] == "install"
+    assert fresh.requests[0]["lock"]["imports"] == ["json", "numpy", "pyrender"]
+    assert [artifact["name"] for artifact in fresh.requests[0]["lock"]["artifacts"]] == ["numpy", "pyrender"]
+
+
+def test_sandbox_scorer_reports_an_uninstallable_candidate_package_as_feedback() -> None:
+    """When a candidate's package cannot be installed the candidate fails, the job continues."""
+    refused = {"ok": False, "error": "No matching distribution found for pyrenderx"}
+    runtime = FakeSandboxRuntime(lambda: _SetupSession(lambda payload: _OK, refused))
+    scorer = SandboxPythonScorer(
+        "def score(c): return 1",
+        runtime=runtime,
+        gateway=None,
+        timeout_seconds=5,
+        dependency_lock=_LOCK,
+        dependency_route=_ROUTE,
+    )
+
+    probe = scorer.run("import pyrenderx\n")
+    assert probe.score is None
+    assert probe.error == "candidate packages could not be installed: No matching distribution found for pyrenderx"
+    assert scorer("import numpy\n") == (0.5, {})
+
+    [box] = runtime.sessions
+    assert [request["action"] for request in box.requests] == ["install", "extend"]
+    assert box.commands[-1] == f"python3 {RUNNER_FILE} {CALLS_DIR}/000001"
+    assert box.closed is False

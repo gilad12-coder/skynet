@@ -177,6 +177,22 @@ def _candidate_roots(candidate: str | dict[str, str] | None) -> set[str]:
     return roots
 
 
+def _requirements_for(roots: set[str]) -> list[str]:
+    """Map the imported roots that this runtime cannot import to package requirements.
+
+    Args:
+        roots: Top-level module names a source imports.
+
+    Returns:
+        One requirement per missing third-party root, aliases applied, sorted by root.
+    """
+    return [
+        _ALIASES.get(root, root)
+        for root in sorted(roots)
+        if root not in sys.stdlib_module_names and root != "skynet" and importlib.util.find_spec(root) is None
+    ]
+
+
 def infer_requirements(
     code: str, overrides: list[str], candidate: str | dict[str, str] | None = None
 ) -> tuple[list[str], list[str]]:
@@ -192,11 +208,7 @@ def infer_requirements(
         Missing-package requirements and imported root modules.
     """
     roots = _import_roots(ast.parse(code)) | _candidate_roots(candidate)
-    requirements = overrides or [
-        _ALIASES.get(root, root)
-        for root in sorted(roots)
-        if root not in sys.stdlib_module_names and root != "skynet" and importlib.util.find_spec(root) is None
-    ]
+    requirements = overrides or _requirements_for(roots)
     for item in requirements:
         parsed = Requirement(item)
         if parsed.url or item.startswith("-"):
@@ -206,26 +218,20 @@ def infer_requirements(
     return requirements, sorted(roots)
 
 
-def resolve(
-    code: str,
-    overrides: list[str],
-    route: dict[str, str],
-    directory: Path,
-    candidate: str | dict[str, str] | None = None,
-) -> dict[str, Any]:
-    """Resolve missing imports to exact wheel versions using the configured registry.
+def _select(
+    requirements: list[str], route: dict[str, str], directory: Path, constraints: list[str]
+) -> list[dict[str, Any]]:
+    """Let pip pick exact wheels for ``requirements`` from the parent's scoped index.
 
     Args:
-        code: Current scorer source.
-        overrides: Optional complete package requirement list.
+        requirements: Package requirements to satisfy, with their dependencies.
         route: Parent registry capability.
         directory: Private sandbox workspace.
-        candidate: Seed candidate whose imports the scorer triggers at run time.
+        constraints: ``name==version`` pins pip may not deviate from.
 
     Returns:
-        Reusable exact artifact lock for this source and runtime.
+        The selected wheels as lock artifacts, empty when nothing was requested.
     """
-    requirements, roots = infer_requirements(code, overrides, candidate)
     artifacts: dict[str, dict[str, Any]] = {}
     stopped: list[PackageSetupStoppedError] = []
 
@@ -284,6 +290,8 @@ def resolve(
     thread.start()
     try:
         report = directory / "report.json"
+        pins = directory / "constraints.txt"
+        pins.write_text("".join(f"{line}\n" for line in constraints))
         if requirements:
             _pip(
                 [
@@ -295,6 +303,8 @@ def resolve(
                     "--no-cache-dir",
                     "--index-url",
                     f"http://127.0.0.1:{server.server_port}/simple/",
+                    "--constraint",
+                    str(pins),
                     *requirements,
                 ]
             )
@@ -314,14 +324,7 @@ def resolve(
                     "sha256": digest,
                 }
             )
-        return {
-            "code_sha256": hashlib.sha256(code.encode()).hexdigest(),
-            "requirements": overrides,
-            "inferred": requirements,
-            "imports": roots,
-            "artifacts": locked,
-            "python": sys.version.split()[0],
-        }
+        return locked
     except Exception:
         if stopped:
             raise stopped[0] from None
@@ -330,6 +333,67 @@ def resolve(
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def resolve(
+    code: str,
+    overrides: list[str],
+    route: dict[str, str],
+    directory: Path,
+    candidate: str | dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Resolve missing imports to exact wheel versions using the configured registry.
+
+    Args:
+        code: Current scorer source.
+        overrides: Optional complete package requirement list.
+        route: Parent registry capability.
+        directory: Private sandbox workspace.
+        candidate: Seed candidate whose imports the scorer triggers at run time.
+
+    Returns:
+        Reusable exact artifact lock for this source and runtime.
+    """
+    requirements, roots = infer_requirements(code, overrides, candidate)
+    return {
+        "code_sha256": hashlib.sha256(code.encode()).hexdigest(),
+        "requirements": overrides,
+        "inferred": requirements,
+        "imports": roots,
+        "artifacts": _select(requirements, route, directory, []),
+        "python": sys.version.split()[0],
+    }
+
+
+def extend(
+    lock: dict[str, Any], candidate: str | dict[str, str] | None, route: dict[str, str], directory: Path
+) -> dict[str, Any]:
+    """Install what a later candidate imports beyond the lock, keeping the lock's versions.
+
+    The optimizer writes candidates after the lock was signed, so the imports
+    they introduce were never resolved. The installed site goes first on the
+    module search path so distributions the lock already brought in are not
+    resolved again, and every locked distribution is a constraint so shared
+    dependencies keep the versions the box already has.
+
+    Args:
+        lock: The lock the box was installed from, as extended so far.
+        candidate: The candidate about to run.
+        route: Parent registry capability.
+        directory: Private scorer dependency directory.
+
+    Returns:
+        The candidate's new import roots and the wheels installed for them.
+    """
+    sys.path.insert(0, str(directory / "site"))
+    roots = _candidate_roots(candidate) - set(lock["imports"])
+    requirements = _requirements_for(roots)
+    known = {artifact["sha256"] for artifact in lock["artifacts"]}
+    constraints = [f"{artifact['name']}=={artifact['version']}" for artifact in lock["artifacts"]]
+    selected = _select(requirements, route, directory, constraints) if requirements else []
+    added = [artifact for artifact in selected if artifact["sha256"] not in known]
+    install({"python": lock["python"], "artifacts": added}, route, directory)
+    return {"imports": sorted(roots), "artifacts": added}
 
 
 def install(lock: dict[str, Any], route: dict[str, str], directory: Path) -> None:
@@ -382,6 +446,8 @@ def main() -> None:
                 directory,
                 document.get("candidate"),
             )
+        elif document["action"] == "extend":
+            result = extend(document["lock"], document.get("candidate"), document["route"], directory)
         else:
             install(document["lock"], document["route"], directory)
             result = {"installed": True}
