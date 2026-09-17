@@ -35,7 +35,7 @@ import { TERMS } from "@/shared/lib/terms";
 import type { ScorePoint } from "../lib/extract-scores";
 import { InfoCard } from "./ui-primitives";
 import { PipelineStages, computeStageTimestamps } from "./PipelineStages";
-import { MetaHarnessPanel, TrajectoryPanel, isMetaHarnessRun } from "@/features/trajectory";
+import { MetaHarnessPanel, TrajectoryPanel, climbEngineOf } from "@/features/trajectory";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { buildBlackboxTrajectoryContext } from "../lib/blackbox-trajectory";
@@ -148,17 +148,19 @@ function OverviewTabImpl({
         : undefined,
     [isBlackbox, job.blackbox_result, payload],
   );
-  // A meta-harness lane hill-climbs instead of branching, so it gets the
-  // climb view; the lane that produced the newest versions decides.
+  // A hill-climbing lane (Meta-Harness, AutoResearch, AutoSaddler) gets the
+  // climb view instead of the tree; the lane that produced the newest
+  // versions decides.
   const strategyEngine = (payload?.payload.strategy as Partial<BlackboxStrategy> | undefined)
     ?.engine;
-  const showClimb =
-    isBlackbox &&
-    isMetaHarnessRun(
-      job.progress_events ?? [],
-      job.blackbox_result?.engine_used ?? null,
-      strategyEngine ?? null,
-    );
+  const climbEngine = isBlackbox
+    ? climbEngineOf(
+        job.progress_events ?? [],
+        job.blackbox_result?.engine_used ?? null,
+        strategyEngine ?? null,
+      )
+    : null;
+  const showClimb = climbEngine !== null;
   const renderRunBlocks = job.optimization_type === "run" || isBlackbox || isPairContext;
   const renderGridAgg = job.optimization_type === "grid_search" && !isPairContext;
 
@@ -603,7 +605,9 @@ function OverviewTabImpl({
         </FadeIn>
       )}
 
-      {renderRunBlocks && showClimb && <MetaHarnessPanel job={job} blackbox={blackboxTrajectory} />}
+      {renderRunBlocks && climbEngine !== null && (
+        <MetaHarnessPanel job={job} engine={climbEngine} blackbox={blackboxTrajectory} />
+      )}
 
       {renderRunBlocks && !showClimb && (
         <TrajectoryPanel

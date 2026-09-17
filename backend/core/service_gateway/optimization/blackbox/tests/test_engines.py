@@ -69,10 +69,10 @@ class _SequenceModel:
 
 def test_registry_requires_native_proposer_availability() -> None:
     """Keep native algorithms visible in the catalog but reject unavailable runtimes."""
-    assert available_engine_ids() == [BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_BEST_OF_N, BLACKBOX_ENGINE_AUTOSADDLER]
+    assert available_engine_ids() == [BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_BEST_OF_N]
     assert isinstance(get_engine(BLACKBOX_ENGINE_GEPA), GepaEngine)
     assert isinstance(get_engine(BLACKBOX_ENGINE_BEST_OF_N), BestOfNEngine)
-    for engine_id in (BLACKBOX_ENGINE_AUTORESEARCH, BLACKBOX_ENGINE_META_HARNESS):
+    for engine_id in (BLACKBOX_ENGINE_AUTORESEARCH, BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER):
         assert ENGINES[engine_id].factory is not None
         with pytest.raises(ServiceError, match="proposer runtime is not configured"):
             get_engine(engine_id)
@@ -98,12 +98,12 @@ def test_registry_native_algorithms_do_not_depend_on_candidate_target(sandbox: b
 def test_registry_filters_multi_part_engines() -> None:
     """Expose named-component inputs only for engines whose pinned adapter supports them."""
     assert available_engine_ids(parts=True) == [BLACKBOX_ENGINE_GEPA]
-    assert available_engine_ids(_NATIVE_CAPS, parts=True) == [BLACKBOX_ENGINE_GEPA]
+    assert available_engine_ids(_NATIVE_CAPS, parts=True) == [BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_AUTOSADDLER]
 
 
 def test_registry_rejects_unknown_engine() -> None:
     """Name only algorithms runnable with the supplied execution capabilities."""
-    with pytest.raises(ServiceError, match=r"Unknown engine 'nope'\. Available engines: gepa, best_of_n, autosaddler\."):
+    with pytest.raises(ServiceError, match=r"Unknown engine 'nope'\. Available engines: gepa, best_of_n\."):
         get_engine("nope")
     with pytest.raises(
         ServiceError, match=r"Available engines: gepa, best_of_n, autoresearch, meta_harness, autosaddler\."
@@ -213,6 +213,30 @@ def test_best_of_n_keeps_completed_incumbent_when_next_candidate_is_partial(tmp_
     assert result.best_score == 0.4
     assert result.total_evals == 3
     assert len(result.metadata["bon_cost_log"]) == 1
+
+
+def test_best_of_n_streams_each_completed_sample_as_a_root(tmp_path: Path) -> None:
+    """Announce every fully scored sample, with its case scores, and never a partial one."""
+    model = _SequenceModel(["aeiou", "xyz", "cut short"])
+    sink: list[tuple[str, dict[str, Any]]] = []
+    server = EvalServer(vowel_scorer, max_evals=5)
+    task = Task(seed_candidate="seed", train_set=[{"id": "a"}, {"id": "b"}])
+    ctx = EngineContext(
+        reflection_lm=model,
+        run_dir=str(tmp_path),
+        progress_callback=lambda event, metrics: sink.append((event, metrics)),
+    )
+    result = BestOfNEngine().run(task, server, ctx)
+
+    candidates = [metrics for event, metrics in sink if event == PROGRESS_CANDIDATE]
+    assert [row["candidate_id"] for row in candidates] == ["0", "1"]
+    assert all(row["parent_id"] is None and row["generation"] == 0 for row in candidates)
+    assert candidates[0]["prompt"] == {"current_candidate": "aeiou"}
+    assert candidates[0]["per_example"] == [{"id": "0", "score": 1.0}, {"id": "1", "score": 1.0}]
+    assert candidates[0]["score"] == pytest.approx(result.best_score)
+    assert candidates[1]["score"] == pytest.approx(0.0)
+    assert [row["discovered_at_evals"] for row in candidates] == [2, 4]
+    assert server.used == 5
 
 
 @pytest.mark.parametrize("seed", ["seed", None])

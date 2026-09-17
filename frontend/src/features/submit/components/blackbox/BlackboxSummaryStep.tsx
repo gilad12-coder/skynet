@@ -21,6 +21,7 @@ import {
   Coins,
   Key,
   Wrench,
+  Robot,
   Warning,
   CaretDown,
 } from "@/shared/ui/icons";
@@ -242,6 +243,8 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
     strategyMode,
     selectedEngine,
     runDisabledReason,
+    nativeProposer,
+    proposer,
     iterationLimitSupported,
     maxScorerRuns,
     maxIterations,
@@ -534,6 +537,17 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       tipText={tip("submit.blackbox.harness")}
                     >
                       {harnessLabel(harness)}
+                    </Row>
+                  )}
+                  {nativeProposer && (
+                    <Row
+                      icon={<Robot className="size-3.5" />}
+                      label={msg("submit.blackbox.review.proposer")}
+                      tipText={tip("submit.blackbox.proposer")}
+                    >
+                      {proposer.effort
+                        ? `${harnessLabel(proposer.harness)} · ${msg(`submit.blackbox.proposer.effort.${proposer.effort}`)}`
+                        : harnessLabel(proposer.harness)}
                     </Row>
                   )}
                   <Row

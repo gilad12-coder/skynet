@@ -435,9 +435,7 @@ class SandboxAgentScorer:
                 if not result.ok:
                     detail = _tail(result.stderr or result.stdout, 800)
                     suffix = f": {detail}" if detail else "."
-                    raise ServiceError(
-                        "The agent dependency command failed inside the offline Vercel sandbox" + suffix
-                    )
+                    raise ServiceError("The agent dependency command failed inside the offline Vercel sandbox" + suffix)
             return {
                 "harness": self._target.harness,
                 "readiness": (

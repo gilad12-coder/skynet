@@ -6,7 +6,7 @@ import json
 import math
 import secrets
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,10 +19,15 @@ from gepa.oa.eval_server import EvalServer as UpstreamEvalServer
 from gepa.oa.task import Task as UpstreamTask
 
 from ..budget_stop import BudgetReached
+from .native_engines import AUTORESEARCH_REVISION, META_HARNESS_REVISION
 from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, Task
 
 GEPA_REVISION = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
 GEPA_SOURCE = f"git+https://github.com/gepa-ai/gepa@{GEPA_REVISION}"
+AUTOSADDLER_REVISION = "9df6d2e3e1d3946057243690bca28e136fa81179"
+AUTOSADDLER_SOURCE = f"git+https://github.com/microsoft/AutoSaddler@{AUTOSADDLER_REVISION}"
+META_HARNESS_SOURCE = f"https://github.com/stanford-iris-lab/meta-harness@{META_HARNESS_REVISION}"
+AUTORESEARCH_SOURCE = f"https://github.com/karpathy/autoresearch@{AUTORESEARCH_REVISION}"
 AUTO_ENGINES = ("gepa", "autoresearch", "meta_harness", "autosaddler")
 
 
@@ -46,13 +51,16 @@ def upstream_task(task: Task, name: str) -> UpstreamTask:
     )
 
 
-def upstream_server(task: Task, server: EvalServer, ctx: EngineContext) -> UpstreamEvalServer:
+def upstream_server(
+    task: Task, server: EvalServer, ctx: EngineContext, on_eval: Callable[[Any, Any, float], None] | None = None
+) -> UpstreamEvalServer:
     """Keep upstream evaluations inside Skynet's run-wide scoring allowance.
 
     Args:
         task: Optimization inputs.
         server: Skynet's accounting and scorer boundary.
         ctx: Workspace and concurrency settings.
+        on_eval: Called with the candidate, case and score after each scorer run, if given.
 
     Returns:
         An unstarted upstream server for an in-process engine.
@@ -71,12 +79,15 @@ def upstream_server(task: Task, server: EvalServer, ctx: EngineContext) -> Upstr
             The score and feedback.
         """
         try:
-            return server.evaluate(candidate, example)
+            score, info = server.evaluate(candidate, example)
         except BudgetReached as exc:
             stops.append(exc)
             raise BudgetExhausted(str(exc)) from exc
         except BudgetExhaustedError as exc:
             raise BudgetExhausted(str(exc)) from exc
+        if on_eval is not None:
+            on_eval(candidate, example, score)
+        return score, info
 
     upstream = UpstreamEvalServer(
         upstream_task(task, Path(ctx.run_dir).name),

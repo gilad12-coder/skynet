@@ -150,6 +150,45 @@ class BlackboxTarget(BaseModel):
         return self
 
 
+BLACKBOX_PROPOSER_EFFORTS = ("low", "medium", "high", "max")
+
+
+# The coding agent that drives a harness-based engine (Meta-Harness,
+# AutoResearch, AutoSaddler and the Auto lanes built from them). Any harness
+# Skynet offers for agent targets can be the proposer; the engine knobs mirror
+# the upstream engine configs and are ignored by engines that lack them.
+class BlackboxProposer(BaseModel):
+    harness: str = BLACKBOX_HARNESS_CLAUDE_CODE
+    install_command: str | None = None
+    run_command: str | None = None
+    effort: str | None = None
+    max_thinking_tokens: int | None = Field(default=None, ge=1_024, le=128_000)
+    max_candidates_per_iter: int | None = Field(default=None, ge=1, le=8)
+    ralph: bool = True
+    max_no_eval_seconds: float | None = Field(default=None, gt=0, le=7_200)
+
+    @model_validator(mode="after")
+    def _ensure_launchable(self) -> BlackboxProposer:
+        """Require a known harness and a run command for a custom one.
+
+        Returns:
+            The validated proposer instance.
+
+        Raises:
+            ValueError: When the harness or effort level is unknown, or a
+                custom harness has no run command.
+        """
+        if self.harness not in BLACKBOX_HARNESSES:
+            raise ValueError(
+                f"Unknown proposer harness '{self.harness}'. Known harnesses: {', '.join(BLACKBOX_HARNESSES)}."
+            )
+        if self.harness == BLACKBOX_HARNESS_CUSTOM and not (self.run_command or "").strip():
+            raise ValueError("A custom proposer harness needs a run_command.")
+        if self.effort is not None and self.effort not in BLACKBOX_PROPOSER_EFFORTS:
+            raise ValueError(f"Unknown effort '{self.effort}'. Known levels: {', '.join(BLACKBOX_PROPOSER_EFFORTS)}.")
+        return self
+
+
 # ``auto`` explores every available engine on a budget slice, then continues
 # from the best version with GEPA; ``single`` runs one named engine.
 class BlackboxStrategy(BaseModel):
@@ -194,6 +233,7 @@ class BlackboxRunRequest(BaseModel):
     strategy: BlackboxStrategy = Field(default_factory=BlackboxStrategy)
     target: BlackboxTarget = Field(default_factory=BlackboxTarget)
     proposer_runtime: Literal["vercel"] = "vercel"
+    proposer: BlackboxProposer = Field(default_factory=BlackboxProposer)
     task_model_settings: ModelConfig | None = Field(default=None, alias="task_model_config")
     reflection_model_settings: ModelConfig = Field(alias="reflection_model_config")
     token_source: Literal["managed", "byok"] = "managed"

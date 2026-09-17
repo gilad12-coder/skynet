@@ -21,14 +21,16 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from ....billing.model_gateway import raise_gateway_stop
+from ....billing.pricing import model_token_costs
 from ....billing.runtime import UsagePendingError
 from ....config import Settings, settings
 from ....exceptions import ServiceError
+from ....models.blackbox import BLACKBOX_HARNESS_CLAUDE_CODE, BlackboxProposer, BlackboxTarget
 from ..budget_stop import BudgetReached
-from . import native_runner
+from . import harness_bridge, native_runner
 from .agent_eval import gateway_from_settings
-from .feedback import emit_candidate
-from .harness import GatewayConfig
+from .feedback import emit_candidate, emit_case_scored
+from .harness import GatewayConfig, build_launch, launch_payload, pinned_harness_check
 from .protocol import BudgetExhaustedError, EngineContext, EvalServer, Result, Task
 from .runner import side_info_json_default
 from .sandbox import (
@@ -40,6 +42,14 @@ from .sandbox import (
     sandbox_runtime_from_settings,
     sandbox_unavailable_reason,
     unique_sandbox_name,
+)
+from .upstream import (
+    AUTORESEARCH_REVISION,
+    AUTORESEARCH_SOURCE,
+    AUTOSADDLER_REVISION,
+    AUTOSADDLER_SOURCE,
+    META_HARNESS_REVISION,
+    META_HARNESS_SOURCE,
 )
 
 GEPA_SOURCE = "0632cdb5dcc052e690eab439e1b4a7e3e9cfe407"
@@ -56,6 +66,56 @@ _INSTALL_ALLOWANCE = 600.0
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _UUID = re.compile(r"^[0-9a-f]{32}$")
+NATIVE_ENGINES = frozenset({"meta_harness", "autoresearch", "autosaddler"})
+_UPSTREAMS = {
+    "meta_harness": (META_HARNESS_SOURCE, META_HARNESS_REVISION),
+    "autoresearch": (AUTORESEARCH_SOURCE, AUTORESEARCH_REVISION),
+    "autosaddler": (AUTOSADDLER_SOURCE, AUTOSADDLER_REVISION),
+}
+_AUTOSADDLER_RUNNER_FILE = "autosaddler_runner.py"
+_BRIDGE_FILE = "harness_bridge.py"
+_ENGINES_FILE = "native_engines.py"
+_PROMPTS_DIR = "upstream_prompts"
+_AUTOSADDLER_PLUGIN_DIR = "autosaddler_plugin"
+# Upstream AutoSaddler v2 declares Python 3.12+ (its usage dataclasses rely on
+# 3.12 default semantics), so its guest carries its own interpreter and a
+# fully pinned, dependency-free install of exactly what the v2 core imports.
+AUTOSADDLER_PYTHON_FLOOR = (3, 12)
+_AUTOSADDLER_PYTHON = "3.12.12"
+_AUTOSADDLER_PINS = (
+    f"autosaddler @ https://github.com/microsoft/AutoSaddler/archive/{AUTOSADDLER_REVISION}.tar.gz",
+    "annotated-types==0.8.0",
+    "anyio==4.15.1",
+    "attrs==26.1.0",
+    "cffi==2.1.1",
+    "claude-agent-sdk==0.2.152",
+    "click==8.5.0",
+    "cryptography==50.0.1",
+    "h11==0.16.0",
+    "httpcore2==2.13.0",
+    "httpx2==2.13.0",
+    "idna==3.19",
+    "jsonschema==4.26.0",
+    "jsonschema-specifications==2025.9.1",
+    "mcp==2.2.0",
+    "mcp-types==2.2.0",
+    "opentelemetry-api==1.44.0",
+    "pycparser==3.0",
+    "pydantic==2.13.5",
+    "pydantic_core==2.46.5",
+    "PyJWT==2.14.0",
+    "python-multipart==0.0.32",
+    "PyYAML==6.0.3",
+    "referencing==0.37.0",
+    "rpds-py==2026.6.3",
+    "sniffio==1.3.1",
+    "sse-starlette==3.4.11",
+    "starlette==1.6.0",
+    "truststore==0.10.4",
+    "typing_extensions==4.16.0",
+    "typing-inspection==0.4.4",
+    "uvicorn==0.53.0",
+)
 
 
 @dataclass(frozen=True)
@@ -67,6 +127,7 @@ class NativeOptions:
     gateway: GatewayConfig = field(repr=False)
     max_token_cost: float
     timeout_seconds: float = 2400.0
+    proposer: BlackboxProposer = field(default_factory=BlackboxProposer)
     budget_route: dict[str, str] | None = field(default=None, repr=False)
     sandbox_runtime: SandboxRuntime | None = None
     usage_by_model: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -126,21 +187,99 @@ def _source_archive() -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
-def _bootstrap_command(runtime: str, *, protected: bool = False) -> str:
+def _runner_files(engine_id: str) -> dict[str, str]:
+    """Collect the sandbox-side runner plus the pinned upstream prompts or plugin it drives.
+
+    Args:
+        engine_id: Native engine being launched.
+
+    Returns:
+        Relative file paths mapped to their text.
+    """
+    bridge = {_BRIDGE_FILE: Path(harness_bridge.__file__).read_text(encoding="utf-8")}
+    if engine_id != "autosaddler":
+        engines = Path(native_runner.__file__).with_name(_ENGINES_FILE)
+        files = {
+            **bridge,
+            _RUNNER_FILE: Path(native_runner.__file__).read_text(encoding="utf-8"),
+            _ENGINES_FILE: engines.read_text(encoding="utf-8"),
+        }
+        prompts_root = engines.with_name(_PROMPTS_DIR)
+        for asset in sorted(path for path in prompts_root.rglob("*") if path.is_file()):
+            files[f"{_PROMPTS_DIR}/{asset.relative_to(prompts_root).as_posix()}"] = asset.read_text(encoding="utf-8")
+        return files
+    runner = Path(native_runner.__file__).with_name(_AUTOSADDLER_RUNNER_FILE)
+    plugin_root = runner.with_name(_AUTOSADDLER_PLUGIN_DIR)
+    files = {**bridge, _AUTOSADDLER_RUNNER_FILE: runner.read_text(encoding="utf-8")}
+    for asset in sorted(plugin_root.rglob("*.md")):
+        files[f"{_AUTOSADDLER_PLUGIN_DIR}/{asset.relative_to(plugin_root).as_posix()}"] = asset.read_text(
+            encoding="utf-8"
+        )
+    return files
+
+
+def _harness_setup(harness: str, install_command: str | None, *, protected: bool) -> tuple[str, str]:
+    """Return the install step and the version assertion for the proposer harness.
+
+    Args:
+        harness: Proposer harness identifier.
+        install_command: Launch install command for a built-in or custom harness.
+        protected: Whether the offline image must already carry the harness.
+
+    Returns:
+        ``(install, check)`` shell fragments, each ending in ``"; "`` or empty.
+    """
+    if harness == BLACKBOX_HARNESS_CLAUDE_CODE:
+        install = (
+            f'if ! claude --version 2>/dev/null | grep -q "^{re.escape(CLAUDE_VERSION)} "; then '
+            f'npm install --global --prefix "$HOME/.local" @anthropic-ai/claude-code@{CLAUDE_VERSION}; fi; '
+        )
+        return ("" if protected else install), f'claude --version | grep -q "^{re.escape(CLAUDE_VERSION)} "; '
+    check = pinned_harness_check(harness)
+    install = f"{install_command}; " if install_command and not protected else ""
+    return install, (f"{check}; " if check else "")
+
+
+def _bootstrap_command(
+    runtime: str,
+    *,
+    protected: bool = False,
+    engine_id: str = "meta_harness",
+    harness: str = BLACKBOX_HARNESS_CLAUDE_CODE,
+    install_command: str | None = None,
+) -> str:
     """Build installation and preflight commands with immutable package versions.
 
     Args:
         runtime: Selected managed execution environment.
         protected: Require dependencies already present in the immutable offline image.
+        engine_id: Native engine whose interpreter and packages are prepared.
+        harness: Proposer harness the engine drives.
+        install_command: Install step of a non-Claude proposer harness.
 
     Returns:
         Shell command that prepares the isolated source and runtime.
     """
+    autosaddler = engine_id == "autosaddler"
+    harness_install, harness_check = _harness_setup(harness, install_command, protected=protected)
+    floor = AUTOSADDLER_PYTHON_FLOOR if autosaddler else PYTHON_FLOOR
     prepare = (
         "set -eu; mkdir -p .claude .cache .local native_vendor rpc; "
         "test -f .claude.json || printf '{}' > .claude.json; "
     )
-    if not protected:
+    if not protected and autosaddler:
+        pins = " ".join(shlex.quote(pin) for pin in _AUTOSADDLER_PINS)
+        prepare += (
+            'export HOME="$PWD"; '
+            'export PATH="$HOME/.local/bin:$PATH"; '
+            "if ! command -v uv > /dev/null 2>&1; then "
+            "python3 -m pip install --disable-pip-version-check --no-deps --user uv==0.9.13; fi; "
+            f"uv venv --python {_AUTOSADDLER_PYTHON} native_venv; "
+            f"uv pip install --python native_venv/bin/python --no-deps {pins}; "
+            'printf "%s\\n" "$PWD/native_venv/bin/python" > native-python.txt; '
+            "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; " + harness_install
+        )
+    elif not protected:
         prepare += (
             'export HOME="$PWD"; '
             'export PATH="$HOME/.local/bin:$PATH"; '
@@ -149,9 +288,7 @@ def _bootstrap_command(runtime: str, *, protected: bool = False) -> str:
             "python3 -m pip install --disable-pip-version-check --no-deps --user uv==0.9.13; "
             '"$HOME/.local/bin/uv" python install 3.11.9; '
             '"$HOME/.local/bin/uv" python find 3.11.9 > native-python.txt; fi; '
-            "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; "
-            f'if ! claude --version 2>/dev/null | grep -q "^{re.escape(CLAUDE_VERSION)} "; then '
-            f'npm install --global --prefix "$HOME/.local" @anthropic-ai/claude-code@{CLAUDE_VERSION}; fi; '
+            "node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'; " + harness_install
         )
     else:
         prepare += "command -v python3 > native-python.txt; "
@@ -160,15 +297,18 @@ def _bootstrap_command(runtime: str, *, protected: bool = False) -> str:
         "data=base64.b64decode(pathlib.Path('native_source.tar.gz.b64').read_text()); "
         "tarfile.open(fileobj=io.BytesIO(data),mode='r:gz').extractall('native_vendor',filter='data')"
     )
+    if not autosaddler:
+        prepare += f'"$(cat native-python.txt)" -c {shlex.quote(extract)}; '
     prepare += (
-        f'"$(cat native-python.txt)" -c {shlex.quote(extract)}; '
-        f'claude --version | grep -q "^{re.escape(CLAUDE_VERSION)} "; '
-        f'"$(cat native-python.txt)" -c '
+        harness_check
+        + '"$(cat native-python.txt)" -c '
         + shlex.quote(
-            f"import sys; assert sys.version_info >= {PYTHON_FLOOR!r}, "
-            f"'Native optimizers need Python {'.'.join(map(str, PYTHON_FLOOR))} or newer'"
+            f"import sys; assert sys.version_info >= {floor!r}, "
+            f"'Native optimizers need Python {'.'.join(map(str, floor))} or newer'"
         )
     )
+    if autosaddler:
+        prepare += '; "$(cat native-python.txt)" -c ' + shlex.quote("import autosaddler.v2.core.engine")
     if protected:
         prepare += "; node -e 'if (+process.versions.node.split(\".\")[0] < 22) process.exit(1)'"
     return prepare
@@ -238,10 +378,7 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
     started = time.monotonic()
     try:
         session.write_files(
-            {
-                _RUNNER_FILE: Path(native_runner.__file__).read_text(encoding="utf-8"),
-                "native_source.tar.gz.b64": source,
-            }
+            {**_runner_files("meta_harness"), **_runner_files("autosaddler"), "native_source.tar.gz.b64": source}
         )
         install_timeout = min(60, lifetime - 1)
         installed = session.run(_bootstrap_command(options.runtime, protected=True), timeout_seconds=install_timeout)
@@ -251,13 +388,14 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
                 + _failure_detail(installed, install_timeout)
             )
         probe = (
-            "import json,subprocess; import native_runner; "
-            "from gepa.oa.registry import get_engine_cls; "
-            "[get_engine_cls(name) for name in ('meta_harness','autoresearch')]; "
+            "import importlib.util,json,subprocess,sys; import native_runner, autosaddler_runner, native_engines; "
+            "native_engines.check_assets(); "
+            f"autosaddler=sys.version_info >= {AUTOSADDLER_PYTHON_FLOOR!r} "
+            "and importlib.util.find_spec('autosaddler') is not None; "
             "prefix=[]; "
             "result=subprocess.run([*prefix,'claude','--version'],capture_output=True,text=True,timeout=20,check=True); "
             f"assert result.stdout.split(' ',1)[0] == {CLAUDE_VERSION!r}; "
-            "print(json.dumps({'ready':True}))"
+            "print(json.dumps({'ready':True,'autosaddler':autosaddler}))"
         )
         remaining = lifetime - (time.monotonic() - started) - 1
         if remaining <= 0:
@@ -269,16 +407,24 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
             timeout_seconds=probe_timeout,
             env={"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CI": "1"},
         )
-        if (
-            not checked.ok
-            or checked.timed_out
-            or not any(line.strip() == '{"ready": true}' for line in checked.stdout.splitlines())
-        ):
+        ready = next(
+            (json.loads(line) for line in checked.stdout.splitlines() if line.strip().startswith('{"ready": true')),
+            None,
+        )
+        if not checked.ok or checked.timed_out or ready is None:
             raise ServiceError(
                 "The selected native runtime cannot launch the pinned upstream engine dependencies. "
                 + _failure_detail(checked, probe_timeout)
             )
-        return {"runtime": options.runtime, "gepa_source": GEPA_SOURCE, "claude_version": CLAUDE_VERSION}
+        return {
+            "runtime": options.runtime,
+            "gepa_source": GEPA_SOURCE,
+            "meta_harness_source": META_HARNESS_REVISION,
+            "autoresearch_source": AUTORESEARCH_REVISION,
+            "autosaddler_source": AUTOSADDLER_REVISION,
+            "autosaddler_ready": bool(ready.get("autosaddler")),
+            "claude_version": CLAUDE_VERSION,
+        }
     finally:
         original_error = sys.exception()
         try:
@@ -298,6 +444,7 @@ class _EvaluatorMailbox:
         nonce: str,
         progress_callback: Any = None,
         check_budget: Any = None,
+        str_mode: bool = True,
     ) -> None:
         """Bind the transport to one parent evaluator.
 
@@ -307,7 +454,9 @@ class _EvaluatorMailbox:
             nonce: Per-process framing token.
             progress_callback: Optional job trajectory sink.
             check_budget: Direct cumulative-spend guard, including on reader threads.
+            str_mode: Whether the task admits only text candidates rather than named parts.
         """
+        self.str_mode = str_mode
         self.session = session
         self.server = server
         self.nonce = nonce
@@ -342,21 +491,38 @@ class _EvaluatorMailbox:
                     self.error = self.error or exc
 
     def _progress(self, event: dict[str, Any]) -> None:
-        """Emit only completed aggregate checkpoints reported by upstream.
+        """Relay a child checkpoint: one scored case of a sweep, or a completed aggregate.
 
         Args:
-            event: Candidate and aggregate score reported by upstream log_progress.
+            event: Case score or candidate aggregate reported by the child.
         """
         score = event.get("score")
-        if not isinstance(score, float | int) or not math.isfinite(score):
+        candidate_id = event.get("candidate_id")
+        if not _finite(score) or isinstance(candidate_id, bool) or not isinstance(candidate_id, int):
             return
+        if event.get("event") == "case_scored":
+            total = event.get("total")
+            if isinstance(total, int) and not isinstance(total, bool):
+                emit_case_scored(
+                    self.progress_callback,
+                    trial=candidate_id,
+                    example_id=str(event.get("example_id", "?")),
+                    score=float(score),
+                    total=total,
+                )
+            return
+        per_example = event.get("per_example")
         emit_candidate(
             self.progress_callback,
-            candidate_id=str(event["candidate_id"]),
+            candidate_id=str(candidate_id),
             parent_id=None,
             generation=0,
             score=float(score),
-            per_example=[],
+            per_example=[
+                (str(example_id), float(value))
+                for example_id, value in (per_example if isinstance(per_example, list) else [])
+                if _finite(value)
+            ],
             candidate=event["candidate"],
             discovered_at_evals=int(event["total_evals"]),
             iteration=None,
@@ -380,8 +546,8 @@ class _EvaluatorMailbox:
             else:
                 try:
                     candidate = request["candidate"]
-                    if not isinstance(candidate, str):
-                        raise ServiceError("Native agent engines require a text candidate.")
+                    if not _candidate_shape_ok(candidate, self.str_mode):
+                        raise ServiceError("Native evaluator request carries an invalid candidate shape.")
                     if self.check_budget is not None:
                         self.check_budget()
                     score, info = self.server.evaluate(candidate, request.get("example"))
@@ -399,6 +565,37 @@ class _EvaluatorMailbox:
                 self.error = self.error or exc
                 self._responses[request_id] = json.dumps({"error": "The parent evaluator returned invalid feedback."})
         self.session.write_files({f"rpc/{request_id}.json": self._responses[request_id]})
+
+
+def _finite(value: Any) -> bool:
+    """Whether a child-reported score is a finite number.
+
+    Args:
+        value: Score field of a progress line.
+
+    Returns:
+        ``True`` for finite ints and floats, ``False`` for anything else.
+    """
+    return isinstance(value, float | int) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _candidate_shape_ok(candidate: Any, str_mode: bool) -> bool:
+    """Check that a child candidate matches the task's text or named-parts shape.
+
+    Args:
+        candidate: Candidate value received from the child.
+        str_mode: Whether the task admits only text candidates.
+
+    Returns:
+        ``True`` when the parent evaluator may score the candidate.
+    """
+    if str_mode:
+        return isinstance(candidate, str)
+    return (
+        isinstance(candidate, dict)
+        and bool(candidate)
+        and all(isinstance(name, str) and isinstance(text, str) for name, text in candidate.items())
+    )
 
 
 def _restore_artifacts(session: SandboxSession, destination: Path) -> None:
@@ -451,7 +648,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     """Execute an unchanged upstream agent engine inside the managed sandbox.
 
     Args:
-        engine_id: Upstream ``meta_harness`` or ``autoresearch`` identifier.
+        engine_id: Upstream ``meta_harness``, ``autoresearch`` or ``autosaddler`` identifier.
         task: Seed and visible training/validation examples.
         server: Skynet evaluator and shared evaluation budget.
         ctx: Run context containing native execution options.
@@ -466,8 +663,15 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     options = ctx.native_options
     if options is None or options.runtime != "vercel":
         raise ServiceError("Native optimizers require the managed Vercel sandbox.")
-    if engine_id not in ("meta_harness", "autoresearch") or not task.str_mode:
+    if engine_id not in NATIVE_ENGINES:
+        raise ServiceError("Unsupported native optimizer.")
+    autosaddler = engine_id == "autosaddler"
+    if not autosaddler and not task.str_mode:
         raise ServiceError("Native agent engines require a single text candidate.")
+    if autosaddler and task.seed_candidate is None:
+        raise ServiceError("AutoSaddler requires a seed candidate to patch.")
+    if autosaddler and len(task.train_set or []) + len(task.val_set or []) < 2:
+        raise ServiceError("AutoSaddler needs at least two visible examples to diagnose and confirm patches.")
     if server.remaining <= 0:
         raise BudgetExhaustedError("The native optimizer evaluation budget is exhausted.")
     if not math.isfinite(options.max_token_cost) or options.max_token_cost <= 0:
@@ -485,7 +689,22 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         if runtime.injects_headers and gateway_host
         else {}
     )
-    source = _source_archive()
+    source = None if autosaddler else _source_archive()
+    upstream_source, upstream_revision = _UPSTREAMS[engine_id]
+    runner_file = _AUTOSADDLER_RUNNER_FILE if autosaddler else _RUNNER_FILE
+    proposer = options.proposer
+    launch = build_launch(
+        BlackboxTarget(
+            kind="agent",
+            harness=proposer.harness,
+            model=options.model,
+            install_command=proposer.install_command,
+            run_command=proposer.run_command,
+        ),
+        GatewayConfig(url=options.gateway.url, api_key=harness_bridge.KEY_TOKEN),
+        protected=options.budget_route is not None,
+    )
+    input_price, output_price = model_token_costs(options.model)
     lifetime = options.timeout_seconds + _INSTALL_ALLOWANCE
     lifetime = min(lifetime, settings.vercel_sandbox_max_lifetime_seconds)
     spec = SandboxSpec(
@@ -498,12 +717,17 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     final_result: Result | None = None
     opened = time.monotonic()
     mailbox = _EvaluatorMailbox(
-        session, server, nonce, getattr(ctx, "progress_callback", None), getattr(ctx, "check_budget", None)
+        session,
+        server,
+        nonce,
+        getattr(ctx, "progress_callback", None),
+        getattr(ctx, "check_budget", None),
+        str_mode=task.str_mode,
     )
     try:
         payload = {
             "nonce": nonce,
-            "source": GEPA_SOURCE,
+            "source": upstream_revision,
             "engine_id": engine_id,
             "model": options.model,
             "sandbox": False,
@@ -513,6 +737,17 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             "max_iterations": ctx.max_iterations,
             "stop_at_score": ctx.stop_at_score,
             "timeout_seconds": options.timeout_seconds,
+            "proposer": {
+                **launch_payload(launch),
+                "harness": proposer.harness,
+                "model": options.model,
+                "price": {"input": input_price, "output": output_price},
+                "effort": proposer.effort,
+                "max_thinking_tokens": proposer.max_thinking_tokens,
+                "max_candidates_per_iter": proposer.max_candidates_per_iter,
+                "ralph": proposer.ralph,
+                "max_no_eval_seconds": proposer.max_no_eval_seconds,
+            },
             "task": {
                 "name": engine_id,
                 "seed_candidate": task.seed_candidate,
@@ -524,13 +759,19 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         }
         session.write_files(
             {
-                _RUNNER_FILE: Path(native_runner.__file__).read_text(encoding="utf-8"),
+                **_runner_files(engine_id),
                 _INPUT_FILE: json.dumps(payload, default=side_info_json_default),
-                "native_source.tar.gz.b64": source,
+                **({} if source is None else {"native_source.tar.gz.b64": source}),
             }
         )
         installed = session.run(
-            _bootstrap_command(options.runtime, protected=options.budget_route is not None),
+            _bootstrap_command(
+                options.runtime,
+                protected=options.budget_route is not None,
+                engine_id=engine_id,
+                harness=proposer.harness,
+                install_command=launch.install_command,
+            ),
             timeout_seconds=min(_INSTALL_ALLOWANCE, lifetime - 1.0),
         )
         if not installed.ok or installed.timed_out:
@@ -540,15 +781,17 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         env = {
             "ANTHROPIC_BASE_URL": (relay or options.gateway.url).removesuffix("/v1"),
             "ANTHROPIC_AUTH_TOKEN": "skynet-managed" if headers else options.gateway.api_key,
+            harness_bridge.KEY_ENV: "skynet-managed" if headers else options.gateway.api_key,
             "DISABLE_AUTOUPDATER": "1",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
             "CI": "1",
             "NO_COLOR": "1",
+            **({"SKYNET_BUDGET_RELAY_URL": relay} if relay else {}),
         }
         command = (
             'export HOME="$PWD"; export PATH="$HOME/.local/bin:$PATH"; '
             'export PYTHONPATH="$PWD/native_vendor"; '
-            f'exec "$(cat native-python.txt)" {_RUNNER_FILE} {_INPUT_FILE}'
+            f'exec "$(cat native-python.txt)" {runner_file} {_INPUT_FILE}'
         )
         timeout = min(options.timeout_seconds, lifetime - (time.monotonic() - opened) - 1.0)
         if timeout <= 0:
@@ -573,7 +816,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
                     total_evals=document.get("total_evals", 0),
                     metadata={
                         **document.get("metadata", {}),
-                        "upstream_source": f"git+https://github.com/gepa-ai/gepa@{GEPA_SOURCE}",
+                        "upstream_source": upstream_source,
                         "native_artifacts_dir": str(artifacts_dir),
                         "native_usage_by_model": usage,
                     },
@@ -620,8 +863,8 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         metadata = dict(document.get("metadata", {}))
         metadata.update(
             {
-                "upstream_source": f"git+https://github.com/gepa-ai/gepa@{GEPA_SOURCE}",
-                "upstream_revision": GEPA_SOURCE,
+                "upstream_source": upstream_source,
+                "upstream_revision": upstream_revision,
                 "runtime": options.runtime,
                 "native_artifacts_dir": str(artifacts_dir),
                 "native_usage_by_model": usage,

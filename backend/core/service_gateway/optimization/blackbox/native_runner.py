@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import importlib.util
 import io
 import json
 import math
@@ -24,12 +25,25 @@ from typing import Any
 
 from gepa.oa.budget import BudgetTracker
 from gepa.oa.config import OptimizeAnythingConfig
-from gepa.oa.engines.autoresearch import _best_aggregate_candidate
 from gepa.oa.eval_server import EvalServer
-from gepa.oa.registry import get_engine_cls
 from gepa.oa.task import Task
 
+try:
+    from . import harness_bridge, native_engines
+except ImportError:  # In the sandbox this file runs as a script beside its sibling modules.
+    _sibling_modules = {}
+    for _sibling in ("harness_bridge", "native_engines"):
+        _spec = importlib.util.spec_from_file_location(_sibling, Path(__file__).with_name(f"{_sibling}.py"))
+        assert _spec is not None
+        assert _spec.loader is not None
+        _sibling_modules[_sibling] = importlib.util.module_from_spec(_spec)
+        sys.modules[_sibling] = _sibling_modules[_sibling]
+        _spec.loader.exec_module(_sibling_modules[_sibling])
+    harness_bridge = _sibling_modules["harness_bridge"]
+    native_engines = _sibling_modules["native_engines"]
+
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
+_PROGRESS_PREFIX = "SKYNET_NATIVE_PROGRESS "
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _TOKEN_NAMES = ("prompt_tokens", "completion_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 _PROC_ROOT = Path("/proc")
@@ -113,7 +127,7 @@ class EvaluatorMailbox:
 
 
 class ProgressEvalServer(EvalServer):
-    """Forward aggregate checkpoints after upstream records them normally."""
+    """Forward aggregate checkpoints, and the case scores behind them, as upstream records them."""
 
     def __init__(self, task: Task, mailbox: EvaluatorMailbox, config: OptimizeAnythingConfig, output_dir: Path) -> None:
         """Bind the upstream evaluator and its additive progress transport.
@@ -125,6 +139,8 @@ class ProgressEvalServer(EvalServer):
             output_dir: Persisted upstream evaluation artifacts.
         """
         self.mailbox = mailbox
+        self._sweeps: dict[str, dict[str, Any]] = {}
+        self._sweep_lock = threading.Lock()
         super().__init__(
             task,
             mailbox.evaluate,
@@ -132,11 +148,89 @@ class ProgressEvalServer(EvalServer):
             max_concurrency=config.max_concurrency,
             output_dir=output_dir,
         )
+        # Cases are named by position, as the other engines name them, so the
+        # run view lines a native version's cases up with the rest of the run.
+        self._case_ids = {id(example): str(index) for index, example in enumerate(self._examples.values())}
+
+    def _sweep_targets(self, example_ids: list[str] | None, split: str | None) -> list[str]:
+        """Mirror the case selection upstream ``evaluate_examples`` makes.
+
+        Args:
+            example_ids: Explicit case ids, if the caller named them.
+            split: Split name otherwise, ``"all"`` for train and val.
+
+        Returns:
+            The ids of the cases upstream will score.
+        """
+        if example_ids is not None:
+            return [eid for eid in example_ids if eid in self._examples]
+        if split is not None:
+            splits = ("train", "val") if split == "all" else (split,)
+            return [eid for name in splits for eid in self._split_ids.get(name, [])]
+        return list(self._split_ids["train"])
+
+    def evaluate_examples(
+        self, candidate: str, example_ids: list[str] | None = None, split: str | None = None
+    ) -> tuple[float, dict[str, Any]]:
+        """Score a candidate on cases, streaming the sweep when it covers every visible case.
+
+        Upstream logs a checkpoint only for a sweep of every visible case, so
+        only such a sweep streams case by case; a partial probe would otherwise
+        leave a version half-scored in the run view for good.
+
+        Args:
+            candidate: Candidate to score.
+            example_ids: Explicit case ids, if the caller named them.
+            split: Split name otherwise.
+
+        Returns:
+            The unchanged upstream aggregate and per-case details.
+        """
+        targets = self._sweep_targets(example_ids, split)
+        if set(targets) == set(self._agent_visible_ids()):
+            with self._sweep_lock:
+                self._sweeps[_candidate_key(candidate)] = {
+                    "candidate_id": self._register_candidate(candidate),
+                    "total": len(targets),
+                    "scores": [],
+                }
+        return super().evaluate_examples(candidate, example_ids, split)
+
+    def evaluate(self, candidate: str, example: Any | None = None, **kwargs: Any) -> tuple[float, dict[str, Any]]:
+        """Score one case, announcing it when it belongs to a streaming sweep.
+
+        Args:
+            candidate: Candidate to score.
+            example: Case to score it on, or ``None`` in single-task mode.
+            **kwargs: Extra evaluator arguments upstream forwards.
+
+        Returns:
+            The unchanged upstream score and side information.
+        """
+        score, info = super().evaluate(candidate, example, **kwargs)
+        with self._sweep_lock:
+            sweep = self._sweeps.get(_candidate_key(candidate))
+        if sweep is None or example is None or not isinstance(score, float | int) or not math.isfinite(score):
+            return score, info
+        example_id = self._case_ids.get(id(example), "?")
+        with self._sweep_lock:
+            sweep["scores"].append((example_id, float(score)))
+        self.mailbox.emit(
+            _PROGRESS_PREFIX,
+            {
+                "event": "case_scored",
+                "candidate_id": sweep["candidate_id"],
+                "example_id": example_id,
+                "score": float(score),
+                "total": sweep["total"],
+            },
+        )
+        return score, info
 
     def log_progress(
         self, val_score: float, candidate: str | None = None, reflection_cost: float = 0.0
     ) -> dict[str, Any]:
-        """Forward an upstream aggregate without constructing candidate ancestry.
+        """Forward an upstream aggregate, with its sweep's case scores, without constructing ancestry.
 
         Args:
             val_score: Aggregate score computed by the unchanged upstream engine.
@@ -148,16 +242,31 @@ class ProgressEvalServer(EvalServer):
         """
         result = super().log_progress(val_score, candidate, reflection_cost)
         if isinstance(candidate, str) and math.isfinite(val_score):
+            with self._sweep_lock:
+                sweep = self._sweeps.pop(_candidate_key(candidate), None)
             self.mailbox.emit(
-                "SKYNET_NATIVE_PROGRESS ",
+                _PROGRESS_PREFIX,
                 {
                     "candidate_id": self._register_candidate(candidate),
                     "candidate": candidate,
                     "score": val_score,
                     "total_evals": self.budget.used,
+                    "per_example": [] if sweep is None else list(sweep["scores"]),
                 },
             )
         return result
+
+
+def _candidate_key(candidate: Any) -> str:
+    """Key a candidate the way upstream's registry does.
+
+    Args:
+        candidate: Candidate text, or a legacy mapping.
+
+    Returns:
+        The text itself, or its sorted JSON form.
+    """
+    return candidate if isinstance(candidate, str) else json.dumps(candidate, sort_keys=True)
 
 
 def _number(value: Any) -> int:
@@ -359,11 +468,10 @@ def _has_evaluated_single_result(server: EvalServer, output_dir: Path, candidate
     return False
 
 
-def _budget_incumbent(engine_id: str, engine: Any, task: Task, server: EvalServer, output_dir: Path) -> dict[str, Any]:
+def _budget_incumbent(engine: Any, task: Task, server: EvalServer, output_dir: Path) -> dict[str, Any]:
     """Retain an incumbent published by the upstream engine before interruption.
 
     Args:
-        engine_id: Pinned native engine.
         engine: Interrupted upstream instance.
         task: Unchanged task and visible evaluation scope.
         server: Completed evaluation evidence.
@@ -372,28 +480,10 @@ def _budget_incumbent(engine_id: str, engine: Any, task: Task, server: EvalServe
     Returns:
         An evaluated candidate envelope, or an empty mapping when none was published.
     """
-    pending = getattr(engine, "_pending_tempdir", None)
-    work_dir = Path(pending.name) if pending is not None else Path(engine.run_dir)
-    if engine_id == "meta_harness":
-        frontier = engine._read_frontier(work_dir / "state/frontier.json")
-        score = engine._best_score(work_dir / "state/frontier.json")
-        filename = frontier.get("best_candidate_file")
-        if not isinstance(filename, str):
-            return {}
-        candidate_path = (work_dir / filename).resolve()
-        if not candidate_path.is_relative_to(work_dir.resolve()) or not candidate_path.is_file():
-            return {}
-        candidate = candidate_path.read_text(encoding="utf-8")
-    elif task.has_dataset:
-        selected = _best_aggregate_candidate(server)
-        if selected is None:
-            return {}
-        candidate, score = selected
-    else:
-        best_file = work_dir / "best_candidate.txt"
-        if not best_file.is_file():
-            return {}
-        candidate, score = best_file.read_text(encoding="utf-8"), server.best_score
+    selected = engine.incumbent(server)
+    if selected is None:
+        return {}
+    candidate, score = selected
     if not isinstance(score, int | float) or not math.isfinite(score):
         return {}
     if task.has_dataset:
@@ -414,6 +504,38 @@ def _budget_incumbent(engine_id: str, engine: Any, task: Task, server: EvalServe
     }
 
 
+def _engine_knobs(engine_id: str, proposer: dict[str, Any]) -> dict[str, Any]:
+    """Translate the request's proposer settings into the upstream engine config.
+
+    Args:
+        engine_id: Upstream engine being configured.
+        proposer: Proposer block of the parent payload.
+
+    Returns:
+        Only the keys the named engine's config dataclass accepts, minus unset ones.
+    """
+    if engine_id == "meta_harness":
+        names = ("max_candidates_per_iter", "effort", "max_thinking_tokens")
+    else:
+        names = ("ralph", "max_no_eval_seconds", "effort", "max_thinking_tokens")
+    return {name: proposer[name] for name in names if proposer.get(name) is not None}
+
+
+def _install_proposer(proposer: dict[str, Any]) -> None:
+    """Put the configured harness behind the ``claude`` command the upstream engines run.
+
+    Args:
+        proposer: Proposer block of the parent payload.
+    """
+    if not proposer or proposer.get("harness") == "claude_code":
+        return
+    config_file = Path("proposer.json").resolve()
+    config_file.write_text(json.dumps(proposer), encoding="utf-8")
+    os.environ[harness_bridge.CONFIG_ENV] = str(config_file)
+    shim_dir = harness_bridge.install_shim(Path.home(), Path(harness_bridge.__file__).resolve(), sys.executable)
+    os.environ["PATH"] = f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+
+
 def execute(payload: dict[str, Any]) -> dict[str, Any]:
     """Run the exact upstream engine and capture its result and histories.
 
@@ -428,7 +550,9 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("task", {}).get("test_set") is not None:
         raise ValueError("Held-out examples must not enter the native optimizer.")
     task = Task(**payload["task"])
-    config_values: dict[str, Any] = {"model": payload["model"]}
+    proposer = payload.get("proposer") or {}
+    _install_proposer(proposer)
+    config_values: dict[str, Any] = {"model": payload["model"], **_engine_knobs(payload["engine_id"], proposer)}
     if payload["engine_id"] == "meta_harness" and payload.get("max_iterations") is not None:
         config_values["max_iterations"] = payload["max_iterations"]
     output_dir = Path("upstream-artifacts").resolve()
@@ -445,7 +569,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     )
     mailbox = EvaluatorMailbox(payload["nonce"], float(payload["timeout_seconds"]))
     server = ProgressEvalServer(task, mailbox, config, output_dir)
-    engine = get_engine_cls(payload["engine_id"])(config)
+    engine = native_engines.ENGINES[payload["engine_id"]](config)
     document: dict[str, Any] = {}
     finished = threading.Event()
 
@@ -489,9 +613,9 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
         document.pop("best_candidate", None)
         document.pop("best_score", None)
         document["stop_reason"] = "budget_reached"
-        document.update(_budget_incumbent(payload["engine_id"], engine, task, server, output_dir))
+        document.update(_budget_incumbent(engine, task, server, output_dir))
     if document.get("error"):
-        document["interrupted_incumbent"] = _budget_incumbent(payload["engine_id"], engine, task, server, output_dir)
+        document["interrupted_incumbent"] = _budget_incumbent(engine, task, server, output_dir)
     best_score = document.get("best_score")
     if (
         not document.get("error")
@@ -504,9 +628,6 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
             "Upstream result fidelity check failed: the selected candidate and score were not evaluated together."
         )
     paths = [("upstream", output_dir), ("work", Path(config.run_dir)), ("sessions", Path.home() / ".claude/projects")]
-    pending = getattr(engine, "_pending_tempdir", None)
-    if pending is not None:
-        paths.append(("interrupted-work", Path(pending.name)))
     document["usage_by_model"] = collect_usage([path for _, path in paths], payload["model"])
     metadata = document.get("metadata", {})
     had_session = bool(metadata.get("session_id") or metadata.get("session_ids"))

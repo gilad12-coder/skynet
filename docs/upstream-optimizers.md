@@ -4,7 +4,7 @@ This is the engine integration stage of the submission-wizard refactor, stacked 
 
 ## Execution authority
 
-All engines use GEPA commit [`0632cdb5dcc052e690eab439e1b4a7e3e9cfe407`](https://github.com/gepa-ai/gepa/tree/0632cdb5dcc052e690eab439e1b4a7e3e9cfe407). Its package metadata still says `0.1.4`, but released `0.1.4` does not provide this engine surface. `pyproject.toml`, `uv.lock`, both pip lockfiles, the staged runtime source, and provenance metadata must agree on the commit. Do not replace this pin with `gepa==0.1.4` or a floating branch.
+GEPA, Best-of-N and every engine's evaluation server use GEPA commit [`0632cdb5dcc052e690eab439e1b4a7e3e9cfe407`](https://github.com/gepa-ai/gepa/tree/0632cdb5dcc052e690eab439e1b4a7e3e9cfe407). Its package metadata still says `0.1.4`, but released `0.1.4` does not provide this engine surface. `pyproject.toml`, `uv.lock`, both pip lockfiles, the staged runtime source, and provenance metadata must agree on the commit. Do not replace this pin with `gepa==0.1.4` or a floating branch.
 
 Skynet owns input validation, model routing, execution transport, outer accounting, progress translation and result persistence. Candidate proposal, native agent prompts, history inspection, search and aggregate winner selection remain upstream. An engine failure propagates; there is no fallback to the removed local Meta-Harness loop.
 
@@ -12,13 +12,13 @@ Skynet owns input validation, model routing, execution transport, outer accounti
 | --- | --- | --- | --- | --- |
 | GEPA | Pinned `gepa.gepa_launcher.optimize_anything` | Text or named components | Existing metered optimization model; native GEPA trajectory/state artifacts | State can recover an interrupted local evaluation-budget boundary; this PR does not implement automatic worker restart |
 | Best-of-N | Pinned `gepa.oa.engines.best_of_n.BestOfNEngine` | Text | Upstream sampling client reaches the configured metered model through authenticated loopback transport | No cross-job resume |
-| Meta-Harness | Pinned `gepa.oa.engines.meta_harness.MetaHarnessEngine` | Text | Claude Code proposer, selected managed model, worker OS jail or Vercel microVM | No persisted-job resume API at this pin |
-| AutoResearch | Pinned `gepa.oa.engines.autoresearch.AutoResearchEngine` | Text | Same execution/model transport; upstream controls the research session | In-run Ralph continuation is not persisted-job recovery |
+| Meta-Harness | [stanford-iris-lab/meta-harness `0cbc31e9`](https://github.com/stanford-iris-lab/meta-harness/tree/0cbc31e97c9e6d24232d1dc754827c02e1ec415c) `run_evolve` loop and verbatim `SKILL.md`, driven against the pinned GEPA eval server by `native_engines.py` | Text | Configured proposer harness behind `claude`, selected managed model, worker OS jail or Vercel microVM | No persisted-job resume API at this pin |
+| AutoResearch | [karpathy/autoresearch `228791fb`](https://github.com/karpathy/autoresearch/tree/228791fb499afffb54b46200aca536f79142f117) git-branch loop and verbatim `program.md`, with `eval.sh` posting to the pinned GEPA eval server | Text | Same execution/model transport; the agent controls the research session | In-run Ralph continuation is not persisted-job recovery |
 | Auto | Published omni-GEPA recipe | Text | All three GEPA/AutoResearch/Meta-Harness lanes must be available | No composed restart implementation |
 
 The [pinned omni example](https://github.com/gepa-ai/gepa/blob/0632cdb5dcc052e690eab439e1b4a7e3e9cfe407/docs/docs/blog/posts/2026-07-22-optimize-anything-omni/index.md) runs three equal exploration allocations through `optimize_best_of`, then a fresh GEPA continuation. Skynet assigns a quarter of the proposer allowance to each phase, partitions scorer calls into four allocations (integer remainder to continuation), and requires at least four scorer calls. Best-of-N is an independent selectable baseline, not a substitute exploration lane. Missing native capability blocks the recipe instead of silently reducing it.
 
-This establishes execution fidelity to the pinned implementation. It does not establish numerical reproduction of the Meta-Harness paper's experiments; dataset, evaluator, model and budget differences remain relevant.
+The Meta-Harness and AutoResearch prompts are vendored verbatim under `upstream_prompts/` with SHA-256 pins; `native_engines.py` derives the sandbox prompts through exact single-match substitutions (domain files, evaluator command, budget wording), so a pin bump that changes upstream wording fails readiness instead of drifting. This establishes execution fidelity to the pinned implementations. It does not establish numerical reproduction of the Meta-Harness paper's experiments; dataset, evaluator, model and budget differences remain relevant.
 
 ## Worker and Vercel transport
 

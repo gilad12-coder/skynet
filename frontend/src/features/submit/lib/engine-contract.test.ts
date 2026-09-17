@@ -3,7 +3,11 @@ import { test } from "node:test";
 
 import type { BlackboxEngineCatalogResponse, BlackboxEngineId } from "@/shared/types/api";
 import {
+  DEFAULT_PROPOSER,
   engineSelectionIssue,
+  proposerKnobs,
+  proposerTunesReasoning,
+  submittedProposer,
   supportsIterationLimit,
   usesNativeProposer,
 } from "./engine-contract.ts";
@@ -35,19 +39,19 @@ const catalog: BlackboxEngineCatalogResponse = {
       checkpoint_restore_reason: null,
     },
   ],
-  engines: (["gepa", "best_of_n", "autoresearch", "meta_harness"] as BlackboxEngineId[]).map(
-    (id) => ({
-      id,
-      label: id,
-      description: id,
-      available: true,
-      unavailable_reason: null,
-      supports_parts: id === "gepa",
-      requires_agent_target: false,
-      checkpoint_recovery_supported: id === "gepa",
-      checkpoint_recovery_reason: id === "gepa" ? null : `${id} cannot restore checkpoints.`,
-    }),
-  ),
+  engines: (
+    ["gepa", "best_of_n", "autoresearch", "meta_harness", "autosaddler"] as BlackboxEngineId[]
+  ).map((id) => ({
+    id,
+    label: id,
+    description: id,
+    available: true,
+    unavailable_reason: null,
+    supports_parts: id === "gepa",
+    requires_agent_target: false,
+    checkpoint_recovery_supported: id === "gepa",
+    checkpoint_recovery_reason: id === "gepa" ? null : `${id} cannot restore checkpoints.`,
+  })),
 };
 
 const selection = {
@@ -102,7 +106,7 @@ test("missing or legacy capabilities cannot authorize an Auto run", () => {
 });
 
 test("native engines accept text evaluation in the managed sandbox without an agent target", () => {
-  for (const engine of ["meta_harness", "autoresearch"] as const) {
+  for (const engine of ["meta_harness", "autoresearch", "autosaddler"] as const) {
     assert.equal(engineSelectionIssue({ ...selection, mode: "single", engine }), null);
     assert.equal(usesNativeProposer("single", engine), true);
   }
@@ -166,4 +170,64 @@ test("Meta-Harness recipes require training cases without moving validation data
       null,
     );
   }
+});
+
+test("proposer knobs follow the engine that reads them, and Auto exposes them all", () => {
+  assert.deepEqual(proposerKnobs("single", "meta_harness"), {
+    thinking: true,
+    candidates: true,
+    ralph: false,
+  });
+  assert.deepEqual(proposerKnobs("single", "autoresearch"), {
+    thinking: true,
+    candidates: false,
+    ralph: true,
+  });
+  assert.deepEqual(proposerKnobs("single", "autosaddler"), {
+    thinking: false,
+    candidates: false,
+    ralph: false,
+  });
+  assert.deepEqual(proposerKnobs("auto", null), { thinking: true, candidates: true, ralph: true });
+});
+
+test("submitted proposer resets every knob the form hides for the engine", () => {
+  const tuned = {
+    ...DEFAULT_PROPOSER,
+    effort: "high" as const,
+    max_thinking_tokens: 8192,
+    max_candidates_per_iter: 4,
+    ralph: false,
+    max_no_eval_seconds: 600,
+  };
+  assert.deepEqual(submittedProposer(tuned, "auto", null), tuned);
+  assert.deepEqual(submittedProposer(tuned, "single", "autosaddler"), {
+    ...tuned,
+    max_thinking_tokens: null,
+    max_candidates_per_iter: null,
+    ralph: true,
+    max_no_eval_seconds: null,
+  });
+  assert.deepEqual(submittedProposer(tuned, "single", "meta_harness"), {
+    ...tuned,
+    ralph: true,
+    max_no_eval_seconds: null,
+  });
+  assert.deepEqual(submittedProposer(tuned, "single", "autoresearch"), {
+    ...tuned,
+    max_candidates_per_iter: null,
+  });
+  assert.deepEqual(submittedProposer({ ...tuned, harness: "opencode" }, "single", "autoresearch"), {
+    ...tuned,
+    harness: "opencode",
+    effort: null,
+    max_thinking_tokens: null,
+    max_candidates_per_iter: null,
+  });
+});
+
+test("reasoning knobs appear only for the Claude Code proposer", () => {
+  assert.equal(proposerTunesReasoning("claude_code"), true);
+  for (const harness of ["pi", "codex", "opencode", "prime"] as const)
+    assert.equal(proposerTunesReasoning(harness), false);
 });

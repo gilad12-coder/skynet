@@ -16,7 +16,12 @@ export const AGENT_RUN_STATUS_FAILED = "failed";
 
 const LANED_EVENTS = new Set([CANDIDATE_EVENT, REJECTED_EVENT, MINIBATCH_EVENT, CASE_SCORED_EVENT]);
 
-export const META_HARNESS_ENGINE = "meta_harness";
+/** Engines that hill-climb: every version is scored on every case, so the run view draws a climb. */
+export const CLIMB_ENGINES: ReadonlySet<string> = new Set([
+  "meta_harness",
+  "autoresearch",
+  "autosaddler",
+]);
 
 function laneOf(event: ProgressEvent): number {
   const lane = event.metrics?.lane_index;
@@ -79,20 +84,20 @@ export function engineOfLatestLane(events: ProgressEvent[]): string | null {
 }
 
 /**
- * Whether the run view should show the meta-harness climb instead of the tree.
+ * The climbing engine whose versions the run view should draw, or null for a
+ * branching run that gets the tree.
  *
  * The lane that produced the newest versions decides while events are in hand;
  * a run without lane events falls back to the engine the result names, then to
  * the one the strategy asked for.
  */
-export function isMetaHarnessRun(
+export function climbEngineOf(
   events: ProgressEvent[],
   engineUsed: string | null | undefined,
   strategyEngine: string | null | undefined,
-): boolean {
-  const fromLanes = engineOfLatestLane(events);
-  if (fromLanes !== null) return fromLanes === META_HARNESS_ENGINE;
-  return (engineUsed ?? strategyEngine ?? null) === META_HARNESS_ENGINE;
+): string | null {
+  const engine = engineOfLatestLane(events) ?? engineUsed ?? strategyEngine ?? null;
+  return engine !== null && CLIMB_ENGINES.has(engine) ? engine : null;
 }
 
 export interface CaseScore {

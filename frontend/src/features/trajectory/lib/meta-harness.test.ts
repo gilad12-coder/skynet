@@ -13,7 +13,7 @@ import {
   extractCaseScores,
   finalRunKey,
   indexAgentRuns,
-  isMetaHarnessRun,
+  climbEngineOf,
   latestVersionLane,
   layoutClimb,
   pendingCases,
@@ -179,15 +179,17 @@ describe("engineOfLatestLane", () => {
       event("case_scored", { trial: 0, example_id: "0", score: 1, total: 2, lane_index: 1 }),
     ];
     assert.equal(engineOfLatestLane(events), "meta_harness");
-    assert.equal(isMetaHarnessRun(events, "gepa", "gepa"), true);
+    assert.equal(climbEngineOf(events, "gepa", "gepa"), "meta_harness");
   });
 
   it("falls back to the result's engine, then the strategy's, without lane events", () => {
     assert.equal(engineOfLatestLane([]), null);
-    assert.equal(isMetaHarnessRun([], "meta_harness", null), true);
-    assert.equal(isMetaHarnessRun([], null, "meta_harness"), true);
-    assert.equal(isMetaHarnessRun([], "gepa", "meta_harness"), false);
-    assert.equal(isMetaHarnessRun([], null, null), false);
+    assert.equal(climbEngineOf([], "meta_harness", null), "meta_harness");
+    assert.equal(climbEngineOf([], null, "autosaddler"), "autosaddler");
+    assert.equal(climbEngineOf([], "autoresearch", "gepa"), "autoresearch");
+    assert.equal(climbEngineOf([], "gepa", "meta_harness"), null);
+    assert.equal(climbEngineOf([], "best_of_n", null), null);
+    assert.equal(climbEngineOf([], null, null), null);
   });
 });
 

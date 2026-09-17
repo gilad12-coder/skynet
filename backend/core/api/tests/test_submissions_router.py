@@ -2110,7 +2110,7 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     assert "does not expose" in by_id["autoresearch"]["checkpoint_recovery_reason"]
     assert by_id["meta_harness"]["available"] is True
     assert by_id["meta_harness"]["requires_agent_target"] is False
-    assert {key for key, engine in by_id.items() if engine["supports_parts"]} == {"gepa"}
+    assert {key for key, engine in by_id.items() if engine["supports_parts"]} == {"gepa", "autosaddler"}
     assert text.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler"]
     assert text.json()["auto_available"] is True
     assert text.json()["auto_unavailable_reason"] is None

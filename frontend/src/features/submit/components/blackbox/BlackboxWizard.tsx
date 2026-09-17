@@ -40,7 +40,6 @@ function evaluationStepFor(field: string | undefined, hasCases: boolean): Evalua
   if (field === "totalBudgetInput") return "budget";
   if (field === "bb-cases" || field === "wizard-stage-evaluation") return "cases";
   if (field.startsWith("bb-scor")) return "scorer";
-  if (field === "bb-execution-agent" || field === "bb-task-model") return "scorer";
   if (field === "bb-split") return hasCases ? "split" : "cases";
   return null;
 }
@@ -85,7 +84,11 @@ export function BlackboxWizard({
         if (key) setEvaluationPart(Math.max(0, evaluationSteps.indexOf(key)));
       }
       if (stage === "optimization")
-        setOptimizationPart(field === "bb-optimization-model" || field === "bb-max-runs" ? 1 : 0);
+        setOptimizationPart(
+          field === "bb-optimization-model" || field === "bb-task-model" || field === "bb-max-runs"
+            ? 1
+            : 0,
+        );
     },
     [evaluationSteps, hasCases],
   );
