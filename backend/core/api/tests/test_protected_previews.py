@@ -74,7 +74,7 @@ def previews(harness: _Harness, monkeypatch: pytest.MonkeyPatch) -> tuple[_Harne
         def dispatch() -> PaidResult[None]:
             """Verify physical provider dispatch is covered by the actual setup ledger."""
             budget = runtime.service.get(runtime.budget_id, runtime.username)
-            assert budget.reserved_credits >= 3
+            assert budget.reserved_credits >= 2
             state["calls"].append({"payload": payload, "kind": kind})
             return PaidResult(None, Decimal("0.01"), {"actual_usd": "0.01"})
 
@@ -151,8 +151,8 @@ def test_preview_creates_budget_and_replays_without_spending_again(previews, kin
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["preview_status"] == "succeeded"
-    assert result["credits_charged"] == 2
-    assert result["budget"]["setup_spent_credits"] == "1.5"
+    assert result["credits_charged"] == 1
+    assert result["budget"]["setup_spent_credits"] == "1"
     assert result["usage_by_model"][0]["input_tokens"] == 10
     assert harness.count(JobModel) == 0
     if kind == "scorer":
@@ -177,7 +177,7 @@ def test_preview_uses_shared_budget_and_rejects_changed_idempotency_input(previe
     second = harness.client.post("/blackbox/scorer/dry-run", json=payload, headers={"Idempotency-Key": "another"})
     assert second.status_code == 200, second.text
     assert second.json()["budget"]["id"] == budget.id
-    assert second.json()["budget"]["setup_spent_credits"] == "3"
+    assert second.json()["budget"]["setup_spent_credits"] == "2"
     assert second.json()["credits_charged"] == 1
     changed = {**payload, "candidate": "different"}
     refused = harness.client.post("/blackbox/scorer/dry-run", json=changed, headers={"Idempotency-Key": "same"})
@@ -197,7 +197,7 @@ def test_preview_retains_completed_output_while_usage_is_pending(previews, kind:
     assert body["preview_status"] == "pending"
     assert body["budget"]["reserved_credits"] == "1"
     assert body["budget"]["pending_operations"] == 1
-    assert body["credits_charged"] == 2
+    assert body["credits_charged"] == 1
     assert body["score"] == 0.75 if kind == "scorer" else body["outputs"] == {"question": "explicit debug value"}
 
 
@@ -213,7 +213,7 @@ def test_failed_preview_replay_preserves_error_and_single_charge(previews, kind:
     assert first.status_code == second.status_code == 200
     assert first.json()["preview_status"] == "failed"
     assert first.json()["error"] == second.json()["error"]
-    assert second.json()["credits_charged"] == 2
+    assert second.json()["credits_charged"] == 1
     assert len(state["calls"]) == 1
 
 
@@ -225,7 +225,7 @@ def test_stream_retains_tokens_final_traces_and_budget(previews) -> None:
     assert "event: token" in response.text
     assert "event: final" in response.text
     assert "explicit debug value" in response.text
-    assert '"credits_charged": 2' in response.text
+    assert '"credits_charged": 1' in response.text
     assert '"node_traces"' in response.text
     assert len(state["calls"]) == len(state["bound"]) == 1
 

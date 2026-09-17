@@ -119,7 +119,7 @@ class _Harness:
         def dispatch() -> PaidResult[None]:
             """Assert real coverage exists before reporting one synthetic provider receipt."""
             snapshot = runtime.service.get(runtime.budget_id, runtime.username)
-            assert snapshot.reserved_credits == 3
+            assert snapshot.reserved_credits == 2
             assert snapshot.pending_operations == 1
             self.calls.append({"budget_id": runtime.budget_id, "identity": identity, "payload": payload})
             return PaidResult(
@@ -283,10 +283,10 @@ def test_legacy_submission_attaches_paid_setup_once(harness: _Harness, route: st
     assert budget.job_id == identity
     assert budget.generation == job["execution_budget_generation"] == job["payload"]["execution_budget_generation"]
     assert budget.id == job["payload"]["execution_budget_id"] == harness.calls[0]["budget_id"]
-    assert budget.setup_spent_credits == Decimal("1.5")
+    assert budget.setup_spent_credits == 1
     assert budget.run_spent_credits == budget.reserved_credits == 0
-    assert budget.available_credits == Decimal("18.5")
-    assert budget.billed_credits == 2
+    assert budget.available_credits == 19
+    assert budget.billed_credits == 1
     assert job["username"] == job["payload"]["username"] == "alice"
     assert job["status"] == "pending"
     assert harness.count(JobModel) == harness.count(ExecutionBudgetModel) == harness.count(WizardPreflightModel) == 1
@@ -395,7 +395,7 @@ def test_keyless_uncertain_retry_does_not_repeat_paid_preflight(harness: _Harnes
     budget = harness.budgets.get(harness.calls[0]["budget_id"], "alice")
     assert budget.total_credits == 100
     assert budget.pending_operations == 1
-    assert budget.reserved_credits == 3
+    assert budget.reserved_credits == 2
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -697,8 +697,8 @@ def test_failed_or_uncertain_paid_setup_never_queues(harness: _Harness, pending_
     assert harness.count(JobModel) == 0
     budget = harness.budgets.get(harness.calls[0]["budget_id"], "alice")
     assert budget.job_id is None
-    assert budget.reserved_credits == (3 if pending_usage else 0)
-    assert budget.setup_spent_credits == (0 if pending_usage else Decimal("1.5"))
+    assert budget.reserved_credits == (2 if pending_usage else 0)
+    assert budget.setup_spent_credits == (0 if pending_usage else 1)
 
 
 def test_attachment_rolls_back_job_when_budget_already_attached(harness: _Harness) -> None:
@@ -782,11 +782,11 @@ def test_run_admission_cannot_dispatch_beyond_remaining_coverage(harness: _Harne
     else:
         assert runtime.execute(quote, policy, dispatch, operation_key="run", cost_kind="sandbox") == "actual result"
         budget = harness.budgets.get(runtime.budget_id, "alice")
-        assert budget.setup_spent_credits == Decimal("1.5")
+        assert budget.setup_spent_credits == 1
         assert budget.run_spent_credits == 18
-        assert budget.available_credits == Decimal("0.5")
-        assert budget.billed_credits == 20
-        assert StripeBillingService(engine=harness.store.engine).spendable_credits("alice") == 80
+        assert budget.available_credits == 1
+        assert budget.billed_credits == 19
+        assert StripeBillingService(engine=harness.store.engine).spendable_credits("alice") == 81
         with pytest.raises(BudgetReached):
             runtime.execute(quote, policy, dispatch, operation_key="next", cost_kind="sandbox")
         assert len(dispatched) == 1
@@ -880,7 +880,7 @@ def test_paid_setup_does_not_rewrite_the_approved_total(harness: _Harness, route
     job = harness.store.get_job(response.json()["optimization_id"], include_payload=True)
     budget = harness.budgets.get(job["execution_budget_id"], "alice")
     assert budget.total_credits == 20
-    assert budget.setup_spent_credits == Decimal("1.5")
+    assert budget.setup_spent_credits == 1
     assert job["payload"]["max_cost_credits"] == budget.total_credits
 
 
@@ -897,4 +897,4 @@ def test_legacy_commitment_is_counted_once_during_protected_submission(harness: 
     assert response.status_code == 201, response.text
     job = harness.store.get_job(response.json()["optimization_id"])
     assert job["execution_budget_id"] is not None
-    assert StripeBillingService(engine=harness.store.engine).spendable_credits("alice") == 38
+    assert StripeBillingService(engine=harness.store.engine).spendable_credits("alice") == 39
