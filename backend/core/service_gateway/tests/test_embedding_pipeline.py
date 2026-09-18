@@ -454,3 +454,84 @@ def test_set_embedding_task_name_noop_without_engine() -> None:
         pipeline.set_embedding_task_name(store, "job-1", "Renamed task")
 
     session_factory.assert_not_called()
+
+
+def _blackbox_success_job(**overrides: Any) -> dict[str, Any]:
+    """Build a minimal successful black-box job dict with optional overrides."""
+    job: dict[str, Any] = {
+        "status": "success",
+        "payload_overview": {
+            "username": "alice",
+            "model_name": "google/gemini-3-flash-preview",
+            "optimization_type": "blackbox",
+            "name": "3D unicorn",
+            "description": "Build a nicer unicorn",
+            "module_name": "blackbox",
+            "optimizer_name": "auto",
+        },
+        "payload": {
+            "objective": "Make the rendered unicorn look more like a unicorn.",
+            "background": "build123d script rendered with pyrender and judged by a VLM.",
+            "recipe": "code",
+            "seed_candidate": "def build():\n    return Sphere(1)",
+            "scorer": {"kind": "python", "metric_code": "def score(v, c):\n    return 0.5"},
+            "cases": [{"prompt": "a unicorn"}],
+        },
+        "latest_metrics": {},
+        "result": {
+            "engine_used": "gepa",
+            "baseline_test_metric": 0.2,
+            "optimized_test_metric": 0.5075,
+        },
+    }
+    job.update(overrides)
+    return job
+
+
+def test_extract_display_fields_blackbox_falls_back_to_overview_and_engine_used() -> None:
+    """A black-box payload has no module/optimizer; the overview and result fill them in."""
+    fields = pipeline._extract_display_fields(_blackbox_success_job())
+    assert fields == {"task_name": "3D unicorn", "module_name": "blackbox", "optimizer_name": "gepa"}
+
+
+def test_extract_display_fields_blackbox_keeps_overview_engine_without_result() -> None:
+    """Without a persisted result the overview optimizer name (the strategy engine) stands."""
+    fields = pipeline._extract_display_fields(_blackbox_success_job(result=None))
+    assert fields["optimizer_name"] == "auto"
+
+
+def test_embed_finished_job_blackbox_uses_blackbox_summariser() -> None:
+    """Black-box jobs are summarised from objective/background, not the DSPy signature path."""
+    store = _FakeJobStore({"bb-1": _blackbox_success_job()})
+    embedder = _FakeEmbedder(vector=[0.1, 0.2, 0.3])
+
+    session = MagicMock(name="session")
+    session.__enter__ = MagicMock(return_value=session)
+    session.__exit__ = MagicMock(return_value=False)
+    session.query.return_value.filter.return_value.first.return_value = None
+    added: list[Any] = []
+    session.add.side_effect = added.append
+
+    with (
+        patch.object(pipeline.settings, "embeddings_enabled", True),
+        patch.object(pipeline, "get_embedder", return_value=embedder),
+        patch.object(pipeline, "summarize_task", side_effect=AssertionError("DSPy path used")),
+        patch.object(pipeline, "summarize_blackbox_task", return_value="Improves a unicorn model.") as bb,
+        patch.object(pipeline, "Session", return_value=session),
+    ):
+        assert pipeline.embed_finished_job("bb-1", job_store=store) is True
+
+    kwargs = bb.call_args.kwargs
+    assert kwargs["objective"].startswith("Make the rendered unicorn")
+    assert kwargs["recipe"] == "code"
+    assert kwargs["scorer"]["kind"] == "python"
+    assert kwargs["description"] == "Build a nicer unicorn"
+    row = added[0]
+    assert row.optimization_type == "blackbox"
+    assert row.module_name == "blackbox"
+    assert row.optimizer_name == "gepa"
+    assert row.winning_model == "google/gemini-3-flash-preview"
+    assert row.baseline_metric == 0.2
+    assert row.optimized_metric == 0.5075
+    assert row.summary_text == "Improves a unicorn model."
+    assert row.signature_code is None

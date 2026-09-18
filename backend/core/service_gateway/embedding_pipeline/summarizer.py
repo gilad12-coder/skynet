@@ -3,6 +3,10 @@
 Given a finished job, we want ~2-3 sentences describing *what the task is*
 in natural language: input → output, objective, metric shape. This text is
 embedded into ``embedding_summary``, which drives explore semantic search.
+DSPy jobs are summarised from their signature / metric / column mapping;
+black-box ("optimize anything") jobs from the user's objective, background,
+starting artifact and scorer — the two shapes share no fields, so each has
+its own signature and heuristic fallback.
 Keeping a natural-language summary (rather than raw code) lets
 semantically-similar tasks cluster together even when their Python source
 looks unrelated.
@@ -64,6 +68,79 @@ class _TaskSummary(dspy.Signature):
             "task itself, not how it's trained."
         )
     )
+
+
+class _BlackboxTaskSummary(dspy.Signature):
+    """Describe a black-box optimization task in 2-3 sentences."""
+
+    objective: str = dspy.InputField(desc="What the user wants improved, in their own words.")
+    background: str = dspy.InputField(desc="Extra context about the artifact or the setting it runs in.")
+    artifact: str = dspy.InputField(
+        desc="The kind of artifact under optimization (prompt, code, text or setup) and an excerpt of its starting version."
+    )
+    scorer: str = dspy.InputField(
+        desc="How a version is scored: the python metric source, or a note that a remote HTTP scorer is used."
+    )
+    cases_sample: str = dspy.InputField(desc="A handful of sample evaluation cases (may be empty).")
+    task_description: str = dspy.OutputField(
+        desc=(
+            "2-3 sentences describing the task in plain English: what artifact "
+            "is being improved, what a good result looks like, and how it is "
+            "scored. Avoid naming the engine or model — this text describes "
+            "the task itself, not how it's optimized."
+        )
+    )
+
+
+_RECIPE_ARTIFACT_LABEL = {
+    "prompt": "a prompt",
+    "code": "code",
+    "anything": "free-form text or a setup",
+}
+
+
+def _seed_excerpt(seed_candidate: str | dict[str, str] | None, *, limit: int) -> str:
+    """Flatten a starting candidate (single text or ``{path: content}``) to a bounded excerpt.
+
+    Args:
+        seed_candidate: The submitted starting version; ``None`` when the run
+            began from scratch.
+        limit: Maximum number of characters to keep.
+
+    Returns:
+        The first ``limit`` characters of the candidate text, multi-file
+        candidates rendered as ``path:`` blocks; empty when nothing was given.
+    """
+    if isinstance(seed_candidate, dict):
+        text = "\n".join(f"{path}:\n{content}" for path, content in seed_candidate.items())
+    else:
+        text = seed_candidate or ""
+    return _truncate(text.strip(), limit, label="seed_candidate")
+
+
+def _heuristic_blackbox_summary(
+    *,
+    objective: str | None,
+    background: str | None,
+    description: str | None,
+    seed_excerpt: str,
+) -> str:
+    """Fallback summary for a black-box job built from the user's own words.
+
+    Args:
+        objective: What the user asked to improve.
+        background: Extra context the user supplied.
+        description: The short run description from the submission form.
+        seed_excerpt: Bounded excerpt of the starting artifact.
+
+    Returns:
+        Objective (or description) plus background, else the seed excerpt;
+        empty only when the job carried none of those.
+    """
+    parts = [part.strip() for part in (objective or description, background) if part and part.strip()]
+    if parts:
+        return " ".join(parts)[:600]
+    return seed_excerpt[:500]
 
 
 def _heuristic_summary(
@@ -172,4 +249,66 @@ def summarize_task(
         return text or fallback
     except Exception as exc:
         logger.warning("Summariser LLM call failed: %s", exc)
+        return fallback
+
+
+def summarize_blackbox_task(
+    *,
+    objective: str | None,
+    background: str | None,
+    description: str | None,
+    recipe: str | None,
+    seed_candidate: str | dict[str, str] | None,
+    scorer: dict[str, Any] | None,
+    cases_sample: list[dict[str, Any]] | None,
+) -> str:
+    """Return a short natural-language description of a black-box task.
+
+    Mirrors :func:`summarize_task` for "optimize anything" jobs, which carry
+    no DSPy signature or column mapping. Never raises; an empty string means
+    the job had no describable content and should be skipped.
+
+    Args:
+        objective: What the user asked to improve, in their own words.
+        background: Extra context the user supplied about the task.
+        description: The short run description from the submission form.
+        recipe: Which wizard recipe authored the run (prompt / code / anything).
+        seed_candidate: The starting artifact, single text or ``{path: content}``.
+        scorer: The submitted scorer dict (``kind`` plus ``metric_code`` or ``url``).
+        cases_sample: Optional evaluation cases; the first three are forwarded.
+
+    Returns:
+        A 2-3 sentence task description from the LLM, or the heuristic
+        fallback when the LLM is unavailable or its call fails.
+    """
+    seed_excerpt = _seed_excerpt(seed_candidate, limit=2000)
+    fallback = _heuristic_blackbox_summary(
+        objective=objective, background=background, description=description, seed_excerpt=seed_excerpt
+    )
+    if not fallback:
+        return ""
+    lm = _build_lm()
+    if lm is None:
+        return fallback
+    scorer = scorer or {}
+    if scorer.get("kind") == "remote":
+        scorer_text = "Remote HTTP scorer (opaque to us)."
+    else:
+        scorer_text = _truncate((scorer.get("metric_code") or "").strip(), 4000, label="metric_code")
+    artifact_kind = _RECIPE_ARTIFACT_LABEL.get(recipe or "", _RECIPE_ARTIFACT_LABEL["anything"])
+    try:
+        sample_rows = cases_sample[:3] if cases_sample else []
+        predictor = dspy.Predict(_BlackboxTaskSummary)
+        with dspy.context(lm=lm):
+            out = predictor(
+                objective=_truncate((objective or "").strip(), 2000, label="objective"),
+                background=_truncate((background or "").strip(), 2000, label="background"),
+                artifact=f"Optimizing {artifact_kind}. Starting version:\n{seed_excerpt}",
+                scorer=scorer_text,
+                cases_sample=_truncate(json.dumps(sample_rows, ensure_ascii=False), 2000, label="cases_sample"),
+            )
+        text = (out.task_description or "").strip()
+        return text or fallback
+    except Exception as exc:
+        logger.warning("Black-box summariser LLM call failed: %s", exc)
         return fallback
