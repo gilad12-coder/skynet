@@ -3666,7 +3666,6 @@
   "submit.draft.restore.retry": "다시 시도",
   "submit.draft.restore.failed": "저장된 설정을 복원할 수 없습니다. 다시 시도하거나 새로 시작하세요.",
   "submit.draft.restore.gone": "저장된 설정을 이 브라우저에서 더 이상 사용할 수 없습니다.",
-  "submit.draft.save_failed": "설정을 이 브라우저에 저장할 수 없습니다. 잃지 않도록 이 탭을 열어 두세요.",
   "submit.draft.reset_failed": "저장된 설정을 지울 수 없습니다. 이전 초안은 그대로 사용할 수 있습니다.",
   "submit.recipe.choose_new": "새 {p1} 설정 시작",
   "submit.blackbox.runtime.label": "최적화 실행 위치",

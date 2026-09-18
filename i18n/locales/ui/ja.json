@@ -3666,7 +3666,6 @@
   "submit.draft.restore.retry": "再試行",
   "submit.draft.restore.failed": "保存した設定を復元できませんでした。再試行するか、新しく始めてください。",
   "submit.draft.restore.gone": "保存した設定はこのブラウザーでは利用できなくなりました。",
-  "submit.draft.save_failed": "この設定をブラウザーに保存できませんでした。失わないように、このタブを開いたままにしてください。",
   "submit.draft.reset_failed": "保存した設定を消去できませんでした。以前の下書きは引き続き利用できます。",
   "submit.recipe.choose_new": "新しい{p1}の設定を始める",
   "submit.blackbox.runtime.label": "最適化の実行先",

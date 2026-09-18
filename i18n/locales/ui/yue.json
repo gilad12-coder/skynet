@@ -3666,7 +3666,6 @@
   "submit.draft.restore.retry": "再試一次",
   "submit.draft.restore.failed": "無法還原已儲存嘅設定。可以再試一次或者重新開始。",
   "submit.draft.restore.gone": "已儲存嘅設定喺呢個瀏覽器已經冇咗。",
-  "submit.draft.save_failed": "無法喺呢個瀏覽器儲存設定。請保持呢個分頁打開，以免遺失。",
   "submit.draft.reset_failed": "無法清除已儲存嘅設定。之前嘅草稿仍然可用。",
   "submit.recipe.choose_new": "開始新嘅{p1}設定",
   "submit.blackbox.runtime.label": "最佳化器執行位置",

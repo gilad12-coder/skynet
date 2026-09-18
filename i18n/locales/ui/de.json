@@ -3666,7 +3666,6 @@
   "submit.draft.restore.retry": "Erneut versuchen",
   "submit.draft.restore.failed": "Die gespeicherte Einrichtung konnte nicht wiederhergestellt werden. Versuche es erneut oder beginne neu.",
   "submit.draft.restore.gone": "Die gespeicherte Einrichtung ist in diesem Browser nicht mehr verfügbar.",
-  "submit.draft.save_failed": "Deine Einrichtung konnte in diesem Browser nicht gespeichert werden. Lass diesen Tab offen, damit sie nicht verloren geht.",
   "submit.draft.reset_failed": "Die gespeicherte Einrichtung konnte nicht gelöscht werden. Dein vorheriger Entwurf ist weiterhin verfügbar.",
   "submit.recipe.choose_new": "Neue {p1}-Einrichtung beginnen",
   "submit.blackbox.runtime.label": "Optimierer ausführen auf",

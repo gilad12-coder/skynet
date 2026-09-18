@@ -82,7 +82,6 @@ export function useWizardDrafts(): WizardDraftsApi {
   return useContext(WizardDraftsContext);
 }
 
-const SAVE_FAILED_TOAST = "wizard-draft-save-failed";
 
 function offerToastId(draftId: string): string {
   return `draft-restore:${draftId}`;
@@ -137,10 +136,6 @@ export function useWizardDraftController({
     offerRef.current = null;
     setOffer(null);
     setComparingClone(false);
-  }, []);
-
-  const warnSaveFailed = useCallback(() => {
-    toast.warn(msg("submit.draft.save_failed"), { toastId: SAVE_FAILED_TOAST });
   }, []);
 
   const discardDraft = useCallback(
@@ -309,7 +304,6 @@ export function useWizardDraftController({
     if (!accountId) return;
     const saver = new DraftSaver(accountId, {
       store: indexedDbDraftStore,
-      onWriteError: warnSaveFailed,
       onWritten: (record) =>
         channelRef.current?.post({
           type: "written",
@@ -345,13 +339,12 @@ export function useWizardDraftController({
       .catch(() => {
         if (cancelled || saver.epoch !== epoch) return;
         setReadyAccount(accountId);
-        warnSaveFailed();
       });
     return () => {
       cancelled = true;
       void saver.flush().finally(() => saver.detach());
     };
-  }, [accountId, dismissOffer, warnSaveFailed]);
+  }, [accountId, dismissOffer]);
 
   useEffect(() => {
     const onLocaleReload = () => {
@@ -383,7 +376,7 @@ export function useWizardDraftController({
         const saver = saverRef.current;
         if (!saver || saver.accountId !== accountId)
           throw new DOMException("Draft detached", "AbortError");
-        if (saver.isHeld) throw new Error(msg("submit.draft.save_failed"));
+        if (saver.isHeld) throw new Error("draft_held");
         await saver.saveExecution(execution);
       },
       takeSnapshot: <K extends DraftRecipe>(recipe: K) => {

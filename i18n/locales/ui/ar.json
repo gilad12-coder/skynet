@@ -3666,7 +3666,6 @@
   "submit.draft.restore.retry": "إعادة المحاولة",
   "submit.draft.restore.failed": "تعذّر استعادة الإعداد المحفوظ. أعد المحاولة أو ابدأ من جديد.",
   "submit.draft.restore.gone": "الإعداد المحفوظ لم يعد متاحًا في هذا المتصفح.",
-  "submit.draft.save_failed": "تعذّر حفظ الإعداد في هذا المتصفح. أبقِ هذه التبويبة مفتوحة حتى لا تفقده.",
   "submit.draft.reset_failed": "تعذّر مسح الإعداد المحفوظ. المسودة السابقة لا تزال متاحة.",
   "submit.recipe.choose_new": "بدء إعداد {p1} جديد",
   "submit.blackbox.runtime.label": "تشغيل المُحسِّن على",

@@ -3666,7 +3666,6 @@
   "submit.draft.restore.retry": "Riprova",
   "submit.draft.restore.failed": "Non è stato possibile ripristinare la configurazione salvata. Riprova o inizia da capo.",
   "submit.draft.restore.gone": "La configurazione salvata non è più disponibile in questo browser.",
-  "submit.draft.save_failed": "Non è stato possibile salvare la configurazione in questo browser. Tieni aperta questa scheda per non perderla.",
   "submit.draft.reset_failed": "Non è stato possibile cancellare la configurazione salvata. La bozza precedente è ancora disponibile.",
   "submit.recipe.choose_new": "Inizia una nuova configurazione {p1}",
   "submit.blackbox.runtime.label": "Esegui l’ottimizzatore su",
