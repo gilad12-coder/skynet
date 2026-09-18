@@ -62,7 +62,7 @@ export function useExecutionBudget() {
     setBudgetUncapped: (uncapped: boolean) => session.setUncapped(uncapped),
     budget: session.budget,
     budgetBusy: session.busy,
-    budgetError: error ?? (session.persistenceUnavailable ? msg("submit.draft.save_failed") : null),
+    budgetError: error ?? null,
     minimumTotalCredits: session.minimumTotalCredits,
     setupSpent: session.budget ? Number(session.budget.setup_spent_credits) : 0,
     availableCredits: session.budget ? Number(session.budget.available_credits) : null,

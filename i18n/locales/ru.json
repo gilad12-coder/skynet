@@ -94,7 +94,7 @@
     "webauthn.challenge_expired": "Срок действия запроса ключа доступа истек — повторите попытку.",
     "webauthn.invalid_credential": "Не удалось проверить этот ключ доступа.",
     "webauthn.not_found": "Ключ доступа не найден.",
-    "billing.insufficient_credits": "Ваш баланс пуст. Пополните кредиты, чтобы запускать на управляемых вычислениях.",
+    "billing.insufficient_credits": "Ваш баланс пуст. Пополните кредиты, чтобы начать запуск.",
     "workflow.validation_failed": "Проверка рабочего процесса не пройдена: {error}",
     "accounts.email_taken": "Этот адрес электронной почты уже зарегистрирован.",
     "accounts.invalid_credentials": "Неверный адрес электронной почты или пароль.",
@@ -147,7 +147,7 @@
     "grid_search.pair_submission_grid_only": "Отправка на уровне пары доступна только для запусков поиска по сетке.",
     "grid_search.pair_test_results_grid_only": "Результаты тестов на уровне пары доступны только для запусков поиска по сетке.",
     "health.workers_dead": "Рабочие потоки не запущены.",
-    "health.workers_stuck": "Рабочие потоки зависли на {seconds} секунд.",
+    "health.workers_stuck": "Рабочие потоки зависли на {seconds, plural, one {# секунду} few {# секунды} many {# секунд} other {# секунды}}.",
     "notifier.email.footer": "Это автоматическое сообщение от Skynet.",
     "notifier.email.ref": "Идентификатор",
     "notifier.label.error": "ошибка",
@@ -206,8 +206,8 @@
     "optimization.protected_interactive_sandbox_required": "Эту защищённую оптимизацию нельзя оценивать или обслуживать в процессе API. Требуется отдельно тарифицируемая песочница {runtime}, которая пока недоступна в этой конечной точке.",
     "optimization.retry_no_payload": "У исходной оптимизации нет сохранённых данных для повторной попытки.",
     "optimization.retry_wrong_status": "Повторить можно только оптимизации в состоянии 'failed' или 'cancelled' — эта находится в состоянии '{status}'. Вместо этого клонируйте её.",
-    "quota.reached": "Достигнут лимит в {quota} оптимизаций на пользователя. Удалите старые оптимизации, чтобы создать новые.",
-    "serve.chat_not_react": "Живой чат доступен только для оптимизаций модуля ReAct.",
+    "quota.reached": "Достигнут лимит в {quota, plural, one {# оптимизацию} few {# оптимизации} many {# оптимизаций} other {# оптимизации}}. Удалите старые оптимизации, чтобы создать новые.",
+    "serve.chat_not_react": "Живой чат доступен только для оптимизаций, использующих модуль ReAct.",
     "serve.chat_requires_live_mcp": "Для живого чата требуется источник инструментов live-MCP; в этом запуске использовался снимок набора данных.",
     "serve.missing_inputs": "Отсутствуют обязательные входные поля: {missing}. Ожидалось: {input_fields}",
     "serve.no_declared_inputs": "У артефакта нет объявленных входных полей; невозможно безопасно проверить входные данные.",
@@ -237,9 +237,9 @@
     "wizard.split_fractions_not_number": "Значения split_fractions должны быть числами: {error}",
     "wizard.split_fractions_not_object": "split_fractions должен быть объектом с ключами train/val/test.",
     "wizard.split_fractions_sum": "Сумма split_fractions должна быть равна 1.0, получено {total}",
-    "serve.request_budget_required": "Set max_cost_credits for this one request.",
-    "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
-    "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
-    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
+    "serve.request_budget_required": "Укажите max_cost_credits для этого запроса.",
+    "budget.idempotency_required": "Отправьте уникальный Idempotency-Key для этого запроса.",
+    "serve.caller_tool_connection_required": "В этом запуске используется подключение инструмента, привязанное к владельцу. Подключите инструмент к своему аккаунту, прежде чем вызывать его.",
+    "serve.protected_interaction_failed": "Запрос в песочнице не выполнен: {error}"
   }
 }

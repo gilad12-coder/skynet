@@ -44,7 +44,12 @@ class _Links(HTMLParser):
 
 
 class PackageBroker:
-    """Limit package traffic to one selected index and its advertised wheel artifacts."""
+    """Limit package traffic to one selected index and its advertised wheel artifacts.
+
+    A wheel lock pre-registers its artifacts but does not close the index: the
+    optimizer writes candidates after the lock was signed, and the packages they
+    import are resolved against the same registry, under the same budget check.
+    """
 
     def __init__(
         self,
@@ -60,7 +65,7 @@ class PackageBroker:
             registry: Account-selected HTTPS simple-index URL.
             check_admission: Owning budget generation and cancellation check.
             allow_private: Deployment permission for private registry addresses.
-            artifacts: Previously pinned wheels; omit to permit index resolution.
+            artifacts: Previously pinned wheels, served without another index round trip.
         """
         parsed = urlsplit(registry)
         if (
@@ -75,7 +80,6 @@ class PackageBroker:
         self.registry = registry.rstrip("/")
         self._check = check_admission
         self._private = allow_private
-        self._locked = artifacts is not None
         self._artifacts: dict[str, dict[str, str]] = {}
         self._cache: dict[str, bytes] = {}
         self._guard = threading.Lock()
@@ -148,7 +152,7 @@ class PackageBroker:
         """
         self._check()
         with self._guard:
-            if body.get("action") == "index" and not self._locked:
+            if body.get("action") == "index":
                 project = body.get("project")
                 if not isinstance(project, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", project):
                     raise ValueError("Invalid package name.")

@@ -53,11 +53,35 @@ def test_index_only_registers_hashed_wheels_and_checks_artifacts(monkeypatch: py
         broker.dispatch({"action": "index", "project": "../../admin"})
 
 
-def test_locked_capability_cannot_resolve_other_packages() -> None:
-    """Refuse arbitrary index queries once execution is bound to a wheel lock."""
+def test_locked_capability_still_resolves_packages_later_candidates_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A wheel lock pre-registers its artifacts without closing the index to new candidates.
+
+    Args:
+        monkeypatch: Fixture replacing only the outbound registry transport.
+    """
+    digest = "a" * 64
+    wheel = "pyrender-0.1.45-py3-none-any.whl"
+    requests = []
+
+    async def fetch(self: PackageBroker, url: str, limit: int) -> bytes:
+        """Serve one index page.
+
+        Args:
+            self: Broker under test.
+            url: Requested index URL.
+            limit: Bounded response allowance.
+
+        Returns:
+            Controlled index HTML.
+        """
+        requests.append(url)
+        return f'<a href="https://files.example/{wheel}#sha256={digest}">{wheel}</a>'.encode()
+
+    monkeypatch.setattr(PackageBroker, "_fetch", fetch)
     broker = PackageBroker("https://pypi.org/simple", check_admission=lambda: None, artifacts=[])
-    with pytest.raises(ValueError, match="Unsupported package operation"):
-        broker.dispatch({"action": "index", "project": "unrequested"})
+    index = json.loads(broker.dispatch({"action": "index", "project": "pyrender"}).body)
+    assert [artifact["filename"] for artifact in index["artifacts"]] == [wheel]
+    assert requests == ["https://pypi.org/simple/pyrender/"]
 
 
 def test_corrupted_wheel_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
