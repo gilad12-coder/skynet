@@ -45,6 +45,12 @@ interface CarouselProps<T> {
    */
   jumpIndices?: readonly number[];
   /**
+   * Page to the first jump index whenever it changes after mount, not only on
+   * open. For pickers whose selection can move outside the carousel (a draft
+   * restored after the slides loaded) and should be shown, not just opened on.
+   */
+  followJumps?: boolean;
+  /**
    * Wrap the whole carousel — position counter, slide, dot strip and nav — in one
    * bordered card so the chrome reads as part of a single tool card (mirrors the
    * curated tour's popover frame). Leave off when an outer container already
@@ -71,6 +77,7 @@ export function Carousel<T>({
   bodyClassName,
   dotTone,
   jumpIndices,
+  followJumps = false,
   framed = false,
   className,
 }: CarouselProps<T>) {
@@ -109,6 +116,15 @@ export function Carousel<T>({
     },
     [go, clampedIdx, isRtl],
   );
+
+  // `go` closes over the current slide, so following through an effect event
+  // keeps the effect keyed to the target alone — depending on `go` would snap
+  // the user back to the target every time they paged away from it.
+  const follow = React.useEffectEvent((target: number) => go(target));
+  const followTarget = followJumps ? (jumpIndices?.[0] ?? null) : null;
+  React.useEffect(() => {
+    if (followTarget !== null) follow(followTarget);
+  }, [followTarget]);
 
   const active = items[clampedIdx];
   if (active === undefined) return null;
