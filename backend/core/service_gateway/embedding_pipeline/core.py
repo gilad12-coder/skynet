@@ -33,15 +33,19 @@ from sqlalchemy.orm import Session
 
 from ...config import settings
 from ...constants import (
+    OPTIMIZATION_TYPE_BLACKBOX,
     OPTIMIZATION_TYPE_GRID_SEARCH,
+    PAYLOAD_OVERVIEW_DESCRIPTION,
     PAYLOAD_OVERVIEW_IS_PRIVATE,
     PAYLOAD_OVERVIEW_MODEL_NAME,
+    PAYLOAD_OVERVIEW_MODULE_NAME,
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
+    PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
     PAYLOAD_OVERVIEW_USERNAME,
 )
 from ...storage.models import JobEmbeddingModel
 from .embeddings import get_embedder
-from .summarizer import summarize_task
+from .summarizer import summarize_blackbox_task, summarize_task
 
 logger = logging.getLogger(__name__)
 
@@ -136,16 +140,27 @@ def _extract_display_fields(job: dict[str, Any]) -> dict[str, str | None]:
         job: The job-store record with ``payload`` and ``payload_overview``
             sub-dicts.
 
+    Black-box payloads carry no ``module_name`` / ``optimizer_name`` of their
+    own (the router stamps both on the overview), so the overview is the
+    fallback for either field.
+
     Returns:
         A dict with ``task_name``, ``module_name``, and ``optimizer_name``
         keys; values may be ``None`` when the field is absent.
     """
     payload = job.get("payload") or {}
     overview = job.get("payload_overview") or {}
+    result = job.get("result")
+    result = result if isinstance(result, dict) else {}
+    optimizer_name = payload.get("optimizer_name") or overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME)
+    # A black-box run submitted in Auto mode only learns its engine at the end,
+    # so the overview still says "auto"; index the engine that actually ran.
+    if overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_BLACKBOX and result.get("engine_used"):
+        optimizer_name = str(result["engine_used"])
     return {
         "task_name": overview.get("name") or payload.get("name"),
-        "module_name": payload.get("module_name"),
-        "optimizer_name": payload.get("optimizer_name"),
+        "module_name": payload.get("module_name") or overview.get(PAYLOAD_OVERVIEW_MODULE_NAME),
+        "optimizer_name": optimizer_name,
     }
 
 
@@ -239,16 +254,23 @@ def _embed_finished_job_once(optimization_id: str, *, job_store: Any) -> bool:
     payload = job.get("payload") or {}
     overview = job.get("payload_overview") or {}
     signature_code = payload.get("signature_code")
-    metric_code = payload.get("metric_code")
-    column_mapping = payload.get("column_mapping")
-    dataset = payload.get("dataset") or []
-
-    summary_text = summarize_task(
-        signature_code=signature_code,
-        metric_code=metric_code,
-        column_mapping=column_mapping,
-        dataset_sample=dataset,
-    )
+    if overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_BLACKBOX:
+        summary_text = summarize_blackbox_task(
+            objective=payload.get("objective"),
+            background=payload.get("background"),
+            description=overview.get(PAYLOAD_OVERVIEW_DESCRIPTION) or payload.get("description"),
+            recipe=payload.get("recipe"),
+            seed_candidate=payload.get("seed_candidate"),
+            scorer=payload.get("scorer"),
+            cases_sample=payload.get("cases") or [],
+        )
+    else:
+        summary_text = summarize_task(
+            signature_code=signature_code,
+            metric_code=payload.get("metric_code"),
+            column_mapping=payload.get("column_mapping"),
+            dataset_sample=payload.get("dataset") or [],
+        )
 
     emb_summary = embedder.encode(summary_text, task="retrieval.passage") if summary_text else None
     if emb_summary is None:

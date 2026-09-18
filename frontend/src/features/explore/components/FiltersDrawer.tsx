@@ -23,15 +23,16 @@ import {
   SheetDescription,
 } from "@/shared/ui/primitives/sheet";
 import { SkynetDatePicker } from "@/shared/ui/skynet-date-picker";
+import { engineDisplayName } from "../lib/format";
 
 interface FiltersDrawerProps {
   open: boolean;
   onOpenChange: (next: boolean) => void;
   /** All distinct model identifiers in the corpus (sorted alphabetically by caller). */
   modelOptions: string[];
-  /** All distinct optimizer names in the corpus (sorted alphabetically by caller). */
+  /** All distinct optimizer / black-box engine ids in the corpus (sorted alphabetically by caller). */
   optimizerOptions: string[];
-  /** All distinct module names in the corpus (sorted alphabetically by caller). */
+  /** All distinct DSPy module names in the corpus (sorted alphabetically by caller). */
   moduleOptions: string[];
   /** Currently active filter values. */
   selectedModels: string[];
@@ -163,6 +164,7 @@ export function FiltersDrawer({
                   options={optimizerOptions}
                   selected={selectedOptimizers}
                   onToggle={(v) => onChangeOptimizers(toggleValue(selectedOptimizers, v))}
+                  labels={Object.fromEntries(optimizerOptions.map((o) => [o, engineDisplayName(o)]))}
                   dir="ltr"
                 />
               </div>

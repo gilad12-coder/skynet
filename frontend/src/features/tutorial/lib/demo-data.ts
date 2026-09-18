@@ -7,7 +7,9 @@
  */
 
 import type {
+  BlackboxEngineId,
   OptimizationStatusResponse,
+  OptimizationType,
   ProgressEvent,
   OptimizationLogEntry,
   PairResult,
@@ -1288,6 +1290,16 @@ const EXPLORE_MODELS = [
 ];
 
 const EXPLORE_OPTIMIZERS = ["GEPA", "MIPROv2", "BootstrapFewShot", "GridSearch"];
+// Black-box ("optimize anything") runs index the engine that ran them, and
+// carry the placeholder module the backend stamps on every such run.
+const EXPLORE_ENGINES: BlackboxEngineId[] = [
+  "gepa",
+  "best_of_n",
+  "autoresearch",
+  "meta_harness",
+  "autosaddler",
+];
+const EXPLORE_BLACKBOX_MODULE = "blackbox";
 
 const EXPLORE_DEMO_TOTAL = 1000;
 const EXPLORE_CLUSTER_ROWS = 4;
@@ -1312,7 +1324,10 @@ function buildExploreDemoPoints(): PublicDashboardPoint[] {
     const optimized = Math.min(0.97, baseline + lift);
 
     const isGrid = i % 7 === 0;
-    const type: "run" | "grid_search" = isGrid ? "grid_search" : "run";
+    // Roughly one row in nine is a black-box run so the demo corpus shows the
+    // mixed kinds — and the raw, unit-less scores — a real corpus has.
+    const isBlackbox = !isGrid && i % 9 === 4;
+    const type: OptimizationType = isBlackbox ? "blackbox" : isGrid ? "grid_search" : "run";
     const modelIdx = (c32 + Math.floor(i / EXPLORE_CLUSTER_TOTAL)) % EXPLORE_MODELS.length;
     const optimizerIdx = isGrid
       ? EXPLORE_OPTIMIZERS.indexOf("GridSearch")
@@ -1324,12 +1339,18 @@ function buildExploreDemoPoints(): PublicDashboardPoint[] {
       optimization_id: `tutorial-explore-${i.toString().padStart(4, "0")}`,
       optimization_type: type,
       winning_model: EXPLORE_MODELS[modelIdx] ?? null,
-      baseline_metric: Number((baseline * 100).toFixed(1)),
-      optimized_metric: Number((optimized * 100).toFixed(1)),
+      baseline_metric: isBlackbox
+        ? Number(baseline.toFixed(4))
+        : Number((baseline * 100).toFixed(1)),
+      optimized_metric: isBlackbox
+        ? Number(optimized.toFixed(4))
+        : Number((optimized * 100).toFixed(1)),
       summary_text: null,
       task_name: EXPLORE_TASKS[taskIdx] ?? null,
-      module_name: "Predict",
-      optimizer_name: EXPLORE_OPTIMIZERS[optimizerIdx] ?? null,
+      module_name: isBlackbox ? EXPLORE_BLACKBOX_MODULE : "Predict",
+      optimizer_name: isBlackbox
+        ? (EXPLORE_ENGINES[i % EXPLORE_ENGINES.length] ?? null)
+        : (EXPLORE_OPTIMIZERS[optimizerIdx] ?? null),
       created_at: new Date(now - daysAgo * 86400_000).toISOString(),
     });
   }

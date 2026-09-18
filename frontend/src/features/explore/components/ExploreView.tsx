@@ -31,6 +31,8 @@ import { ResultsToolbar } from "./ResultsToolbar";
 import { ResultsSkeleton } from "./ResultsSkeleton";
 import { Pagination } from "./Pagination";
 
+const BLACKBOX_MODULE_PLACEHOLDER = "blackbox";
+
 /**
  * Top-level /explore page rendering a single ranked-list view driven by one
  * shared search input and filter set, with corpus toggle and pagination.
@@ -97,8 +99,14 @@ export function ExploreView() {
     () => (demoPoints ? collectDistinct(demoPoints, "optimizer_name") : facets.optimizers),
     [demoPoints, facets.optimizers],
   );
+  // Black-box runs are stamped with a placeholder module name so they sort
+  // with everything else; it isn't a DSPy module, and the Run type filter
+  // already isolates those runs, so it never shows up as a module chip.
   const moduleOptions = React.useMemo(
-    () => (demoPoints ? collectDistinct(demoPoints, "module_name") : facets.modules),
+    () =>
+      (demoPoints ? collectDistinct(demoPoints, "module_name") : facets.modules).filter(
+        (m) => m !== BLACKBOX_MODULE_PLACEHOLDER,
+      ),
     [demoPoints, facets.modules],
   );
   // Popular searches for a blank field: real trending only — what people
