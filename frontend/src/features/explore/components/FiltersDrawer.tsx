@@ -47,6 +47,9 @@ interface FiltersDrawerProps {
   selectedModules: string[];
   dateFrom: string | null;
   dateTo: string | null;
+  /** Live result count for the current query + filters, shown on the primary button. */
+  resultTotal: number;
+  resultsLoading: boolean;
   onChangeModels: (next: string[]) => void;
   onChangeOptimizers: (next: string[]) => void;
   onChangeTypes: (next: string[]) => void;
@@ -56,7 +59,7 @@ interface FiltersDrawerProps {
   onClearAll: () => void;
 }
 
-const TYPE_VALUES: ReadonlyArray<{
+export const TYPE_VALUES: ReadonlyArray<{
   value: string;
   labelKey: Parameters<typeof msg>[0];
 }> = [
@@ -65,16 +68,22 @@ const TYPE_VALUES: ReadonlyArray<{
   { value: "blackbox", labelKey: "explore.filter.blackbox" },
 ];
 
+/** Display label for a run-type value; unknown values fall back to the raw id. */
+export function typeLabel(value: string): string {
+  const entry = TYPE_VALUES.find((t) => t.value === value);
+  return entry ? msg(entry.labelKey) : value;
+}
+
 /**
  * Slide-in panel for structured filtering on top of the free-text query.
- * Every section is a chip group — a dropdown would hide both the options and
- * the current selection behind a click, and no dimension here is wide enough
- * to need that. Each chip carries the number of runs it would leave with the
- * other active filters, so the drawer itself shows which combinations exist:
- * zero-count chips grey out instead of leading to an empty result, and long
- * lists (models) collapse to their busiest values behind a search box and a
- * "show all" toggle. Date inputs use the project's custom calendar to stay
- * consistent with the rest of the visual system.
+ * Every dimension is a checklist: one value per row, a checkbox for the
+ * selection state, and the number of runs that value would leave alongside
+ * the other active filters aligned at the end of the row. Zero-count rows
+ * are disabled instead of leading to an empty result, a section whose values
+ * are all ruled out says so, and long lists (models) collapse to their
+ * busiest values behind a search box and a "show all" toggle. Filters apply
+ * immediately; the primary button reports the live result count so the
+ * effect of each choice is visible before the drawer closes.
  */
 export function FiltersDrawer({
   open,
@@ -89,6 +98,8 @@ export function FiltersDrawer({
   selectedModules,
   dateFrom,
   dateTo,
+  resultTotal,
+  resultsLoading,
   onChangeModels,
   onChangeOptimizers,
   onChangeTypes,
@@ -96,20 +107,20 @@ export function FiltersDrawer({
   onChangeDateRange,
   onClearAll,
 }: FiltersDrawerProps) {
+  const dateCount = (dateFrom ? 1 : 0) + (dateTo ? 1 : 0);
   const totalActive =
     selectedModels.length +
     selectedOptimizers.length +
     selectedTypes.length +
     selectedModules.length +
-    (dateFrom ? 1 : 0) +
-    (dateTo ? 1 : 0);
+    dateCount;
   const isRtl = getActiveDir() === "rtl";
   // A section's counts are only "ruled out by the other filters" when there
   // are other filters; with none active, zero counts mean the scope is empty.
   const othersActive = (own: number) => totalActive - own > 0;
   // Run types render in a fixed order with the fetched count attached; an
   // empty fetch (loading, error) leaves counts unknown rather than zero.
-  const typeChips = React.useMemo<FacetOption[]>(() => {
+  const typeRows = React.useMemo<FacetOption[]>(() => {
     if (typeOptions.length === 0) return TYPE_VALUES.map((t) => ({ value: t.value, count: -1 }));
     return TYPE_VALUES.map((t) => ({
       value: t.value,
@@ -151,53 +162,57 @@ export function FiltersDrawer({
             </button>
           </SheetHeader>
 
-          <div className="flex-1 overflow-y-auto px-6 py-6">
-            {/* Two clusters, each held tighter (gap-7) than the space between
-                them (gap-10): the optimization itself (program, model,
+          <div className="flex-1 overflow-y-auto px-6 py-5">
+            {/* Two clusters, each held tighter (gap-6) than the space between
+                them (gap-9): the optimization itself (program, model,
                 optimizer), then the run's own metadata (kind, date). */}
-            <div className="flex flex-col gap-10">
-              <div className="flex flex-col gap-7">
-                <FacetSection
+            <div className="flex flex-col gap-9">
+              <div className="flex flex-col gap-6">
+                <FacetList
                   title={msg("explore.filters.section.modules")}
                   icon={Cube}
                   options={moduleOptions}
                   selected={selectedModules}
                   othersActive={othersActive(selectedModules.length)}
                   onToggle={(v) => onChangeModules(toggleValue(selectedModules, v))}
+                  onClear={() => onChangeModules([])}
                   dir="auto"
                 />
 
-                <FacetSection
+                <FacetList
                   title={msg("explore.filters.section.models")}
                   icon={Cpu}
                   options={modelOptions}
                   selected={selectedModels}
                   othersActive={othersActive(selectedModels.length)}
                   onToggle={(v) => onChangeModels(toggleValue(selectedModels, v))}
+                  onClear={() => onChangeModels([])}
                   labelOf={modelDisplayName}
                   dir="ltr"
                 />
 
-                <FacetSection
+                <FacetList
                   title={msg("explore.filters.section.optimizers")}
                   icon={Target}
                   options={optimizerOptions}
                   selected={selectedOptimizers}
                   othersActive={othersActive(selectedOptimizers.length)}
                   onToggle={(v) => onChangeOptimizers(toggleValue(selectedOptimizers, v))}
+                  onClear={() => onChangeOptimizers([])}
                   labelOf={engineDisplayName}
                   dir="ltr"
                 />
               </div>
 
-              <div className="flex flex-col gap-7">
-                <FacetSection
+              <div className="flex flex-col gap-6">
+                <FacetList
                   title={msg("explore.filters.section.types")}
                   icon={Stack}
-                  options={typeChips}
+                  options={typeRows}
                   selected={selectedTypes}
                   othersActive={othersActive(selectedTypes.length)}
                   onToggle={(v) => onChangeTypes(toggleValue(selectedTypes, v))}
+                  onClear={() => onChangeTypes([])}
                   labelOf={typeLabel}
                   dir="auto"
                 />
@@ -205,7 +220,7 @@ export function FiltersDrawer({
                 <FilterSection
                   title={msg("explore.filters.section.date")}
                   icon={CalendarBlank}
-                  selectedCount={(dateFrom ? 1 : 0) + (dateTo ? 1 : 0)}
+                  onClear={dateCount > 0 ? () => onChangeDateRange(null, null) : undefined}
                 >
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <DateRangeField
@@ -238,9 +253,14 @@ export function FiltersDrawer({
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              className="inline-flex items-center justify-center rounded-lg bg-foreground px-4 py-2 text-[13px] font-medium text-background transition-colors cursor-pointer hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              aria-busy={resultsLoading}
+              className={`inline-flex items-center justify-center rounded-lg bg-foreground px-4 py-2 text-[13px] font-medium tabular-nums text-background transition-[background-color,opacity] cursor-pointer hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 ${
+                resultsLoading ? "opacity-70" : ""
+              }`}
             >
-              {msg("explore.filters.apply")}
+              {resultTotal === 1
+                ? msg("explore.filters.show_results_one")
+                : formatMsg("explore.filters.show_results", { n: resultTotal })}
             </button>
           </div>
         </div>
@@ -253,11 +273,6 @@ function toggleValue(current: string[], value: string): string[] {
   return current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
 }
 
-function typeLabel(value: string): string {
-  const entry = TYPE_VALUES.find((t) => t.value === value);
-  return entry ? msg(entry.labelKey) : value;
-}
-
 type IconComponent = React.ComponentType<{
   className?: string;
   "aria-hidden"?: boolean | "true";
@@ -266,18 +281,19 @@ type IconComponent = React.ComponentType<{
 function FilterSection({
   title,
   icon: Icon,
-  selectedCount = 0,
+  onClear,
   children,
 }: {
   title: string;
   icon?: IconComponent;
-  selectedCount?: number;
+  /** Present only while the section has something to clear. */
+  onClear?: () => void;
   children: React.ReactNode;
 }) {
-  const active = selectedCount > 0;
+  const active = onClear !== undefined;
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
+    <section className="flex flex-col gap-2">
+      <div className="flex min-h-7 items-center justify-between gap-2">
         <h3
           className={`inline-flex items-center gap-2 text-[12px] font-medium tracking-wide transition-colors ${
             active ? "text-foreground/80" : "text-foreground/55"
@@ -294,22 +310,13 @@ function FilterSection({
           <span>{title}</span>
         </h3>
         {active && (
-          <span
-            className="rounded-full bg-foreground/[0.06] px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums text-foreground/60"
-            aria-label={formatMsg(
-              selectedCount === 1
-                ? "explore.filters.section.selected"
-                : "explore.filters.section.selected_many",
-              { n: selectedCount },
-            )}
+          <button
+            type="button"
+            onClick={onClear}
+            className="rounded-md px-1.5 py-0.5 text-[12px] text-foreground/55 transition-colors cursor-pointer hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
           >
-            {formatMsg(
-              selectedCount === 1
-                ? "explore.filters.section.selected"
-                : "explore.filters.section.selected_many",
-              { n: selectedCount },
-            )}
-          </span>
+            {msg("explore.filters.section.clear")}
+          </button>
         )}
       </div>
       {children}
@@ -317,13 +324,14 @@ function FilterSection({
   );
 }
 
-function FacetSection({
+function FacetList({
   title,
   icon,
   options,
   selected,
   othersActive,
   onToggle,
+  onClear,
   labelOf = (v) => v,
   dir,
 }: {
@@ -334,7 +342,12 @@ function FacetSection({
   /** Whether any filter outside this section is active (counts then mean "ruled out"). */
   othersActive: boolean;
   onToggle: (value: string) => void;
+  onClear: () => void;
   labelOf?: (value: string) => string;
+  /**
+   * Per-row text direction. LTR for code identifiers, RTL for Hebrew labels,
+   * auto for user-authored names that may be either (tasks, modules).
+   */
   dir: "ltr" | "rtl" | "auto";
 }) {
   const [query, setQuery] = React.useState("");
@@ -349,7 +362,7 @@ function FacetSection({
   const exhausted = othersActive && selected.length === 0 && isExhausted(options);
 
   return (
-    <FilterSection title={title} icon={icon} selectedCount={selected.length}>
+    <FilterSection title={title} icon={icon} onClear={selected.length > 0 ? onClear : undefined}>
       {collapsible && (
         <SectionSearchInput
           value={query}
@@ -360,19 +373,31 @@ function FacetSection({
         />
       )}
       {visible.length === 0 ? (
-        <p className="text-[12.5px] text-foreground/45">
+        <p className="py-1 text-[12.5px] text-foreground/45">
           {trimmed
             ? msg("explore.filters.section.no_search_match")
             : msg("explore.filters.empty_section")}
         </p>
       ) : (
-        <ChipGroup
-          options={visible}
-          selected={selected}
-          onToggle={onToggle}
-          labelOf={labelOf}
-          dir={dir}
-        />
+        <div role="group" aria-label={title} className="-mx-2 flex flex-col">
+          {visible.map(({ value, count }) => {
+            const label = labelOf(value);
+            return (
+              <FacetRow
+                key={value}
+                label={label}
+                // Trimmed labels (e.g. bare model names) keep the full value
+                // reachable on hover — providers can collide on the short name.
+                title={label === value ? undefined : value}
+                // A negative count means unknown (facets not loaded); hide it.
+                count={count < 0 ? null : count}
+                checked={selected.includes(value)}
+                dir={dir}
+                onToggle={() => onToggle(value)}
+              />
+            );
+          })}
+        </div>
       )}
       {exhausted && (
         <p className="text-[12px] text-foreground/45">
@@ -384,7 +409,7 @@ function FacetSection({
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="self-start text-[12px] text-foreground/60 underline-offset-4 transition-colors cursor-pointer hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+          className="self-start rounded-md px-1 py-0.5 text-[12px] text-foreground/60 underline-offset-4 transition-colors cursor-pointer hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
         >
           {expanded
             ? msg("explore.filters.section.show_fewer")
@@ -392,6 +417,66 @@ function FacetSection({
         </button>
       )}
     </FilterSection>
+  );
+}
+
+function FacetRow({
+  label,
+  title,
+  count,
+  checked,
+  dir,
+  onToggle,
+}: {
+  label: string;
+  title?: string;
+  count: number | null;
+  checked: boolean;
+  dir: "ltr" | "rtl" | "auto";
+  onToggle: () => void;
+}) {
+  // A checked row always stays clickable so it can be unchecked; only an
+  // unchecked value the other filters rule out is taken off the table.
+  const unavailable = !checked && count === 0;
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      disabled={unavailable}
+      title={title}
+      onClick={onToggle}
+      className={`group flex min-h-[44px] w-full items-center gap-3 rounded-md px-2 py-1.5 text-start transition-[background-color,color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45 lg:min-h-9 ${
+        unavailable
+          ? "cursor-not-allowed text-foreground/35"
+          : "cursor-pointer text-foreground/80 hover:bg-accent hover:text-foreground"
+      } ${checked ? "text-foreground" : ""}`}
+    >
+      <span
+        aria-hidden="true"
+        className={`flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-[background-color,border-color] ${
+          checked
+            ? "border-foreground bg-foreground text-background"
+            : unavailable
+              ? "border-foreground/15 bg-background"
+              : "border-foreground/30 bg-background group-hover:border-foreground/55"
+        }`}
+      >
+        {checked && <Check className="size-3" aria-hidden="true" />}
+      </span>
+      <span dir={dir} className="min-w-0 flex-1 truncate text-[13px]">
+        {label}
+      </span>
+      {count !== null && (
+        <span
+          className={`shrink-0 tabular-nums text-[12px] ${
+            unavailable ? "text-foreground/30" : "text-foreground/45"
+          }`}
+        >
+          {count}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -419,96 +504,6 @@ function SectionSearchInput({
         className="w-full rounded-lg border border-border bg-background ps-3 pe-8 py-1.5 text-[12.5px] text-foreground placeholder:text-foreground/40 transition-colors hover:border-foreground/30 focus:border-foreground/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
       />
     </div>
-  );
-}
-
-function ChipGroup({
-  options,
-  selected,
-  onToggle,
-  labelOf,
-  dir,
-}: {
-  options: FacetOption[];
-  selected: string[];
-  onToggle: (value: string) => void;
-  labelOf: (value: string) => string;
-  /**
-   * Per-chip text direction. LTR for code identifiers, RTL for Hebrew labels,
-   * auto for user-authored names that may be either (tasks, modules).
-   */
-  dir: "ltr" | "rtl" | "auto";
-}) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {options.map(({ value, count }) => {
-        const active = selected.includes(value);
-        const label = labelOf(value);
-        return (
-          <SelectableChip
-            key={value}
-            label={label}
-            // Trimmed labels (e.g. bare model names) keep the full value
-            // reachable on hover — providers can collide on the short name.
-            title={label === value ? undefined : value}
-            // A negative count means unknown (facets not loaded); hide it.
-            count={count < 0 ? null : count}
-            active={active}
-            dir={dir}
-            onClick={() => onToggle(value)}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-function SelectableChip({
-  label,
-  title,
-  count,
-  active,
-  dir,
-  onClick,
-}: {
-  label: string;
-  title?: string;
-  count: number | null;
-  active: boolean;
-  dir: "ltr" | "rtl" | "auto";
-  onClick: () => void;
-}) {
-  // A selected chip always stays clickable so it can be removed; only an
-  // unselected value the other filters rule out is taken off the table.
-  const unavailable = !active && count === 0;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      disabled={unavailable}
-      title={title}
-      dir={dir}
-      className={`group inline-flex min-h-[44px] max-w-full items-center gap-1 rounded-full border px-3 py-1.5 text-[12.5px] transition-[background-color,border-color,color,opacity] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-0 ${
-        active
-          ? "cursor-pointer border-foreground/40 bg-foreground/[0.06] text-foreground"
-          : unavailable
-            ? "cursor-not-allowed border-border/60 bg-background text-foreground/35"
-            : "cursor-pointer border-border bg-background text-foreground/70 hover:border-foreground/30 hover:text-foreground"
-      }`}
-    >
-      {active && <Check className="size-3 shrink-0 text-foreground/70" aria-hidden="true" />}
-      <span className="min-w-0 truncate tabular-nums">{label}</span>
-      {count !== null && (
-        <span
-          className={`shrink-0 tabular-nums text-[11px] ${
-            active ? "text-foreground/55" : unavailable ? "text-foreground/30" : "text-foreground/45"
-          }`}
-        >
-          {count}
-        </span>
-      )}
-    </button>
   );
 }
 

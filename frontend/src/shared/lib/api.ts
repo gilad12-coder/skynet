@@ -2907,7 +2907,7 @@ const FACET_LIST_KEYS = ["models", "optimizers", "optimization_types", "modules"
 /**
  * Filter options (models / optimizers / modules / run types) present in one
  * corpus scope, each with the number of runs it would leave alongside the
- * other active filters, so each /explore tab offers exactly the chips it can
+ * other active filters, so each /explore tab offers exactly the values it can
  * filter to and can grey out the ones the current selection rules out. Pass
  * no scope for the public archive; pass `owner_username` for the caller's
  * own runs or `shared_with_username` for runs shared with them (the backend

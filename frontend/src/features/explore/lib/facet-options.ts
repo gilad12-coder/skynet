@@ -24,7 +24,7 @@ export function isCollapsible(options: FacetOption[]): boolean {
  *
  * A search query wins over everything and matches on the raw value or its
  * display label. Otherwise short and expanded sections show every option in
- * the order given (the caller keeps them alphabetical so chips never jump
+ * the order given (the caller keeps them alphabetical so rows never jump
  * when counts change); a collapsed long section shows its selected values
  * first, then the busiest of the rest up to the collapse limit.
  */

@@ -537,10 +537,16 @@ def fetch_corpus_facets(
             if other_param != param and other_param in active
         ]
         context_sql = " AND ".join(others) if others else "TRUE"
+        # Black-box runs are stamped with a placeholder module name so they
+        # sort with everything else; it is not a DSPy module and must never
+        # surface as one.
+        member_sql = f"{column} <> ''"
+        if column == "module":
+            member_sql += f" AND run_type <> '{OPTIMIZATION_TYPE_BLACKBOX}'"
         selects.append(
             f"SELECT '{name}' AS dim, {column} AS value, "
             f"COUNT(*) FILTER (WHERE {context_sql}) AS n "
-            f"FROM corpus WHERE {column} <> '' GROUP BY {column}"
+            f"FROM corpus WHERE {member_sql} GROUP BY {column}"
         )
     sql = corpus_cte + " " + " UNION ALL ".join(selects)
 

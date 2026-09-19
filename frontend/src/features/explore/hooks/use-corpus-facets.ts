@@ -18,11 +18,11 @@ export interface FacetFilters {
 /**
  * Filter options for the active corpus tab, each with the number of runs it
  * would leave alongside the other active filters, so each tab offers exactly
- * the chips it can filter to — a model private to "mine" never shows under
+ * the values it can filter to — a model private to "mine" never shows under
  * "public" — and can grey out the ones the current selection rules out.
  * Refetches when the corpus, signed-in user, or any structured filter
  * changes (the free-text query is not part of the counts); the previous
- * facets stay on screen while the new ones load so chips never flicker away.
+ * facets stay on screen while the new ones load so rows never flicker away.
  * Signed-out "mine"/"shared" have nothing to fetch and resolve to empty.
  * The backend returns every dimension sorted by value.
  */

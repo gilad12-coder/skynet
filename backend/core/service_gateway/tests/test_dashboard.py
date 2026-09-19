@@ -375,6 +375,8 @@ def test_fetch_corpus_facets_counts_each_dimension_against_the_other_filters(mon
     assert "FILTER (WHERE model = ANY(:models))" in selects["types"]
     assert "run_type = ANY" not in selects["types"]
     assert "FILTER (WHERE model = ANY(:models) AND run_type = ANY(:optimization_types))" in selects["modules"]
+    assert "WHERE module <> '' AND run_type <> 'blackbox' GROUP BY module" in selects["modules"]
+    assert "run_type <> 'blackbox'" not in selects["models"]
     assert "j.created_at >= :date_from" in sql
     assert params["optimization_types"] == ["blackbox"]
     assert "date_to_excl" not in params

@@ -69,7 +69,7 @@ class FacetsResponse(BaseModel):
     Each list holds the model / optimizer / module / run-type values present
     in the requested scope, each with the number of runs it would leave when
     combined with every other active filter, so the /explore filter drawer
-    offers exactly the chips that scope can filter to and can grey out the
+    offers exactly the values that scope can filter to and can grey out the
     ones the current selection has already ruled out.
     """
 

@@ -26,13 +26,13 @@ import { usePopularQueries } from "../hooks/use-popular-queries";
 import { useResultKeyboardNav } from "../hooks/use-result-keyboard-nav";
 import { ExploreSkeleton } from "./ExploreSkeleton";
 import { SearchBar } from "./SearchBar";
+import { ActiveFilters } from "./ActiveFilters";
 import { FiltersDrawer } from "./FiltersDrawer";
 import { ResultsList } from "./ResultsList";
 import { ResultsToolbar } from "./ResultsToolbar";
 import { ResultsSkeleton } from "./ResultsSkeleton";
 import { Pagination } from "./Pagination";
 
-const BLACKBOX_MODULE_PLACEHOLDER = "blackbox";
 
 /**
  * Top-level /explore page rendering a single ranked-list view driven by one
@@ -88,7 +88,7 @@ export function ExploreView() {
   );
 
   // Filter options come from a per-corpus facets fetch so each tab lists only
-  // the chips it can filter to (a model private to "mine" never shows under
+  // the values it can filter to (a model private to "mine" never shows under
   // "public"). The tutorial's demo corpus has no backend scope, so there we
   // fall back to deriving options from the injected demo points.
   const facets = useCorpusFacets(query.corpus, sessionUser, {
@@ -117,14 +117,17 @@ export function ExploreView() {
         : facets.types,
     [demoPoints, facets.types],
   );
-  // Black-box runs are stamped with a placeholder module name so they sort
-  // with everything else; it isn't a DSPy module, and the Run type filter
-  // already isolates those runs, so it never shows up as a module chip.
+  // Black-box runs carry a placeholder module name; the backend already
+  // leaves them out of the module facet, and the demo fallback does the same.
   const moduleOptions = React.useMemo(
     () =>
-      (demoPoints ? countOccurrences(demoPoints.map((p) => p.module_name)) : facets.modules).filter(
-        (m) => m.value !== BLACKBOX_MODULE_PLACEHOLDER,
-      ),
+      demoPoints
+        ? countOccurrences(
+            demoPoints
+              .filter((p) => p.optimization_type !== "blackbox")
+              .map((p) => p.module_name),
+          )
+        : facets.modules,
     [demoPoints, facets.modules],
   );
   // Popular searches for a blank field: real trending only — what people
@@ -185,6 +188,20 @@ export function ExploreView() {
             onClearRecent={clearRecent}
             suggestions={isPublicCorpus ? popularSearches : []}
           />
+          <ActiveFilters
+            models={query.models}
+            optimizers={query.optimizers}
+            types={query.types}
+            modules={query.modules}
+            dateFrom={query.dateFrom}
+            dateTo={query.dateTo}
+            onChangeModels={actions.setModels}
+            onChangeOptimizers={actions.setOptimizers}
+            onChangeTypes={actions.setTypes}
+            onChangeModules={actions.setModules}
+            onChangeDateRange={actions.setDateRange}
+            onClearAll={actions.clearFilters}
+          />
         </div>
 
         {isTrulyEmpty ? (
@@ -225,6 +242,8 @@ export function ExploreView() {
         selectedModules={query.modules}
         dateFrom={query.dateFrom}
         dateTo={query.dateTo}
+        resultTotal={response.total}
+        resultsLoading={response.loading}
         onChangeModels={actions.setModels}
         onChangeOptimizers={actions.setOptimizers}
         onChangeTypes={actions.setTypes}
