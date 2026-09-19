@@ -12,26 +12,26 @@ import {
   SignIn,
   Warning,
 } from "@/shared/ui/icons";
-import { logSearchQuery, type PublicDashboardPoint } from "@/shared/lib/api";
+import { logSearchQuery, type FacetDimension, type PublicDashboardPoint } from "@/shared/lib/api";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { registerTutorialHook } from "@/features/tutorial";
 import { usePublicDashboard } from "../hooks/use-public-dashboard";
-import { useCorpusFacets } from "../hooks/use-corpus-facets";
+import { useFacetOptions } from "../hooks/use-facet-options";
+import { facetsFromPoints } from "../lib/facet-options";
 import { useSemanticSearch } from "../hooks/use-semantic-search";
 import { useRecentQueries } from "../hooks/use-recent-queries";
 import { usePopularQueries } from "../hooks/use-popular-queries";
 import { useResultKeyboardNav } from "../hooks/use-result-keyboard-nav";
 import { ExploreSkeleton } from "./ExploreSkeleton";
 import { SearchBar } from "./SearchBar";
-import { FiltersDrawer } from "./FiltersDrawer";
+import { FilterBar } from "./FilterBar";
 import { ResultsList } from "./ResultsList";
 import { ResultsToolbar } from "./ResultsToolbar";
 import { ResultsSkeleton } from "./ResultsSkeleton";
 import { Pagination } from "./Pagination";
 
-const BLACKBOX_MODULE_PLACEHOLDER = "blackbox";
 
 /**
  * Top-level /explore page rendering a single ranked-list view driven by one
@@ -56,7 +56,17 @@ export function ExploreView() {
     sessionUser,
     sessionReady: status !== "loading",
   });
-  const [drawerOpen, setDrawerOpen] = React.useState(false);
+  // Which filter picker is open (one at a time) and its value search; the
+  // search resets on close so the next open starts from the busiest values
+  // again. Closing is ignored for a picker that is no longer the open one,
+  // since clicking straight from one picker to another closes the first
+  // after the second has opened.
+  const [openDimension, setOpenDimension] = React.useState<FacetDimension | null>(null);
+  const [facetQuery, setFacetQuery] = React.useState("");
+  const onPickerOpenChange = React.useCallback((dimension: FacetDimension, open: boolean) => {
+    setOpenDimension((prev) => (open ? dimension : prev === dimension ? null : prev));
+    if (!open) setFacetQuery("");
+  }, []);
 
   const { recent, push: pushRecent, clear: clearRecent } = useRecentQueries();
 
@@ -86,29 +96,30 @@ export function ExploreView() {
     commitQuery(query.text),
   );
 
-  // Filter options come from a per-corpus facets fetch so each tab lists only
-  // the chips it can filter to (a model private to "mine" never shows under
-  // "public"). The tutorial's demo corpus has no backend scope, so there we
-  // fall back to deriving options from the injected demo points.
-  const facets = useCorpusFacets(query.corpus, sessionUser);
-  const modelOptions = React.useMemo(
-    () => (demoPoints ? collectDistinct(demoPoints, "winning_model") : facets.models),
-    [demoPoints, facets.models],
+  // The open picker's values come from a per-corpus facets fetch so each tab
+  // lists only the values it can filter to (a model private to "mine" never
+  // shows under "public"); the backend caps the list and answers the value
+  // search. The tutorial's demo corpus has no backend scope, so there the
+  // same ranking is applied client-side to the injected demo points.
+  const fetchedOptions = useFacetOptions(
+    query.corpus,
+    sessionUser,
+    {
+      models: query.models,
+      optimizers: query.optimizers,
+      types: query.types,
+      modules: query.modules,
+      dateFrom: query.dateFrom,
+      dateTo: query.dateTo,
+    },
+    demoPoints ? null : openDimension,
+    facetQuery,
   );
-  const optimizerOptions = React.useMemo(
-    () => (demoPoints ? collectDistinct(demoPoints, "optimizer_name") : facets.optimizers),
-    [demoPoints, facets.optimizers],
-  );
-  // Black-box runs are stamped with a placeholder module name so they sort
-  // with everything else; it isn't a DSPy module, and the Run type filter
-  // already isolates those runs, so it never shows up as a module chip.
-  const moduleOptions = React.useMemo(
-    () =>
-      (demoPoints ? collectDistinct(demoPoints, "module_name") : facets.modules).filter(
-        (m) => m !== BLACKBOX_MODULE_PLACEHOLDER,
-      ),
-    [demoPoints, facets.modules],
-  );
+  const facetOptions = React.useMemo(() => {
+    if (!demoPoints || !openDimension) return fetchedOptions;
+    const demo = facetsFromPoints(demoPoints, facetQuery);
+    return { options: demo[openDimension], total: demo.totals[openDimension], loading: false };
+  }, [demoPoints, openDimension, facetQuery, fetchedOptions]);
   // Popular searches for a blank field: real trending only — what people
   // actually searched (public corpus, logged server-side on explicit commit).
   // When the log has no data yet, this is empty and the section simply doesn't
@@ -158,14 +169,33 @@ export function ExploreView() {
             onCorpusChange={actions.setCorpus}
             signedIn={sessionUser.length > 0}
             filtersCount={appliedFilterCount}
-            onOpenFilters={() => setDrawerOpen(true)}
-            onClearFilters={actions.clearFilters}
             loading={response.loading}
             onResultKeyDown={onInputKeyDown}
             activeResultIndex={activeIndex}
             recentQueries={recent}
             onClearRecent={clearRecent}
             suggestions={isPublicCorpus ? popularSearches : []}
+          />
+          <FilterBar
+            openDimension={openDimension}
+            onOpenChange={onPickerOpenChange}
+            facetQuery={facetQuery}
+            onFacetQueryChange={setFacetQuery}
+            options={facetOptions.options}
+            total={facetOptions.total}
+            loading={facetOptions.loading}
+            selectedModels={query.models}
+            selectedOptimizers={query.optimizers}
+            selectedTypes={query.types}
+            selectedModules={query.modules}
+            dateFrom={query.dateFrom}
+            dateTo={query.dateTo}
+            onChangeModels={actions.setModels}
+            onChangeOptimizers={actions.setOptimizers}
+            onChangeTypes={actions.setTypes}
+            onChangeModules={actions.setModules}
+            onChangeDateRange={actions.setDateRange}
+            onClearAll={actions.clearFilters}
           />
         </div>
 
@@ -193,26 +223,6 @@ export function ExploreView() {
           />
         )}
       </div>
-
-      <FiltersDrawer
-        open={drawerOpen}
-        onOpenChange={setDrawerOpen}
-        modelOptions={modelOptions}
-        optimizerOptions={optimizerOptions}
-        moduleOptions={moduleOptions}
-        selectedModels={query.models}
-        selectedOptimizers={query.optimizers}
-        selectedTypes={query.types}
-        selectedModules={query.modules}
-        dateFrom={query.dateFrom}
-        dateTo={query.dateTo}
-        onChangeModels={actions.setModels}
-        onChangeOptimizers={actions.setOptimizers}
-        onChangeTypes={actions.setTypes}
-        onChangeModules={actions.setModules}
-        onChangeDateRange={actions.setDateRange}
-        onClearAll={actions.clearAll}
-      />
     </div>
   );
 }
@@ -368,17 +378,4 @@ function ListPane({
       />
     </div>
   );
-}
-
-function collectDistinct(
-  points: PublicDashboardPoint[],
-  key: "winning_model" | "optimizer_name" | "module_name",
-): string[] {
-  if (!Array.isArray(points)) return [];
-  const set = new Set<string>();
-  for (const p of points) {
-    const v = (p as PublicDashboardPoint)[key];
-    if (typeof v === "string" && v.length > 0) set.add(v);
-  }
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
 }

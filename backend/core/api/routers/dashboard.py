@@ -12,12 +12,14 @@ view, not a stable dev contract.
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ...service_gateway.dashboard import (
+    FACET_LIMIT_DEFAULT,
+    FACET_LIMIT_MAX,
     POPULAR_QUERIES_LIMIT_DEFAULT,
     SEARCH_PAGE_SIZE_DEFAULT,
     SEARCH_PAGE_SIZE_MAX,
@@ -56,17 +58,38 @@ class PublicDashboardResponse(BaseModel):
     points: list[PublicDashboardPoint]
 
 
-class FacetsResponse(BaseModel):
-    """Distinct filter options for one corpus scope (``GET /dashboard/facets``).
+class FacetOption(BaseModel):
+    """One filter value in a facet dimension with its contextual run count."""
 
-    Each list holds the model / optimizer / module values present in the
-    requested scope, so the /explore filter drawer offers exactly the chips
-    that scope can filter to.
+    value: str
+    count: int
+
+
+class FacetTotals(BaseModel):
+    """Distinct values still available per dimension, beyond the ones listed."""
+
+    models: int = 0
+    optimizers: int = 0
+    modules: int = 0
+    types: int = 0
+
+
+class FacetsResponse(BaseModel):
+    """Filter options with run counts for one corpus scope (``GET /dashboard/facets``).
+
+    Each list holds the busiest model / optimizer / module / run-type values
+    in the requested scope (capped per dimension, optionally narrowed by a
+    value search), each with the number of runs it would leave when combined
+    with every other active filter. ``totals`` says how many distinct values
+    remain available per dimension, so the /explore filter drawer can show
+    "top 8 of 1,240" and offer search for the rest instead of listing them.
     """
 
-    models: list[str] = []
-    optimizers: list[str] = []
-    modules: list[str] = []
+    models: list[FacetOption] = []
+    optimizers: list[FacetOption] = []
+    modules: list[FacetOption] = []
+    types: list[FacetOption] = []
+    totals: FacetTotals = FacetTotals()
 
 
 class SearchRequest(BaseModel):
@@ -196,14 +219,25 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
         http_request: Request,
         owner_username: str | None = None,
         shared_with_username: str | None = None,
+        models: Annotated[list[str] | None, Query()] = None,
+        optimizers: Annotated[list[str] | None, Query()] = None,
+        optimization_types: Annotated[list[str] | None, Query()] = None,
+        modules: Annotated[list[str] | None, Query()] = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        q: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=FACET_LIMIT_MAX)] = FACET_LIMIT_DEFAULT,
+        dim: Literal["models", "optimizers", "modules", "types"] | None = None,
         authorization: str | None = Header(default=None),
     ) -> FacetsResponse:
-        """Distinct model / optimizer / module options for the requested corpus.
+        """Busiest filter values with contextual run counts for the requested corpus.
 
         Lets each /explore tab list options drawn from its own scope rather
-        than the public archive's. Scope is resolved with the same
-        session-match check as ``/dashboard/search``: a caller may only ask
-        for their own (mine) or shared-with-them options.
+        than the public archive's. The active filters are passed back in so
+        every option's count reflects the other dimensions' selections (the
+        same conjunctive semantics ``/dashboard/search`` applies). Scope is
+        resolved with the same session-match check as ``/dashboard/search``:
+        a caller may only ask for their own (mine) or shared-with-them options.
 
         Args:
             http_request: Incoming request, forwarded to
@@ -212,10 +246,22 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
             owner_username: When set, scope to the caller's own jobs.
             shared_with_username: When set (and ``owner_username`` is not),
                 scope to jobs shared with the caller.
+            models: Active model filter (repeatable query param).
+            optimizers: Active optimizer / engine filter.
+            optimization_types: Active run-type filter.
+            modules: Active DSPy module filter.
+            date_from: Inclusive lower bound on ``created_at``.
+            date_to: Inclusive upper bound on ``created_at``.
+            q: Optional case-insensitive substring to match values against
+                (the picker's value search).
+            limit: Maximum values returned per dimension.
+            dim: Restrict the work to one dimension — the one whose picker is
+                open; the others come back empty.
             authorization: Bearer token, required only when a scope is set.
 
         Returns:
-            A :class:`FacetsResponse` with the distinct options for the scope.
+            A :class:`FacetsResponse` with the top values, counts, and
+            per-dimension totals for the scope.
 
         Raises:
             HTTPException: When a scope is set but the request is
@@ -235,11 +281,22 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
             job_store=job_store,
             owner_username=resolved_owner,
             shared_with_username=resolved_shared,
+            models=models,
+            optimizers=optimizers,
+            optimization_types=optimization_types,
+            modules=modules,
+            date_from=date_from,
+            date_to=date_to,
+            value_query=q,
+            limit=limit,
+            dimension=dim,
         )
         return FacetsResponse(
-            models=data["models"],
-            optimizers=data["optimizers"],
-            modules=data["modules"],
+            models=[FacetOption(**o) for o in data["models"]],
+            optimizers=[FacetOption(**o) for o in data["optimizers"]],
+            modules=[FacetOption(**o) for o in data["modules"]],
+            types=[FacetOption(**o) for o in data["types"]],
+            totals=FacetTotals(**data["totals"]),
         )
 
     @router.post(
