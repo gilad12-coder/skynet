@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { motion } from "framer-motion";
-import { CircleNotch, Globe, User, Users, X } from "@/shared/ui/icons";
+import { CircleNotch, FadersHorizontal, FunnelX, Globe, User, Users, X } from "@/shared/ui/icons";
 import { msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
@@ -20,8 +20,10 @@ interface SearchBarProps {
   onCorpusChange: (next: ExploreCorpus) => void;
   /** Disables the session-scoped tabs (Mine, Shared) when no logged-in user. */
   signedIn: boolean;
-  /** Number of structured filters applied in the bar below; keeps the field styled as active. */
   filtersCount: number;
+  onOpenFilters: () => void;
+  /** Quick-clears the metadata filters (preserving the text query). */
+  onClearFilters: () => void;
   /** True while a search request is in flight — drives the inline spinner. */
   loading: boolean;
   /**
@@ -65,6 +67,8 @@ export function SearchBar({
   onCorpusChange,
   signedIn,
   filtersCount,
+  onOpenFilters,
+  onClearFilters,
   loading,
   onResultKeyDown,
   activeResultIndex,
@@ -194,6 +198,34 @@ export function SearchBar({
             <X className="size-4" aria-hidden="true" />
           </button>
         )}
+        {filtersCount > 0 && (
+          <TooltipButton tooltip={msg("explore.filters.reset")} side="bottom">
+            <button
+              type="button"
+              onClick={onClearFilters}
+              aria-label={msg("explore.filters.reset")}
+              className="inline-flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:size-9"
+            >
+              <FunnelX className="size-[1.05rem]" aria-hidden="true" />
+            </button>
+          </TooltipButton>
+        )}
+        <button
+          type="button"
+          onClick={onOpenFilters}
+          aria-label={msg("explore.filters.button")}
+          className="inline-flex h-[44px] min-w-[44px] shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg px-2.5 text-[13px] text-foreground/70 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:h-9 lg:min-w-0"
+        >
+          <FadersHorizontal className="size-[1.125rem]" aria-hidden="true" />
+          {filtersCount > 0 && (
+            <span
+              dir="ltr"
+              className="inline-flex min-w-5 items-center justify-center rounded-full bg-foreground px-1.5 text-[10px] font-semibold leading-tight text-background tabular-nums"
+            >
+              {filtersCount}
+            </span>
+          )}
+        </button>
         {suggestOpen && (
           <SearchSuggestions
             recent={recentQueries}

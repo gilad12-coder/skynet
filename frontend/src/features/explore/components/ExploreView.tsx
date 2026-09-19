@@ -12,7 +12,7 @@ import {
   SignIn,
   Warning,
 } from "@/shared/ui/icons";
-import { logSearchQuery, type FacetDimension, type PublicDashboardPoint } from "@/shared/lib/api";
+import { logSearchQuery, type PublicDashboardPoint } from "@/shared/lib/api";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { EmptyState } from "@/shared/ui/empty-state";
@@ -26,7 +26,7 @@ import { usePopularQueries } from "../hooks/use-popular-queries";
 import { useResultKeyboardNav } from "../hooks/use-result-keyboard-nav";
 import { ExploreSkeleton } from "./ExploreSkeleton";
 import { SearchBar } from "./SearchBar";
-import { FilterBar } from "./FilterBar";
+import { FiltersDrawer, FilterSummary, type DrawerField } from "./FiltersDrawer";
 import { ResultsList } from "./ResultsList";
 import { ResultsToolbar } from "./ResultsToolbar";
 import { ResultsSkeleton } from "./ResultsSkeleton";
@@ -56,17 +56,25 @@ export function ExploreView() {
     sessionUser,
     sessionReady: status !== "loading",
   });
-  // Which filter picker is open (one at a time) and its value search; the
-  // search resets on close so the next open starts from the busiest values
-  // again. Closing is ignored for a picker that is no longer the open one,
-  // since clicking straight from one picker to another closes the first
-  // after the second has opened.
-  const [openDimension, setOpenDimension] = React.useState<FacetDimension | null>(null);
+  // The drawer, the field expanded inside it (one at a time), and that
+  // field's value search; the search resets whenever a field or the drawer
+  // closes so the next open starts from the busiest values again.
+  const [drawerOpen, setDrawerOpen] = React.useState(false);
+  const [openField, setOpenField] = React.useState<DrawerField | null>(null);
   const [facetQuery, setFacetQuery] = React.useState("");
-  const onPickerOpenChange = React.useCallback((dimension: FacetDimension, open: boolean) => {
-    setOpenDimension((prev) => (open ? dimension : prev === dimension ? null : prev));
-    if (!open) setFacetQuery("");
+  const onOpenFieldChange = React.useCallback((next: DrawerField | null) => {
+    setOpenField(next);
+    setFacetQuery("");
   }, []);
+  const onDrawerOpenChange = React.useCallback((next: boolean) => {
+    setDrawerOpen(next);
+    if (!next) {
+      setOpenField(null);
+      setFacetQuery("");
+    }
+  }, []);
+  // Only the facet dimensions are fetched; the date field has no values to list.
+  const openDimension = openField === "date" ? null : openField;
 
   const { recent, push: pushRecent, clear: clearRecent } = useRecentQueries();
 
@@ -96,7 +104,7 @@ export function ExploreView() {
     commitQuery(query.text),
   );
 
-  // The open picker's values come from a per-corpus facets fetch so each tab
+  // The open field's values come from a per-corpus facets fetch so each tab
   // lists only the values it can filter to (a model private to "mine" never
   // shows under "public"); the backend caps the list and answers the value
   // search. The tutorial's demo corpus has no backend scope, so there the
@@ -169,6 +177,8 @@ export function ExploreView() {
             onCorpusChange={actions.setCorpus}
             signedIn={sessionUser.length > 0}
             filtersCount={appliedFilterCount}
+            onOpenFilters={() => setDrawerOpen(true)}
+            onClearFilters={actions.clearFilters}
             loading={response.loading}
             onResultKeyDown={onInputKeyDown}
             activeResultIndex={activeIndex}
@@ -176,25 +186,14 @@ export function ExploreView() {
             onClearRecent={clearRecent}
             suggestions={isPublicCorpus ? popularSearches : []}
           />
-          <FilterBar
-            openDimension={openDimension}
-            onOpenChange={onPickerOpenChange}
-            facetQuery={facetQuery}
-            onFacetQueryChange={setFacetQuery}
-            options={facetOptions.options}
-            total={facetOptions.total}
-            loading={facetOptions.loading}
-            selectedModels={query.models}
-            selectedOptimizers={query.optimizers}
-            selectedTypes={query.types}
-            selectedModules={query.modules}
+          <FilterSummary
+            models={query.models}
+            optimizers={query.optimizers}
+            types={query.types}
+            modules={query.modules}
             dateFrom={query.dateFrom}
             dateTo={query.dateTo}
-            onChangeModels={actions.setModels}
-            onChangeOptimizers={actions.setOptimizers}
-            onChangeTypes={actions.setTypes}
-            onChangeModules={actions.setModules}
-            onChangeDateRange={actions.setDateRange}
+            onOpen={() => setDrawerOpen(true)}
             onClearAll={actions.clearFilters}
           />
         </div>
@@ -223,6 +222,32 @@ export function ExploreView() {
           />
         )}
       </div>
+
+      <FiltersDrawer
+        open={drawerOpen}
+        onOpenChange={onDrawerOpenChange}
+        openField={openField}
+        onOpenFieldChange={onOpenFieldChange}
+        facetQuery={facetQuery}
+        onFacetQueryChange={setFacetQuery}
+        options={facetOptions.options}
+        total={facetOptions.total}
+        loading={facetOptions.loading}
+        selectedModels={query.models}
+        selectedOptimizers={query.optimizers}
+        selectedTypes={query.types}
+        selectedModules={query.modules}
+        dateFrom={query.dateFrom}
+        dateTo={query.dateTo}
+        resultTotal={response.total}
+        resultsLoading={response.loading}
+        onChangeModels={actions.setModels}
+        onChangeOptimizers={actions.setOptimizers}
+        onChangeTypes={actions.setTypes}
+        onChangeModules={actions.setModules}
+        onChangeDateRange={actions.setDateRange}
+        onClearAll={actions.clearFilters}
+      />
     </div>
   );
 }
