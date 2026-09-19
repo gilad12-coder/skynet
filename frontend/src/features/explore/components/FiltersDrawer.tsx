@@ -10,6 +10,7 @@ import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { Sheet, SheetContent, SheetTitle } from "@/shared/ui/primitives/sheet";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { SkynetDatePicker } from "@/shared/ui/skynet-date-picker";
 import { useIsWideViewport } from "../hooks/use-wide-viewport";
 import { pickerRows } from "../lib/facet-options";
@@ -390,20 +391,25 @@ export function FilterSummary({
 function FieldRow({
   label,
   summary,
-  more = 0,
+  count = 0,
+  onClear,
   open,
   onToggle,
   children,
 }: {
   label: string;
   summary: string | null;
-  more?: number;
+  /** How many values are selected in this field; drives the count chip. */
+  count?: number;
+  /** Clears the field's whole selection; the clear control shows only when set. */
+  onClear?: () => void;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
 }) {
   const panelId = React.useId();
   const reduceMotion = useReducedMotion();
+  const numberFormat = useNumberFormat();
   const buttonRef = React.useRef<HTMLButtonElement>(null);
   const wasOpen = React.useRef(open);
   // Collapsing unmounts whatever was focused inside (Escape from the search
@@ -417,36 +423,55 @@ function FieldRow({
 
   return (
     <div className={cn("transition-colors", open && "-mx-3 rounded-lg bg-accent/40 px-3")}>
-      <button
-        ref={buttonRef}
-        type="button"
-        aria-expanded={open}
-        aria-controls={panelId}
-        onClick={onToggle}
-        className={`flex h-[52px] w-full cursor-pointer items-center gap-3 rounded-md text-start lg:h-12 ${FOCUS_RING}`}
-      >
-        <span className="w-[5.5rem] shrink-0 text-[13px] text-foreground/60">{label}</span>
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-[13.5px]",
-            summary === null ? "text-foreground/40" : "font-medium text-foreground",
-          )}
+      <div className="flex h-[52px] w-full items-center gap-1.5 lg:h-12">
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={onToggle}
+          className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md text-start ${FOCUS_RING}`}
         >
-          {summary ?? msg("explore.filters.field.any")}
-        </span>
-        {more > 0 && (
-          <span className="shrink-0 rounded-full bg-foreground/10 px-1.5 py-px text-[11px] font-medium tabular-nums text-foreground/75">
-            +{more}
+          <span className="w-[5.5rem] shrink-0 text-[13px] text-foreground/60">{label}</span>
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-[13.5px]",
+              summary === null ? "text-foreground/40" : "font-medium text-foreground",
+            )}
+          >
+            {summary ?? msg("explore.filters.field.any")}
           </span>
-        )}
-        <CaretDown
-          className={cn(
-            "size-3 shrink-0 text-foreground/45 transition-transform duration-200",
-            open && "rotate-180",
+          {count > 1 && (
+            <span className="shrink-0 rounded-full bg-foreground/10 px-1.5 py-px text-[11px] font-medium tabular-nums text-foreground/75">
+              {numberFormat.format(count)}
+            </span>
           )}
+        </button>
+        {onClear && (
+          <TooltipButton tooltip={msg("explore.filters.picker.clear")} side="top">
+            <button
+              type="button"
+              onClick={onClear}
+              aria-label={msg("explore.filters.picker.clear")}
+              className={`flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground/45 transition-colors hover:bg-foreground/10 hover:text-foreground ${FOCUS_RING}`}
+            >
+              <X className="size-3.5" aria-hidden="true" />
+            </button>
+          </TooltipButton>
+        )}
+        <button
+          type="button"
+          tabIndex={-1}
           aria-hidden="true"
-        />
-      </button>
+          onClick={onToggle}
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground/45"
+        >
+          <CaretDown
+            className={cn("size-3 transition-transform duration-200", open && "rotate-180")}
+            aria-hidden="true"
+          />
+        </button>
+      </div>
       {/* Reveal on a height+opacity transition so the fields glide open and
           shut instead of snapping. The negative inline margin matches the
           list's own bleed so overflow-hidden clips the reveal vertically
@@ -467,18 +492,6 @@ function FieldRow({
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-function ClearSelection({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`self-end cursor-pointer rounded-md px-1 text-[11.5px] text-foreground/65 hover:text-foreground ${FOCUS_RING}`}
-    >
-      {msg("explore.filters.picker.clear")}
-    </button>
   );
 }
 
@@ -604,7 +617,8 @@ function FacetField({
     <FieldRow
       label={msg(`explore.filters.trigger.${dimension}`)}
       summary={first === undefined ? null : displayName(first)}
-      more={Math.max(0, selected.length - 1)}
+      count={selected.length}
+      onClear={selected.length > 0 ? () => onChange([]) : undefined}
       open={open}
       onToggle={onToggle}
     >
@@ -697,25 +711,22 @@ function FacetField({
             ))}
         </ul>
 
-        {(meta !== null || selected.length > 0) && (
-          <div className="flex h-8 items-center justify-between gap-3 text-[11.5px] text-foreground/50">
-            <span className="inline-flex min-w-0 items-center gap-2">
-              <span className="tabular-nums">{meta}</span>
-              {meta !== null && canShowMore && (
-                <button
-                  type="button"
-                  onClick={onShowMore}
-                  disabled={loading}
-                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-1 font-medium text-foreground/70 hover:text-foreground disabled:cursor-default disabled:opacity-60 ${FOCUS_RING}`}
-                >
-                  {loading && options.length > 0 && (
-                    <CircleNotch className="size-3 animate-spin" aria-hidden="true" />
-                  )}
-                  {msg("explore.filters.show_more")}
-                </button>
-              )}
-            </span>
-            {selected.length > 0 && <ClearSelection onClick={() => onChange([])} />}
+        {meta !== null && (
+          <div className="flex h-8 items-center gap-2 text-[11.5px] text-foreground/50">
+            <span className="tabular-nums">{meta}</span>
+            {canShowMore && (
+              <button
+                type="button"
+                onClick={onShowMore}
+                disabled={loading}
+                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md px-1 font-medium text-foreground/70 hover:text-foreground disabled:cursor-default disabled:opacity-60 ${FOCUS_RING}`}
+              >
+                {loading && options.length > 0 && (
+                  <CircleNotch className="size-3 animate-spin" aria-hidden="true" />
+                )}
+                {msg("explore.filters.show_more")}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -751,7 +762,8 @@ function TypeField({
     <FieldRow
       label={msg("explore.filters.trigger.types")}
       summary={first === undefined ? null : typeLabel(first)}
-      more={Math.max(0, selected.length - 1)}
+      count={selected.length}
+      onClear={selected.length > 0 ? () => onChange([]) : undefined}
       open={open}
       onToggle={onToggle}
     >
@@ -788,11 +800,6 @@ function TypeField({
             );
           })}
         </div>
-        {selected.length > 0 && (
-          <div className="flex h-8 items-center justify-end text-[11.5px]">
-            <ClearSelection onClick={() => onChange([])} />
-          </div>
-        )}
       </div>
     </FieldRow>
   );
@@ -825,6 +832,7 @@ function DateField({
     <FieldRow
       label={msg("explore.filters.trigger.date")}
       summary={dateSummary(dateFrom, dateTo, formatDay)}
+      onClear={dateCount > 0 ? () => onChange(null, null) : undefined}
       open={open}
       onToggle={onToggle}
     >
@@ -881,7 +889,6 @@ function DateField({
               ariaLabel={msg("explore.filters.date.to")}
             />
           </label>
-          {dateCount > 0 && <ClearSelection onClick={() => onChange(null, null)} />}
         </div>
       </div>
     </FieldRow>
