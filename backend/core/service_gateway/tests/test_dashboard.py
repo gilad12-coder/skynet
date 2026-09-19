@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.pool import StaticPool
 
@@ -432,3 +433,40 @@ def test_fetch_corpus_facets_value_query_matches_every_dimension_and_escapes_lik
     assert "WHERE model <> '' AND model ILIKE :value_pattern GROUP BY model" in sql
     assert "COUNT(DISTINCT optimizer) AS n FROM corpus WHERE optimizer <> '' AND optimizer ILIKE :value_pattern AND TRUE" in sql
     assert out == {"models": [], "optimizers": [], "modules": [], "types": [], "totals": {"models": 0, "optimizers": 0, "modules": 0, "types": 0}}
+
+
+def test_fetch_corpus_facets_dimension_restricts_the_query_to_one_dimension(monkeypatch) -> None:
+    """One open picker queries only its own dimension, still counted against the other filters."""
+    monkeypatch.setattr(dashboard, "_job_embeddings_relation", lambda _store: "job_embeddings")
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.execute.return_value.mappings.return_value.all.return_value = [
+        {"dim": "optimizers", "value": "mipro", "n": 3},
+        {"dim": "optimizers", "value": None, "n": 12},
+    ]
+    monkeypatch.setattr(dashboard, "Session", lambda _engine: session)
+
+    out = dashboard.fetch_corpus_facets(
+        job_store=SimpleNamespace(engine=object()),
+        models=["gpt-4o"],
+        dimension="optimizers",
+    )
+
+    sql = str(session.execute.call_args.args[0])
+    assert sql.count("AS dim") == 2
+    assert "SELECT 'optimizers' AS dim" in sql
+    assert "SELECT 'models' AS dim" not in sql
+    assert "FILTER (WHERE model = ANY(:models))" in sql
+    assert out == {
+        "models": [],
+        "optimizers": [{"value": "mipro", "count": 3}],
+        "modules": [],
+        "types": [],
+        "totals": {"models": 0, "optimizers": 12, "modules": 0, "types": 0},
+    }
+
+
+def test_fetch_corpus_facets_rejects_an_unknown_dimension() -> None:
+    """A typo in the dimension fails loudly instead of producing a malformed UNION."""
+    with pytest.raises(ValueError, match="unknown facet dimension"):
+        dashboard.fetch_corpus_facets(job_store=SimpleNamespace(engine=object()), dimension="tasks")

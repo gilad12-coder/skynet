@@ -2906,6 +2906,8 @@ export interface CorpusFacets {
   totals: FacetTotals;
 }
 
+export type FacetDimension = keyof FacetTotals;
+
 /** The active structured filters, echoed back so facet counts are contextual. */
 export interface FacetContext {
   models?: string[];
@@ -2922,16 +2924,17 @@ const FACET_LIST_KEYS = ["models", "optimizers", "optimization_types", "modules"
  * The busiest filter values (models / optimizers / modules / run types) in
  * one corpus scope, each with the number of runs it would leave alongside the
  * other active filters, so each /explore tab offers exactly the values it can
- * filter to. `query` narrows every dimension to values containing that text
- * (case-insensitive, matched server-side) and `limit` caps each list. Pass
- * no scope for the public archive; pass `owner_username` for the caller's
+ * filter to. `query` narrows the values to those containing that text
+ * (case-insensitive, matched server-side), `limit` caps each list, and
+ * `dimension` restricts the work to the one picker that is open (the other
+ * lists come back empty). Pass no scope for the public archive; pass `owner_username` for the caller's
  * own runs or `shared_with_username` for runs shared with them (the backend
  * requires the bearer token to match the requested username).
  */
 export function getCorpusFacets(
   scope: { owner_username?: string; shared_with_username?: string } = {},
   context: FacetContext = {},
-  options: { query?: string; limit?: number } = {},
+  options: { query?: string; limit?: number; dimension?: FacetDimension } = {},
 ): Promise<CorpusFacets> {
   const params = new URLSearchParams();
   if (scope.owner_username) params.set("owner_username", scope.owner_username);
@@ -2944,6 +2947,7 @@ export function getCorpusFacets(
   if (context.date_to) params.set("date_to", context.date_to);
   if (options.query?.trim()) params.set("q", options.query.trim());
   if (options.limit) params.set("limit", String(options.limit));
+  if (options.dimension) params.set("dim", options.dimension);
   const qs = params.toString();
   return cachedGet(`/dashboard/facets${qs ? `?${qs}` : ""}`, 15000);
 }

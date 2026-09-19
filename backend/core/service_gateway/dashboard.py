@@ -456,6 +456,7 @@ def fetch_corpus_facets(
     date_to: date | None = None,
     value_query: str | None = None,
     limit: int = FACET_LIMIT_DEFAULT,
+    dimension: str | None = None,
 ) -> dict[str, Any]:
     """Return the busiest filter values per dimension in one corpus, with counts.
 
@@ -475,8 +476,9 @@ def fetch_corpus_facets(
     filters rule out (count 0) are dropped rather than padded in, and the
     number of distinct values still available is reported separately so the
     UI can say "top 8 of 1,240" and offer search for the rest. ``value_query``
-    is that search: a case-insensitive substring match on the raw value,
-    applied to every dimension at once.
+    is that search: a case-insensitive substring match on the raw value.
+    The UI opens one dimension's picker at a time, so ``dimension`` restricts
+    the work to that dimension; the others come back empty with a zero total.
 
     The scope predicate and the payload-first / embedded-first ``COALESCE``
     derivation mirror :func:`_fetch_corpus_points` and :func:`_search_lexical`
@@ -498,6 +500,8 @@ def fetch_corpus_facets(
         value_query: Optional substring to match values against; blank means
             no restriction.
         limit: Maximum values returned per dimension (``1..FACET_LIMIT_MAX``).
+        dimension: One of ``models`` / ``optimizers`` / ``modules`` / ``types``
+            to compute only that dimension, or ``None`` for all four.
 
     Returns:
         ``{"models": [...], "optimizers": [...], "modules": [...], "types": [...],
@@ -506,7 +510,12 @@ def fetch_corpus_facets(
         count descending then value, and ``totals`` gives the number of
         distinct values with a positive count per dimension (so a total larger
         than the list length means there is more to search for).
+
+    Raises:
+        ValueError: When ``dimension`` names no facet dimension.
     """
+    if dimension is not None and dimension not in {name for name, _, _ in _FACET_DIMENSIONS}:
+        raise ValueError(f"unknown facet dimension: {dimension!r}")
     params: dict[str, Any] = {}
     if owner_username is not None:
         scope_sql = "j.username = :owner_username"
@@ -568,6 +577,8 @@ def fetch_corpus_facets(
 
     selects: list[str] = []
     for name, column, param in _FACET_DIMENSIONS:
+        if dimension is not None and name != dimension:
+            continue
         others = [
             f"{other_column} = ANY(:{other_param})"
             for _, other_column, other_param in _FACET_DIMENSIONS

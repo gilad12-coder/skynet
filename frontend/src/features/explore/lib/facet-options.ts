@@ -1,8 +1,8 @@
 /**
- * Pure helpers behind the explore filter drawer's value lists.
+ * Pure helpers behind the explore filter pickers' value lists.
  *
  * A filter dimension can hold thousands of distinct values (every model id
- * ever optimized against), so the drawer never lists one in full. Each
+ * ever optimized against), so a picker never lists one in full. Each
  * dimension shows its busiest values up to a small cap, ranked by the number
  * of runs each would leave alongside the other active filters, and reports
  * how many distinct values exist so the user knows to search for the rest.
@@ -45,6 +45,27 @@ export function topOptions(
     (o) => o.count > 0 && (!needle || o.value.toLowerCase().includes(needle)),
   );
   return { options: matching.slice(0, limit), total: matching.length };
+}
+
+export interface PickerRow {
+  value: string;
+  /** Null when the value is selected but fell outside the ranked slice, so its count is unknown. */
+  count: number | null;
+  checked: boolean;
+}
+
+/**
+ * The rows a picker lists: the selected values pinned first (so a choice
+ * stays visible and removable even once it drops out of the top ranks or
+ * stops matching the search), then the ranked options that are not selected.
+ */
+export function pickerRows(options: FacetOption[], selected: string[]): PickerRow[] {
+  const counts = new Map(options.map((o) => [o.value, o.count]));
+  const pinned = selected.map((value) => ({ value, count: counts.get(value) ?? null, checked: true }));
+  const rest = options
+    .filter((o) => !selected.includes(o.value))
+    .map((o) => ({ value: o.value, count: o.count, checked: false }));
+  return [...pinned, ...rest];
 }
 
 /**

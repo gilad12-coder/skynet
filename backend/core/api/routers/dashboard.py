@@ -227,6 +227,7 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
         date_to: date | None = None,
         q: str | None = None,
         limit: Annotated[int, Query(ge=1, le=FACET_LIMIT_MAX)] = FACET_LIMIT_DEFAULT,
+        dim: Literal["models", "optimizers", "modules", "types"] | None = None,
         authorization: str | None = Header(default=None),
     ) -> FacetsResponse:
         """Busiest filter values with contextual run counts for the requested corpus.
@@ -251,9 +252,11 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
             modules: Active DSPy module filter.
             date_from: Inclusive lower bound on ``created_at``.
             date_to: Inclusive upper bound on ``created_at``.
-            q: Optional case-insensitive substring to match values against in
-                every dimension (the drawer's value search).
+            q: Optional case-insensitive substring to match values against
+                (the picker's value search).
             limit: Maximum values returned per dimension.
+            dim: Restrict the work to one dimension — the one whose picker is
+                open; the others come back empty.
             authorization: Bearer token, required only when a scope is set.
 
         Returns:
@@ -286,6 +289,7 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
             date_to=date_to,
             value_query=q,
             limit=limit,
+            dimension=dim,
         )
         return FacetsResponse(
             models=[FacetOption(**o) for o in data["models"]],

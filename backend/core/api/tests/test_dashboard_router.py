@@ -176,6 +176,7 @@ def test_facets_public_forwards_no_scope(monkeypatch: pytest.MonkeyPatch) -> Non
     }
     assert captured["value_query"] is None
     assert captured["limit"] == 8
+    assert captured["dimension"] is None
     assert captured["owner_username"] is None
     assert captured["shared_with_username"] is None
     assert captured["optimization_types"] is None
@@ -190,9 +191,10 @@ def test_facets_forward_active_filters_for_contextual_counts(
     client = _client(monkeypatch, user=None)
     resp = client.get(
         "/dashboard/facets?optimization_types=blackbox&models=a&models=b&date_from=2026-01-02"
-        "&q=gpt&limit=20",
+        "&q=gpt&limit=20&dim=models",
     )
     assert resp.status_code == 200
+    assert captured["dimension"] == "models"
     assert captured["optimization_types"] == ["blackbox"]
     assert captured["models"] == ["a", "b"]
     assert captured["date_from"] == date(2026, 1, 2)
@@ -207,6 +209,13 @@ def test_facets_limit_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client(monkeypatch, user=None)
     assert client.get("/dashboard/facets?limit=500").status_code == 422
     assert client.get("/dashboard/facets?limit=0").status_code == 422
+
+
+def test_facets_dimension_must_be_known(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``dim`` is validated at the edge so the gateway never builds an empty query."""
+    _spy_facets(monkeypatch)
+    client = _client(monkeypatch, user=None)
+    assert client.get("/dashboard/facets?dim=tasks").status_code == 422
 
 
 def test_facets_owner_scope_is_resolved_and_forwarded(
