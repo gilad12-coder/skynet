@@ -125,7 +125,6 @@
   "explore.page.title": "Explore",
   "explore.search.aria": "Search the public optimisation archive",
   "explore.search.placeholder": "Search optimisations by task, model, or optimiser",
-  "explore.sort.gain.tip": "Sort by improvement — the gap between the optimised score and the baseline score, highest to lowest",
   "optimization.progress.gepa": "GEPA optimisation",
   "optimization.rerun.failed": "Couldn't create a new optimisation",
   "optimization.rerun.success": "New optimisation created",

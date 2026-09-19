@@ -2952,7 +2952,7 @@ export function getCorpusFacets(
   return cachedGet(`/dashboard/facets${qs ? `?${qs}` : ""}`, 15000);
 }
 
-export type SearchSort = "relevance" | "recent" | "gain";
+export type SearchSort = "relevance" | "recent" | "oldest";
 
 export interface SearchFilters {
   query?: string;
