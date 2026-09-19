@@ -10,6 +10,7 @@ only pin the route's scope-resolution contract.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 import pytest
@@ -58,9 +59,9 @@ def _spy_facets(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """
     captured: dict[str, Any] = {}
 
-    def _fake(**kwargs: Any) -> dict[str, list[str]]:
+    def _fake(**kwargs: Any) -> dict[str, list[dict[str, Any]]]:
         captured.update(kwargs)
-        return {"models": [], "optimizers": [], "modules": []}
+        return {"models": [], "optimizers": [], "modules": [], "types": []}
 
     monkeypatch.setattr(dashboard_module, "fetch_corpus_facets", _fake)
     return captured
@@ -160,9 +161,27 @@ def test_facets_public_forwards_no_scope(monkeypatch: pytest.MonkeyPatch) -> Non
     client = _client(monkeypatch, user=None)
     resp = client.get("/dashboard/facets")
     assert resp.status_code == 200
-    assert resp.json() == {"models": [], "optimizers": [], "modules": []}
+    assert resp.json() == {"models": [], "optimizers": [], "modules": [], "types": []}
     assert captured["owner_username"] is None
     assert captured["shared_with_username"] is None
+    assert captured["optimization_types"] is None
+    assert captured["date_from"] is None
+
+
+def test_facets_forward_active_filters_for_contextual_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated filter params and the date bounds reach the gateway as lists / dates."""
+    captured = _spy_facets(monkeypatch)
+    client = _client(monkeypatch, user=None)
+    resp = client.get(
+        "/dashboard/facets?optimization_types=blackbox&models=a&models=b&date_from=2026-01-02",
+    )
+    assert resp.status_code == 200
+    assert captured["optimization_types"] == ["blackbox"]
+    assert captured["models"] == ["a", "b"]
+    assert captured["date_from"] == date(2026, 1, 2)
+    assert captured["date_to"] is None
 
 
 def test_facets_owner_scope_is_resolved_and_forwarded(

@@ -12,9 +12,9 @@ view, not a stable dev contract.
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ...service_gateway.dashboard import (
@@ -56,17 +56,27 @@ class PublicDashboardResponse(BaseModel):
     points: list[PublicDashboardPoint]
 
 
-class FacetsResponse(BaseModel):
-    """Distinct filter options for one corpus scope (``GET /dashboard/facets``).
+class FacetOption(BaseModel):
+    """One filter value in a facet dimension with its contextual run count."""
 
-    Each list holds the model / optimizer / module values present in the
-    requested scope, so the /explore filter drawer offers exactly the chips
-    that scope can filter to.
+    value: str
+    count: int
+
+
+class FacetsResponse(BaseModel):
+    """Filter options with run counts for one corpus scope (``GET /dashboard/facets``).
+
+    Each list holds the model / optimizer / module / run-type values present
+    in the requested scope, each with the number of runs it would leave when
+    combined with every other active filter, so the /explore filter drawer
+    offers exactly the chips that scope can filter to and can grey out the
+    ones the current selection has already ruled out.
     """
 
-    models: list[str] = []
-    optimizers: list[str] = []
-    modules: list[str] = []
+    models: list[FacetOption] = []
+    optimizers: list[FacetOption] = []
+    modules: list[FacetOption] = []
+    types: list[FacetOption] = []
 
 
 class SearchRequest(BaseModel):
@@ -196,14 +206,22 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
         http_request: Request,
         owner_username: str | None = None,
         shared_with_username: str | None = None,
+        models: Annotated[list[str] | None, Query()] = None,
+        optimizers: Annotated[list[str] | None, Query()] = None,
+        optimization_types: Annotated[list[str] | None, Query()] = None,
+        modules: Annotated[list[str] | None, Query()] = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
         authorization: str | None = Header(default=None),
     ) -> FacetsResponse:
-        """Distinct model / optimizer / module options for the requested corpus.
+        """Filter options with contextual run counts for the requested corpus.
 
         Lets each /explore tab list options drawn from its own scope rather
-        than the public archive's. Scope is resolved with the same
-        session-match check as ``/dashboard/search``: a caller may only ask
-        for their own (mine) or shared-with-them options.
+        than the public archive's. The active filters are passed back in so
+        every option's count reflects the other dimensions' selections (the
+        same conjunctive semantics ``/dashboard/search`` applies). Scope is
+        resolved with the same session-match check as ``/dashboard/search``:
+        a caller may only ask for their own (mine) or shared-with-them options.
 
         Args:
             http_request: Incoming request, forwarded to
@@ -212,10 +230,16 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
             owner_username: When set, scope to the caller's own jobs.
             shared_with_username: When set (and ``owner_username`` is not),
                 scope to jobs shared with the caller.
+            models: Active model filter (repeatable query param).
+            optimizers: Active optimizer / engine filter.
+            optimization_types: Active run-type filter.
+            modules: Active DSPy module filter.
+            date_from: Inclusive lower bound on ``created_at``.
+            date_to: Inclusive upper bound on ``created_at``.
             authorization: Bearer token, required only when a scope is set.
 
         Returns:
-            A :class:`FacetsResponse` with the distinct options for the scope.
+            A :class:`FacetsResponse` with the options and counts for the scope.
 
         Raises:
             HTTPException: When a scope is set but the request is
@@ -235,11 +259,18 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
             job_store=job_store,
             owner_username=resolved_owner,
             shared_with_username=resolved_shared,
+            models=models,
+            optimizers=optimizers,
+            optimization_types=optimization_types,
+            modules=modules,
+            date_from=date_from,
+            date_to=date_to,
         )
         return FacetsResponse(
-            models=data["models"],
-            optimizers=data["optimizers"],
-            modules=data["modules"],
+            models=[FacetOption(**o) for o in data["models"]],
+            optimizers=[FacetOption(**o) for o in data["optimizers"]],
+            modules=[FacetOption(**o) for o in data["modules"]],
+            types=[FacetOption(**o) for o in data["types"]],
         )
 
     @router.post(

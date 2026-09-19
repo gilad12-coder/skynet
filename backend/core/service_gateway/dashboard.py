@@ -415,21 +415,45 @@ def invalidate_public_dashboard_cache() -> None:
         _CACHE["payload"] = None
 
 
+# Each facet dimension is a column of the scoped corpus CTE plus the name of
+# the bound list parameter that filters it, so one loop can build "all filters
+# except this dimension's own" for every dimension.
+_FACET_DIMENSIONS: tuple[tuple[str, str, str], ...] = (
+    ("models", "model", "models"),
+    ("optimizers", "optimizer", "optimizers"),
+    ("modules", "module", "modules"),
+    ("types", "run_type", "optimization_types"),
+)
+
+
 def fetch_corpus_facets(
     *,
     job_store: Any,
     owner_username: str | None = None,
     shared_with_username: str | None = None,
-) -> dict[str, list[str]]:
-    """Return the distinct model / optimizer / module values in one corpus.
+    models: list[str] | None = None,
+    optimizers: list[str] | None = None,
+    optimization_types: list[str] | None = None,
+    modules: list[str] | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Return per-value run counts for every filter dimension in one corpus.
 
     Backs ``GET /dashboard/facets`` so each /explore tab lists the filter
     options drawn from its OWN scope — the mine tab surfaces a user's private
-    react runs, not just whatever appears in the public archive. The scope
-    predicate and the payload-first / embedded-first ``COALESCE`` derivation
-    mirror :func:`_fetch_corpus_points` and :func:`_search_semantic` exactly,
-    so every value returned here lines up with a run the same scope can
-    actually filter to.
+    react runs, not just whatever appears in the public archive. Counts are
+    conjunctive in the usual faceted-navigation sense: a value's count is the
+    number of runs it would leave when combined with every *other* active
+    filter, while its own dimension's selection is ignored (selections inside
+    a dimension are OR'd, so applying them would zero out every unselected
+    sibling). The free-text query is deliberately not part of the context —
+    semantic ranking has no crisp matched set to count against.
+
+    The scope predicate and the payload-first / embedded-first ``COALESCE``
+    derivation mirror :func:`_fetch_corpus_points` and :func:`_search_lexical`
+    exactly, so every value returned here lines up with a run the same scope
+    can actually filter to.
 
     Args:
         job_store: A store exposing a SQLAlchemy ``engine`` attribute.
@@ -437,10 +461,20 @@ def fetch_corpus_facets(
             private rows) instead of the public corpus.
         shared_with_username: When set (and ``owner_username`` is not), scope to
             jobs shared with that user via a member grant.
+        models: Active model filter, or ``None`` / empty for no filter.
+        optimizers: Active optimizer / engine filter.
+        optimization_types: Active run-type filter.
+        modules: Active DSPy module filter.
+        date_from: Inclusive lower bound on ``created_at`` (date precision).
+        date_to: Inclusive upper bound on ``created_at`` (date precision).
 
     Returns:
-        ``{"models": [...], "optimizers": [...], "modules": [...]}`` — each a
-        case-sensitively sorted list of distinct non-empty values.
+        ``{"models": [...], "optimizers": [...], "modules": [...], "types": [...]}``
+        — each a list of ``{"value": str, "count": int}`` dicts sorted
+        case-sensitively by value, holding every non-empty value present in
+        the scope. ``count`` is 0 when the value has no run left under the
+        other dimensions' filters, so the UI can show it as unavailable
+        rather than silently hide it.
     """
     params: dict[str, Any] = {}
     if owner_username is not None:
@@ -454,40 +488,70 @@ def fetch_corpus_facets(
             "NOT COALESCE(je.is_private, "
             "(j.payload_overview->>'is_private')::boolean, FALSE)"
         )
-    je_rel = _job_embeddings_relation(job_store)
-    with Session(job_store.engine) as session:
-        row = (
-            session.execute(
-                text(
-                    "SELECT "
-                    "ARRAY_AGG(DISTINCT model) FILTER (WHERE model <> '') AS models, "
-                    "ARRAY_AGG(DISTINCT optimizer) FILTER (WHERE optimizer <> '') "
-                    "AS optimizers, "
-                    "ARRAY_AGG(DISTINCT module) FILTER (WHERE module <> '') AS modules "
-                    "FROM ("
-                    "SELECT "
-                    "COALESCE(je.winning_model, "
-                    f"j.payload_overview->>'{PAYLOAD_OVERVIEW_MODEL_NAME}') AS model, "
-                    "COALESCE(je.optimizer_name, "
-                    f"j.payload_overview->>'{PAYLOAD_OVERVIEW_OPTIMIZER_NAME}') AS optimizer, "
-                    "COALESCE(je.module_name, "
-                    f"j.payload_overview->>'{PAYLOAD_OVERVIEW_MODULE_NAME}') AS module "
-                    "FROM jobs j "
-                    f"LEFT JOIN {je_rel} je "
-                    "ON je.optimization_id = j.optimization_id "
-                    f"WHERE j.status = 'success' AND {_USER_FACING_CORPUS_SQL} AND {scope_sql}"
-                    ") sub"
-                ),
-                params,
-            )
-            .mappings()
-            .first()
+    date_parts: list[str] = []
+    if date_from is not None:
+        date_parts.append("AND j.created_at >= :date_from")
+        params["date_from"] = date_from
+    if date_to is not None:
+        date_parts.append("AND j.created_at < :date_to_excl")
+        params["date_to_excl"] = date_to + timedelta(days=1)
+
+    active: dict[str, list[str]] = {}
+    for key, values in (
+        ("models", models),
+        ("optimizers", optimizers),
+        ("modules", modules),
+        ("optimization_types", optimization_types),
+    ):
+        if values:
+            active[key] = list(values)
+            params[key] = list(values)
+
+    # Legacy rows predate the type column everywhere; they are plain runs
+    # (see ``_USER_FACING_CORPUS_SQL``), so they count under 'run' rather
+    # than vanishing from the type facet.
+    corpus_cte = (
+        "WITH corpus AS ("
+        "SELECT "
+        f"COALESCE(je.winning_model, j.payload_overview->>'{PAYLOAD_OVERVIEW_MODEL_NAME}') "
+        "AS model, "
+        f"COALESCE(je.optimizer_name, j.payload_overview->>'{PAYLOAD_OVERVIEW_OPTIMIZER_NAME}') "
+        "AS optimizer, "
+        f"COALESCE(je.module_name, j.payload_overview->>'{PAYLOAD_OVERVIEW_MODULE_NAME}') "
+        "AS module, "
+        "COALESCE(je.optimization_type, j.optimization_type, "
+        f"j.payload_overview->>'{PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE}', "
+        f"'{OPTIMIZATION_TYPE_RUN}') AS run_type "
+        "FROM jobs j "
+        f"LEFT JOIN {_job_embeddings_relation(job_store)} je "
+        "ON je.optimization_id = j.optimization_id "
+        f"WHERE j.status = 'success' AND {_USER_FACING_CORPUS_SQL} AND {scope_sql} "
+        + " ".join(date_parts)
+        + ")"
+    )
+    selects: list[str] = []
+    for name, column, param in _FACET_DIMENSIONS:
+        others = [
+            f"{other_column} = ANY(:{other_param})"
+            for _, other_column, other_param in _FACET_DIMENSIONS
+            if other_param != param and other_param in active
+        ]
+        context_sql = " AND ".join(others) if others else "TRUE"
+        selects.append(
+            f"SELECT '{name}' AS dim, {column} AS value, "
+            f"COUNT(*) FILTER (WHERE {context_sql}) AS n "
+            f"FROM corpus WHERE {column} <> '' GROUP BY {column}"
         )
-    return {
-        "models": sorted(row["models"] or []) if row else [],
-        "optimizers": sorted(row["optimizers"] or []) if row else [],
-        "modules": sorted(row["modules"] or []) if row else [],
-    }
+    sql = corpus_cte + " " + " UNION ALL ".join(selects)
+
+    facets: dict[str, list[dict[str, Any]]] = {name: [] for name, _, _ in _FACET_DIMENSIONS}
+    with Session(job_store.engine) as session:
+        rows = session.execute(text(sql), params).mappings().all()
+    for row in rows:
+        facets[str(row["dim"])].append({"value": str(row["value"]), "count": int(row["n"])})
+    for options in facets.values():
+        options.sort(key=lambda option: option["value"])
+    return facets
 
 
 SEARCH_SORT_RELEVANCE = "relevance"

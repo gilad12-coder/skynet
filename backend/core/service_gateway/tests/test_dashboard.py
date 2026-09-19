@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+import re
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -337,3 +338,48 @@ def test_search_optimizations_forces_lexical_when_embeddings_table_absent(monkey
         owner_username="someone@example.com",
     )
     assert out is sentinel
+
+
+def test_fetch_corpus_facets_counts_each_dimension_against_the_other_filters(monkeypatch) -> None:
+    """Every dimension's count excludes its own filter and applies the others.
+
+    Selections within one dimension are OR'd, so a model's count must ignore
+    the active model filter (otherwise every unselected model would read 0)
+    while honouring the active run-type filter. Rows come back grouped per
+    dimension and sorted by value, with zero-count values kept so the drawer
+    can grey them out rather than drop them.
+    """
+    monkeypatch.setattr(dashboard, "_job_embeddings_relation", lambda _store: "job_embeddings")
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.execute.return_value.mappings.return_value.all.return_value = [
+        {"dim": "models", "value": "gpt-b", "n": 0},
+        {"dim": "models", "value": "gpt-a", "n": 2},
+        {"dim": "types", "value": "run", "n": 5},
+        {"dim": "types", "value": "blackbox", "n": 2},
+        {"dim": "modules", "value": "predict", "n": 1},
+    ]
+    monkeypatch.setattr(dashboard, "Session", lambda _engine: session)
+
+    out = dashboard.fetch_corpus_facets(
+        job_store=SimpleNamespace(engine=object()),
+        optimization_types=["blackbox"],
+        models=["gpt-a"],
+        date_from=date(2026, 1, 1),
+    )
+
+    sql = str(session.execute.call_args.args[0])
+    params = session.execute.call_args.args[1]
+    selects = {re.search(r"SELECT '(\w+)' AS dim", part).group(1): part for part in sql.split("UNION ALL")}
+    assert "FILTER (WHERE run_type = ANY(:optimization_types))" in selects["models"]
+    assert "FILTER (WHERE model = ANY(:models))" in selects["types"]
+    assert "run_type = ANY" not in selects["types"]
+    assert "FILTER (WHERE model = ANY(:models) AND run_type = ANY(:optimization_types))" in selects["modules"]
+    assert "j.created_at >= :date_from" in sql
+    assert params["optimization_types"] == ["blackbox"]
+    assert "date_to_excl" not in params
+
+    assert out["models"] == [{"value": "gpt-a", "count": 2}, {"value": "gpt-b", "count": 0}]
+    assert out["types"] == [{"value": "blackbox", "count": 2}, {"value": "run", "count": 5}]
+    assert out["modules"] == [{"value": "predict", "count": 1}]
+    assert out["optimizers"] == []

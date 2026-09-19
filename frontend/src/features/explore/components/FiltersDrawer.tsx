@@ -11,6 +11,7 @@ import {
   Target,
   X,
 } from "@/shared/ui/icons";
+import type { FacetOption } from "@/shared/lib/api";
 import { modelDisplayName } from "@/shared/lib/formatters";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
@@ -24,16 +25,21 @@ import {
 } from "@/shared/ui/primitives/sheet";
 import { SkynetDatePicker } from "@/shared/ui/skynet-date-picker";
 import { engineDisplayName } from "../lib/format";
+import { isCollapsible, isExhausted, visibleOptions } from "../lib/facet-options";
 
 interface FiltersDrawerProps {
   open: boolean;
   onOpenChange: (next: boolean) => void;
-  /** All distinct model identifiers in the corpus (sorted alphabetically by caller). */
-  modelOptions: string[];
-  /** All distinct optimizer / black-box engine ids in the corpus (sorted alphabetically by caller). */
-  optimizerOptions: string[];
-  /** All distinct DSPy module names in the corpus (sorted alphabetically by caller). */
-  moduleOptions: string[];
+  /**
+   * Every value present in the corpus for each dimension, sorted by value by
+   * the caller, each with the number of runs it would leave alongside the
+   * other active filters (0 = ruled out by the current selection).
+   */
+  modelOptions: FacetOption[];
+  optimizerOptions: FacetOption[];
+  moduleOptions: FacetOption[];
+  /** Run-type counts; an empty list means counts are unknown and every type stays selectable. */
+  typeOptions: FacetOption[];
   /** Currently active filter values. */
   selectedModels: string[];
   selectedOptimizers: string[];
@@ -59,17 +65,16 @@ const TYPE_VALUES: ReadonlyArray<{
   { value: "blackbox", labelKey: "explore.filter.blackbox" },
 ];
 
-// Lists longer than this get an inline search box. Shorter lists already
-// fit in a few rows of chips — adding a search input there is friction.
-const SEARCH_THRESHOLD = 8;
-
 /**
  * Slide-in panel for structured filtering on top of the free-text query.
- * Sections stack vertically and never collapse — discoverability beats
- * compactness here, since most users will scan once and pick a handful.
- * Long option lists (models, optimizers) get a per-section search input;
- * date inputs use the project's custom calendar to stay consistent with
- * the rest of the visual system.
+ * Every section is a chip group — a dropdown would hide both the options and
+ * the current selection behind a click, and no dimension here is wide enough
+ * to need that. Each chip carries the number of runs it would leave with the
+ * other active filters, so the drawer itself shows which combinations exist:
+ * zero-count chips grey out instead of leading to an empty result, and long
+ * lists (models) collapse to their busiest values behind a search box and a
+ * "show all" toggle. Date inputs use the project's custom calendar to stay
+ * consistent with the rest of the visual system.
  */
 export function FiltersDrawer({
   open,
@@ -77,6 +82,7 @@ export function FiltersDrawer({
   modelOptions,
   optimizerOptions,
   moduleOptions,
+  typeOptions,
   selectedModels,
   selectedOptimizers,
   selectedTypes,
@@ -98,6 +104,18 @@ export function FiltersDrawer({
     (dateFrom ? 1 : 0) +
     (dateTo ? 1 : 0);
   const isRtl = getActiveDir() === "rtl";
+  // A section's counts are only "ruled out by the other filters" when there
+  // are other filters; with none active, zero counts mean the scope is empty.
+  const othersActive = (own: number) => totalActive - own > 0;
+  // Run types render in a fixed order with the fetched count attached; an
+  // empty fetch (loading, error) leaves counts unknown rather than zero.
+  const typeChips = React.useMemo<FacetOption[]>(() => {
+    if (typeOptions.length === 0) return TYPE_VALUES.map((t) => ({ value: t.value, count: -1 }));
+    return TYPE_VALUES.map((t) => ({
+      value: t.value,
+      count: typeOptions.find((o) => o.value === t.value)?.count ?? 0,
+    }));
+  }, [typeOptions]);
   // Phones get a bottom sheet capped below the top edge; desktop keeps the
   // side drawer on the reading-end edge.
   const isPhone = useIsPhone();
@@ -139,50 +157,50 @@ export function FiltersDrawer({
                 optimizer), then the run's own metadata (kind, date). */}
             <div className="flex flex-col gap-10">
               <div className="flex flex-col gap-7">
-                <SearchableChipSection
+                <FacetSection
                   title={msg("explore.filters.section.modules")}
                   icon={Cube}
                   options={moduleOptions}
                   selected={selectedModules}
+                  othersActive={othersActive(selectedModules.length)}
                   onToggle={(v) => onChangeModules(toggleValue(selectedModules, v))}
                   dir="auto"
                 />
 
-                <SearchableChipSection
+                <FacetSection
                   title={msg("explore.filters.section.models")}
                   icon={Cpu}
                   options={modelOptions}
                   selected={selectedModels}
+                  othersActive={othersActive(selectedModels.length)}
                   onToggle={(v) => onChangeModels(toggleValue(selectedModels, v))}
-                  labels={Object.fromEntries(modelOptions.map((m) => [m, modelDisplayName(m)]))}
+                  labelOf={modelDisplayName}
                   dir="ltr"
                 />
 
-                <SearchableChipSection
+                <FacetSection
                   title={msg("explore.filters.section.optimizers")}
                   icon={Target}
                   options={optimizerOptions}
                   selected={selectedOptimizers}
+                  othersActive={othersActive(selectedOptimizers.length)}
                   onToggle={(v) => onChangeOptimizers(toggleValue(selectedOptimizers, v))}
-                  labels={Object.fromEntries(optimizerOptions.map((o) => [o, engineDisplayName(o)]))}
+                  labelOf={engineDisplayName}
                   dir="ltr"
                 />
               </div>
 
               <div className="flex flex-col gap-7">
-                <FilterSection
+                <FacetSection
                   title={msg("explore.filters.section.types")}
                   icon={Stack}
-                  selectedCount={selectedTypes.length}
-                >
-                  <ChipGroup
-                    options={TYPE_VALUES.map((t) => t.value)}
-                    labels={Object.fromEntries(TYPE_VALUES.map((t) => [t.value, msg(t.labelKey)]))}
-                    selected={selectedTypes}
-                    onToggle={(v) => onChangeTypes(toggleValue(selectedTypes, v))}
-                    dir="auto"
-                  />
-                </FilterSection>
+                  options={typeChips}
+                  selected={selectedTypes}
+                  othersActive={othersActive(selectedTypes.length)}
+                  onToggle={(v) => onChangeTypes(toggleValue(selectedTypes, v))}
+                  labelOf={typeLabel}
+                  dir="auto"
+                />
 
                 <FilterSection
                   title={msg("explore.filters.section.date")}
@@ -233,6 +251,11 @@ export function FiltersDrawer({
 
 function toggleValue(current: string[], value: string): string[] {
   return current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+}
+
+function typeLabel(value: string): string {
+  const entry = TYPE_VALUES.find((t) => t.value === value);
+  return entry ? msg(entry.labelKey) : value;
 }
 
 type IconComponent = React.ComponentType<{
@@ -294,42 +317,40 @@ function FilterSection({
   );
 }
 
-function SearchableChipSection({
+function FacetSection({
   title,
   icon,
   options,
   selected,
+  othersActive,
   onToggle,
-  labels,
+  labelOf = (v) => v,
   dir,
 }: {
   title: string;
   icon?: IconComponent;
-  options: string[];
+  options: FacetOption[];
   selected: string[];
+  /** Whether any filter outside this section is active (counts then mean "ruled out"). */
+  othersActive: boolean;
   onToggle: (value: string) => void;
-  labels?: Record<string, string>;
+  labelOf?: (value: string) => string;
   dir: "ltr" | "rtl" | "auto";
 }) {
   const [query, setQuery] = React.useState("");
-  const showSearch = options.length > SEARCH_THRESHOLD;
-  const trimmed = query.trim().toLowerCase();
+  const [expanded, setExpanded] = React.useState(false);
+  const collapsible = isCollapsible(options);
+  const trimmed = query.trim();
 
-  // Selected values always render first, then the rest match the search.
-  const visible = React.useMemo(() => {
-    if (!trimmed) return options;
-    return options.filter((v) => v.toLowerCase().includes(trimmed));
-  }, [options, trimmed]);
-  const ordered = React.useMemo(() => {
-    const selectedSet = new Set(selected);
-    const heads = visible.filter((v) => selectedSet.has(v));
-    const tails = visible.filter((v) => !selectedSet.has(v));
-    return [...heads, ...tails];
-  }, [visible, selected]);
+  const visible = React.useMemo(
+    () => visibleOptions(options, selected, { expanded, query: trimmed, labelOf }),
+    [options, selected, expanded, trimmed, labelOf],
+  );
+  const exhausted = othersActive && selected.length === 0 && isExhausted(options);
 
   return (
     <FilterSection title={title} icon={icon} selectedCount={selected.length}>
-      {showSearch && (
+      {collapsible && (
         <SectionSearchInput
           value={query}
           onChange={setQuery}
@@ -338,7 +359,7 @@ function SearchableChipSection({
           })}
         />
       )}
-      {ordered.length === 0 ? (
+      {visible.length === 0 ? (
         <p className="text-[12.5px] text-foreground/45">
           {trimmed
             ? msg("explore.filters.section.no_search_match")
@@ -346,12 +367,29 @@ function SearchableChipSection({
         </p>
       ) : (
         <ChipGroup
-          options={ordered}
+          options={visible}
           selected={selected}
           onToggle={onToggle}
-          labels={labels}
+          labelOf={labelOf}
           dir={dir}
         />
+      )}
+      {exhausted && (
+        <p className="text-[12px] text-foreground/45">
+          {msg("explore.filters.section.none_in_selection")}
+        </p>
+      )}
+      {collapsible && !trimmed && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="self-start text-[12px] text-foreground/60 underline-offset-4 transition-colors cursor-pointer hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+        >
+          {expanded
+            ? msg("explore.filters.section.show_fewer")
+            : formatMsg("explore.filters.section.show_all", { n: options.length })}
+        </button>
       )}
     </FilterSection>
   );
@@ -388,30 +426,24 @@ function ChipGroup({
   options,
   selected,
   onToggle,
-  labels,
+  labelOf,
   dir,
 }: {
-  options: string[];
+  options: FacetOption[];
   selected: string[];
   onToggle: (value: string) => void;
-  /** Optional override for display strings (e.g. type values → Hebrew). */
-  labels?: Record<string, string>;
+  labelOf: (value: string) => string;
   /**
    * Per-chip text direction. LTR for code identifiers, RTL for Hebrew labels,
    * auto for user-authored names that may be either (tasks, modules).
    */
   dir: "ltr" | "rtl" | "auto";
 }) {
-  if (options.length === 0) {
-    return (
-      <p className="text-[12.5px] text-foreground/45">{msg("explore.filters.empty_section")}</p>
-    );
-  }
   return (
     <div className="flex flex-wrap gap-1.5">
-      {options.map((value) => {
+      {options.map(({ value, count }) => {
         const active = selected.includes(value);
-        const label = labels?.[value] ?? value;
+        const label = labelOf(value);
         return (
           <SelectableChip
             key={value}
@@ -419,6 +451,8 @@ function ChipGroup({
             // Trimmed labels (e.g. bare model names) keep the full value
             // reachable on hover — providers can collide on the short name.
             title={label === value ? undefined : value}
+            // A negative count means unknown (facets not loaded); hide it.
+            count={count < 0 ? null : count}
             active={active}
             dir={dir}
             onClick={() => onToggle(value)}
@@ -432,31 +466,48 @@ function ChipGroup({
 function SelectableChip({
   label,
   title,
+  count,
   active,
   dir,
   onClick,
 }: {
   label: string;
   title?: string;
+  count: number | null;
   active: boolean;
   dir: "ltr" | "rtl" | "auto";
   onClick: () => void;
 }) {
+  // A selected chip always stays clickable so it can be removed; only an
+  // unselected value the other filters rule out is taken off the table.
+  const unavailable = !active && count === 0;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      disabled={unavailable}
       title={title}
       dir={dir}
-      className={`group inline-flex min-h-[44px] max-w-full cursor-pointer items-center gap-1 rounded-full border px-3 py-1.5 text-[12.5px] transition-[background-color,border-color,color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-0 ${
+      className={`group inline-flex min-h-[44px] max-w-full items-center gap-1 rounded-full border px-3 py-1.5 text-[12.5px] transition-[background-color,border-color,color,opacity] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-0 ${
         active
-          ? "border-foreground/40 bg-foreground/[0.06] text-foreground"
-          : "border-border bg-background text-foreground/70 hover:border-foreground/30 hover:text-foreground"
+          ? "cursor-pointer border-foreground/40 bg-foreground/[0.06] text-foreground"
+          : unavailable
+            ? "cursor-not-allowed border-border/60 bg-background text-foreground/35"
+            : "cursor-pointer border-border bg-background text-foreground/70 hover:border-foreground/30 hover:text-foreground"
       }`}
     >
       {active && <Check className="size-3 shrink-0 text-foreground/70" aria-hidden="true" />}
       <span className="min-w-0 truncate tabular-nums">{label}</span>
+      {count !== null && (
+        <span
+          className={`shrink-0 tabular-nums text-[11px] ${
+            active ? "text-foreground/55" : unavailable ? "text-foreground/30" : "text-foreground/45"
+          }`}
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }

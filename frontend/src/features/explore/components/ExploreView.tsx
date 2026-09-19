@@ -19,6 +19,7 @@ import { EmptyState } from "@/shared/ui/empty-state";
 import { registerTutorialHook } from "@/features/tutorial";
 import { usePublicDashboard } from "../hooks/use-public-dashboard";
 import { useCorpusFacets } from "../hooks/use-corpus-facets";
+import { countOccurrences } from "../lib/facet-options";
 import { useSemanticSearch } from "../hooks/use-semantic-search";
 import { useRecentQueries } from "../hooks/use-recent-queries";
 import { usePopularQueries } from "../hooks/use-popular-queries";
@@ -90,22 +91,39 @@ export function ExploreView() {
   // the chips it can filter to (a model private to "mine" never shows under
   // "public"). The tutorial's demo corpus has no backend scope, so there we
   // fall back to deriving options from the injected demo points.
-  const facets = useCorpusFacets(query.corpus, sessionUser);
+  const facets = useCorpusFacets(query.corpus, sessionUser, {
+    models: query.models,
+    optimizers: query.optimizers,
+    types: query.types,
+    modules: query.modules,
+    dateFrom: query.dateFrom,
+    dateTo: query.dateTo,
+  });
   const modelOptions = React.useMemo(
-    () => (demoPoints ? collectDistinct(demoPoints, "winning_model") : facets.models),
+    () => (demoPoints ? countOccurrences(demoPoints.map((p) => p.winning_model)) : facets.models),
     [demoPoints, facets.models],
   );
   const optimizerOptions = React.useMemo(
-    () => (demoPoints ? collectDistinct(demoPoints, "optimizer_name") : facets.optimizers),
+    () =>
+      demoPoints ? countOccurrences(demoPoints.map((p) => p.optimizer_name)) : facets.optimizers,
     [demoPoints, facets.optimizers],
+  );
+  // Legacy rows carry no explicit type and are plain runs, matching how the
+  // backend counts them.
+  const typeOptions = React.useMemo(
+    () =>
+      demoPoints
+        ? countOccurrences(demoPoints.map((p) => p.optimization_type ?? "run"))
+        : facets.types,
+    [demoPoints, facets.types],
   );
   // Black-box runs are stamped with a placeholder module name so they sort
   // with everything else; it isn't a DSPy module, and the Run type filter
   // already isolates those runs, so it never shows up as a module chip.
   const moduleOptions = React.useMemo(
     () =>
-      (demoPoints ? collectDistinct(demoPoints, "module_name") : facets.modules).filter(
-        (m) => m !== BLACKBOX_MODULE_PLACEHOLDER,
+      (demoPoints ? countOccurrences(demoPoints.map((p) => p.module_name)) : facets.modules).filter(
+        (m) => m.value !== BLACKBOX_MODULE_PLACEHOLDER,
       ),
     [demoPoints, facets.modules],
   );
@@ -200,6 +218,7 @@ export function ExploreView() {
         modelOptions={modelOptions}
         optimizerOptions={optimizerOptions}
         moduleOptions={moduleOptions}
+        typeOptions={typeOptions}
         selectedModels={query.models}
         selectedOptimizers={query.optimizers}
         selectedTypes={query.types}
@@ -368,17 +387,4 @@ function ListPane({
       />
     </div>
   );
-}
-
-function collectDistinct(
-  points: PublicDashboardPoint[],
-  key: "winning_model" | "optimizer_name" | "module_name",
-): string[] {
-  if (!Array.isArray(points)) return [];
-  const set = new Set<string>();
-  for (const p of points) {
-    const v = (p as PublicDashboardPoint)[key];
-    if (typeof v === "string" && v.length > 0) set.add(v);
-  }
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
 }

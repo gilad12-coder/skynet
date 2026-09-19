@@ -2879,26 +2879,53 @@ export function getPublicDashboard(): Promise<PublicDashboardResponse> {
   return cachedGet("/dashboard/public", 15000);
 }
 
-export interface CorpusFacets {
-  models: string[];
-  optimizers: string[];
-  modules: string[];
+export interface FacetOption {
+  value: string;
+  /** Runs this value would leave when combined with every other active filter. */
+  count: number;
 }
 
+export interface CorpusFacets {
+  models: FacetOption[];
+  optimizers: FacetOption[];
+  modules: FacetOption[];
+  types: FacetOption[];
+}
+
+/** The active structured filters, echoed back so facet counts are contextual. */
+export interface FacetContext {
+  models?: string[];
+  optimizers?: string[];
+  optimization_types?: string[];
+  modules?: string[];
+  date_from?: string; // ISO date (YYYY-MM-DD)
+  date_to?: string; // ISO date (YYYY-MM-DD)
+}
+
+const FACET_LIST_KEYS = ["models", "optimizers", "optimization_types", "modules"] as const;
+
 /**
- * Distinct filter options (models / optimizers / modules) present in one
- * corpus scope, so each /explore tab offers exactly the chips it can filter
- * to. Pass no scope for the public archive; pass `owner_username` for the
- * caller's own runs or `shared_with_username` for runs shared with them (the
- * backend requires the bearer token to match the requested username).
+ * Filter options (models / optimizers / modules / run types) present in one
+ * corpus scope, each with the number of runs it would leave alongside the
+ * other active filters, so each /explore tab offers exactly the chips it can
+ * filter to and can grey out the ones the current selection rules out. Pass
+ * no scope for the public archive; pass `owner_username` for the caller's
+ * own runs or `shared_with_username` for runs shared with them (the backend
+ * requires the bearer token to match the requested username).
  */
 export function getCorpusFacets(
   scope: { owner_username?: string; shared_with_username?: string } = {},
+  context: FacetContext = {},
 ): Promise<CorpusFacets> {
   const params = new URLSearchParams();
   if (scope.owner_username) params.set("owner_username", scope.owner_username);
   else if (scope.shared_with_username)
     params.set("shared_with_username", scope.shared_with_username);
+  for (const key of FACET_LIST_KEYS) {
+    for (const value of context[key] ?? []) params.append(key, value);
+  }
+  if (context.date_from) params.set("date_from", context.date_from);
+  if (context.date_to) params.set("date_to", context.date_to);
   const qs = params.toString();
   return cachedGet(`/dashboard/facets${qs ? `?${qs}` : ""}`, 15000);
 }
