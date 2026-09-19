@@ -18,6 +18,8 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from ...service_gateway.dashboard import (
+    FACET_LIMIT_DEFAULT,
+    FACET_LIMIT_MAX,
     POPULAR_QUERIES_LIMIT_DEFAULT,
     SEARCH_PAGE_SIZE_DEFAULT,
     SEARCH_PAGE_SIZE_MAX,
@@ -63,20 +65,31 @@ class FacetOption(BaseModel):
     count: int
 
 
+class FacetTotals(BaseModel):
+    """Distinct values still available per dimension, beyond the ones listed."""
+
+    models: int = 0
+    optimizers: int = 0
+    modules: int = 0
+    types: int = 0
+
+
 class FacetsResponse(BaseModel):
     """Filter options with run counts for one corpus scope (``GET /dashboard/facets``).
 
-    Each list holds the model / optimizer / module / run-type values present
-    in the requested scope, each with the number of runs it would leave when
-    combined with every other active filter, so the /explore filter drawer
-    offers exactly the values that scope can filter to and can grey out the
-    ones the current selection has already ruled out.
+    Each list holds the busiest model / optimizer / module / run-type values
+    in the requested scope (capped per dimension, optionally narrowed by a
+    value search), each with the number of runs it would leave when combined
+    with every other active filter. ``totals`` says how many distinct values
+    remain available per dimension, so the /explore filter drawer can show
+    "top 8 of 1,240" and offer search for the rest instead of listing them.
     """
 
     models: list[FacetOption] = []
     optimizers: list[FacetOption] = []
     modules: list[FacetOption] = []
     types: list[FacetOption] = []
+    totals: FacetTotals = FacetTotals()
 
 
 class SearchRequest(BaseModel):
@@ -212,9 +225,11 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
         modules: Annotated[list[str] | None, Query()] = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        q: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=FACET_LIMIT_MAX)] = FACET_LIMIT_DEFAULT,
         authorization: str | None = Header(default=None),
     ) -> FacetsResponse:
-        """Filter options with contextual run counts for the requested corpus.
+        """Busiest filter values with contextual run counts for the requested corpus.
 
         Lets each /explore tab list options drawn from its own scope rather
         than the public archive's. The active filters are passed back in so
@@ -236,10 +251,14 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
             modules: Active DSPy module filter.
             date_from: Inclusive lower bound on ``created_at``.
             date_to: Inclusive upper bound on ``created_at``.
+            q: Optional case-insensitive substring to match values against in
+                every dimension (the drawer's value search).
+            limit: Maximum values returned per dimension.
             authorization: Bearer token, required only when a scope is set.
 
         Returns:
-            A :class:`FacetsResponse` with the options and counts for the scope.
+            A :class:`FacetsResponse` with the top values, counts, and
+            per-dimension totals for the scope.
 
         Raises:
             HTTPException: When a scope is set but the request is
@@ -265,12 +284,15 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
             modules=modules,
             date_from=date_from,
             date_to=date_to,
+            value_query=q,
+            limit=limit,
         )
         return FacetsResponse(
             models=[FacetOption(**o) for o in data["models"]],
             optimizers=[FacetOption(**o) for o in data["optimizers"]],
             modules=[FacetOption(**o) for o in data["modules"]],
             types=[FacetOption(**o) for o in data["types"]],
+            totals=FacetTotals(**data["totals"]),
         )
 
     @router.post(

@@ -345,19 +345,24 @@ def test_fetch_corpus_facets_counts_each_dimension_against_the_other_filters(mon
 
     Selections within one dimension are OR'd, so a model's count must ignore
     the active model filter (otherwise every unselected model would read 0)
-    while honouring the active run-type filter. Rows come back grouped per
-    dimension and sorted by value, with zero-count values kept so the drawer
-    can grey them out rather than drop them.
+    while honouring the active run-type filter. No dimension comes back in
+    full: each branch keeps only positive counts, ranks by count, and is
+    capped, while a NULL-value row per dimension carries the distinct total.
     """
     monkeypatch.setattr(dashboard, "_job_embeddings_relation", lambda _store: "job_embeddings")
     session = MagicMock()
     session.__enter__.return_value = session
     session.execute.return_value.mappings.return_value.all.return_value = [
-        {"dim": "models", "value": "gpt-b", "n": 0},
+        {"dim": "models", "value": "gpt-b", "n": 2},
         {"dim": "models", "value": "gpt-a", "n": 2},
+        {"dim": "models", "value": "gpt-c", "n": 7},
+        {"dim": "models", "value": None, "n": 1240},
         {"dim": "types", "value": "run", "n": 5},
         {"dim": "types", "value": "blackbox", "n": 2},
+        {"dim": "types", "value": None, "n": 2},
         {"dim": "modules", "value": "predict", "n": 1},
+        {"dim": "modules", "value": None, "n": 1},
+        {"dim": "optimizers", "value": None, "n": 0},
     ]
     monkeypatch.setattr(dashboard, "Session", lambda _engine: session)
 
@@ -366,22 +371,64 @@ def test_fetch_corpus_facets_counts_each_dimension_against_the_other_filters(mon
         optimization_types=["blackbox"],
         models=["gpt-a"],
         date_from=date(2026, 1, 1),
+        limit=3,
     )
 
     sql = str(session.execute.call_args.args[0])
     params = session.execute.call_args.args[1]
-    selects = {re.search(r"SELECT '(\w+)' AS dim", part).group(1): part for part in sql.split("UNION ALL")}
-    assert "FILTER (WHERE run_type = ANY(:optimization_types))" in selects["models"]
-    assert "FILTER (WHERE model = ANY(:models))" in selects["types"]
-    assert "run_type = ANY" not in selects["types"]
-    assert "FILTER (WHERE model = ANY(:models) AND run_type = ANY(:optimization_types))" in selects["modules"]
-    assert "WHERE module <> '' AND run_type <> 'blackbox' GROUP BY module" in selects["modules"]
-    assert "run_type <> 'blackbox'" not in selects["models"]
+    branches = [part for part in sql.split("UNION ALL") if "AS value" in part]
+    selects = {}
+    for part in branches:
+        name = re.search(r"SELECT '(\w+)' AS dim", part).group(1)
+        selects.setdefault(name, []).append(part)
+    values_sql = {name: parts[0] for name, parts in selects.items()}
+    totals_sql = {name: parts[1] for name, parts in selects.items()}
+    assert "FILTER (WHERE run_type = ANY(:optimization_types))" in values_sql["models"]
+    assert "FILTER (WHERE model = ANY(:models))" in values_sql["types"]
+    assert "run_type = ANY" not in values_sql["types"]
+    assert "FILTER (WHERE model = ANY(:models) AND run_type = ANY(:optimization_types))" in values_sql["modules"]
+    assert "WHERE module <> '' AND run_type <> 'blackbox' GROUP BY module" in values_sql["modules"]
+    assert "run_type <> 'blackbox'" not in values_sql["models"]
+    assert "HAVING COUNT(*) FILTER (WHERE run_type = ANY(:optimization_types)) > 0" in values_sql["models"]
+    assert "ORDER BY n DESC, value ASC LIMIT :facet_limit" in values_sql["models"]
+    assert "COUNT(DISTINCT model) AS n FROM corpus WHERE model <> '' AND run_type = ANY(:optimization_types)" in totals_sql["models"]
+    assert "ILIKE" not in sql
     assert "j.created_at >= :date_from" in sql
     assert params["optimization_types"] == ["blackbox"]
+    assert params["facet_limit"] == 3
     assert "date_to_excl" not in params
+    assert "value_pattern" not in params
 
-    assert out["models"] == [{"value": "gpt-a", "count": 2}, {"value": "gpt-b", "count": 0}]
-    assert out["types"] == [{"value": "blackbox", "count": 2}, {"value": "run", "count": 5}]
+    assert out["models"] == [
+        {"value": "gpt-c", "count": 7},
+        {"value": "gpt-a", "count": 2},
+        {"value": "gpt-b", "count": 2},
+    ]
+    assert out["types"] == [{"value": "run", "count": 5}, {"value": "blackbox", "count": 2}]
     assert out["modules"] == [{"value": "predict", "count": 1}]
     assert out["optimizers"] == []
+    assert out["totals"] == {"models": 1240, "optimizers": 0, "modules": 1, "types": 2}
+
+
+def test_fetch_corpus_facets_value_query_matches_every_dimension_and_escapes_like(monkeypatch) -> None:
+    """A value search narrows every dimension with an escaped ILIKE substring, and the limit is capped."""
+    monkeypatch.setattr(dashboard, "_job_embeddings_relation", lambda _store: "job_embeddings")
+    session = MagicMock()
+    session.__enter__.return_value = session
+    session.execute.return_value.mappings.return_value.all.return_value = []
+    monkeypatch.setattr(dashboard, "Session", lambda _engine: session)
+
+    out = dashboard.fetch_corpus_facets(
+        job_store=SimpleNamespace(engine=object()),
+        value_query=" 50%_off ",
+        limit=10_000,
+    )
+
+    sql = str(session.execute.call_args.args[0])
+    params = session.execute.call_args.args[1]
+    assert params["value_pattern"] == "%50\\%\\_off%"
+    assert params["facet_limit"] == dashboard.FACET_LIMIT_MAX
+    assert sql.count("ILIKE :value_pattern") == 8
+    assert "WHERE model <> '' AND model ILIKE :value_pattern GROUP BY model" in sql
+    assert "COUNT(DISTINCT optimizer) AS n FROM corpus WHERE optimizer <> '' AND optimizer ILIKE :value_pattern AND TRUE" in sql
+    assert out == {"models": [], "optimizers": [], "modules": [], "types": [], "totals": {"models": 0, "optimizers": 0, "modules": 0, "types": 0}}

@@ -1,62 +1,23 @@
 /**
- * Pure helpers behind the explore filter drawer's option lists.
+ * Pure helpers behind the explore filter drawer's value lists.
  *
- * The drawer follows the classic faceted-navigation contract: every option
- * carries the number of runs it would leave alongside the other active
- * filters, and that count decides how the option is presented — greyed out
- * at zero, promoted into the collapsed view when a section is long. The
- * presentation is chosen per section from its cardinality alone: a handful
- * of values (run types, DSPy modules) is shown in full, a long open-ended
- * list (models) collapses to its busiest values until expanded.
+ * A filter dimension can hold thousands of distinct values (every model id
+ * ever optimized against), so the drawer never lists one in full. Each
+ * dimension shows its busiest values up to a small cap, ranked by the number
+ * of runs each would leave alongside the other active filters, and reports
+ * how many distinct values exist so the user knows to search for the rest.
+ * The backend does this ranking for the real corpora; these helpers apply the
+ * same contract client-side to the tutorial's demo points, which have no
+ * backend scope to ask.
  */
 
-import type { FacetOption } from "@/shared/lib/api";
+import type { CorpusFacets, FacetOption, PublicDashboardPoint } from "@/shared/lib/api";
 
-/** Sections with more options than this collapse to their busiest values. */
-export const COLLAPSE_LIMIT = 8;
-
-export function isCollapsible(options: FacetOption[]): boolean {
-  return options.length > COLLAPSE_LIMIT;
-}
+/** Values shown per dimension before the user has to search. */
+export const FACET_LIMIT = 8;
 
 /**
- * The options a section renders right now.
- *
- * A search query wins over everything and matches on the raw value or its
- * display label. Otherwise short and expanded sections show every option in
- * the order given (the caller keeps them alphabetical so rows never jump
- * when counts change); a collapsed long section shows its selected values
- * first, then the busiest of the rest up to the collapse limit.
- */
-export function visibleOptions(
-  options: FacetOption[],
-  selected: string[],
-  opts: { expanded: boolean; query: string; labelOf: (value: string) => string },
-): FacetOption[] {
-  const needle = opts.query.trim().toLowerCase();
-  if (needle) {
-    return options.filter(
-      (o) =>
-        o.value.toLowerCase().includes(needle) ||
-        opts.labelOf(o.value).toLowerCase().includes(needle),
-    );
-  }
-  if (opts.expanded || !isCollapsible(options)) return options;
-  const selectedSet = new Set(selected);
-  const pinned = options.filter((o) => selectedSet.has(o.value));
-  const rest = options.filter((o) => !selectedSet.has(o.value)).sort((a, b) => b.count - a.count);
-  return [...pinned, ...rest.slice(0, Math.max(0, COLLAPSE_LIMIT - pinned.length))];
-}
-
-/** True when the other active filters have ruled out every value in the section. */
-export function isExhausted(options: FacetOption[]): boolean {
-  return options.length > 0 && options.every((o) => o.count === 0);
-}
-
-/**
- * Facet options derived client-side by counting occurrences — the tutorial's
- * demo corpus has no backend scope to ask, so its counts are plain totals
- * rather than contextual ones. Empty and missing values are skipped.
+ * Count occurrences of each non-empty value, busiest first (ties by value).
  */
 export function countOccurrences(values: ReadonlyArray<string | null | undefined>): FacetOption[] {
   const counts = new Map<string, number>();
@@ -64,7 +25,68 @@ export function countOccurrences(values: ReadonlyArray<string | null | undefined
     if (typeof v !== "string" || v.length === 0) continue;
     counts.set(v, (counts.get(v) ?? 0) + 1);
   }
-  return Array.from(counts, ([value, count]) => ({ value, count })).sort((a, b) =>
-    a.value.localeCompare(b.value),
+  return Array.from(counts, ([value, count]) => ({ value, count })).sort(
+    (a, b) => b.count - a.count || a.value.localeCompare(b.value),
   );
+}
+
+/**
+ * The slice of a ranked list a dimension shows: values containing `query`
+ * (case-insensitive) with a positive count, capped at `limit`, plus how many
+ * such values there are in total.
+ */
+export function topOptions(
+  options: FacetOption[],
+  query: string,
+  limit: number = FACET_LIMIT,
+): { options: FacetOption[]; total: number } {
+  const needle = query.trim().toLowerCase();
+  const matching = options.filter(
+    (o) => o.count > 0 && (!needle || o.value.toLowerCase().includes(needle)),
+  );
+  return { options: matching.slice(0, limit), total: matching.length };
+}
+
+/**
+ * Facets derived from the tutorial's demo points under the same contract as
+ * the backend: ranked, capped, searchable, with totals. Counts are plain
+ * totals rather than contextual ones. Legacy points with no explicit type are
+ * plain runs, and black-box runs carry a placeholder module name that is not
+ * a DSPy module, so they never count as one.
+ */
+export function facetsFromPoints(
+  points: PublicDashboardPoint[],
+  query: string,
+  limit: number = FACET_LIMIT,
+): CorpusFacets {
+  const models = topOptions(countOccurrences(points.map((p) => p.winning_model)), query, limit);
+  const optimizers = topOptions(
+    countOccurrences(points.map((p) => p.optimizer_name)),
+    query,
+    limit,
+  );
+  const modules = topOptions(
+    countOccurrences(
+      points.filter((p) => p.optimization_type !== "blackbox").map((p) => p.module_name),
+    ),
+    query,
+    limit,
+  );
+  const types = topOptions(
+    countOccurrences(points.map((p) => p.optimization_type ?? "run")),
+    query,
+    limit,
+  );
+  return {
+    models: models.options,
+    optimizers: optimizers.options,
+    modules: modules.options,
+    types: types.options,
+    totals: {
+      models: models.total,
+      optimizers: optimizers.total,
+      modules: modules.total,
+      types: types.total,
+    },
+  };
 }

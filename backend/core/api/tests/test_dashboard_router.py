@@ -59,9 +59,15 @@ def _spy_facets(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """
     captured: dict[str, Any] = {}
 
-    def _fake(**kwargs: Any) -> dict[str, list[dict[str, Any]]]:
+    def _fake(**kwargs: Any) -> dict[str, Any]:
         captured.update(kwargs)
-        return {"models": [], "optimizers": [], "modules": [], "types": []}
+        return {
+            "models": [],
+            "optimizers": [],
+            "modules": [],
+            "types": [],
+            "totals": {"models": 0, "optimizers": 0, "modules": 0, "types": 0},
+        }
 
     monkeypatch.setattr(dashboard_module, "fetch_corpus_facets", _fake)
     return captured
@@ -161,7 +167,15 @@ def test_facets_public_forwards_no_scope(monkeypatch: pytest.MonkeyPatch) -> Non
     client = _client(monkeypatch, user=None)
     resp = client.get("/dashboard/facets")
     assert resp.status_code == 200
-    assert resp.json() == {"models": [], "optimizers": [], "modules": [], "types": []}
+    assert resp.json() == {
+        "models": [],
+        "optimizers": [],
+        "modules": [],
+        "types": [],
+        "totals": {"models": 0, "optimizers": 0, "modules": 0, "types": 0},
+    }
+    assert captured["value_query"] is None
+    assert captured["limit"] == 8
     assert captured["owner_username"] is None
     assert captured["shared_with_username"] is None
     assert captured["optimization_types"] is None
@@ -175,13 +189,24 @@ def test_facets_forward_active_filters_for_contextual_counts(
     captured = _spy_facets(monkeypatch)
     client = _client(monkeypatch, user=None)
     resp = client.get(
-        "/dashboard/facets?optimization_types=blackbox&models=a&models=b&date_from=2026-01-02",
+        "/dashboard/facets?optimization_types=blackbox&models=a&models=b&date_from=2026-01-02"
+        "&q=gpt&limit=20",
     )
     assert resp.status_code == 200
     assert captured["optimization_types"] == ["blackbox"]
     assert captured["models"] == ["a", "b"]
     assert captured["date_from"] == date(2026, 1, 2)
     assert captured["date_to"] is None
+    assert captured["value_query"] == "gpt"
+    assert captured["limit"] == 20
+
+
+def test_facets_limit_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dimension is never returned in full: ``limit`` above the cap is a 422."""
+    _spy_facets(monkeypatch)
+    client = _client(monkeypatch, user=None)
+    assert client.get("/dashboard/facets?limit=500").status_code == 422
+    assert client.get("/dashboard/facets?limit=0").status_code == 422
 
 
 def test_facets_owner_scope_is_resolved_and_forwarded(

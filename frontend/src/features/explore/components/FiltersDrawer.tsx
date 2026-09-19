@@ -11,10 +11,10 @@ import {
   Target,
   X,
 } from "@/shared/ui/icons";
-import type { FacetOption } from "@/shared/lib/api";
+import type { CorpusFacets, FacetOption } from "@/shared/lib/api";
 import { modelDisplayName } from "@/shared/lib/formatters";
 import { msg, formatMsg } from "@/shared/lib/messages";
-import { getActiveDir } from "@/shared/lib/runtime-locale";
+import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 import {
   Sheet,
@@ -25,21 +25,22 @@ import {
 } from "@/shared/ui/primitives/sheet";
 import { SkynetDatePicker } from "@/shared/ui/skynet-date-picker";
 import { engineDisplayName } from "../lib/format";
-import { isCollapsible, isExhausted, visibleOptions } from "../lib/facet-options";
+import { ActiveFilters } from "./ActiveFilters";
 
 interface FiltersDrawerProps {
   open: boolean;
   onOpenChange: (next: boolean) => void;
   /**
-   * Every value present in the corpus for each dimension, sorted by value by
-   * the caller, each with the number of runs it would leave alongside the
-   * other active filters (0 = ruled out by the current selection).
+   * The busiest values per dimension for the current context (or, while
+   * `facetQuery` is non-empty, the values matching it), each with the number
+   * of runs it would leave alongside the other active filters, plus the
+   * number of distinct values available per dimension.
    */
-  modelOptions: FacetOption[];
-  optimizerOptions: FacetOption[];
-  moduleOptions: FacetOption[];
-  /** Run-type counts; an empty list means counts are unknown and every type stays selectable. */
-  typeOptions: FacetOption[];
+  facets: CorpusFacets;
+  facetsLoading: boolean;
+  /** Live value search across every dimension; owned by the caller so it can reset on close. */
+  facetQuery: string;
+  onFacetQueryChange: (next: string) => void;
   /** Currently active filter values. */
   selectedModels: string[];
   selectedOptimizers: string[];
@@ -74,24 +75,29 @@ export function typeLabel(value: string): string {
   return entry ? msg(entry.labelKey) : value;
 }
 
+const FOCUS_RING =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45";
+
 /**
- * Slide-in panel for structured filtering on top of the free-text query.
- * Every dimension is a checklist: one value per row, a checkbox for the
- * selection state, and the number of runs that value would leave alongside
- * the other active filters aligned at the end of the row. Zero-count rows
- * are disabled instead of leading to an empty result, a section whose values
- * are all ruled out says so, and long lists (models) collapse to their
- * busiest values behind a search box and a "show all" toggle. Filters apply
+ * Slide-in panel for structured filtering on top of the free-text query,
+ * built for corpora where a single dimension (models, above all) can hold
+ * thousands of distinct values. Nothing is ever listed in full: one search
+ * box at the top queries every dimension server-side, and until the user
+ * types, each dimension shows only its busiest handful of values ("top 8 of
+ * 1,240"), ranked by the number of runs each would leave alongside the other
+ * active filters. Values the current selection rules out are not shown at
+ * all. The applied filters sit in their own section as removable tokens, so
+ * selection state never depends on a value being in view. Filters apply
  * immediately; the primary button reports the live result count so the
  * effect of each choice is visible before the drawer closes.
  */
 export function FiltersDrawer({
   open,
   onOpenChange,
-  modelOptions,
-  optimizerOptions,
-  moduleOptions,
-  typeOptions,
+  facets,
+  facetsLoading,
+  facetQuery,
+  onFacetQueryChange,
   selectedModels,
   selectedOptimizers,
   selectedTypes,
@@ -115,27 +121,34 @@ export function FiltersDrawer({
     selectedModules.length +
     dateCount;
   const isRtl = getActiveDir() === "rtl";
-  // A section's counts are only "ruled out by the other filters" when there
-  // are other filters; with none active, zero counts mean the scope is empty.
+  const searching = facetQuery.trim().length > 0;
+  // A dimension's empty list means "ruled out by the other filters" only when
+  // there are other filters; with none active, it means the scope has none.
   const othersActive = (own: number) => totalActive - own > 0;
   // Run types render in a fixed order with the fetched count attached; an
   // empty fetch (loading, error) leaves counts unknown rather than zero.
   const typeRows = React.useMemo<FacetOption[]>(() => {
-    if (typeOptions.length === 0) return TYPE_VALUES.map((t) => ({ value: t.value, count: -1 }));
+    if (facets.types.length === 0) return TYPE_VALUES.map((t) => ({ value: t.value, count: -1 }));
     return TYPE_VALUES.map((t) => ({
       value: t.value,
-      count: typeOptions.find((o) => o.value === t.value)?.count ?? 0,
+      count: facets.types.find((o) => o.value === t.value)?.count ?? 0,
     }));
-  }, [typeOptions]);
+  }, [facets.types]);
   // Phones get a bottom sheet capped below the top edge; desktop keeps the
-  // side drawer on the reading-end edge.
+  // side drawer on the reading-end edge. Focus lands in the search box on
+  // desktop; on phones that would raise the keyboard over the list.
   const isPhone = useIsPhone();
+  const searchRef = React.useRef<HTMLInputElement>(null);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side={isPhone ? "bottom" : isRtl ? "left" : "right"}
         showCloseButton={false}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          if (!isPhone) searchRef.current?.focus();
+        }}
         className={
           isPhone
             ? "max-h-[85dvh] w-full gap-0 rounded-t-2xl border-border bg-background p-0 pb-[env(safe-area-inset-bottom)]"
@@ -143,7 +156,7 @@ export function FiltersDrawer({
         }
       >
         <div className="flex h-full min-h-0 flex-col">
-          <SheetHeader className="flex-row items-start justify-between gap-3 border-b border-border/60 px-6 py-5">
+          <SheetHeader className="flex-row items-start justify-between gap-3 px-6 pt-5 pb-4">
             <div className="flex flex-col gap-1.5">
               <SheetTitle className="text-[17px] font-medium tracking-tight text-foreground">
                 {msg("explore.filters.title")}
@@ -156,88 +169,126 @@ export function FiltersDrawer({
               type="button"
               onClick={() => onOpenChange(false)}
               aria-label={msg("explore.filters.close")}
-              className="inline-flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:size-9"
+              className={`inline-flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground lg:size-9 ${FOCUS_RING}`}
             >
               <X className="size-4" aria-hidden="true" />
             </button>
           </SheetHeader>
 
-          <div className="flex-1 overflow-y-auto px-6 py-5">
-            {/* Two clusters, each held tighter (gap-6) than the space between
-                them (gap-9): the optimization itself (program, model,
-                optimizer), then the run's own metadata (kind, date). */}
-            <div className="flex flex-col gap-9">
-              <div className="flex flex-col gap-6">
-                <FacetList
-                  title={msg("explore.filters.section.modules")}
-                  icon={Cube}
-                  options={moduleOptions}
-                  selected={selectedModules}
-                  othersActive={othersActive(selectedModules.length)}
-                  onToggle={(v) => onChangeModules(toggleValue(selectedModules, v))}
-                  onClear={() => onChangeModules([])}
-                  dir="auto"
-                />
+          <div className="border-b border-border/60 px-6 pb-4">
+            <ValueSearchInput
+              ref={searchRef}
+              value={facetQuery}
+              onChange={onFacetQueryChange}
+              busy={facetsLoading && searching}
+            />
+          </div>
 
-                <FacetList
-                  title={msg("explore.filters.section.models")}
-                  icon={Cpu}
-                  options={modelOptions}
-                  selected={selectedModels}
-                  othersActive={othersActive(selectedModels.length)}
-                  onToggle={(v) => onChangeModels(toggleValue(selectedModels, v))}
-                  onClear={() => onChangeModels([])}
-                  labelOf={modelDisplayName}
-                  dir="ltr"
-                />
+          <div className="flex-1 overflow-y-auto px-6 py-5" aria-busy={facetsLoading}>
+            <div className="flex flex-col gap-8">
+              {totalActive > 0 && (
+                <section className="flex flex-col gap-2.5">
+                  <GroupHeader title={msg("explore.filters.active")} meta={String(totalActive)} />
+                  <ActiveFilters
+                    models={selectedModels}
+                    optimizers={selectedOptimizers}
+                    types={selectedTypes}
+                    modules={selectedModules}
+                    dateFrom={dateFrom}
+                    dateTo={dateTo}
+                    onChangeModels={onChangeModels}
+                    onChangeOptimizers={onChangeOptimizers}
+                    onChangeTypes={onChangeTypes}
+                    onChangeModules={onChangeModules}
+                    onChangeDateRange={onChangeDateRange}
+                    onClearAll={onClearAll}
+                  />
+                </section>
+              )}
 
-                <FacetList
-                  title={msg("explore.filters.section.optimizers")}
-                  icon={Target}
-                  options={optimizerOptions}
-                  selected={selectedOptimizers}
-                  othersActive={othersActive(selectedOptimizers.length)}
-                  onToggle={(v) => onChangeOptimizers(toggleValue(selectedOptimizers, v))}
-                  onClear={() => onChangeOptimizers([])}
-                  labelOf={engineDisplayName}
-                  dir="ltr"
-                />
-              </div>
+              {/* The optimization itself first (program, model, optimizer);
+                  the run's own metadata (kind, date) only when browsing —
+                  a value search is about the three open-ended dimensions. */}
+              <ValueGroup
+                title={msg("explore.filters.section.modules")}
+                icon={Cube}
+                options={facets.modules}
+                total={facets.totals.modules}
+                selected={selectedModules}
+                searching={searching}
+                othersActive={othersActive(selectedModules.length)}
+                onToggle={(v) => onChangeModules(toggleValue(selectedModules, v))}
+                dir="auto"
+              />
+              <ValueGroup
+                title={msg("explore.filters.section.models")}
+                icon={Cpu}
+                options={facets.models}
+                total={facets.totals.models}
+                selected={selectedModels}
+                searching={searching}
+                othersActive={othersActive(selectedModels.length)}
+                onToggle={(v) => onChangeModels(toggleValue(selectedModels, v))}
+                labelOf={modelDisplayName}
+                dir="ltr"
+              />
+              <ValueGroup
+                title={msg("explore.filters.section.optimizers")}
+                icon={Target}
+                options={facets.optimizers}
+                total={facets.totals.optimizers}
+                selected={selectedOptimizers}
+                searching={searching}
+                othersActive={othersActive(selectedOptimizers.length)}
+                onToggle={(v) => onChangeOptimizers(toggleValue(selectedOptimizers, v))}
+                labelOf={engineDisplayName}
+                dir="ltr"
+              />
 
-              <div className="flex flex-col gap-6">
-                <FacetList
-                  title={msg("explore.filters.section.types")}
-                  icon={Stack}
-                  options={typeRows}
-                  selected={selectedTypes}
-                  othersActive={othersActive(selectedTypes.length)}
-                  onToggle={(v) => onChangeTypes(toggleValue(selectedTypes, v))}
-                  onClear={() => onChangeTypes([])}
-                  labelOf={typeLabel}
-                  dir="auto"
-                />
+              {!searching && (
+                <>
+                  <section className="flex flex-col gap-1.5">
+                    <GroupHeader title={msg("explore.filters.section.types")} icon={Stack} />
+                    <div role="group" aria-label={msg("explore.filters.section.types")} className="-mx-2 flex flex-col">
+                      {typeRows.map(({ value, count }) => {
+                        const checked = selectedTypes.includes(value);
+                        return (
+                          <ValueRow
+                            key={value}
+                            label={typeLabel(value)}
+                            count={count < 0 ? null : count}
+                            checked={checked}
+                            // A checked row always stays clickable so it can be
+                            // unchecked; only a type the other filters rule out
+                            // is taken off the table.
+                            disabled={!checked && count === 0}
+                            dir="auto"
+                            onToggle={() => onChangeTypes(toggleValue(selectedTypes, value))}
+                          />
+                        );
+                      })}
+                    </div>
+                  </section>
 
-                <FilterSection
-                  title={msg("explore.filters.section.date")}
-                  icon={CalendarBlank}
-                  onClear={dateCount > 0 ? () => onChangeDateRange(null, null) : undefined}
-                >
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <DateRangeField
-                      label={msg("explore.filters.date.from")}
-                      value={dateFrom}
-                      max={dateTo ?? undefined}
-                      onChange={(v) => onChangeDateRange(v, dateTo)}
-                    />
-                    <DateRangeField
-                      label={msg("explore.filters.date.to")}
-                      value={dateTo}
-                      min={dateFrom ?? undefined}
-                      onChange={(v) => onChangeDateRange(dateFrom, v)}
-                    />
-                  </div>
-                </FilterSection>
-              </div>
+                  <section className="flex flex-col gap-2.5">
+                    <GroupHeader title={msg("explore.filters.section.date")} icon={CalendarBlank} />
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <DateRangeField
+                        label={msg("explore.filters.date.from")}
+                        value={dateFrom}
+                        max={dateTo ?? undefined}
+                        onChange={(v) => onChangeDateRange(v, dateTo)}
+                      />
+                      <DateRangeField
+                        label={msg("explore.filters.date.to")}
+                        value={dateTo}
+                        min={dateFrom ?? undefined}
+                        onChange={(v) => onChangeDateRange(dateFrom, v)}
+                      />
+                    </div>
+                  </section>
+                </>
+              )}
             </div>
           </div>
 
@@ -246,7 +297,7 @@ export function FiltersDrawer({
               type="button"
               onClick={onClearAll}
               disabled={totalActive === 0}
-              className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-[13px] text-foreground/65 transition-[background-color,color] cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              className={`inline-flex items-center justify-center rounded-lg px-3 py-2 text-[13px] text-foreground/65 transition-[background-color,color] cursor-pointer hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:text-foreground/30 disabled:hover:bg-transparent ${FOCUS_RING}`}
             >
               {msg("explore.filters.clear")}
             </button>
@@ -254,7 +305,7 @@ export function FiltersDrawer({
               type="button"
               onClick={() => onOpenChange(false)}
               aria-busy={resultsLoading}
-              className={`inline-flex items-center justify-center rounded-lg bg-foreground px-4 py-2 text-[13px] font-medium tabular-nums text-background transition-[background-color,opacity] cursor-pointer hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 ${
+              className={`inline-flex items-center justify-center rounded-lg bg-foreground px-4 py-2 text-[13px] font-medium tabular-nums text-background transition-[background-color,opacity] cursor-pointer hover:bg-foreground/90 ${FOCUS_RING} ${
                 resultsLoading ? "opacity-70" : ""
               }`}
             >
@@ -273,124 +324,97 @@ function toggleValue(current: string[], value: string): string[] {
   return current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
 }
 
+function formatCount(n: number): string {
+  return new Intl.NumberFormat(getActiveIntlLocale()).format(n);
+}
+
 type IconComponent = React.ComponentType<{
   className?: string;
   "aria-hidden"?: boolean | "true";
 }>;
 
-function FilterSection({
+function GroupHeader({
   title,
   icon: Icon,
-  onClear,
-  children,
+  meta,
 }: {
   title: string;
   icon?: IconComponent;
-  /** Present only while the section has something to clear. */
-  onClear?: () => void;
-  children: React.ReactNode;
+  /** Right-aligned figure, e.g. "Top 8 of 1,240". */
+  meta?: string;
 }) {
-  const active = onClear !== undefined;
   return (
-    <section className="flex flex-col gap-2">
-      <div className="flex min-h-7 items-center justify-between gap-2">
-        <h3
-          className={`inline-flex items-center gap-2 text-[12px] font-medium tracking-wide transition-colors ${
-            active ? "text-foreground/80" : "text-foreground/55"
-          }`}
-        >
-          {Icon && (
-            <Icon
-              className={`size-3.5 transition-colors ${
-                active ? "text-foreground/70" : "text-foreground/45"
-              }`}
-              aria-hidden="true"
-            />
-          )}
-          <span>{title}</span>
-        </h3>
-        {active && (
-          <button
-            type="button"
-            onClick={onClear}
-            className="rounded-md px-1.5 py-0.5 text-[12px] text-foreground/55 transition-colors cursor-pointer hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
-          >
-            {msg("explore.filters.section.clear")}
-          </button>
-        )}
-      </div>
-      {children}
-    </section>
+    <div className="flex min-h-6 items-center justify-between gap-3">
+      <h3 className="inline-flex items-center gap-2 text-[12px] font-medium tracking-wide text-foreground/60">
+        {Icon && <Icon className="size-3.5 text-foreground/45" aria-hidden="true" />}
+        <span>{title}</span>
+      </h3>
+      {meta && <span className="shrink-0 text-[12px] tabular-nums text-foreground/45">{meta}</span>}
+    </div>
   );
 }
 
-function FacetList({
+function ValueGroup({
   title,
   icon,
   options,
+  total,
   selected,
+  searching,
   othersActive,
   onToggle,
-  onClear,
   labelOf = (v) => v,
   dir,
 }: {
   title: string;
   icon?: IconComponent;
+  /** The busiest (or matching) values, already ranked and capped by the source. */
   options: FacetOption[];
+  /** Distinct values available in this dimension, beyond the ones listed. */
+  total: number;
   selected: string[];
-  /** Whether any filter outside this section is active (counts then mean "ruled out"). */
+  searching: boolean;
+  /** Whether any filter outside this dimension is active (an empty list then means "ruled out"). */
   othersActive: boolean;
   onToggle: (value: string) => void;
-  onClear: () => void;
   labelOf?: (value: string) => string;
   /**
-   * Per-row text direction. LTR for code identifiers, RTL for Hebrew labels,
-   * auto for user-authored names that may be either (tasks, modules).
+   * Per-row text direction. LTR for code identifiers, auto for user-authored
+   * names that may be either (modules).
    */
   dir: "ltr" | "rtl" | "auto";
 }) {
-  const [query, setQuery] = React.useState("");
-  const [expanded, setExpanded] = React.useState(false);
-  const collapsible = isCollapsible(options);
-  const trimmed = query.trim();
-
-  const visible = React.useMemo(
-    () => visibleOptions(options, selected, { expanded, query: trimmed, labelOf }),
-    [options, selected, expanded, trimmed, labelOf],
-  );
-  const exhausted = othersActive && selected.length === 0 && isExhausted(options);
+  const shown = options.length;
+  const truncated = total > shown;
+  const meta = truncated
+    ? formatMsg(searching ? "explore.filters.group.matches" : "explore.filters.group.top", {
+        shown: formatCount(shown),
+        total: formatCount(total),
+      })
+    : undefined;
+  const emptyText = searching
+    ? msg("explore.filters.section.no_search_match")
+    : othersActive
+      ? msg("explore.filters.section.none_in_selection")
+      : msg("explore.filters.empty_section");
 
   return (
-    <FilterSection title={title} icon={icon} onClear={selected.length > 0 ? onClear : undefined}>
-      {collapsible && (
-        <SectionSearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder={formatMsg("explore.filters.section.search", {
-            section: title,
-          })}
-        />
-      )}
-      {visible.length === 0 ? (
-        <p className="py-1 text-[12.5px] text-foreground/45">
-          {trimmed
-            ? msg("explore.filters.section.no_search_match")
-            : msg("explore.filters.empty_section")}
-        </p>
+    <section className="flex flex-col gap-1.5">
+      <GroupHeader title={title} icon={icon} meta={meta} />
+      {shown === 0 ? (
+        <p className="py-1 text-[12.5px] text-foreground/45">{emptyText}</p>
       ) : (
         <div role="group" aria-label={title} className="-mx-2 flex flex-col">
-          {visible.map(({ value, count }) => {
+          {options.map(({ value, count }) => {
             const label = labelOf(value);
             return (
-              <FacetRow
+              <ValueRow
                 key={value}
                 label={label}
                 // Trimmed labels (e.g. bare model names) keep the full value
                 // reachable on hover — providers can collide on the short name.
                 title={label === value ? undefined : value}
-                // A negative count means unknown (facets not loaded); hide it.
-                count={count < 0 ? null : count}
+                count={count}
                 checked={selected.includes(value)}
                 dir={dir}
                 onToggle={() => onToggle(value)}
@@ -399,67 +423,58 @@ function FacetList({
           })}
         </div>
       )}
-      {exhausted && (
+      {truncated && !searching && (
         <p className="text-[12px] text-foreground/45">
-          {msg("explore.filters.section.none_in_selection")}
+          {formatMsg("explore.filters.group.rest", { n: formatCount(total - shown) })}
         </p>
       )}
-      {collapsible && !trimmed && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-          className="self-start rounded-md px-1 py-0.5 text-[12px] text-foreground/60 underline-offset-4 transition-colors cursor-pointer hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
-        >
-          {expanded
-            ? msg("explore.filters.section.show_fewer")
-            : formatMsg("explore.filters.section.show_all", { n: options.length })}
-        </button>
-      )}
-    </FilterSection>
+    </section>
   );
 }
 
-function FacetRow({
+function ValueRow({
   label,
   title,
   count,
   checked,
+  disabled = false,
   dir,
   onToggle,
 }: {
   label: string;
   title?: string;
+  /** Null when the count is unknown (facets not loaded). */
   count: number | null;
   checked: boolean;
+  disabled?: boolean;
   dir: "ltr" | "rtl" | "auto";
   onToggle: () => void;
 }) {
-  // A checked row always stays clickable so it can be unchecked; only an
-  // unchecked value the other filters rule out is taken off the table.
-  const unavailable = !checked && count === 0;
   return (
     <button
       type="button"
       role="checkbox"
       aria-checked={checked}
-      disabled={unavailable}
+      disabled={disabled}
       title={title}
       onClick={onToggle}
-      className={`group flex min-h-[44px] w-full items-center gap-3 rounded-md px-2 py-1.5 text-start transition-[background-color,color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45 lg:min-h-9 ${
-        unavailable
+      className={`group flex min-h-[44px] w-full items-center gap-3 rounded-md px-2 py-1.5 text-start transition-[background-color,color] focus-visible:ring-inset lg:min-h-9 ${FOCUS_RING} ${
+        disabled
           ? "cursor-not-allowed text-foreground/35"
-          : "cursor-pointer text-foreground/80 hover:bg-accent hover:text-foreground"
-      } ${checked ? "text-foreground" : ""}`}
+          : checked
+            ? "cursor-pointer text-foreground hover:bg-accent"
+            : "cursor-pointer text-foreground/80 hover:bg-accent hover:text-foreground"
+      }`}
     >
+      {/* A fixed slot keeps labels aligned whether or not the mark shows. */}
       <span
         aria-hidden="true"
         className={`flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-[background-color,border-color] ${
           checked
             ? "border-foreground bg-foreground text-background"
-            : unavailable
-              ? "border-foreground/15 bg-background"
-              : "border-foreground/30 bg-background group-hover:border-foreground/55"
+            : disabled
+              ? "border-foreground/15"
+              : "border-foreground/25 group-hover:border-foreground/50"
         }`}
       >
         {checked && <Check className="size-3" aria-hidden="true" />}
@@ -469,43 +484,61 @@ function FacetRow({
       </span>
       {count !== null && (
         <span
-          className={`shrink-0 tabular-nums text-[12px] ${
-            unavailable ? "text-foreground/30" : "text-foreground/45"
+          className={`shrink-0 text-[12px] tabular-nums ${
+            disabled ? "text-foreground/30" : "text-foreground/45"
           }`}
         >
-          {count}
+          {formatCount(count)}
         </span>
       )}
     </button>
   );
 }
 
-function SectionSearchInput({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  placeholder: string;
-}) {
+const ValueSearchInput = React.forwardRef<
+  HTMLInputElement,
+  { value: string; onChange: (next: string) => void; busy: boolean }
+>(function ValueSearchInput({ value, onChange, busy }, ref) {
   return (
     <div className="relative">
       <MagnifyingGlass
-        className="pointer-events-none absolute end-2.5 top-1/2 size-3.5 -translate-y-1/2 text-foreground/40"
+        className={`pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 transition-opacity ${
+          busy ? "animate-pulse text-foreground/60" : "text-foreground/40"
+        }`}
         aria-hidden="true"
       />
       <input
+        ref={ref}
         type="search"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
+        onKeyDown={(e) => {
+          // Escape clears the search before it is allowed to close the sheet.
+          if (e.key === "Escape" && value) {
+            e.stopPropagation();
+            onChange("");
+          }
+        }}
+        placeholder={msg("explore.filters.search.placeholder")}
+        aria-label={msg("explore.filters.search.placeholder")}
+        autoComplete="off"
+        spellCheck={false}
         dir="auto"
-        className="w-full rounded-lg border border-border bg-background ps-3 pe-8 py-1.5 text-[12.5px] text-foreground placeholder:text-foreground/40 transition-colors hover:border-foreground/30 focus:border-foreground/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+        className={`h-10 w-full rounded-lg border border-border bg-background ps-10 pe-10 text-[13.5px] text-foreground placeholder:text-foreground/40 transition-colors hover:border-foreground/30 focus:border-foreground/40 focus:outline-none [&::-webkit-search-cancel-button]:hidden ${FOCUS_RING}`}
       />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          aria-label={msg("explore.filters.search.clear")}
+          className={`absolute end-1.5 top-1/2 inline-flex size-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-foreground/50 transition-[background-color,color] hover:bg-accent hover:text-foreground ${FOCUS_RING}`}
+        >
+          <X className="size-3.5" aria-hidden="true" />
+        </button>
+      )}
     </div>
   );
-}
+});
 
 function DateRangeField({
   label,

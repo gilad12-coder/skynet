@@ -2885,11 +2885,25 @@ export interface FacetOption {
   count: number;
 }
 
+export interface FacetTotals {
+  models: number;
+  optimizers: number;
+  modules: number;
+  types: number;
+}
+
+/**
+ * The busiest values per dimension (capped server-side, never the full list —
+ * a corpus can hold thousands of distinct models) plus, per dimension, how
+ * many distinct values are available in total so the UI can say "top 8 of
+ * 1,240" and offer search for the rest.
+ */
 export interface CorpusFacets {
   models: FacetOption[];
   optimizers: FacetOption[];
   modules: FacetOption[];
   types: FacetOption[];
+  totals: FacetTotals;
 }
 
 /** The active structured filters, echoed back so facet counts are contextual. */
@@ -2905,10 +2919,11 @@ export interface FacetContext {
 const FACET_LIST_KEYS = ["models", "optimizers", "optimization_types", "modules"] as const;
 
 /**
- * Filter options (models / optimizers / modules / run types) present in one
- * corpus scope, each with the number of runs it would leave alongside the
+ * The busiest filter values (models / optimizers / modules / run types) in
+ * one corpus scope, each with the number of runs it would leave alongside the
  * other active filters, so each /explore tab offers exactly the values it can
- * filter to and can grey out the ones the current selection rules out. Pass
+ * filter to. `query` narrows every dimension to values containing that text
+ * (case-insensitive, matched server-side) and `limit` caps each list. Pass
  * no scope for the public archive; pass `owner_username` for the caller's
  * own runs or `shared_with_username` for runs shared with them (the backend
  * requires the bearer token to match the requested username).
@@ -2916,6 +2931,7 @@ const FACET_LIST_KEYS = ["models", "optimizers", "optimization_types", "modules"
 export function getCorpusFacets(
   scope: { owner_username?: string; shared_with_username?: string } = {},
   context: FacetContext = {},
+  options: { query?: string; limit?: number } = {},
 ): Promise<CorpusFacets> {
   const params = new URLSearchParams();
   if (scope.owner_username) params.set("owner_username", scope.owner_username);
@@ -2926,6 +2942,8 @@ export function getCorpusFacets(
   }
   if (context.date_from) params.set("date_from", context.date_from);
   if (context.date_to) params.set("date_to", context.date_to);
+  if (options.query?.trim()) params.set("q", options.query.trim());
+  if (options.limit) params.set("limit", String(options.limit));
   const qs = params.toString();
   return cachedGet(`/dashboard/facets${qs ? `?${qs}` : ""}`, 15000);
 }

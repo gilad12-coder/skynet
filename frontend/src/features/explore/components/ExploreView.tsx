@@ -19,7 +19,7 @@ import { EmptyState } from "@/shared/ui/empty-state";
 import { registerTutorialHook } from "@/features/tutorial";
 import { usePublicDashboard } from "../hooks/use-public-dashboard";
 import { useCorpusFacets } from "../hooks/use-corpus-facets";
-import { countOccurrences } from "../lib/facet-options";
+import { facetsFromPoints } from "../lib/facet-options";
 import { useSemanticSearch } from "../hooks/use-semantic-search";
 import { useRecentQueries } from "../hooks/use-recent-queries";
 import { usePopularQueries } from "../hooks/use-popular-queries";
@@ -58,6 +58,13 @@ export function ExploreView() {
     sessionReady: status !== "loading",
   });
   const [drawerOpen, setDrawerOpen] = React.useState(false);
+  // The drawer's value search; reset on close so the next open starts from
+  // the busiest values again.
+  const [facetQuery, setFacetQuery] = React.useState("");
+  const onDrawerOpenChange = React.useCallback((next: boolean) => {
+    setDrawerOpen(next);
+    if (!next) setFacetQuery("");
+  }, []);
 
   const { recent, push: pushRecent, clear: clearRecent } = useRecentQueries();
 
@@ -89,46 +96,25 @@ export function ExploreView() {
 
   // Filter options come from a per-corpus facets fetch so each tab lists only
   // the values it can filter to (a model private to "mine" never shows under
-  // "public"). The tutorial's demo corpus has no backend scope, so there we
-  // fall back to deriving options from the injected demo points.
-  const facets = useCorpusFacets(query.corpus, sessionUser, {
-    models: query.models,
-    optimizers: query.optimizers,
-    types: query.types,
-    modules: query.modules,
-    dateFrom: query.dateFrom,
-    dateTo: query.dateTo,
-  });
-  const modelOptions = React.useMemo(
-    () => (demoPoints ? countOccurrences(demoPoints.map((p) => p.winning_model)) : facets.models),
-    [demoPoints, facets.models],
+  // "public"); the backend caps every dimension and answers the value search.
+  // The tutorial's demo corpus has no backend scope, so there the same
+  // ranking is applied client-side to the injected demo points.
+  const { facets: fetchedFacets, loading: facetsLoading } = useCorpusFacets(
+    query.corpus,
+    sessionUser,
+    {
+      models: query.models,
+      optimizers: query.optimizers,
+      types: query.types,
+      modules: query.modules,
+      dateFrom: query.dateFrom,
+      dateTo: query.dateTo,
+    },
+    facetQuery,
   );
-  const optimizerOptions = React.useMemo(
-    () =>
-      demoPoints ? countOccurrences(demoPoints.map((p) => p.optimizer_name)) : facets.optimizers,
-    [demoPoints, facets.optimizers],
-  );
-  // Legacy rows carry no explicit type and are plain runs, matching how the
-  // backend counts them.
-  const typeOptions = React.useMemo(
-    () =>
-      demoPoints
-        ? countOccurrences(demoPoints.map((p) => p.optimization_type ?? "run"))
-        : facets.types,
-    [demoPoints, facets.types],
-  );
-  // Black-box runs carry a placeholder module name; the backend already
-  // leaves them out of the module facet, and the demo fallback does the same.
-  const moduleOptions = React.useMemo(
-    () =>
-      demoPoints
-        ? countOccurrences(
-            demoPoints
-              .filter((p) => p.optimization_type !== "blackbox")
-              .map((p) => p.module_name),
-          )
-        : facets.modules,
-    [demoPoints, facets.modules],
+  const facets = React.useMemo(
+    () => (demoPoints ? facetsFromPoints(demoPoints, facetQuery) : fetchedFacets),
+    [demoPoints, facetQuery, fetchedFacets],
   );
   // Popular searches for a blank field: real trending only — what people
   // actually searched (public corpus, logged server-side on explicit commit).
@@ -231,11 +217,11 @@ export function ExploreView() {
 
       <FiltersDrawer
         open={drawerOpen}
-        onOpenChange={setDrawerOpen}
-        modelOptions={modelOptions}
-        optimizerOptions={optimizerOptions}
-        moduleOptions={moduleOptions}
-        typeOptions={typeOptions}
+        onOpenChange={onDrawerOpenChange}
+        facets={facets}
+        facetsLoading={facetsLoading && !demoPoints}
+        facetQuery={facetQuery}
+        onFacetQueryChange={setFacetQuery}
         selectedModels={query.models}
         selectedOptimizers={query.optimizers}
         selectedTypes={query.types}

@@ -22,6 +22,7 @@ when added.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 import weakref
@@ -425,6 +426,22 @@ _FACET_DIMENSIONS: tuple[tuple[str, str, str], ...] = (
     ("types", "run_type", "optimization_types"),
 )
 
+FACET_LIMIT_DEFAULT = 8
+FACET_LIMIT_MAX = 50
+
+
+def _facet_like_pattern(value_query: str) -> str:
+    """Turn a free-text facet search into a substring ``ILIKE`` pattern.
+
+    Args:
+        value_query: The user's (already non-blank) search text.
+
+    Returns:
+        ``%text%`` with LIKE metacharacters escaped so a literal ``%`` or
+        ``_`` in a model id matches itself rather than anything.
+    """
+    return "%" + re.sub(r"([\\%_])", r"\\\1", value_query.strip()) + "%"
+
 
 def fetch_corpus_facets(
     *,
@@ -437,8 +454,10 @@ def fetch_corpus_facets(
     modules: list[str] | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
-) -> dict[str, list[dict[str, Any]]]:
-    """Return per-value run counts for every filter dimension in one corpus.
+    value_query: str | None = None,
+    limit: int = FACET_LIMIT_DEFAULT,
+) -> dict[str, Any]:
+    """Return the busiest filter values per dimension in one corpus, with counts.
 
     Backs ``GET /dashboard/facets`` so each /explore tab lists the filter
     options drawn from its OWN scope — the mine tab surfaces a user's private
@@ -449,6 +468,15 @@ def fetch_corpus_facets(
     a dimension are OR'd, so applying them would zero out every unselected
     sibling). The free-text query is deliberately not part of the context —
     semantic ranking has no crisp matched set to count against.
+
+    A dimension can hold thousands of distinct values (every model id ever
+    optimized against), so no dimension is ever returned in full: each is
+    capped at ``limit`` values ranked by contextual count, values the other
+    filters rule out (count 0) are dropped rather than padded in, and the
+    number of distinct values still available is reported separately so the
+    UI can say "top 8 of 1,240" and offer search for the rest. ``value_query``
+    is that search: a case-insensitive substring match on the raw value,
+    applied to every dimension at once.
 
     The scope predicate and the payload-first / embedded-first ``COALESCE``
     derivation mirror :func:`_fetch_corpus_points` and :func:`_search_lexical`
@@ -467,14 +495,17 @@ def fetch_corpus_facets(
         modules: Active DSPy module filter.
         date_from: Inclusive lower bound on ``created_at`` (date precision).
         date_to: Inclusive upper bound on ``created_at`` (date precision).
+        value_query: Optional substring to match values against; blank means
+            no restriction.
+        limit: Maximum values returned per dimension (``1..FACET_LIMIT_MAX``).
 
     Returns:
-        ``{"models": [...], "optimizers": [...], "modules": [...], "types": [...]}``
-        — each a list of ``{"value": str, "count": int}`` dicts sorted
-        case-sensitively by value, holding every non-empty value present in
-        the scope. ``count`` is 0 when the value has no run left under the
-        other dimensions' filters, so the UI can show it as unavailable
-        rather than silently hide it.
+        ``{"models": [...], "optimizers": [...], "modules": [...], "types": [...],
+        "totals": {"models": int, ...}}`` — each list holds up to ``limit``
+        ``{"value": str, "count": int}`` dicts with ``count > 0``, ordered by
+        count descending then value, and ``totals`` gives the number of
+        distinct values with a positive count per dimension (so a total larger
+        than the list length means there is more to search for).
     """
     params: dict[str, Any] = {}
     if owner_username is not None:
@@ -529,6 +560,12 @@ def fetch_corpus_facets(
         + " ".join(date_parts)
         + ")"
     )
+    params["facet_limit"] = max(1, min(int(limit), FACET_LIMIT_MAX))
+    match_sql = ""
+    if value_query and value_query.strip():
+        params["value_pattern"] = _facet_like_pattern(value_query)
+        match_sql = " AND {column} ILIKE :value_pattern"
+
     selects: list[str] = []
     for name, column, param in _FACET_DIMENSIONS:
         others = [
@@ -540,23 +577,36 @@ def fetch_corpus_facets(
         # Black-box runs are stamped with a placeholder module name so they
         # sort with everything else; it is not a DSPy module and must never
         # surface as one.
-        member_sql = f"{column} <> ''"
+        member_sql = f"{column} <> ''" + match_sql.format(column=column)
         if column == "module":
             member_sql += f" AND run_type <> '{OPTIMIZATION_TYPE_BLACKBOX}'"
+        count_sql = f"COUNT(*) FILTER (WHERE {context_sql})"
         selects.append(
-            f"SELECT '{name}' AS dim, {column} AS value, "
-            f"COUNT(*) FILTER (WHERE {context_sql}) AS n "
-            f"FROM corpus WHERE {member_sql} GROUP BY {column}"
+            f"(SELECT '{name}' AS dim, {column} AS value, {count_sql} AS n "
+            f"FROM corpus WHERE {member_sql} GROUP BY {column} "
+            f"HAVING {count_sql} > 0 ORDER BY n DESC, value ASC LIMIT :facet_limit)"
+        )
+        # A NULL value row carries the dimension's distinct-value total, so
+        # the list and its "of N" arrive in the same round-trip.
+        selects.append(
+            f"(SELECT '{name}' AS dim, NULL AS value, COUNT(DISTINCT {column}) AS n "
+            f"FROM corpus WHERE {member_sql} AND {context_sql})"
         )
     sql = corpus_cte + " " + " UNION ALL ".join(selects)
 
-    facets: dict[str, list[dict[str, Any]]] = {name: [] for name, _, _ in _FACET_DIMENSIONS}
+    facets: dict[str, Any] = {name: [] for name, _, _ in _FACET_DIMENSIONS}
+    totals: dict[str, int] = {name: 0 for name, _, _ in _FACET_DIMENSIONS}
     with Session(job_store.engine) as session:
         rows = session.execute(text(sql), params).mappings().all()
     for row in rows:
-        facets[str(row["dim"])].append({"value": str(row["value"]), "count": int(row["n"])})
+        if row["value"] is None:
+            totals[str(row["dim"])] = int(row["n"])
+        else:
+            facets[str(row["dim"])].append({"value": str(row["value"]), "count": int(row["n"])})
+    # UNION ALL does not promise to keep each branch's ORDER BY intact.
     for options in facets.values():
-        options.sort(key=lambda option: option["value"])
+        options.sort(key=lambda option: (-option["count"], option["value"]))
+    facets["totals"] = totals
     return facets
 
 
