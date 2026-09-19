@@ -19,14 +19,15 @@ import { EmptyState } from "@/shared/ui/empty-state";
 import { registerTutorialHook } from "@/features/tutorial";
 import { usePublicDashboard } from "../hooks/use-public-dashboard";
 import { useFacetOptions } from "../hooks/use-facet-options";
-import { facetsFromPoints } from "../lib/facet-options";
+import { FACET_LIMIT, FACET_LIMIT_MAX, FACET_LIMIT_STEP, facetsFromPoints } from "../lib/facet-options";
 import { useSemanticSearch } from "../hooks/use-semantic-search";
 import { useRecentQueries } from "../hooks/use-recent-queries";
 import { usePopularQueries } from "../hooks/use-popular-queries";
 import { useResultKeyboardNav } from "../hooks/use-result-keyboard-nav";
+import { useIsWideViewport } from "../hooks/use-wide-viewport";
 import { ExploreSkeleton } from "./ExploreSkeleton";
 import { SearchBar } from "./SearchBar";
-import { FiltersDrawer, FilterSummary, type DrawerField } from "./FiltersDrawer";
+import { FiltersAside, FiltersDrawer, FilterSummary, type DrawerField } from "./FiltersDrawer";
 import { ResultsList } from "./ResultsList";
 import { ResultsToolbar } from "./ResultsToolbar";
 import { ResultsSkeleton } from "./ResultsSkeleton";
@@ -56,21 +57,39 @@ export function ExploreView() {
     sessionUser,
     sessionReady: status !== "loading",
   });
-  // The drawer, the field expanded inside it (one at a time), and that
-  // field's value search; the search resets whenever a field or the drawer
-  // closes so the next open starts from the busiest values again.
+  // The filter panel (an aside beside the results on desktop, a sheet
+  // below), the field expanded inside it (one at a time), that field's value
+  // search, and how far its ranked list has been paged; search and paging
+  // reset whenever a field or the panel closes so the next open starts from
+  // the busiest values again.
+  const wide = useIsWideViewport();
+  const filtersButtonRef = React.useRef<HTMLButtonElement>(null);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [openField, setOpenField] = React.useState<DrawerField | null>(null);
   const [facetQuery, setFacetQuery] = React.useState("");
+  const [facetLimit, setFacetLimit] = React.useState(FACET_LIMIT);
   const onOpenFieldChange = React.useCallback((next: DrawerField | null) => {
     setOpenField(next);
     setFacetQuery("");
+    setFacetLimit(FACET_LIMIT);
   }, []);
+  const onFacetQueryChange = React.useCallback((next: string) => {
+    setFacetQuery(next);
+    setFacetLimit(FACET_LIMIT);
+  }, []);
+  const onShowMore = React.useCallback(
+    () => setFacetLimit((limit) => Math.min(FACET_LIMIT_MAX, limit + FACET_LIMIT_STEP)),
+    [],
+  );
   const onDrawerOpenChange = React.useCallback((next: boolean) => {
     setDrawerOpen(next);
     if (!next) {
       setOpenField(null);
       setFacetQuery("");
+      setFacetLimit(FACET_LIMIT);
+      // The aside has no focus trap to hand focus back; the sheet's own
+      // restore lands on the same button.
+      filtersButtonRef.current?.focus();
     }
   }, []);
   // Only the facet dimensions are fetched; the date field has no values to list.
@@ -122,12 +141,14 @@ export function ExploreView() {
     },
     demoPoints ? null : openDimension,
     facetQuery,
+    facetLimit,
   );
   const facetOptions = React.useMemo(() => {
     if (!demoPoints || !openDimension) return fetchedOptions;
-    const demo = facetsFromPoints(demoPoints, facetQuery);
+    const demo = facetsFromPoints(demoPoints, facetQuery, facetLimit);
     return { options: demo[openDimension], total: demo.totals[openDimension], loading: false };
-  }, [demoPoints, openDimension, facetQuery, fetchedOptions]);
+  }, [demoPoints, openDimension, facetQuery, facetLimit, fetchedOptions]);
+  const canShowMore = facetLimit < FACET_LIMIT_MAX && facetOptions.total > facetOptions.options.length;
   // Popular searches for a blank field: real trending only — what people
   // actually searched (public corpus, logged server-side on explicit commit).
   // When the log has no data yet, this is empty and the section simply doesn't
@@ -156,9 +177,37 @@ export function ExploreView() {
     return <ExploreSkeleton />;
   }
 
+  const panelProps = {
+    open: drawerOpen,
+    onOpenChange: onDrawerOpenChange,
+    openField,
+    onOpenFieldChange,
+    facetQuery,
+    onFacetQueryChange,
+    options: facetOptions.options,
+    total: facetOptions.total,
+    loading: facetOptions.loading,
+    canShowMore,
+    onShowMore,
+    selectedModels: query.models,
+    selectedOptimizers: query.optimizers,
+    selectedTypes: query.types,
+    selectedModules: query.modules,
+    dateFrom: query.dateFrom,
+    dateTo: query.dateTo,
+    resultTotal: response.total,
+    resultsLoading: response.loading,
+    onChangeModels: actions.setModels,
+    onChangeOptimizers: actions.setOptimizers,
+    onChangeTypes: actions.setTypes,
+    onChangeModules: actions.setModules,
+    onChangeDateRange: actions.setDateRange,
+    onClearAll: actions.clearFilters,
+  };
+
   return (
-    <div className="pb-16">
-      <div className="flex flex-col gap-1.5">
+    <div className="flex items-start gap-6 pb-16">
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         {isPublicCorpus && corpusError && (
           <div
             className="flex items-start gap-3 rounded-lg border border-border bg-accent-muted/50 px-4 py-3 text-xs text-foreground"
@@ -177,7 +226,9 @@ export function ExploreView() {
             onCorpusChange={actions.setCorpus}
             signedIn={sessionUser.length > 0}
             filtersCount={appliedFilterCount}
-            onOpenFilters={() => setDrawerOpen(true)}
+            filtersOpen={drawerOpen}
+            filtersButtonRef={filtersButtonRef}
+            onOpenFilters={() => onDrawerOpenChange(!drawerOpen)}
             onClearFilters={actions.clearFilters}
             loading={response.loading}
             onResultKeyDown={onInputKeyDown}
@@ -193,7 +244,7 @@ export function ExploreView() {
             modules={query.modules}
             dateFrom={query.dateFrom}
             dateTo={query.dateTo}
-            onOpen={() => setDrawerOpen(true)}
+            onOpen={() => onDrawerOpenChange(true)}
             onClearAll={actions.clearFilters}
           />
         </div>
@@ -223,31 +274,7 @@ export function ExploreView() {
         )}
       </div>
 
-      <FiltersDrawer
-        open={drawerOpen}
-        onOpenChange={onDrawerOpenChange}
-        openField={openField}
-        onOpenFieldChange={onOpenFieldChange}
-        facetQuery={facetQuery}
-        onFacetQueryChange={setFacetQuery}
-        options={facetOptions.options}
-        total={facetOptions.total}
-        loading={facetOptions.loading}
-        selectedModels={query.models}
-        selectedOptimizers={query.optimizers}
-        selectedTypes={query.types}
-        selectedModules={query.modules}
-        dateFrom={query.dateFrom}
-        dateTo={query.dateTo}
-        resultTotal={response.total}
-        resultsLoading={response.loading}
-        onChangeModels={actions.setModels}
-        onChangeOptimizers={actions.setOptimizers}
-        onChangeTypes={actions.setTypes}
-        onChangeModules={actions.setModules}
-        onChangeDateRange={actions.setDateRange}
-        onClearAll={actions.clearFilters}
-      />
+      {wide ? <FiltersAside {...panelProps} /> : <FiltersDrawer {...panelProps} />}
     </div>
   );
 }
