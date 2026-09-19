@@ -129,9 +129,9 @@ function dateSummary(
  *
  * The panel has two hosts. On desktop it is an aside in the page layout
  * beside the results, non-modal, so the list reflows live as filters change
- * and the footer only reports the count. Below that it is a sheet (a bottom
- * sheet on phones), where the results are hidden behind it and the primary
- * button carries the live count out.
+ * and no footer is needed (the summary line under the search field clears).
+ * Below that it is a sheet (a bottom sheet on phones), where the results are
+ * hidden behind it and the footer's primary button carries the live count out.
  */
 function FiltersPanel({
   variant,
@@ -192,15 +192,11 @@ function FiltersPanel({
   const formatDay = useDayFormat();
   const inline = variant === "inline";
   const gutter = inline ? "px-5" : "px-6";
-  const countLabel =
-    resultTotal === 1
-      ? msg("explore.results.count.one")
-      : formatMsg("explore.results.count.many", { n: numberFormat.format(resultTotal) });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div
-        className={cn("flex flex-row items-center justify-between gap-3 pb-3", gutter, inline ? "pt-4" : "pt-5")}
+        className={cn("flex flex-row items-center justify-between gap-3", gutter, inline ? "pt-4 pb-2" : "pt-5 pb-3")}
       >
         {inline ? (
           <h2 id={titleId} className="text-[15px] font-medium tracking-tight text-foreground">
@@ -211,14 +207,16 @@ function FiltersPanel({
             {msg("explore.filters.title")}
           </SheetTitle>
         )}
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={msg("explore.filters.close")}
-          className={`inline-flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground lg:size-9 ${FOCUS_RING}`}
-        >
-          <X className="size-4" aria-hidden="true" />
-        </button>
+        {!inline && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={msg("explore.filters.close")}
+            className={`inline-flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground lg:size-9 ${FOCUS_RING}`}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </button>
+        )}
       </div>
 
       <div className={cn("flex-1 overflow-y-auto pb-4", gutter)}>
@@ -261,24 +259,16 @@ function FiltersPanel({
         </div>
       </div>
 
-      <div className={cn("flex items-center justify-between gap-3 border-t border-border/60 py-4", gutter)}>
-        <button
-          type="button"
-          onClick={onClearAll}
-          disabled={totalActive === 0}
-          className={`h-10 cursor-pointer rounded-lg px-3 text-[13px] text-foreground/65 transition-colors hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:text-foreground/65 ${FOCUS_RING}`}
-        >
-          {msg("explore.filters.reset")}
-        </button>
-        {inline ? (
-          <span
-            role="status"
-            className="inline-flex items-center gap-2 text-[13px] tabular-nums text-foreground/65"
+      {!inline && (
+        <div className={cn("flex items-center justify-between gap-3 border-t border-border/60 py-4", gutter)}>
+          <button
+            type="button"
+            onClick={onClearAll}
+            disabled={totalActive === 0}
+            className={`h-10 cursor-pointer rounded-lg px-3 text-[13px] text-foreground/65 transition-colors hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:text-foreground/65 ${FOCUS_RING}`}
           >
-            {resultsLoading && <CircleNotch className="size-3.5 animate-spin" aria-hidden="true" />}
-            {countLabel}
-          </span>
-        ) : (
+            {msg("explore.filters.reset")}
+          </button>
           <button
             type="button"
             onClick={onClose}
@@ -291,8 +281,8 @@ function FiltersPanel({
                 : formatMsg("explore.filters.show_results", { n: numberFormat.format(resultTotal) })}
             </span>
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
