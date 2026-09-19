@@ -24,10 +24,9 @@ import { useSemanticSearch } from "../hooks/use-semantic-search";
 import { useRecentQueries } from "../hooks/use-recent-queries";
 import { usePopularQueries } from "../hooks/use-popular-queries";
 import { useResultKeyboardNav } from "../hooks/use-result-keyboard-nav";
-import { useIsWideViewport } from "../hooks/use-wide-viewport";
 import { ExploreSkeleton } from "./ExploreSkeleton";
 import { SearchBar } from "./SearchBar";
-import { FiltersAside, FiltersDrawer, FilterSummary, type DrawerField } from "./FiltersDrawer";
+import { FiltersDrawer, FilterSummary, type DrawerField } from "./FiltersDrawer";
 import { ResultsList } from "./ResultsList";
 import { ResultsToolbar } from "./ResultsToolbar";
 import { ResultsSkeleton } from "./ResultsSkeleton";
@@ -62,7 +61,6 @@ export function ExploreView() {
   // search, and how far its ranked list has been paged; search and paging
   // reset whenever a field or the panel closes so the next open starts from
   // the busiest values again.
-  const wide = useIsWideViewport();
   const filtersButtonRef = React.useRef<HTMLButtonElement>(null);
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [openField, setOpenField] = React.useState<DrawerField | null>(null);
@@ -206,8 +204,8 @@ export function ExploreView() {
   };
 
   return (
-    <div className="flex items-start gap-6 pb-16">
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+    <>
+      <div className="flex flex-col gap-1.5 pb-16">
         {isPublicCorpus && corpusError && (
           <div
             className="flex items-start gap-3 rounded-lg border border-border bg-accent-muted/50 px-4 py-3 text-xs text-foreground"
@@ -274,8 +272,8 @@ export function ExploreView() {
         )}
       </div>
 
-      {wide ? <FiltersAside {...panelProps} /> : <FiltersDrawer {...panelProps} />}
-    </div>
+      <FiltersDrawer {...panelProps} />
+    </>
   );
 }
 

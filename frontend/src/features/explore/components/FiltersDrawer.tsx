@@ -9,8 +9,9 @@ import { msg, formatMsg } from "@/shared/lib/messages";
 import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/shared/ui/primitives/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/shared/ui/primitives/sheet";
 import { SkynetDatePicker } from "@/shared/ui/skynet-date-picker";
+import { useIsWideViewport } from "../hooks/use-wide-viewport";
 import { pickerRows } from "../lib/facet-options";
 import { DATE_PRESETS, lastDaysRange, matchingPreset } from "../lib/date-range";
 import { engineDisplayName } from "../lib/format";
@@ -127,15 +128,13 @@ function dateSummary(
  * the selection stays pinned at the top of its list however far it ranks.
  * Every pick applies immediately.
  *
- * The panel has two hosts. On desktop it is an aside in the page layout
- * beside the results, non-modal, so the list reflows live as filters change
- * and no footer is needed (the summary line under the search field clears).
- * Below that it is a sheet (a bottom sheet on phones), where the results are
- * hidden behind it and the footer's primary button carries the live count out.
+ * The panel always lives in the shared sheet. On a wide desktop that sheet is
+ * non-modal — no scrim, the results stay live beside it — so it needs no
+ * footer. Narrower, the sheet is a modal takeover (a bottom sheet on phones)
+ * whose footer button carries the live count out to the hidden results.
  */
 function FiltersPanel({
-  variant,
-  titleId,
+  showFooter,
   onClose,
   openField,
   onOpenFieldChange,
@@ -161,8 +160,8 @@ function FiltersPanel({
   onChangeDateRange,
   onClearAll,
 }: FiltersPanelProps & {
-  variant: "sheet" | "inline";
-  titleId?: string;
+  /** The footer with Reset + "Show N runs"; shown only when the results are hidden behind the sheet. */
+  showFooter: boolean;
   onClose: () => void;
 }) {
   const selectedBy: Record<FacetDimension, string[]> = {
@@ -190,33 +189,22 @@ function FiltersPanel({
   const toggleField = (field: DrawerField) => onOpenFieldChange(openField === field ? null : field);
   const numberFormat = useNumberFormat();
   const formatDay = useDayFormat();
-  const inline = variant === "inline";
-  const gutter = inline ? "px-5" : "px-6";
+  const gutter = "px-6";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div
-        className={cn("flex flex-row items-center justify-between gap-3", gutter, inline ? "pt-4 pb-2" : "pt-5 pb-3")}
-      >
-        {inline ? (
-          <h2 id={titleId} className="text-[15px] font-medium tracking-tight text-foreground">
-            {msg("explore.filters.title")}
-          </h2>
-        ) : (
-          <SheetTitle className="text-[17px] font-medium tracking-tight text-foreground">
-            {msg("explore.filters.title")}
-          </SheetTitle>
-        )}
-        {!inline && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={msg("explore.filters.close")}
-            className={`inline-flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground lg:size-9 ${FOCUS_RING}`}
-          >
-            <X className="size-4" aria-hidden="true" />
-          </button>
-        )}
+      <div className={cn("flex flex-row items-center justify-between gap-3 pt-5 pb-3", gutter)}>
+        <SheetTitle className="text-[17px] font-medium tracking-tight text-foreground">
+          {msg("explore.filters.title")}
+        </SheetTitle>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={msg("explore.filters.close")}
+          className={`inline-flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground lg:size-9 ${FOCUS_RING}`}
+        >
+          <X className="size-4" aria-hidden="true" />
+        </button>
       </div>
 
       <div className={cn("flex-1 overflow-y-auto pb-4", gutter)}>
@@ -259,7 +247,7 @@ function FiltersPanel({
         </div>
       </div>
 
-      {!inline && (
+      {showFooter && (
         <div className={cn("flex items-center justify-between gap-3 border-t border-border/60 py-4", gutter)}>
           <button
             type="button"
@@ -288,77 +276,41 @@ function FiltersPanel({
 }
 
 /**
- * The panel as a sheet, for viewports too narrow to hold it beside the
- * results: a bottom sheet on phones, a side sheet on tablets. Escape first
- * collapses the open field, then closes the sheet.
+ * The panel's one host: the shared sheet. On a wide desktop it is non-modal —
+ * no scrim, sitting below the header on the edge opposite the sidebar, so the
+ * results stay live and interactive beside it and it commits every pick
+ * immediately (no footer). On a phone it is a bottom sheet, and on a tablet a
+ * side sheet; both are modal takeovers with the footer's "Show N runs" button.
+ * Escape first collapses the open field, then closes the sheet.
  */
 export function FiltersDrawer({ open, onOpenChange, ...panel }: FiltersHostProps) {
   const isRtl = getActiveDir() === "rtl";
   const isPhone = useIsPhone();
+  const live = useIsWideViewport();
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={onOpenChange} modal={!live}>
       <SheetContent
         side={isPhone ? "bottom" : isRtl ? "left" : "right"}
         showCloseButton={false}
+        showOverlay={!live}
         aria-describedby={undefined}
+        style={live ? { top: "var(--header-height, 53px)", height: "auto" } : undefined}
         onEscapeKeyDown={(event) => {
           if (panel.openField === null) return;
           event.preventDefault();
           panel.onOpenFieldChange(null);
         }}
+        onInteractOutside={live ? (event) => event.preventDefault() : undefined}
         className={
           isPhone
             ? "max-h-[88dvh] w-full gap-0 rounded-t-2xl border-border bg-background p-0 pb-[env(safe-area-inset-bottom)]"
             : "w-full !max-w-md gap-0 border-border bg-background p-0"
         }
       >
-        <FiltersPanel variant="sheet" onClose={() => onOpenChange(false)} {...panel} />
+        <FiltersPanel showFooter={!live} onClose={() => onOpenChange(false)} {...panel} />
       </SheetContent>
     </Sheet>
-  );
-}
-
-const ASIDE_WIDTH = "21rem";
-
-/**
- * The panel as a column in the page layout, for desktop: no scrim, no focus
- * trap, the results reflow beside it and stay interactive. It sticks to the
- * top of the scroll area with its own inner scroll. Escape first collapses
- * the open field, then closes the aside.
- */
-export function FiltersAside({ open, onOpenChange, ...panel }: FiltersHostProps) {
-  const reduceMotion = useReducedMotion();
-  const titleId = React.useId();
-  const close = () => onOpenChange(false);
-
-  return (
-    <AnimatePresence initial={false}>
-      {open && (
-        <motion.aside
-          key="filters"
-          aria-labelledby={titleId}
-          initial={{ width: 0, opacity: 0 }}
-          animate={{ width: ASIDE_WIDTH, opacity: 1 }}
-          exit={{ width: 0, opacity: 0 }}
-          transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.16, 1, 0.3, 1] }}
-          className="sticky top-2 shrink-0 self-start overflow-hidden"
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            event.stopPropagation();
-            if (panel.openField !== null) panel.onOpenFieldChange(null);
-            else close();
-          }}
-        >
-          <div
-            className="flex max-h-[calc(100dvh-var(--header-height,3.5rem)-1.5rem)] flex-col overflow-hidden rounded-xl border border-border bg-background"
-            style={{ width: ASIDE_WIDTH }}
-          >
-            <FiltersPanel variant="inline" titleId={titleId} onClose={close} {...panel} />
-          </div>
-        </motion.aside>
-      )}
-    </AnimatePresence>
   );
 }
 
@@ -451,6 +403,7 @@ function FieldRow({
   children: React.ReactNode;
 }) {
   const panelId = React.useId();
+  const reduceMotion = useReducedMotion();
   const buttonRef = React.useRef<HTMLButtonElement>(null);
   const wasOpen = React.useRef(open);
   // Collapsing unmounts whatever was focused inside (Escape from the search
@@ -488,13 +441,31 @@ function FieldRow({
         )}
         <CaretDown
           className={cn(
-            "size-3 shrink-0 text-foreground/45 transition-transform",
+            "size-3 shrink-0 text-foreground/45 transition-transform duration-200",
             open && "rotate-180",
           )}
           aria-hidden="true"
         />
       </button>
-      {open && <div id={panelId}>{children}</div>}
+      {/* Reveal on a height+opacity transition so the fields glide open and
+          shut instead of snapping. The negative inline margin matches the
+          list's own bleed so overflow-hidden clips the reveal vertically
+          without shaving the row highlights at the sides. */}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="content"
+            id={panelId}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: reduceMotion ? 0 : 0.24, ease: [0.16, 1, 0.3, 1] }}
+            className="-mx-3 overflow-hidden px-3"
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
