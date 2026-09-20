@@ -39,8 +39,9 @@ const EMPTY: FacetOptions = { options: [], total: 0, loading: false };
  * values it can filter to — a model private to "mine" never shows under
  * "public". Nothing is fetched in full: the backend caps the list and
  * reports the total, and `query` turns the same request into a server-side
- * value search (debounced). Only the open picker (`dimension`) is fetched;
- * `null` means none is open and nothing loads. Refetches when the corpus,
+ * value search (debounced), and `limit` grows as the user asks for more of
+ * the ranked list. Only the open picker (`dimension`) is fetched; `null`
+ * means none is open and nothing loads. Refetches when the corpus,
  * signed-in user, dimension, query, or any structured filter changes (the
  * free-text run query is not part of the counts); the previous values stay
  * on screen while the new ones load so rows never flicker away. Signed-out
@@ -52,6 +53,7 @@ export function useFacetOptions(
   filters: FacetFilters,
   dimension: FacetDimension | null,
   query = "",
+  limit: number = FACET_LIMIT,
 ): FacetOptions {
   const [state, setState] = useState<FacetOptions>(EMPTY);
   // One primitive dependency for the arrays and dates together: the URL-state
@@ -107,7 +109,7 @@ export function useFacetOptions(
           try {
             const data = await getCorpusFacets(scope, context, {
               query: trimmedQuery,
-              limit: FACET_LIMIT,
+              limit,
               dimension,
             });
             if (!cancelled) {
@@ -125,7 +127,7 @@ export function useFacetOptions(
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [corpus, sessionUser, filterKey, dimension, trimmedQuery]);
+  }, [corpus, sessionUser, filterKey, dimension, trimmedQuery, limit]);
 
   return state;
 }

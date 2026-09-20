@@ -621,10 +621,12 @@ def fetch_corpus_facets(
     return facets
 
 
+# ``recent`` orders newest-first, ``oldest`` oldest-first — the two date
+# directions the UI exposes as "Newest"/"Oldest".
 SEARCH_SORT_RELEVANCE = "relevance"
 SEARCH_SORT_RECENT = "recent"
-SEARCH_SORT_GAIN = "gain"
-SEARCH_SORTS = (SEARCH_SORT_RELEVANCE, SEARCH_SORT_RECENT, SEARCH_SORT_GAIN)
+SEARCH_SORT_OLDEST = "oldest"
+SEARCH_SORTS = (SEARCH_SORT_RELEVANCE, SEARCH_SORT_RECENT, SEARCH_SORT_OLDEST)
 
 SEARCH_PAGE_SIZE_DEFAULT = 30
 SEARCH_PAGE_SIZE_MAX = 50
@@ -1062,14 +1064,8 @@ def _search_semantic(
         params["query_vec"] = _vector_literal(query_vector)  # type: ignore[arg-type]
         order_sql = "je.embedding_summary <=> CAST(:query_vec AS vector) ASC, je.created_at DESC"
         relevance_sql = "1 - (je.embedding_summary <=> CAST(:query_vec AS vector))"
-    elif sort == SEARCH_SORT_GAIN:
-        # Plain ``optimized - baseline`` (not COALESCE-to-0): a row missing
-        # either metric yields NULL and sinks via NULLS LAST, rather than a
-        # baseline-less run posing as a gain equal to its raw optimized score.
-        order_sql = (
-            "(je.optimized_metric - je.baseline_metric) DESC NULLS LAST, "
-            "je.created_at DESC"
-        )
+    elif sort == SEARCH_SORT_OLDEST:
+        order_sql = "je.created_at ASC, je.optimization_id ASC"
         relevance_sql = "NULL::float"
     else:
         order_sql = "je.created_at DESC, je.optimization_id DESC"
@@ -1314,15 +1310,8 @@ def _search_lexical(
 
     where_sql = " AND ".join(where_parts)
 
-    if sort == SEARCH_SORT_GAIN:
-        # Plain ``optimized - baseline`` (not COALESCE-to-0): a row missing
-        # either metric yields NULL and sinks via NULLS LAST, rather than a
-        # baseline-less run posing as a gain equal to its raw optimized score.
-        order_sql = (
-            f"({_CORPUS_OPTIMIZED_METRIC_SQL} - {_CORPUS_BASELINE_METRIC_SQL}) "
-            "DESC NULLS LAST, "
-            "j.created_at DESC, j.optimization_id DESC"
-        )
+    if sort == SEARCH_SORT_OLDEST:
+        order_sql = "j.created_at ASC, j.optimization_id ASC"
     else:
         order_sql = "j.created_at DESC, j.optimization_id DESC"
 

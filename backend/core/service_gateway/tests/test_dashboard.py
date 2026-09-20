@@ -145,16 +145,18 @@ def _sqlite_jsonb_typeof(value: str | None) -> str | None:
     return "other"
 
 
-def test_corpus_metric_sql_falls_back_to_job_scores_for_gain_ranking() -> None:
-    """Unembedded rows rank by their own job scores under the gain sort.
+def test_corpus_metric_sql_falls_back_to_job_scores() -> None:
+    """Unembedded rows resolve their own job scores for the displayed score/delta.
 
-    Executes the real metric-fallback SQL against an in-memory schema. The
-    embedded pair must win when present; otherwise runs read
+    Executes the real metric-fallback SQL against an in-memory schema — the
+    SQL that fills each result row's ``baseline_metric``/``optimized_metric``.
+    The embedded pair must win when present; otherwise runs read
     ``latest_metrics`` then ``result`` and grid jobs read
     ``result.best_pair``, mirroring the embedding pipeline's
     ``_extract_scores``. Rows with no numeric pair anywhere (including a
-    malformed non-numeric value, which must not error) sink below every
-    scored row and fall back to recency among themselves.
+    malformed non-numeric value, which must not error) resolve to NULL. The
+    ``optimized - baseline`` ordering here is only the assertion vehicle for
+    the resolved values, not a production sort.
     """
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool

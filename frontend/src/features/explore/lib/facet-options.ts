@@ -13,8 +13,11 @@
 
 import type { CorpusFacets, FacetOption, PublicDashboardPoint } from "@/shared/lib/api";
 
-/** Values shown per dimension before the user has to search. */
+/** Values shown per dimension before the user has to search or ask for more. */
 export const FACET_LIMIT = 8;
+/** Values added per "Show more"; the backend caps a single list at `FACET_LIMIT_MAX`. */
+export const FACET_LIMIT_STEP = 24;
+export const FACET_LIMIT_MAX = 50;
 
 /**
  * Count occurrences of each non-empty value, busiest first (ties by value).

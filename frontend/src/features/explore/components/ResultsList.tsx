@@ -3,11 +3,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { ArrowUp, ArrowDown } from "@/shared/ui/icons";
-import { modelDisplayName } from "@/shared/lib/formatters";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import type { SearchResult } from "@/shared/lib/api";
 import type { SearchType } from "../hooks/use-semantic-search";
-import { engineDisplayName, formatGain, formatMetric, formatRelativeDate } from "../lib/format";
+import { formatExactDate, formatGain, formatMetric } from "../lib/format";
 
 interface ResultsListProps {
   results: SearchResult[];
@@ -21,25 +20,11 @@ interface ResultsListProps {
   onResultOpen: () => void;
 }
 
-// The corpus mixes DSPy programs with black-box ("anything") runs, so every
-// row names its kind with the same labels the Run type filter uses.
-const KIND_LABEL_KEY: Record<string, Parameters<typeof msg>[0]> = {
-  run: "explore.filter.run",
-  grid_search: "explore.filter.grid",
-  blackbox: "explore.filter.blackbox",
-};
-
-function kindLabel(type: string | null | undefined): string {
-  const key = type ? KIND_LABEL_KEY[type] : undefined;
-  return key ? msg(key) : "";
-}
-
 /**
  * Vertically-rhythmic list of search hits. Each row is a single-tap card:
  * title with an inline score+delta tag, two-line summary, and a thin meta
- * strip carrying the run's kind, optimizer or engine, model, and a relative
- * timestamp at the end — plus a relevance badge at the start on semantic
- * searches.
+ * strip carrying the run's exact creation date at the end — plus a relevance
+ * badge at the start on semantic searches.
  *
  * Hover lifts the title to full-opacity; the row itself is the open affordance.
  */
@@ -86,10 +71,7 @@ function ResultRow({
 }) {
   const title = row.task_name?.trim() || msg("explore.row.no_summary");
   const gain = formatGain(row.baseline_metric, row.optimized_metric, row.optimization_type);
-  const kind = kindLabel(row.optimization_type);
-  const engine = engineDisplayName(row.optimizer_name);
-  const model = modelDisplayName(row.winning_model);
-  const dateText = formatRelativeDate(row.created_at);
+  const dateText = formatExactDate(row.created_at);
   const summary = row.summary_text?.trim();
   const ref = React.useRef<HTMLAnchorElement | null>(null);
 
@@ -128,13 +110,6 @@ function ResultRow({
         {searchType === "semantic" && row.relevance != null && (
           <RelevanceBadge relevance={row.relevance} />
         )}
-        {kind && (
-          <span className="rounded-full border border-border/70 px-1.5 py-0.5 text-[10.5px] font-medium leading-none text-foreground/60">
-            {kind}
-          </span>
-        )}
-        {engine && <MetaText text={engine} />}
-        {model && <MetaText text={model} title={row.winning_model ?? undefined} />}
         <time
           dateTime={row.created_at ?? undefined}
           title={row.created_at ?? undefined}
@@ -144,20 +119,6 @@ function ResultRow({
         </time>
       </div>
     </Link>
-  );
-}
-
-// Identifiers (engine names, model ids) are Latin even in RTL locales, and a
-// leading middle dot keeps consecutive items readable without a chip each.
-function MetaText({ text, title }: { text: string; title?: string }) {
-  return (
-    <span
-      dir="ltr"
-      title={title}
-      className="max-w-[24ch] truncate before:me-2 before:text-foreground/30 before:content-['·']"
-    >
-      {text}
-    </span>
   );
 }
 
