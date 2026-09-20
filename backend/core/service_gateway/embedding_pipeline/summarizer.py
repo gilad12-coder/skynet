@@ -1,21 +1,25 @@
 """LLM-backed task summariser feeding ``embedding_summary``.
 
 Given a finished job, we want ~2-3 sentences describing *what the task is*
-in natural language: input → output, objective, metric shape. This text is
-embedded into ``embedding_summary``, which drives explore semantic search.
-DSPy jobs are summarised from their signature / metric / column mapping;
-black-box ("optimize anything") jobs from the user's objective, background,
-starting artifact and scorer — the two shapes share no fields, so each has
-its own signature and heuristic fallback.
-Keeping a natural-language summary (rather than raw code) lets
-semantically-similar tasks cluster together even when their Python source
-looks unrelated.
+in natural language. This text is embedded into ``embedding_summary``, which
+drives explore semantic search. The summary is built from only what a human
+recognises the task by — its title, its description, and a sample of its
+data (training rows for DSPy jobs, evaluation cases for black-box ones) —
+never from the run's code, scorer, config or optimiser, which are fragile,
+gameable signals that pull unrelated tasks together. Because a public job's
+summary is surfaced to other users, the signatures steer the model to describe
+the task's domain and shape in general terms and never to reproduce verbatim
+values from the data sample — the sample is evidence of *what kind* of task
+this is, not content to be echoed. DSPy and black-box jobs keep separate
+signatures only so each can label its data sample in its own terms. Keeping a
+natural-language summary (rather than raw fields) lets semantically-similar
+tasks cluster together even when their submissions look unrelated.
 
 The summariser is cheap to stub: ``settings.embeddings_summary_model`` (or
 ``settings.code_agent_model`` as fallback) is a normal LiteLLM model id,
 wrapped in ``dspy.Predict``. If it fails for any reason (no key, network
-error, quota) we fall back to a heuristic text composed from the column
-mapping — the pipeline keeps working, just with weaker signal.
+error, quota) we fall back to a heuristic text composed from the title and
+description — the pipeline keeps working, just with weaker signal.
 """
 
 from __future__ import annotations
@@ -56,16 +60,24 @@ def _truncate(value: str, limit: int, *, label: str) -> str:
 class _TaskSummary(dspy.Signature):
     """Describe a DSPy optimization task in 2-3 sentences."""
 
-    signature_code: str = dspy.InputField(desc="The DSPy Signature source code being optimised.")
-    metric_code: str = dspy.InputField(desc="The metric function source code (scoring rule).")
-    column_mapping: str = dspy.InputField(desc="JSON column → role map (which columns feed inputs vs outputs).")
-    dataset_sample: str = dspy.InputField(desc="A handful of sample rows from the training dataset.")
+    title: str = dspy.InputField(desc="The task's name.")
+    description: str = dspy.InputField(desc="The user's own description of what the task does.")
+    dataset_sample: str = dspy.InputField(
+        desc=(
+            "Several sample rows from the training dataset, as illustrative "
+            "evidence of the task's domain and shape. They may be unrepresentative, "
+            "so infer the general task — not the specifics of these particular rows."
+        )
+    )
     task_description: str = dspy.OutputField(
         desc=(
-            "2-3 sentences describing the task in plain English: what the "
-            "inputs are, what output is produced, what the objective is. "
-            "Avoid naming the optimizer or model — this text describes the "
-            "task itself, not how it's trained."
+            "2-3 sentences describing the task in plain English, drawn only "
+            "from its title, description and sample data: what the inputs are "
+            "and what output is produced. Avoid naming the optimizer or model "
+            "— this text describes the task itself, not how it's trained. "
+            "Describe the domain in general terms; never quote or reproduce "
+            "specific values, names, emails, identifiers or other verbatim "
+            "content from the sample rows, and don't fixate on their formatting."
         )
     )
 
@@ -73,110 +85,46 @@ class _TaskSummary(dspy.Signature):
 class _BlackboxTaskSummary(dspy.Signature):
     """Describe a black-box optimization task in 2-3 sentences."""
 
-    objective: str = dspy.InputField(desc="What the user wants improved, in their own words.")
-    background: str = dspy.InputField(desc="Extra context about the artifact or the setting it runs in.")
-    artifact: str = dspy.InputField(
-        desc="The kind of artifact under optimization (prompt, code, text or setup) and an excerpt of its starting version."
+    title: str = dspy.InputField(desc="The task's name.")
+    description: str = dspy.InputField(desc="The user's own description of what they want improved.")
+    cases_sample: str = dspy.InputField(
+        desc=(
+            "Several sample evaluation cases (may be empty), as illustrative "
+            "evidence of what's being improved. They may be unrepresentative, so "
+            "infer the general task — not the specifics of these particular cases."
+        )
     )
-    scorer: str = dspy.InputField(
-        desc="How a version is scored: the python metric source, or a note that a remote HTTP scorer is used."
-    )
-    cases_sample: str = dspy.InputField(desc="A handful of sample evaluation cases (may be empty).")
     task_description: str = dspy.OutputField(
         desc=(
-            "2-3 sentences describing the task in plain English: what artifact "
-            "is being improved, what a good result looks like, and how it is "
-            "scored. Avoid naming the engine or model — this text describes "
-            "the task itself, not how it's optimized."
+            "2-3 sentences describing the task in plain English, drawn only "
+            "from its title, description and sample cases: what is being "
+            "improved and what a good result looks like. Avoid naming the "
+            "engine or model — this text describes the task itself, not how "
+            "it's optimized. Describe the domain in general terms; never quote "
+            "or reproduce specific values, names, emails, identifiers or other "
+            "verbatim content from the sample cases, and don't fixate on their "
+            "formatting."
         )
     )
 
 
-_RECIPE_ARTIFACT_LABEL = {
-    "prompt": "a prompt",
-    "code": "code",
-    "anything": "free-form text or a setup",
-}
+def _heuristic_summary(title: str | None, description: str | None) -> str:
+    """Fallback summary built from the task's title and description.
 
-
-def _seed_excerpt(seed_candidate: str | dict[str, str] | None, *, limit: int) -> str:
-    """Flatten a starting candidate (single text or ``{path: content}``) to a bounded excerpt.
+    Used when the summariser LLM is unavailable. Weaker than a real summary
+    for semantic search, but non-empty and deterministic whenever the task
+    carried a title or a description.
 
     Args:
-        seed_candidate: The submitted starting version; ``None`` when the run
-            began from scratch.
-        limit: Maximum number of characters to keep.
+        title: The task's name.
+        description: The user's description of the task.
 
     Returns:
-        The first ``limit`` characters of the candidate text, multi-file
-        candidates rendered as ``path:`` blocks; empty when nothing was given.
+        The non-empty parts joined by a space, capped at 600 characters;
+        empty only when the task had neither a title nor a description.
     """
-    if isinstance(seed_candidate, dict):
-        text = "\n".join(f"{path}:\n{content}" for path, content in seed_candidate.items())
-    else:
-        text = seed_candidate or ""
-    return _truncate(text.strip(), limit, label="seed_candidate")
-
-
-def _heuristic_blackbox_summary(
-    *,
-    objective: str | None,
-    background: str | None,
-    description: str | None,
-    seed_excerpt: str,
-) -> str:
-    """Fallback summary for a black-box job built from the user's own words.
-
-    Args:
-        objective: What the user asked to improve.
-        background: Extra context the user supplied.
-        description: The short run description from the submission form.
-        seed_excerpt: Bounded excerpt of the starting artifact.
-
-    Returns:
-        Objective (or description) plus background, else the seed excerpt;
-        empty only when the job carried none of those.
-    """
-    parts = [part.strip() for part in (objective or description, background) if part and part.strip()]
-    if parts:
-        return " ".join(parts)[:600]
-    return seed_excerpt[:500]
-
-
-def _heuristic_summary(
-    signature_code: str | None,
-    metric_code: str | None,
-    column_mapping: dict[str, Any] | None,
-) -> str:
-    """Fallback summary built by inspecting the code + column mapping.
-
-    Used when the LLM call is unavailable. Worse than a real summary
-    for semantic search, but still non-empty and deterministic.
-
-    Args:
-        signature_code: Source code of the user's DSPy signature.
-        metric_code: Source code of the user's metric function.
-        column_mapping: Optional ``{"inputs": ..., "outputs": ...}`` map.
-
-    Returns:
-        A short text summary derived from the column mapping and metric
-        first-line, or the truncated signature code when the mapping is
-        missing.
-    """
-    if not column_mapping:
-        return (signature_code or "").strip()[:500]
-    inputs = column_mapping.get("inputs", {}) or {}
-    outputs = column_mapping.get("outputs", {}) or {}
-    in_names = list(inputs.values()) if isinstance(inputs, dict) else []
-    out_names = list(outputs.values()) if isinstance(outputs, dict) else []
-    parts: list[str] = []
-    if in_names and out_names:
-        parts.append(f"Task maps {', '.join(in_names)} to {', '.join(out_names)}.")
-    elif in_names:
-        parts.append(f"Task takes {', '.join(in_names)} as input.")
-    if metric_code and len(metric_code) < 400:
-        parts.append(f"Scored by: {metric_code.strip().splitlines()[0] if metric_code.strip() else ''}")
-    return " ".join(p for p in parts if p).strip() or (signature_code or "").strip()[:500]
+    parts = [part.strip() for part in (title, description) if part and part.strip()]
+    return " ".join(parts)[:600]
 
 
 def _build_lm() -> dspy.LM | None:
@@ -205,44 +153,40 @@ def _build_lm() -> dspy.LM | None:
 
 def summarize_task(
     *,
-    signature_code: str | None,
-    metric_code: str | None,
-    column_mapping: dict[str, Any] | None,
+    title: str | None,
+    description: str | None,
     dataset_sample: list[dict[str, Any]] | None,
 ) -> str:
-    """Return a short natural-language description of the task.
+    """Return a short natural-language description of a DSPy task.
 
     Never raises. Returns an empty string if nothing useful can be
     produced — callers should treat empty as "skip the summary
     embedding for this job."
 
     Args:
-        signature_code: Source code of the user's DSPy signature.
-        metric_code: Source code of the user's metric function.
-        column_mapping: Optional column → role map for the dataset.
-        dataset_sample: Optional list of sample rows; the first three
+        title: The task's name.
+        description: The user's description of the task.
+        dataset_sample: Optional list of sample rows; the first ten
             are forwarded to the summariser LM.
 
     Returns:
         A 2-3 sentence task description from the LLM, or the heuristic
-        fallback string when the LLM is unavailable or its call fails.
+        fallback (title + description) when the LLM is unavailable or its
+        call fails.
     """
-    fallback = _heuristic_summary(signature_code, metric_code, column_mapping)
+    fallback = _heuristic_summary(title, description)
     lm = _build_lm()
     if lm is None:
         return fallback
     try:
-        sample_rows = dataset_sample[:3] if dataset_sample else []
+        sample_rows = dataset_sample[:10] if dataset_sample else []
         predictor = dspy.Predict(_TaskSummary)
         with dspy.context(lm=lm):
             out = predictor(
-                signature_code=_truncate((signature_code or "").strip(), 4000, label="signature_code"),
-                metric_code=_truncate((metric_code or "").strip(), 4000, label="metric_code"),
-                column_mapping=_truncate(
-                    json.dumps(column_mapping or {}, ensure_ascii=False), 1000, label="column_mapping"
-                ),
+                title=_truncate((title or "").strip(), 500, label="title"),
+                description=_truncate((description or "").strip(), 4000, label="description"),
                 dataset_sample=_truncate(
-                    json.dumps(sample_rows, ensure_ascii=False), 2000, label="dataset_sample"
+                    json.dumps(sample_rows, ensure_ascii=False), 6000, label="dataset_sample"
                 ),
             )
         text = (out.task_description or "").strip()
@@ -254,58 +198,40 @@ def summarize_task(
 
 def summarize_blackbox_task(
     *,
-    objective: str | None,
-    background: str | None,
+    title: str | None,
     description: str | None,
-    recipe: str | None,
-    seed_candidate: str | dict[str, str] | None,
-    scorer: dict[str, Any] | None,
     cases_sample: list[dict[str, Any]] | None,
 ) -> str:
     """Return a short natural-language description of a black-box task.
 
     Mirrors :func:`summarize_task` for "optimize anything" jobs, which carry
-    no DSPy signature or column mapping. Never raises; an empty string means
-    the job had no describable content and should be skipped.
+    no DSPy signature. Never raises; an empty string means the job had no
+    describable content and should be skipped.
 
     Args:
-        objective: What the user asked to improve, in their own words.
-        background: Extra context the user supplied about the task.
-        description: The short run description from the submission form.
-        recipe: Which wizard recipe authored the run (prompt / code / anything).
-        seed_candidate: The starting artifact, single text or ``{path: content}``.
-        scorer: The submitted scorer dict (``kind`` plus ``metric_code`` or ``url``).
-        cases_sample: Optional evaluation cases; the first three are forwarded.
+        title: The task's name.
+        description: The user's description of what they want improved.
+        cases_sample: Optional evaluation cases; the first ten are forwarded.
 
     Returns:
         A 2-3 sentence task description from the LLM, or the heuristic
-        fallback when the LLM is unavailable or its call fails.
+        fallback (title + description) when the LLM is unavailable or its
+        call fails.
     """
-    seed_excerpt = _seed_excerpt(seed_candidate, limit=2000)
-    fallback = _heuristic_blackbox_summary(
-        objective=objective, background=background, description=description, seed_excerpt=seed_excerpt
-    )
+    fallback = _heuristic_summary(title, description)
     if not fallback:
         return ""
     lm = _build_lm()
     if lm is None:
         return fallback
-    scorer = scorer or {}
-    if scorer.get("kind") == "remote":
-        scorer_text = "Remote HTTP scorer (opaque to us)."
-    else:
-        scorer_text = _truncate((scorer.get("metric_code") or "").strip(), 4000, label="metric_code")
-    artifact_kind = _RECIPE_ARTIFACT_LABEL.get(recipe or "", _RECIPE_ARTIFACT_LABEL["anything"])
     try:
-        sample_rows = cases_sample[:3] if cases_sample else []
+        sample_rows = cases_sample[:10] if cases_sample else []
         predictor = dspy.Predict(_BlackboxTaskSummary)
         with dspy.context(lm=lm):
             out = predictor(
-                objective=_truncate((objective or "").strip(), 2000, label="objective"),
-                background=_truncate((background or "").strip(), 2000, label="background"),
-                artifact=f"Optimizing {artifact_kind}. Starting version:\n{seed_excerpt}",
-                scorer=scorer_text,
-                cases_sample=_truncate(json.dumps(sample_rows, ensure_ascii=False), 2000, label="cases_sample"),
+                title=_truncate((title or "").strip(), 500, label="title"),
+                description=_truncate((description or "").strip(), 4000, label="description"),
+                cases_sample=_truncate(json.dumps(sample_rows, ensure_ascii=False), 6000, label="cases_sample"),
             )
         text = (out.task_description or "").strip()
         return text or fallback

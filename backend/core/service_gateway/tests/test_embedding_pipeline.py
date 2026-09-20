@@ -410,6 +410,50 @@ def test_drain_backfill_queue_continues_after_embed_failure() -> None:
     assert seen == ["a", "b", "c"]
 
 
+def test_fetch_all_success_ids_returns_ids() -> None:
+    """The corpus-wide scan unwraps every success job's ``optimization_id``."""
+    store = _FakeJobStore()
+    session = MagicMock(name="session")
+    session.__enter__ = MagicMock(return_value=session)
+    session.__exit__ = MagicMock(return_value=False)
+    session.execute.return_value.mappings.return_value.all.return_value = [
+        {"optimization_id": "a"},
+        {"optimization_id": "b"},
+    ]
+    with patch.object(pipeline, "Session", return_value=session):
+        ids = pipeline._fetch_all_success_ids(store)
+    assert ids == ["a", "b"]
+
+
+def test_reembed_all_returns_zero_when_disabled() -> None:
+    """``embeddings_enabled=False`` skips even the scan."""
+    store = _FakeJobStore()
+    with (
+        patch.object(pipeline.settings, "embeddings_enabled", False),
+        patch.object(pipeline, "_fetch_all_success_ids", side_effect=AssertionError("scanned")),
+    ):
+        assert pipeline.reembed_all_embeddings(store) == 0
+
+
+def test_reembed_all_drains_every_success_id() -> None:
+    """Every success id is re-embedded synchronously and the written count returned."""
+    store = _FakeJobStore()
+    calls: list[str] = []
+
+    def _fake_embed(optimization_id: str, *, job_store: Any) -> bool:
+        """Stub embedder that records each call and reports success."""
+        calls.append(optimization_id)
+        return True
+
+    with (
+        patch.object(pipeline.settings, "embeddings_enabled", True),
+        patch.object(pipeline, "_fetch_all_success_ids", return_value=["a", "b", "c"]),
+        patch.object(pipeline, "embed_finished_job", side_effect=_fake_embed),
+    ):
+        assert pipeline.reembed_all_embeddings(store) == 3
+    assert calls == ["a", "b", "c"]
+
+
 def test_embedding_index_sweeper_repairs_a_bounded_batch() -> None:
     """A repair pass purges orphans and drains only the configured batch."""
     store = _FakeJobStore()
@@ -501,7 +545,7 @@ def test_extract_display_fields_blackbox_keeps_overview_engine_without_result() 
 
 
 def test_embed_finished_job_blackbox_uses_blackbox_summariser() -> None:
-    """Black-box jobs are summarised from objective/background, not the DSPy signature path."""
+    """Black-box jobs are summarised from title/description/cases, not the DSPy path."""
     store = _FakeJobStore({"bb-1": _blackbox_success_job()})
     embedder = _FakeEmbedder(vector=[0.1, 0.2, 0.3])
 
@@ -522,10 +566,9 @@ def test_embed_finished_job_blackbox_uses_blackbox_summariser() -> None:
         assert pipeline.embed_finished_job("bb-1", job_store=store) is True
 
     kwargs = bb.call_args.kwargs
-    assert kwargs["objective"].startswith("Make the rendered unicorn")
-    assert kwargs["recipe"] == "code"
-    assert kwargs["scorer"]["kind"] == "python"
+    assert kwargs["title"] == "3D unicorn"
     assert kwargs["description"] == "Build a nicer unicorn"
+    assert kwargs["cases_sample"] == [{"prompt": "a unicorn"}]
     row = added[0]
     assert row.optimization_type == "blackbox"
     assert row.module_name == "blackbox"
