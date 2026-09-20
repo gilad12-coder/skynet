@@ -64,7 +64,7 @@ class _TaskSummary(dspy.Signature):
     description: str = dspy.InputField(desc="The user's own description of what the task does.")
     dataset_sample: str = dspy.InputField(
         desc=(
-            "A handful of sample rows from the training dataset, as illustrative "
+            "Several sample rows from the training dataset, as illustrative "
             "evidence of the task's domain and shape. They may be unrepresentative, "
             "so infer the general task — not the specifics of these particular rows."
         )
@@ -89,7 +89,7 @@ class _BlackboxTaskSummary(dspy.Signature):
     description: str = dspy.InputField(desc="The user's own description of what they want improved.")
     cases_sample: str = dspy.InputField(
         desc=(
-            "A handful of sample evaluation cases (may be empty), as illustrative "
+            "Several sample evaluation cases (may be empty), as illustrative "
             "evidence of what's being improved. They may be unrepresentative, so "
             "infer the general task — not the specifics of these particular cases."
         )
@@ -166,7 +166,7 @@ def summarize_task(
     Args:
         title: The task's name.
         description: The user's description of the task.
-        dataset_sample: Optional list of sample rows; the first three
+        dataset_sample: Optional list of sample rows; the first ten
             are forwarded to the summariser LM.
 
     Returns:
@@ -179,14 +179,14 @@ def summarize_task(
     if lm is None:
         return fallback
     try:
-        sample_rows = dataset_sample[:3] if dataset_sample else []
+        sample_rows = dataset_sample[:10] if dataset_sample else []
         predictor = dspy.Predict(_TaskSummary)
         with dspy.context(lm=lm):
             out = predictor(
                 title=_truncate((title or "").strip(), 500, label="title"),
                 description=_truncate((description or "").strip(), 4000, label="description"),
                 dataset_sample=_truncate(
-                    json.dumps(sample_rows, ensure_ascii=False), 2000, label="dataset_sample"
+                    json.dumps(sample_rows, ensure_ascii=False), 6000, label="dataset_sample"
                 ),
             )
         text = (out.task_description or "").strip()
@@ -211,7 +211,7 @@ def summarize_blackbox_task(
     Args:
         title: The task's name.
         description: The user's description of what they want improved.
-        cases_sample: Optional evaluation cases; the first three are forwarded.
+        cases_sample: Optional evaluation cases; the first ten are forwarded.
 
     Returns:
         A 2-3 sentence task description from the LLM, or the heuristic
@@ -225,13 +225,13 @@ def summarize_blackbox_task(
     if lm is None:
         return fallback
     try:
-        sample_rows = cases_sample[:3] if cases_sample else []
+        sample_rows = cases_sample[:10] if cases_sample else []
         predictor = dspy.Predict(_BlackboxTaskSummary)
         with dspy.context(lm=lm):
             out = predictor(
                 title=_truncate((title or "").strip(), 500, label="title"),
                 description=_truncate((description or "").strip(), 4000, label="description"),
-                cases_sample=_truncate(json.dumps(sample_rows, ensure_ascii=False), 2000, label="cases_sample"),
+                cases_sample=_truncate(json.dumps(sample_rows, ensure_ascii=False), 6000, label="cases_sample"),
             )
         text = (out.task_description or "").strip()
         return text or fallback
