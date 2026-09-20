@@ -6,11 +6,14 @@ drives explore semantic search. The summary is built from only what a human
 recognises the task by — its title, its description, and a sample of its
 data (training rows for DSPy jobs, evaluation cases for black-box ones) —
 never from the run's code, scorer, config or optimiser, which are fragile,
-gameable signals that pull unrelated tasks together. DSPy and black-box jobs
-keep separate signatures only so each can label its data sample in its own
-terms. Keeping a natural-language summary (rather than raw fields) lets
-semantically-similar tasks cluster together even when their submissions look
-unrelated.
+gameable signals that pull unrelated tasks together. Because a public job's
+summary is surfaced to other users, the signatures steer the model to describe
+the task's domain and shape in general terms and never to reproduce verbatim
+values from the data sample — the sample is evidence of *what kind* of task
+this is, not content to be echoed. DSPy and black-box jobs keep separate
+signatures only so each can label its data sample in its own terms. Keeping a
+natural-language summary (rather than raw fields) lets semantically-similar
+tasks cluster together even when their submissions look unrelated.
 
 The summariser is cheap to stub: ``settings.embeddings_summary_model`` (or
 ``settings.code_agent_model`` as fallback) is a normal LiteLLM model id,
@@ -59,13 +62,22 @@ class _TaskSummary(dspy.Signature):
 
     title: str = dspy.InputField(desc="The task's name.")
     description: str = dspy.InputField(desc="The user's own description of what the task does.")
-    dataset_sample: str = dspy.InputField(desc="A handful of sample rows from the training dataset.")
+    dataset_sample: str = dspy.InputField(
+        desc=(
+            "A handful of sample rows from the training dataset, as illustrative "
+            "evidence of the task's domain and shape. They may be unrepresentative, "
+            "so infer the general task — not the specifics of these particular rows."
+        )
+    )
     task_description: str = dspy.OutputField(
         desc=(
             "2-3 sentences describing the task in plain English, drawn only "
             "from its title, description and sample data: what the inputs are "
             "and what output is produced. Avoid naming the optimizer or model "
-            "— this text describes the task itself, not how it's trained."
+            "— this text describes the task itself, not how it's trained. "
+            "Describe the domain in general terms; never quote or reproduce "
+            "specific values, names, emails, identifiers or other verbatim "
+            "content from the sample rows, and don't fixate on their formatting."
         )
     )
 
@@ -75,14 +87,23 @@ class _BlackboxTaskSummary(dspy.Signature):
 
     title: str = dspy.InputField(desc="The task's name.")
     description: str = dspy.InputField(desc="The user's own description of what they want improved.")
-    cases_sample: str = dspy.InputField(desc="A handful of sample evaluation cases (may be empty).")
+    cases_sample: str = dspy.InputField(
+        desc=(
+            "A handful of sample evaluation cases (may be empty), as illustrative "
+            "evidence of what's being improved. They may be unrepresentative, so "
+            "infer the general task — not the specifics of these particular cases."
+        )
+    )
     task_description: str = dspy.OutputField(
         desc=(
             "2-3 sentences describing the task in plain English, drawn only "
             "from its title, description and sample cases: what is being "
             "improved and what a good result looks like. Avoid naming the "
             "engine or model — this text describes the task itself, not how "
-            "it's optimized."
+            "it's optimized. Describe the domain in general terms; never quote "
+            "or reproduce specific values, names, emails, identifiers or other "
+            "verbatim content from the sample cases, and don't fixate on their "
+            "formatting."
         )
     )
 
