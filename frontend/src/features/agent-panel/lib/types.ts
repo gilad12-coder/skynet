@@ -7,6 +7,9 @@ export type TrustMode = "ask" | "auto_safe" | "yolo";
 export interface ChatTurn {
   role: "user" | "assistant";
   content: string;
+  // Compact trace of the tools an assistant turn ran, so the next turn can
+  // reason about earlier results instead of only the prose reply.
+  tool_calls?: Array<{ tool: string; status: "done" | "error"; result?: string }>;
 }
 
 /**
@@ -32,7 +35,7 @@ export interface WizardState {
   source_dataset_id?: string;
   job_name?: string;
   job_description?: string;
-  job_type?: "run" | "grid_search";
+  job_type?: "run" | "grid_search" | "blackbox";
   optimizer_name?: string;
   module_name?: string;
   // Authored graph for a ``workflow`` (multi-module) run — carried in place of
@@ -54,6 +57,10 @@ export interface WizardState {
   is_private?: boolean;
   optimizer_kwargs?: Record<string, unknown>;
   target_score?: number;
+  // Black-box ("optimize anything") wizard fields the agent can read and write.
+  blackbox_objective?: string;
+  blackbox_seed?: string;
+  blackbox_scorer_code?: string;
 }
 
 export interface ToolStartPayload {
