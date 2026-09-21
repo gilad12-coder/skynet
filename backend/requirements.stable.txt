@@ -8,7 +8,7 @@
 # install fails with ResolutionImpossible. backend/Dockerfile's pip path does
 # exactly that. The agent layer bridges classic ReAct vs ReActV2 in
 # core.service_gateway.react_compat, so the same source runs on either line.
-# The DEFAULT line (dspy 3.3.0) lives in requirements.txt.
+# The DEFAULT line (dspy 3.3.1) lives in requirements.txt.
 #
 # prometheus-fastapi-instrumentator tracks 8.0.2 to match uv.lock /
 # requirements.txt — both lines stay on one instrumentator version. It was
