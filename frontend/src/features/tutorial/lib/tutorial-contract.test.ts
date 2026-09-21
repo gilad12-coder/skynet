@@ -18,6 +18,7 @@ const MENU_PATH = join(HERE, "../components/tutorial-menu.tsx");
 const DEMO_DATA_PATH = join(HERE, "demo-data.ts");
 const DETAIL_VIEW_PATH = join(HERE, "../../optimizations/components/OptimizationDetailView.tsx");
 const SUBMIT_WIZARD_PATH = join(HERE, "../../submit/hooks/use-submit-wizard.ts");
+const BLACKBOX_WIZARD_PATH = join(HERE, "../../submit/hooks/use-blackbox-wizard.ts");
 const SRC_PATH = fileURLToPath(new URL("../../../", import.meta.url));
 const EN_PATH = fileURLToPath(new URL("../../../../../i18n/locales/ui/en.json", import.meta.url));
 const HE_PATH = fileURLToPath(new URL("../../../../../i18n/locales/ui/he.json", import.meta.url));
@@ -57,7 +58,7 @@ test("every tutorial spotlight target is still declared by the application", () 
 test("tutorial workflow tracks stay synchronized with the chooser", () => {
   const steps = readFileSync(STEPS_PATH, "utf8");
   const menu = readFileSync(MENU_PATH, "utf8");
-  const tracks = ["quick", "data", "results", "workspace"];
+  const tracks = ["quick", "anything", "data", "results", "workspace"];
 
   for (const track of tracks) {
     assert.match(steps, new RegExp(`\\b${track}: \\{`));
@@ -74,15 +75,16 @@ test("each guided workflow stays at seven steps or fewer", () => {
   const counts = {
     quick:
       (steps.match(/tracks: QUICK_ONLY/g) ?? []).length +
-      (steps.match(/tracks: QUICK_AND_RESULTS/g) ?? []).length,
+      (steps.match(/tracks: QUICK_AND_ANYTHING/g) ?? []).length,
+    anything:
+      (steps.match(/tracks: ANYTHING_ONLY/g) ?? []).length +
+      (steps.match(/tracks: QUICK_AND_ANYTHING/g) ?? []).length,
     data: (steps.match(/tracks: DATA_ONLY/g) ?? []).length,
-    results:
-      (steps.match(/tracks: RESULTS_ONLY/g) ?? []).length +
-      (steps.match(/tracks: QUICK_AND_RESULTS/g) ?? []).length,
+    results: (steps.match(/tracks: RESULTS_ONLY/g) ?? []).length,
     workspace: (steps.match(/tracks: WORKSPACE_ONLY/g) ?? []).length,
   };
 
-  assert.deepEqual(counts, { quick: 7, data: 3, results: 7, workspace: 7 });
+  assert.deepEqual(counts, { quick: 7, anything: 7, data: 3, results: 7, workspace: 7 });
   for (const [track, count] of Object.entries(counts)) {
     assert.ok(count <= 7, `${track} guide has ${count} steps`);
   }
@@ -104,6 +106,20 @@ test("the quick-start guide keeps demo code deterministic and cost-free", () => 
   assert.match(steps, /callTutorialHook\("setCodeAssistMode", "manual"\)/);
   assert.match(wizard, /setSignatureManuallyEdited\(true\)/);
   assert.match(wizard, /setMetricManuallyEdited\(true\)/);
+});
+
+test("the optimize-anything guide never spends money or saves a draft", () => {
+  const steps = readFileSync(STEPS_PATH, "utf8");
+  const demoData = readFileSync(DEMO_DATA_PATH, "utf8");
+  const detailView = readFileSync(DETAIL_VIEW_PATH, "utf8");
+  const blackboxWizard = readFileSync(BLACKBOX_WIZARD_PATH, "utf8");
+  const scorer = demoData.match(/DEMO_BLACKBOX_SCORER_CODE = `([^`]+)`/)?.[1] ?? "";
+
+  assert.match(scorer, /def score\(candidate, case=None\):/);
+  assert.doesNotMatch(scorer, /\bllm\b/);
+  assert.match(steps, /callTutorialHook\("setBlackboxDemo"/);
+  assert.match(blackboxWizard, /!drafts\.suspended &&/);
+  assert.match(detailView, /setJob\(buildBlackboxDemoJob\(\)\)/);
 });
 
 test("the quick-start optimization reaches its results within two seconds", () => {

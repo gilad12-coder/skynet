@@ -17,7 +17,11 @@ import { TERMS } from "@/shared/lib/terms";
 // Leaf import on purpose — the tutorial barrel deliberately does not re-export
 // the demo fixtures (see features/tutorial/index.ts).
 // eslint-disable-next-line no-restricted-imports -- deliberate leaf import; see above
-import { DEMO_OPTIMIZATION_ID, DEMO_GRID_OPTIMIZATION_ID } from "@/features/tutorial/lib/demo-data";
+import {
+  DEMO_OPTIMIZATION_ID,
+  DEMO_GRID_OPTIMIZATION_ID,
+  DEMO_BLACKBOX_OPTIMIZATION_ID,
+} from "@/features/tutorial/lib/demo-data";
 import { OptimizationDetailView } from "./OptimizationDetailView";
 import { OptimizationDetailSkeleton } from "./OptimizationDetailSkeleton";
 
@@ -51,7 +55,10 @@ export function OptimizationDetailGate() {
   // sign-in can still upgrade it.
   const resolvedIdRef = useRef<string | null>(null);
 
-  const isDemo = id === DEMO_OPTIMIZATION_ID || id === DEMO_GRID_OPTIMIZATION_ID;
+  const isDemo =
+    id === DEMO_OPTIMIZATION_ID ||
+    id === DEMO_GRID_OPTIMIZATION_ID ||
+    id === DEMO_BLACKBOX_OPTIMIZATION_ID;
 
   useEffect(() => {
     if (isDemo) {

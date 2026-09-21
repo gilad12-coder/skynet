@@ -8,6 +8,9 @@
 
 import {
   resetDemoSimulation,
+  DEMO_BLACKBOX_OPTIMIZATION_ID,
+  DEMO_BLACKBOX_SCORER_CODE,
+  DEMO_BLACKBOX_SEED_TEXT,
   DEMO_METRIC_CODE,
   DEMO_OPTIMIZATION_ID,
   DEMO_SIGNATURE_CODE,
@@ -21,16 +24,17 @@ import { perLocale } from "@/shared/lib/per-locale";
 import { TUTORIAL_SUBMIT_SPLASH_MS } from "./tutorial-timing";
 
 /**
- * The short end-to-end path plus three focused workflow guides.
+ * The short end-to-end path plus four focused workflow guides.
  *
  * Keeping each guide narrow makes the tutorial useful after onboarding too:
  * users can replay only the part they need instead of stepping through the
  * entire application again.
  */
-export type TutorialTrack = "quick" | "data" | "results" | "workspace";
+export type TutorialTrack = "quick" | "anything" | "data" | "results" | "workspace";
 
 const QUICK_ONLY: readonly TutorialTrack[] = ["quick"];
-const QUICK_AND_RESULTS: readonly TutorialTrack[] = ["quick", "results"];
+const QUICK_AND_ANYTHING: readonly TutorialTrack[] = ["quick", "anything"];
+const ANYTHING_ONLY: readonly TutorialTrack[] = ["anything"];
 const DATA_ONLY: readonly TutorialTrack[] = ["data"];
 const RESULTS_ONLY: readonly TutorialTrack[] = ["results"];
 const WORKSPACE_ONLY: readonly TutorialTrack[] = ["workspace"];
@@ -156,17 +160,33 @@ function injectDemoDashboardData() {
   callTutorialHook("setDemoAnalytics", getCachedDemoDashboardAnalytics());
 }
 
-async function ensureSubmit() {
-  if (!window.location.pathname.startsWith("/submit")) {
-    navigateTo("/submit");
-    await waitForElement("[data-tutorial='wizard-stepper']");
-  }
+async function ensureSubmitPage() {
+  if (!window.location.pathname.startsWith("/submit")) navigateTo("/submit");
+}
+
+/** `/submit` opens on the recipe picker; the tour asks for it by name. */
+async function ensureRecipePicker() {
+  await ensureSubmitPage();
+  await waitForHook("openTutorialRecipePicker");
+  callTutorialHook("openTutorialRecipePicker");
+  await waitForElement("[data-tutorial='submit-recipe']");
+}
+
+/**
+ * No wizard exists until a recipe is chosen, so every wizard step first asks
+ * the page for the wizard it belongs to, then waits for that instance's hooks.
+ */
+async function ensureSubmit(recipe: "program" | "anything") {
+  await ensureSubmitPage();
+  await waitForHook("openTutorialWizard");
+  callTutorialHook("openTutorialWizard", recipe);
+  await waitForElement("[data-tutorial='wizard-stepper']");
   await waitForHook("setWizardStep");
   await new Promise<void>((r) => requestAnimationFrame(() => r()));
 }
 
-async function ensureDemoDetail() {
-  const path = `/optimizations/${DEMO_OPTIMIZATION_ID}`;
+async function ensureDemoDetail(id: string = DEMO_OPTIMIZATION_ID) {
+  const path = `/optimizations/${id}`;
   if (window.location.pathname === path) {
     await waitForHook("setDetailTab");
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
@@ -192,6 +212,22 @@ function setDetailTab(tab: string) {
 
 function setOptimizerName(name: string) {
   callTutorialHook("setOptimizerName", name);
+}
+
+/** A wizard stage is a run of substeps; open the one that holds `field`. */
+function showWizardSubstep(stage: keyof typeof WIZARD_STAGE, field?: string) {
+  callTutorialHook("showWizardSubstep", stage, field);
+  setWizardStep(WIZARD_STAGE[stage]);
+}
+
+/** Fill the "Optimize anything" wizard so every stage has something to show. */
+function injectBlackboxDemo() {
+  callTutorialHook("setCodeAssistMode", "manual");
+  callTutorialHook("setBlackboxDemo", {
+    seedText: DEMO_BLACKBOX_SEED_TEXT,
+    objective: msg("tutorial.demo.blackbox.objective"),
+    metricCode: DEMO_BLACKBOX_SCORER_CODE,
+  });
 }
 
 async function ensureTagger() {
@@ -323,6 +359,16 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     readingTimeSec: 9,
   },
   {
+    id: "dd-recipe-picker",
+    title: msg("tutorial.step.recipe_picker.title"),
+    description: msg("tutorial.step.recipe_picker.body"),
+    target: "[data-tutorial='submit-recipe']",
+    placement: "bottom",
+    beforeShow: ensureRecipePicker,
+    tracks: QUICK_AND_ANYTHING,
+    readingTimeSec: 9,
+  },
+  {
     id: "dd-data-upload",
     title: formatMsg("auto.features.tutorial.lib.steps.template.16", { p1: TERMS.dataset }),
     description: `${formatMsg("auto.features.tutorial.lib.steps.template.17", {
@@ -332,9 +378,10 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     target: "[data-tutorial='dataset-upload']",
     placement: "left",
     beforeShow: async () => {
-      await ensureSubmit();
+      await ensureSubmit("program");
       injectSampleDataset();
-      setWizardStep(WIZARD_STAGE.evaluation);
+      showWizardSubstep("evaluation", "dataset-upload");
+      await waitForElement("[data-tutorial='dataset-upload']");
     },
     tracks: QUICK_ONLY,
     readingTimeSec: 7,
@@ -352,9 +399,9 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     target: "[data-tutorial='signature-editor']",
     placement: "top",
     beforeShow: async () => {
-      await ensureSubmit();
+      await ensureSubmit("program");
       injectSampleDataset();
-      setWizardStep(WIZARD_STAGE.evaluation);
+      showWizardSubstep("evaluation", "signature-editor");
       callTutorialHook("setCodeAssistMode", "manual");
       callTutorialHook("chooseModule", "predict");
       callTutorialHook("setSignatureCode", DEMO_SIGNATURE_CODE);
@@ -376,8 +423,9 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     target: "[data-tutorial='model-catalog']",
     placement: "bottom",
     beforeShow: async () => {
-      await ensureSubmit();
-      setWizardStep(WIZARD_STAGE.optimization);
+      await ensureSubmit("program");
+      showWizardSubstep("optimization", "model-catalog");
+      await waitForElement("[data-tutorial='model-catalog']");
     },
     tracks: QUICK_ONLY,
     readingTimeSec: 7,
@@ -393,12 +441,103 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     target: "[data-tutorial='wizard-stage-review']",
     placement: "bottom",
     beforeShow: async () => {
-      await ensureSubmit();
+      await ensureSubmit("program");
       setOptimizerName("gepa");
       setWizardStep(WIZARD_STAGE.review);
     },
     tracks: QUICK_ONLY,
     readingTimeSec: 5,
+  },
+  {
+    id: "bb-start",
+    title: msg("tutorial.step.bb_start.title"),
+    description: msg("tutorial.step.bb_start.body"),
+    target: "[data-tutorial='wizard-stage-goal']",
+    placement: "left",
+    beforeShow: async () => {
+      await ensureSubmit("anything");
+      injectBlackboxDemo();
+      showWizardSubstep("goal");
+      await waitForElement("[data-tutorial='wizard-stage-goal']");
+    },
+    tracks: ANYTHING_ONLY,
+    readingTimeSec: 10,
+  },
+  {
+    id: "bb-budget",
+    title: msg("tutorial.step.bb_budget.title"),
+    description: msg("tutorial.step.bb_budget.body"),
+    target: "[data-tutorial='wizard-stage-evaluation']",
+    placement: "left",
+    beforeShow: async () => {
+      await ensureSubmit("anything");
+      injectBlackboxDemo();
+      showWizardSubstep("evaluation", "totalBudgetInput");
+      await waitForElement("[data-tutorial='wizard-stage-evaluation']");
+    },
+    tracks: ANYTHING_ONLY,
+    readingTimeSec: 9,
+  },
+  {
+    id: "bb-scorer",
+    title: msg("tutorial.step.bb_scorer.title"),
+    description: msg("tutorial.step.bb_scorer.body"),
+    target: "[data-tutorial='wizard-stage-evaluation']",
+    placement: "left",
+    beforeShow: async () => {
+      await ensureSubmit("anything");
+      injectBlackboxDemo();
+      showWizardSubstep("evaluation", "bb-scorer-code");
+      await waitForElement("#bb-scorer-code");
+    },
+    tracks: ANYTHING_ONLY,
+    readingTimeSec: 12,
+  },
+  {
+    id: "bb-engines",
+    title: msg("tutorial.step.bb_engines.title"),
+    description: msg("tutorial.step.bb_engines.body"),
+    target: "[data-tutorial='wizard-stage-optimization']",
+    placement: "left",
+    beforeShow: async () => {
+      await ensureSubmit("anything");
+      injectBlackboxDemo();
+      showWizardSubstep("optimization", "bb-engines");
+      await waitForElement("#bb-engines");
+    },
+    tracks: ANYTHING_ONLY,
+    readingTimeSec: 12,
+  },
+  {
+    id: "bb-scores",
+    title: msg("tutorial.step.bb_scores.title"),
+    description: msg("tutorial.step.bb_scores.body"),
+    target: "[data-tutorial='score-cards']",
+    placement: "bottom",
+    beforeShow: async () => {
+      const onDetail =
+        window.location.pathname === `/optimizations/${DEMO_BLACKBOX_OPTIMIZATION_ID}`;
+      if (!onDetail) await showSubmitSplash();
+      await ensureDemoDetail(DEMO_BLACKBOX_OPTIMIZATION_ID);
+      setDetailTab("overview");
+      await waitForElement("[data-tutorial='score-cards']");
+    },
+    tracks: ANYTHING_ONLY,
+    readingTimeSec: 9,
+  },
+  {
+    id: "bb-best-version",
+    title: msg("tutorial.step.bb_best_version.title"),
+    description: msg("tutorial.step.bb_best_version.body"),
+    target: "[data-tutorial='best-version']",
+    placement: "top",
+    beforeShow: async () => {
+      await ensureDemoDetail(DEMO_BLACKBOX_OPTIMIZATION_ID);
+      setDetailTab("best");
+      await waitForElement("[data-tutorial='best-version']");
+    },
+    tracks: ANYTHING_ONLY,
+    readingTimeSec: 10,
   },
   {
     id: "dd-result-actions",
@@ -511,7 +650,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       setDetailTab("artifact");
       await waitForElement("[data-tutorial='artifact-output']");
     },
-    tracks: QUICK_AND_RESULTS,
+    tracks: RESULTS_ONLY,
     readingTimeSec: 12,
   },
   {
@@ -681,6 +820,10 @@ export function getTrack(trackId: TutorialTrack): TutorialTrackDefinition | unde
     quick: {
       name: msg("tutorial.track.quick.name"),
       description: msg("tutorial.track.quick.desc"),
+    },
+    anything: {
+      name: msg("tutorial.track.anything.name"),
+      description: msg("tutorial.track.anything.desc"),
     },
     data: {
       name: msg("tutorial.track.data.name"),

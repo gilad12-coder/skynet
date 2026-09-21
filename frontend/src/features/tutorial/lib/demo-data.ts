@@ -8,6 +8,7 @@
 
 import type {
   BlackboxEngineId,
+  BlackboxRunResult,
   OptimizationStatusResponse,
   OptimizationType,
   ProgressEvent,
@@ -31,6 +32,7 @@ import { TUTORIAL_DEMO_RUN_MS } from "./tutorial-timing";
 
 export const DEMO_OPTIMIZATION_ID = "a7e3b291-4d2f-4f8c-b142-9d5e6f8a1c3b";
 export const DEMO_GRID_OPTIMIZATION_ID = "c3f9d215-8a47-4e6b-a1d3-7b2f9c58e4a1";
+export const DEMO_BLACKBOX_OPTIMIZATION_ID = "e5b1a8c4-2f63-4d9a-8c17-3a6d0f4b9e72";
 
 export const DEMO_SIGNATURE_CODE = `class EmailClassifier(dspy.Signature):
     """Classify an email into a category: spam, important, or promotional."""
@@ -1260,6 +1262,161 @@ export function buildGridDemoJob(): OptimizationStatusResponse {
     progress_count: 0,
     log_count: pairLogs.length,
     grid_result: grid,
+  };
+}
+
+// The "Optimize anything" tour optimizes one text: a support-reply prompt,
+// scored by a deterministic rubric so the demo never needs a scoring model.
+// Each score is what DEMO_BLACKBOX_SCORER_CODE returns for that text.
+const DEMO_BLACKBOX_VERSIONS: ReadonlyArray<{
+  text: string;
+  score: number;
+  parent: string | null;
+  generation: number;
+  firstRun: number;
+}> = [
+  {
+    text: "You are a support agent. Answer the customer's question.",
+    score: 1 / 6,
+    parent: null,
+    generation: 0,
+    firstRun: 1,
+  },
+  {
+    text: "You are a support agent. Answer the customer's question in a friendly tone. Keep the reply under 120 words.",
+    score: 2 / 6,
+    parent: "0",
+    generation: 1,
+    firstRun: 7,
+  },
+  {
+    text: "You are a support agent. Open by restating the customer's problem in one sentence, then answer it.",
+    score: 2 / 6,
+    parent: "0",
+    generation: 1,
+    firstRun: 13,
+  },
+  {
+    text: "You are a support agent. Open by restating the customer's problem in one sentence. Give the fix as numbered steps. Keep the reply under 120 words.",
+    score: 4 / 6,
+    parent: "2",
+    generation: 2,
+    firstRun: 19,
+  },
+  {
+    text: "You are a support agent. Open by restating the customer's problem in one sentence. Give the fix as numbered steps, one action per step. If the fix needs account access, say so before the steps. Close with one line on what to do if the steps fail. Keep the reply under 120 words.",
+    score: 1,
+    parent: "3",
+    generation: 3,
+    firstRun: 25,
+  },
+];
+
+export const DEMO_BLACKBOX_SEED_TEXT = DEMO_BLACKBOX_VERSIONS[0]?.text ?? "";
+
+export const DEMO_BLACKBOX_SCORER_CODE = `RUBRIC = ["support agent", "restating", "numbered steps", "account access", "steps fail", "120 words"]
+
+
+def score(candidate, case=None):
+    """Share of the support-reply rubric the prompt covers. Higher is better."""
+    text = candidate if isinstance(candidate, str) else "\\n".join(candidate.values())
+    covered = [rule for rule in RUBRIC if rule in text.lower()]
+    return len(covered) / len(RUBRIC), {"covered": covered}
+`;
+
+export function buildBlackboxDemoPayload(): OptimizationPayloadResponse {
+  return {
+    optimization_id: DEMO_BLACKBOX_OPTIMIZATION_ID,
+    optimization_type: "blackbox",
+    payload: {
+      recipe: "anything",
+      seed_candidate: DEMO_BLACKBOX_SEED_TEXT,
+      objective: msg("tutorial.demo.blackbox.objective"),
+      scorer: { kind: "code", metric_code: DEMO_BLACKBOX_SCORER_CODE },
+      strategy: { mode: "single", engine: "gepa" },
+    },
+  };
+}
+
+export function buildBlackboxDemoJob(): OptimizationStatusResponse {
+  const start = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  const seed = DEMO_BLACKBOX_VERSIONS[0];
+  const best = DEMO_BLACKBOX_VERSIONS[DEMO_BLACKBOX_VERSIONS.length - 1];
+  const runtimeSeconds = 214;
+  const scorerRuns = 30;
+  const progress: ProgressEvent[] = DEMO_BLACKBOX_VERSIONS.map((version, index) => ({
+    timestamp: new Date(start.getTime() + version.firstRun * 7000).toISOString(),
+    event: "candidate",
+    metrics: {
+      candidate_id: String(index),
+      parent_id: version.parent,
+      generation: version.generation,
+      score: version.score,
+      // GEPA carries a plain-text candidate under this one synthetic key.
+      prompt: { current_candidate: version.text },
+      discovered_at_evals: version.firstRun,
+    },
+  }));
+  const result: BlackboxRunResult = {
+    optimizer_name: "GEPA",
+    strategy_mode: "single",
+    engine_used: "gepa",
+    split_counts: {},
+    baseline_test_metric: seed?.score ?? null,
+    optimized_test_metric: best?.score ?? null,
+    metric_improvement: seed && best ? best.score - seed.score : null,
+    seed_candidate: DEMO_BLACKBOX_SEED_TEXT,
+    best_candidate: best?.text ?? "",
+    regression_guard_applied: false,
+    lanes: [
+      {
+        engine: "gepa",
+        phase: "single",
+        status: "completed",
+        best_score: best?.score ?? null,
+        scorer_runs: scorerRuns,
+      },
+    ],
+    versions: DEMO_BLACKBOX_VERSIONS.map((version) => ({
+      candidate: version.text,
+      score: version.score,
+      mean_score: version.score,
+      evals: 6,
+      first_run: version.firstRun,
+      side_info: {},
+    })),
+    total_scorer_runs: scorerRuns,
+    runtime_seconds: runtimeSeconds,
+    num_lm_calls: 12,
+    total_tokens: 18400,
+    usage_by_model: [],
+    optimization_metadata: {},
+    details: {},
+  };
+
+  return {
+    optimization_id: DEMO_BLACKBOX_OPTIMIZATION_ID,
+    optimization_type: "blackbox",
+    status: "success",
+    name: msg("tutorial.demo.blackbox.name"),
+    description: msg("tutorial.demo.blackbox.objective"),
+    username: "demo",
+    created_at: daysAgo(2),
+    started_at: daysAgo(2),
+    completed_at: daysAgo(2),
+    elapsed_seconds: runtimeSeconds,
+    elapsed: fmtElapsed(runtimeSeconds),
+    optimizer_name: "GEPA",
+    model_name: "openai/gpt-4o-mini",
+    baseline_test_metric: result.baseline_test_metric,
+    optimized_test_metric: result.optimized_test_metric,
+    metric_improvement: result.metric_improvement,
+    progress_events: progress,
+    logs: [],
+    latest_metrics: {},
+    progress_count: progress.length,
+    log_count: 0,
+    blackbox_result: result,
   };
 }
 

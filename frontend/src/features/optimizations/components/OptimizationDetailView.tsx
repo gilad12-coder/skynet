@@ -66,9 +66,12 @@ import type {
 import {
   DEMO_OPTIMIZATION_ID,
   DEMO_GRID_OPTIMIZATION_ID,
+  DEMO_BLACKBOX_OPTIMIZATION_ID,
   DEMO_TRAJECTORY_PREVIEW_LAYOUT,
   buildDemoOptimizationPayload,
   buildGridDemoJob,
+  buildBlackboxDemoJob,
+  buildBlackboxDemoPayload,
   resetDemoSimulation,
   startDemoSimulation,
 } from "@/features/tutorial/lib/demo-data";
@@ -269,7 +272,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
 
   const isDemoMode = id === DEMO_OPTIMIZATION_ID;
   const isGridDemoMode = id === DEMO_GRID_OPTIMIZATION_ID;
-  const isAnyDemoMode = isDemoMode || isGridDemoMode;
+  const isBlackboxDemoMode = id === DEMO_BLACKBOX_OPTIMIZATION_ID;
+  const isAnyDemoMode = isDemoMode || isGridDemoMode || isBlackboxDemoMode;
   // Public read-only share view: seed from props; never call authed endpoints.
   const skipNetwork = isAnyDemoMode || isShare;
 
@@ -337,6 +341,13 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     setJob(buildGridDemoJob());
     setLoading(false);
   }, [isGridDemoMode]);
+
+  useEffect(() => {
+    if (!isBlackboxDemoMode) return;
+    setPayload(buildBlackboxDemoPayload());
+    setJob(buildBlackboxDemoJob());
+    setLoading(false);
+  }, [isBlackboxDemoMode]);
 
   // Seed the read-only share view from the public composite; no fetching.
   useEffect(() => {
@@ -1638,7 +1649,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
             )}
 
             {showBestVersionTab && job.blackbox_result && (
-              <TabsContent value="best" className="mt-4">
+              <TabsContent value="best" className="mt-4" data-tutorial="best-version">
                 <BestVersionTab result={job.blackbox_result} jobName={job.name} />
               </TabsContent>
             )}

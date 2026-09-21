@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ValidationFrame, ValidationGate, ValidationPlan } from "./ValidationFrame";
 import { msg } from "@/shared/lib/messages";
 import { useCredits } from "@/features/billing";
+import { registerTutorialHook } from "@/features/tutorial";
 
 import { TotalBudgetCard } from "./TotalBudgetCard";
 import { WizardIssueNotice } from "./WizardIssueNotice";
@@ -58,6 +59,7 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
     if (stage === "optimization")
       setOptimizationPart(field === "totalBudgetInput" ? 2 : field === "model-catalog" ? 1 : 0);
   }, []);
+  useEffect(() => registerTutorialHook("showWizardSubstep", routeSubstep), [routeSubstep]);
   const goToField = (stage: WizardStageId, field?: string) => {
     // Budget errors return to the last configuration panel.
     const target: WizardStageId = field === "totalBudgetInput" ? "optimization" : stage;

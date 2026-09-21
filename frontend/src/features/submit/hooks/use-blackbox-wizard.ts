@@ -37,6 +37,7 @@ import {
   type DatasetSummary,
 } from "@/shared/lib/api";
 import { useWizardStateOptional } from "@/features/agent-panel";
+import { registerTutorialHook } from "@/features/tutorial";
 import { readPref, useUserPrefs } from "@/features/settings";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
@@ -294,6 +295,23 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
 
   const [scorerKind, setScorerKind] = useState<"python" | "remote">("python");
   const [metricCode, setMetricCode] = useState(scorerTemplateFor(initialRecipe));
+  // The guided tour drives this wizard from plain-JS steps through the typed
+  // tutorial bridge. Its demo setup counts as hand-written, so the writing
+  // assistant never starts a paid pass over it.
+  useEffect(() => {
+    const unregister = [
+      registerTutorialHook("setWizardStep", setStep),
+      registerTutorialHook("setCodeAssistMode", setCodeAssistMode),
+      registerTutorialHook("setBlackboxDemo", (demo) => {
+        setSeedText(demo.seedText);
+        setSeedManuallyEdited(true);
+        setObjective(demo.objective);
+        setMetricCode(demo.metricCode);
+        setScorerManuallyEdited(true);
+      }),
+    ];
+    return () => unregister.forEach((fn) => fn());
+  }, []);
   const [scorerUrl, setScorerUrl] = useState("");
   const [scorerSecret, setScorerSecret] = useState("");
   const [scorerInstall, setScorerInstall] = useState("");
@@ -1115,6 +1133,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   // Restored or cloned authored artifacts must survive the first render before hydration.
   const interviewPossible =
     !drafts.offerPending &&
+    !drafts.suspended &&
     codeAssistMode === "auto" &&
     !cloned &&
     !seedManuallyEdited &&
