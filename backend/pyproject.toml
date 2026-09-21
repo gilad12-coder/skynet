@@ -36,9 +36,9 @@ dependencies = [
     # gepa.oa has no release yet. The commit still reports itself as 0.1.4, so it
     # also carries PxN batched sampling (gepa.strategies.proposal_sampling) and the
     # enable_tool_optimization adapter that core.service_gateway.react_compat
-    # imports at module load. dspy 3.2.1 (gepa==0.0.27) and dspy 3.3.0
-    # (gepa==0.1.1) hard-pin an older gepa; the [tool.uv] override-dependencies
-    # below replaces that pin with this same source. To move the pin: change the
+    # imports at module load. dspy 3.2.1 hard-pins an older gepa (==0.0.27) and
+    # dspy 3.3.1 pins the PyPI 0.1.4, which lacks gepa.oa; the [tool.uv]
+    # override-dependencies below replaces that pin with this same source. To move the pin: change the
     # commit here, in the override below, in requirements*.txt and in
     # core/service_gateway/optimization/blackbox/upstream.py (GEPA_REVISION),
     # and native_runtime.py (GEPA_SOURCE), then run `uv lock` and the blackbox
@@ -109,11 +109,12 @@ render = [
 ]
 
 [tool.uv]
-# dspy 3.3.0's metadata hard-pins gepa[dspy]==0.1.1 (dspy 3.2.1 pins ==0.0.27). Both
-# predate PxN batched sampling (gepa.strategies.proposal_sampling), which the GEPA
-# optimizer wiring in core.service_gateway.optimization needs, and neither ships
-# gepa.oa, which the black-box engines are built on. The pinned commit is a strict
-# superset of 0.1.1's optimize()/DspyAdapter surface — it only adds params
+# dspy 3.3.1's metadata hard-pins gepa[dspy]==0.1.4 (dspy 3.2.1 pins ==0.0.27).
+# Neither PyPI release ships gepa.oa, which the black-box engines are built on, and
+# 0.0.27 also predates PxN batched sampling (gepa.strategies.proposal_sampling), which
+# the GEPA optimizer wiring in core.service_gateway.optimization needs. The pinned
+# commit reports itself as 0.1.4 and is a strict superset of that release's
+# optimize()/DspyAdapter surface — it only adds params
 # (sampling_strategy, selection_strategy, …) and renames/removes nothing dspy calls —
 # so overriding the pin is safe. The override names the same git commit as the
 # dependency above so the resolver sees a single gepa source. Drop this override

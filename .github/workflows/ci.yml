@@ -103,14 +103,15 @@ jobs:
       # starlette<1.0.0, but you have starlette 1.3.1").
       # Both lines pin the same gepa git commit (reporting 0.1.4) over dspy's
       # hard gepa[dspy] requirement for upstream OA engines and PxN sampling —
-      # ==0.0.27 on the stable line (dspy 3.2.1), ==0.1.1 on the preview line
-      # (dspy 3.3.0). Those two mismatch lines are filtered; everything else pip
-      # check emits is a real defect.
+      # ==0.0.27 on the stable line (dspy 3.2.1). The preview line (dspy 3.3.1)
+      # pins ==0.1.4, which the commit's own version satisfies, so only the stable
+      # mismatch appears. It is filtered; everything else pip check emits is a
+      # real defect.
       - name: Dependency set is complete and self-consistent
         run: |
           out=$(docker run --rm skynet-backend:pip-${{ matrix.dspy_line }} pip check 2>&1 || true)
           echo "$out"
-          if echo "$out" | grep -vE 'has requirement gepa\[dspy\]==0\.(0\.27|1\.1)' | grep -qE 'requires|has requirement'; then
+          if echo "$out" | grep -vE 'has requirement gepa\[dspy\]==0\.0\.27' | grep -qE 'requires|has requirement'; then
             echo "::error::pip check found real dependency problems in the ${{ matrix.dspy_line }} pip-path image"
             exit 1
           fi
