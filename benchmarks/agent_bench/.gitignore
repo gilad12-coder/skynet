@@ -1,0 +1,6 @@
+results/*/attempts/
+results/*/homes/
+results/pilot*/
+results/*.log
+__pycache__/
+.ruff_cache/
