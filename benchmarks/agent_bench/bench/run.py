@@ -31,12 +31,13 @@ from dotenv import dotenv_values
 
 from bench.harnesses.base import MODEL, Attempt
 from bench.harnesses.cli import CLI_HARNESSES
-from bench.harnesses.dspy_react import run_dspy
+from bench.harnesses.dspy_react import FIXED, run_dspy
+from bench.language import is_hebrew
 from bench.prompt import brief, user_message
 from bench.task import Run, Task, grade, load_tasks
 
 ROOT = Path(__file__).resolve().parent.parent
-HARNESSES = [*CLI_HARNESSES, "dspy-reactv2", "dspy-react"]
+HARNESSES = [*CLI_HARNESSES, "dspy-reactv2", "dspy-react", FIXED]
 _write_lock = threading.Lock()
 
 
@@ -160,6 +161,14 @@ def run_attempt(harness: str, task: Task, trial: int, out: Path, key: str, timeo
         message = user_message(task)
         if harness in CLI_HARNESSES:
             attempt = CLI_HARNESSES[harness](message, brief(), port, workdir, home, key, timeout)
+        elif harness == FIXED:
+            # The app pins the reply language from the UI locale; the prompt's language stands in for it here.
+            conversation = {
+                "turns": task.history,
+                "reply_language": "Hebrew" if is_hebrew(task.prompt) else "English",
+            }
+            message = user_message(task, transcript=False)
+            attempt = run_dspy(harness, message, brief(), port, workdir, key, timeout, conversation)
         else:
             attempt = run_dspy(harness, message, brief(), port, workdir, key, timeout)
         snapshot = fetch_state(port)

@@ -15,11 +15,13 @@ def brief() -> str:
     return BRIEF_PATH.read_text().strip()
 
 
-def user_message(task: Task) -> str:
+def user_message(task: Task, transcript: bool = True) -> str:
     """Render the task as one user message: context, earlier turns, then the request.
 
     Args:
         task: The task to render.
+        transcript: Include the earlier turns as text. A harness that replays
+            them as real conversation history passes ``False``.
 
     Returns:
         The user message text.
@@ -27,8 +29,8 @@ def user_message(task: Task) -> str:
     parts: list[str] = []
     if task.wizard_state:
         parts.append("Current wizard state (JSON):\n" + json.dumps(task.wizard_state, ensure_ascii=False, indent=1))
-    if task.history:
+    if task.history and transcript:
         lines = [f"{role.upper()}: {text}" for role, text in task.history]
         parts.append("Conversation so far:\n" + "\n".join(lines))
-    parts.append(("USER: " if task.history else "") + task.prompt)
+    parts.append(("USER: " if task.history and transcript else "") + task.prompt)
     return "\n\n".join(parts)
