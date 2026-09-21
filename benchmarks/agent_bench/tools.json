@@ -1,0 +1,5140 @@
+{
+ "source": "Dumped from the backend's FastMCP mount (agent-reachable tools only); auth and idempotency headers removed.",
+ "tools": [
+  {
+   "name": "blackbox_engines_blackbox_engines_get",
+   "description": "Describe every engine so the wizard can show why one cannot run here.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "target": {
+      "type": "string",
+      "enum": [
+       "text",
+       "agent"
+      ],
+      "default": "text"
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "blackbox_scorer_dry_run_blackbox_scorer_dry_run_post",
+   "description": "Run the scorer once so a broken one fails here, not in the job.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "scorer": {
+      "properties": {
+       "kind": {
+        "type": "string",
+        "enum": [
+         "python",
+         "remote"
+        ],
+        "default": "python"
+       },
+       "metric_code": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "url": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "secret": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "timeout_seconds": {
+        "type": "number",
+        "maximum": 600.0,
+        "exclusiveMinimum": 0.0,
+        "default": 60.0
+       },
+       "install_command": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "dependency_lock": {
+        "anyOf": [
+         {
+          "properties": {
+           "code_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+           },
+           "requirements": {
+            "items": {
+             "type": "string"
+            },
+            "type": "array"
+           },
+           "inferred": {
+            "items": {
+             "type": "string"
+            },
+            "type": "array"
+           },
+           "imports": {
+            "items": {
+             "type": "string"
+            },
+            "type": "array"
+           },
+           "artifacts": {
+            "items": {
+             "properties": {
+              "name": {
+               "type": "string",
+               "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+              },
+              "version": {
+               "type": "string",
+               "pattern": "^[a-zA-Z0-9][a-zA-Z0-9.!+_-]*$"
+              },
+              "filename": {
+               "type": "string",
+               "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._+!-]*\\.whl$"
+              },
+              "url": {
+               "type": "string",
+               "maxLength": 4096
+              },
+              "sha256": {
+               "type": "string",
+               "pattern": "^[a-f0-9]{64}$"
+              }
+             },
+             "type": "object",
+             "required": [
+              "name",
+              "version",
+              "filename",
+              "url",
+              "sha256"
+             ]
+            },
+            "type": "array"
+           },
+           "python": {
+            "type": "string"
+           },
+           "image": {
+            "type": "string"
+           },
+           "registry_url": {
+            "type": "string"
+           },
+           "signature": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+           }
+          },
+          "type": "object",
+          "required": [
+           "code_sha256",
+           "requirements",
+           "inferred",
+           "imports",
+           "artifacts",
+           "python",
+           "image",
+           "registry_url",
+           "signature"
+          ]
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "model": {
+        "anyOf": [
+         {
+          "properties": {
+           "name": {
+            "type": "string"
+           },
+           "token_source": {
+            "anyOf": [
+             {
+              "type": "string",
+              "enum": [
+               "managed",
+               "byok"
+              ]
+             },
+             {
+              "type": "null"
+             }
+            ]
+           },
+           "byok_provider": {
+            "anyOf": [
+             {
+              "type": "string"
+             },
+             {
+              "type": "null"
+             }
+            ]
+           },
+           "base_url": {
+            "anyOf": [
+             {
+              "type": "string"
+             },
+             {
+              "type": "null"
+             }
+            ]
+           },
+           "temperature": {
+            "anyOf": [
+             {
+              "type": "number",
+              "maximum": 2.0,
+              "minimum": 0.0
+             },
+             {
+              "type": "null"
+             }
+            ]
+           },
+           "max_tokens": {
+            "anyOf": [
+             {
+              "type": "integer",
+              "minimum": 1.0
+             },
+             {
+              "type": "null"
+             }
+            ]
+           },
+           "extra": {
+            "additionalProperties": true,
+            "type": "object"
+           }
+          },
+          "type": "object",
+          "required": [
+           "name"
+          ],
+          "description": "Configuration block for language-model/backbone selection."
+         },
+         {
+          "type": "null"
+         }
+        ]
+       }
+      },
+      "type": "object"
+     },
+     "candidate": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       }
+      ]
+     },
+     "case": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "execution_budget_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "execution_budget_revision": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "scorer",
+     "candidate"
+    ]
+   }
+  },
+  {
+   "name": "bulk_cancel_jobs_optimizations_bulk_cancel_post",
+   "description": "Cancel a batch of non-terminal optimizations and report per-id outcomes.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_ids": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "bulk_delete_jobs_optimizations_bulk_delete_post",
+   "description": "Delete a batch of terminal optimizations and report per-id outcomes.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_ids": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "bulk_pin_jobs_optimizations_bulk_pin_post",
+   "description": "Pin or unpin up to 100 optimizations in a single call.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_ids": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "maxItems": 100,
+      "minItems": 1
+     },
+     "value": {
+      "type": "boolean",
+      "description": "Target state — true to pin, false to clear."
+     }
+    },
+    "required": [
+     "optimization_ids",
+     "value"
+    ]
+   }
+  },
+  {
+   "name": "cancel_job_optimizations",
+   "description": "Cooperatively cancel an active optimization.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "clone_job_optimizations",
+   "description": "Clone a finished or active optimization into ``count`` fresh runs.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     },
+     "count": {
+      "type": "integer",
+      "maximum": 5.0,
+      "minimum": 1.0,
+      "description": "Number of copies to create (1–5).",
+      "default": 1
+     },
+     "name_prefix": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 100
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Prefix prepended to each clone's name. Defaults to 'עותק של'."
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "delete_job_optimizations",
+   "description": "Hard-delete an optimization and all its data (not recoverable).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "discover_models_models_discover_post",
+   "description": "Probe an OpenAI-compatible endpoint for its model list.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "base_url": {
+      "type": "string"
+     },
+     "api_key": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "base_url"
+    ]
+   }
+  },
+  {
+   "name": "get_analytics_summary_analytics_summary_get",
+   "description": "Return aggregated KPIs across optimizations.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimizer": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Exact-match optimizer name (e.g. 'gepa')"
+     },
+     "model": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Exact-match model name, compared against the primary model used by the optimization"
+     },
+     "status": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Optimization status filter: pending, running, success, failed, cancelled"
+     },
+     "username": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Only include optimizations submitted by this username"
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "get_grid_search_result_optimizations",
+   "description": "Return all pair results for a finished grid search, including ``best_pair``.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "get_job_logs_optimizations",
+   "description": "Return log lines for an optimization in chronological order.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     },
+     "limit": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "maximum": 50.0,
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Max log entries to return (default 25, ceiling 50). Paginate with offset for more.",
+      "default": 25
+     },
+     "offset": {
+      "type": "integer",
+      "minimum": 0.0,
+      "description": "Number of log entries to skip before returning — use with limit for simple pagination",
+      "default": 0
+     },
+     "level": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Case-insensitive level filter: DEBUG, INFO, WARNING, ERROR, CRITICAL"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "get_job_summary_optimizations",
+   "description": "Return the compact dashboard-card shape for a single optimization.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "get_model_stats_analytics_models_get",
+   "description": "Return per-model aggregated statistics.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimizer": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Exact-match optimizer name to scope the stats"
+     },
+     "status": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Restrict aggregation to a single status bucket"
+     },
+     "username": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Only include jobs submitted by this username"
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "get_optimization_counts_optimizations_counts_get",
+   "description": "Return backend row counts grouped by status for dashboard stat cards.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "username": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Restrict counts to a single user"
+     },
+     "include_shared": {
+      "type": "boolean",
+      "description": "Fold runs shared with the caller into the tally and report them under `shared` (non-admin).",
+      "default": false
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "get_optimizer_stats_analytics_optimizers_get",
+   "description": "Return per-optimizer aggregated statistics.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "model": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Exact-match model name to scope the stats to a single model"
+     },
+     "status": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Restrict aggregation to a single status bucket"
+     },
+     "username": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Only include jobs submitted by this username"
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "get_pair_test_results_optimizations",
+   "description": "Per-pair analogue of ``GET /test-results`` with global-index remapping.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     },
+     "pair_index": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "optimization_id",
+     "pair_index"
+    ]
+   }
+  },
+  {
+   "name": "get_registry_snapshot_registry_get",
+   "description": "Return sorted names of every registered module, metric, and optimizer.",
+   "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+   }
+  },
+  {
+   "name": "get_test_results_optimizations",
+   "description": "Return stored per-example baseline and optimized test scores.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "get_wallet_for_agent",
+   "description": "Return the caller's purchased balance, free grant, and recent ledger.",
+   "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+   }
+  },
+  {
+   "name": "list_datasets_for_agent",
+   "description": "Return the caller's datasets plus, optionally, those shared with them.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "include_shared": {
+      "type": "boolean",
+      "default": true
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "list_jobs_optimizations_get",
+   "description": "Return a page of optimizations ordered by ``created_at`` descending.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "status": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Exact-match status filter: pending, validating, running, success, failed, cancelled"
+     },
+     "username": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Only include optimizations submitted by this user"
+     },
+     "optimization_type": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "'run' (single optimization) or 'grid_search' (model-pair sweep)"
+     },
+     "limit": {
+      "type": "integer",
+      "maximum": 50.0,
+      "minimum": 1.0,
+      "description": "Page size (default 25, ceiling 50). Use the default unless the user explicitly asks for fewer; paginate with offset.",
+      "default": 25
+     },
+     "offset": {
+      "type": "integer",
+      "minimum": 0.0,
+      "description": "Number of optimizations to skip before returning; combine with limit for stable pagination",
+      "default": 0
+     },
+     "include_shared": {
+      "type": "boolean",
+      "description": "Also include runs shared with the caller via a member grant (Drive-style sharing). Non-admins only; admins already see all.",
+      "default": false
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "list_models_for_agent",
+   "description": "List models; copy each entry's ``name`` verbatim into ``model_name`` when submitting. Pass ``query`` to filter by name substring (case-insensitive, e.g. ``query=\"gpt-5.4\"``) — the unfiltered catalog is ~18KB across 130 models, so always pa…",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "list_sample_datasets_datasets_samples_get",
+   "description": "Return the catalog of bundled demo datasets without the rows.",
+   "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+   }
+  },
+  {
+   "name": "list_tagging_sessions_for_agent",
+   "description": "Return the caller's sessions, pinned first then newest activity.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "limit": {
+      "type": "integer",
+      "maximum": 200.0,
+      "minimum": 1.0,
+      "default": 100
+     },
+     "offset": {
+      "type": "integer",
+      "minimum": 0.0,
+      "default": 0
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "memory_nap",
+   "description": "Save the agent-authored summary of the next pending block.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "block": {
+      "type": "string",
+      "description": "The block id from the compression request, like \"16-31\"."
+     },
+     "summary": {
+      "type": "string",
+      "description": "Your one-line compression of the block, at most 280 characters."
+     }
+    },
+    "required": [
+     "block",
+     "summary"
+    ]
+   }
+  },
+  {
+   "name": "memory_note",
+   "description": "Append one line to the caller's permanent memory log.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "text": {
+      "type": "string",
+      "description": "The memory: one line, at most 280 characters, in English."
+     }
+    },
+    "required": [
+     "text"
+    ]
+   }
+  },
+  {
+   "name": "memory_recall",
+   "description": "Regex-search the caller's whole memory log, word for word.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "pattern": {
+      "type": "string",
+      "description": "Case-insensitive regular expression."
+     }
+    },
+    "required": [
+     "pattern"
+    ]
+   }
+  },
+  {
+   "name": "memory_zoom",
+   "description": "Expand a ``#lo-hi`` summary node into its halves, toward raw memories.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "block": {
+      "type": "string",
+      "description": "A block id as the memory context prints them, like \"16-31\"."
+     }
+    },
+    "required": [
+     "block"
+    ]
+   }
+  },
+  {
+   "name": "pause_job_optimizations",
+   "description": "Suspend a running optimization at its last checkpoint so it can be resumed.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "profile_datasets_profile_post",
+   "description": "Return a ``DatasetProfile`` and a recommended ``SplitPlan``.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "dataset": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "column_mapping": {
+      "properties": {
+       "inputs": {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       },
+       "outputs": {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       }
+      },
+      "type": "object",
+      "description": "Describe how dataframe columns map onto DSPy signature fields.\n\n``inputs`` / ``outputs`` are plural mappings — ``{signature_field: column_name}``\n— because a single signature can have multiple input or output fields. This\nis distinct from the ``ServeResponse.input_fields`` / ``output_fields`` lists,\nwhich live at a different layer (inference response) and carry only field\n*names*, not column bindings. The two shapes are intentionally different."
+     },
+     "staged_dataset_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Opaque id from ``POST /datasets/stage-for-agent``. Pass instead of an inline ``dataset`` to profile staged rows; the backend rehydrates them."
+     },
+     "seed": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Optional RNG seed for reproducibility; a random one is chosen if omitted."
+     },
+     "engine": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Black-box engine the split will feed (``best_of_n``, ``meta_harness``, ...). Shifts the recommended fractions towards the sets that engine actually scores on; omit for the GEPA-tuned default."
+     }
+    },
+    "required": [
+     "column_mapping"
+    ]
+   }
+  },
+  {
+   "name": "public_search_dashboard_search_post",
+   "description": "Rank embedded jobs by pgvector similarity (or recency / gain).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "models": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "optimizers": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "optimization_types": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "tasks": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "modules": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "date_from": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "date_to": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "sort": {
+      "type": "string",
+      "default": "relevance"
+     },
+     "page": {
+      "type": "integer",
+      "minimum": 1.0,
+      "default": 1
+     },
+     "size": {
+      "type": "integer",
+      "maximum": 50.0,
+      "minimum": 1.0,
+      "default": 30
+     },
+     "owner_username": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "shared_with_username": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "rename_job_optimizations",
+   "description": "Update the display name for an optimization.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string",
+      "maxLength": 200,
+      "minLength": 1
+     }
+    },
+    "required": [
+     "optimization_id",
+     "name"
+    ]
+   }
+  },
+  {
+   "name": "request_code_authoring",
+   "description": "Signal the chat UI to render an inline code-authoring card.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "goal": {
+      "type": "string",
+      "maxLength": 400,
+      "description": "Optional plain-language goal for the Signature/Metric (empty seeds both from the dataset). Echoed back so the card can show it.",
+      "default": ""
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "request_user_dataset_datasets_request_upload_post",
+   "description": "Signal the chat UI to render an inline dataset-upload card.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "prompt": {
+      "type": "string",
+      "maxLength": 400,
+      "description": "Short Hebrew sentence explaining why a dataset is needed.",
+      "default": ""
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "request_user_dataset_from_library",
+   "description": "Signal the chat UI to render an inline saved-dataset picker.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "prompt": {
+      "type": "string",
+      "maxLength": 400,
+      "description": "Short Hebrew sentence explaining why a dataset is needed.",
+      "default": ""
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "request_user_inference",
+   "description": "Signal the chat UI to render an inline inference-input card.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     },
+     "prompt": {
+      "type": "string",
+      "maxLength": 400,
+      "description": "Short Hebrew sentence explaining why inference is being offered.",
+      "default": ""
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "request_user_pair_inference",
+   "description": "Signal the chat UI to render an inline inference card for one pair.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     },
+     "pair_index": {
+      "type": "integer"
+     },
+     "prompt": {
+      "type": "string",
+      "maxLength": 400,
+      "description": "Short Hebrew sentence explaining why inference is being offered.",
+      "default": ""
+     }
+    },
+    "required": [
+     "optimization_id",
+     "pair_index"
+    ]
+   }
+  },
+  {
+   "name": "restart_job_optimizations",
+   "description": "Reset a terminal optimization in place and re-run it from scratch.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "resume_job_optimizations",
+   "description": "Resume a mid-run optimization in place from its saved GEPA checkpoint.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "retry_job_optimizations",
+   "description": "Re-run a failed or cancelled optimization using the original payload.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "serve_info_serve",
+   "description": "Describe an optimized program without running it.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "serve_pair_info_serve",
+   "description": "Describe the program for one grid-search pair without running it.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     },
+     "pair_index": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "optimization_id",
+     "pair_index"
+    ]
+   }
+  },
+  {
+   "name": "set_column_roles_datasets_column_roles_post",
+   "description": "Validate a proposed column-role map and return a ``wizard_state`` patch.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "dataset_columns": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "maxItems": 100,
+      "minItems": 1
+     },
+     "column_roles": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "type": "object",
+      "description": "Map of dataset column name → role: 'input', 'output', or 'ignore'."
+     },
+     "job_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "dataset_columns",
+     "column_roles"
+    ]
+   }
+  },
+  {
+   "name": "stage_sample_dataset_datasets_samples",
+   "description": "Stage a sample's rows for the caller and return a ``wizard_state`` patch.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "sample_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "sample_id"
+    ]
+   }
+  },
+  {
+   "name": "submit_blackbox_run_blackbox_run_post",
+   "description": "Queue a black-box optimization of a text artifact against a scorer.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "description": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 280
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "username": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "objective": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "background": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "recipe": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "prompt",
+         "code",
+         "anything"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "seed_candidate": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "scorer": {
+      "properties": {
+       "kind": {
+        "type": "string",
+        "enum": [
+         "python",
+         "remote"
+        ],
+        "default": "python"
+       },
+       "metric_code": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "url": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "secret": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "timeout_seconds": {
+        "type": "number",
+        "maximum": 600.0,
+        "exclusiveMinimum": 0.0,
+        "default": 60.0
+       },
+       "install_command": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "dependency_lock": {
+        "anyOf": [
+         {
+          "properties": {
+           "code_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+           },
+           "requirements": {
+            "items": {
+             "type": "string"
+            },
+            "type": "array"
+           },
+           "inferred": {
+            "items": {
+             "type": "string"
+            },
+            "type": "array"
+           },
+           "imports": {
+            "items": {
+             "type": "string"
+            },
+            "type": "array"
+           },
+           "artifacts": {
+            "items": {
+             "properties": {
+              "name": {
+               "type": "string",
+               "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+              },
+              "version": {
+               "type": "string",
+               "pattern": "^[a-zA-Z0-9][a-zA-Z0-9.!+_-]*$"
+              },
+              "filename": {
+               "type": "string",
+               "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._+!-]*\\.whl$"
+              },
+              "url": {
+               "type": "string",
+               "maxLength": 4096
+              },
+              "sha256": {
+               "type": "string",
+               "pattern": "^[a-f0-9]{64}$"
+              }
+             },
+             "type": "object",
+             "required": [
+              "name",
+              "version",
+              "filename",
+              "url",
+              "sha256"
+             ]
+            },
+            "type": "array"
+           },
+           "python": {
+            "type": "string"
+           },
+           "image": {
+            "type": "string"
+           },
+           "registry_url": {
+            "type": "string"
+           },
+           "signature": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+           }
+          },
+          "type": "object",
+          "required": [
+           "code_sha256",
+           "requirements",
+           "inferred",
+           "imports",
+           "artifacts",
+           "python",
+           "image",
+           "registry_url",
+           "signature"
+          ]
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "model": {
+        "anyOf": [
+         {
+          "properties": {
+           "name": {
+            "type": "string"
+           },
+           "token_source": {
+            "anyOf": [
+             {
+              "type": "string",
+              "enum": [
+               "managed",
+               "byok"
+              ]
+             },
+             {
+              "type": "null"
+             }
+            ]
+           },
+           "byok_provider": {
+            "anyOf": [
+             {
+              "type": "string"
+             },
+             {
+              "type": "null"
+             }
+            ]
+           },
+           "base_url": {
+            "anyOf": [
+             {
+              "type": "string"
+             },
+             {
+              "type": "null"
+             }
+            ]
+           },
+           "temperature": {
+            "anyOf": [
+             {
+              "type": "number",
+              "maximum": 2.0,
+              "minimum": 0.0
+             },
+             {
+              "type": "null"
+             }
+            ]
+           },
+           "max_tokens": {
+            "anyOf": [
+             {
+              "type": "integer",
+              "minimum": 1.0
+             },
+             {
+              "type": "null"
+             }
+            ]
+           },
+           "extra": {
+            "additionalProperties": true,
+            "type": "object"
+           }
+          },
+          "type": "object",
+          "required": [
+           "name"
+          ],
+          "description": "Configuration block for language-model/backbone selection."
+         },
+         {
+          "type": "null"
+         }
+        ]
+       }
+      },
+      "type": "object"
+     },
+     "cases": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "type": "array",
+        "maxItems": 200000
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "staged_dataset_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "split_fractions": {
+      "properties": {
+       "train": {
+        "type": "number",
+        "default": 0.7
+       },
+       "val": {
+        "type": "number",
+        "default": 0.15
+       },
+       "test": {
+        "type": "number",
+        "default": 0.15
+       }
+      },
+      "type": "object",
+      "description": "Train/val/test fraction spec."
+     },
+     "shuffle": {
+      "type": "boolean",
+      "default": true
+     },
+     "seed": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "budget": {
+      "properties": {
+       "max_scorer_runs": {
+        "type": "integer",
+        "maximum": 100000.0,
+        "minimum": 1.0,
+        "default": 200
+       },
+       "max_iterations": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "maximum": 1000.0,
+          "minimum": 1.0
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "stop_at_score": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       }
+      },
+      "type": "object"
+     },
+     "strategy": {
+      "properties": {
+       "mode": {
+        "type": "string",
+        "enum": [
+         "auto",
+         "single"
+        ],
+        "default": "auto"
+       },
+       "engine": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       }
+      },
+      "type": "object"
+     },
+     "target": {
+      "properties": {
+       "kind": {
+        "type": "string",
+        "enum": [
+         "text",
+         "agent"
+        ],
+        "default": "text"
+       },
+       "harness": {
+        "type": "string",
+        "default": "pi"
+       },
+       "model": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "timeout_seconds": {
+        "type": "number",
+        "maximum": 2700.0,
+        "exclusiveMinimum": 0.0,
+        "default": 600.0
+       },
+       "concurrency": {
+        "type": "integer",
+        "maximum": 8.0,
+        "minimum": 1.0,
+        "default": 2
+       },
+       "setup_command": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "install_command": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "run_command": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       }
+      },
+      "type": "object"
+     },
+     "proposer_runtime": {
+      "type": "string",
+      "const": "vercel",
+      "default": "vercel"
+     },
+     "proposer": {
+      "properties": {
+       "harness": {
+        "type": "string",
+        "default": "claude_code"
+       },
+       "install_command": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "run_command": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "effort": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "max_thinking_tokens": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "maximum": 128000.0,
+          "minimum": 1024.0
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "max_candidates_per_iter": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "maximum": 8.0,
+          "minimum": 1.0
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "ralph": {
+        "type": "boolean",
+        "default": true
+       },
+       "max_no_eval_seconds": {
+        "anyOf": [
+         {
+          "type": "number",
+          "maximum": 7200.0,
+          "exclusiveMinimum": 0.0
+         },
+         {
+          "type": "null"
+         }
+        ]
+       }
+      },
+      "type": "object"
+     },
+     "task_model_config": {
+      "anyOf": [
+       {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "token_source": {
+          "anyOf": [
+           {
+            "type": "string",
+            "enum": [
+             "managed",
+             "byok"
+            ]
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "byok_provider": {
+          "anyOf": [
+           {
+            "type": "string"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "base_url": {
+          "anyOf": [
+           {
+            "type": "string"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "temperature": {
+          "anyOf": [
+           {
+            "type": "number",
+            "maximum": 2.0,
+            "minimum": 0.0
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "max_tokens": {
+          "anyOf": [
+           {
+            "type": "integer",
+            "minimum": 1.0
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "extra": {
+          "additionalProperties": true,
+          "type": "object"
+         }
+        },
+        "type": "object",
+        "required": [
+         "name"
+        ],
+        "description": "Configuration block for language-model/backbone selection."
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "reflection_model_config": {
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "token_source": {
+        "anyOf": [
+         {
+          "type": "string",
+          "enum": [
+           "managed",
+           "byok"
+          ]
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "byok_provider": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "base_url": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "temperature": {
+        "anyOf": [
+         {
+          "type": "number",
+          "maximum": 2.0,
+          "minimum": 0.0
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "max_tokens": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "minimum": 1.0
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "extra": {
+        "additionalProperties": true,
+        "type": "object"
+       }
+      },
+      "type": "object",
+      "required": [
+       "name"
+      ],
+      "description": "Configuration block for language-model/backbone selection."
+     },
+     "token_source": {
+      "type": "string",
+      "enum": [
+       "managed",
+       "byok"
+      ],
+      "default": "managed"
+     },
+     "is_private": {
+      "type": "boolean",
+      "default": false
+     },
+     "preflight_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "preflight_fingerprint": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 128,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "execution_budget_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "execution_budget_revision": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "execution_budget_generation": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "max_cost_credits": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "estimated_credits_low": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "estimated_credits_high": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "scorer",
+     "reflection_model_config"
+    ]
+   }
+  },
+  {
+   "name": "submit_grid_search_grid_search_post",
+   "description": "Queue a sweep over ``(generation_model, reflection_model)`` pairs.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "User-defined display name for this optimization."
+     },
+     "description": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 280
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Short description of the optimization goal (max 280 characters)."
+     },
+     "username": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Submitter identity. Optional on the wire — the API always overwrites it from the authenticated session, so clients (including MCP tool callers) can omit it."
+     },
+     "module_name": {
+      "type": "string"
+     },
+     "module_kwargs": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "signature_code": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "The single dspy.Signature the module wraps. Required for every module except 'workflow', whose per-node signatures live inside the workflow spec instead."
+     },
+     "workflow": {
+      "anyOf": [
+       {
+        "properties": {
+         "nodes": {
+          "items": {
+           "anyOf": [
+            {
+             "properties": {
+              "id": {
+               "type": "string",
+               "maxLength": 64,
+               "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "name": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "maxLength": 120
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "position": {
+               "anyOf": [
+                {
+                 "properties": {
+                  "x": {
+                   "type": "number"
+                  },
+                  "y": {
+                   "type": "number"
+                  }
+                 },
+                 "type": "object",
+                 "required": [
+                  "x",
+                  "y"
+                 ],
+                 "description": "Canvas coordinates persisted so the builder re-opens exactly as left."
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "kind": {
+               "type": "string",
+               "const": "input"
+              },
+              "fields": {
+               "items": {
+                "properties": {
+                 "name": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                 },
+                 "annotation": {
+                  "type": "string",
+                  "default": "str"
+                 },
+                 "description": {
+                  "anyOf": [
+                   {
+                    "type": "string"
+                   },
+                   {
+                    "type": "null"
+                   }
+                  ]
+                 }
+                },
+                "type": "object",
+                "required": [
+                 "name"
+                ],
+                "description": "A declared port on an anchor, transform, or mcp node."
+               },
+               "type": "array",
+               "minItems": 1
+              }
+             },
+             "type": "object",
+             "required": [
+              "id",
+              "kind",
+              "fields"
+             ],
+             "description": "The single entry anchor; its fields are the workflow's input ports."
+            },
+            {
+             "properties": {
+              "id": {
+               "type": "string",
+               "maxLength": 64,
+               "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "name": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "maxLength": 120
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "position": {
+               "anyOf": [
+                {
+                 "properties": {
+                  "x": {
+                   "type": "number"
+                  },
+                  "y": {
+                   "type": "number"
+                  }
+                 },
+                 "type": "object",
+                 "required": [
+                  "x",
+                  "y"
+                 ],
+                 "description": "Canvas coordinates persisted so the builder re-opens exactly as left."
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "kind": {
+               "type": "string",
+               "const": "output"
+              },
+              "fields": {
+               "items": {
+                "properties": {
+                 "name": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                 },
+                 "annotation": {
+                  "type": "string",
+                  "default": "str"
+                 },
+                 "description": {
+                  "anyOf": [
+                   {
+                    "type": "string"
+                   },
+                   {
+                    "type": "null"
+                   }
+                  ]
+                 }
+                },
+                "type": "object",
+                "required": [
+                 "name"
+                ],
+                "description": "A declared port on an anchor, transform, or mcp node."
+               },
+               "type": "array",
+               "minItems": 1
+              }
+             },
+             "type": "object",
+             "required": [
+              "id",
+              "kind",
+              "fields"
+             ],
+             "description": "The single exit anchor; its fields are the workflow's final outputs."
+            },
+            {
+             "properties": {
+              "id": {
+               "type": "string",
+               "maxLength": 64,
+               "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "name": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "maxLength": 120
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "position": {
+               "anyOf": [
+                {
+                 "properties": {
+                  "x": {
+                   "type": "number"
+                  },
+                  "y": {
+                   "type": "number"
+                  }
+                 },
+                 "type": "object",
+                 "required": [
+                  "x",
+                  "y"
+                 ],
+                 "description": "Canvas coordinates persisted so the builder re-opens exactly as left."
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "kind": {
+               "type": "string",
+               "const": "signature"
+              },
+              "module_name": {
+               "type": "string",
+               "enum": [
+                "predict",
+                "cot",
+                "react",
+                "flex"
+               ],
+               "default": "predict"
+              },
+              "signature_code": {
+               "type": "string",
+               "minLength": 1
+              },
+              "tool_filter": {
+               "anyOf": [
+                {
+                 "items": {
+                  "type": "string"
+                 },
+                 "type": "array"
+                },
+                {
+                 "type": "null"
+                }
+               ],
+               "description": "React and flex nodes only: which tools out of the run-level tool_source the node may call. Null means the full roster on a react node, and no tools at all on a flex node — a Flex is a complete module without them, so it opts in by naming the tools it wants."
+              }
+             },
+             "type": "object",
+             "required": [
+              "id",
+              "kind",
+              "signature_code"
+             ],
+             "description": "An LLM step: a dspy.Signature run by a per-node module choice."
+            },
+            {
+             "properties": {
+              "id": {
+               "type": "string",
+               "maxLength": 64,
+               "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "name": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "maxLength": 120
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "position": {
+               "anyOf": [
+                {
+                 "properties": {
+                  "x": {
+                   "type": "number"
+                  },
+                  "y": {
+                   "type": "number"
+                  }
+                 },
+                 "type": "object",
+                 "required": [
+                  "x",
+                  "y"
+                 ],
+                 "description": "Canvas coordinates persisted so the builder re-opens exactly as left."
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "kind": {
+               "type": "string",
+               "const": "transform"
+              },
+              "transform_code": {
+               "type": "string",
+               "minLength": 1
+              },
+              "input_fields": {
+               "items": {
+                "properties": {
+                 "name": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                 },
+                 "annotation": {
+                  "type": "string",
+                  "default": "str"
+                 },
+                 "description": {
+                  "anyOf": [
+                   {
+                    "type": "string"
+                   },
+                   {
+                    "type": "null"
+                   }
+                  ]
+                 }
+                },
+                "type": "object",
+                "required": [
+                 "name"
+                ],
+                "description": "A declared port on an anchor, transform, or mcp node."
+               },
+               "type": "array",
+               "minItems": 1
+              },
+              "output_fields": {
+               "items": {
+                "properties": {
+                 "name": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                 },
+                 "annotation": {
+                  "type": "string",
+                  "default": "str"
+                 },
+                 "description": {
+                  "anyOf": [
+                   {
+                    "type": "string"
+                   },
+                   {
+                    "type": "null"
+                   }
+                  ]
+                 }
+                },
+                "type": "object",
+                "required": [
+                 "name"
+                ],
+                "description": "A declared port on an anchor, transform, or mcp node."
+               },
+               "type": "array",
+               "minItems": 1
+              }
+             },
+             "type": "object",
+             "required": [
+              "id",
+              "kind",
+              "transform_code",
+              "input_fields",
+              "output_fields"
+             ],
+             "description": "A non-LLM Python step reshaping data between nodes."
+            },
+            {
+             "properties": {
+              "id": {
+               "type": "string",
+               "maxLength": 64,
+               "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "name": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "maxLength": 120
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "position": {
+               "anyOf": [
+                {
+                 "properties": {
+                  "x": {
+                   "type": "number"
+                  },
+                  "y": {
+                   "type": "number"
+                  }
+                 },
+                 "type": "object",
+                 "required": [
+                  "x",
+                  "y"
+                 ],
+                 "description": "Canvas coordinates persisted so the builder re-opens exactly as left."
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "kind": {
+               "type": "string",
+               "const": "mcp"
+              },
+              "tool_name": {
+               "type": "string",
+               "maxLength": 128,
+               "minLength": 1
+              },
+              "input_fields": {
+               "items": {
+                "properties": {
+                 "name": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                 },
+                 "annotation": {
+                  "type": "string",
+                  "default": "str"
+                 },
+                 "description": {
+                  "anyOf": [
+                   {
+                    "type": "string"
+                   },
+                   {
+                    "type": "null"
+                   }
+                  ]
+                 }
+                },
+                "type": "object",
+                "required": [
+                 "name"
+                ],
+                "description": "A declared port on an anchor, transform, or mcp node."
+               },
+               "type": "array"
+              },
+              "output_field": {
+               "properties": {
+                "name": {
+                 "type": "string",
+                 "maxLength": 64,
+                 "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                },
+                "annotation": {
+                 "type": "string",
+                 "default": "str"
+                },
+                "description": {
+                 "anyOf": [
+                  {
+                   "type": "string"
+                  },
+                  {
+                   "type": "null"
+                  }
+                 ]
+                }
+               },
+               "type": "object",
+               "required": [
+                "name"
+               ],
+               "description": "A declared port on an anchor, transform, or mcp node."
+              }
+             },
+             "type": "object",
+             "required": [
+              "id",
+              "kind",
+              "tool_name"
+             ],
+             "description": "An explicit MCP tool call as a graph step."
+            }
+           ]
+          },
+          "type": "array",
+          "maxItems": 50,
+          "minItems": 2
+         },
+         "edges": {
+          "items": {
+           "properties": {
+            "source": {
+             "type": "string"
+            },
+            "source_port": {
+             "type": "string",
+             "maxLength": 64,
+             "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            },
+            "target": {
+             "type": "string"
+            },
+            "target_port": {
+             "type": "string",
+             "maxLength": 64,
+             "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            }
+           },
+           "type": "object",
+           "required": [
+            "source",
+            "source_port",
+            "target",
+            "target_port"
+           ],
+           "description": "A port-level data-flow connection between two nodes."
+          },
+          "type": "array",
+          "maxItems": 200
+         }
+        },
+        "type": "object",
+        "required": [
+         "nodes"
+        ],
+        "description": "The full workflow graph carried on a run request."
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Workflow graph spec. Required when module_name is 'workflow', forbidden otherwise. The graph's input-anchor fields are the run's input ports (covered by column_mapping.inputs) and its output-anchor fields are the final outputs the metric scores (covered by column_mapping.outputs)."
+     },
+     "metric_code": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "optimizer_name": {
+      "type": "string"
+     },
+     "optimizer_kwargs": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "compile_kwargs": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "dataset": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "type": "array",
+        "maxItems": 200000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Inline dataset rows. Optional when ``staged_dataset_id`` is provided — the server then loads the rows from the staged copy. Exactly one of ``dataset`` or ``staged_dataset_id`` must be present."
+     },
+     "staged_dataset_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Opaque id returned by ``POST /datasets/stage-for-agent``. Used by agent-driven submits so the model does not have to inline tens of thousands of dataset rows into its tool arguments."
+     },
+     "source_dataset_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Id of a saved personal-library dataset to run by reference. The server resolves the caller's access, loads the rows onto ``dataset``, and records the link from the optimization back to the dataset. Mutually exclusive with ``dataset`` and ``staged_dataset_id``."
+     },
+     "column_mapping": {
+      "properties": {
+       "inputs": {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       },
+       "outputs": {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       }
+      },
+      "type": "object",
+      "description": "Describe how dataframe columns map onto DSPy signature fields.\n\n``inputs`` / ``outputs`` are plural mappings — ``{signature_field: column_name}``\n— because a single signature can have multiple input or output fields. This\nis distinct from the ``ServeResponse.input_fields`` / ``output_fields`` lists,\nwhich live at a different layer (inference response) and carry only field\n*names*, not column bindings. The two shapes are intentionally different."
+     },
+     "column_order": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Dataset column names in the order the user arranged them at submit time. Persisted as an array because JSONB does not preserve object key order — a clone reads this back to restore the original column order in the UI."
+     },
+     "split_fractions": {
+      "properties": {
+       "train": {
+        "type": "number",
+        "default": 0.7
+       },
+       "val": {
+        "type": "number",
+        "default": 0.15
+       },
+       "test": {
+        "type": "number",
+        "default": 0.15
+       }
+      },
+      "type": "object",
+      "description": "Train/val/test fraction spec."
+     },
+     "shuffle": {
+      "type": "boolean",
+      "default": true
+     },
+     "seed": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "dataset_filename": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Original dataset file name."
+     },
+     "is_private": {
+      "type": "boolean",
+      "description": "When true, the optimization is excluded from the public explore page.",
+      "default": false
+     },
+     "token_source": {
+      "type": "string",
+      "enum": [
+       "managed",
+       "byok"
+      ],
+      "description": "How model calls are billed: 'managed' charges the marked-up provider cost to Skynet credits; 'byok' sends calls through the user's provider key and charges only Skynet's platform fee to credits. Billable sandbox usage is charged at cost in both modes.",
+      "default": "managed"
+     },
+     "execution_runtime": {
+      "type": "string",
+      "const": "vercel",
+      "default": "vercel"
+     },
+     "preflight_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "preflight_fingerprint": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 128,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "execution_budget_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "execution_budget_revision": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "execution_budget_generation": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "max_cost_credits": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "User-set per-job spend ceiling, in credits. A DSPy optimizer's token use is not linear (bootstrapping, compile steps, validation loops), so the wizard shows a projected bracket rather than a tight estimate and lets the user cap the run here. The run is hard-stopped server-side once its accumulated credit cost reaches this cap; consumed work remains billed and the run preserves any evaluated result. Omit (null) for no ceiling."
+     },
+     "target_score": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 100.0,
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Optional validation score target, expressed as a percentage. GEPA stops searching when its best validation candidate reaches this score; the existing metric-call budget remains a safety ceiling."
+     },
+     "estimated_credits_low": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Low end of the projected credit bracket the wizard showed at submit. Persisted so the post-run proof moment can reconcile the estimate against the actual charge. Carries the chargeable bracket for the run's token_source (managed: full per-model cost; byok: platform fee). Advisory only — never gates or bills. Omit (null) when no estimate was computed."
+     },
+     "estimated_credits_high": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "High end of the projected credit bracket (see estimated_credits_low). Seeds the post-run estimate-vs-actual reconciliation. Advisory only."
+     },
+     "generation_models": {
+      "items": {
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "token_source": {
+         "anyOf": [
+          {
+           "type": "string",
+           "enum": [
+            "managed",
+            "byok"
+           ]
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "byok_provider": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "base_url": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "temperature": {
+         "anyOf": [
+          {
+           "type": "number",
+           "maximum": 2.0,
+           "minimum": 0.0
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "max_tokens": {
+         "anyOf": [
+          {
+           "type": "integer",
+           "minimum": 1.0
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "extra": {
+         "additionalProperties": true,
+         "type": "object"
+        }
+       },
+       "type": "object",
+       "required": [
+        "name"
+       ],
+       "description": "Configuration block for language-model/backbone selection."
+      },
+      "type": "array"
+     },
+     "reflection_models": {
+      "items": {
+       "properties": {
+        "name": {
+         "type": "string"
+        },
+        "token_source": {
+         "anyOf": [
+          {
+           "type": "string",
+           "enum": [
+            "managed",
+            "byok"
+           ]
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "byok_provider": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "base_url": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "temperature": {
+         "anyOf": [
+          {
+           "type": "number",
+           "maximum": 2.0,
+           "minimum": 0.0
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "max_tokens": {
+         "anyOf": [
+          {
+           "type": "integer",
+           "minimum": 1.0
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "extra": {
+         "additionalProperties": true,
+         "type": "object"
+        }
+       },
+       "type": "object",
+       "required": [
+        "name"
+       ],
+       "description": "Configuration block for language-model/backbone selection."
+      },
+      "type": "array"
+     },
+     "use_all_available_generation_models": {
+      "type": "boolean",
+      "description": "Populate generation_models from every available model in the catalog. When true, generation_models may be omitted and is replaced server-side.",
+      "default": false
+     },
+     "use_all_available_reflection_models": {
+      "type": "boolean",
+      "description": "Populate reflection_models from every available model in the catalog. When true, reflection_models may be omitted and is replaced server-side.",
+      "default": false
+     }
+    },
+    "required": [
+     "module_name",
+     "optimizer_name",
+     "column_mapping"
+    ]
+   }
+  },
+  {
+   "name": "submit_job_run_post",
+   "description": "Queue one end-to-end DSPy optimization for background execution.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "User-defined display name for this optimization."
+     },
+     "description": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 280
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Short description of the optimization goal (max 280 characters)."
+     },
+     "username": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Submitter identity. Optional on the wire — the API always overwrites it from the authenticated session, so clients (including MCP tool callers) can omit it."
+     },
+     "module_name": {
+      "type": "string"
+     },
+     "module_kwargs": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "signature_code": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "The single dspy.Signature the module wraps. Required for every module except 'workflow', whose per-node signatures live inside the workflow spec instead."
+     },
+     "workflow": {
+      "anyOf": [
+       {
+        "properties": {
+         "nodes": {
+          "items": {
+           "anyOf": [
+            {
+             "properties": {
+              "id": {
+               "type": "string",
+               "maxLength": 64,
+               "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "name": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "maxLength": 120
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "position": {
+               "anyOf": [
+                {
+                 "properties": {
+                  "x": {
+                   "type": "number"
+                  },
+                  "y": {
+                   "type": "number"
+                  }
+                 },
+                 "type": "object",
+                 "required": [
+                  "x",
+                  "y"
+                 ],
+                 "description": "Canvas coordinates persisted so the builder re-opens exactly as left."
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "kind": {
+               "type": "string",
+               "const": "input"
+              },
+              "fields": {
+               "items": {
+                "properties": {
+                 "name": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                 },
+                 "annotation": {
+                  "type": "string",
+                  "default": "str"
+                 },
+                 "description": {
+                  "anyOf": [
+                   {
+                    "type": "string"
+                   },
+                   {
+                    "type": "null"
+                   }
+                  ]
+                 }
+                },
+                "type": "object",
+                "required": [
+                 "name"
+                ],
+                "description": "A declared port on an anchor, transform, or mcp node."
+               },
+               "type": "array",
+               "minItems": 1
+              }
+             },
+             "type": "object",
+             "required": [
+              "id",
+              "kind",
+              "fields"
+             ],
+             "description": "The single entry anchor; its fields are the workflow's input ports."
+            },
+            {
+             "properties": {
+              "id": {
+               "type": "string",
+               "maxLength": 64,
+               "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "name": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "maxLength": 120
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "position": {
+               "anyOf": [
+                {
+                 "properties": {
+                  "x": {
+                   "type": "number"
+                  },
+                  "y": {
+                   "type": "number"
+                  }
+                 },
+                 "type": "object",
+                 "required": [
+                  "x",
+                  "y"
+                 ],
+                 "description": "Canvas coordinates persisted so the builder re-opens exactly as left."
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "kind": {
+               "type": "string",
+               "const": "output"
+              },
+              "fields": {
+               "items": {
+                "properties": {
+                 "name": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                 },
+                 "annotation": {
+                  "type": "string",
+                  "default": "str"
+                 },
+                 "description": {
+                  "anyOf": [
+                   {
+                    "type": "string"
+                   },
+                   {
+                    "type": "null"
+                   }
+                  ]
+                 }
+                },
+                "type": "object",
+                "required": [
+                 "name"
+                ],
+                "description": "A declared port on an anchor, transform, or mcp node."
+               },
+               "type": "array",
+               "minItems": 1
+              }
+             },
+             "type": "object",
+             "required": [
+              "id",
+              "kind",
+              "fields"
+             ],
+             "description": "The single exit anchor; its fields are the workflow's final outputs."
+            },
+            {
+             "properties": {
+              "id": {
+               "type": "string",
+               "maxLength": 64,
+               "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "name": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "maxLength": 120
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "position": {
+               "anyOf": [
+                {
+                 "properties": {
+                  "x": {
+                   "type": "number"
+                  },
+                  "y": {
+                   "type": "number"
+                  }
+                 },
+                 "type": "object",
+                 "required": [
+                  "x",
+                  "y"
+                 ],
+                 "description": "Canvas coordinates persisted so the builder re-opens exactly as left."
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "kind": {
+               "type": "string",
+               "const": "signature"
+              },
+              "module_name": {
+               "type": "string",
+               "enum": [
+                "predict",
+                "cot",
+                "react",
+                "flex"
+               ],
+               "default": "predict"
+              },
+              "signature_code": {
+               "type": "string",
+               "minLength": 1
+              },
+              "tool_filter": {
+               "anyOf": [
+                {
+                 "items": {
+                  "type": "string"
+                 },
+                 "type": "array"
+                },
+                {
+                 "type": "null"
+                }
+               ],
+               "description": "React and flex nodes only: which tools out of the run-level tool_source the node may call. Null means the full roster on a react node, and no tools at all on a flex node — a Flex is a complete module without them, so it opts in by naming the tools it wants."
+              }
+             },
+             "type": "object",
+             "required": [
+              "id",
+              "kind",
+              "signature_code"
+             ],
+             "description": "An LLM step: a dspy.Signature run by a per-node module choice."
+            },
+            {
+             "properties": {
+              "id": {
+               "type": "string",
+               "maxLength": 64,
+               "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "name": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "maxLength": 120
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "position": {
+               "anyOf": [
+                {
+                 "properties": {
+                  "x": {
+                   "type": "number"
+                  },
+                  "y": {
+                   "type": "number"
+                  }
+                 },
+                 "type": "object",
+                 "required": [
+                  "x",
+                  "y"
+                 ],
+                 "description": "Canvas coordinates persisted so the builder re-opens exactly as left."
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "kind": {
+               "type": "string",
+               "const": "transform"
+              },
+              "transform_code": {
+               "type": "string",
+               "minLength": 1
+              },
+              "input_fields": {
+               "items": {
+                "properties": {
+                 "name": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                 },
+                 "annotation": {
+                  "type": "string",
+                  "default": "str"
+                 },
+                 "description": {
+                  "anyOf": [
+                   {
+                    "type": "string"
+                   },
+                   {
+                    "type": "null"
+                   }
+                  ]
+                 }
+                },
+                "type": "object",
+                "required": [
+                 "name"
+                ],
+                "description": "A declared port on an anchor, transform, or mcp node."
+               },
+               "type": "array",
+               "minItems": 1
+              },
+              "output_fields": {
+               "items": {
+                "properties": {
+                 "name": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                 },
+                 "annotation": {
+                  "type": "string",
+                  "default": "str"
+                 },
+                 "description": {
+                  "anyOf": [
+                   {
+                    "type": "string"
+                   },
+                   {
+                    "type": "null"
+                   }
+                  ]
+                 }
+                },
+                "type": "object",
+                "required": [
+                 "name"
+                ],
+                "description": "A declared port on an anchor, transform, or mcp node."
+               },
+               "type": "array",
+               "minItems": 1
+              }
+             },
+             "type": "object",
+             "required": [
+              "id",
+              "kind",
+              "transform_code",
+              "input_fields",
+              "output_fields"
+             ],
+             "description": "A non-LLM Python step reshaping data between nodes."
+            },
+            {
+             "properties": {
+              "id": {
+               "type": "string",
+               "maxLength": 64,
+               "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+              },
+              "name": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "maxLength": 120
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "position": {
+               "anyOf": [
+                {
+                 "properties": {
+                  "x": {
+                   "type": "number"
+                  },
+                  "y": {
+                   "type": "number"
+                  }
+                 },
+                 "type": "object",
+                 "required": [
+                  "x",
+                  "y"
+                 ],
+                 "description": "Canvas coordinates persisted so the builder re-opens exactly as left."
+                },
+                {
+                 "type": "null"
+                }
+               ]
+              },
+              "kind": {
+               "type": "string",
+               "const": "mcp"
+              },
+              "tool_name": {
+               "type": "string",
+               "maxLength": 128,
+               "minLength": 1
+              },
+              "input_fields": {
+               "items": {
+                "properties": {
+                 "name": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                 },
+                 "annotation": {
+                  "type": "string",
+                  "default": "str"
+                 },
+                 "description": {
+                  "anyOf": [
+                   {
+                    "type": "string"
+                   },
+                   {
+                    "type": "null"
+                   }
+                  ]
+                 }
+                },
+                "type": "object",
+                "required": [
+                 "name"
+                ],
+                "description": "A declared port on an anchor, transform, or mcp node."
+               },
+               "type": "array"
+              },
+              "output_field": {
+               "properties": {
+                "name": {
+                 "type": "string",
+                 "maxLength": 64,
+                 "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+                },
+                "annotation": {
+                 "type": "string",
+                 "default": "str"
+                },
+                "description": {
+                 "anyOf": [
+                  {
+                   "type": "string"
+                  },
+                  {
+                   "type": "null"
+                  }
+                 ]
+                }
+               },
+               "type": "object",
+               "required": [
+                "name"
+               ],
+               "description": "A declared port on an anchor, transform, or mcp node."
+              }
+             },
+             "type": "object",
+             "required": [
+              "id",
+              "kind",
+              "tool_name"
+             ],
+             "description": "An explicit MCP tool call as a graph step."
+            }
+           ]
+          },
+          "type": "array",
+          "maxItems": 50,
+          "minItems": 2
+         },
+         "edges": {
+          "items": {
+           "properties": {
+            "source": {
+             "type": "string"
+            },
+            "source_port": {
+             "type": "string",
+             "maxLength": 64,
+             "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            },
+            "target": {
+             "type": "string"
+            },
+            "target_port": {
+             "type": "string",
+             "maxLength": 64,
+             "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            }
+           },
+           "type": "object",
+           "required": [
+            "source",
+            "source_port",
+            "target",
+            "target_port"
+           ],
+           "description": "A port-level data-flow connection between two nodes."
+          },
+          "type": "array",
+          "maxItems": 200
+         }
+        },
+        "type": "object",
+        "required": [
+         "nodes"
+        ],
+        "description": "The full workflow graph carried on a run request."
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Workflow graph spec. Required when module_name is 'workflow', forbidden otherwise. The graph's input-anchor fields are the run's input ports (covered by column_mapping.inputs) and its output-anchor fields are the final outputs the metric scores (covered by column_mapping.outputs)."
+     },
+     "metric_code": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "optimizer_name": {
+      "type": "string"
+     },
+     "optimizer_kwargs": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "compile_kwargs": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "dataset": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "type": "array",
+        "maxItems": 200000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Inline dataset rows. Optional when ``staged_dataset_id`` is provided — the server then loads the rows from the staged copy. Exactly one of ``dataset`` or ``staged_dataset_id`` must be present."
+     },
+     "staged_dataset_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Opaque id returned by ``POST /datasets/stage-for-agent``. Used by agent-driven submits so the model does not have to inline tens of thousands of dataset rows into its tool arguments."
+     },
+     "source_dataset_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Id of a saved personal-library dataset to run by reference. The server resolves the caller's access, loads the rows onto ``dataset``, and records the link from the optimization back to the dataset. Mutually exclusive with ``dataset`` and ``staged_dataset_id``."
+     },
+     "column_mapping": {
+      "properties": {
+       "inputs": {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       },
+       "outputs": {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       }
+      },
+      "type": "object",
+      "description": "Describe how dataframe columns map onto DSPy signature fields.\n\n``inputs`` / ``outputs`` are plural mappings — ``{signature_field: column_name}``\n— because a single signature can have multiple input or output fields. This\nis distinct from the ``ServeResponse.input_fields`` / ``output_fields`` lists,\nwhich live at a different layer (inference response) and carry only field\n*names*, not column bindings. The two shapes are intentionally different."
+     },
+     "column_order": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Dataset column names in the order the user arranged them at submit time. Persisted as an array because JSONB does not preserve object key order — a clone reads this back to restore the original column order in the UI."
+     },
+     "split_fractions": {
+      "properties": {
+       "train": {
+        "type": "number",
+        "default": 0.7
+       },
+       "val": {
+        "type": "number",
+        "default": 0.15
+       },
+       "test": {
+        "type": "number",
+        "default": 0.15
+       }
+      },
+      "type": "object",
+      "description": "Train/val/test fraction spec."
+     },
+     "shuffle": {
+      "type": "boolean",
+      "default": true
+     },
+     "seed": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "dataset_filename": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Original dataset file name."
+     },
+     "is_private": {
+      "type": "boolean",
+      "description": "When true, the optimization is excluded from the public explore page.",
+      "default": false
+     },
+     "token_source": {
+      "type": "string",
+      "enum": [
+       "managed",
+       "byok"
+      ],
+      "description": "How model calls are billed: 'managed' charges the marked-up provider cost to Skynet credits; 'byok' sends calls through the user's provider key and charges only Skynet's platform fee to credits. Billable sandbox usage is charged at cost in both modes.",
+      "default": "managed"
+     },
+     "execution_runtime": {
+      "type": "string",
+      "const": "vercel",
+      "default": "vercel"
+     },
+     "preflight_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "preflight_fingerprint": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 128,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "execution_budget_id": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 64,
+        "minLength": 1
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "execution_budget_revision": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "execution_budget_generation": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "max_cost_credits": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 1.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "User-set per-job spend ceiling, in credits. A DSPy optimizer's token use is not linear (bootstrapping, compile steps, validation loops), so the wizard shows a projected bracket rather than a tight estimate and lets the user cap the run here. The run is hard-stopped server-side once its accumulated credit cost reaches this cap; consumed work remains billed and the run preserves any evaluated result. Omit (null) for no ceiling."
+     },
+     "target_score": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 100.0,
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Optional validation score target, expressed as a percentage. GEPA stops searching when its best validation candidate reaches this score; the existing metric-call budget remains a safety ceiling."
+     },
+     "estimated_credits_low": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Low end of the projected credit bracket the wizard showed at submit. Persisted so the post-run proof moment can reconcile the estimate against the actual charge. Carries the chargeable bracket for the run's token_source (managed: full per-model cost; byok: platform fee). Advisory only — never gates or bills. Omit (null) when no estimate was computed."
+     },
+     "estimated_credits_high": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "minimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "High end of the projected credit bracket (see estimated_credits_low). Seeds the post-run estimate-vs-actual reconciliation. Advisory only."
+     },
+     "model_config": {
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "token_source": {
+        "anyOf": [
+         {
+          "type": "string",
+          "enum": [
+           "managed",
+           "byok"
+          ]
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "byok_provider": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "base_url": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "temperature": {
+        "anyOf": [
+         {
+          "type": "number",
+          "maximum": 2.0,
+          "minimum": 0.0
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "max_tokens": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "minimum": 1.0
+         },
+         {
+          "type": "null"
+         }
+        ]
+       },
+       "extra": {
+        "additionalProperties": true,
+        "type": "object"
+       }
+      },
+      "type": "object",
+      "required": [
+       "name"
+      ],
+      "description": "Configuration block for language-model/backbone selection."
+     },
+     "reflection_model_config": {
+      "anyOf": [
+       {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "token_source": {
+          "anyOf": [
+           {
+            "type": "string",
+            "enum": [
+             "managed",
+             "byok"
+            ]
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "byok_provider": {
+          "anyOf": [
+           {
+            "type": "string"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "base_url": {
+          "anyOf": [
+           {
+            "type": "string"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "temperature": {
+          "anyOf": [
+           {
+            "type": "number",
+            "maximum": 2.0,
+            "minimum": 0.0
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "max_tokens": {
+          "anyOf": [
+           {
+            "type": "integer",
+            "minimum": 1.0
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "extra": {
+          "additionalProperties": true,
+          "type": "object"
+         }
+        },
+        "type": "object",
+        "required": [
+         "name"
+        ],
+        "description": "Configuration block for language-model/backbone selection."
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "task_model_config": {
+      "anyOf": [
+       {
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "token_source": {
+          "anyOf": [
+           {
+            "type": "string",
+            "enum": [
+             "managed",
+             "byok"
+            ]
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "byok_provider": {
+          "anyOf": [
+           {
+            "type": "string"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "base_url": {
+          "anyOf": [
+           {
+            "type": "string"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "temperature": {
+          "anyOf": [
+           {
+            "type": "number",
+            "maximum": 2.0,
+            "minimum": 0.0
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "max_tokens": {
+          "anyOf": [
+           {
+            "type": "integer",
+            "minimum": 1.0
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "extra": {
+          "additionalProperties": true,
+          "type": "object"
+         }
+        },
+        "type": "object",
+        "required": [
+         "name"
+        ],
+        "description": "Configuration block for language-model/backbone selection."
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "tool_source": {
+      "anyOf": [
+       {
+        "properties": {
+         "kind": {
+          "type": "string",
+          "enum": [
+           "live_mcp",
+           "dataset_snapshot"
+          ]
+         },
+         "mcp_url": {
+          "anyOf": [
+           {
+            "type": "string"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "mcp_auth_header": {
+          "anyOf": [
+           {
+            "type": "string"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         "tool_filter": {
+          "anyOf": [
+           {
+            "items": {
+             "type": "string"
+            },
+            "type": "array"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         }
+        },
+        "type": "object",
+        "required": [
+         "kind"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "module_name",
+     "optimizer_name",
+     "column_mapping",
+     "model_config"
+    ]
+   }
+  },
+  {
+   "name": "toggle_pin_job_optimizations",
+   "description": "Toggle the ``pinned`` flag on an optimization.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "optimization_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "optimization_id"
+    ]
+   }
+  },
+  {
+   "name": "update_user_preferences",
+   "description": "Validate and return the requested browser-preference patch.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "advanced_mode": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Show expert optimization controls in the app."
+     },
+     "expand_advanced": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Start advanced sections expanded in forms."
+     },
+     "lite_mode": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Use the lower-motion, lighter-weight interface."
+     },
+     "wizard_code_assist": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "auto",
+         "manual"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Whether the optimization wizard should draft code automatically."
+     },
+     "wizard_split_mode": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "auto",
+         "manual"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Whether dataset splits should be selected automatically."
+     },
+     "tagger_assist": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Enable AI-assisted tagging in new labeling sessions."
+     },
+     "dictation_enabled": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Show voice dictation in the shared composer."
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "update_wizard_state",
+   "description": "Validate and echo any subset of wizard fields as a ``wizard_state`` patch.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "job_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "job_description": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 500
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "optimizer_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 80
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Optimizer algorithm. Only 'gepa' is supported."
+     },
+     "module_name": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 80
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "DSPy module to optimize. Supported values: 'predict', 'cot', 'react', 'flex', 'workflow'. 'react' and 'flex' call MCP tools and need ``react_config``."
+     },
+     "job_type": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "run",
+         "grid_search",
+         "blackbox"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "'run' for a single-pair run, 'grid_search' for a model-pair sweep, 'blackbox' to switch the wizard to an optimize-anything run."
+     },
+     "react_config": {
+      "anyOf": [
+       {
+        "properties": {
+         "mcpUrl": {
+          "type": "string",
+          "maxLength": 2000,
+          "minLength": 1,
+          "pattern": "^https?://",
+          "description": "MCP server URL."
+         },
+         "toolFilter": {
+          "anyOf": [
+           {
+            "items": {
+             "type": "string"
+            },
+            "type": "array"
+           },
+           {
+            "type": "null"
+           }
+          ],
+          "description": "Tool names the program may call; null exposes every tool on the server."
+         }
+        },
+        "type": "object",
+        "required": [
+         "mcpUrl"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "MCP tool source for a 'react' or 'flex' module: {mcpUrl, toolFilter}."
+     },
+     "is_private": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "When true (the default for new runs), the run is excluded from public Explore."
+     },
+     "column_roles": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Dataset column → role map. Values: 'input', 'output', or 'ignore'."
+     },
+     "model_config": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Generation model config dict (name required, other fields optional)."
+     },
+     "reflection_model_config": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Reflection model config dict (teacher for GEPA)."
+     },
+     "generation_models": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Grid-search list of generation models."
+     },
+     "reflection_models": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Grid-search list of reflection models."
+     },
+     "use_all_generation_models": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "When true, sweep over every generation model in the catalog."
+     },
+     "use_all_reflection_models": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "When true, sweep over every reflection model in the catalog."
+     },
+     "split_fractions": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "type": "number"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Train/val/test fractions. Must sum to 1.0 and be non-negative."
+     },
+     "split_mode": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "auto",
+         "manual"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "'auto' follows the profiler recommendation; 'manual' pins user edits."
+     },
+     "seed": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Shuffle/split seed."
+     },
+     "shuffle": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "optimizer_kwargs": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Optimizer parameters. Known keys: auto, reflection_minibatch_size, max_full_evals, use_merge."
+     },
+     "target_score": {
+      "anyOf": [
+       {
+        "type": "number",
+        "maximum": 100.0,
+        "exclusiveMinimum": 0.0
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Optional GEPA validation target as a percentage (1–100)."
+     },
+     "blackbox_objective": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 4000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Black-box mode only: what a better version means, in the user's words."
+     },
+     "blackbox_seed": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 200000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Black-box mode only: the starting text to optimize."
+     },
+     "blackbox_scorer_code": {
+      "anyOf": [
+       {
+        "type": "string",
+        "maxLength": 100000
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Black-box mode only: Python source defining score(candidate, case=None)."
+     },
+     "signature_code": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Full DSPy Signature source to replace the current one."
+     },
+     "metric_code": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Full metric function source to replace the current one."
+     }
+    },
+    "required": []
+   }
+  },
+  {
+   "name": "validate_code_validate_code_post",
+   "description": "Inspect DSPy signature and metric syntax without executing authored code.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "signature_code": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "metric_code": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "column_mapping": {
+      "properties": {
+       "inputs": {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       },
+       "outputs": {
+        "additionalProperties": {
+         "type": "string"
+        },
+        "type": "object"
+       }
+      },
+      "type": "object",
+      "description": "Describe how dataframe columns map onto DSPy signature fields.\n\n``inputs`` / ``outputs`` are plural mappings — ``{signature_field: column_name}``\n— because a single signature can have multiple input or output fields. This\nis distinct from the ``ServeResponse.input_fields`` / ``output_fields`` lists,\nwhich live at a different layer (inference response) and carry only field\n*names*, not column bindings. The two shapes are intentionally different."
+     },
+     "sample_row": {
+      "additionalProperties": true,
+      "type": "object"
+     },
+     "optimizer_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "module_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "column_mapping"
+    ]
+   }
+  },
+  {
+   "name": "validate_datasets_validate_post",
+   "description": "Block submissions whose split leaves zero held-out examples.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "row_count": {
+      "type": "integer",
+      "minimum": 0.0
+     },
+     "fractions": {
+      "properties": {
+       "train": {
+        "type": "number",
+        "default": 0.7
+       },
+       "val": {
+        "type": "number",
+        "default": 0.15
+       },
+       "test": {
+        "type": "number",
+        "default": 0.15
+       }
+      },
+      "type": "object",
+      "description": "Train/val/test fraction spec."
+     }
+    },
+    "required": [
+     "row_count",
+     "fractions"
+    ]
+   }
+  }
+ ],
+ "groups": {
+  "_ALWAYS_TOOLS": [
+   "blackbox_engines_blackbox_engines_get",
+   "bulk_pin_jobs_optimizations_bulk_pin_post",
+   "clone_job_optimizations",
+   "discover_models_models_discover_post",
+   "get_analytics_summary_analytics_summary_get",
+   "get_grid_search_result_optimizations",
+   "get_job_logs_optimizations",
+   "get_job_summary_optimizations",
+   "get_model_stats_analytics_models_get",
+   "get_optimization_counts_optimizations_counts_get",
+   "get_optimizer_stats_analytics_optimizers_get",
+   "get_pair_test_results_optimizations",
+   "get_registry_snapshot_registry_get",
+   "get_test_results_optimizations",
+   "get_wallet_for_agent",
+   "list_datasets_for_agent",
+   "list_jobs_optimizations_get",
+   "list_models_for_agent",
+   "list_sample_datasets_datasets_samples_get",
+   "list_tagging_sessions_for_agent",
+   "memory_nap",
+   "memory_note",
+   "memory_recall",
+   "memory_zoom",
+   "public_search_dashboard_search_post",
+   "rename_job_optimizations",
+   "request_user_dataset_datasets_request_upload_post",
+   "request_user_dataset_from_library",
+   "request_user_inference",
+   "request_user_pair_inference",
+   "retry_job_optimizations",
+   "serve_info_serve",
+   "serve_pair_info_serve",
+   "set_column_roles_datasets_column_roles_post",
+   "stage_sample_dataset_datasets_samples",
+   "toggle_pin_job_optimizations",
+   "update_user_preferences",
+   "update_wizard_state"
+  ],
+  "_BLACKBOX_DRY_RUN_TOOLS": [
+   "blackbox_scorer_dry_run_blackbox_scorer_dry_run_post"
+  ],
+  "_BLACKBOX_SUBMIT_TOOLS": [
+   "submit_blackbox_run_blackbox_run_post"
+  ],
+  "_BLACKBOX_TOOLS": [
+   "blackbox_scorer_dry_run_blackbox_scorer_dry_run_post",
+   "submit_blackbox_run_blackbox_run_post"
+  ],
+  "_CODE_AUTHORING_TOOLS": [
+   "request_code_authoring"
+  ],
+  "_DATASET_READY_TOOLS": [
+   "profile_datasets_profile_post",
+   "validate_code_validate_code_post",
+   "validate_datasets_validate_post"
+  ],
+  "_DESTRUCTIVE_TOOLS": [
+   "bulk_cancel_jobs_optimizations_bulk_cancel_post",
+   "bulk_delete_jobs_optimizations_bulk_delete_post",
+   "cancel_job_optimizations",
+   "clone_job_optimizations",
+   "delete_job_optimizations",
+   "restart_job_optimizations",
+   "resume_job_optimizations",
+   "retry_job_optimizations",
+   "submit_blackbox_run_blackbox_run_post",
+   "submit_grid_search_grid_search_post",
+   "submit_job_run_post"
+  ],
+  "_GRID_SUBMIT_TOOLS": [
+   "submit_grid_search_grid_search_post"
+  ],
+  "_POST_SUBMIT_TOOLS": [
+   "bulk_cancel_jobs_optimizations_bulk_cancel_post",
+   "bulk_delete_jobs_optimizations_bulk_delete_post",
+   "cancel_job_optimizations",
+   "delete_job_optimizations",
+   "pause_job_optimizations",
+   "restart_job_optimizations",
+   "resume_job_optimizations"
+  ],
+  "_READY_TO_SUBMIT_TOOLS": [
+   "submit_job_run_post"
+  ],
+  "_SUBMIT_TOOLS": [
+   "submit_grid_search_grid_search_post",
+   "submit_job_run_post"
+  ]
+ }
+}
