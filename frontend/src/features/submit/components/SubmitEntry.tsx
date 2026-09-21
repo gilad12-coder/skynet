@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer-motion";
 
 import { useWizardStateOptional } from "@/features/agent-panel";
+import { registerTutorialHook } from "@/features/tutorial";
 
 import { SubmitWizard } from "./SubmitWizard";
 import { BlackboxWizard } from "./blackbox/BlackboxWizard";
@@ -49,6 +50,9 @@ export function SubmitEntry() {
   // hydrate once at mount, so a live instance is never re-seeded underneath
   // the user.
   const [wizardKey, setWizardKey] = useState(0);
+  // Set while the guided tour drives this page: which screen it opened last.
+  // The tour always leaves `/submit` when it ends, which unmounts this state.
+  const [touring, setTouring] = useState<Recipe | "picker" | null>(null);
   const variants = useReducedMotion() ? STILL_VARIANTS : SCREEN_VARIANTS;
 
   const {
@@ -60,6 +64,7 @@ export function SubmitEntry() {
     accountId,
   } = useWizardDraftController({
     cloning,
+    suspended: touring !== null,
     onContinue: (next) => {
       wizardState?.reset();
       setWizardKey((k) => k + 1);
@@ -80,6 +85,28 @@ export function SubmitEntry() {
       setShown("picker");
     },
   });
+
+  useEffect(() => {
+    const offWizard = registerTutorialHook("openTutorialWizard", (next) => {
+      // Each tour step asks for its wizard again; only a change of recipe
+      // gets a fresh instance, so demo data seeded by earlier steps survives.
+      if (touring !== next) {
+        wizardState?.reset();
+        setWizardKey((k) => k + 1);
+        setTouring(next);
+        setRecipe(next);
+      }
+      setPicking(false);
+    });
+    const offPicker = registerTutorialHook("openTutorialRecipePicker", () => {
+      setTouring((current) => current ?? "picker");
+      setPicking(true);
+    });
+    return () => {
+      offWizard();
+      offPicker();
+    };
+  }, [touring, wizardState]);
 
   const choose = (next: Recipe) => {
     if (offerPending && !comparingClone) {

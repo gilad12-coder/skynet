@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ValidationFrame, ValidationGate, ValidationPlan } from "../ValidationFrame";
 import { msg } from "@/shared/lib/messages";
 import { useCredits } from "@/features/billing";
+import { registerTutorialHook } from "@/features/tutorial";
 import { SubmitSplashOverlay } from "@/shared/ui/submit-splash-overlay";
 import { TERMS } from "@/shared/lib/terms";
 
@@ -88,6 +89,7 @@ export function BlackboxWizard({
     },
     [evaluationSteps, hasCases],
   );
+  useEffect(() => registerTutorialHook("showWizardSubstep", routeSubstep), [routeSubstep]);
   const handleEditField = (stage: WizardStageId, field?: string) => {
     const target = stageOwning(stage, field);
     routeSubstep(target, field);

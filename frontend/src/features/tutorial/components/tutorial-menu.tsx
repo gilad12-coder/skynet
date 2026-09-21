@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useReducedMotion } from "framer-motion";
 import { Popover as PopoverPrimitive } from "radix-ui";
-import { Compass, Database, Lightning, TrendUp } from "@/shared/ui/icons";
+import { Compass, Cube, Database, Lightning, TrendUp } from "@/shared/ui/icons";
 import { useTutorialContext } from "./tutorial-provider";
 import type { TutorialTrack } from "../lib/steps";
 import { getLoadedTrack, loadStepsModule } from "../lib/steps-loader";
@@ -24,6 +24,12 @@ const TRACKS = [
     icon: Lightning,
     nameKey: "tutorial.track.quick.name",
     descKey: "tutorial.track.quick.desc",
+  },
+  {
+    id: "anything",
+    icon: Cube,
+    nameKey: "tutorial.track.anything.name",
+    descKey: "tutorial.track.anything.desc",
   },
   {
     id: "data",

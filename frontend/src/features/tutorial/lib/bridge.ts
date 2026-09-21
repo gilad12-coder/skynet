@@ -31,8 +31,27 @@ import type { DashboardAnalytics, PublicDashboardPoint } from "@/shared/lib/api"
 export interface TutorialHooks {
   /** Switch the dashboard between the "jobs" and "analytics" tabs. */
   setTab: (tab: string) => void;
+  /**
+   * Open a wizard on `/submit` for the tour, past the recipe picker. While the
+   * tour drives the page no draft is saved or offered, so demo data never
+   * lands in the user's draft and a saved draft never blocks the wizard.
+   */
+  openTutorialWizard: (recipe: "program" | "anything") => void;
+  /** Show the recipe picker on `/submit`, under the same no-draft tour mode. */
+  openTutorialRecipePicker: () => void;
   /** Jump the submit wizard to a specific step index. */
   setWizardStep: (step: number) => void;
+  /**
+   * Open the substep of a wizard stage that holds a field. Stages split into
+   * substeps, and only the open one is rendered, so a step that spotlights a
+   * field calls this first.
+   */
+  showWizardSubstep: (
+    stage: "goal" | "evaluation" | "optimization" | "review",
+    field?: string,
+  ) => void;
+  /** Seed the black-box wizard's starting point, goal and scorer. */
+  setBlackboxDemo: (demo: { seedText: string; objective: string; metricCode: string }) => void;
   /** Switch the optimization-detail page between its tabs. */
   setDetailTab: (tab: string) => void;
   /** Seed the wizard's optimizer selector. */

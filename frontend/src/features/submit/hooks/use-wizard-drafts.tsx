@@ -39,6 +39,8 @@ import {
 export interface WizardDraftsApi {
   /** A discovered draft awaits the user's choice; nothing is saved meanwhile. */
   offerPending: boolean;
+  /** The guided tour drives the wizard: nothing is saved and no paid assistant starts. */
+  suspended: boolean;
   takeExecution(): WizardBudgetDraft;
   saveExecution(execution: WizardBudgetDraft): Promise<void>;
   /** The in-memory snapshot for a workflow, or null while an offer is pending. */
@@ -54,6 +56,7 @@ export interface WizardDraftsApi {
 
 const NOOP_API: WizardDraftsApi = {
   offerPending: false,
+  suspended: false,
   takeExecution: () => ({}),
   saveExecution: async () => {
     throw new Error("draft_not_ready");
@@ -96,10 +99,17 @@ function offerToastId(draftId: string): string {
  */
 export function useWizardDraftController({
   cloning,
+  suspended = false,
   onContinue,
   onStartNew,
 }: {
   cloning: boolean;
+  /**
+   * The guided tour drives the wizard with demo data. While it does, no saver
+   * exists: the user's own draft is flushed and left alone, no restore offer
+   * blocks the wizard, and the demo setup is never saved as a draft.
+   */
+  suspended?: boolean;
   onContinue: (recipe: DraftRecipe) => void;
   onStartNew: () => void;
 }) {
@@ -301,7 +311,7 @@ export function useWizardDraftController({
     }
     lastAccountRef.current = accountId;
     setReadyAccount(null);
-    if (!accountId) return;
+    if (!accountId || suspended) return;
     const saver = new DraftSaver(accountId, {
       store: indexedDbDraftStore,
       onWritten: (record) =>
@@ -344,7 +354,7 @@ export function useWizardDraftController({
       cancelled = true;
       void saver.flush().finally(() => saver.detach());
     };
-  }, [accountId, dismissOffer]);
+  }, [accountId, suspended, dismissOffer]);
 
   useEffect(() => {
     const onLocaleReload = () => {
@@ -362,6 +372,7 @@ export function useWizardDraftController({
   const api = useMemo<WizardDraftsApi>(
     () => ({
       offerPending,
+      suspended,
       takeExecution: () => {
         const saver = saverRef.current;
         if (!saver || saver.accountId !== accountId || saver.isHeld) return {};
@@ -414,7 +425,7 @@ export function useWizardDraftController({
           .catch(() => {});
       },
     }),
-    [accountId, offerPending, comparingClone],
+    [accountId, offerPending, suspended, comparingClone],
   );
 
   return {
@@ -422,7 +433,7 @@ export function useWizardDraftController({
     offerPending,
     comparingClone,
     startNew,
-    accountReady: accountId !== null && readyAccount === accountId,
+    accountReady: accountId !== null && (suspended || readyAccount === accountId),
     accountId,
   };
 }
