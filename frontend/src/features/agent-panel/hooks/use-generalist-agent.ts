@@ -439,10 +439,6 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             rt.reasoningBuf += chunk;
             patchSession(key, { reasoning: rt.reasoningBuf });
           },
-          onStatusPatch: (label) => {
-            if (controller.signal.aborted) return;
-            if (label) patchSession(key, { statusLabel: label });
-          },
           onToolStart: (ev) => {
             if (controller.signal.aborted) return;
             patchSession(key, {
@@ -465,6 +461,9 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
           onToolEnd: (ev) => {
             if (controller.signal.aborted) return;
             finishToolCall(key, ev.id, ev.status === "ok" ? "done" : "error", ev.result);
+            patchSession(key, {
+              statusLabel: msg("auto.features.agent.panel.hooks.use.generalist.agent.literal.1"),
+            });
             if (ev.status === "ok") {
               if (OPTIMIZATION_MUTATING_TOOLS.has(ev.tool)) {
                 window.dispatchEvent(new Event("optimizations-changed"));

@@ -11,6 +11,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
@@ -116,13 +117,15 @@ def test_resolve_gateway_auto_router_uses_proxy_without_direct_key(gateway_setti
 
 
 def test_resolve_gateway_explicit_base_url_wins(gateway_settings: pytest.MonkeyPatch) -> None:
-    """An explicit gateway overrides both managed endpoints."""
+    """An explicit gateway overrides both managed endpoints and is reached through LiteLLM."""
     gateway_settings.setattr(cc.settings, "openrouter_api_key", SecretStr("direct-key"))
 
-    gateway = cc.resolve_gateway("openrouter/openrouter/auto-beta", "http://onprem/v1")
+    gateway = cc.resolve_gateway("openai/internal-model", "http://onprem/v1")
 
-    assert gateway.base_url == "http://onprem"
-    assert gateway.billing_model == "openrouter/openrouter/auto-beta"
+    assert gateway.via_litellm
+    assert gateway.base_url == "http://onprem/v1"
+    assert gateway.model == gateway.billing_model == "openai/internal-model"
+    assert gateway.auth_token == ""
 
 
 def test_resolve_gateway_without_a_key_is_a_service_error(gateway_settings: pytest.MonkeyPatch) -> None:
@@ -302,6 +305,159 @@ def test_build_env_maps_reasoning_effort(tmp_path: Path, effort: str | None, exp
     controls = {k: v for k, v in env.items() if k in ("CLAUDE_CODE_DISABLE_THINKING", "CLAUDE_CODE_EFFORT_LEVEL")}
     assert controls == expected
     assert "CLAUDE_CODE_EXTRA_BODY" not in env
+    assert "CLAUDE_CODE_MAX_OUTPUT_TOKENS" not in env
+
+
+def test_build_env_forwards_sampling_settings(tmp_path: Path) -> None:
+    """Temperature rides in the extra request body and the output cap in its own variable."""
+    env = cc._build_env(
+        _gateway(),
+        tmp_path,
+        reasoning_effort=None,
+        request_timeout_seconds=90,
+        tool_timeout_seconds=30,
+        extra_body={"session_id": "conv-1"},
+        temperature=0.2,
+        max_output_tokens=2048,
+    )
+
+    assert json.loads(env["CLAUDE_CODE_EXTRA_BODY"]) == {"temperature": 0.2, "session_id": "conv-1"}
+    assert env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "2048"
+
+
+def _onprem_gateway() -> cc.ClaudeCodeGateway:
+    """Return a LiteLLM-addressed gateway like ``resolve_gateway`` builds for a base URL."""
+    return cc.ClaudeCodeGateway(
+        base_url="http://onprem/v1",
+        auth_token="",
+        model="openai/internal-model",
+        billing_model="openai/internal-model",
+        via_litellm=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_translator_relays_a_streamed_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI's request reaches LiteLLM without Anthropic-only fields and the stream comes back verbatim."""
+    calls: list[dict[str, Any]] = []
+    events = [b"event: message_start\ndata: {}\n\n", b"event: message_stop\ndata: {}\n\n"]
+
+    async def acreate(**kwargs: Any) -> Any:
+        """Record the call and answer with a canned event stream."""
+        calls.append(kwargs)
+
+        async def stream() -> Any:
+            """Yield the canned events."""
+            for event in events:
+                yield event
+
+        return stream()
+
+    monkeypatch.setattr(cc.anthropic_messages, "acreate", acreate)
+    body = {
+        "model": "ignored",
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 64,
+        "stream": True,
+        "temperature": 0.2,
+        "context_management": {"edits": []},
+        "metadata": {"user_id": "u"},
+    }
+
+    async with cc._anthropic_endpoint(_onprem_gateway()) as endpoint, httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{endpoint.base_url}/v1/messages", json=body, headers={"Authorization": f"Bearer {endpoint.auth_token}"}
+        )
+
+    assert not endpoint.via_litellm
+    assert endpoint.model == "openai/internal-model"
+    assert response.status_code == 200
+    assert response.content == b"".join(events)
+    assert calls == [
+        {
+            "model": "openai/internal-model",
+            "api_base": "http://onprem/v1",
+            "drop_params": True,
+            "messages": body["messages"],
+            "max_tokens": 64,
+            "stream": True,
+            "temperature": 0.2,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_translator_relays_a_whole_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-streaming request gets LiteLLM's Anthropic-format message back as JSON."""
+    message = {"id": "msg_1", "type": "message", "content": [{"type": "text", "text": "hi"}]}
+
+    async def acreate(**kwargs: Any) -> Any:
+        """Answer with a canned message."""
+        return message
+
+    monkeypatch.setattr(cc.anthropic_messages, "acreate", acreate)
+
+    async with cc._anthropic_endpoint(_onprem_gateway()) as endpoint, httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{endpoint.base_url}/v1/messages",
+            json={"messages": [], "max_tokens": 8},
+            headers={"Authorization": f"Bearer {endpoint.auth_token}"},
+        )
+
+    assert response.json() == message
+
+
+@pytest.mark.asyncio
+async def test_translator_reports_an_upstream_failure_in_anthropic_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An upstream error keeps its status and reaches the CLI as an Anthropic error envelope."""
+
+    class UpstreamError(Exception):
+        """Stand-in for a LiteLLM API error."""
+
+        status_code = 429
+
+    async def acreate(**kwargs: Any) -> Any:
+        """Fail like a rate-limited gateway."""
+        raise UpstreamError("slow down")
+
+    monkeypatch.setattr(cc.anthropic_messages, "acreate", acreate)
+
+    async with cc._anthropic_endpoint(_onprem_gateway()) as endpoint, httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{endpoint.base_url}/v1/messages",
+            json={"messages": [], "max_tokens": 8},
+            headers={"Authorization": f"Bearer {endpoint.auth_token}"},
+        )
+
+    assert response.status_code == 429
+    assert response.json() == {"type": "error", "error": {"type": "api_error", "message": "slow down"}}
+
+
+@pytest.mark.asyncio
+async def test_translator_rejects_a_wrong_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Another local process without the turn's token cannot spend on the gateway."""
+
+    async def acreate(**kwargs: Any) -> Any:
+        """Fail the test if the gate lets a call through."""
+        raise AssertionError("gateway reached without the token")
+
+    monkeypatch.setattr(cc.anthropic_messages, "acreate", acreate)
+
+    async with cc._anthropic_endpoint(_onprem_gateway()) as endpoint, httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{endpoint.base_url}/v1/messages", json={"messages": []}, headers={"Authorization": "Bearer wrong"}
+        )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_anthropic_format_gateway_is_used_directly() -> None:
+    """A managed gateway already speaks the Messages format, so nothing is put in front of it."""
+    gateway = _gateway()
+
+    async with cc._anthropic_endpoint(gateway) as endpoint:
+        assert endpoint is gateway
 
 
 def _bridge_tool(name: str, handler: Any) -> cc.BridgeTool:

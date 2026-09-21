@@ -2118,6 +2118,8 @@ async def _drive_generalist_agent(
     base_url: str | None,
     reasoning_effort: str | None,
     extra_body: dict[str, Any] | None,
+    temperature: float | None,
+    max_output_tokens: int | None,
     usage: ClaudeCodeUsage,
     reply_language: str,
     auth_header: str | None = None,
@@ -2141,11 +2143,13 @@ async def _drive_generalist_agent(
         registry: Approval registry used for tool gating.
         emit: SSE event emitter.
         model_name: Catalog id of the model running the turn.
-        base_url: Explicit Anthropic-format gateway, or ``None`` for the
-            managed one.
+        base_url: Explicit on-prem gateway addressed the LiteLLM way, or
+            ``None`` for the managed one.
         reasoning_effort: Requested reasoning level, or ``None`` for the default.
         extra_body: Provider-specific request fields (the auto router's
             quality dial and ``session_id``), or ``None``.
+        temperature: Sampling temperature, or ``None`` for the model default.
+        max_output_tokens: Per-response output cap, or ``None`` for the CLI default.
         usage: Accumulator the caller meters the turn from.
         reply_language: English name of the language the agent replies in
             (e.g. ``"Hebrew"``).
@@ -2223,6 +2227,8 @@ async def _drive_generalist_agent(
                 # approval window; the CLI must outwait it.
                 tool_timeout_seconds=APPROVAL_TIMEOUT_SECONDS + 60,
                 extra_body=extra_body,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
             )
 
 
@@ -2268,9 +2274,10 @@ async def run_generalist_agent(
         trust_mode: Trust level controlling which tool calls require approval.
         mcp_url: Optional override for the MCP server URL.
         model_config: Optional override for the model: its ``name``,
-            ``base_url`` (an Anthropic-format gateway), ``extra["reasoning_effort"]``
-            and ``extra["extra_body"]`` apply; other LiteLLM knobs have no
-            equivalent in the CLI and are ignored.
+            ``base_url`` (an on-prem gateway addressed the LiteLLM way),
+            ``temperature``, ``max_tokens``, ``extra["reasoning_effort"]`` and
+            ``extra["extra_body"]`` apply; any other ``extra`` key has no
+            equivalent in the CLI and is ignored.
         approval_registry: Optional registry used for tool approval coordination.
         auth_header: Verbatim ``Authorization`` header from the SSE caller.
             Forwarded to the MCP session so the agent's tool calls
@@ -2318,6 +2325,8 @@ async def run_generalist_agent(
             base_url=base_url,
             reasoning_effort=extra.get("reasoning_effort"),
             extra_body=extra.get("extra_body"),
+            temperature=model_config.temperature if model_config else None,
+            max_output_tokens=model_config.max_tokens if model_config else None,
             usage=usage,
             reply_language=_reply_language(locale),
             auth_header=auth_header,

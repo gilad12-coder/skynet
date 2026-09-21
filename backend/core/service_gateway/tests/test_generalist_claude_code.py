@@ -50,7 +50,8 @@ _FAKE_CLI = """\
             for name in {calls!r}:
                 outcome = await client.call_tool(name, {{}}, raise_on_error=False)
                 results.append(outcome.content[0].text)
-        return {{"listed": listed, "results": results, "prompt": prompt}}
+        settings = {{k: v for k, v in os.environ.items() if k.startswith("CLAUDE_CODE_")}}
+        return {{"listed": listed, "results": results, "prompt": prompt, "settings": settings}}
 
     reply = json.dumps(asyncio.run(main()), ensure_ascii=False)
     events = [
@@ -223,6 +224,35 @@ async def test_turn_phases_tools_gates_approvals_and_meters(tmp_path: Path, monk
     assert names.count("status_patch") == 4
     assert "message_patch" in names
     assert usage_by_model_from_history(usage_sink[0]) == {"litellm_proxy/vendor/model": (9, 5)}
+
+
+@pytest.mark.asyncio
+async def test_turn_forwards_the_model_settings_to_the_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Temperature, the output cap and the reasoning level of the model config all reach the CLI."""
+    _install_fake_cli(tmp_path, monkeypatch, [])
+    config = ModelConfig(
+        name="openrouter/vendor/model", temperature=0.3, max_tokens=512, extra={"reasoning_effort": "high"}
+    )
+
+    async with cc.serve_tool_bridge([_upstream_tool("list_models_for_agent", "models")]) as app_mcp:
+        stream = run_generalist_agent(
+            wizard_state=WizardState(),
+            chat_history=[],
+            user_message="hello",
+            trust_mode="ask",
+            mcp_url=app_mcp.url,
+            model_config=config,
+            approval_registry=ApprovalRegistry(),
+            auth_header=f"Bearer {app_mcp.token}",
+            locale="en",
+        )
+        events = [event async for event in stream]
+
+    assert events[-1]["event"] == "done", events[-1]
+    settings = json.loads(events[-1]["data"]["assistant_message"])["settings"]
+    assert json.loads(settings["CLAUDE_CODE_EXTRA_BODY"]) == {"temperature": 0.3}
+    assert settings["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "512"
+    assert settings["CLAUDE_CODE_EFFORT_LEVEL"] == "high"
 
 
 @pytest.mark.asyncio

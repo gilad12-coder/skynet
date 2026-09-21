@@ -9,7 +9,9 @@ Two pieces, both agnostic of which agent uses them:
 * :func:`run_claude_code_turn` launches ``claude -p`` against an
   Anthropic-format gateway, decodes its ``stream-json`` output into reasoning /
   reply deltas, keeps a :class:`ClaudeCodeUsage` current for billing, and
-  returns the final reply.
+  returns the final reply. A gateway that speaks another wire format (an
+  on-prem OpenAI-compatible endpoint) is fronted by a loopback translator for
+  the span of the turn.
 
 The handlers run on the caller's event loop, so they can share the caller's
 MCP session, approval futures and SSE queue without any thread hop.
@@ -32,10 +34,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import litellm
 import uvicorn
 from fastmcp import FastMCP
 from fastmcp.tools import Tool
 from fastmcp.tools.tool import ToolResult
+from litellm.anthropic_interface import messages as anthropic_messages
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.routing import Route
 
 from ...config import settings
 from ...exceptions import ServiceError
@@ -68,6 +76,23 @@ _CLI_EFFORT_BY_LEVEL = {
 # A parent Claude Code session exports these; inherited, they make the child
 # believe it is nested or bill a personal Anthropic key instead of the gateway.
 _STRIPPED_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_API_KEY")
+
+# The Messages fields LiteLLM's adapter translates. The CLI also sends
+# Anthropic-only ones (``context_management``, ``output_config``) that a
+# foreign gateway would reject.
+_TRANSLATED_FIELDS = (
+    "messages",
+    "system",
+    "tools",
+    "tool_choice",
+    "max_tokens",
+    "stream",
+    "temperature",
+    "top_p",
+    "top_k",
+    "stop_sequences",
+    "thinking",
+)
 
 _SYNTHETIC_MODEL = "<synthetic>"
 _STDERR_TAIL_CHARS = 2000
@@ -104,6 +129,9 @@ class ClaudeCodeGateway:
     auth_token: str
     model: str
     billing_model: str
+    # The endpoint is not Anthropic-format: ``model`` is a LiteLLM id and the
+    # CLI reaches ``base_url`` through a loopback translator.
+    via_litellm: bool = False
 
 
 @dataclass
@@ -202,10 +230,14 @@ def resolve_gateway(model_name: str, base_url: str | None = None) -> ClaudeCodeG
     OpenRouter slug, so a leading ``openrouter/`` is dropped. OpenRouter's
     auto router skips the proxy whenever a direct key exists.
 
+    An explicit ``base_url`` is an on-prem gateway addressed the way LiteLLM
+    addresses it (``openai/<model>`` for an OpenAI-compatible one), so the turn
+    goes through LiteLLM, which also resolves the credential from its usual
+    environment variables.
+
     Args:
         model_name: Catalog model id (``openrouter/deepseek/deepseek-v4.1-flash``).
-        base_url: Explicit Anthropic-format endpoint that overrides the proxy
-            and OpenRouter (on-prem gateways).
+        base_url: Explicit endpoint that overrides the proxy and OpenRouter.
 
     Returns:
         The endpoint, credential, model slug and billing key for the turn.
@@ -213,6 +245,10 @@ def resolve_gateway(model_name: str, base_url: str | None = None) -> ClaudeCodeG
     Raises:
         ServiceError: When no credential is configured for the chosen endpoint.
     """
+    if base_url:
+        return ClaudeCodeGateway(
+            base_url=base_url, auth_token="", model=model_name, billing_model=model_name, via_litellm=True
+        )
     slug = model_name.removeprefix("openrouter/")
     proxy_key = settings.litellm_proxy_api_key
     direct_key = settings.openrouter_api_key
@@ -220,12 +256,11 @@ def resolve_gateway(model_name: str, base_url: str | None = None) -> ClaudeCodeG
     # the proxy echoes the requested id, which would hide the served model
     # from the reply footer and price the turn as the router itself.
     prefer_direct = slug.startswith(_OPENROUTER_ROUTER_PREFIX) and direct_key is not None
-    if base_url or (settings.litellm_proxy_url and not prefer_direct):
+    if settings.litellm_proxy_url and not prefer_direct:
         key = proxy_key or direct_key
-        url = base_url or settings.litellm_proxy_url or ""
         # The CLI appends ``/v1/messages`` itself.
-        url = url.rstrip("/").removesuffix("/v1")
-        billing_model = f"litellm_proxy/{slug}" if not base_url else model_name
+        url = settings.litellm_proxy_url.rstrip("/").removesuffix("/v1")
+        billing_model = f"litellm_proxy/{slug}"
     else:
         key = direct_key
         url = OPENROUTER_ANTHROPIC_BASE_URL
@@ -347,6 +382,126 @@ class _EmbeddedServer(uvicorn.Server):
 
 
 @asynccontextmanager
+async def _serve_on_loopback(app: Any, what: str) -> AsyncGenerator[int, None]:
+    """Serve ``app`` on an ephemeral loopback port until the block exits.
+
+    Args:
+        app: The ASGI application.
+        what: Name used in errors and logs.
+
+    Yields:
+        The port the server listens on.
+
+    Raises:
+        ClaudeCodeError: When the embedded server fails to start.
+    """
+    # Binding here (not inside uvicorn) makes the kernel-assigned port known
+    # before the CLI config is written, with no bind race.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    server = _EmbeddedServer(
+        uvicorn.Config(app, log_level="warning", access_log=False, lifespan="on", timeout_graceful_shutdown=1)
+    )
+    serve_task = asyncio.create_task(server.serve(sockets=[sock]))
+    try:
+        while not server.started:
+            if serve_task.done():
+                raise ClaudeCodeError(f"{what} failed to start")
+            await asyncio.sleep(0.01)
+        yield sock.getsockname()[1]
+    finally:
+        server.should_exit = True
+        try:
+            await asyncio.wait_for(asyncio.shield(serve_task), timeout=5)
+        except (TimeoutError, asyncio.CancelledError):
+            serve_task.cancel()
+        except Exception:
+            logger.exception("%s shutdown failed", what)
+        finally:
+            sock.close()
+
+
+def _translator_error(exc: Exception) -> JSONResponse:
+    """Shape a LiteLLM failure as the Anthropic error envelope the CLI reports.
+
+    Args:
+        exc: The exception LiteLLM raised.
+
+    Returns:
+        The error response, carrying the upstream status when there is one.
+    """
+    status = getattr(exc, "status_code", None)
+    status = status if isinstance(status, int) and 400 <= status <= 599 else 502
+    return JSONResponse({"type": "error", "error": {"type": "api_error", "message": str(exc)}}, status_code=status)
+
+
+@asynccontextmanager
+async def _serve_translator(gateway: ClaudeCodeGateway) -> AsyncGenerator[ClaudeCodeGateway, None]:
+    """Front a non-Anthropic gateway with a loopback ``/v1/messages`` endpoint.
+
+    Args:
+        gateway: The LiteLLM-addressed gateway (``via_litellm``).
+
+    Yields:
+        An Anthropic-format gateway the CLI can call directly.
+    """
+    # On-prem gateways implement chat completions; LiteLLM would otherwise
+    # send ``openai/`` models to the Responses API, which few of them serve.
+    litellm.use_chat_completions_url_for_anthropic_messages = True
+
+    async def create_message(request: Request) -> Response:
+        """Translate one Messages request and relay the answer.
+
+        Args:
+            request: The CLI's request.
+
+        Returns:
+            The Anthropic-format reply, streamed when the CLI asked for that.
+        """
+        body = await request.json()
+        params = {name: body[name] for name in _TRANSLATED_FIELDS if name in body}
+        try:
+            # The CLI always asks for thinking; a gateway model LiteLLM has no
+            # capability record for would otherwise be refused outright.
+            result = await anthropic_messages.acreate(
+                model=gateway.model, api_base=gateway.base_url, drop_params=True, **params
+            )
+        except Exception as exc:
+            logger.warning("model gateway call failed: %s", exc)
+            return _translator_error(exc)
+        if params.get("stream"):
+            return StreamingResponse(result, media_type="text/event-stream")
+        return JSONResponse(result)
+
+    token = secrets.token_urlsafe(32)
+    app = _BearerGate(Starlette(routes=[Route("/v1/messages", create_message, methods=["POST"])]), token)
+    async with _serve_on_loopback(app, "model gateway translator") as port:
+        yield ClaudeCodeGateway(
+            base_url=f"http://127.0.0.1:{port}",
+            auth_token=token,
+            model=gateway.model,
+            billing_model=gateway.billing_model,
+        )
+
+
+@asynccontextmanager
+async def _anthropic_endpoint(gateway: ClaudeCodeGateway) -> AsyncGenerator[ClaudeCodeGateway, None]:
+    """Yield an endpoint the CLI can call, translating when the gateway needs it.
+
+    Args:
+        gateway: The turn's gateway.
+
+    Yields:
+        ``gateway`` itself, or the loopback translator in front of it.
+    """
+    if not gateway.via_litellm:
+        yield gateway
+        return
+    async with _serve_translator(gateway) as endpoint:
+        yield endpoint
+
+
+@asynccontextmanager
 async def serve_tool_bridge(tools: list[BridgeTool]) -> AsyncGenerator[ToolBridge, None]:
     """Serve ``tools`` over MCP on an ephemeral loopback port for one turn.
 
@@ -355,9 +510,6 @@ async def serve_tool_bridge(tools: list[BridgeTool]) -> AsyncGenerator[ToolBridg
 
     Yields:
         The bridge's URL and bearer token.
-
-    Raises:
-        ClaudeCodeError: When the embedded server fails to start.
     """
     state = _BridgeState()
     mcp = FastMCP("Skynet")
@@ -368,33 +520,11 @@ async def serve_tool_bridge(tools: list[BridgeTool]) -> AsyncGenerator[ToolBridg
         mcp.add_tool(tool)
     token = secrets.token_urlsafe(32)
     app = _BearerGate(mcp.http_app(path="/mcp"), token)
-
-    # Binding here (not inside uvicorn) makes the kernel-assigned port known
-    # before the CLI config is written, with no bind race.
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    server = _EmbeddedServer(
-        uvicorn.Config(app, log_level="warning", access_log=False, lifespan="on", timeout_graceful_shutdown=1)
-    )
-    serve_task = asyncio.create_task(server.serve(sockets=[sock]))
-    try:
-        while not server.started:
-            if serve_task.done():
-                raise ClaudeCodeError("tool bridge failed to start")
-            await asyncio.sleep(0.01)
-        yield ToolBridge(url=f"http://127.0.0.1:{port}/mcp", token=token)
-    finally:
-        state.cancel_inflight()
-        server.should_exit = True
+    async with _serve_on_loopback(app, "tool bridge") as port:
         try:
-            await asyncio.wait_for(asyncio.shield(serve_task), timeout=5)
-        except (TimeoutError, asyncio.CancelledError):
-            serve_task.cancel()
-        except Exception:
-            logger.exception("tool bridge shutdown failed")
+            yield ToolBridge(url=f"http://127.0.0.1:{port}/mcp", token=token)
         finally:
-            sock.close()
+            state.cancel_inflight()
 
 
 class StreamDecoder:
@@ -540,6 +670,8 @@ def _build_env(
     request_timeout_seconds: float,
     tool_timeout_seconds: float,
     extra_body: dict[str, Any] | None,
+    temperature: float | None = None,
+    max_output_tokens: int | None = None,
 ) -> dict[str, str]:
     """Assemble the CLI's environment: isolated config, gateway, no side traffic.
 
@@ -550,6 +682,8 @@ def _build_env(
         request_timeout_seconds: Longest a single model call may take.
         tool_timeout_seconds: Longest a single tool call may take.
         extra_body: Provider-specific fields merged into every model request.
+        temperature: Sampling temperature; ``None`` keeps the CLI default.
+        max_output_tokens: Cap on one model reply; ``None`` keeps the CLI default.
 
     Returns:
         The environment for the subprocess.
@@ -580,8 +714,13 @@ def _build_env(
         env["CLAUDE_CODE_DISABLE_THINKING"] = "1"
     elif reasoning_effort in _CLI_EFFORT_BY_LEVEL:
         env["CLAUDE_CODE_EFFORT_LEVEL"] = _CLI_EFFORT_BY_LEVEL[reasoning_effort]
-    if extra_body:
-        env["CLAUDE_CODE_EXTRA_BODY"] = json.dumps(extra_body)
+    # The CLI has no temperature setting of its own; the extra body is merged
+    # into every request, which makes it one.
+    body = {**({"temperature": temperature} if temperature is not None else {}), **(extra_body or {})}
+    if body:
+        env["CLAUDE_CODE_EXTRA_BODY"] = json.dumps(body)
+    if max_output_tokens is not None:
+        env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(max_output_tokens)
     return env
 
 
@@ -629,6 +768,8 @@ async def run_claude_code_turn(
     request_timeout_seconds: float = 120.0,
     tool_timeout_seconds: float = 960.0,
     extra_body: dict[str, Any] | None = None,
+    temperature: float | None = None,
+    max_output_tokens: int | None = None,
 ) -> str:
     """Run one agent turn through the Claude Code CLI and return its reply.
 
@@ -653,6 +794,9 @@ async def run_claude_code_turn(
             the approval timeout, or a slow confirmation fails the call.
         extra_body: Provider-specific fields merged into every model request
             (OpenRouter's router plugins and ``session_id``).
+        temperature: Sampling temperature; ``None`` keeps the CLI default.
+            Anthropic models reject anything but 1 while thinking is on.
+        max_output_tokens: Cap on one model reply; ``None`` keeps the CLI default.
 
     Returns:
         The reply text.
@@ -662,8 +806,9 @@ async def run_claude_code_turn(
     """
     usage.last_request_model = gateway.model
     decoder = StreamDecoder(usage, on_reasoning=on_reasoning, on_reply=on_reply, on_reply_reset=on_reply_reset)
-    with tempfile.TemporaryDirectory(prefix="skynet-agent-") as workdir:
-        root = Path(workdir)
+    async with contextlib.AsyncExitStack() as stack:
+        endpoint = await stack.enter_async_context(_anthropic_endpoint(gateway))
+        root = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="skynet-agent-")))
         config_dir = root / "config"
         cwd = root / "cwd"
         config_dir.mkdir()
@@ -706,12 +851,14 @@ async def run_claude_code_turn(
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
                 env=_build_env(
-                    gateway,
+                    endpoint,
                     config_dir,
                     reasoning_effort=reasoning_effort,
                     request_timeout_seconds=request_timeout_seconds,
                     tool_timeout_seconds=tool_timeout_seconds,
                     extra_body=extra_body,
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
                 ),
                 # Own session = own process group, so one killpg reaps the
                 # CLI's children too.
