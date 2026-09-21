@@ -500,6 +500,18 @@ export function useGeneralistAgent(args: UseGeneralistAgentArgs): GeneralistAgen
             rt.replyBuf += chunk;
             appendReply(key, chunk);
           },
+          onMessageReset: () => {
+            if (controller.signal.aborted) return;
+            rt.replyBuf = "";
+            patchSession(key, { reasoningEndedAt: null });
+            patchMessages(key, (prev) => {
+              const last = prev[prev.length - 1];
+              if (!last || last.role !== "assistant" || last.content === "") return prev;
+              const next = prev.slice();
+              next[next.length - 1] = { ...last, content: "" };
+              return next;
+            });
+          },
           onDone: (result) => {
             if (controller.signal.aborted) return;
             patchSession(key, {

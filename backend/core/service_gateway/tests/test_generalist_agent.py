@@ -14,8 +14,8 @@ from sqlalchemy.pool import StaticPool
 from core.service_gateway.agents import generalist as generalist_module
 from core.service_gateway.agents.code import _agent_error_payload, _SubmitArgExtractor
 from core.service_gateway.agents.generalist import (
+    GENERALIST_SYSTEM_PROMPT,
     ApprovalRegistry,
-    GeneralistSig,
     WizardState,
     _needs_approval,
     _TurnAuthoringFlag,
@@ -894,7 +894,7 @@ def test_system_prompt_forbids_submit_in_authoring_turn() -> None:
     Guards against a future prompt edit silently dropping the ordering rule that
     is the primary defense for this bug.
     """
-    prompt = GeneralistSig.__doc__ or ""
+    prompt = GENERALIST_SYSTEM_PROMPT or ""
     assert "NEVER call ``submit_job_run_post`` in the SAME turn as" in prompt
     assert "request_code_authoring" in prompt
 
@@ -1335,7 +1335,7 @@ async def test_sample_staging_keeps_an_existing_job_name() -> None:
 
 def test_system_prompt_covers_new_capabilities() -> None:
     """The prompt names the modules, modes and tools the agent now supports."""
-    prompt = GeneralistSig.__doc__ or ""
+    prompt = GENERALIST_SYSTEM_PROMPT or ""
     for needle in ("react", "flex", "blackbox", "target_score", "validate_datasets", "restart"):
         assert needle in prompt
 

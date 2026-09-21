@@ -448,6 +448,10 @@ async def _wrap_with_persistence(
                 chunk = data.get("chunk")
                 if isinstance(chunk, str):
                     assistant_buf.append(chunk)
+            elif name == "message_reset":
+                # The text so far prefaced a tool call; salvaging it on a
+                # dropped stream would persist narration as the reply.
+                assistant_buf.clear()
             elif name == "turn_metadata":
                 raw_allowed = data.get("allowed_tools")
                 if isinstance(raw_allowed, list):
@@ -556,7 +560,7 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
         Event types: ``conversation_meta`` (only when persistence is on),
         ``reasoning_patch``, ``tool_start``, ``tool_end``, ``status_patch``,
         ``pending_approval``, ``approval_resolved``, ``message_patch``,
-        ``done``, ``error``.
+        ``message_reset``, ``done``, ``error``.
 
         Args:
             req: Request body with user message, chat history, wizard

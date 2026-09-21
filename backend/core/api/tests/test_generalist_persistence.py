@@ -481,6 +481,25 @@ async def test_persist_on_done_writes_exactly_once(wrapper_engine: Engine) -> No
     assert rows[0].model == "test-model"
 
 
+async def test_retracted_preamble_is_not_salvaged_as_the_reply(wrapper_engine: Engine) -> None:
+    """Text withdrawn by ``message_reset`` stays out of a turn persisted on teardown."""
+
+    async def _preamble_then_dangle() -> AsyncIterator[dict[str, Any]]:
+        """Stream a preamble, retract it, settle a tool call, then dangle."""
+        yield {"event": "message_patch", "data": {"chunk": "בודק את הנתונים"}}
+        yield {"event": "message_reset", "data": {}}
+        yield {"event": "tool_start", "data": {"id": "t1", "tool": "submit_job_run_post", "arguments": {}}}
+        yield {"event": "tool_end", "data": {"id": "t1", "status": "ok", "result": {"job_id": "d94bbebc"}}}
+        while True:
+            yield {"event": "ping", "data": {}}
+
+    await _drive_then_close(_preamble_then_dangle(), wrapper_engine, until="tool_end")
+
+    rows = _assistant_rows(wrapper_engine)
+    assert len(rows) == 1
+    assert rows[0].content == ""
+
+
 async def test_empty_greeting_turn_does_not_persist_on_teardown(wrapper_engine: Engine) -> None:
     """A teardown with no text and no settled tool-calls writes no empty row."""
 
