@@ -2419,3 +2419,36 @@ def test_blackbox_scorer_dry_run_preserves_sandbox_charge_without_model_usage(mo
     assert resp.status_code == 200
     assert resp.json()["credits_charged"] == 2
     assert metered == []
+
+
+@pytest.mark.usefixtures("_skip_scorer_sandbox")
+def test_submit_blackbox_run_resolves_staged_dataset_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A by-reference black-box submit scores against the staged rows and keeps them staged."""
+    store = _FakeJobStore()
+    rows = [{"target": "aeiou"}, {"target": "xyz"}]
+    staged_id = store.stage_dataset(username="alice", dataset_filename="cases.json", rows=rows)
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    payload = _blackbox_payload()
+    del payload["cases"]
+    payload["staged_dataset_id"] = staged_id
+
+    resp = client.post("/blackbox/run", json=payload)
+
+    assert resp.status_code == 201
+    assert store._jobs[resp.json()["optimization_id"]]["overview"]["dataset_rows"] == 2
+    assert store.get_staged_dataset(staged_id, "alice") == rows
+
+
+@pytest.mark.usefixtures("_skip_scorer_sandbox")
+def test_submit_blackbox_run_rejects_unknown_staged_dataset_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unknown ``staged_dataset_id`` is a 400 and queues nothing."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    payload = _blackbox_payload()
+    del payload["cases"]
+    payload["staged_dataset_id"] = "does-not-exist"
+
+    resp = client.post("/blackbox/run", json=payload)
+
+    assert resp.status_code == 400
+    assert store._jobs == {}

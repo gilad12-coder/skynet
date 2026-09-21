@@ -1206,6 +1206,21 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                 402 (no credits), 409 (quota), 422 (malformed).
         """
         payload.username = current_user.username
+        # Resolved before the replay key is derived so a by-reference submit
+        # and its inline twin hash to the same request. The staged rows are
+        # left in place (the TTL sweep reclaims them): a rejected submit can
+        # be retried, and the DSPy wizard may still be using the same upload.
+        if payload.staged_dataset_id:
+            if not payload.cases:
+                staged_rows = job_store.get_staged_dataset(payload.staged_dataset_id, payload.username)
+                if not staged_rows:
+                    raise DomainError(
+                        I18nKey.SUBMISSION_STAGED_DATASET_NOT_FOUND,
+                        status=400,
+                        staged_dataset_id=payload.staged_dataset_id,
+                    )
+                payload.cases = staged_rows
+            payload.staged_dataset_id = None
 
         replay_keys = resolve_submission_replay_keys(
             payload,

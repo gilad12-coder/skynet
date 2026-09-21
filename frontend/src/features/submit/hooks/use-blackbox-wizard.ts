@@ -26,10 +26,12 @@ import type {
 import {
   getBlackboxEngines,
   getDatasetRows,
+  getStagedDataset,
   getJob,
   getOptimizationPayload,
   isInsufficientCreditsError,
   isStorageQuotaError,
+  stageDatasetForAgent,
   submitBlackboxRun,
   type BlackboxAuthoringContext,
   type DatasetSummary,
@@ -389,6 +391,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     wizardCtxRef.current = wizardCtx;
   }, [wizardCtx]);
   const agentPulseTick = wizardCtx?.agentPulseTick ?? 0;
+  // Staged id the current cases already correspond to, and the id being
+  // fetched: together they stop the staging effect below from re-staging (or
+  // clearing) rows the agent staged itself.
+  const casesStagedIdRef = useRef<string | null>(null);
+  const hydratingStagedIdRef = useRef<string | null>(null);
+  const lastStagedCasesRef = useRef<ParsedDataset | null>(null);
   useEffect(() => {
     const shared = wizardCtx?.state;
     const keys = wizardCtx?.agentPulseKeys ?? [];
@@ -414,6 +422,47 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         setSeed(shared.seed);
       } else if (key === "shuffle" && typeof shared.shuffle === "boolean") {
         setShuffle(shared.shuffle);
+      } else if (key === "blackbox_objective" && typeof shared.blackbox_objective === "string") {
+        setObjective(shared.blackbox_objective);
+      } else if (key === "blackbox_seed" && typeof shared.blackbox_seed === "string") {
+        // An agent-written seed is decided: the code agent must not replace it.
+        setSeedMode("text");
+        setSeedText(shared.blackbox_seed);
+        setSeedManuallyEdited(true);
+      } else if (
+        key === "blackbox_scorer_code" &&
+        typeof shared.blackbox_scorer_code === "string"
+      ) {
+        setScorerKind("python");
+        setMetricCode(shared.blackbox_scorer_code);
+        setScorerManuallyEdited(true);
+      } else if (
+        key === "staged_dataset_id" &&
+        typeof shared.staged_dataset_id === "string" &&
+        shared.staged_dataset_id !== casesStagedIdRef.current
+      ) {
+        const stagedId = shared.staged_dataset_id;
+        hydratingStagedIdRef.current = stagedId;
+        getStagedDataset(stagedId)
+          .then((res) => {
+            if (!mountedRef.current || hydratingStagedIdRef.current !== stagedId) return;
+            if (!res || res.rows.length === 0) return;
+            const hydrated: ParsedDataset = {
+              columns: res.columns.length > 0 ? res.columns : Object.keys(res.rows[0] ?? {}),
+              rows: res.rows,
+              rowCount: res.row_count,
+            };
+            casesStagedIdRef.current = stagedId;
+            lastStagedCasesRef.current = hydrated;
+            setParsedCases(hydrated);
+            setCasesName((prev) => prev || "dataset.json");
+          })
+          .catch(() => {
+            /* best-effort: a failed fetch leaves the wizard's own cases intact */
+          })
+          .finally(() => {
+            if (hydratingStagedIdRef.current === stagedId) hydratingStagedIdRef.current = null;
+          });
       }
     }
     // Runs once per agent pulse; the keys and state are read from that render.
@@ -433,7 +482,65 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     if (!sf || sf.train !== split.train || sf.val !== split.val || sf.test !== split.test) {
       wizardCtx.setField("split_fractions", split, "user");
     }
-  }, [wizardCtx, jobName, jobDescription, isPrivate, splitMode, seed, shuffle, split]);
+    // The agent reads which workflow is on screen from job_type, and the task
+    // itself from the blackbox_* fields; an empty or non-shareable value (a
+    // multi-part seed, a remote scorer) is dropped rather than sent blank.
+    if (s.job_type !== "blackbox") wizardCtx.setField("job_type", "blackbox", "user");
+    const sharedTask = {
+      blackbox_objective: objective.trim() ? objective : undefined,
+      blackbox_seed: seedMode === "text" && seedText.trim() ? seedText : undefined,
+      blackbox_scorer_code: scorerKind === "python" && metricCode.trim() ? metricCode : undefined,
+    } as const;
+    for (const key of Object.keys(sharedTask) as Array<keyof typeof sharedTask>) {
+      const value = sharedTask[key];
+      if (s[key] === value) continue;
+      if (value === undefined) wizardCtx.clearField(key);
+      else wizardCtx.setField(key, value, "user");
+    }
+  }, [
+    wizardCtx,
+    jobName,
+    jobDescription,
+    isPrivate,
+    splitMode,
+    seed,
+    shuffle,
+    split,
+    objective,
+    seedMode,
+    seedText,
+    scorerKind,
+    metricCode,
+  ]);
+  // Stage the cases so the agent can submit them by id. With no cases the
+  // field is cleared: the shared state outlives the program wizard, and a
+  // dataset id left behind by it must never ride along on a black-box run.
+  useEffect(() => {
+    const ctx = wizardCtxRef.current;
+    if (!ctx) return;
+    if (!parsedCases || parsedCases.rowCount === 0) {
+      if (ctx.state.staged_dataset_id !== undefined && !hydratingStagedIdRef.current) {
+        ctx.clearField("staged_dataset_id");
+      }
+      lastStagedCasesRef.current = null;
+      casesStagedIdRef.current = null;
+      return;
+    }
+    if (lastStagedCasesRef.current === parsedCases) return;
+    lastStagedCasesRef.current = parsedCases;
+    stageDatasetForAgent({
+      dataset: parsedCases.rows,
+      dataset_filename: casesName || "dataset.json",
+    })
+      .then((res) => {
+        if (!mountedRef.current || lastStagedCasesRef.current !== parsedCases) return;
+        casesStagedIdRef.current = res.staged_dataset_id;
+        wizardCtxRef.current?.setField("staged_dataset_id", res.staged_dataset_id, "user");
+      })
+      .catch(() => {
+        if (lastStagedCasesRef.current === parsedCases) lastStagedCasesRef.current = null;
+      });
+  }, [parsedCases, casesName]);
   // The draft's stage is applied one render after its fields, so the
   // prerequisite walk (below validateStep) checks the restored state rather
   // than the empty initial one.

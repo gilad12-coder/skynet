@@ -226,6 +226,9 @@ class BlackboxRunRequest(BaseModel):
     seed_candidate: BlackboxCandidate | None = None
     scorer: BlackboxScorer
     cases: list[dict[str, Any]] | None = Field(default=None, max_length=200_000)
+    # By-reference twin of ``cases`` for agent callers: a dataset already staged
+    # server-side, so the rows never travel through the model's tool arguments.
+    staged_dataset_id: str | None = Field(default=None, min_length=1, max_length=64)
     split_fractions: SplitFractions = Field(default_factory=SplitFractions)
     shuffle: bool = True
     seed: int | None = None

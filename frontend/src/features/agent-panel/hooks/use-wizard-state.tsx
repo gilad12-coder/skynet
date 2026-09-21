@@ -30,6 +30,9 @@ type WizardKey =
   | "is_private"
   | "optimizer_kwargs"
   | "target_score"
+  | "blackbox_objective"
+  | "blackbox_seed"
+  | "blackbox_scorer_code"
   | "staged_dataset_id"
   | "source_dataset_id";
 type WriteSource = "user" | "agent";
@@ -210,7 +213,9 @@ export function extractWizardPatch(result: unknown): Partial<WizardState> {
 
   if (typeof wrap.job_name === "string") patch.job_name = wrap.job_name;
   if (typeof wrap.job_description === "string") patch.job_description = wrap.job_description;
-  if (wrap.job_type === "run" || wrap.job_type === "grid_search") patch.job_type = wrap.job_type;
+  if (wrap.job_type === "run" || wrap.job_type === "grid_search" || wrap.job_type === "blackbox") {
+    patch.job_type = wrap.job_type;
+  }
 
   if (typeof wrap.optimizer_name === "string") patch.optimizer_name = wrap.optimizer_name;
   if (typeof wrap.module_name === "string") patch.module_name = wrap.module_name;
@@ -299,6 +304,14 @@ export function extractWizardPatch(result: unknown): Partial<WizardState> {
     !Array.isArray(wrap.optimizer_kwargs)
   ) {
     patch.optimizer_kwargs = wrap.optimizer_kwargs as Record<string, unknown>;
+  }
+  if (typeof wrap.target_score === "number" && Number.isFinite(wrap.target_score)) {
+    patch.target_score = wrap.target_score;
+  }
+  if (typeof wrap.blackbox_objective === "string") patch.blackbox_objective = wrap.blackbox_objective;
+  if (typeof wrap.blackbox_seed === "string") patch.blackbox_seed = wrap.blackbox_seed;
+  if (typeof wrap.blackbox_scorer_code === "string") {
+    patch.blackbox_scorer_code = wrap.blackbox_scorer_code;
   }
 
   return patch;

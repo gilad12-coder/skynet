@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer-motion";
 
@@ -81,7 +81,48 @@ export function SubmitEntry() {
     },
   });
 
+  // The shared agent state outlives either wizard. Fields that only mean
+  // something to the workflow being left (its staged rows, the black-box task)
+  // are dropped on a switch so the next wizard never adopts them as its own.
+  // `keep` names fields the agent wrote in the same update as the switch:
+  // those already belong to the workflow being entered.
+  const dropRecipeScopedState = (next: Recipe, keep: readonly string[] = []) => {
+    if (!wizardState || recipe === null || recipe === next) return;
+    for (const key of [
+      "staged_dataset_id",
+      "blackbox_objective",
+      "blackbox_seed",
+      "blackbox_scorer_code",
+    ] as const) {
+      if (keep.includes(key)) continue;
+      if (wizardState.state[key] !== undefined) wizardState.clearField(key);
+    }
+  };
+
+  // The agent picks the workflow by writing `job_type`; follow it so the wizard
+  // on screen is the one whose fields the agent is filling. A pending draft
+  // offer is left alone: the user has not chosen what to do with it yet.
+  // Only a pulse that lands while this page is open counts: the keys of an
+  // older pulse are still in the shared state at mount and must not skip the
+  // picker.
+  const agentPulseTick = wizardState?.agentPulseTick ?? 0;
+  const mountPulseTickRef = useRef(agentPulseTick);
+  useEffect(() => {
+    if (agentPulseTick === mountPulseTickRef.current) return;
+    if (!wizardState?.agentPulseKeys.includes("job_type")) return;
+    if (offerPending && !comparingClone) return;
+    const jobType = wizardState.state.job_type;
+    if (!jobType) return;
+    const wanted: Recipe = jobType === "blackbox" ? "anything" : "program";
+    if (recipe === wanted && !picking) return;
+    dropRecipeScopedState(wanted, wizardState.agentPulseKeys);
+    setRecipe(wanted);
+    setPicking(false);
+    // Runs once per agent pulse; the keys and state are read from that render.
+  }, [agentPulseTick]);
+
   const choose = (next: Recipe) => {
+    dropRecipeScopedState(next);
     if (offerPending && !comparingClone) {
       // Entering a workflow past a pending offer is an explicit start-new:
       // the saved draft goes through the same reset before a wizard mounts.
