@@ -43,6 +43,8 @@ export interface GeneralistAgentHandlers {
   onPendingApproval?: (ev: PendingApprovalPayload) => void;
   onApprovalResolved?: (ev: ApprovalResolvedPayload) => void;
   onMessagePatch?: (chunk: string) => void;
+  /** The reply streamed so far prefaced a tool call and is not the reply. */
+  onMessageReset?: () => void;
   onConversationMeta?: (ev: ConversationMetaPayload) => void;
   onDone: (result: {
     assistant_message: string;
@@ -128,6 +130,9 @@ export async function streamGeneralistAgent(
         break;
       case "message_patch":
         handlers.onMessagePatch?.(String(data.chunk ?? ""));
+        break;
+      case "message_reset":
+        handlers.onMessageReset?.();
         break;
       case "conversation_meta":
         handlers.onConversationMeta?.({
