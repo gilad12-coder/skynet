@@ -19,7 +19,8 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from bench.harnesses.base import MODEL
-from bench.harnesses.dspy_react import MAX_ITERS
+from bench.harnesses.dspy_react import FIXED, MAX_ITERS
+from core.service_gateway.agents.conversation_react import ConversationReAct, history_from_turns
 from core.service_gateway.optimization.retrying_react import RetryingReActV2
 
 
@@ -38,6 +39,7 @@ async def _child(variant: str, port: int, workdir: Path) -> dict[str, Any]:
     brief = (workdir / "brief.txt").read_text()
     lm = dspy.LM(f"openrouter/{MODEL}", api_key=os.environ["OPENROUTER_API_KEY"], cache=False, max_tokens=16000)
     signature = dspy.Signature("user_message: str -> reply: str", brief)
+    inputs: dict[str, Any] = {"user_message": message}
     loop = asyncio.get_running_loop()
 
     async with (
@@ -58,7 +60,20 @@ async def _child(variant: str, port: int, workdir: Path) -> dict[str, Any]:
             )
 
         tools = [bridge(dspy.Tool.from_mcp_tool(session, t)) for t in listing.tools]
-        if variant == "dspy-reactv2":
+        if variant == FIXED:
+            conversation = json.loads((workdir / "conversation.json").read_text())
+            signature = signature.insert(
+                1,
+                "reply_language",
+                dspy.InputField(desc="Write `reply` in this language, whatever language the data or tool results use."),
+                str,
+            )
+            program = ConversationReAct(signature, tools=tools, max_iters=MAX_ITERS)
+            inputs["reply_language"] = conversation["reply_language"]
+            inputs["history"] = history_from_turns(
+                [tuple(turn) for turn in conversation["turns"]], input_field="user_message", output_field="reply"
+            )
+        elif variant == "dspy-reactv2":
             program = RetryingReActV2(signature, tools=tools, max_iters=MAX_ITERS, serial_tool_calls=True)
         else:
             program = dspy.ReAct(signature, tools=tools, max_iters=MAX_ITERS)
@@ -66,12 +81,13 @@ async def _child(variant: str, port: int, workdir: Path) -> dict[str, Any]:
         error, answer = "", ""
         try:
             with dspy.context(lm=lm):
-                prediction = await asyncio.to_thread(program, user_message=message)
+                prediction = await asyncio.to_thread(program, **inputs)
             answer = str(getattr(prediction, "reply", "") or "")
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"[:300]
 
     fresh = cached = output = 0
+    per_call = []
     for entry in lm.history:
         usage = entry.get("usage") or {}
         details = usage.get("prompt_tokens_details")
@@ -80,6 +96,9 @@ async def _child(variant: str, port: int, workdir: Path) -> dict[str, Any]:
         fresh += (usage.get("prompt_tokens") or 0) - hit
         cached += hit
         output += usage.get("completion_tokens") or 0
+        provider = getattr(entry.get("response"), "provider", None)
+        per_call.append({"prompt_tokens": usage.get("prompt_tokens"), "cached_tokens": hit, "provider": provider})
+    (workdir / "llm_calls.json").write_text(json.dumps(per_call, indent=1))
     return {
         "answer": answer,
         "fresh_input_tokens": fresh,
@@ -93,7 +112,7 @@ async def _child(variant: str, port: int, workdir: Path) -> dict[str, Any]:
 def main() -> None:
     """Child entry point: run one attempt and write ``dspy_result.json``."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("variant", choices=["dspy-reactv2", "dspy-react"])
+    parser.add_argument("variant", choices=["dspy-reactv2", "dspy-react", FIXED])
     parser.add_argument("port", type=int)
     parser.add_argument("workdir", type=Path)
     args = parser.parse_args()

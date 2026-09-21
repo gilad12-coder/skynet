@@ -36,6 +36,7 @@ harnesses running the same model over the same tools.
 | name | what runs |
 |---|---|
 | `dspy-reactv2` | the project's `RetryingReActV2` (what the agent uses today) |
+| `dspy-reactv2-fixed` | `ConversationReAct`: the same loop with an append-only native-tool-call prompt, stored native history and a pinned reply language |
 | `dspy-react` | stock classic `dspy.ReAct` |
 | `claude-code` | `claude -p` pointed at OpenRouter |
 | `codex` | `codex exec` with an OpenRouter provider |
@@ -63,7 +64,7 @@ attempts that hit an infrastructure error are retried.
 `$PY -m bench.language results/main` reports how often each harness answered
 in the wrong language. `TASKS.md` lists every task with its prompt and checks.
 
-## Results (2026-09-20)
+## Results (2026-09-20, fixed loop added 2026-09-21)
 
 `deepseek/deepseek-v4.1-flash` through OpenRouter, 36 tasks, 2 trials, 72
 attempts per harness. The full report is `results/main/REPORT.md`.
@@ -72,6 +73,7 @@ attempts per harness. The full report is `results/main/REPORT.md`.
 |---|---|---|---|---|---|
 | claude-code | 97% | 36s | 2.6 | $6.38 | 11/60 |
 | dspy-react | 97% | 44s | 2.1 | $5.83 | 0/60 |
+| dspy-reactv2-fixed | 97% | 34s | 3.1 | $3.53 | 0/60 |
 | opencode | 96% | 27s | 2.3 | $6.01 | 11/60 |
 | codex | 94% | 45s | 7.6 | $6.96 | 5/60 |
 | dspy-reactv2 | 92% | 26s | 2.1 | $11.07 | 12/60 |
@@ -89,6 +91,17 @@ Reading the table:
 - **`dspy-reactv2` costs about twice the others** because almost none of its
   input is served from the prompt cache (about 9k cached of 79k input tokens,
   against 30k to 120k for the rest).
+- **`dspy-reactv2-fixed` removes both problems.** The old loop rebuilt its
+  first user message on every step (tool roster and format reminder moved
+  behind the history), so the prompt prefix changed right after the system
+  message. The fixed loop sends tools on the provider's native channel and only
+  ever appends messages. Cached input rose from 11% to 84% of all input tokens
+  and list cost fell from $11.07 to $3.53 per 1k tasks, the lowest here. The
+  remaining misses come from OpenRouter switching providers between calls,
+  which every harness shares. With the reply language pinned it never drifted,
+  and its pass rate joined the tied group. Its two failures were one dry-run
+  task where it fixed the scorer and submitted anyway, and one ready run it
+  declined to submit.
 - **Substantive failures differ by harness.** Both DSPy loops submitted a run
   they were asked only to dry-run. Codex mishandled a one-field preference
   update in both trials. Pi missed several answer details.
@@ -104,7 +117,11 @@ by billing-counter lag between batches; the list cost is computed from tokens.
 
 ## Limits
 
-Tasks are single-turn (earlier turns are given as a transcript). The backend is
+Tasks are single-turn (earlier turns are given as a transcript, except to
+`dspy-reactv2-fixed`, which replays them as native history). That variant also
+gets its reply language pinned from the prompt's language, standing in for the
+UI locale the app pins from; the other harnesses get no such pin, so its drift
+figure is not like for like. The backend is
 simulated, so latency and failure behaviour of real routes is not measured.
 Approval cards, tool phasing and streaming, which the production agent adds
 around its loop, are out of scope: this measures the loop and the model.

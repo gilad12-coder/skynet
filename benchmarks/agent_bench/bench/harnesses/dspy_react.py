@@ -1,11 +1,14 @@
-"""DSPy ReAct harness: the agent loop Skynet's generalist agent runs today.
+"""DSPy ReAct harness: the agent loops built on DSPy.
 
-Two variants share this module:
+Three variants share this module:
 
 * ``dspy-reactv2``  the project's ``RetryingReActV2`` (``dspy.ReActV2`` with
   parse-failure resampling and serial tool calls), exactly the class the
   production agent constructs.
 * ``dspy-react``    stock classic ``dspy.ReAct``.
+* ``dspy-reactv2-fixed``  the project's ``ConversationReAct``: the same loop with
+  native tool calling, an append-only prompt the provider can cache, earlier
+  turns replayed as real history, and the reply language pinned.
 
 The loop runs in a child process so a hang can be killed and so the backend's
 import footprint never stays resident in the benchmark runner.
@@ -18,29 +21,42 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from bench.harnesses.base import Attempt
 
 BACKEND = Path(__file__).resolve().parents[4] / "backend"
 MAX_ITERS = 15
+FIXED = "dspy-reactv2-fixed"
 
 
-def run_dspy(variant: str, message: str, brief: str, port: int, workdir: Path, key: str, timeout: int) -> Attempt:
+def run_dspy(
+    variant: str,
+    message: str,
+    brief: str,
+    port: int,
+    workdir: Path,
+    key: str,
+    timeout: int,
+    conversation: dict[str, Any] | None = None,
+) -> Attempt:
     """Run one DSPy ReAct attempt in a child process.
 
     Args:
-        variant: ``"dspy-reactv2"`` or ``"dspy-react"``.
+        variant: ``"dspy-reactv2"``, ``"dspy-react"`` or ``"dspy-reactv2-fixed"``.
         message: The user message.
         brief: The shared system prompt.
         port: Port of the attempt's world server.
         workdir: Directory for this attempt's files.
         key: OpenRouter API key.
         timeout: Seconds before the child is killed.
+        conversation: For the fixed variant, the earlier ``turns`` and the ``reply_language``.
 
     Returns:
         The parsed attempt.
     """
     (workdir / "message.txt").write_text(message)
+    (workdir / "conversation.json").write_text(json.dumps(conversation or {}, ensure_ascii=False))
     (workdir / "brief.txt").write_text(brief)
     out = workdir / "dspy_result.json"
     cmd = [sys.executable, "-m", "bench.harnesses.dspy_child", variant, str(port), str(workdir)]
