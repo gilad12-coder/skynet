@@ -31,13 +31,13 @@ from dotenv import dotenv_values
 
 from bench.harnesses.base import MODEL, Attempt
 from bench.harnesses.cli import CLI_HARNESSES
-from bench.harnesses.dspy_react import FIXED, run_dspy
+from bench.harnesses.dspy_react import FIXED, STABLE, run_dspy
 from bench.language import is_hebrew
 from bench.prompt import brief, user_message
 from bench.task import Run, Task, grade, load_tasks
 
 ROOT = Path(__file__).resolve().parent.parent
-HARNESSES = [*CLI_HARNESSES, "dspy-reactv2", "dspy-react", FIXED]
+HARNESSES = [*CLI_HARNESSES, "dspy-reactv2", "dspy-react", FIXED, STABLE]
 _write_lock = threading.Lock()
 
 
@@ -129,7 +129,9 @@ def start_server(task_id: str, port: int, log: Path) -> subprocess.Popen:
     raise RuntimeError(f"world server for {task_id} did not start; see {log}")
 
 
-def run_attempt(harness: str, task: Task, trial: int, out: Path, key: str, timeout: int, slot: int) -> dict[str, Any]:
+def run_attempt(
+    harness: str, task: Task, trial: int, out: Path, key: str, timeout: int, slot: int, pin_language: bool = False
+) -> dict[str, Any]:
     """Run and grade one (harness, task, trial) attempt.
 
     Args:
@@ -140,6 +142,7 @@ def run_attempt(harness: str, task: Task, trial: int, out: Path, key: str, timeo
         key: OpenRouter API key.
         timeout: Seconds before the harness is killed.
         slot: Index of the concurrent worker running this attempt.
+        pin_language: Also tell the text-mode DSPy loops which language to reply in.
 
     Returns:
         The result record written to ``results.jsonl``.
@@ -169,6 +172,9 @@ def run_attempt(harness: str, task: Task, trial: int, out: Path, key: str, timeo
             }
             message = user_message(task, transcript=False)
             attempt = run_dspy(harness, message, brief(), port, workdir, key, timeout, conversation)
+        elif pin_language and harness in ("dspy-reactv2", STABLE):
+            pinned = {"reply_language": "Hebrew" if is_hebrew(task.prompt) else "English"}
+            attempt = run_dspy(harness, message, brief(), port, workdir, key, timeout, pinned)
         else:
             attempt = run_dspy(harness, message, brief(), port, workdir, key, timeout)
         snapshot = fetch_state(port)
@@ -203,6 +209,10 @@ def main() -> None:
     parser.add_argument("--concurrency", type=int, default=3)
     parser.add_argument("--timeout", type=int, default=420)
     parser.add_argument("--out", type=Path, default=ROOT / "results" / "latest")
+    parser.add_argument(
+        "--pin-language", action="store_true",
+        help="pin the reply language for dspy-reactv2 and dspy-reactv2-stable, to compare them without language drift",
+    )  # fmt: skip
     args = parser.parse_args()
 
     key = api_key()
@@ -235,7 +245,7 @@ def main() -> None:
             task, trial = item
             slot = slots.get()
             try:
-                record = run_attempt(harness, task, trial, args.out, key, args.timeout, slot)
+                record = run_attempt(harness, task, trial, args.out, key, args.timeout, slot, args.pin_language)
             finally:
                 slots.put(slot)
             with _write_lock:
