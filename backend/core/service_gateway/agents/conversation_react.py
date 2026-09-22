@@ -19,10 +19,18 @@ from typing import Any
 
 import dspy
 from dspy.adapters.chat_adapter import ChatAdapter
-from dspy.adapters.types.tool import ToolCallResults, ToolCalls
+from dspy.adapters.types.tool import ToolCalls
 from dspy.adapters.utils import get_field_description_string
 
 from ..optimization.retrying_react import PARSE_RETRY_ATTEMPTS, RetryingReActV2
+
+try:
+    from dspy.adapters.types.tool import ToolCallResults
+except ImportError:  # The stable dspy 3.2 line has neither ReActV2 nor replayable tool results.
+    ToolCallResults = None  # type: ignore[assignment,misc]
+
+NATIVE_LOOP_AVAILABLE = ToolCallResults is not None and hasattr(dspy, "ReActV2")
+"""Whether the installed DSPy can run this loop; importing the module never requires it."""
 
 SUBMIT_TOOL = "submit"
 _DELIVERED = "Delivered to the user."

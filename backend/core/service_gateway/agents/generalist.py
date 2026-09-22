@@ -64,7 +64,7 @@ from ..language_models import (
 from ..optimization.training_ground.registry import hash_tool_schema
 from .code import ReactReplyStream, _agent_error_payload, _format_agent_error, _reply_language
 from .constants import REASONING_FIELD
-from .conversation_react import AppendOnlyChatAdapter, ConversationReAct, history_from_turns
+from .conversation_react import NATIVE_LOOP_AVAILABLE, AppendOnlyChatAdapter, ConversationReAct, history_from_turns
 
 logger = logging.getLogger(__name__)
 
@@ -2268,6 +2268,12 @@ async def _drive_generalist_agent(
         return reply_text
 
 
+_UNSUPPORTED_DSPY_BUILD = (
+    "The assistant needs DSPy's ReActV2 loop with native tool-call history (dspy 3.3+), "
+    "which this DSPy build cannot provide."
+)
+
+
 async def run_generalist_agent(
     *,
     wizard_state: WizardState,
@@ -2331,6 +2337,9 @@ async def run_generalist_agent(
     Raises:
         asyncio.CancelledError: Re-raised when the stream is cancelled.
     """
+    if not NATIVE_LOOP_AVAILABLE:
+        yield {"event": "error", "data": {"error": _UNSUPPORTED_DSPY_BUILD}}
+        return
     url = mcp_url or settings.generalist_agent_mcp_url
     registry = approval_registry or get_approval_registry()
     model_name = model_config.name if model_config else settings.generalist_agent_model

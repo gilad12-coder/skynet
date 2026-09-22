@@ -1489,3 +1489,18 @@ async def test_turn_replays_history_natively_and_streams_the_submit(monkeypatch:
     assert events[0]["event"] == "turn_metadata"
     assert events[0]["data"]["allowed_tools"] == ["list_models_for_agent"]
     assert [e["event"] for e in events if e["event"] in ("tool_start", "tool_end")] == ["tool_start", "tool_end"]
+
+
+async def test_stable_dspy_line_reports_the_loop_as_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A DSPy build without ReActV2 gets one error event instead of a crash mid-turn."""
+    monkeypatch.setattr(generalist_module, "NATIVE_LOOP_AVAILABLE", False)
+
+    events = [
+        event
+        async for event in generalist_module.run_generalist_agent(
+            wizard_state=WizardState(), chat_history=[], user_message="hi", mcp_url="http://unused"
+        )
+    ]
+
+    assert [event["event"] for event in events] == ["error"]
+    assert "dspy 3.3" in events[0]["data"]["error"]
