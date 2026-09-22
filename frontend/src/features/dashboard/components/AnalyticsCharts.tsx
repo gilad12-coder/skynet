@@ -21,8 +21,25 @@ import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { STATUS_COLORS } from "../constants";
 import type { HistogramBar, TimelinePoint } from "../lib/transform-chart-data";
 
-const AXIS_TICK = { fontSize: 10 };
+const AXIS_TICK = { fontSize: 10, fill: "var(--muted-foreground)" };
+// Axis lines and tick marks stay visible (muted) so every chart reads with
+// both axes even when the grid is sparse; titles sit inside the plot margins.
+const AXIS_LINE = { stroke: "var(--border)" };
 const GRID_CLASS = "stroke-muted";
+
+type AxisTitlePosition = "insideBottom" | "insideLeft" | "insideRight";
+
+function axisTitle(value: string, position: AxisTitlePosition) {
+  const vertical = position !== "insideBottom";
+  return {
+    value,
+    position,
+    angle: vertical ? (position === "insideLeft" ? -90 : 90) : undefined,
+    offset: vertical ? 10 : -6,
+    fontSize: 10,
+    fill: "var(--muted-foreground)",
+  };
+}
 const CURSOR_FILL = { fill: "var(--color-chart-5)", fillOpacity: 0.12 };
 
 function formatPoints(value: number | null | undefined): string {
@@ -150,21 +167,22 @@ export function RangeHistogram({
       <CartesianGrid vertical={false} strokeDasharray="3 3" className={GRID_CLASS} />
       <XAxis
         dataKey="label"
-        tickLine={false}
-        axisLine={false}
+        tickLine={AXIS_LINE}
+        axisLine={AXIS_LINE}
         tick={AXIS_TICK}
         interval={0}
         className="fill-muted-foreground"
-        label={{ value: unitLabel, position: "insideBottom", offset: -6, fontSize: 10 }}
+        label={axisTitle(unitLabel, "insideBottom")}
       />
       <YAxis
         yAxisId="count"
-        tickLine={false}
-        axisLine={false}
+        tickLine={AXIS_LINE}
+        axisLine={AXIS_LINE}
         tick={AXIS_TICK}
         allowDecimals={false}
-        width={32}
+        width={44}
         className="fill-muted-foreground"
+        label={axisTitle(runsLabel, "insideLeft")}
       />
     </>
   );
@@ -173,17 +191,18 @@ export function RangeHistogram({
     <div className="h-[240px] min-w-0" dir="ltr">
       <ResponsiveContainer width="100%" height="100%">
         {withAverage ? (
-          <ComposedChart data={data} margin={{ left: 0, right: 8, top: 10, bottom: 18 }}>
+          <ComposedChart data={data} margin={{ left: 4, right: 4, top: 10, bottom: 20 }}>
             {axes}
             <YAxis
               yAxisId="avg"
               orientation="right"
-              tickLine={false}
-              axisLine={false}
+              tickLine={AXIS_LINE}
+              axisLine={AXIS_LINE}
               tick={AXIS_TICK}
-              width={40}
+              width={52}
               tickFormatter={(v: number) => `${v}%`}
               className="fill-muted-foreground"
+              label={axisTitle(avgLabel, "insideRight")}
             />
             {tooltip}
             <Bar
@@ -210,7 +229,7 @@ export function RangeHistogram({
             />
           </ComposedChart>
         ) : (
-          <BarChart data={data} margin={{ left: 0, right: 8, top: 10, bottom: 18 }}>
+          <BarChart data={data} margin={{ left: 4, right: 8, top: 10, bottom: 20 }}>
             {axes}
             {tooltip}
             <Bar
@@ -263,6 +282,7 @@ export function StackedTimeline({
   const failedLabel = getStatusLabel("failed");
   const otherLabel = msg("dashboard.analytics.legend_other");
   const totalLabel = msg("dashboard.analytics.runs");
+  const dateLabel = msg("dashboard.analytics.col_date");
   const clickable = onSelect != null;
   const select = (point: TimelinePoint) => onSelect?.(point.date, bucketEnd(point.date, granularity));
 
@@ -302,24 +322,26 @@ export function StackedTimeline({
   return (
     <div className="h-[220px] min-w-0" dir="ltr">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ left: 0, right: 8, top: 10, bottom: 4 }} barCategoryGap="20%">
+        <BarChart data={data} margin={{ left: 4, right: 8, top: 10, bottom: 20 }} barCategoryGap="20%">
           <CartesianGrid vertical={false} strokeDasharray="3 3" className={GRID_CLASS} />
           <XAxis
             dataKey="label"
-            tickLine={false}
-            axisLine={false}
+            tickLine={AXIS_LINE}
+            axisLine={AXIS_LINE}
             tick={AXIS_TICK}
             minTickGap={28}
             interval="preserveStartEnd"
             className="fill-muted-foreground"
+            label={axisTitle(dateLabel, "insideBottom")}
           />
           <YAxis
-            tickLine={false}
-            axisLine={false}
+            tickLine={AXIS_LINE}
+            axisLine={AXIS_LINE}
             tick={AXIS_TICK}
             allowDecimals={false}
-            width={32}
+            width={44}
             className="fill-muted-foreground"
+            label={axisTitle(totalLabel, "insideLeft")}
           />
           <Tooltip
             cursor={CURSOR_FILL}
