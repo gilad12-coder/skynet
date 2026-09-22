@@ -19,10 +19,18 @@ from typing import Any
 
 import dspy
 from dspy.adapters.chat_adapter import ChatAdapter
-from dspy.adapters.types.tool import ToolCallResults, ToolCalls
+from dspy.adapters.types.tool import ToolCalls
 from dspy.adapters.utils import get_field_description_string
 
 from ..optimization.retrying_react import PARSE_RETRY_ATTEMPTS, RetryingReActV2
+
+try:
+    from dspy.adapters.types.tool import ToolCallResults
+except ImportError:  # The stable dspy 3.2 line has neither ReActV2 nor replayable tool results.
+    ToolCallResults = None  # type: ignore[assignment,misc]
+
+NATIVE_LOOP_AVAILABLE = ToolCallResults is not None and hasattr(dspy, "ReActV2")
+"""Whether the installed DSPy can run this loop; importing the module never requires it."""
 
 SUBMIT_TOOL = "submit"
 _DELIVERED = "Delivered to the user."
@@ -157,13 +165,19 @@ class ConversationReAct(RetryingReActV2):
 
 
 def history_from_turns(
-    turns: Iterable[tuple[str, str]], *, input_field: str, output_field: str
+    turns: Iterable[tuple[str, str] | tuple[str, str, list[dict[str, Any]]]],
+    *,
+    input_field: str,
+    output_field: str,
 ) -> dspy.History:
     """Rebuild native loop history from plain ``(role, text)`` conversation turns.
 
     An earlier assistant reply is replayed the way the loop itself records one:
     as a ``submit`` call. The inner signature has no reply field, so a plain
-    assistant text would be dropped from the prompt.
+    assistant text would be dropped from the prompt. An assistant turn may carry
+    a third element, the trace of the tool calls it made, each a
+    ``{tool, status, result}`` dict (``args`` optional); those are replayed
+    one call per loop step ahead of the ``submit``, as the loop records them.
 
     Args:
         turns: Earlier turns, oldest first, with roles ``"user"`` and ``"assistant"``.
@@ -175,21 +189,44 @@ def history_from_turns(
     """
     messages: list[dict[str, Any]] = []
     pending: dict[str, Any] = {}
-    for index, (role, text) in enumerate(turns):
+    for index, turn in enumerate(turns):
+        role, text = turn[0], turn[1]
         if role == "user":
             if pending:
                 messages.append(pending)
             pending = {input_field: text}
             continue
-        calls = ToolCalls(
-            tool_calls=[ToolCalls.ToolCall(id=f"turn_{index}", name=SUBMIT_TOOL, args={output_field: text})]
-        )
-        results = ToolCallResults.from_tool_calls_and_values(calls, [_DELIVERED], [False])
-        messages.append({**pending, "tool_calls": calls.model_copy(update={"tool_call_results": results})})
+        trace = turn[2] if len(turn) > 2 else []
+        for step, call in enumerate(trace):
+            messages.append({**pending, "tool_calls": _replayed_call(
+                f"turn_{index}_{step}", call["tool"], call.get("args") or {},
+                call.get("result") or "", call.get("status") == "error",
+            )})  # fmt: skip
+            pending = {}
+        submit = _replayed_call(f"turn_{index}", SUBMIT_TOOL, {output_field: text}, _DELIVERED, False)
+        messages.append({**pending, "tool_calls": submit})
         pending = {}
     if pending:
         messages.append(pending)
     return dspy.History(messages=messages)
+
+
+def _replayed_call(call_id: str, name: str, args: dict[str, Any], result: str, is_error: bool) -> ToolCalls:
+    """Build one settled tool call for a replayed history event.
+
+    Args:
+        call_id: Tool call id; results are matched to calls by it.
+        name: Tool name.
+        args: Arguments the call was made with.
+        result: The result text the tool returned.
+        is_error: Whether the call failed.
+
+    Returns:
+        The call with its result attached.
+    """
+    calls = ToolCalls(tool_calls=[ToolCalls.ToolCall(id=call_id, name=name, args=args)])
+    results = ToolCallResults.from_tool_calls_and_values(calls, [result], [is_error])
+    return calls.model_copy(update={"tool_call_results": results})
 
 
 def dump_history(history: dspy.History) -> list[dict[str, Any]]:
