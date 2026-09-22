@@ -21,8 +21,25 @@ import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { STATUS_COLORS } from "../constants";
 import type { HistogramBar, TimelinePoint } from "../lib/transform-chart-data";
 
-const AXIS_TICK = { fontSize: 10 };
+const AXIS_TICK = { fontSize: 10, fill: "var(--muted-foreground)" };
+// Axis lines and tick marks stay visible (muted) so every chart reads with
+// both axes even when the grid is sparse; titles sit inside the plot margins.
+const AXIS_LINE = { stroke: "var(--border)" };
 const GRID_CLASS = "stroke-muted";
+
+type AxisTitlePosition = "insideBottom" | "insideLeft" | "insideRight";
+
+function axisTitle(value: string, position: AxisTitlePosition) {
+  const vertical = position !== "insideBottom";
+  return {
+    value,
+    position,
+    angle: vertical ? (position === "insideLeft" ? -90 : 90) : undefined,
+    offset: vertical ? 10 : -6,
+    fontSize: 10,
+    fill: "var(--muted-foreground)",
+  };
+}
 const CURSOR_FILL = { fill: "var(--color-chart-5)", fillOpacity: 0.12 };
 
 function formatPoints(value: number | null | undefined): string {
@@ -64,18 +81,22 @@ function TooltipCard({ title, rows }: { title: string; rows: TooltipRow[] }) {
  * are computed server-side, so the chart has the same handful of bars whether
  * the user has three runs or three thousand. When `withAverage` is set (the
  * dataset-size breakdown) a line traces the mean improvement per bucket so the
- * "does more data help?" question is answered on the same axis.
+ * "does more data help?" question is answered on the same axis. Clicking a
+ * bar (or a row in lite mode) hands its bucket edges to `onBucketClick` so
+ * the dashboard can narrow to that range.
  */
 export function RangeHistogram({
   data,
   unitLabel,
   withAverage = false,
   emptyMessage,
+  onBucketClick,
 }: {
   data: HistogramBar[];
   unitLabel: string;
   withAverage?: boolean;
   emptyMessage?: string;
+  onBucketClick?: (bar: HistogramBar) => void;
 }) {
   const lite = useLiteMode();
   const runsLabel = msg("dashboard.analytics.runs");
@@ -83,11 +104,20 @@ export function RangeHistogram({
 
   if (data.length === 0) return <ChartEmptyState message={emptyMessage} />;
 
+  const clickable = onBucketClick != null;
+  const handleClick = clickable
+    ? (_: unknown, index: number) => {
+        const bar = data[index];
+        if (bar) onBucketClick(bar);
+      }
+    : undefined;
+
   if (lite) {
     return (
       <div className="h-[240px]">
         <ChartTable
           rows={data}
+          onRowClick={clickable ? (row) => onBucketClick(row) : undefined}
           columns={[
             {
               key: "label",
@@ -137,21 +167,22 @@ export function RangeHistogram({
       <CartesianGrid vertical={false} strokeDasharray="3 3" className={GRID_CLASS} />
       <XAxis
         dataKey="label"
-        tickLine={false}
-        axisLine={false}
+        tickLine={AXIS_LINE}
+        axisLine={AXIS_LINE}
         tick={AXIS_TICK}
         interval={0}
         className="fill-muted-foreground"
-        label={{ value: unitLabel, position: "insideBottom", offset: -6, fontSize: 10 }}
+        label={axisTitle(unitLabel, "insideBottom")}
       />
       <YAxis
         yAxisId="count"
-        tickLine={false}
-        axisLine={false}
+        tickLine={AXIS_LINE}
+        axisLine={AXIS_LINE}
         tick={AXIS_TICK}
         allowDecimals={false}
-        width={32}
+        width={44}
         className="fill-muted-foreground"
+        label={axisTitle(runsLabel, "insideLeft")}
       />
     </>
   );
@@ -160,17 +191,18 @@ export function RangeHistogram({
     <div className="h-[240px] min-w-0" dir="ltr">
       <ResponsiveContainer width="100%" height="100%">
         {withAverage ? (
-          <ComposedChart data={data} margin={{ left: 0, right: 8, top: 10, bottom: 18 }}>
+          <ComposedChart data={data} margin={{ left: 4, right: 4, top: 10, bottom: 20 }}>
             {axes}
             <YAxis
               yAxisId="avg"
               orientation="right"
-              tickLine={false}
-              axisLine={false}
+              tickLine={AXIS_LINE}
+              axisLine={AXIS_LINE}
               tick={AXIS_TICK}
-              width={40}
+              width={52}
               tickFormatter={(v: number) => `${v}%`}
               className="fill-muted-foreground"
+              label={axisTitle(avgLabel, "insideRight")}
             />
             {tooltip}
             <Bar
@@ -181,6 +213,8 @@ export function RangeHistogram({
               radius={[4, 4, 0, 0]}
               maxBarSize={48}
               animationDuration={300}
+              cursor={clickable ? "pointer" : "default"}
+              onClick={handleClick}
             />
             <Line
               yAxisId="avg"
@@ -195,7 +229,7 @@ export function RangeHistogram({
             />
           </ComposedChart>
         ) : (
-          <BarChart data={data} margin={{ left: 0, right: 8, top: 10, bottom: 18 }}>
+          <BarChart data={data} margin={{ left: 4, right: 8, top: 10, bottom: 20 }}>
             {axes}
             {tooltip}
             <Bar
@@ -206,6 +240,8 @@ export function RangeHistogram({
               radius={[4, 4, 0, 0]}
               maxBarSize={48}
               animationDuration={300}
+              cursor={clickable ? "pointer" : "default"}
+              onClick={handleClick}
             />
           </BarChart>
         )}
@@ -214,28 +250,41 @@ export function RangeHistogram({
   );
 }
 
+/** Inclusive last day of the timeline bucket that starts on `start` (ISO day). */
+function bucketEnd(start: string, granularity: DashboardAnalyticsGranularity): string {
+  if (granularity === "day") return start;
+  const startDate = new Date(`${start}T00:00:00Z`);
+  const end =
+    granularity === "week"
+      ? new Date(startDate.getTime() + 6 * 86_400_000)
+      : new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + 1, 0));
+  return end.toISOString().slice(0, 10);
+}
+
 /**
  * Submissions over time as stacked success/failed/other bars. Bucket width is
  * chosen server-side (day, week or month) from the span of the filtered runs,
  * and the axis thins its ticks, so a two-year history stays legible. Clicking
- * a bar narrows the dashboard to that day; wider buckets are not clickable
- * because the `date` filter is a single calendar day.
+ * a bar narrows the dashboard to that bucket: a single day, or the week or
+ * month the bar spans, handed over as an inclusive `[start, end]` day range.
  */
 export function StackedTimeline({
   data,
   granularity,
-  onDayClick,
+  onSelect,
 }: {
   data: TimelinePoint[];
   granularity: DashboardAnalyticsGranularity;
-  onDayClick?: (date: string) => void;
+  onSelect?: (start: string, end: string) => void;
 }) {
   const lite = useLiteMode();
   const successLabel = getStatusLabel("success");
   const failedLabel = getStatusLabel("failed");
   const otherLabel = msg("dashboard.analytics.legend_other");
   const totalLabel = msg("dashboard.analytics.runs");
-  const clickable = granularity === "day" && onDayClick != null;
+  const dateLabel = msg("dashboard.analytics.col_date");
+  const clickable = onSelect != null;
+  const select = (point: TimelinePoint) => onSelect?.(point.date, bucketEnd(point.date, granularity));
 
   if (data.length === 0) return <ChartEmptyState />;
 
@@ -251,7 +300,7 @@ export function StackedTimeline({
             { key: "other", label: otherLabel, align: "end" },
             { key: "total", label: totalLabel, align: "end" },
           ]}
-          onRowClick={clickable ? (row) => onDayClick(row.date) : undefined}
+          onRowClick={clickable ? (row) => select(row) : undefined}
         />
       </div>
     );
@@ -260,7 +309,7 @@ export function StackedTimeline({
   const handleClick = clickable
     ? (_: unknown, index: number) => {
         const point = data[index];
-        if (point) onDayClick(point.date);
+        if (point) select(point);
       }
     : undefined;
 
@@ -273,24 +322,26 @@ export function StackedTimeline({
   return (
     <div className="h-[220px] min-w-0" dir="ltr">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ left: 0, right: 8, top: 10, bottom: 4 }} barCategoryGap="20%">
+        <BarChart data={data} margin={{ left: 4, right: 8, top: 10, bottom: 20 }} barCategoryGap="20%">
           <CartesianGrid vertical={false} strokeDasharray="3 3" className={GRID_CLASS} />
           <XAxis
             dataKey="label"
-            tickLine={false}
-            axisLine={false}
+            tickLine={AXIS_LINE}
+            axisLine={AXIS_LINE}
             tick={AXIS_TICK}
             minTickGap={28}
             interval="preserveStartEnd"
             className="fill-muted-foreground"
+            label={axisTitle(dateLabel, "insideBottom")}
           />
           <YAxis
-            tickLine={false}
-            axisLine={false}
+            tickLine={AXIS_LINE}
+            axisLine={AXIS_LINE}
             tick={AXIS_TICK}
             allowDecimals={false}
-            width={32}
+            width={44}
             className="fill-muted-foreground"
+            label={axisTitle(totalLabel, "insideLeft")}
           />
           <Tooltip
             cursor={CURSOR_FILL}

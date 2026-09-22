@@ -15,6 +15,9 @@ export type HistogramBar = {
   label: string;
   count: number;
   avgImprovement: number | null;
+  /** Backend `[lower, upper)` edges (null = open end) so a bar can become a filter. */
+  lower: number | null;
+  upper: number | null;
 };
 
 export type OptimizerRow = {
@@ -103,7 +106,7 @@ function shareBars(counts: Record<string, number>, label: (key: string) => strin
     .sort((a, b) => b.value - a.value);
 }
 
-function jobTypeLabel(key: string): string {
+export function jobTypeLabel(key: string): string {
   switch (key) {
     case "grid_search":
       return msg("auto.features.dashboard.lib.transform.chart.data.literal.1");
@@ -135,6 +138,8 @@ function histogram(buckets: DashboardAnalyticsRangeBucket[], fmt: Intl.NumberFor
     label: bucketLabel(b, fmt),
     count: b.count,
     avgImprovement: b.avg_improvement,
+    lower: b.lower,
+    upper: b.upper,
   }));
 }
 

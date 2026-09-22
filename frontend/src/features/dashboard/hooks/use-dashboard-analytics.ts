@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getDashboardAnalytics, type DashboardAnalytics } from "@/shared/lib/api";
-import type { AnalyticsRange } from "./use-analytics-filters";
+import type { AnalyticsBucket, AnalyticsRange } from "./use-analytics-filters";
 
 type UseDashboardAnalyticsArgs = {
   sessionUser: string;
@@ -11,8 +11,14 @@ type UseDashboardAnalyticsArgs = {
   model: string;
   status: string;
   date: string | null;
+  dateTo: string | null;
   owner: string | null;
   access: string | null;
+  jobType: string | null;
+  module: string | null;
+  improvement: AnalyticsBucket | null;
+  runtime: AnalyticsBucket | null;
+  dataset: AnalyticsBucket | null;
 };
 
 export type UseDashboardAnalyticsReturn = {
@@ -38,8 +44,14 @@ export function useDashboardAnalytics({
   model,
   status,
   date,
+  dateTo,
   owner,
   access,
+  jobType,
+  module,
+  improvement,
+  runtime,
+  dataset,
 }: UseDashboardAnalyticsArgs): UseDashboardAnalyticsReturn {
   const [analyticsData, setAnalyticsData] = useState<DashboardAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -57,9 +69,18 @@ export function useDashboardAnalytics({
         model: model !== "all" ? model : undefined,
         status: status !== "all" ? status : undefined,
         date: date ?? undefined,
+        date_to: dateTo ?? undefined,
         include_shared: includeShared,
         owner: owner ?? undefined,
         access: access ?? undefined,
+        job_type: jobType ?? undefined,
+        module: module ?? undefined,
+        improvement_min: improvement?.lower,
+        improvement_max: improvement?.upper,
+        runtime_min: runtime?.lower,
+        runtime_max: runtime?.upper,
+        dataset_min: dataset?.lower,
+        dataset_max: dataset?.upper,
       });
       setAnalyticsData(result);
     } catch {
@@ -67,7 +88,23 @@ export function useDashboardAnalytics({
     } finally {
       setAnalyticsLoading(false);
     }
-  }, [isAdmin, sessionUser, range, optimizer, model, status, date, owner, access]);
+  }, [
+    isAdmin,
+    sessionUser,
+    range,
+    optimizer,
+    model,
+    status,
+    date,
+    dateTo,
+    owner,
+    access,
+    jobType,
+    module,
+    improvement,
+    runtime,
+    dataset,
+  ]);
 
   useEffect(() => {
     if (activeTab !== "analytics") return;

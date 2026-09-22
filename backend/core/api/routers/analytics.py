@@ -145,6 +145,43 @@ def _improvement_points(value: float) -> float:
     return value * 100 if abs(value) <= 1 else value
 
 
+def _job_type_key(summary: OptimizationSummaryResponse) -> str:
+    """Return the dashboard job-type bucket for a run.
+
+    Args:
+        summary: The run's dashboard summary.
+
+    Returns:
+        The ``optimization_type``, except that single runs of a multi-node
+        workflow program report :data:`_JOB_TYPE_WORKFLOW`.
+    """
+    job_type = summary.optimization_type or OPTIMIZATION_TYPE_RUN
+    if job_type == OPTIMIZATION_TYPE_RUN and summary.composition == COMPOSITION_WORKFLOW:
+        return _JOB_TYPE_WORKFLOW
+    return job_type
+
+
+def _in_bucket(value: float | None, lower: float | None, upper: float | None) -> bool:
+    """Report whether ``value`` falls inside the half-open ``[lower, upper)`` range.
+
+    Mirrors :func:`_range_buckets` so a histogram bar's edges can be echoed
+    back as a filter and select exactly the runs that bar counted.
+
+    Args:
+        value: The measured value, or None when the run has no measurement.
+        lower: Inclusive lower edge, or None for an open start.
+        upper: Exclusive upper edge, or None for an open end.
+
+    Returns:
+        False when the value is missing or outside the range.
+    """
+    if value is None:
+        return False
+    if lower is not None and value < lower:
+        return False
+    return upper is None or value < upper
+
+
 def _created_at_utc(value: datetime | str | None) -> datetime | None:
     """Coerce a summary's ``created_at`` to an aware UTC datetime.
 
@@ -758,6 +795,10 @@ def create_analytics_router(*, job_store) -> APIRouter:
         username: str | None = Query(default=None, description="Only include optimizations owned by this user"),
         optimization_id: str | None = Query(default=None, description="Limit the aggregation to a single optimization"),
         date: str | None = Query(default=None, description="YYYY-MM-DD day filter on created_at"),
+        date_to: str | None = Query(
+            default=None,
+            description="YYYY-MM-DD inclusive end of a created_at range that starts at `date`",
+        ),
         days: int | None = Query(
             default=None,
             ge=1,
@@ -773,6 +814,25 @@ def create_analytics_router(*, job_store) -> APIRouter:
             default=None,
             description="Restrict to a caller access tier: 'mine', 'owner', 'editor', or 'viewer'.",
         ),
+        job_type: str | None = Query(
+            default=None,
+            description="Job-type bucket filter: 'run', 'grid_search', 'blackbox' or 'workflow'.",
+        ),
+        module: str | None = Query(default=None, description="Exact-match module name filter"),
+        improvement_min: float | None = Query(
+            default=None, description="Inclusive lower bound on improvement, in percentage points"
+        ),
+        improvement_max: float | None = Query(
+            default=None, description="Exclusive upper bound on improvement, in percentage points"
+        ),
+        runtime_min: float | None = Query(
+            default=None, ge=0, description="Inclusive lower bound on run time, in minutes"
+        ),
+        runtime_max: float | None = Query(
+            default=None, ge=0, description="Exclusive upper bound on run time, in minutes"
+        ),
+        dataset_min: float | None = Query(default=None, ge=0, description="Inclusive lower bound on dataset rows"),
+        dataset_max: float | None = Query(default=None, ge=0, description="Exclusive upper bound on dataset rows"),
     ) -> DashboardAnalyticsResponse:
         """Return a pre-shaped payload for the whole analytics dashboard.
 
@@ -791,11 +851,21 @@ def create_analytics_router(*, job_store) -> APIRouter:
             status: Optimization status filter.
             username: Only include optimizations owned by this user.
             optimization_id: Limit the aggregation to a single optimization.
-            date: ``YYYY-MM-DD`` day filter on ``created_at``.
+            date: ``YYYY-MM-DD`` day filter on ``created_at``, or the range
+                start when ``date_to`` is given.
+            date_to: Inclusive ``YYYY-MM-DD`` end of the ``created_at`` range.
             days: Only include runs created within the last ``days`` days.
             include_shared: Union in runs shared with ``username``.
             owner: Restrict the aggregation to runs owned by this username.
             access: Restrict to a caller access tier (mine/owner/editor/viewer).
+            job_type: Restrict to one job-type bucket (run/grid_search/blackbox/workflow).
+            module: Exact-match module name filter.
+            improvement_min: Inclusive lower bound on improvement (points).
+            improvement_max: Exclusive upper bound on improvement (points).
+            runtime_min: Inclusive lower bound on run time (minutes).
+            runtime_max: Exclusive upper bound on run time (minutes).
+            dataset_min: Inclusive lower bound on dataset rows.
+            dataset_max: Exclusive upper bound on dataset rows.
             current_user: The authenticated caller (scopes the aggregation).
 
         Returns:
@@ -857,11 +927,36 @@ def create_analytics_router(*, job_store) -> APIRouter:
                 continue
             if optimization_id and summary.optimization_id != optimization_id:
                 continue
-            if date or since:
+            if job_type and _job_type_key(summary) != job_type:
+                continue
+            if module and summary.module_name != module:
+                continue
+            if (improvement_min is not None or improvement_max is not None) and not _in_bucket(
+                None if summary.metric_improvement is None else _improvement_points(summary.metric_improvement),
+                improvement_min,
+                improvement_max,
+            ):
+                continue
+            if (runtime_min is not None or runtime_max is not None) and not _in_bucket(
+                None if summary.elapsed_seconds is None else summary.elapsed_seconds / 60.0,
+                runtime_min,
+                runtime_max,
+            ):
+                continue
+            if (dataset_min is not None or dataset_max is not None) and not _in_bucket(
+                float(summary.dataset_rows) if summary.dataset_rows else None,
+                dataset_min,
+                dataset_max,
+            ):
+                continue
+            if date or date_to or since:
                 created = _created_at_utc(summary.created_at)
                 if created is None:
                     continue
-                if date and created.date().isoformat() != date:
+                day = created.date().isoformat()
+                if date and (day < date if date_to else day != date):
+                    continue
+                if date_to and day > date_to:
                     continue
                 if since and created < since:
                     continue
@@ -907,10 +1002,8 @@ def create_analytics_router(*, job_store) -> APIRouter:
         for s in summaries:
             opt = s.optimizer_name or t("analytics.other_bucket")
             optimizer_counts[opt] = optimizer_counts.get(opt, 0) + 1
-            job_type = s.optimization_type or OPTIMIZATION_TYPE_RUN
-            if job_type == OPTIMIZATION_TYPE_RUN and s.composition == COMPOSITION_WORKFLOW:
-                job_type = _JOB_TYPE_WORKFLOW
-            job_type_counts[job_type] = job_type_counts.get(job_type, 0) + 1
+            type_key = _job_type_key(s)
+            job_type_counts[type_key] = job_type_counts.get(type_key, 0) + 1
             if s.module_name:
                 module_counts[s.module_name] = module_counts.get(s.module_name, 0) + 1
             if s.dataset_rows:

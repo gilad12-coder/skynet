@@ -1556,6 +1556,7 @@
   "dashboard.analytics.col_date": "Date",
   "dashboard.analytics.col_name": "Name",
   "dashboard.analytics.col_range": "Range",
+  "dashboard.analytics.col_share": "Share",
   "dashboard.analytics.improvement_histogram": "Improvement distribution",
   "dashboard.analytics.kpi_median_detail": "Median {p1}",
   "dashboard.analytics.kpi_running_detail": "{p1} running now",

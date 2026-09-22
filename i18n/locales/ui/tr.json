@@ -7,6 +7,7 @@
   "dashboard.analytics.col_date": "Tarih",
   "dashboard.analytics.col_name": "Ad",
   "dashboard.analytics.col_range": "Aralık",
+  "dashboard.analytics.col_share": "Pay",
   "dashboard.analytics.improvement_histogram": "İyileşme dağılımı",
   "dashboard.analytics.kpi_median_detail": "Medyan {p1}",
   "dashboard.analytics.kpi_running_detail": "{p1} şu anda çalışıyor",

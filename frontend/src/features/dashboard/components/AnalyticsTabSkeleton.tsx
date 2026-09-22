@@ -4,7 +4,7 @@ import { Skeleton } from "@/shared/ui/skeleton";
 
 function KpiCard() {
   return (
-    <div className="flex h-full min-w-0 flex-[1_1_11rem] flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5 sm:p-6 xl:flex-[1_1_8rem]">
+    <div className="flex h-full min-h-[9.5rem] min-w-0 flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5 sm:p-6">
       <div className="flex items-center gap-2">
         <Skeleton width={6} height={6} circle />
         <Skeleton width={90} height={10} />
@@ -45,7 +45,7 @@ export function AnalyticsTabSkeleton() {
     <div className="space-y-6" aria-hidden="true">
       <Skeleton width={220} height={30} borderRadius={8} />
 
-      <div className="flex flex-wrap gap-3 sm:gap-4">
+      <div className="grid auto-rows-fr grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-5">
         <KpiCard />
         <KpiCard />
         <KpiCard />

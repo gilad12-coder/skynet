@@ -1141,6 +1141,15 @@ export function getDashboardAnalytics(params?: {
   include_shared?: boolean;
   owner?: string;
   access?: string;
+  date_to?: string;
+  job_type?: string;
+  module?: string;
+  improvement_min?: number | null;
+  improvement_max?: number | null;
+  runtime_min?: number | null;
+  runtime_max?: number | null;
+  dataset_min?: number | null;
+  dataset_max?: number | null;
 }) {
   const q = new URLSearchParams();
   if (params?.username) q.set("username", params.username);
@@ -1148,10 +1157,24 @@ export function getDashboardAnalytics(params?: {
   if (params?.model) q.set("model", params.model);
   if (params?.status) q.set("status", params.status);
   if (params?.date) q.set("date", params.date);
+  if (params?.date_to) q.set("date_to", params.date_to);
   if (params?.days) q.set("days", String(params.days));
   if (params?.include_shared) q.set("include_shared", "true");
   if (params?.owner) q.set("owner", params.owner);
   if (params?.access) q.set("access", params.access);
+  if (params?.job_type) q.set("job_type", params.job_type);
+  if (params?.module) q.set("module", params.module);
+  for (const key of [
+    "improvement_min",
+    "improvement_max",
+    "runtime_min",
+    "runtime_max",
+    "dataset_min",
+    "dataset_max",
+  ] as const) {
+    const value = params?.[key];
+    if (value != null) q.set(key, String(value));
+  }
   const qs = q.toString();
   return cachedGet<DashboardAnalytics>(`/analytics/dashboard${qs ? `?${qs}` : ""}`);
 }

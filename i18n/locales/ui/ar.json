@@ -7,6 +7,7 @@
   "dashboard.analytics.col_date": "التاريخ",
   "dashboard.analytics.col_name": "الاسم",
   "dashboard.analytics.col_range": "النطاق",
+  "dashboard.analytics.col_share": "الحصة",
   "dashboard.analytics.improvement_histogram": "توزيع التحسُّن",
   "dashboard.analytics.kpi_median_detail": "وسيط {p1}",
   "dashboard.analytics.kpi_running_detail": "{p1} قيد التشغيل الآن",
