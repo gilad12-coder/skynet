@@ -21,7 +21,6 @@
   "optimizations.grid.response_time_seconds": "{value}s",
   "optimizations.reasoning_effort.short.med": "med",
   "optimizations.serve.field_separator": ": ",
-  "optimizations.servechat.demo_label": "{label} {index}",
   "settings.admin.storage.edit_hint": "Presiona Intro para guardar, Esc para cancelar",
   "settings.agent.shortcut.recording": "Presiona una nueva combinación…",
   "submit.dataset.library_loaded": "Cargado “{name}” ({count} filas)",

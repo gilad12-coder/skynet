@@ -13,50 +13,9 @@
  * the optimization page shows them.
  */
 
-import { formatBlackboxDelta, formatBlackboxScore } from "@/shared/lib/formatters";
 import { msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import type { BlackboxEngineId, OptimizationType } from "@/shared/types/api";
-
-export type GainBadge = {
-  text: string;
-  kind: "positive" | "negative" | "neutral";
-};
-
-const RAW_SCALE_TYPE: OptimizationType = "blackbox";
-
-function isRawScale(type: string | null | undefined): boolean {
-  return type === RAW_SCALE_TYPE;
-}
-
-export function formatMetric(
-  value: number | null | undefined,
-  type?: string | null,
-): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  if (isRawScale(type)) return formatBlackboxScore(value);
-  return `${value.toFixed(1)}%`;
-}
-
-export function formatGain(
-  baseline: number | null | undefined,
-  optimized: number | null | undefined,
-  type?: string | null,
-): GainBadge | null {
-  if (baseline == null || optimized == null) return null;
-  if (!Number.isFinite(baseline) || !Number.isFinite(optimized)) return null;
-  const gain = optimized - baseline;
-  if (isRawScale(type)) {
-    // Scorer deltas are compared after the same 4-decimal rounding the score
-    // itself gets, so "0.5075 vs 0.5075" never shows a phantom "+0".
-    const rounded = Number(gain.toFixed(4)) + 0;
-    if (rounded === 0) return { text: "0", kind: "neutral" };
-    return { text: formatBlackboxDelta(rounded), kind: rounded > 0 ? "positive" : "negative" };
-  }
-  if (Math.abs(gain) < 0.05) return { text: "0.0%", kind: "neutral" };
-  if (gain > 0) return { text: `+${gain.toFixed(1)}%`, kind: "positive" };
-  return { text: `${gain.toFixed(1)}%`, kind: "negative" };
-}
+import type { BlackboxEngineId } from "@/shared/types/api";
 
 // Engine ids are what the backend indexes for black-box runs (and what DSPy
 // runs store for their optimizer, lowercased), so one map labels both. The

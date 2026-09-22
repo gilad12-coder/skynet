@@ -18,22 +18,22 @@ export interface StepBlock {
   timedOut: boolean;
 }
 
-export interface RawBlock {
+interface RawBlock {
   kind: "raw";
   text: string;
 }
 
-export interface PromptBlock {
+interface PromptBlock {
   kind: "prompt";
   text: string;
 }
 
-export interface ThinkingPart {
+interface ThinkingPart {
   kind: "thinking";
   text: string;
 }
 
-export interface TextPart {
+interface TextPart {
   kind: "text";
   text: string;
 }
@@ -48,7 +48,7 @@ export interface ToolPart {
   done: boolean;
 }
 
-export type TurnPart = ThinkingPart | TextPart | ToolPart;
+type TurnPart = ThinkingPart | TextPart | ToolPart;
 
 /** A note the store or the runner left in the stream, not something the box printed. */
 export interface NoticeBlock {

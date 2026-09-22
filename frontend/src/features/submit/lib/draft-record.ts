@@ -115,7 +115,7 @@ export interface AnythingDraftData {
 
 export type DraftRecipe = "program" | "anything";
 
-export interface DraftWorkflowState<T> {
+interface DraftWorkflowState<T> {
   data: T;
   meaningful: boolean;
 }
@@ -230,12 +230,6 @@ export function recipeToOpen(record: WizardDraftRecord | null): DraftRecipe | nu
   if (record.program?.meaningful) return "program";
   if (record.anything?.meaningful) return "anything";
   return null;
-}
-
-/** The stage the restore reopens, for the toast's supporting line. */
-export function draftStage(record: WizardDraftRecord | null): WizardStageId | null {
-  const recipe = recipeToOpen(record);
-  return recipe ? (record?.[recipe]?.data.stage ?? null) : null;
 }
 
 /** Compare configurations without treating wizard navigation as an edit. */

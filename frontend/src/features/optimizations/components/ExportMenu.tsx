@@ -31,7 +31,7 @@ function escapeCsvField(value: string | number | null | undefined): string {
   return s;
 }
 
-export function exportPromptAsJson(prompt: OptimizedPredictor, optimizationId: string) {
+function exportPromptAsJson(prompt: OptimizedPredictor, optimizationId: string) {
   downloadFile(
     JSON.stringify(prompt, null, 2),
     `prompt_${optimizationId.slice(0, 8)}.json`,
@@ -40,7 +40,7 @@ export function exportPromptAsJson(prompt: OptimizedPredictor, optimizationId: s
 }
 
 /** Save the GEPA-rewritten Flex module source as a standalone .py download. */
-export function exportModuleAsPython(
+function exportModuleAsPython(
   moduleSrc: string,
   optimizationId: string,
   componentPath?: string,
@@ -54,7 +54,7 @@ export function exportModuleAsPython(
 }
 
 /** Decode the artifact's base64 pickle and hand it to the browser as a .pkl download. */
-export function downloadProgramPickle(pickleBase64: string, optimizationId: string) {
+function downloadProgramPickle(pickleBase64: string, optimizationId: string) {
   const blob = new Blob([Uint8Array.from(atob(pickleBase64), (c) => c.charCodeAt(0))], {
     type: "application/octet-stream",
   });

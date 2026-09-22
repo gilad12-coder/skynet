@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-export type AnalyticsFilters = {
+type AnalyticsFilters = {
   model: string;
   status: string;
   jobId: string | null;

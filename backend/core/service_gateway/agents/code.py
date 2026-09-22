@@ -1685,7 +1685,6 @@ class ReactReplyStream:
                 ``submit`` argument.
         """
         self._program = program
-        self._reply_field = reply_field
         self._native = native_tool_calling_active()
         self._stream_field = "tool_calls"
         if self._native:

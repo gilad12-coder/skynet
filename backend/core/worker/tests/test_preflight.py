@@ -151,7 +151,6 @@ def test_workflow_preview_does_not_replay_after_stream_dispatch(
                     "actual_transform", "Wrapped node failure"
                 )
             raise RuntimeError("Stream ended after provider dispatch")
-            yield
 
         return stream
 

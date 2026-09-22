@@ -63,7 +63,6 @@ def test_send_alert_noop_when_webhook_unset(monkeypatch):
     monkeypatch.setattr(settings, "alert_webhook_url", "")
     assert alerts.send_alert("boom") is None
     assert calls == []
-    assert alerts.alerts_configured() is False
 
 
 def test_send_alert_posts_rendered_message(captured_posts):

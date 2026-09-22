@@ -7,17 +7,14 @@ export { ByokKeysSection } from "./components/ByokKeysSection";
 export { InsufficientCreditsModalHost } from "./components/InsufficientCreditsModalHost";
 export { litellmProviderForByok } from "./lib/byok";
 export {
-  CREDIT_USD_VALUE,
   creditsToUsd,
   usdToCredits,
   formatBudgetUsd,
-  formatCredits,
   formatCreditsUsd,
   formatUsd,
   type TokenSourceMode,
 } from "./lib/credit";
 export {
-  MARKUP,
   PLATFORM_FEE_FRACTION,
   creditsForUsage,
   modelTokenCosts,

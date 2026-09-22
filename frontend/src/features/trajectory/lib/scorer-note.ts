@@ -3,7 +3,7 @@
 // stripped before that, but older runs let them through as JSON-quoted data
 // URLs, and the note's character cap cuts most of them mid-base64.
 
-export interface ScorerImage {
+interface ScorerImage {
   key: string;
   src: string;
 }

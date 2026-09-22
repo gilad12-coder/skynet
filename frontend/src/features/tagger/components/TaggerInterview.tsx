@@ -65,7 +65,7 @@ function focusAppendedField(el: HTMLElement): void {
 }
 
 /** The confirmed task contract handed back from the labeling-guide card. */
-export interface TaskContract {
+interface TaskContract {
   mode: AnnotationMode;
   question?: string;
   categories?: Category[];

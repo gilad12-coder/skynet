@@ -8,7 +8,7 @@ import type { AssistPrediction, TaggerConfig } from "./types";
 // and freezes the build-time localhost fallback. See shared/lib/api.ts.
 const apiBase = () => getRuntimeEnv().apiUrl;
 
-export interface InterviewTurnResult {
+interface InterviewTurnResult {
   message: string;
   options: InterviewOption[];
   rubric: string[];

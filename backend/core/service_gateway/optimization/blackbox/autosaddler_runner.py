@@ -88,7 +88,6 @@ _HARNESS_CAPABILITY_TOOLS = dict.fromkeys(
     ("read_workspace", "edit_workspace", "run_commands", "load_skills", "network"), ()
 )
 _HARNESS_SKILL_DIRECTORY = ".agents/skills"
-_ARTIFACT_PREFIXES = {"train": "evaluations", "development": "quarantine/dev", "test": "post_optimization/test"}
 _MIN_CASES = 2
 
 

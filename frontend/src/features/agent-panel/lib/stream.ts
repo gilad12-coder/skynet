@@ -31,7 +31,7 @@ export interface GeneralistAgentRequest {
   reasoning_effort?: string;
 }
 
-export interface ConversationMetaPayload {
+interface ConversationMetaPayload {
   conversation_id: string;
   title: string;
 }

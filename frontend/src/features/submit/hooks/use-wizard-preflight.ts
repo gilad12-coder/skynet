@@ -14,7 +14,6 @@ import type { ExecutionBudgetSession } from "../lib/execution-budget-session";
 import {
   reusableSuccessfulPreflight,
   reusableTerminalPreflight,
-  type StoredPreflightEvidence,
 } from "../lib/preflight-outcome";
 import {
   PreflightStore,
@@ -27,7 +26,6 @@ import { preflightIdentity } from "../lib/validation-evidence";
 import type { ToastApi } from "../lib/validation-toast";
 import { waitForPreflightUsage } from "../lib/wait-for-preflight-usage";
 
-export type PreflightEvidence = StoredPreflightEvidence;
 export type { ValidationPhase, ValidationProgress };
 
 // One store for the page: a check keeps running while the user is elsewhere
@@ -177,5 +175,3 @@ export function useWizardPreflight(
     feedback,
   };
 }
-
-export type WizardPreflightContext = ReturnType<typeof useWizardPreflight>;

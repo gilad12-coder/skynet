@@ -23,14 +23,11 @@ import type {
   ProfileDatasetResponse,
   QueueStatusResponse,
   RunRequest,
-  ScorerDryRunRequest,
-  ScorerDryRunResponse,
   ServeInfoResponse,
   ServeResponse,
   ValidateCodeResponse,
   ValidateDatasetRequest,
   ValidateDatasetResponse,
-  WorkflowDryRunRequest,
   WorkflowDryRunResponse,
   WorkflowSpec,
 } from "@/shared/types/api";
@@ -39,7 +36,7 @@ import { I18N_KEY, tI18n } from "@/shared/lib/i18n";
 import { reportHandledError } from "@/shared/lib/report-error";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
 import { getRuntimeEnv } from "@/shared/lib/runtime-env";
-import { readNdjsonStream, readServerSentEvents, type ServerSentEvent } from "@/shared/lib/sse";
+import { readServerSentEvents, type ServerSentEvent } from "@/shared/lib/sse";
 
 // Resolve the runtime API base lazily on every call. Capturing it once at
 // module load races the injected `window.__SKYNET_ENV__` script: the framework
@@ -193,13 +190,13 @@ if (typeof window !== "undefined") {
 }
 
 /** Backend error code for the unified storage budget being exceeded (HTTP 409). */
-export const STORAGE_QUOTA_CODE = I18N_KEY.USER_STORAGE_QUOTA_EXCEEDED;
+const STORAGE_QUOTA_CODE = I18N_KEY.USER_STORAGE_QUOTA_EXCEEDED;
 
 /** Browser event the central error path fires when a write hits the storage budget. */
 export const STORAGE_QUOTA_EVENT = "storage-quota-exceeded";
 
 /** Backend error code for a managed run blocked by an empty credit balance (HTTP 402). */
-export const INSUFFICIENT_CREDITS_CODE = I18N_KEY.BILLING_INSUFFICIENT_CREDITS;
+const INSUFFICIENT_CREDITS_CODE = I18N_KEY.BILLING_INSUFFICIENT_CREDITS;
 
 /** Browser event the central error path fires when a submit hits the credit gate. */
 export const INSUFFICIENT_CREDITS_EVENT = "billing-insufficient-credits";
@@ -416,55 +413,6 @@ export interface WorkflowDryRunStreamHandlers {
   signal?: AbortSignal;
 }
 
-/** Stream a workflow dry run via SSE. Calls handlers as the answer forms. */
-export async function dryRunWorkflowStream(
-  payload: WorkflowDryRunRequest,
-  handlers: WorkflowDryRunStreamHandlers,
-): Promise<void> {
-  let res: Response;
-  try {
-    res = await fetchWithAuthRetry(`${apiBase()}/workflows/dry-run/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify(payload),
-      signal: handlers.signal,
-    });
-  } catch (err) {
-    if ((err as Error)?.name === "AbortError") return;
-    handlers.onError(msg("auto.shared.lib.api.literal.4"));
-    return;
-  }
-  if (!res.ok || !res.body) {
-    const text = await res.text().catch(() => "");
-    handlers.onError(
-      parseErrorMessage(text) ?? formatMsg("auto.shared.lib.api.template.3", { p1: res.status }),
-    );
-    return;
-  }
-  const processEvent = ({ event, data }: ServerSentEvent) => {
-    if (event === "token") {
-      handlers.onToken(String(data.field ?? ""), String(data.chunk ?? ""));
-    } else if (event === "final") {
-      handlers.onFinal({
-        outputs: (data.outputs as Record<string, unknown> | null) ?? null,
-        node_traces: (data.node_traces as WorkflowDryRunResponse["node_traces"]) ?? [],
-        model_used: String(data.model_used ?? ""),
-        error: (data.error as string | null) ?? null,
-        failed_node_id: (data.failed_node_id as string | null) ?? null,
-      });
-    } else if (event === "error") {
-      handlers.onError(String(data.error ?? msg("auto.shared.lib.api.literal.5")));
-    }
-  };
-  try {
-    await readServerSentEvents(res.body, processEvent);
-  } catch (err) {
-    if ((err as Error)?.name !== "AbortError") {
-      handlers.onError(err instanceof Error ? err.message : msg("auto.shared.lib.api.literal.6"));
-    }
-  }
-}
-
 export function submitGridSearch(payload: GridSearchRequest, idempotencyKey?: string) {
   return request<OptimizationSubmissionResponse>("/grid-search", {
     method: "POST",
@@ -478,13 +426,6 @@ export function submitBlackboxRun(payload: BlackboxRunRequest, idempotencyKey?: 
     method: "POST",
     body: JSON.stringify(payload),
     ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {}),
-  });
-}
-
-export function dryRunScorer(payload: ScorerDryRunRequest) {
-  return request<ScorerDryRunResponse>("/blackbox/scorer/dry-run", {
-    method: "POST",
-    body: JSON.stringify(payload),
   });
 }
 
@@ -871,7 +812,7 @@ export function updateMemorySettings(patch: Partial<Record<MemoryKnobName, numbe
   });
 }
 
-export interface BillingFreeGrant {
+interface BillingFreeGrant {
   credits_remaining: number;
   credits_total: number;
 }
@@ -898,13 +839,13 @@ export function getWallet() {
 }
 
 /** One day's billed run spend (the usage dashboard's time series). */
-export interface BillingUsageDay {
+interface BillingUsageDay {
   date: string;
   billed_credits: number;
 }
 
 /** One model's share of run spend over the window. */
-export interface BillingUsageModel {
+interface BillingUsageModel {
   model: string | null;
   credits: number;
   runs: number;
@@ -948,7 +889,7 @@ export interface BillingAddressResponse {
 }
 
 /** Masked saved payment method. Full payment credentials never reach the app. */
-export interface BillingPaymentMethod {
+interface BillingPaymentMethod {
   id: string;
   type: string;
   brand: string | null;
@@ -1273,7 +1214,7 @@ export type GeneralAccess = "restricted" | "anyone";
 export type LinkRole = Exclude<ShareRole, "owner">;
 
 /** One invited member of an optimization (username + grantable tier role). */
-export interface SharingMember {
+interface SharingMember {
   username: string;
   role: MemberRole;
 }
@@ -1467,7 +1408,7 @@ export interface DatasetOptimizationsResponse {
 }
 
 /** One invited member of a dataset (username + tier role). */
-export interface DatasetSharingMember {
+interface DatasetSharingMember {
   username: string;
   role: MemberRole;
 }
@@ -1968,16 +1909,6 @@ export async function deleteGridPair(optimizationId: string, pairIndex: number) 
   invalidateCache("/optimizations");
   return res;
 }
-// Per-pair re-run: like a single run's Restart/Resume scoped to one grid pair —
-// re-queues the grid in place to re-run only this pair, keeping the others.
-export async function restartGridPair(optimizationId: string, pairIndex: number) {
-  const res = await request<{ optimization_id: string; status: string }>(
-    `/optimizations/${optimizationId}/pair/${pairIndex}/restart`,
-    { method: "POST" },
-  );
-  invalidateCache("/optimizations");
-  return res;
-}
 export async function resumeGridPair(optimizationId: string, pairIndex: number) {
   const res = await request<{ optimization_id: string; status: string }>(
     `/optimizations/${optimizationId}/pair/${pairIndex}/resume`,
@@ -2118,7 +2049,7 @@ export async function transcribeAudio(
 }
 
 /** Bulk-delete the caller's pending (staged) uploads. */
-export async function bulkDeleteStagedUploads(ids: string[]): Promise<BulkDeleteResult> {
+async function bulkDeleteStagedUploads(ids: string[]): Promise<BulkDeleteResult> {
   const res = await request<BulkDeleteResult>("/usage/storage/staged/bulk-delete", {
     method: "POST",
     body: JSON.stringify({ ids }),
@@ -2128,7 +2059,7 @@ export async function bulkDeleteStagedUploads(ids: string[]): Promise<BulkDelete
 }
 
 /** Bulk-delete the caller's saved agent conversations. */
-export async function bulkDeleteConversations(ids: string[]): Promise<BulkDeleteResult> {
+async function bulkDeleteConversations(ids: string[]): Promise<BulkDeleteResult> {
   const res = await request<BulkDeleteResult>("/agent/conversations/bulk-delete", {
     method: "POST",
     body: JSON.stringify({ ids }),
@@ -2566,13 +2497,13 @@ const CODE_AGENT_TOOLS = new Set<CodeAgentToolName>([
   "disconnect",
 ]);
 
-export interface CodeAgentToolStart {
+interface CodeAgentToolStart {
   id: string;
   tool: CodeAgentToolName;
   reason: string;
 }
 
-export interface CodeAgentToolEnd {
+interface CodeAgentToolEnd {
   id: string;
   tool: CodeAgentToolName;
   status: string;
@@ -2760,7 +2691,7 @@ export function parseInterviewOptions(raw: unknown): InterviewOption[] {
     .filter((option) => option.label);
 }
 
-export interface CodeInterviewTurnResult {
+interface CodeInterviewTurnResult {
   message: string;
   options: InterviewOption[];
   brief: string[];
@@ -2885,7 +2816,7 @@ export interface FacetOption {
   count: number;
 }
 
-export interface FacetTotals {
+interface FacetTotals {
   models: number;
   optimizers: number;
   modules: number;
