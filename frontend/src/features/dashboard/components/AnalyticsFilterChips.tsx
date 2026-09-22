@@ -12,15 +12,17 @@ export function AnalyticsFilterChips({
 }: {
   filters: Pick<
     UseAnalyticsFiltersReturn,
+    | "range"
+    | "optimizer"
     | "model"
     | "status"
-    | "jobId"
     | "date"
     | "owner"
     | "access"
+    | "setRange"
+    | "setOptimizer"
     | "setModel"
     | "setStatus"
-    | "setJobId"
     | "setDate"
     | "setOwner"
     | "setAccess"
@@ -28,24 +30,34 @@ export function AnalyticsFilterChips({
   sessionUser: string;
 }) {
   const {
+    range,
+    optimizer,
     model,
     status,
-    jobId,
     date,
     owner,
     access,
+    setRange,
+    setOptimizer,
     setModel,
     setStatus,
-    setJobId,
     setDate,
     setOwner,
     setAccess,
   } = filters;
-  const hasFilters = jobId || date || owner || access || model !== "all" || status !== "all";
+  const hasFilters =
+    date ||
+    owner ||
+    access ||
+    range !== "all" ||
+    optimizer !== "all" ||
+    model !== "all" ||
+    status !== "all";
   if (!hasFilters) return null;
 
   const clearAllFilters = () => {
-    setJobId(null);
+    setRange("all");
+    setOptimizer("all");
     setDate(null);
     setOwner(null);
     setAccess(null);
@@ -80,12 +92,19 @@ export function AnalyticsFilterChips({
           onClear={() => setOwner(null)}
         />
       )}
-      {jobId && (
+      {range !== "all" && (
+        <FilterChip
+          label={msg(`usage.range.${range}`)}
+          ariaLabel={msg("dashboard.analytics.range_filter_clear")}
+          onClear={() => setRange("all")}
+        />
+      )}
+      {optimizer !== "all" && (
         <FilterChip
           dir="ltr"
-          label={`${jobId.slice(0, 8)}...`}
-          ariaLabel={msg("auto.features.dashboard.components.analyticstab.literal.1")}
-          onClear={() => setJobId(null)}
+          label={optimizer}
+          ariaLabel={msg("dashboard.analytics.optimizer_filter_clear")}
+          onClear={() => setOptimizer("all")}
         />
       )}
       {date && (

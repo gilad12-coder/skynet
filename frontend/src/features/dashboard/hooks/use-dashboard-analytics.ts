@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { getDashboardAnalytics, type DashboardAnalytics } from "@/shared/lib/api";
+import type { AnalyticsRange } from "./use-analytics-filters";
 
 type UseDashboardAnalyticsArgs = {
   sessionUser: string;
   isAdmin: boolean;
   activeTab: string;
+  range: AnalyticsRange;
+  optimizer: string;
   model: string;
   status: string;
-  jobId: string | null;
   date: string | null;
   owner: string | null;
   access: string | null;
@@ -20,13 +22,21 @@ export type UseDashboardAnalyticsReturn = {
   fetchDashboardAnalytics: () => Promise<void>;
 };
 
+const RANGE_DAYS: Record<AnalyticsRange, number | undefined> = {
+  "7d": 7,
+  "30d": 30,
+  "90d": 90,
+  all: undefined,
+};
+
 export function useDashboardAnalytics({
   sessionUser,
   isAdmin,
   activeTab,
+  range,
+  optimizer,
   model,
   status,
-  jobId,
   date,
   owner,
   access,
@@ -42,9 +52,10 @@ export function useDashboardAnalytics({
     try {
       const result = await getDashboardAnalytics({
         username,
+        days: RANGE_DAYS[range],
+        optimizer: optimizer !== "all" ? optimizer : undefined,
         model: model !== "all" ? model : undefined,
         status: status !== "all" ? status : undefined,
-        optimization_id: jobId ?? undefined,
         date: date ?? undefined,
         include_shared: includeShared,
         owner: owner ?? undefined,
@@ -56,7 +67,7 @@ export function useDashboardAnalytics({
     } finally {
       setAnalyticsLoading(false);
     }
-  }, [isAdmin, sessionUser, model, status, jobId, date, owner, access]);
+  }, [isAdmin, sessionUser, range, optimizer, model, status, date, owner, access]);
 
   useEffect(() => {
     if (activeTab !== "analytics") return;

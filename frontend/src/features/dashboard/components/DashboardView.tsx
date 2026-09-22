@@ -115,7 +115,8 @@ export function DashboardView() {
     activeTab,
     model: analyticsFilters.model,
     status: analyticsFilters.status,
-    jobId: analyticsFilters.jobId,
+    range: analyticsFilters.range,
+    optimizer: analyticsFilters.optimizer,
     date: analyticsFilters.date,
     owner: analyticsFilters.owner,
     access: analyticsFilters.access,
@@ -540,6 +541,7 @@ export function DashboardView() {
                   chartData={chartData}
                   filters={analyticsFilters}
                   sessionUser={sessionUser}
+                  onOpenJob={(id) => router.push(`/optimizations/${id}`)}
                 />
               </TabsContent>
             </Tabs>
