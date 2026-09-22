@@ -11,6 +11,10 @@ import {
   TreeStructure,
   Lightbulb,
   Compass,
+  SquaresFour,
+  Cpu,
+  Target,
+  RocketLaunch,
 } from "@/shared/ui/icons";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { perLocale } from "@/shared/lib/per-locale";
@@ -41,38 +45,62 @@ const SECTIONS: readonly SectionMeta[] = perLocale(() => [
     Icon: BookOpen,
   },
   {
-    id: "gepa",
+    id: "recipes",
     num: "2",
+    title: msg("auto.features.tutorial.components.concepts.guide.literal.350"),
+    Icon: SquaresFour,
+  },
+  {
+    id: "gepa",
+    num: "3",
     title: msg("auto.features.tutorial.components.concepts.guide.literal.2"),
     Icon: Sparkle,
   },
   {
+    id: "engines",
+    num: "4",
+    title: msg("auto.features.tutorial.components.concepts.guide.literal.351"),
+    Icon: Cpu,
+  },
+  {
+    id: "scorers",
+    num: "5",
+    title: msg("auto.features.tutorial.components.concepts.guide.literal.352"),
+    Icon: Target,
+  },
+  {
     id: "parameters",
-    num: "3",
+    num: "6",
     title: msg("auto.features.tutorial.components.concepts.guide.literal.3"),
     Icon: Gear,
   },
   {
     id: "task-definition",
-    num: "4",
+    num: "7",
     title: msg("auto.features.tutorial.components.concepts.guide.literal.4"),
     Icon: Stack,
   },
   {
     id: "workflow",
-    num: "5",
+    num: "8",
     title: msg("auto.features.tutorial.components.concepts.guide.literal.5"),
     Icon: TreeStructure,
   },
   {
+    id: "app",
+    num: "9",
+    title: msg("auto.features.tutorial.components.concepts.guide.literal.353"),
+    Icon: RocketLaunch,
+  },
+  {
     id: "tips",
-    num: "6",
+    num: "10",
     title: msg("auto.features.tutorial.components.concepts.guide.literal.6"),
     Icon: Lightbulb,
   },
   {
     id: "glossary",
-    num: "7",
+    num: "11",
     title: msg("auto.features.tutorial.components.concepts.guide.literal.7"),
     Icon: Compass,
   },
@@ -173,10 +201,14 @@ export function ConceptsGuide({ open, onClose }: ConceptsGuideProps) {
           <GuideSidebar activeId={activeId} onJump={jumpTo} />
           <div ref={scrollRef} className="min-w-0 overflow-y-auto px-5 sm:px-8 py-6 scroll-smooth">
             <SectionBackground />
+            <SectionRecipes />
             <SectionGepa />
+            <SectionEngines />
+            <SectionScorers />
             <SectionParameters />
             <SectionTaskDefinition />
             <SectionWorkflow />
+            <SectionApp />
             <SectionTips />
             <SectionGlossary />
           </div>
@@ -426,6 +458,47 @@ function SectionBackground() {
   );
 }
 
+function SectionRecipes() {
+  return (
+    <GuideSection
+      id="recipes"
+      num="2"
+      title={msg("auto.features.tutorial.components.concepts.guide.literal.350")}
+      kicker={msg("auto.features.tutorial.components.concepts.guide.literal.354")}
+    >
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.355")}</p>
+      <div className="my-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-[#E5DDD4] bg-white p-4">
+          <p className="font-semibold text-[#3D2E22]">
+            {msg("auto.features.tutorial.components.concepts.guide.literal.356")}
+          </p>
+          <p className="mt-1 text-[13.5px] text-[#5C4D40]">
+            {msg("auto.features.tutorial.components.concepts.guide.literal.357")}
+          </p>
+        </div>
+        <div className="rounded-xl border border-[#D8C7AD] bg-[#F8F4EE] p-4">
+          <p className="font-semibold text-[#3D2E22]">
+            {msg("auto.features.tutorial.components.concepts.guide.literal.358")}
+          </p>
+          <p className="mt-1 text-[13.5px] text-[#5C4D40]">
+            {msg("auto.features.tutorial.components.concepts.guide.literal.359")}
+          </p>
+        </div>
+      </div>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.360")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.361")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.362")}</p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.363")}</SubHeading>
+      <ul className="list-disc ps-5 space-y-1.5">
+        <li>{msg("auto.features.tutorial.components.concepts.guide.literal.364")}</li>
+        <li>{msg("auto.features.tutorial.components.concepts.guide.literal.365")}</li>
+      </ul>
+    </GuideSection>
+  );
+}
+
 function GepaLoopDiagram() {
   const stages = [
     { i: 1, name: msg("auto.features.tutorial.components.concepts.guide.literal.57") },
@@ -522,7 +595,7 @@ function SectionGepa() {
   return (
     <GuideSection
       id="gepa"
-      num="2"
+      num="3"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.2")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.63")}
     >
@@ -566,11 +639,194 @@ function SectionGepa() {
   );
 }
 
+function EngineTable() {
+  const engines: Array<[string, string]> = [
+    ["GEPA", msg("auto.features.tutorial.components.concepts.guide.literal.373")],
+    ["Best-of-N", msg("auto.features.tutorial.components.concepts.guide.literal.374")],
+    ["AutoResearch", msg("auto.features.tutorial.components.concepts.guide.literal.375")],
+    ["Meta-Harness", msg("auto.features.tutorial.components.concepts.guide.literal.376")],
+    ["AutoSaddler", msg("auto.features.tutorial.components.concepts.guide.literal.377")],
+  ];
+  return (
+    <div className="my-3 overflow-x-auto rounded-lg border border-[#E5DDD4] bg-white shadow-[0_1px_2px_rgba(28,22,18,0.05)]">
+      <table className="w-full text-[13.5px] guide-table">
+        <thead>
+          <tr className="bg-[#F0EBE4] text-[#3D2E22]">
+            <th
+              className="text-start font-semibold px-3 py-2 w-[26%]"
+              style={{ fontFamily: "var(--font-ui)" }}
+            >
+              {msg("auto.features.tutorial.components.concepts.guide.literal.371")}
+            </th>
+            <th
+              className="text-start font-semibold px-3 py-2"
+              style={{ fontFamily: "var(--font-ui)" }}
+            >
+              {msg("auto.features.tutorial.components.concepts.guide.literal.372")}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {engines.map(([name, how], i) => (
+            <tr key={name} className={i % 2 === 0 ? "bg-white" : "bg-[#FAF8F5]"}>
+              <td className="px-3 py-2 align-top text-[#3D2E22] font-medium" dir="ltr">
+                {name}
+              </td>
+              <td className="px-3 py-2 align-top text-[#3D2E22]">{how}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SectionEngines() {
+  return (
+    <GuideSection
+      id="engines"
+      num="4"
+      title={msg("auto.features.tutorial.components.concepts.guide.literal.351")}
+      kicker={msg("auto.features.tutorial.components.concepts.guide.literal.366")}
+    >
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.367")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.368")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.369")}</p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.370")}</SubHeading>
+      <EngineTable />
+      <p className="text-[#5C4D40]">
+        {msg("auto.features.tutorial.components.concepts.guide.literal.378")}
+      </p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.379")}</SubHeading>
+      <div className="my-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-[#D8C7AD] bg-[#F8F4EE] p-4">
+          <p className="font-semibold text-[#3D2E22]">
+            {msg("auto.features.tutorial.components.concepts.guide.literal.380")}
+          </p>
+          <p className="mt-1 text-[13.5px] text-[#5C4D40]">
+            {msg("auto.features.tutorial.components.concepts.guide.literal.381")}
+          </p>
+        </div>
+        <div className="rounded-xl border border-[#E5DDD4] bg-white p-4">
+          <p className="font-semibold text-[#3D2E22]">
+            {msg("auto.features.tutorial.components.concepts.guide.literal.382")}
+          </p>
+          <p className="mt-1 text-[13.5px] text-[#5C4D40]">
+            {msg("auto.features.tutorial.components.concepts.guide.literal.383")}
+          </p>
+        </div>
+      </div>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.384")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.385")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.386")}</p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.387")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.388")}</p>
+      <ParamTable
+        rows={[
+          {
+            name: msg("auto.features.tutorial.components.concepts.guide.literal.389"),
+            desc: msg("auto.features.tutorial.components.concepts.guide.literal.390"),
+          },
+          {
+            name: msg("auto.features.tutorial.components.concepts.guide.literal.391"),
+            desc: msg("auto.features.tutorial.components.concepts.guide.literal.392"),
+          },
+          {
+            name: msg("auto.features.tutorial.components.concepts.guide.literal.393"),
+            desc: msg("auto.features.tutorial.components.concepts.guide.literal.394"),
+          },
+          {
+            name: msg("auto.features.tutorial.components.concepts.guide.literal.395"),
+            desc: msg("auto.features.tutorial.components.concepts.guide.literal.396"),
+          },
+          {
+            name: msg("auto.features.tutorial.components.concepts.guide.literal.397"),
+            desc: msg("auto.features.tutorial.components.concepts.guide.literal.398"),
+          },
+        ]}
+      />
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.399")}</SubHeading>
+      <ul className="list-disc ps-5 space-y-1.5">
+        <li>{msg("auto.features.tutorial.components.concepts.guide.literal.400")}</li>
+        <li>{msg("auto.features.tutorial.components.concepts.guide.literal.401")}</li>
+        <li>{msg("auto.features.tutorial.components.concepts.guide.literal.402")}</li>
+      </ul>
+    </GuideSection>
+  );
+}
+
+const SCORER_EXAMPLE = `from skynet import llm
+
+
+def score(candidate, case=None):
+    answer = llm(candidate, case["question"])
+    expected = case["expected"].strip().lower()
+    hit = expected in answer.lower()
+    return (1.0 if hit else 0.0), f"expected: {expected}"
+`;
+
+function SectionScorers() {
+  return (
+    <GuideSection
+      id="scorers"
+      num="5"
+      title={msg("auto.features.tutorial.components.concepts.guide.literal.352")}
+      kicker={msg("auto.features.tutorial.components.concepts.guide.literal.403")}
+    >
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.404")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.405")}</p>
+      <ul className="list-disc ps-5 space-y-1.5">
+        <li>{msg("auto.features.tutorial.components.concepts.guide.literal.406")}</li>
+        <li>{msg("auto.features.tutorial.components.concepts.guide.literal.407")}</li>
+      </ul>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.408")}</p>
+      <GuideCodeEditor
+        code={SCORER_EXAMPLE}
+        label={msg("auto.features.tutorial.components.concepts.guide.literal.410")}
+        height="200px"
+      />
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.409")}</p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.411")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.412")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.413")}</p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.414")}</SubHeading>
+      <ParamTable
+        rows={[
+          {
+            name: msg("auto.features.tutorial.components.concepts.guide.literal.415"),
+            desc: msg("auto.features.tutorial.components.concepts.guide.literal.416"),
+          },
+          {
+            name: msg("auto.features.tutorial.components.concepts.guide.literal.417"),
+            desc: msg("auto.features.tutorial.components.concepts.guide.literal.418"),
+          },
+          {
+            name: msg("auto.features.tutorial.components.concepts.guide.literal.419"),
+            desc: msg("auto.features.tutorial.components.concepts.guide.literal.420"),
+          },
+        ]}
+      />
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.421")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.422")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.423")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.424")}</p>
+    </GuideSection>
+  );
+}
+
 function SectionParameters() {
   return (
     <GuideSection
       id="parameters"
-      num="3"
+      num="6"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.3")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.100")}
     >
@@ -650,7 +906,7 @@ function SectionTaskDefinition() {
   return (
     <GuideSection
       id="task-definition"
-      num="4"
+      num="7"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.4")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.128")}
     >
@@ -854,16 +1110,35 @@ function SectionWorkflow() {
     ],
     ["GET /serve/{id}/info", msg("auto.features.tutorial.components.concepts.guide.literal.209")],
     ["POST /serve/{id}", msg("auto.features.tutorial.components.concepts.guide.literal.210")],
+    ["POST /serve/{id}/chat", msg("auto.features.tutorial.components.concepts.guide.literal.461")],
+    ["POST /blackbox/run", msg("auto.features.tutorial.components.concepts.guide.literal.457")],
+    [
+      "POST /blackbox/scorer/dry-run",
+      msg("auto.features.tutorial.components.concepts.guide.literal.458"),
+    ],
+    ["GET /blackbox/engines", msg("auto.features.tutorial.components.concepts.guide.literal.459")],
+    [
+      "GET /optimizations/shared-with-me",
+      msg("auto.features.tutorial.components.concepts.guide.literal.460"),
+    ],
+    ["GET /share/{token}", msg("auto.features.tutorial.components.concepts.guide.literal.462")],
+    ["GET /datasets/library", msg("auto.features.tutorial.components.concepts.guide.literal.463")],
+    [
+      "GET /analytics/dashboard",
+      msg("auto.features.tutorial.components.concepts.guide.literal.464"),
+    ],
+    ["POST /dashboard/search", msg("auto.features.tutorial.components.concepts.guide.literal.465")],
   ];
   return (
     <GuideSection
       id="workflow"
-      num="5"
+      num="8"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.5")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.170")}
     >
       <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.171")}</SubHeading>
       <WorkflowFlow />
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.466")}</p>
 
       <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.172")}</SubHeading>
       <p>{msg("auto.features.tutorial.components.concepts.guide.literal.173")}</p>
@@ -1002,6 +1277,44 @@ function SectionWorkflow() {
   );
 }
 
+function SectionApp() {
+  return (
+    <GuideSection
+      id="app"
+      num="9"
+      title={msg("auto.features.tutorial.components.concepts.guide.literal.353")}
+      kicker={msg("auto.features.tutorial.components.concepts.guide.literal.425")}
+    >
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.426")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.427")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.428")}</p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.429")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.430")}</p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.431")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.432")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.433")}</p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.434")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.435")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.436")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.437")}</p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.438")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.439")}</p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.440")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.441")}</p>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.442")}</SubHeading>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.443")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.444")}</p>
+      <p>{msg("auto.features.tutorial.components.concepts.guide.literal.445")}</p>
+    </GuideSection>
+  );
+}
+
 function SectionTips() {
   const problems: Array<[string, React.ReactNode]> = [
     [
@@ -1024,11 +1337,23 @@ function SectionTips() {
       msg("auto.features.tutorial.components.concepts.guide.literal.250"),
       msg("auto.features.tutorial.components.concepts.guide.literal.251"),
     ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.451"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.452"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.453"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.454"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.455"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.456"),
+    ],
   ];
   return (
     <GuideSection
       id="tips"
-      num="6"
+      num="10"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.6")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.220")}
     >
@@ -1046,6 +1371,14 @@ function SectionTips() {
         <li>{msg("auto.features.tutorial.components.concepts.guide.literal.234")}</li>
         <li>{msg("auto.features.tutorial.components.concepts.guide.literal.236")}</li>
         <li>{msg("auto.features.tutorial.components.concepts.guide.literal.237")}</li>
+      </ul>
+
+      <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.446")}</SubHeading>
+      <ul className="list-disc ps-5 space-y-1.5">
+        <li>{msg("auto.features.tutorial.components.concepts.guide.literal.447")}</li>
+        <li>{msg("auto.features.tutorial.components.concepts.guide.literal.448")}</li>
+        <li>{msg("auto.features.tutorial.components.concepts.guide.literal.449")}</li>
+        <li>{msg("auto.features.tutorial.components.concepts.guide.literal.450")}</li>
       </ul>
 
       <SubHeading>{msg("auto.features.tutorial.components.concepts.guide.literal.238")}</SubHeading>
@@ -1145,11 +1478,79 @@ function SectionGlossary() {
       msg("auto.features.tutorial.components.concepts.guide.literal.326"),
       msg("auto.features.tutorial.components.concepts.guide.literal.270"),
     ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.467"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.468"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.469"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.470"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.471"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.472"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.473"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.474"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.475"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.476"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.477"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.478"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.479"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.480"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.481"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.482"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.483"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.484"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.485"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.486"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.487"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.488"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.489"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.490"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.491"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.492"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.493"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.494"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.495"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.496"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.497"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.498"),
+    ],
+    [
+      msg("auto.features.tutorial.components.concepts.guide.literal.499"),
+      msg("auto.features.tutorial.components.concepts.guide.literal.500"),
+    ],
   ];
   return (
     <GuideSection
       id="glossary"
-      num="7"
+      num="11"
       title={msg("auto.features.tutorial.components.concepts.guide.literal.7")}
       kicker={msg("auto.features.tutorial.components.concepts.guide.literal.252")}
     >
