@@ -1,45 +1,48 @@
 import { useState } from "react";
 
+export type AnalyticsRange = "7d" | "30d" | "90d" | "all";
+
 type AnalyticsFilters = {
+  range: AnalyticsRange;
+  optimizer: string;
   model: string;
   status: string;
-  jobId: string | null;
   date: string | null;
   owner: string | null;
   access: string | null;
-  leaderboardLimit: number;
 };
 
 export type UseAnalyticsFiltersReturn = AnalyticsFilters & {
+  setRange: (v: AnalyticsRange) => void;
+  setOptimizer: (v: string) => void;
   setModel: (v: string) => void;
   setStatus: (v: string) => void;
-  setJobId: (v: string | null) => void;
   setDate: (v: string | null) => void;
   setOwner: (v: string | null) => void;
   setAccess: (v: string | null) => void;
 };
 
-const LEADERBOARD_LIMIT = 5;
-
 export function useAnalyticsFilters(): UseAnalyticsFiltersReturn {
+  const [range, setRange] = useState<AnalyticsRange>("all");
+  const [optimizer, setOptimizer] = useState<string>("all");
   const [model, setModel] = useState<string>("all");
   const [status, setStatus] = useState<string>("all");
-  const [jobId, setJobId] = useState<string | null>(null);
   const [date, setDate] = useState<string | null>(null);
   const [owner, setOwner] = useState<string | null>(null);
   const [access, setAccess] = useState<string | null>(null);
 
   return {
+    range,
+    optimizer,
     model,
     status,
-    jobId,
     date,
     owner,
     access,
-    leaderboardLimit: LEADERBOARD_LIMIT,
+    setRange,
+    setOptimizer,
     setModel,
     setStatus,
-    setJobId,
     setDate,
     setOwner,
     setAccess,
