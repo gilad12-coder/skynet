@@ -49,7 +49,7 @@ Useful recipes: `just test`, `just lint`, `just check-i18n`, `just --list` for e
 
 ```
 frontend/   Next.js (App Router) · Tailwind v4 · shadcn/radix · SSE streaming UI
-backend/    FastAPI · SQLAlchemy + Alembic (boot-time migrations) · DSPy 3.2
+backend/    FastAPI · SQLAlchemy + Alembic (boot-time migrations) · DSPy 3.3
             └─ worker: multi-pod job fleet over Postgres (SELECT … FOR UPDATE
                SKIP LOCKED leases, orphan recovery, resumable GEPA checkpoints)
 deploy/     litellm proxy (compose) · helm chart for Kubernetes

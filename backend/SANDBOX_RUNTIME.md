@@ -19,7 +19,7 @@ Each paid Continue check and each submitted run creates exactly one outer Vercel
 | Dependency | Execution identity |
 | --- | --- |
 | GEPA, including OA engines/recipes | `0632cdb5dcc052e690eab439e1b4a7e3e9cfe407` |
-| DSPy | `3.3.0` default; `3.2.1` only with the stable lock/build option |
+| DSPy | `3.3.1` |
 | pip, for scorer wheel resolution | `26.2.1` |
 | Node | `22.22.0` |
 | Claude Code | `@anthropic-ai/claude-code@2.1.259` |
