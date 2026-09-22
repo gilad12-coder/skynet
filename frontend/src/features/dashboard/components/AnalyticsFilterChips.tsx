@@ -1,5 +1,7 @@
 import * as React from "react";
-import { X } from "@/shared/ui/icons";
+import { FunnelX, X } from "@/shared/ui/icons";
+import { Button } from "@/shared/ui/primitives/button";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { getStatusLabel } from "@/shared/constants/job-status";
 import { modelDisplayName, moduleLabel } from "@/shared/lib/formatters";
 import { msg } from "@/shared/lib/messages";
@@ -54,6 +56,7 @@ export function AnalyticsFilterChips({
       : new Date(date).toLocaleDateString(locale, dateFormat)
     : "";
   const bucketClearLabel = msg("auto.features.dashboard.components.analyticstab.literal.2");
+  const clearAllLabel = msg("auto.features.dashboard.components.analyticstab.3");
 
   const ownerIsMe = Boolean(owner) && owner!.toLowerCase() === sessionUser.toLowerCase();
   const accessLabels: Record<string, string> = {
@@ -161,12 +164,18 @@ export function AnalyticsFilterChips({
           onClear={() => setStatus("all")}
         />
       )}
-      <button
-        onClick={clearAll}
-        className="ms-0.5 min-h-[44px] cursor-pointer text-[0.625rem] text-[#3D2E22]/40 transition-colors hover:text-[#3D2E22]/70 lg:min-h-0"
-      >
-        {msg("auto.features.dashboard.components.analyticstab.3")}
-      </button>
+      <TooltipButton tooltip={clearAllLabel}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          type="button"
+          onClick={clearAll}
+          className="ms-0.5 max-lg:size-[44px]"
+          aria-label={clearAllLabel}
+        >
+          <FunnelX className="size-4" aria-hidden="true" />
+        </Button>
+      </TooltipButton>
     </div>
   );
 }
