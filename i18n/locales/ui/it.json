@@ -7,6 +7,7 @@
   "dashboard.analytics.col_date": "Data",
   "dashboard.analytics.col_name": "Nome",
   "dashboard.analytics.col_range": "Intervallo",
+  "dashboard.analytics.col_share": "Quota",
   "dashboard.analytics.improvement_histogram": "Distribuzione dei miglioramenti",
   "dashboard.analytics.kpi_median_detail": "Mediana {p1}",
   "dashboard.analytics.kpi_running_detail": "{p1} in corso",

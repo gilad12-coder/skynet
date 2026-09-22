@@ -7,6 +7,7 @@
   "dashboard.analytics.col_date": "Дата",
   "dashboard.analytics.col_name": "Название",
   "dashboard.analytics.col_range": "Диапазон",
+  "dashboard.analytics.col_share": "Доля",
   "dashboard.analytics.improvement_histogram": "Распределение улучшения",
   "dashboard.analytics.kpi_median_detail": "Медиана {p1}",
   "dashboard.analytics.kpi_running_detail": "Сейчас выполняется: {p1}",

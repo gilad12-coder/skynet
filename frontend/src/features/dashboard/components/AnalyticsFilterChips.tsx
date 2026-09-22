@@ -1,32 +1,18 @@
 import * as React from "react";
 import { X } from "@/shared/ui/icons";
 import { getStatusLabel } from "@/shared/constants/job-status";
-import { modelDisplayName } from "@/shared/lib/formatters";
+import { modelDisplayName, moduleLabel } from "@/shared/lib/formatters";
 import { msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { TERMS } from "@/shared/lib/terms";
+import { jobTypeLabel } from "../lib/transform-chart-data";
 import type { UseAnalyticsFiltersReturn } from "../hooks/use-analytics-filters";
 
 export function AnalyticsFilterChips({
   filters,
   sessionUser,
 }: {
-  filters: Pick<
-    UseAnalyticsFiltersReturn,
-    | "range"
-    | "optimizer"
-    | "model"
-    | "status"
-    | "date"
-    | "owner"
-    | "access"
-    | "setRange"
-    | "setOptimizer"
-    | "setModel"
-    | "setStatus"
-    | "setDate"
-    | "setOwner"
-    | "setAccess"
-  >;
+  filters: UseAnalyticsFiltersReturn;
   sessionUser: string;
 }) {
   const {
@@ -35,8 +21,14 @@ export function AnalyticsFilterChips({
     model,
     status,
     date,
+    dateTo,
     owner,
     access,
+    jobType,
+    module,
+    improvement,
+    runtime,
+    dataset,
     setRange,
     setOptimizer,
     setModel,
@@ -44,26 +36,24 @@ export function AnalyticsFilterChips({
     setDate,
     setOwner,
     setAccess,
+    setJobType,
+    setModule,
+    setImprovement,
+    setRuntime,
+    setDataset,
+    hasFilters,
+    clearAll,
   } = filters;
-  const hasFilters =
-    date ||
-    owner ||
-    access ||
-    range !== "all" ||
-    optimizer !== "all" ||
-    model !== "all" ||
-    status !== "all";
   if (!hasFilters) return null;
 
-  const clearAllFilters = () => {
-    setRange("all");
-    setOptimizer("all");
-    setDate(null);
-    setOwner(null);
-    setAccess(null);
-    setModel("all");
-    setStatus("all");
-  };
+  const locale = getActiveIntlLocale();
+  const dateFormat: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
+  const dateLabel = date
+    ? dateTo && dateTo !== date
+      ? new Intl.DateTimeFormat(locale, dateFormat).formatRange(new Date(date), new Date(dateTo))
+      : new Date(date).toLocaleDateString(locale, dateFormat)
+    : "";
+  const bucketClearLabel = msg("auto.features.dashboard.components.analyticstab.literal.2");
 
   const ownerIsMe = Boolean(owner) && owner!.toLowerCase() === sessionUser.toLowerCase();
   const accessLabels: Record<string, string> = {
@@ -109,13 +99,49 @@ export function AnalyticsFilterChips({
       )}
       {date && (
         <FilterChip
-          label={new Date(date).toLocaleDateString(getActiveIntlLocale(), {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-          })}
-          ariaLabel={msg("auto.features.dashboard.components.analyticstab.literal.2")}
+          label={dateLabel}
+          ariaLabel={bucketClearLabel}
           onClear={() => setDate(null)}
+        />
+      )}
+      {jobType && (
+        <FilterChip
+          label={jobTypeLabel(jobType)}
+          ariaLabel={bucketClearLabel}
+          onClear={() => setJobType(null)}
+        />
+      )}
+      {module && (
+        <FilterChip
+          label={moduleLabel(module)}
+          title={module}
+          truncate
+          ariaLabel={bucketClearLabel}
+          onClear={() => setModule(null)}
+        />
+      )}
+      {improvement && (
+        <FilterChip
+          dir="ltr"
+          label={`${improvement.label} ${msg("dashboard.analytics.axis_points")}`}
+          ariaLabel={bucketClearLabel}
+          onClear={() => setImprovement(null)}
+        />
+      )}
+      {runtime && (
+        <FilterChip
+          dir="ltr"
+          label={`${runtime.label} ${msg("dashboard.analytics.axis_minutes")}`}
+          ariaLabel={bucketClearLabel}
+          onClear={() => setRuntime(null)}
+        />
+      )}
+      {dataset && (
+        <FilterChip
+          dir="ltr"
+          label={`${dataset.label} ${TERMS.rowPlural}`}
+          ariaLabel={bucketClearLabel}
+          onClear={() => setDataset(null)}
         />
       )}
       {model !== "all" && (
@@ -136,7 +162,7 @@ export function AnalyticsFilterChips({
         />
       )}
       <button
-        onClick={clearAllFilters}
+        onClick={clearAll}
         className="ms-0.5 min-h-[44px] cursor-pointer text-[0.625rem] text-[#3D2E22]/40 transition-colors hover:text-[#3D2E22]/70 lg:min-h-0"
       >
         {msg("auto.features.dashboard.components.analyticstab.3")}

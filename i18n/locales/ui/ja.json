@@ -7,6 +7,7 @@
   "dashboard.analytics.col_date": "日付",
   "dashboard.analytics.col_name": "名前",
   "dashboard.analytics.col_range": "範囲",
+  "dashboard.analytics.col_share": "割合",
   "dashboard.analytics.improvement_histogram": "改善の分布",
   "dashboard.analytics.kpi_median_detail": "中央値 {p1}",
   "dashboard.analytics.kpi_running_detail": "現在{p1}件実行中",

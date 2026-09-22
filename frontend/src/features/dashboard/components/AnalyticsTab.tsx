@@ -5,9 +5,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AnimatedNumber, StaggerContainer, StaggerItem } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { formatElapsed, modelDisplayName } from "@/shared/lib";
-import type { DashboardAnalytics, DashboardAnalyticsJob } from "@/shared/lib/api";
+import type { DashboardAnalytics } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { cn } from "@/shared/lib/utils";
@@ -16,8 +15,13 @@ import { AnalyticsEmpty } from "./AnalyticsEmpty";
 import { AnalyticsFilterChips } from "./AnalyticsFilterChips";
 import { AnalyticsSection } from "./AnalyticsSection";
 import { AnalyticsTabSkeleton } from "./AnalyticsTabSkeleton";
-import type { ChartData, OptimizerRow, ShareBar } from "../lib/transform-chart-data";
-import type { AnalyticsRange, UseAnalyticsFiltersReturn } from "../hooks/use-analytics-filters";
+import { Leaderboard, OptimizerTable } from "./AnalyticsTables";
+import type { ChartData, HistogramBar, ShareBar } from "../lib/transform-chart-data";
+import type {
+  AnalyticsBucket,
+  AnalyticsRange,
+  UseAnalyticsFiltersReturn,
+} from "../hooks/use-analytics-filters";
 
 const chartFallback = (height: number) => (
   <div className="flex items-center justify-center" style={{ height }}>
@@ -83,7 +87,7 @@ function KpiCard({
   valueDir?: "ltr" | "rtl";
 }) {
   return (
-    <div className="flex h-full min-w-0 flex-[1_1_11rem] flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5 transition-colors duration-300 hover:border-border/70 sm:p-6 xl:flex-[1_1_8rem]">
+    <div className="flex h-full min-h-[9.5rem] min-w-0 flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5 transition-colors duration-300 hover:border-border/70 sm:p-6">
       <div className="flex items-center gap-2">
         <span className={`size-1.5 rounded-full ${KPI_DOT[accent]}`} aria-hidden />
         <p className="text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
@@ -97,9 +101,9 @@ function KpiCard({
         >
           {value}
         </p>
-        {detail && (
-          <p className="text-center text-[0.6875rem] tabular-nums text-muted-foreground">{detail}</p>
-        )}
+        <p className="min-h-[1rem] text-center text-[0.6875rem] tabular-nums text-muted-foreground">
+          {detail}
+        </p>
       </div>
     </div>
   );
@@ -243,155 +247,6 @@ function ShareBars({
   );
 }
 
-const TH = "px-3 py-2 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground";
-const TD = "px-3 py-2.5 tabular-nums";
-const ROW_BUTTON =
-  "cursor-pointer border-t border-border/60 transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:bg-accent/50";
-
-function OptimizerTable({
-  rows,
-  onSelect,
-}: {
-  rows: OptimizerRow[];
-  onSelect: (name: string) => void;
-}) {
-  return (
-    <div className="overflow-x-auto rounded-lg border border-border/60">
-      <table className="w-full min-w-[34rem] border-collapse text-sm">
-        <thead className="bg-muted/50">
-          <tr>
-            <th className={`${TH} text-start`}>{TERMS.optimizer}</th>
-            <th className={`${TH} text-end`}>{msg("dashboard.analytics.runs")}</th>
-            <th className={`${TH} text-end`}>
-              {msg("auto.features.dashboard.components.analyticstab.4")}
-            </th>
-            <th className={`${TH} text-end`}>
-              {msg("auto.features.dashboard.components.analyticstab.8")}
-            </th>
-            <th className={`${TH} text-end`}>
-              {msg("auto.features.dashboard.components.analyticstab.11")}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr
-              key={row.name}
-              tabIndex={0}
-              className={ROW_BUTTON}
-              onClick={() => onSelect(row.name)}
-              onKeyDown={(e) => activateOnKey(e, () => onSelect(row.name))}
-            >
-              <td className={`${TD} min-w-[12rem]`}>
-                <div className="flex flex-col gap-1.5">
-                  <span className="font-medium" dir="ltr">
-                    {row.name}
-                  </span>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-muted/60" dir="ltr">
-                    <div
-                      className="h-full rounded-full bg-[var(--color-chart-2)] transition-all duration-500"
-                      style={{ width: `${row.share}%` }}
-                    />
-                  </div>
-                </div>
-              </td>
-              <td className={`${TD} text-end font-semibold`}>{row.count}</td>
-              <td className={`${TD} text-end`}>{Math.round(row.successRate)}%</td>
-              <td
-                className={cn(
-                  `${TD} text-end font-medium`,
-                  row.avgImprovement != null && row.avgImprovement > 0 && "text-emerald-600",
-                  row.avgImprovement != null && row.avgImprovement < 0 && "text-red-600",
-                )}
-                dir="ltr"
-              >
-                {pointsText(row.avgImprovement)}
-              </td>
-              <td className={`${TD} text-end`} dir="ltr">
-                {row.avgRuntimeMinutes == null ? "—" : formatElapsed(row.avgRuntimeMinutes * 60)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Leaderboard({
-  jobs,
-  onOpenJob,
-}: {
-  jobs: DashboardAnalyticsJob[];
-  onOpenJob: (optimizationId: string) => void;
-}) {
-  const locale = getActiveIntlLocale();
-  return (
-    <div className="overflow-x-auto rounded-lg border border-border/60">
-      <table className="w-full min-w-[40rem] border-collapse text-sm">
-        <thead className="bg-muted/50">
-          <tr>
-            <th className={`${TH} w-8 text-start`}>#</th>
-            <th className={`${TH} text-start`}>{msg("dashboard.analytics.col_name")}</th>
-            <th className={`${TH} text-start`}>{TERMS.optimizer}</th>
-            <th className={`${TH} text-start`}>{TERMS.model}</th>
-            <th className={`${TH} text-end`}>{TERMS.scoreImprovement}</th>
-            <th className={`${TH} text-end`}>
-              {msg("auto.features.dashboard.components.analyticstab.11")}
-            </th>
-            <th className={`${TH} text-end`}>{msg("dashboard.analytics.col_date")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {jobs.map((job, i) => (
-            <tr
-              key={job.optimization_id}
-              tabIndex={0}
-              aria-label={msg("dashboard.analytics.open_job")}
-              className={ROW_BUTTON}
-              onClick={() => onOpenJob(job.optimization_id)}
-              onKeyDown={(e) => activateOnKey(e, () => onOpenJob(job.optimization_id))}
-            >
-              <td className={`${TD} text-muted-foreground/70`}>{i + 1}</td>
-              <td className={`${TD} max-w-[16rem] truncate font-medium`} title={job.name ?? undefined}>
-                {job.name || <span dir="ltr">{job.optimization_id.slice(0, 8)}…</span>}
-              </td>
-              <td className={TD} dir="ltr">
-                {job.optimizer_name ?? "—"}
-              </td>
-              <td className={`${TD} max-w-[12rem] truncate font-mono text-xs`} dir="ltr" title={job.model_name ?? undefined}>
-                {job.model_name ? modelDisplayName(job.model_name) : "—"}
-              </td>
-              <td className={`${TD} text-end font-semibold text-emerald-600`} dir="ltr">
-                {pointsText(improvementPoints(job.metric_improvement))}
-              </td>
-              <td className={`${TD} text-end`} dir="ltr">
-                {job.elapsed_seconds == null ? "—" : formatElapsed(job.elapsed_seconds)}
-              </td>
-              <td className={`${TD} text-end whitespace-nowrap`}>
-                {job.created_at
-                  ? new Date(job.created_at).toLocaleDateString(locale, {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })
-                  : "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// Leaderboard rows carry the raw metric delta; ratio-scale metrics (|delta| <= 1)
-// are shown in percentage points like every other improvement figure here.
-function improvementPoints(delta: number | null | undefined): number | null {
-  if (delta == null) return null;
-  return Math.abs(delta) <= 1 ? delta * 100 : delta;
-}
-
 // Rank-shaded ramp for the model list: the most-used model is darkest and
 // lighter steps follow, so the list reads as a ranking. Clamps past rank 5.
 const MODEL_RAMP = [
@@ -412,20 +267,27 @@ function AnalyticsTabImpl({
 }: AnalyticsTabProps) {
   const {
     range,
-    optimizer,
-    model,
-    status,
-    date,
     owner,
     access,
     setRange,
     setOptimizer,
     setModel,
     setStatus,
-    setDate,
+    setDateRange,
     setOwner,
     setAccess,
+    setJobType,
+    setModule,
+    setImprovement,
+    setRuntime,
+    setDataset,
+    hasFilters,
+    clearAll,
+    key: filterKey,
   } = filters;
+
+  const bucketFilter = (setter: (bucket: AnalyticsBucket | null) => void) => (bar: HistogramBar) =>
+    setter({ lower: bar.lower, upper: bar.upper, label: bar.label });
 
   const showOwners = chartData.ownerUsage.length > 1 || Boolean(owner);
   const showAccess = chartData.accessUsage.length > 1 || Boolean(access);
@@ -433,16 +295,6 @@ function AnalyticsTabImpl({
   if (analyticsLoading && analyticsData === null) {
     return <AnalyticsTabSkeleton />;
   }
-
-  const hasFilters = Boolean(
-    date ||
-      owner ||
-      access ||
-      range !== "all" ||
-      optimizer !== "all" ||
-      model !== "all" ||
-      status !== "all",
-  );
 
   const toolbar = (
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -456,18 +308,7 @@ function AnalyticsTabImpl({
       return (
         <div data-tutorial="analytics-content" className="space-y-6">
           {toolbar}
-          <AnalyticsEmpty
-            variant="no-results"
-            onClearFilters={() => {
-              setRange("all");
-              setOptimizer("all");
-              setModel("all");
-              setStatus("all");
-              setDate(null);
-              setOwner(null);
-              setAccess(null);
-            }}
-          />
+          <AnalyticsEmpty variant="no-results" onClearFilters={clearAll} />
         </div>
       );
     }
@@ -490,7 +331,7 @@ function AnalyticsTabImpl({
 
       <AnimatePresence mode="wait">
         <motion.div
-          key={`${range}-${optimizer}-${model}-${status}-${date ?? "all"}-${owner ?? "all"}-${access ?? "all"}`}
+          key={filterKey}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -4 }}
@@ -499,7 +340,10 @@ function AnalyticsTabImpl({
           <StaggerContainer className="space-y-6" staggerDelay={0.03}>
             {kpis && (
               <StaggerItem>
-                <div data-tutorial="dashboard-stats" className="flex flex-wrap gap-3 sm:gap-4">
+                <div
+                  data-tutorial="dashboard-stats"
+                  className="grid auto-rows-fr grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 xl:grid-cols-5"
+                >
                   <KpiCard
                     label={msg("dashboard.analytics.kpi_total")}
                     accent="default"
@@ -567,6 +411,7 @@ function AnalyticsTabImpl({
                       data={chartData.improvementHistogram}
                       unitLabel={msg("dashboard.analytics.axis_points")}
                       emptyMessage={noSuccessMessage}
+                      onBucketClick={bucketFilter(setImprovement)}
                     />
                   </div>
                   <div className="min-w-0">
@@ -578,6 +423,7 @@ function AnalyticsTabImpl({
                     <RangeHistogram
                       data={chartData.runtimeHistogram}
                       unitLabel={msg("dashboard.analytics.axis_minutes")}
+                      onBucketClick={bucketFilter(setRuntime)}
                     />
                   </div>
                 </div>
@@ -593,6 +439,7 @@ function AnalyticsTabImpl({
                     data={chartData.datasetBuckets}
                     unitLabel={TERMS.rowPlural}
                     withAverage
+                    onBucketClick={bucketFilter(setDataset)}
                   />
                 </div>
               </AnalyticsSection>
@@ -614,7 +461,7 @@ function AnalyticsTabImpl({
                 <StackedTimeline
                   data={chartData.timeline}
                   granularity={chartData.timelineGranularity}
-                  onDayClick={setDate}
+                  onSelect={setDateRange}
                 />
               </AnalyticsSection>
             </StaggerItem>
@@ -657,7 +504,7 @@ function AnalyticsTabImpl({
                       {msg("auto.features.dashboard.components.analyticstab.24")}
                       {TERMS.optimization}
                     </PanelHeading>
-                    <ShareBars bars={chartData.jobTypes} />
+                    <ShareBars bars={chartData.jobTypes} onSelect={setJobType} />
                   </div>
                   <div className="min-w-0">
                     <PanelHeading>{msg("dashboard.analytics.by_module")}</PanelHeading>
@@ -665,6 +512,7 @@ function AnalyticsTabImpl({
                       <ShareBars
                         bars={chartData.modules}
                         color={() => "var(--color-chart-4)"}
+                        onSelect={setModule}
                       />
                     ) : (
                       <p className="text-sm text-muted-foreground">

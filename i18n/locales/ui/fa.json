@@ -7,6 +7,7 @@
   "dashboard.analytics.col_date": "تاریخ",
   "dashboard.analytics.col_name": "نام",
   "dashboard.analytics.col_range": "بازه",
+  "dashboard.analytics.col_share": "سهم",
   "dashboard.analytics.improvement_histogram": "توزیع بهبود",
   "dashboard.analytics.kpi_median_detail": "میانهٔ {p1}",
   "dashboard.analytics.kpi_running_detail": "هم‌اکنون {p1} در حال اجرا",
