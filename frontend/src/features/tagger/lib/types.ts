@@ -83,7 +83,7 @@ export interface AssistPrediction {
   reason?: string;
 }
 
-export interface InterviewTurn {
+interface InterviewTurn {
   role: "assistant" | "user";
   content: string;
   /** LiteLLM model id that produced an assistant turn (the reply's chip). */
@@ -103,7 +103,7 @@ export interface ReviewRound {
   flaggedPass?: boolean;
 }
 
-export interface AutotagProgress {
+interface AutotagProgress {
   status: "running" | "done" | "failed" | "canceled";
   total: number;
   done: number;

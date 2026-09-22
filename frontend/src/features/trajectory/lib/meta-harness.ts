@@ -8,7 +8,7 @@ const CASE_SCORED_EVENT = "case_scored";
 const LANE_STARTED_EVENT = "lane_started";
 const AGENT_RUN_EVENT = "agent_run";
 
-export const AGENT_RUN_PHASE_VERSION = "version";
+const AGENT_RUN_PHASE_VERSION = "version";
 export const AGENT_RUN_PHASE_BASELINE = "baseline";
 export const AGENT_RUN_PHASE_FINAL = "final";
 export const AGENT_RUN_STATUS_RUNNING = "running";
@@ -17,7 +17,7 @@ export const AGENT_RUN_STATUS_FAILED = "failed";
 const LANED_EVENTS = new Set([CANDIDATE_EVENT, REJECTED_EVENT, MINIBATCH_EVENT, CASE_SCORED_EVENT]);
 
 /** Engines that hill-climb: every version is scored on every case, so the run view draws a climb. */
-export const CLIMB_ENGINES: ReadonlySet<string> = new Set([
+const CLIMB_ENGINES: ReadonlySet<string> = new Set([
   "meta_harness",
   "autoresearch",
   "autosaddler",
@@ -207,7 +207,7 @@ export function indexAgentRuns(runs: AgentRunSummary[]): Map<string, AgentRunSum
   return byCell;
 }
 
-export interface ClimbVersion {
+interface ClimbVersion {
   candidate: CandidateMetrics;
   index: number;
   score: number;
@@ -218,7 +218,7 @@ export interface ClimbVersion {
 
 // A version still being scored: its cases fill in one by one until the
 // candidate event completes it.
-export interface PendingVersion {
+interface PendingVersion {
   index: number;
   total: number;
   scores: Map<string, number>;

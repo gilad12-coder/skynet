@@ -18,7 +18,6 @@
   "optimizations.grid.format.seconds": "{value}s",
   "optimizations.grid.response_time_seconds": "{value}s",
   "optimizations.serve.field_separator": ": ",
-  "optimizations.servechat.demo_label": "{label} {index}",
   "share.you": "(o próprio)",
   "tooltip.submit.blackbox.scorer_install": "É executado uma vez na Vercel Sandbox offline. Use pacotes já presentes na imagem fixada ou artefatos de pacotes geridos pela implantação; os repositórios públicos de apt e de pacotes não estão disponíveis.",
   "submit.budget.byok_note": "O seu fornecedor cobra os tokens do modelo na sua chave. Este limite cobre apenas a taxa de plataforma da Skynet e o ambiente de execução.",

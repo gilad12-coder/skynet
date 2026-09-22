@@ -28,7 +28,7 @@ export const TABLE_EXPORT_FORMATS: readonly TableExportFormat[] = [
 /** The columnar analytics formats — grouped apart in the menu, always last. */
 export const COLUMNAR_FORMATS: ReadonlySet<TableExportFormat> = new Set(["parquet", "feather"]);
 
-export interface TableExportData {
+interface TableExportData {
   /** Column order; also the header row. */
   columns: string[];
   /** One object per row, keyed by column name. Missing keys export as empty. */

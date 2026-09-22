@@ -13,12 +13,12 @@ import {
 
 const RECENT_LIMIT = 2;
 
-export interface WorkspaceTaggingSummary {
+interface WorkspaceTaggingSummary {
   total: number;
   recent: TaggerSessionSummary[];
 }
 
-export interface WorkspaceDatasetsSummary {
+interface WorkspaceDatasetsSummary {
   total: number;
   recent: DatasetSummary[];
   usage: DatasetUsageMeter;

@@ -63,7 +63,7 @@ interface RunOutcome {
   exit_code?: number | null;
 }
 
-export function agentRunPhaseText(run: Pick<AgentRunSummary, "phase" | "trial">): string {
+function agentRunPhaseText(run: Pick<AgentRunSummary, "phase" | "trial">): string {
   if (run.phase === AGENT_RUN_PHASE_BASELINE) return msg("agent_run.phase.baseline");
   if (run.phase === AGENT_RUN_PHASE_FINAL) return msg("agent_run.phase.final");
   return formatMsg("meta_harness.version", { id: displayCandidateId(String(run.trial ?? 0)) });

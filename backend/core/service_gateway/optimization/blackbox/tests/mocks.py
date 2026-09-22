@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from ..protocol import Candidate, EngineContext, EvalServer, Result, SideInfo, Task
+from ..protocol import Candidate, EngineContext, SideInfo
 from ..sandbox import CommandResult, OutputSink, SandboxSpec
 
 VOWELS = "aeiou"
@@ -108,46 +108,6 @@ def make_ctx(run_dir: str, lm: FakeReflectionLM | None = None, **overrides: Any)
     """
     lm = lm or FakeReflectionLM()
     return EngineContext(reflection_lm=lambda prompt: str(lm(prompt)[0]), run_dir=run_dir, **overrides)
-
-
-class ScriptedEngine:
-    """Engine that scores a fixed list of candidates, then returns the best or raises.
-
-    Args:
-        name: Catalog id to report.
-        candidates: Versions to score through the server, in order.
-        error: Exception to raise after scoring, if any.
-    """
-
-    def __init__(self, name: str, candidates: list[str], *, error: BaseException | None = None) -> None:
-        """Create the engine."""
-        self.name = name
-        self._candidates = candidates
-        self._error = error
-        self.calls: list[Task] = []
-
-    def run(self, task: Task, server: EvalServer, ctx: EngineContext) -> Result:
-        """Score the scripted candidates and hand back the server's best.
-
-        Args:
-            task: Recorded on ``calls`` so tests can inspect the seed.
-            server: Budgeted scorer for this lane.
-            ctx: Ignored.
-
-        Returns:
-            The best candidate the server saw.
-
-        Raises:
-            BaseException: The configured ``error``, after scoring.
-        """
-        self.calls.append(task)
-        for candidate in self._candidates:
-            server.evaluate(candidate, None)
-        if self._error is not None:
-            raise self._error
-        best = server.best_candidate
-        assert best is not None
-        return Result(best_candidate=best, best_score=server.best_score, total_evals=server.used)
 
 
 class FakeSandboxSession:

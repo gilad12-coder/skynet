@@ -15,7 +15,7 @@ export type LegalBlock =
   | { kind: "list"; items: readonly string[] };
 
 /** A numbered top-level section of a legal document. */
-export interface LegalSection {
+interface LegalSection {
   heading: string;
   blocks: readonly LegalBlock[];
 }

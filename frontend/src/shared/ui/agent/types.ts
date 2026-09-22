@@ -1,6 +1,6 @@
 export type AgentStatus = "idle" | "streaming" | "queued" | "done" | "error";
 
-export type AgentToolStatus = "running" | "done" | "error";
+type AgentToolStatus = "running" | "done" | "error";
 
 export interface AgentToolCall {
   id: string;

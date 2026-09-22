@@ -14,11 +14,11 @@ export type OptimizationType = "run" | "grid_search" | "blackbox";
 // Levels emitted by the backend (`backend/core/api/routers/optimizations_meta.py`).
 // `(string & {})` keeps the union behaviour for autocomplete while still
 // accepting any backend-future level without a TS error.
-export type LogLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
+type LogLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
 
 // Same brand pattern: documented values plus an escape hatch for any
 // backend-future kind (`backend/core/models/dataset.py:42`).
-export type ProfileKind = "categorical" | "numeric" | "freeform";
+type ProfileKind = "categorical" | "numeric" | "freeform";
 
 export interface ModelConfig {
   name: string;
@@ -59,7 +59,7 @@ export interface ToolSource {
   tool_filter?: string[] | null;
 }
 
-export interface SplitCounts {
+interface SplitCounts {
   train: number;
   val: number;
   test: number;
@@ -70,7 +70,7 @@ export interface SplitCounts {
 // A workflow run (`module_name === "workflow"`) carries this spec instead of a
 // top-level `signature_code`; per-node signatures live inside the nodes.
 
-export interface WorkflowNodePosition {
+interface WorkflowNodePosition {
   x: number;
   y: number;
 }
@@ -89,12 +89,12 @@ interface WorkflowNodeSpecBase {
   position?: WorkflowNodePosition | null;
 }
 
-export interface WorkflowInputNodeSpec extends WorkflowNodeSpecBase {
+interface WorkflowInputNodeSpec extends WorkflowNodeSpecBase {
   kind: "input";
   fields: WorkflowFieldSpec[];
 }
 
-export interface WorkflowOutputNodeSpec extends WorkflowNodeSpecBase {
+interface WorkflowOutputNodeSpec extends WorkflowNodeSpecBase {
   kind: "output";
   fields: WorkflowFieldSpec[];
 }
@@ -119,7 +119,7 @@ export interface WorkflowTransformNodeSpec extends WorkflowNodeSpecBase {
   output_fields: WorkflowFieldSpec[];
 }
 
-export interface WorkflowMcpNodeSpec extends WorkflowNodeSpecBase {
+interface WorkflowMcpNodeSpec extends WorkflowNodeSpecBase {
   kind: "mcp";
   tool_name: string;
   input_fields: WorkflowFieldSpec[];
@@ -268,7 +268,7 @@ export interface OptimizationSubmissionResponse {
   optimizer_name: string;
 }
 
-export interface RunRecovery {
+interface RunRecovery {
   state: "recovering" | "recovered" | "unavailable";
   phase?: string | null;
   reason?: string | null;
@@ -276,7 +276,7 @@ export interface RunRecovery {
   checkpoint_revision?: string | null;
 }
 
-export interface TerminalEvidence {
+interface TerminalEvidence {
   candidate_origin?: "seed" | "optimized" | null;
   final_evaluation_completed?: boolean;
   final_evaluation_reason?: string | null;
@@ -298,7 +298,7 @@ export interface TerminalEvidence {
 }
 
 /** The worker's measured-burn projection that parked a run at its checkpoint. */
-export interface BudgetProjection {
+interface BudgetProjection {
   planned_calls: number;
   done_calls: number;
   spent_credits: string;
@@ -387,7 +387,7 @@ export interface ProgressEvent {
   metrics: Record<string, unknown>;
 }
 
-export interface OptimizedDemo {
+interface OptimizedDemo {
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
 }
@@ -431,7 +431,7 @@ export interface NodeArtifact {
   optimized_src?: string | null;
 }
 
-export interface ProgramArtifact {
+interface ProgramArtifact {
   path?: string | null;
   program_state_json?: Record<string, unknown> | null;
   program_pickle_base64?: string | null;
@@ -514,7 +514,7 @@ export interface PairResult {
   optimized_logged_metrics?: Record<string, number>;
 }
 
-export interface RunResult {
+interface RunResult {
   module_name: string;
   optimizer_name: string;
   metric_name?: string | null;
@@ -689,7 +689,7 @@ export interface ScorerDryRunResponse {
   credits_charged?: number;
 }
 
-export interface BlackboxLaneResult {
+interface BlackboxLaneResult {
   engine: BlackboxEngineId;
   phase: "explore" | "continue" | "single";
   status: "completed" | "failed" | "unavailable" | "budget_exhausted";
@@ -717,7 +717,7 @@ export interface BlackboxVersion {
  * One candidate in the engine's lineage: `parents` are indices into the same
  * list (`null` marks the seed). Only the GEPA engine records lineage today.
  */
-export interface BlackboxCandidateNode {
+interface BlackboxCandidateNode {
   candidate: BlackboxCandidate;
   parents: Array<number | null>;
   val_score?: number | null;
@@ -862,7 +862,7 @@ export interface OptimizationPayloadResponse {
   payload: Record<string, unknown>;
 }
 
-export interface DatasetRow {
+interface DatasetRow {
   index: number;
   row: Record<string, unknown>;
 }
@@ -934,16 +934,16 @@ export interface ModelCatalogResponse {
   models: CatalogModel[];
 }
 
-export interface TargetColumnProfile {
+interface TargetColumnProfile {
   name: string;
   kind: ProfileKind | (string & {});
   unique_values: number;
   class_histogram: Record<string, number>;
 }
 
-export type ColumnKind = "text" | "image";
+type ColumnKind = "text" | "image";
 
-export interface InputColumnProfile {
+interface InputColumnProfile {
   name: string;
   kind: ColumnKind;
 }

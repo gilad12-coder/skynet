@@ -1,8 +1,8 @@
 import type { ModelConfig } from "@/shared/types/api";
 
-export type CodeAssistDefault = "auto" | "manual";
-export type SplitModeDefault = "auto" | "manual";
-export type TrustModeDefault = "ask" | "auto_safe" | "yolo";
+type CodeAssistDefault = "auto" | "manual";
+type SplitModeDefault = "auto" | "manual";
+type TrustModeDefault = "ask" | "auto_safe" | "yolo";
 
 export interface AgentShortcut {
   key: string;
@@ -122,9 +122,9 @@ export const PREF_KEYS: Record<keyof UserPrefs, string> = {
 // Mirrors the backend's balanced-tier pin (BALANCED_PINNED_MODEL_ID in
 // core/api/model_router.py): new composers open on the model that would
 // serve them anyway, instead of an opaque "Auto" chip. Re-pin both together.
-export const DEFAULT_COMPOSER_MODEL = "openrouter/openai/gpt-5.6-terra";
+const DEFAULT_COMPOSER_MODEL = "openrouter/openai/gpt-5.6-terra";
 
-export const DEFAULT_AGENT_SHORTCUT: AgentShortcut = {
+const DEFAULT_AGENT_SHORTCUT: AgentShortcut = {
   key: "j",
   ctrl: true,
   alt: false,

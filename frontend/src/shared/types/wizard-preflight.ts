@@ -10,8 +10,8 @@ import type {
 import type { ExecutionBudget } from "./execution-budget";
 
 export type PreflightScope = "evaluation" | "execution";
-export type PreflightStatus = "succeeded" | "failed" | "pending";
-export type PreflightPendingCategory =
+type PreflightStatus = "succeeded" | "failed" | "pending";
+type PreflightPendingCategory =
   | "later_stage_dependency"
   | "usage_reconciliation"
   | "setup_incomplete";
