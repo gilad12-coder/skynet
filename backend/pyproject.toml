@@ -25,21 +25,20 @@ dependencies = [
     "uvicorn>=0.23",
     "pydantic>=2.5",
     "pydantic-settings>=2.14.2",
-    # Dual-line support: classic ReAct (3.2.x stable) and ReActV2 (3.3) are both
-    # bridged in core.service_gateway.react_compat. Air-gap builds vendor one
-    # line — see requirements.stable.txt / requirements.preview.txt.
-    "dspy>=3.2.1,<3.4",
+    # ReActV2, native tool-call history and Flex all arrived in 3.3; the agent
+    # layer depends on them, so there is no older line to fall back to.
+    "dspy>=3.3.1,<3.4",
     # gepa is pinned to an immutable upstream commit, not a PyPI release: the
     # black-box engines (core.service_gateway.optimization.blackbox) invoke the
     # upstream optimize_anything engines and recipes through gepa.oa — Best-of-N,
     # Meta-Harness, AutoResearch and the omni composition Auto is built on — and
     # gepa.oa has no release yet. The commit still reports itself as 0.1.4, so it
     # also carries PxN batched sampling (gepa.strategies.proposal_sampling) and the
-    # enable_tool_optimization adapter that core.service_gateway.react_compat
-    # imports at module load. dspy 3.2.1 hard-pins an older gepa (==0.0.27) and
+    # enable_tool_optimization adapter the training ground runs GEPA through.
     # dspy 3.3.1 pins the PyPI 0.1.4, which lacks gepa.oa; the [tool.uv]
-    # override-dependencies below replaces that pin with this same source. To move the pin: change the
-    # commit here, in the override below, in requirements*.txt and in
+    # override-dependencies below replaces that pin with this same source. To
+    # move the pin: change the commit here, in the override below, in
+    # requirements.txt and in
     # core/service_gateway/optimization/blackbox/upstream.py (GEPA_REVISION),
     # and native_runtime.py (GEPA_SOURCE), then run `uv lock` and the blackbox
     # test suite (it checks the pin agrees).
@@ -109,10 +108,10 @@ render = [
 ]
 
 [tool.uv]
-# dspy 3.3.1's metadata hard-pins gepa[dspy]==0.1.4 (dspy 3.2.1 pins ==0.0.27).
-# Neither PyPI release ships gepa.oa, which the black-box engines are built on, and
-# 0.0.27 also predates PxN batched sampling (gepa.strategies.proposal_sampling), which
-# the GEPA optimizer wiring in core.service_gateway.optimization needs. The pinned
+# dspy 3.3.1's metadata hard-pins gepa[dspy]==0.1.4. That PyPI release ships neither
+# gepa.oa, which the black-box engines are built on, nor PxN batched sampling
+# (gepa.strategies.proposal_sampling), which the GEPA optimizer wiring in
+# core.service_gateway.optimization needs. The pinned
 # commit reports itself as 0.1.4 and is a strict superset of that release's
 # optimize()/DspyAdapter surface — it only adds params
 # (sampling_strategy, selection_strategy, …) and renames/removes nothing dspy calls —

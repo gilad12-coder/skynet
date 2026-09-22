@@ -88,35 +88,30 @@ RUN if [ -n "$GEPA_GIT_MIRROR" ]; then \
         git config --global "url.${GEPA_GIT_MIRROR}.insteadOf" https://github.com/gepa-ai/gepa; \
     fi
 
-COPY pyproject.toml uv.lock requirements.txt requirements.stable.txt ./
+COPY pyproject.toml uv.lock requirements.txt ./
 
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
 # Dependency installer toggle. PKG_MANAGER=uv (default) installs the exact
-# uv.lock wheel set via uv — the dspy 3.3.1 line. PKG_MANAGER=pip installs a
-# pinned requirements file; DSPY_LINE then selects which line: "preview"
-# (requirements.txt, dspy 3.3.1) or "stable" (requirements.stable.txt,
-# dspy 3.2.1). The agent layer bridges classic ReAct vs ReActV2, so the source
-# is identical either way — only the wheel set differs:
-#   docker build --build-arg PKG_MANAGER=pip --build-arg DSPY_LINE=stable ...
+# uv.lock wheel set via uv. PKG_MANAGER=pip installs requirements.txt, the
+# same set exported from uv.lock, for hosts without uv:
+#   docker build --build-arg PKG_MANAGER=pip ...
 # Either way the deps land in their own layer (before the source copy) so it
-# caches until the lockfile / requirements change. Both requirements files are
-# complete compiled lockfiles, so we install with --no-deps to skip
-# re-resolution. Both lines pin the same gepa git commit for the upstream OA
-# engines and GEPA PxN sampling, but dspy's metadata hard-pins a PyPI gepa —
-# ==0.0.27 on dspy 3.2.1, ==0.1.4 on dspy 3.3.1 — so a resolving install fails
-# or pulls the release without gepa.oa. --no-deps preserves this deliberate override.
-# Compatibility is exercised by the pip-path image smoke tests. The uv path
-# carries the same override in uv.lock ([tool.uv] override-dependencies).
+# caches until the lockfile / requirements change. requirements.txt is a
+# complete compiled lockfile, so we install with --no-deps to skip
+# re-resolution. It pins a gepa git commit for the upstream OA engines and
+# GEPA PxN sampling, but dspy's metadata hard-pins gepa==0.1.4 from PyPI, so a
+# resolving install would pull the release without gepa.oa. --no-deps
+# preserves this deliberate override; the uv path carries the same override
+# in uv.lock ([tool.uv] override-dependencies). Compatibility is exercised by
+# the pip-path image smoke tests.
 ARG PKG_MANAGER=uv
-ARG DSPY_LINE=preview
 RUN if [ "$PKG_MANAGER" = "pip" ]; then \
         umask 0002; \
-        if [ "$DSPY_LINE" = "stable" ]; then REQ=requirements.stable.txt; else REQ=requirements.txt; fi; \
         pip install --no-cache-dir --no-deps \
             ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
             ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
-            -r "$REQ"; \
+            -r requirements.txt; \
     else \
         umask 0002; \
         pip install --no-cache-dir \
@@ -132,9 +127,7 @@ RUN if [ "$PKG_MANAGER" = "pip" ]; then \
 # its generated Python in a Deno/Pyodide WASM sandbox (dspy.PythonInterpreter
 # shells out to `deno` on PATH) — even the un-optimized baseline runs through
 # the interpreter — so the runtime image needs the deno binary plus a warm
-# npm:pyodide cache. Only the dspy 3.3 line ships Flex, so gate this (~40MB
-# binary + ~14MB pyodide) to Flex-capable images: the uv path (always dspy
-# 3.3.0) and the preview pip line. The stable pip line skips it entirely.
+# npm:pyodide cache (~40MB binary + ~14MB pyodide).
 # DENO_DIR must match at build and run time so the runtime sandbox hits the
 # cache primed here; it lives under /app so the chgrp/chmod below makes it
 # group-0 writable for the runtime v8 code cache. Air-gap: point
@@ -143,8 +136,7 @@ RUN if [ "$PKG_MANAGER" = "pip" ]; then \
 ARG DENO_VERSION=2.6.6
 ARG DENO_DOWNLOAD_BASE=https://github.com/denoland/deno/releases/download
 ENV DENO_DIR=/app/.deno
-RUN if [ "$PKG_MANAGER" = "uv" ] || [ "$DSPY_LINE" = "preview" ]; then \
-        umask 0002; \
+RUN umask 0002; \
         case "$(dpkg --print-architecture)" in \
             amd64) DENO_TARGET=x86_64-unknown-linux-gnu ;; \
             arm64) DENO_TARGET=aarch64-unknown-linux-gnu ;; \
@@ -157,8 +149,7 @@ RUN if [ "$PKG_MANAGER" = "uv" ] || [ "$DSPY_LINE" = "preview" ]; then \
         && chmod +x /usr/local/bin/deno \
         && if [ "$PKG_MANAGER" = "uv" ]; then PY=/app/.venv/bin/python; else PY=python; fi \
         && RUNNER_JS=$("$PY" -c 'import os, dspy.primitives.python_interpreter as m; print(os.path.join(os.path.dirname(m.__file__), "runner.js"))') \
-        && ${NPM_CONFIG_REGISTRY:+NPM_CONFIG_REGISTRY=$NPM_CONFIG_REGISTRY} deno cache "$RUNNER_JS"; \
-    fi
+        && ${NPM_CONFIG_REGISTRY:+NPM_CONFIG_REGISTRY=$NPM_CONFIG_REGISTRY} deno cache "$RUNNER_JS"
 
 COPY --chown=1001:0 . .
 

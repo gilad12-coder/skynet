@@ -64,22 +64,15 @@ jobs:
           fi
 
   # Everything above installs through uv. The Dockerfile's other path
-  # (PKG_MANAGER=pip) installs the compiled requirements files with --no-deps,
+  # (PKG_MANAGER=pip) installs the compiled requirements.txt with --no-deps,
   # which means pip never re-resolves and never notices a package the file
   # forgot to list — `stripe` was absent from requirements.txt while
   # core/billing/service.py imported it unguarded, so a pip-path image would
   # have died on the billing import with nothing in CI to catch it. Build the
-  # image both ways and import the modules that actually pull the runtime deps.
-  # The stable line matters most here: its compile is not reproducible on
-  # demand, so the requirements-sync guard cannot cover it and this is its only
-  # gate.
+  # image that way and import the modules that actually pull the runtime deps.
   docker-pip-path:
-    name: docker · pip path (${{ matrix.dspy_line }})
+    name: docker · pip path
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        dspy_line: [preview, stable]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -89,11 +82,10 @@ jobs:
           context: backend
           build-args: |
             PKG_MANAGER=pip
-            DSPY_LINE=${{ matrix.dspy_line }}
           load: true
-          tags: skynet-backend:pip-${{ matrix.dspy_line }}
-          cache-from: type=gha,scope=pip-${{ matrix.dspy_line }}
-          cache-to: type=gha,mode=max,scope=pip-${{ matrix.dspy_line }}
+          tags: skynet-backend:pip
+          cache-from: type=gha,scope=pip
+          cache-to: type=gha,mode=max,scope=pip
       # `pip check` is the sharp end: --no-deps means pip installed the file
       # verbatim without ever validating it, so this is the first thing in the
       # pipeline that reads the wheels' own metadata. It catches both failure
@@ -101,18 +93,16 @@ jobs:
       # stripe, which is not installed") and two pins that cannot coexist
       # ("prometheus-fastapi-instrumentator 7.1.0 has requirement
       # starlette<1.0.0, but you have starlette 1.3.1").
-      # Both lines pin the same gepa git commit (reporting 0.1.4) over dspy's
-      # hard gepa[dspy] requirement for upstream OA engines and PxN sampling —
-      # ==0.0.27 on the stable line (dspy 3.2.1). The preview line (dspy 3.3.1)
-      # pins ==0.1.4, which the commit's own version satisfies, so only the stable
-      # mismatch appears. It is filtered; everything else pip check emits is a
-      # real defect.
+      # The file pins a gepa git commit (reporting 0.1.4) over dspy's hard
+      # gepa[dspy]==0.1.4 requirement for upstream OA engines and PxN sampling;
+      # the commit's own version satisfies the pin, so everything pip check
+      # emits is a real defect.
       - name: Dependency set is complete and self-consistent
         run: |
-          out=$(docker run --rm skynet-backend:pip-${{ matrix.dspy_line }} pip check 2>&1 || true)
+          out=$(docker run --rm skynet-backend:pip pip check 2>&1 || true)
           echo "$out"
-          if echo "$out" | grep -vE 'has requirement gepa\[dspy\]==0\.0\.27' | grep -qE 'requires|has requirement'; then
-            echo "::error::pip check found real dependency problems in the ${{ matrix.dspy_line }} pip-path image"
+          if echo "$out" | grep -qE 'requires|has requirement'; then
+            echo "::error::pip check found real dependency problems in the pip-path image"
             exit 1
           fi
       # Importing the modules that pull the third-party surface also catches a
@@ -122,7 +112,7 @@ jobs:
       # standing up.
       - name: Import smoke test
         run: |
-          docker run --rm skynet-backend:pip-${{ matrix.dspy_line }} python -c "
+          docker run --rm skynet-backend:pip python -c "
           import core.api.app
           import core.billing.service
           import core.worker.subprocess_runner
@@ -134,7 +124,7 @@ jobs:
           "
       - name: Pinned native optimizer runtime is installed
         run: |
-          docker run --rm --network none skynet-backend:pip-${{ matrix.dspy_line }} python -c "
+          docker run --rm --network none skynet-backend:pip python -c "
           import subprocess
           assert subprocess.check_output(['node', '--version'], text=True).strip() == 'v22.22.0'
           assert subprocess.check_output(['claude', '--version'], text=True).strip() == '2.1.259 (Claude Code)'
