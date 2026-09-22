@@ -22,7 +22,6 @@
   "optimizations.reasoning_effort.short.med": "med",
   "optimizations.reasoning_effort.short.min": "min",
   "optimizations.serve.field_separator": ": ",
-  "optimizations.servechat.demo_label": "{label} {index}",
   "tooltip.submit.blackbox.scorer_install": "Wird einmal in der netzwerkisolierten Vercel Sandbox ausgeführt. Verwenden Sie Pakete aus dem festgeschriebenen Image oder bereitstellungseigene Paketartefakte; öffentliche apt- und Paketquellen sind nicht verfügbar.",
   "submit.budget.byok_note": "Ihr Anbieter rechnet Modell-Token direkt über Ihren Schlüssel ab. Der Gesamtbetrag enthält nur die Skynet-Plattformgebühr und die Nutzung der Vercel Sandbox.",
   "submit.blackbox.roles.optimization.managed_hint": "Verwendet die Standard-Sampling-Einstellungen des Modells; die Abrechnung kann über Skynet-Credits oder Ihren OpenRouter-Schlüssel erfolgen."

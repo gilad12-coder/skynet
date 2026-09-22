@@ -403,5 +403,3 @@ function FieldList({ label, names }: { label: string; names: string[] }) {
     </Section>
   );
 }
-
-export default WorkflowGraphView;

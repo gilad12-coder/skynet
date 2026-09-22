@@ -27,16 +27,16 @@ const ISOLATE_END = "⁩";
 const TOKENS_PER_MILLION = 1_000_000;
 
 /** One term of an equation: a value with an optional caption naming it, or an operator between terms. */
-export type Operand = { value: string; caption?: string } | { op: string };
+type Operand = { value: string; caption?: string } | { op: string };
 
 /** One position on a scale of choices, marking the one in effect. */
-export interface ScalePoint {
+interface ScalePoint {
   label: string;
   value: string;
   active: boolean;
 }
 
-export interface CalcStep {
+interface CalcStep {
   label: string;
   value: string;
   /** A prose reading of the arithmetic, when an equation would say less. */

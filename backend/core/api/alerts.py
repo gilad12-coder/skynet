@@ -100,11 +100,6 @@ class _Throttle:
 _throttle = _Throttle()
 
 
-def alerts_configured() -> bool:
-    """Return whether an outbound alert webhook is configured."""
-    return bool(settings.alert_webhook_url)
-
-
 def _truncate(text_value: str, limit: int) -> str:
     """Return ``text_value`` shortened to ``limit`` characters with an elision marker.
 

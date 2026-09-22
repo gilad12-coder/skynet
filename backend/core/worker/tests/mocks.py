@@ -51,9 +51,6 @@ def load_fixture(name: str) -> Any:
 _GRID = load_fixture("jobs/success_grid.detail.json")
 _GEPA = load_fixture("jobs/success_single_gepa.detail.json")
 
-REAL_OPTIMIZATION_ID: str = _GEPA["optimization_id"]
-REAL_GRID_OPTIMIZATION_ID: str = _GRID["optimization_id"]
-
 # Real result payload from the gepa run (sans large blobs).
 REAL_RESULT: dict = {
     k: v
@@ -96,33 +93,6 @@ REAL_GRID_PAYLOAD: dict = {
 }
 
 _GEPA_PROGRESS = _GEPA["progress_events"]
-_GEPA_LOGS = _GEPA["logs"]
-
-
-def make_log_event(
-    msg: str = _GEPA_LOGS[0]["message"],
-    level: str = "INFO",
-    logger: str = "dspy.evaluate.evaluate",
-    timestamp: str = _GEPA_LOGS[0]["timestamp"],
-) -> dict:
-    """Build a synthetic ``EVENT_LOG`` dict for tests.
-
-    Args:
-        msg: Log message text.
-        level: Log level name.
-        logger: Originating logger name.
-        timestamp: ISO 8601 timestamp string.
-
-    Returns:
-        Dict matching the ``EVENT_LOG`` shape produced by the runner.
-    """
-    return {
-        "type": "log",
-        "level": level,
-        "logger": logger,
-        "message": msg,
-        "timestamp": timestamp,
-    }
 
 
 def make_progress_event(
@@ -160,22 +130,6 @@ def make_result_event(result: dict | None = None) -> dict:
         Dict matching the ``EVENT_RESULT`` shape produced by the runner.
     """
     return {"type": "result", "result": result if result is not None else dict(REAL_RESULT)}
-
-
-def make_error_event(
-    error: str = "RuntimeError: model exploded",
-    traceback: str = "Traceback (most recent call last):\n  ...",
-) -> dict:
-    """Build a synthetic ``EVENT_ERROR`` dict for tests.
-
-    Args:
-        error: Error string.
-        traceback: Formatted traceback string.
-
-    Returns:
-        Dict matching the ``EVENT_ERROR`` shape produced by the runner.
-    """
-    return {"type": "error", "error": error, "traceback": traceback}
 
 
 def fake_dspy_service(result: dict | None = None) -> MagicMock:

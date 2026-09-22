@@ -587,28 +587,6 @@ def filter_ids_at_least(
     return allowed, denied
 
 
-def enforce_user_quota(job_store, username: str) -> None:
-    """Raise if ``username`` is at or over their job quota.
-
-    Live DB overrides take precedence over static config. Admins and users
-    with an explicit ``None`` override bypass the check entirely.
-
-    Args:
-        job_store: The job store used to count the user's existing jobs.
-        username: The user whose quota should be enforced.
-
-    Raises:
-        DomainError: When the user already has at least ``quota`` jobs (HTTP 409).
-    """
-    live_quota_resolver = getattr(job_store, "get_effective_user_quota", None)
-    quota = live_quota_resolver(username) if callable(live_quota_resolver) else settings.get_user_quota(username)
-    if quota is None:
-        return
-    current = job_store.count_jobs(username=username)
-    if current >= quota:
-        raise DomainError("quota.reached", status=409, quota=quota)
-
-
 def _mb(num_bytes: int) -> float:
     """Return ``num_bytes`` as megabytes rounded to one decimal for messages."""
     return round(num_bytes / (1024 * 1024), 1)

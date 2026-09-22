@@ -58,7 +58,7 @@ interface FiltersHostProps extends FiltersPanelProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export const TYPE_VALUES: ReadonlyArray<{
+const TYPE_VALUES: ReadonlyArray<{
   value: string;
   labelKey: Parameters<typeof msg>[0];
 }> = [
@@ -68,7 +68,7 @@ export const TYPE_VALUES: ReadonlyArray<{
 ];
 
 /** Display label for a run-type value; unknown values fall back to the raw id. */
-export function typeLabel(value: string): string {
+function typeLabel(value: string): string {
   const entry = TYPE_VALUES.find((t) => t.value === value);
   return entry ? msg(entry.labelKey) : value;
 }

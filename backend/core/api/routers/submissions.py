@@ -27,7 +27,6 @@ from ...billing import (
     StripeBillingService,
     byok_prefix_routable,
     byok_provider_for_litellm,
-    committed_spend_credits,
     cost_ceiling_budget,
     provider_slug_for_model,
 )
@@ -550,39 +549,6 @@ def _expand_catalog_grid_payload(payload: GridSearchRequest) -> None:
 # Statuses whose runs hold a live claim on the balance: queued/leased work,
 # plus paused runs — resume re-enqueues those without a fresh credit gate.
 _COMMITTED_JOB_STATUSES = ("pending", "validating", "running", "paused")
-
-
-def _committed_active_credits(job_store, username: str) -> int:
-    """Sum the balance credits the user's still-active runs can yet debit.
-
-    Each active run's stamped cost ceiling (``max_cost_credits`` in its payload
-    overview) is converted to the balance credits it can actually consume
-    (:func:`committed_spend_credits` — the full budget for a managed run, only
-    the platform fee for BYOK) and summed. Rows predating the overview stamp
-    contribute zero; for those the clamped debit remains the backstop. The sum
-    is deliberately conservative for partially-complete runs: the full ceiling
-    is counted even when part of it was already spent and debited.
-
-    Args:
-        job_store: Job-store instance; a store without ``list_jobs`` commits zero.
-        username: Account whose active runs are summed.
-
-    Returns:
-        The non-negative committed credits.
-    """
-    list_jobs = getattr(job_store, "list_jobs", None)
-    if not callable(list_jobs):
-        return 0
-    committed = 0
-    for status in _COMMITTED_JOB_STATUSES:
-        for job in list_jobs(status=status, username=username, limit=200, with_counts=False):
-            overview = job.get("payload_overview") or {}
-            budget = overview.get(PAYLOAD_OVERVIEW_MAX_COST_CREDITS)
-            if budget is None:
-                continue
-            token_source = str(overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE) or "")
-            committed += committed_spend_credits(int(budget), token_source)
-    return committed
 
 
 def _enforce_credit_balance(job_store, username: str, token_source: str) -> int | None:

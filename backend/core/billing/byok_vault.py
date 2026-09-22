@@ -380,31 +380,6 @@ class ProviderKeyVault:
             keys = [_row_view(row) for row in rows]
         return VaultSnapshot(keys=keys)
 
-    def has_connection(self, username: str, provider: str) -> bool:
-        """Return whether the account has any stored connection for a provider.
-
-        A pure existence query — no decryption — so it answers even when the
-        vault key is unconfigured. Used by the submit-time BYOK gate to reject a
-        run the user has no key for, before the job is ever queued.
-
-        Args:
-            username: Account to check.
-            provider: Provider slug to look for.
-
-        Returns:
-            True when at least one connection is stored for the provider.
-        """
-        with Session(self._engine) as session:
-            return (
-                session.query(BillingProviderKeyModel.id)
-                .filter(
-                    BillingProviderKeyModel.username == username,
-                    BillingProviderKeyModel.provider == provider,
-                )
-                .first()
-                is not None
-            )
-
     def has_verified_connection(self, username: str, provider: str) -> bool:
         """Return whether the account has a verified connection for a provider.
 

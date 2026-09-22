@@ -1,4 +1,3 @@
-export { SubmitWizard } from "./components/SubmitWizard";
 export { PreflightNotifications } from "./components/PreflightNotifications";
 export { SubmitEntry } from "./components/SubmitEntry";
 export { ModelConfigModal } from "./components/ModelConfigModal";

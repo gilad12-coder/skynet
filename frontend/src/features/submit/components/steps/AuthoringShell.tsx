@@ -33,7 +33,7 @@ export function ArtifactStatusChip({ status }: { status: ArtifactStatus }) {
   );
 }
 
-export interface ModeToggleProps {
+interface ModeToggleProps {
   value: "auto" | "manual";
   onChange: (mode: "auto" | "manual") => void;
   disabledReason?: string;
@@ -44,7 +44,7 @@ export interface ModeToggleProps {
   module?: { label: string; onChangeModule: () => void } | null;
 }
 
-export function ModeToggle({ value, onChange, disabledReason, start, module }: ModeToggleProps) {
+function ModeToggle({ value, onChange, disabledReason, start, module }: ModeToggleProps) {
   const autoDisabled = !!disabledReason && value !== "auto";
 
   return (

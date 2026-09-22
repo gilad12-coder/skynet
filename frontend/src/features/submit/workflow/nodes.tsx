@@ -37,7 +37,7 @@ export interface NodeTraceState {
   error?: string | null;
 }
 
-export interface WorkflowNodeData extends Record<string, unknown> {
+interface WorkflowNodeData extends Record<string, unknown> {
   spec: WorkflowNodeSpec;
   issues: string[];
   trace?: NodeTraceState | null;

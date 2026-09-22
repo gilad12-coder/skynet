@@ -38,7 +38,7 @@ function shortName(id: string): string {
 // Sentinel sent instead of a catalog id: the backend's per-turn router in
 // its frontier-quality tier (Cursor-style "Intelligence"). Plain null stays
 // the balanced router tier.
-export const AUTO_INTELLIGENT_MODEL = "auto:intelligent";
+const AUTO_INTELLIGENT_MODEL = "auto:intelligent";
 
 /** Menu/chip label for the current choice, including the auto tiers. */
 function displayName(value: string | null): string {

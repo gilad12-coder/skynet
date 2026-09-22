@@ -134,7 +134,7 @@ export type DryRunState =
 
 // The backend looks for a `score` (or `metric`) entrypoint and accepts either a
 // bare number or `{"score": ..., ...side_info}` (see blackbox/scorer.py).
-export const SCORER_TEMPLATE = `from skynet import llm, Image  # llm(prompt, input=None, images=None) asks the scorer model
+const SCORER_TEMPLATE = `from skynet import llm, Image  # llm(prompt, input=None, images=None) asks the scorer model
 
 
 def score(candidate, case=None):
