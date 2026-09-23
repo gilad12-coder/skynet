@@ -12,7 +12,6 @@ import type { ServeInfoResponse, WorkflowNodeTrace } from "@/shared/types/api";
 import { autoResizeTextarea, Composer, MessageActions } from "@/shared/ui/agent";
 import { formatOutput } from "@/shared/lib";
 import { formatMsg, msg } from "@/shared/lib/messages";
-import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 export interface ServeChatProps {
   serveInfo: ServeInfoResponse;
@@ -314,9 +313,7 @@ export function ServeChat({
             }}
             className="max-w-2xl mx-auto"
           >
-            <div
-              className={`flex gap-2 ${getActiveDir() === "ltr" ? "flex-row-reverse" : ""} items-center`}
-            >
+            <div className="flex items-center gap-2">
               <Button
                 type={serveLoading ? "button" : "submit"}
                 onClick={serveLoading ? handleStopServe : undefined}
