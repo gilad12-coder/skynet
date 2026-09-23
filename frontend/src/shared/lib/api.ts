@@ -1717,6 +1717,26 @@ export function taggerAssistAutotagCancel(sessionId: string) {
 }
 
 /**
+ * Generate a fully synthetic dataset from a plain-language brief — the setup
+ * wizard's third data source next to upload and library. Nothing is persisted;
+ * the caller creates the session with the returned rows like a parsed file.
+ */
+export function synthesizeTaggerDataset(body: {
+  brief: string;
+  rows: number;
+  columns?: string[];
+  model?: string;
+  model_params?: Record<string, unknown>;
+}) {
+  return request<{
+    columns: string[];
+    rows: Array<Record<string, unknown>>;
+    credits: number;
+    model: string;
+  }>("/tagging-sessions/synthesize", { method: "POST", body: JSON.stringify(body) });
+}
+
+/**
  * The caller's account-wide storage usage against their budget. ``breakdown``
  * maps each storage category to its byte contribution; ``used_bytes`` is their
  * sum and the same total the save/run gate enforces.

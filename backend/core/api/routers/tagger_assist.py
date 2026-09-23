@@ -3,7 +3,8 @@
 Drives the tagger's assist modes on top of the persisted session rows:
 the dataset interview (rubric distillation), batched label predictions for
 calibration and review rounds, pre-run credit estimates, and the bulk
-auto-tag job.
+auto-tag job — plus, ahead of any session, a synthetic-dataset generator for
+users who want to label data they do not have yet.
 
 The bulk job is a ``tagging_autotag`` row in the shared jobs table, claimed
 by the DB-lease background worker (any pod) and executed by
@@ -158,6 +159,39 @@ class AutotagStatusResponse(BaseModel):
         description="False when the session claims 'running' but the worker fleet "
         "no longer owns an active job for it — the client should offer a resume."
     )
+
+
+class SynthesizeRequest(BaseModel):
+    """Brief for a fully synthetic dataset to label, generated before any session exists."""
+
+    brief: str = Field(
+        min_length=3,
+        max_length=2000,
+        description="What the dataset is about and what its rows should look like.",
+    )
+    rows: int = Field(default=30, ge=1, le=tagging.MAX_SYNTH_ROWS)
+    columns: list[Annotated[str, Field(min_length=1, max_length=tagging.MAX_COLUMN_CHARS)]] = Field(
+        default_factory=list,
+        max_length=tagging.MAX_SYNTH_COLUMNS,
+        description="Column names to fill; empty lets the model choose them.",
+    )
+    model: str | None = Field(
+        default=None,
+        description="LiteLLM id of the catalog model writing the rows; absent uses the tagging default.",
+    )
+    model_params: dict[str, Any] | None = Field(
+        default=None,
+        description="Sampling/billing parameters saved with the chosen model (same shape as assist.modelParams).",
+    )
+
+
+class SynthesizeResponse(BaseModel):
+    """A generated dataset ready to be labeled."""
+
+    columns: list[str]
+    rows: list[dict[str, Any]]
+    credits: int
+    model: str
 
 
 def _load_for_role(
@@ -748,5 +782,57 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             except KeyError:
                 store_cancelled = False
         return {"cancelled": locally_cancelled or store_cancelled}
+
+    @router.post(
+        "/tagging-sessions/synthesize",
+        response_model=SynthesizeResponse,
+        summary="Generate a synthetic dataset to label",
+    )
+    def synthesize_dataset(req: SynthesizeRequest, user: AuthenticatedUserDep) -> SynthesizeResponse:
+        """Write a brand-new dataset from a plain-language brief.
+
+        The setup wizard's third data source next to upload and library: the
+        rows come back to the client, which creates the session with them
+        exactly as it would with a parsed file, so nothing is persisted here.
+
+        Args:
+            req: The brief, the row count, optional column names and the
+                model to write with.
+            user: Authenticated caller; the run is metered to their account.
+
+        Returns:
+            The settled columns, the generated rows and the credit cost.
+
+        Raises:
+            DomainError: 422 when the chosen model is outside the catalog,
+                400 when a BYOK pick lacks a verified connection, 502 when
+                the model produced no usable rows.
+        """
+        enforce_llm_credits(job_store, user.username)
+        model_config = _resolve_assist_model(
+            job_store, user.username, {"model": req.model, "modelParams": req.model_params}
+        )
+        usage_sink: list = []
+        try:
+            columns, rows, credits = tagging.synthesize_rows(
+                req.brief,
+                req.columns,
+                req.rows,
+                usage_sink=usage_sink,
+                model_config=model_config,
+            )
+        except Exception as exc:
+            logger.exception("synthetic dataset generation failed for %s", user.username)
+            raise DomainError("tagger.assist.llm_failed", status=502) from exc
+        finally:
+            # A failed slice's completed calls still consumed tokens; bill what ran.
+            meter_llm_run(
+                job_store.engine,
+                user.username,
+                usage_sink,
+                description="Synthetic tagging dataset",
+                token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
+            )
+        return SynthesizeResponse(columns=columns, rows=rows, credits=credits, model=model_config.name)
 
     return router

@@ -7,7 +7,8 @@ background worker is a recording fake — the job loop itself is covered in
 ``core.worker.tests.test_tagging_job``. Covers the interview turn, prediction
 with exclusion semantics, bulk-job submission mechanics (job row + overview +
 payload + session mirror), status reconciliation against the job row, cancel,
-the autosave 409 while a job runs, and the ownership guard.
+the autosave 409 while a job runs, the ownership guard, and the
+pre-session synthetic-dataset route.
 """
 
 from __future__ import annotations
@@ -725,3 +726,59 @@ def test_ownership_enforced_on_assist_routes() -> None:
     assert resp.status_code == 404
     resp = bob_client.get(f"/tagging-sessions/{session_id}/assist/autotag")
     assert resp.status_code == 404
+
+
+def test_synthesize_forwards_brief_and_returns_rows(monkeypatch) -> None:
+    """The synthesize route forwards the brief, columns and count and meters the run."""
+    seen: dict = {}
+
+    def fake_synthesize(brief, columns, count, usage_sink=None, model_config=None):
+        """Capture the request and return a tiny dataset."""
+        seen.update({"brief": brief, "columns": columns, "count": count, "model": model_config.name})
+        return ["text"], [{"text": "Card declined"}, {"text": "Love the app"}], 3
+
+    monkeypatch.setattr(tagging, "synthesize_rows", fake_synthesize)
+    monkeypatch.setattr(tagger_assist, "get_catalog_cached", lambda: _catalog_with("openai/gpt-test"))
+    client, _ = _client(_ALICE)
+    resp = client.post(
+        "/tagging-sessions/synthesize",
+        json={"brief": "Bank support chats", "rows": 2, "columns": ["text"], "model": "openai/gpt-test"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["columns"] == ["text"]
+    assert [r["text"] for r in body["rows"]] == ["Card declined", "Love the app"]
+    assert body["credits"] == 3
+    assert body["model"] == "openai/gpt-test"
+    assert seen == {"brief": "Bank support chats", "columns": ["text"], "count": 2, "model": "openai/gpt-test"}
+
+
+def test_synthesize_validates_and_rejects_unknown_model(monkeypatch) -> None:
+    """Row-count and column limits are enforced, and a non-catalog model is refused before spending."""
+    called = []
+    monkeypatch.setattr(tagging, "synthesize_rows", lambda *a, **k: called.append(1))
+    monkeypatch.setattr(tagger_assist, "get_catalog_cached", lambda: _catalog_with("openai/gpt-test"))
+    client, _ = _client(_ALICE)
+    assert client.post("/tagging-sessions/synthesize", json={"brief": "x", "rows": 5}).status_code == 422
+    too_many = tagging.MAX_SYNTH_ROWS + 1
+    assert client.post("/tagging-sessions/synthesize", json={"brief": "Reviews", "rows": too_many}).status_code == 422
+    resp = client.post(
+        "/tagging-sessions/synthesize", json={"brief": "Reviews", "rows": 5, "model": "openai/nope"}
+    )
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "tagger.assist.unknown_model"
+    assert called == []
+
+
+def test_synthesize_maps_engine_failure_to_502(monkeypatch) -> None:
+    """A generator that produced nothing surfaces as the shared LLM-failure code."""
+
+    def boom(*args, **kwargs):
+        """Simulate a model that wrote no usable rows."""
+        raise RuntimeError("no rows")
+
+    monkeypatch.setattr(tagging, "synthesize_rows", boom)
+    client, _ = _client(_ALICE)
+    resp = client.post("/tagging-sessions/synthesize", json={"brief": "Reviews", "rows": 5})
+    assert resp.status_code == 502
+    assert resp.json()["code"] == "tagger.assist.llm_failed"

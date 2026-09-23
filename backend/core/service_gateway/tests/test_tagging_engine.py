@@ -2,8 +2,9 @@
 
 Covers label normalization across the three annotation modes, defensive JSON
 parsing of model output, few-shot example selection (corrections-first,
-exclusions, provenance filtering), instruction compilation, and the credit
-estimator.
+exclusions, provenance filtering), instruction compilation, the credit
+estimator, and the synthetic-dataset generator's row normalization and
+slicing.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from ..tagging import (
     MAX_EXAMPLES,
     InterviewTurnSig,
     _MessageLeakGuard,
+    _normalize_synthetic_rows,
     _parse_interview_prediction,
     _parse_json,
     _StreamedArrayItems,
@@ -28,6 +30,7 @@ from ..tagging import (
     normalize_label,
     select_examples,
     summarize_dataset,
+    synthesize_rows,
     task_description,
 )
 
@@ -432,3 +435,66 @@ def test_build_assist_lm_merges_lm_extra_body(monkeypatch) -> None:
             "extra_body": {"plugins": [{"id": "auto-router", "cost_quality_tradeoff": 5}]},
         }
     ]
+
+
+def test_normalize_synthetic_rows_projects_onto_given_columns() -> None:
+    """Given columns win: extras are dropped, gaps become empty strings, blanks vanish."""
+    parsed = [
+        {"text": "Card declined twice", "channel": "chat", "junk": 1},
+        {"text": "  ", "channel": ""},
+        {"channel": "email", "extra": {"a": 1}},
+        "not an object",
+    ]
+    columns, rows = _normalize_synthetic_rows(parsed, ["text", "channel"])
+    assert columns == ["text", "channel"]
+    assert rows == [
+        {"text": "Card declined twice", "channel": "chat"},
+        {"text": "", "channel": "email"},
+    ]
+
+
+def test_normalize_synthetic_rows_lets_first_object_settle_columns() -> None:
+    """Without columns the first usable object decides them; nested cells are JSON."""
+    parsed = [{"review": "Great", "tags": ["a", "b"]}, {"review": "Bad", "other": "x"}]
+    columns, rows = _normalize_synthetic_rows(parsed, [])
+    assert columns == ["review", "tags"]
+    assert rows == [{"review": "Great", "tags": '["a", "b"]'}, {"review": "Bad", "tags": ""}]
+    assert _normalize_synthetic_rows("nope", []) == ([], [])
+
+
+def test_synthesize_rows_slices_dedupes_and_caps(monkeypatch) -> None:
+    """The first slice settles columns, later slices reuse them, repeats and overflow are dropped."""
+    calls: list[tuple[list[str], int, int, int]] = []
+
+    def fake_batch(lm, brief, columns, count, part, parts):
+        """Record the slice request and return predictable rows on the settled columns."""
+        calls.append((list(columns), count, part, parts))
+        cols = columns or ["text"]
+        rows = [{c: f"{c}-{part}-{i}" for c in cols} for i in range(count)]
+        rows.append(dict(rows[0]))
+        return cols, rows
+
+    monkeypatch.setattr(tagging, "_synthesize_batch", fake_batch)
+    monkeypatch.setattr(tagging, "_build_assist_lm", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(tagging, "usage_by_model_from_history", lambda lm: {})
+    sink: list = []
+    columns, rows, credits = synthesize_rows("support tickets", [], 55, usage_sink=sink)
+    assert columns == ["text"]
+    assert len(rows) == 55
+    assert len({r["text"] for r in rows}) == 55
+    assert credits == 0
+    assert len(sink) == 1
+    assert calls[0] == ([], 25, 1, 3)
+    assert sorted(calls[1:]) == [(["text"], 5, 3, 3), (["text"], 25, 2, 3)]
+
+
+def test_synthesize_rows_raises_when_nothing_usable(monkeypatch) -> None:
+    """A model that writes no rows surfaces as an error instead of an empty dataset."""
+    monkeypatch.setattr(tagging, "_synthesize_batch", lambda *a, **k: ([], []))
+    monkeypatch.setattr(tagging, "_build_assist_lm", lambda *a, **k: SimpleNamespace())
+    try:
+        synthesize_rows("anything", [], 10)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected RuntimeError")

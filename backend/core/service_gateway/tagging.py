@@ -48,6 +48,10 @@ BATCH_CONCURRENCY = 4
 MAX_EXAMPLES = 40
 SAMPLE_ROWS = 8
 MAX_ROW_CHARS = 1200
+SYNTH_BATCH_SIZE = 25
+MAX_SYNTH_ROWS = 200
+MAX_SYNTH_COLUMNS = 6
+MAX_COLUMN_CHARS = 60
 # chars-per-token heuristic for the pre-run estimate; JSON label output per row.
 CHARS_PER_TOKEN = 4
 OUTPUT_TOKENS_PER_ROW = 30
@@ -264,6 +268,30 @@ class TagOneSig(dspy.Signature):
     task_instructions: str = dspy.InputField(desc="Task, rubric and labeled examples.")
     row_text: str = dspy.InputField(desc="The row to label.")
     label_json: str = dspy.OutputField(desc='JSON object: {"label": <label>, "confidence": <0..1>, "reason": "..."}.')
+
+
+class SynthesizeRowsSig(dspy.Signature):
+    """Write realistic synthetic dataset rows for a labeling task.
+
+    Produce exactly the requested number of rows as a JSON array of flat
+    objects. Every object must carry every listed column with a string
+    value; when no columns are given, choose one to three sensible
+    snake_case column names yourself (the main text column first) and use
+    them in every row. Rows must be varied — different people, situations,
+    lengths, tones, edge cases and a few genuinely ambiguous items — never
+    numbered, never templated, never obviously machine-made. Write in the
+    language the brief is written in unless the brief asks for another. A
+    dataset is written in several parts by separate calls, so lean this part
+    towards its own slice of scenarios instead of covering everything.
+    """
+
+    brief: str = dspy.InputField(desc="What the dataset is about and what its rows look like.")
+    columns_json: str = dspy.InputField(
+        desc='JSON array of column names to fill, e.g. ["text", "channel"]; "[]" means choose them.'
+    )
+    count: int = dspy.InputField(desc="Exactly how many rows to write.")
+    part: str = dspy.InputField(desc='Which slice of the dataset this call writes, e.g. "part 2 of 4".')
+    rows_json: str = dspy.OutputField(desc="JSON array of row objects and nothing else.")
 
 
 def _parse_json(raw: str, fallback: Any) -> Any:
@@ -1406,3 +1434,174 @@ def estimate_credits_for_rows(
         "credits_low": base,
         "credits_high": max(base, int(base * 1.8)),
     }
+
+
+def _clean_column_names(raw: Any) -> list[str]:
+    """Reduce a caller- or model-supplied column list to distinct usable names.
+
+    Args:
+        raw: Anything the model or the request put where column names go.
+
+    Returns:
+        Non-empty, length-capped, de-duplicated names in their original order.
+    """
+    if not isinstance(raw, (list, tuple)):
+        return []
+    names: list[str] = []
+    for item in raw:
+        name = str(item or "").strip()[:MAX_COLUMN_CHARS]
+        if name and name not in names:
+            names.append(name)
+    return names[:MAX_SYNTH_COLUMNS]
+
+
+def _cell_text(value: Any) -> str:
+    """Flatten one generated cell to the plain string the tagger stores.
+
+    Args:
+        value: A parsed JSON value produced by the model.
+
+    Returns:
+        The stripped, length-capped text; nested values are JSON-encoded.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)[:MAX_ROW_CHARS]
+    return str(value).strip()[:MAX_ROW_CHARS]
+
+
+def _normalize_synthetic_rows(parsed: Any, columns: list[str]) -> tuple[list[str], list[dict[str, str]]]:
+    """Validate a model-produced row array against the dataset's columns.
+
+    Args:
+        parsed: The parsed ``rows_json`` value (expected: list of objects).
+        columns: The columns every row must carry; empty lets the first
+            usable object decide them.
+
+    Returns:
+        ``(columns, rows)`` — the settled column list and every object that
+        had at least one non-empty cell, projected onto exactly those columns.
+    """
+    if not isinstance(parsed, list):
+        return columns, []
+    settled = list(columns)
+    rows: list[dict[str, str]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        if not settled:
+            settled = _clean_column_names(list(item.keys()))
+            if not settled:
+                continue
+        row = {col: _cell_text(item.get(col)) for col in settled}
+        if any(row.values()):
+            rows.append(row)
+    return settled, rows
+
+
+def _synthesize_batch(
+    lm: dspy.LM, brief: str, columns: list[str], count: int, part: int, parts: int
+) -> tuple[list[str], list[dict[str, str]]]:
+    """Write one slice of a synthetic dataset.
+
+    Args:
+        lm: The assist LM (bound inside the calling thread).
+        brief: The user's description of the data.
+        columns: Columns to fill; empty lets the model choose them.
+        count: How many rows this slice should contain.
+        part: 1-based index of this slice.
+        parts: Total number of slices the dataset is written in.
+
+    Returns:
+        ``(columns, rows)`` as :func:`_normalize_synthetic_rows` settles
+        them; both empty when the call failed or nothing parsed.
+    """
+    try:
+        with dspy.context(lm=lm):
+            pred = dspy.Predict(SynthesizeRowsSig)(
+                brief=brief,
+                columns_json=json.dumps(columns, ensure_ascii=False),
+                count=count,
+                part=f"part {part} of {parts}",
+            )
+        parsed = _parse_json(getattr(pred, "rows_json", ""), None)
+    except Exception:
+        logger.warning("synthetic dataset part %s/%s failed", part, parts, exc_info=True)
+        return columns, []
+    return _normalize_synthetic_rows(parsed, columns)
+
+
+def synthesize_rows(
+    brief: str,
+    columns: list[str],
+    count: int,
+    usage_sink: list | None = None,
+    model_config: ModelConfig | None = None,
+) -> tuple[list[str], list[dict[str, str]], int]:
+    """Generate a fully synthetic dataset to label from a plain-language brief.
+
+    The first slice runs alone so that, when the caller left the columns to
+    the model, every later slice fills the same ones; the remaining slices
+    then run concurrently like prediction batches. Exact duplicate rows
+    across slices are dropped.
+
+    Args:
+        brief: What the dataset is about and what its rows look like.
+        columns: Column names to fill; empty lets the model choose them.
+        count: Number of rows wanted (capped at ``MAX_SYNTH_ROWS``).
+        usage_sink: Optional list the built LM is appended to, so the caller
+            can debit the run's token usage on any exit path.
+        model_config: Optional resolved model config, including an in-memory
+            BYOK vault connection when that source was selected.
+
+    Returns:
+        ``(columns, rows, credits)`` — the settled columns, at most ``count``
+        rows keyed by them, and the credit cost of the calls made.
+
+    Raises:
+        RuntimeError: When no slice produced a usable row.
+    """
+    selected = model_config or assist_model_config({})
+    lm = _build_assist_lm(model_config=selected)
+    if usage_sink is not None:
+        usage_sink.append(lm)
+    count = max(1, min(int(count), MAX_SYNTH_ROWS))
+    sizes = [SYNTH_BATCH_SIZE] * (count // SYNTH_BATCH_SIZE)
+    if count % SYNTH_BATCH_SIZE:
+        sizes.append(count % SYNTH_BATCH_SIZE)
+    parts = len(sizes)
+    settled = _clean_column_names(columns)
+    rows: list[dict[str, str]] = []
+    seen: set[tuple[str, ...]] = set()
+
+    def absorb(batch: list[dict[str, str]]) -> None:
+        """Append the slice's rows, skipping exact repeats of earlier ones."""
+        for row in batch:
+            key = tuple(row.get(col, "") for col in settled)
+            if key not in seen:
+                seen.add(key)
+                rows.append(row)
+
+    first_columns, first_rows = _synthesize_batch(lm, brief, settled, sizes[0], 1, parts)
+    settled = settled or first_columns
+    if not settled:
+        raise RuntimeError("synthetic dataset generation produced no rows")
+    absorb(first_rows)
+    if parts > 1:
+
+        def work(slice_index: int) -> list[dict[str, str]]:
+            """Write one of the remaining slices on the settled columns."""
+            return _synthesize_batch(lm, brief, settled, sizes[slice_index], slice_index + 1, parts)[1]
+
+        with ThreadPoolExecutor(max_workers=BATCH_CONCURRENCY) as pool:
+            for batch in pool.map(work, range(1, parts)):
+                absorb(batch)
+    if not rows:
+        raise RuntimeError("synthetic dataset generation produced no rows")
+    usage = usage_by_model_from_history(lm)
+    credits = run_cost_credits(
+        (ModelUsage(model=model, input_tokens=tokens[0], output_tokens=tokens[1]) for model, tokens in usage.items()),
+        selected.token_source or TOKEN_SOURCE_MANAGED,
+    )
+    return settled, rows[:count], credits
