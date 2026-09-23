@@ -19,7 +19,6 @@ export interface ReactServeChatRequest {
   user_message: string;
   chat_history: ChatTurn[];
   trust_mode: TrustMode;
-  max_cost_credits: number;
 }
 
 export interface ReactServeChatHandlers {

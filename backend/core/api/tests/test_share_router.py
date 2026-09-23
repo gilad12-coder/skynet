@@ -372,7 +372,7 @@ def test_protected_shared_metadata_does_not_execute_persisted_signature(
     assert read.json()["serve_info"]["input_fields"] == ["question"]
     assert read.json()["serve_info"]["output_fields"] == ["reasoning", "answer"]
     assert execution.status_code == 400
-    assert "max_cost_credits" in execution.json()["detail"]
+    assert "Idempotency-Key" in execution.json()["detail"]
     assert not marker.exists()
 
 
@@ -882,8 +882,8 @@ def test_serve_allowed_for_editor_member() -> None:
     assert "secret.internal" not in resp.text
 
 
-def test_serve_viewer_requires_a_caller_budget() -> None:
-    """A viewer reaches inference but must authorize a one-request budget."""
+def test_serve_viewer_requires_a_replay_key() -> None:
+    """A viewer reaches inference but must send an Idempotency-Key; no budget is required."""
     store = _MemStore()
     _seed_job(store, username="alice")
     token = _enable_anyone(store)
@@ -893,7 +893,7 @@ def test_serve_viewer_requires_a_caller_budget() -> None:
     viewer = _client(store, user="carol")
     resp = viewer.post(f"/share/{token}/serve", json={"inputs": {"question": "hi"}})
     assert resp.status_code == 400
-    assert "max_cost_credits" in resp.json()["detail"]
+    assert "Idempotency-Key" in resp.json()["detail"]
 
 
 def test_serve_unauthorized_for_anonymous() -> None:
@@ -978,8 +978,8 @@ def test_signed_in_stranger_gets_editor_link_role_and_can_serve() -> None:
     assert served.status_code == 200
 
 
-def test_signed_in_stranger_viewer_link_requires_a_caller_budget() -> None:
-    """An anyone-viewer link permits inference once the caller supplies a budget."""
+def test_signed_in_stranger_viewer_link_requires_a_replay_key() -> None:
+    """An anyone-viewer link permits inference once the caller sends an Idempotency-Key."""
     store = _MemStore()
     _seed_job(store, username="alice")
     token = _enable_anyone(store, role="viewer")
@@ -991,7 +991,7 @@ def test_signed_in_stranger_viewer_link_requires_a_caller_budget() -> None:
 
     served = stranger.post(f"/share/{token}/serve", json={"inputs": {"question": "hi"}})
     assert served.status_code == 400
-    assert "max_cost_credits" in served.json()["detail"]
+    assert "Idempotency-Key" in served.json()["detail"]
 
 
 def test_public_view_of_public_optimization_is_readable_and_scrubbed() -> None:

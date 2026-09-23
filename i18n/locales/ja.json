@@ -237,7 +237,6 @@
     "wizard.split_fractions_not_number": "split_fractions の値は数値である必要があります: {error}",
     "wizard.split_fractions_not_object": "split_fractions は train／val／test のキーを持つオブジェクトである必要があります。",
     "wizard.split_fractions_sum": "split_fractions の合計は 1.0 である必要がありますが、{total} でした。",
-    "serve.request_budget_required": "このリクエストに max_cost_credits を設定してください。",
     "budget.idempotency_required": "このリクエストには一意の Idempotency-Key を送信してください。",
     "serve.caller_tool_connection_required": "この実行は所有者に紐づいたツール接続を使用します。呼び出す前に、ツールをあなたのアカウントに接続してください。",
     "serve.protected_interaction_failed": "サンドボックス内のリクエストが失敗しました: {error}"

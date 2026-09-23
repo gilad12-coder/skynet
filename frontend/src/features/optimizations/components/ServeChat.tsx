@@ -34,8 +34,6 @@ export interface ServeChatProps {
   chatScrollRef: React.RefObject<HTMLDivElement | null>;
   handleServe: (overrideInputs?: Record<string, string>) => void;
   handleStopServe: () => void;
-  requestBudgetCredits: string;
-  onRequestBudgetCreditsChange: (value: string) => void;
 }
 
 export function ServeChat({
@@ -50,8 +48,6 @@ export function ServeChat({
   chatScrollRef,
   handleServe,
   handleStopServe,
-  requestBudgetCredits,
-  onRequestBudgetCreditsChange,
 }: ServeChatProps) {
   const [editingRunTs, setEditingRunTs] = useState<number | null>(null);
   const [singleDraft, setSingleDraft] = useState("");
@@ -187,10 +183,7 @@ export function ServeChat({
                   {run.creditsCharged != null && (
                     <p className="mt-1 text-[0.6875rem] text-muted-foreground">
                       {formatMsg("optimizations.serve.request_spent", {
-                        credits: formatBudgetUsd(
-                          String(run.creditsCharged),
-                          getActiveIntlLocale(),
-                        ),
+                        credits: formatBudgetUsd(String(run.creditsCharged), getActiveIntlLocale()),
                       })}
                     </p>
                   )}
@@ -285,31 +278,6 @@ export function ServeChat({
       </div>
 
       <div className="border-t border-border/40 pt-3">
-        <div className="mx-auto mb-3 flex max-w-2xl items-center justify-between gap-3 rounded-xl border border-border/60 bg-muted/20 px-3 py-2">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-foreground">
-              {msg("optimizations.serve.request_budget")}
-            </p>
-            <p className="text-[0.6875rem] leading-snug text-muted-foreground">
-              {msg("optimizations.serve.request_budget_hint")}
-            </p>
-          </div>
-          <label className="flex shrink-0 items-center gap-1.5">
-            <input
-              type="number"
-              min={0.01}
-              step={0.01}
-              value={requestBudgetCredits}
-              onChange={(event) => onRequestBudgetCreditsChange(event.target.value)}
-              disabled={serveLoading}
-              aria-label={msg("optimizations.serve.request_budget")}
-              className="h-9 w-20 rounded-lg border border-input bg-background px-2 text-end text-sm font-semibold tabular-nums outline-none focus:border-[#C8A882] focus:ring-2 focus:ring-[#C8A882]/20"
-            />
-            <span className="text-xs text-muted-foreground">
-              {msg("submit.cost_ceiling.cap_unit")}
-            </span>
-          </label>
-        </div>
         {serveError && (
           <InlineErrorRow
             message={serveError}

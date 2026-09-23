@@ -237,7 +237,6 @@
     "wizard.split_fractions_not_number": "Les valeurs de split_fractions doivent être des nombres : {error}",
     "wizard.split_fractions_not_object": "split_fractions doit être un objet avec les clés train/val/test.",
     "wizard.split_fractions_sum": "split_fractions doit totaliser 1.0, obtenu {total}",
-    "serve.request_budget_required": "Définissez max_cost_credits pour cette seule requête.",
     "budget.idempotency_required": "Envoyez une Idempotency-Key unique pour cette requête.",
     "serve.caller_tool_connection_required": "Cette exécution utilise une connexion d'outil liée au propriétaire. Connectez l'outil à votre compte avant de l'invoquer.",
     "serve.protected_interaction_failed": "La requête en bac à sable a échoué : {error}"

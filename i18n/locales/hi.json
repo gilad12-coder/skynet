@@ -237,7 +237,6 @@
     "wizard.split_fractions_not_number": "split_fractions मान संख्याएँ होनी चाहिए: {error}",
     "wizard.split_fractions_not_object": "split_fractions एक ऑब्जेक्ट होना चाहिए जिसमें train/val/test कुंजियाँ हों।",
     "wizard.split_fractions_sum": "split_fractions का योग 1.0 होना चाहिए, मिला {total}",
-    "serve.request_budget_required": "इस एक अनुरोध के लिए max_cost_credits सेट करें।",
     "budget.idempotency_required": "इस अनुरोध के लिए एक अद्वितीय Idempotency-Key भेजें।",
     "serve.caller_tool_connection_required": "यह रन एक स्वामी-बाध्य टूल कनेक्शन का उपयोग करता है। इसे लागू करने से पहले टूल को अपने खाते से कनेक्ट करें।",
     "serve.protected_interaction_failed": "सैंडबॉक्स्ड अनुरोध विफल रहा: {error}"

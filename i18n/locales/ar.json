@@ -237,7 +237,6 @@
     "wizard.split_fractions_not_number": "يجب أن تكون قيم split_fractions أعدادًا: {error}",
     "wizard.split_fractions_not_object": "يجب أن يكون split_fractions كائنًا يحوي المفاتيح train/val/test.",
     "wizard.split_fractions_sum": "يجب أن يكون مجموع split_fractions مساويًا 1.0، وكان {total}",
-    "serve.request_budget_required": "اضبط max_cost_credits لهذا الطلب الواحد.",
     "budget.idempotency_required": "أرسِل Idempotency-Key فريدًا لهذا الطلب.",
     "serve.caller_tool_connection_required": "يستخدم هذا التشغيل اتصال أداة مرتبطًا بالمالك. اربط الأداة بحسابك قبل استدعائها.",
     "serve.protected_interaction_failed": "فشل الطلب داخل صندوق الحماية: {error}"

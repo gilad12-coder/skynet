@@ -232,7 +232,7 @@ def test_protected_workflow_metadata_never_executes_transform_code(
     assert info.json()["output_fields"] == ["shout"]
     assert form.status_code == 200
     assert execution.status_code == 400
-    assert "max_cost_credits" in execution.json()["detail"]
+    assert "Idempotency-Key" in execution.json()["detail"]
     assert not marker.exists()
 
 

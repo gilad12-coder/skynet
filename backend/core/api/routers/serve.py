@@ -177,7 +177,7 @@ class ServeChatRequest(BaseModel):
         ge=1,
         le=MAX_CREDITS,
         strict=True,
-        description="Maximum credits authorized for this one chat turn; required for protected runs.",
+        description="Optional cap on credits for this one chat turn; omitted, the turn draws on the account balance.",
     )
 
 
@@ -212,21 +212,19 @@ def _cap_serve_outputs(outputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _interaction_authority(max_cost_credits: int | None, idempotency_key: str | None) -> tuple[int, str]:
-    """Require an explicit one-request maximum and replay key.
+def _interaction_authority(max_cost_credits: int | None, idempotency_key: str | None) -> tuple[int | None, str]:
+    """Require a replay key; a one-request maximum stays optional.
 
     Args:
-        max_cost_credits: Caller-selected maximum credits.
+        max_cost_credits: Caller-selected maximum credits, or ``None`` to draw on the account.
         idempotency_key: Transport replay identity.
 
     Returns:
-        Validated maximum and trimmed idempotency key.
+        Optional maximum and trimmed idempotency key.
 
     Raises:
-        DomainError: When either required authority field is missing.
+        DomainError: When the replay key is missing.
     """
-    if max_cost_credits is None:
-        raise DomainError("serve.request_budget_required", status=400)
     key = (idempotency_key or "").strip()
     if not key:
         raise DomainError("budget.idempotency_required", status=400)
@@ -284,7 +282,7 @@ def _protected_result(
     model_config: ModelConfig,
     inputs: dict[str, Any],
     interaction: dict[str, Any],
-    max_cost_credits: int,
+    max_cost_credits: int | None,
     idempotency_key: str,
     current_user: AuthenticatedUser,
     on_event: Callable[[dict[str, Any]], None] | None = None,
@@ -300,7 +298,7 @@ def _protected_result(
         model_config: Requested task model.
         inputs: Validated program inputs.
         interaction: Guest operation descriptor.
-        max_cost_credits: Exact request maximum accepted by the caller.
+        max_cost_credits: Optional request maximum accepted by the caller.
         idempotency_key: Stable request replay identity.
         current_user: Authenticated caller who funds this interaction.
         on_event: Optional live event receiver.
@@ -348,7 +346,7 @@ def _protected_program_call(
         job_store: Store backing artifacts and billing.
         job_data: Persisted protected optimization row.
         optimization_id: Program identity.
-        req: Caller inputs, model override, and one-request maximum.
+        req: Caller inputs, model override, and optional one-request maximum.
         current_user: Authenticated spending owner.
         idempotency_key: Transport replay identity.
         pair_index: Optional grid pair selection.

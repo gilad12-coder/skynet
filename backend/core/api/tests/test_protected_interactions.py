@@ -153,6 +153,30 @@ def test_interaction_closes_caller_budget_and_replays_without_a_second_charge(
     assert harness.count(JobModel) == 0
 
 
+def test_interaction_without_a_caller_maximum_draws_on_the_account(
+    interactions: tuple[_Harness, dict[str, Any]],
+) -> None:
+    """Run and replay one request whose only limit is the account balance."""
+    harness, state = interactions
+    authority = {
+        "kind": "serve",
+        "max_cost_credits": None,
+        "idempotency_key": "uncapped-call",
+        "user": AuthenticatedUser("alice", "user", ()),
+        "job_store": harness.store,
+    }
+    first = protected_interaction.run_protected_interaction(_payload(), **authority)
+    replay = protected_interaction.run_protected_interaction(_payload(), **authority)
+
+    assert first["outputs"] == {"answer": "sandboxed"}
+    assert first["credits_charged"] == "1"
+    assert first["budget"]["uncapped"] is True
+    assert first["budget"]["state"] == "closed"
+    assert replay["interaction_id"] == first["interaction_id"]
+    assert len(state["calls"]) == 1
+    assert harness.count(ExecutionBudgetModel) == 1
+
+
 def test_same_transport_key_cannot_change_the_approved_ceiling(
     interactions: tuple[_Harness, dict[str, Any]],
 ) -> None:

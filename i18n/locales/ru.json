@@ -237,7 +237,6 @@
     "wizard.split_fractions_not_number": "Значения split_fractions должны быть числами: {error}",
     "wizard.split_fractions_not_object": "split_fractions должен быть объектом с ключами train/val/test.",
     "wizard.split_fractions_sum": "Сумма split_fractions должна быть равна 1.0, получено {total}",
-    "serve.request_budget_required": "Укажите max_cost_credits для этого запроса.",
     "budget.idempotency_required": "Отправьте уникальный Idempotency-Key для этого запроса.",
     "serve.caller_tool_connection_required": "В этом запуске используется подключение инструмента, привязанное к владельцу. Подключите инструмент к своему аккаунту, прежде чем вызывать его.",
     "serve.protected_interaction_failed": "Запрос в песочнице не выполнен: {error}"

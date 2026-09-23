@@ -9,6 +9,7 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from ..billing import ProviderKeyVault, payload_uses_token_source
+from ..billing.budget_amounts import MAX_CREDITS
 from ..billing.budgets import BudgetConflictError, BudgetError, BudgetService, OperationSnapshot
 from ..billing.model_gateway import ModelGateway
 from ..billing.operation_pricing import OperationQuote, json_fingerprint
@@ -276,7 +277,7 @@ def run_protected_interaction(
     payload: dict[str, Any],
     *,
     kind: str,
-    max_cost_credits: int,
+    max_cost_credits: int | None,
     idempotency_key: str,
     user: AuthenticatedUser,
     job_store: Any,
@@ -290,7 +291,8 @@ def run_protected_interaction(
     Args:
         payload: Secret-free program, evaluator, and request data.
         kind: Serve, evaluation, or chat identity.
-        max_cost_credits: Exact maximum the caller accepted for this request.
+        max_cost_credits: Maximum the caller accepted for this request, or ``None``
+            to let the request draw on the account balance instead.
         idempotency_key: Transport replay identity.
         user: Authenticated account funding model and sandbox work.
         job_store: Store whose engine owns budgets and credentials.
@@ -313,7 +315,12 @@ def run_protected_interaction(
     scope = json_fingerprint({"kind": kind, "key": key})[:24]
     request_fingerprint = json_fingerprint(payload)
     try:
-        budget = service.create(user.username, max_cost_credits, idempotency_key=creation_key)
+        if max_cost_credits is None:
+            # No caller cap: the budget stays uncapped so only the account balance
+            # bounds the request, and the fixed total keeps replays fingerprint-stable.
+            budget = service.create(user.username, MAX_CREDITS, idempotency_key=creation_key, uncapped=True)
+        else:
+            budget = service.create(user.username, max_cost_credits, idempotency_key=creation_key)
         document = _existing_document(engine, budget.id, scope)
         if budget.state == "closed":
             if document is None or document.get("_request_fingerprint") != request_fingerprint:
