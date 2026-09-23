@@ -111,7 +111,9 @@ test("the concepts guide avoids canned AI-writing patterns", () => {
   const guideCopy = [...referencedKeys].map((key) => english[key]).join("\n");
 
   for (const pattern of [
-    /\b(?:delve|utilize|leverage|robust|streamline|harness|tapestry|landscape|paradigm|synergy|ecosystem)\b/i,
+    /\b(?:delve|utilize|leverage|robust|streamline|tapestry|landscape|paradigm|synergy|ecosystem)\b/i,
+    // "harness" is product vocabulary now (Meta-Harness, the harness setting); only ban the verb.
+    /\bharness(?:es|ed|ing)?\s+(?:the|its|their|your)\s+(?:power|potential|full)\b/i,
     /\b(?:the problem (?:isn't|is not)|what's missing|what do we learn|to be precise)\b/i,
     /\b(?:it is worth noting|it's worth noting|importantly|interestingly|let's unpack|let's explore)\b/i,
     /\bnot\s+[^.]{1,80}\s+but\s+[^.]{1,80}[.!?]/i,
