@@ -30,6 +30,7 @@ export function LanguageSwitcher({ className }: { className?: string }) {
   const [query, setQuery] = React.useState("");
   const [highlight, setHighlight] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const listRef = React.useRef<HTMLDivElement>(null);
 
   const current = LOCALE_REGISTRY[locale];
 
@@ -49,6 +50,12 @@ export function LanguageSwitcher({ className }: { className?: string }) {
   React.useEffect(() => {
     setHighlight(0);
   }, [query]);
+
+  React.useEffect(() => {
+    listRef.current
+      ?.querySelectorAll<HTMLElement>("[role=option]")
+      [highlight]?.scrollIntoView({ block: "nearest" });
+  }, [highlight]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -76,8 +83,11 @@ export function LanguageSwitcher({ className }: { className?: string }) {
     }
   };
 
+  // modal: the switcher also lives inside the settings dialog, whose scroll
+  // lock swallows wheel events on anything portaled outside it. A modal
+  // popover installs its own lock, which takes over and lets the list scroll.
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover modal open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -126,7 +136,7 @@ export function LanguageSwitcher({ className }: { className?: string }) {
             {isAuto && <Check className="size-4 shrink-0 text-[#C8A882]" aria-hidden="true" />}
           </button>
         )}
-        <div role="listbox" className="max-h-72 overflow-y-auto">
+        <div ref={listRef} role="listbox" className="max-h-72 overflow-y-auto">
           {results.length === 0 ? (
             <p className="px-2 py-3 text-center text-xs text-muted-foreground">
               {msg("shared.language.no_results")}
