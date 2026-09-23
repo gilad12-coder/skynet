@@ -3265,6 +3265,7 @@
   "optimization.blackbox.config.slide_target": "Target & scorer",
   "optimization.config.slide_general": "General",
   "optimization.config.description": "Description",
+  "optimization.config.expand": "Show full text",
   "optimization.config.runtime": "Execution runtime",
   "optimization.config.rows": "Rows",
   "optimization.config.model_endpoint": "Custom endpoint",

@@ -2,7 +2,19 @@
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer-motion";
-import { CaretLeft, CaretRight, Key, Plug, TextT, Thermometer, Wallet } from "@/shared/ui/icons";
+import {
+  ArrowsOut,
+  CaretLeft,
+  CaretRight,
+  Key,
+  Plug,
+  TextT,
+  Thermometer,
+  Wallet,
+} from "@/shared/ui/icons";
+import { Dialog, DialogContent } from "@/shared/ui/primitives/dialog";
+import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { useUserPrefs } from "@/features/settings";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { msg } from "@/shared/lib/messages";
@@ -34,6 +46,57 @@ const SLIDE_TRANSITION = {
   ease: [0.2, 0.8, 0.2, 1] as const,
 };
 
+// Card values are single-line facts; notes are prose. Anything past these
+// limits is clipped with an ellipsis and gets a maximize button that opens
+// the full text in a dialog.
+const VALUE_CHAR_LIMIT = 40;
+const NOTE_CHAR_LIMIT = 280;
+
+function clipText(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit).trimEnd()}…` : text;
+}
+
+/** Maximize button that opens the untruncated text in a dialog. */
+function ExpandTextButton({
+  label,
+  text,
+  mono = false,
+}: {
+  label: ReactNode;
+  text: string;
+  mono?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const expandLabel = msg("optimization.config.expand");
+  return (
+    <>
+      <TooltipButton tooltip={expandLabel}>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label={expandLabel}
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-[#8C7A6B] transition-colors hover:bg-[#EDE7DD] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ArrowsOut className="size-3.5" aria-hidden="true" />
+        </button>
+      </TooltipButton>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="w-[min(40rem,92vw)] max-w-[min(40rem,92vw)] sm:max-w-[min(40rem,92vw)]">
+          <DialogTitleRow title={label} />
+          <div className="max-h-[70vh] overflow-y-auto rounded-xl border border-border/45 bg-[#F8F4EE] p-4">
+            <p
+              className={cn("whitespace-pre-wrap break-words text-sm", mono && "font-mono")}
+              dir={mono ? "ltr" : "auto"}
+            >
+              {text}
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 /** Numbered feature card for a slide's leading facts. */
 export function SlideHeroCard({
   index,
@@ -60,12 +123,15 @@ export function SlideHeroCard({
         <div className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
           {label}
         </div>
-        <div
-          className="mt-1 truncate font-mono text-xl font-semibold tracking-tight text-foreground sm:text-2xl"
-          dir="ltr"
-          title={value}
-        >
-          {value}
+        <div className="mt-1 flex min-w-0 items-center gap-2">
+          <div
+            className="min-w-0 truncate font-mono text-xl font-semibold tracking-tight text-foreground sm:text-2xl"
+            dir="ltr"
+            title={value}
+          >
+            {clipText(value, VALUE_CHAR_LIMIT)}
+          </div>
+          {value.length > VALUE_CHAR_LIMIT && <ExpandTextButton label={label} text={value} mono />}
         </div>
       </div>
     </article>
@@ -89,12 +155,15 @@ export function SlideMiniCard({
       </span>
       <div className="min-w-0">
         <div className="truncate text-[0.6875rem] font-medium text-muted-foreground">{label}</div>
-        <div
-          className="mt-0.5 truncate font-mono text-base font-semibold text-foreground"
-          dir="ltr"
-          title={value}
-        >
-          {value}
+        <div className="mt-0.5 flex min-w-0 items-center gap-2">
+          <div
+            className="min-w-0 truncate font-mono text-base font-semibold text-foreground"
+            dir="ltr"
+            title={value}
+          >
+            {clipText(value, VALUE_CHAR_LIMIT)}
+          </div>
+          {value.length > VALUE_CHAR_LIMIT && <ExpandTextButton label={label} text={value} mono />}
         </div>
       </div>
     </article>
@@ -103,13 +172,17 @@ export function SlideMiniCard({
 
 /** Free-text block for prose the wizard captured (description, objective, background). */
 export function SlideNote({ label, text }: { label: ReactNode; text: string }) {
+  const long = text.length > NOTE_CHAR_LIMIT;
   return (
     <div className="rounded-xl border border-border/45 bg-background/65 p-4">
-      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <div className="min-w-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {label}
+        </div>
+        {long && <ExpandTextButton label={label} text={text} />}
       </div>
       <p className="whitespace-pre-wrap text-sm" dir="auto">
-        {text}
+        {clipText(text, NOTE_CHAR_LIMIT)}
       </p>
     </div>
   );

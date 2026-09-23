@@ -2132,6 +2132,7 @@ export type MessageKey =
   | "optimization.config.all_generation_models"
   | "optimization.config.all_reflection_models"
   | "optimization.config.description"
+  | "optimization.config.expand"
   | "optimization.config.model_endpoint"
   | "optimization.config.model_pairs"
   | "optimization.config.proposer_idle"
@@ -5889,6 +5890,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "optimization.config.all_generation_models": "כל מודלי הייצור",
   "optimization.config.all_reflection_models": "כל מודלי המשוב",
   "optimization.config.description": "תיאור",
+  "optimization.config.expand": "הצגת הטקסט המלא",
   "optimization.config.model_endpoint": "נקודת קצה מותאמת",
   "optimization.config.model_pairs": "צמדי מודלים",
   "optimization.config.proposer_idle": "מגבלת חוסר פעילות למציע",
@@ -17192,6 +17194,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "optimization.config.all_generation_models": "All generation models",
   "optimization.config.all_reflection_models": "All feedback models",
   "optimization.config.description": "Description",
+  "optimization.config.expand": "Show full text",
   "optimization.config.model_endpoint": "Custom endpoint",
   "optimization.config.model_pairs": "Model pairs",
   "optimization.config.proposer_idle": "Proposer idle limit",
