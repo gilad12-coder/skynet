@@ -6,27 +6,39 @@ import {
   ArrowUpRight,
   Books,
   Brain,
+  Coins,
+  Columns,
   Cpu,
   Cube,
   Database,
   DiceFive,
+  FileText,
   Gauge,
   Gear,
   GearSix,
   GitMerge,
+  Globe,
+  HardDrives,
+  Key,
+  Lock,
+  Plug,
   Repeat,
+  RocketLaunch,
   Ruler,
   Shuffle,
   Sparkle,
   Stack,
+  Table,
   Tag,
   Target,
+  TreeStructure,
+  Wallet,
   Wrench,
 } from "@/shared/ui/icons";
 import { FadeIn } from "@/shared/ui/motion";
-import { useUserPrefs } from "@/features/settings";
 import { HelpTip } from "@/shared/ui/help-tip";
 import type {
+  ColumnMapping,
   ModelConfig,
   OptimizationPayloadResponse,
   OptimizationStatusResponse,
@@ -35,9 +47,10 @@ import type {
 import { tip } from "@/shared/lib/tooltips";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { perLocale } from "@/shared/lib/per-locale";
-import { moduleLabel } from "@/shared/lib/formatters";
+import { formatBytes, moduleLabel } from "@/shared/lib/formatters";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import { formatCreditsUsd } from "@/features/billing";
 import { TERMS } from "@/shared/lib/terms";
-import { cn } from "@/shared/lib/utils";
 import { InfoCard } from "./ui-primitives";
 import { BlackboxConfigCard } from "./BlackboxConfig";
 import {
@@ -45,10 +58,17 @@ import {
   ModelCard,
   SlideHeroCard,
   SlideMiniCard,
+  SlideNote,
   SplitBar,
 } from "./ConfigCarousel";
 
 const CONFIG_SLIDES = perLocale(() => [
+  {
+    id: "general",
+    label: msg("optimization.config.slide_general"),
+    icon: <Tag className="size-5" />,
+    tip: tip("config.section.general"),
+  },
   {
     id: "optimization",
     label: `${msg("auto.features.optimizations.components.configtab.5")}${TERMS.optimization}`,
@@ -79,6 +99,8 @@ const OPT_PARAM_LABELS: Record<string, string> = perLocale(() => ({
   max_full_evals: msg("auto.features.optimizations.components.configtab.literal.7"),
   max_metric_calls: msg("submit.metric_calls"),
   use_merge: msg("auto.features.optimizations.components.configtab.literal.8"),
+  pxn_parents: msg("submit.pxn.parents"),
+  pxn_proposals: msg("submit.pxn.proposals"),
   metric: TERMS.metric,
 }));
 const OPT_PARAM_TIPS: Record<string, string> = perLocale(() => ({
@@ -99,12 +121,21 @@ const OPT_PARAM_TIPS: Record<string, string> = perLocale(() => ({
   max_full_evals: msg("auto.features.optimizations.components.configtab.literal.12"),
   max_metric_calls: msg("tooltip.submit.metric_calls"),
   use_merge: msg("auto.features.optimizations.components.configtab.literal.13"),
+  pxn_parents: msg("tooltip.submit.pxn_parents"),
+  pxn_proposals: msg("tooltip.submit.pxn_proposals"),
 }));
 
-function labelWithTip(key: string): ReactNode {
-  const label = OPT_PARAM_LABELS[key] || key;
-  const tipText = OPT_PARAM_TIPS[key];
-  return tipText ? <HelpTip text={tipText}>{label}</HelpTip> : label;
+// Raw kwarg identifiers read the same in every locale; the tooltip carries
+// the translated explanation of which call the value was handed to.
+function humanizeKey(key: string): string {
+  const spaced = key.replace(/_/g, " ").trim();
+  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : key;
+}
+
+function labelWithTip(key: string, fallbackTip: string): ReactNode {
+  const label = OPT_PARAM_LABELS[key] || humanizeKey(key);
+  const tipText = OPT_PARAM_TIPS[key] ?? fallbackTip;
+  return <HelpTip text={tipText}>{label}</HelpTip>;
 }
 
 const PARAM_ICONS: Record<string, ReactNode> = {
@@ -118,6 +149,8 @@ const PARAM_ICONS: Record<string, ReactNode> = {
   // Shares Gauge with `auto`: both are the run's (mutually exclusive) budget knob.
   max_metric_calls: <Gauge className="size-3.5" />,
   use_merge: <GitMerge className="size-3.5" />,
+  pxn_parents: <TreeStructure className="size-3.5" />,
+  pxn_proposals: <Sparkle className="size-3.5" />,
 };
 
 function paramIcon(key: string): ReactNode {
@@ -133,13 +166,28 @@ const AUTO_LEVEL_LABELS: Record<string, string> = perLocale(() => ({
   heavy: msg("auto.features.optimizations.components.configtab.literal.20"),
 }));
 
+function yesNo(v: boolean): string {
+  return v
+    ? msg("auto.features.optimizations.components.configtab.literal.14")
+    : msg("auto.features.optimizations.components.configtab.literal.15");
+}
+
 function formatParamValue(k: string, v: unknown): string {
-  if (typeof v === "boolean")
-    return v
-      ? msg("auto.features.optimizations.components.configtab.literal.14")
-      : msg("auto.features.optimizations.components.configtab.literal.15");
+  if (typeof v === "boolean") return yesNo(v);
+  if (v == null) return "—";
   if (k === "auto" && typeof v === "string" && AUTO_LEVEL_LABELS[v]) return AUTO_LEVEL_LABELS[v];
+  if (typeof v === "object") return JSON.stringify(v);
   return String(v);
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 // The pair only carries the model name + reasoning effort; the richer
@@ -163,6 +211,82 @@ function pickPairModelConfig(
   return reasoningEffort ? { name, extra: { reasoning_effort: reasoningEffort } } : { name };
 }
 
+type ConfigRow = { label: ReactNode; value: string; icon: ReactNode };
+
+function MiniGrid({ rows }: { rows: ConfigRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div
+      className="grid gap-3"
+      style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(11rem, 100%), 1fr))" }}
+    >
+      {rows.map((row, index) => (
+        <SlideMiniCard key={index} label={row.label} value={row.value} icon={row.icon} />
+      ))}
+    </div>
+  );
+}
+
+const ROLE_STYLES = {
+  input: "bg-[#3D2E22]/10 text-[#3D2E22]",
+  output: "bg-primary/10 text-primary",
+  ignore: "bg-muted text-muted-foreground",
+} as const;
+
+/** Every dataset column with the role the run gave it, in the file's own order. */
+function ColumnRoles({ mapping, order }: { mapping: ColumnMapping; order: string[] | null }) {
+  const inputs = mapping.inputs ?? {};
+  const outputs = mapping.outputs ?? {};
+  const columns = order ?? [...Object.keys(inputs), ...Object.keys(outputs)];
+  if (columns.length === 0) return null;
+  const roleLabels = {
+    input: msg("auto.features.submit.components.steps.summarystep.literal.6"),
+    output: msg("auto.features.submit.components.steps.summarystep.literal.7"),
+    ignore: msg("auto.features.submit.components.steps.summarystep.literal.8"),
+  };
+  return (
+    <div className="rounded-xl border border-border/45 bg-background/65 p-4">
+      <div className="mb-3 flex items-center gap-2 text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
+        <Columns className="size-3.5" aria-hidden="true" />
+        <HelpTip text={tip("submit.column_roles")}>
+          {msg("auto.features.submit.components.steps.summarystep.11")}
+        </HelpTip>
+      </div>
+      <ul className="flex flex-wrap gap-2">
+        {columns.map((column) => {
+          const role: keyof typeof ROLE_STYLES =
+            column in inputs ? "input" : column in outputs ? "output" : "ignore";
+          const field =
+            role === "input" ? inputs[column] : role === "output" ? outputs[column] : null;
+          const renamed = field && field !== column ? field : null;
+          return (
+            <li
+              key={column}
+              className="inline-flex max-w-full items-center gap-2 rounded-full border border-border/45 bg-background/80 py-1 pe-1 ps-3 text-xs"
+            >
+              <span className="truncate font-mono font-medium text-foreground" dir="ltr">
+                {renamed ? `${column} · ${renamed}` : column}
+              </span>
+              <span
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide ${ROLE_STYLES[role]}`}
+              >
+                {roleLabels[role]}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Every setting the run was submitted with, grouped into general / optimization
+ * / models / data slides. Reads the stored payload first and falls back to the
+ * summarised job fields, so older runs whose payload lacks a field still show
+ * what the job record knows. Nothing here is gated on advanced mode: the tab is
+ * the record of what actually ran.
+ */
 export function ConfigTab({
   job,
   payload,
@@ -172,17 +296,91 @@ export function ConfigTab({
   payload: OptimizationPayloadResponse | null;
   activePair?: PairResult;
 }) {
-  const { prefs } = useUserPrefs();
-  const advanced = prefs.advancedMode;
-
   if (job.optimization_type === "blackbox") {
     return (
       <BlackboxConfigCard job={job} payload={(payload?.payload ?? {}) as Record<string, unknown>} />
     );
   }
 
-  // Merge job-level data with full payload for richer config display
+  const locale = getActiveIntlLocale();
   const p = (payload?.payload ?? {}) as Record<string, unknown>;
+  const isGrid = job.optimization_type === "grid_search";
+
+  const name = nonEmptyString(p.name) ?? nonEmptyString(job.name) ?? "—";
+  const description = nonEmptyString(p.description) ?? nonEmptyString(job.description);
+  const isPrivate = typeof p.is_private === "boolean" ? p.is_private : null;
+  const tokenSource =
+    p.token_source === "byok" || p.token_source === "managed" ? p.token_source : null;
+  const runtime = nonEmptyString(p.execution_runtime);
+  const hasCostCap = "max_cost_credits" in p || "estimated_credits_low" in p;
+  const costCap = typeof p.max_cost_credits === "number" ? p.max_cost_credits : null;
+  const estimateLow = typeof p.estimated_credits_low === "number" ? p.estimated_credits_low : null;
+  const estimateHigh =
+    typeof p.estimated_credits_high === "number" ? p.estimated_credits_high : null;
+  const targetScore = typeof p.target_score === "number" ? p.target_score : null;
+
+  const generalRows: ConfigRow[] = [];
+  if (isPrivate != null) {
+    generalRows.push({
+      label: <HelpTip text={tip("submit.privacy")}>{msg("submit.basics.privacy.label")}</HelpTip>,
+      value: isPrivate ? msg("submit.basics.privacy.private") : msg("submit.basics.privacy.public"),
+      icon: isPrivate ? <Lock /> : <Globe />,
+    });
+  }
+  if (tokenSource) {
+    generalRows.push({
+      label: (
+        <HelpTip text={tip("config.billing_source")}>{msg("submit.budget.billing_source")}</HelpTip>
+      ),
+      value: tokenSource === "byok" ? msg("billing.mode.byok") : msg("billing.mode.managed"),
+      icon: tokenSource === "byok" ? <Key /> : <Wallet />,
+    });
+  }
+  if (runtime) {
+    generalRows.push({
+      label: <HelpTip text={tip("config.runtime")}>{msg("optimization.config.runtime")}</HelpTip>,
+      value: runtime === "vercel" ? msg("submit.runtime.vercel") : runtime,
+      icon: <RocketLaunch />,
+    });
+  }
+  if (hasCostCap) {
+    generalRows.push({
+      label: <HelpTip text={tip("submit.budget")}>{msg("submit.budget.label")}</HelpTip>,
+      value:
+        costCap != null ? formatCreditsUsd(costCap, locale) : msg("submit.budget.uncapped_short"),
+      icon: <Coins />,
+    });
+  }
+  if (estimateLow != null && estimateHigh != null) {
+    generalRows.push({
+      label: (
+        <HelpTip text={tip("submit.estimate")}>
+          {tokenSource === "byok"
+            ? msg("submit.summary.estimate_fee")
+            : msg("submit.summary.estimate_cost")}
+        </HelpTip>
+      ),
+      // Isolate "low–high" as one LTR run (U+2066…U+2069) so the dash between
+      // the two number groups doesn't flip them under RTL.
+      value: formatMsg("submit.summary.estimate_range", {
+        low: `⁦${formatCreditsUsd(estimateLow, locale)}`,
+        high: `${formatCreditsUsd(estimateHigh, locale)}⁩`,
+      }),
+      icon: <Gauge />,
+    });
+  }
+  if (targetScore != null) {
+    generalRows.push({
+      label: (
+        <HelpTip text={tip("submit.target_score")}>
+          {msg("auto.features.submit.components.steps.summarystep.25")}
+        </HelpTip>
+      ),
+      value: `${targetScore}%`,
+      icon: <Target />,
+    });
+  }
+
   const splitFractions = (p.split_fractions ??
     job.split_fractions ?? { train: 0.7, val: 0.15, test: 0.15 }) as {
     train: number;
@@ -191,61 +389,166 @@ export function ConfigTab({
   };
   const shuffleVal =
     p.shuffle != null ? Boolean(p.shuffle) : job.shuffle != null ? job.shuffle : true;
-  const seedVal = (p.seed ?? job.seed) as number | undefined;
-  const optKw = (p.optimizer_kwargs ?? job.optimizer_kwargs ?? {}) as Record<string, unknown>;
-  const compKw = (p.compile_kwargs ?? job.compile_kwargs ?? {}) as Record<string, unknown>;
-  const modelCfg = (p.model_config ?? job.model_settings ?? null) as Record<string, unknown> | null;
-  const reflCfg = (p.reflection_model_config ?? null) as Record<string, unknown> | null;
-  const taskCfg = (p.task_model_config ?? null) as Record<string, unknown> | null;
+  const seedVal = (p.seed ?? job.seed) as number | null | undefined;
+  const optKw = asRecord(p.optimizer_kwargs) ?? job.optimizer_kwargs ?? {};
+  const modKw = asRecord(p.module_kwargs) ?? job.module_kwargs ?? {};
+  const compKw = asRecord(p.compile_kwargs) ?? job.compile_kwargs ?? {};
+  const modelCfg = asRecord(p.model_config) ?? job.model_settings ?? null;
+  const reflCfg = asRecord(p.reflection_model_config);
+  const taskCfg = asRecord(p.task_model_config);
+  const workflow = asRecord(p.workflow);
+  const workflowNodes = Array.isArray(workflow?.nodes) ? workflow.nodes.length : null;
+  const workflowEdges = Array.isArray(workflow?.edges) ? workflow.edges.length : null;
 
-  // React runs carry a tool-source config the generic rows don't cover.
-  // Scoring lives in metric_code (shown in the code view), so there is no
-  // reward preset to surface here.
-  const toolSource = (p.tool_source ?? null) as Record<string, unknown> | null;
-  const reactRows: Array<{ label: ReactNode; value: string; icon: ReactNode }> =
-    (job.module_name ?? "").toLowerCase() === "react" && toolSource?.kind
+  // Tool sources ride on react runs and on workflows whose steps call tools;
+  // show them whenever the payload carries one rather than keying on the module.
+  const toolSource = asRecord(p.tool_source);
+  const toolRows: ConfigRow[] = [];
+  if (toolSource && typeof toolSource.kind === "string") {
+    const kind = toolSource.kind;
+    toolRows.push({
+      label: (
+        <HelpTip text={tip("react.tool_source")}>{msg("submit.react.tool_source_label")}</HelpTip>
+      ),
+      value:
+        kind === "live_mcp"
+          ? msg("optimization.config.tool_source.live_mcp")
+          : kind === "dataset_snapshot"
+            ? msg("optimization.config.tool_source.dataset_snapshot")
+            : kind,
+      icon: <Wrench />,
+    });
+    const mcpUrl = nonEmptyString(toolSource.mcp_url);
+    if (mcpUrl) {
+      toolRows.push({
+        label: <HelpTip text={tip("react.mcp_url")}>{msg("submit.react.mcp_url_label")}</HelpTip>,
+        value: mcpUrl,
+        icon: <Plug />,
+      });
+    }
+    const filter = Array.isArray(toolSource.tool_filter) ? toolSource.tool_filter : null;
+    toolRows.push({
+      label: <HelpTip text={tip("config.tool_access")}>{msg("submit.react.tools_access")}</HelpTip>,
+      value: filter
+        ? formatMsg("submit.react.tools_count", { p1: filter.length })
+        : msg("submit.react.tools_all"),
+      icon: <Wrench />,
+    });
+  }
+
+  const gridRows: ConfigRow[] = [];
+  if (isGrid) {
+    if (job.total_pairs != null) {
+      gridRows.push({
+        label: (
+          <HelpTip text={tip("config.model_pairs")}>
+            {msg("optimization.config.model_pairs")}
+          </HelpTip>
+        ),
+        value: String(job.total_pairs),
+        icon: <Cpu />,
+      });
+    }
+    if (typeof p.use_all_available_generation_models === "boolean") {
+      gridRows.push({
+        label: (
+          <HelpTip text={tip("config.all_generation_models")}>
+            {msg("optimization.config.all_generation_models")}
+          </HelpTip>
+        ),
+        value: yesNo(p.use_all_available_generation_models),
+        icon: <Cpu />,
+      });
+    }
+    if (typeof p.use_all_available_reflection_models === "boolean") {
+      gridRows.push({
+        label: (
+          <HelpTip text={tip("config.all_reflection_models")}>
+            {msg("optimization.config.all_reflection_models")}
+          </HelpTip>
+        ),
+        value: yesNo(p.use_all_available_reflection_models),
+        icon: <Brain />,
+      });
+    }
+  }
+
+  const optimizationRows: ConfigRow[] = [
+    ...(workflowNodes != null && workflowEdges != null
       ? [
           {
             label: (
-              <HelpTip text={tip("react.tool_source")}>
-                {msg("submit.react.tool_source_label")}
-              </HelpTip>
+              <HelpTip text={tip("config.workflow")}>{msg("optimization.config.workflow")}</HelpTip>
             ),
-            value: String(toolSource.mcp_url || toolSource.kind),
-            icon: <Wrench className="size-3.5" />,
+            value: formatMsg("optimization.config.workflow_graph", {
+              nodes: workflowNodes,
+              edges: workflowEdges,
+            }),
+            icon: <TreeStructure />,
           },
         ]
-      : [];
-
-  const items: Array<{ label: ReactNode; value: string; icon: ReactNode }> = [
-    {
-      label: (
-        <HelpTip text={tip("module.choice")}>
-          {msg("auto.features.optimizations.components.configtab.1")}
-        </HelpTip>
-      ),
-      value: moduleLabel(job.module_name),
-      icon: <Cube className="size-3.5" />,
-    },
-    {
-      label: <HelpTip text={tip("optimizer.choice")}>{TERMS.optimizer}</HelpTip>,
-      value: job.optimizer_name ?? "—",
-      icon: <Target className="size-3.5" />,
-    },
-    ...reactRows,
+      : []),
+    ...toolRows,
+    ...gridRows,
+    // `metric` is the scoring callable itself; the code tab shows its source.
     ...Object.entries(optKw)
-      .filter(([k]) => k !== "metric" && (advanced || k === "auto"))
+      .filter(([k]) => k !== "metric")
       .map(([k, v]) => ({
-        label: labelWithTip(k),
+        label: labelWithTip(k, tip("config.optimizer_kwarg")),
         value: formatParamValue(k, v),
         icon: paramIcon(k),
       })),
-    ...Object.entries(compKw).map(([k, v]) => ({
-      label: labelWithTip(k),
+    ...Object.entries(modKw).map(([k, v]) => ({
+      label: <HelpTip text={tip("config.module_kwarg")}>{humanizeKey(k)}</HelpTip>,
       value: formatParamValue(k, v),
-      icon: <Stack className="size-3.5" />,
+      icon: <Cube />,
+    })),
+    ...Object.entries(compKw).map(([k, v]) => ({
+      label: <HelpTip text={tip("config.compile_kwarg")}>{humanizeKey(k)}</HelpTip>,
+      value: formatParamValue(k, v),
+      icon: <Stack />,
     })),
   ];
+
+  const datasetFilename = nonEmptyString(p.dataset_filename);
+  const inlineRows = Array.isArray(p.dataset) ? p.dataset.length : null;
+  const datasetRows = job.dataset_rows ?? inlineRows;
+  const columnMapping =
+    (asRecord(p.column_mapping) as ColumnMapping | null) ?? job.column_mapping ?? null;
+  const columnOrder = Array.isArray(p.column_order)
+    ? p.column_order.filter((c): c is string => typeof c === "string")
+    : null;
+
+  const dataRows: ConfigRow[] = [];
+  if (datasetFilename) {
+    dataRows.push({
+      label: (
+        <HelpTip text={tip("submit.dataset_file")}>
+          {msg("auto.features.submit.components.steps.summarystep.7")}
+        </HelpTip>
+      ),
+      value: datasetFilename,
+      icon: <FileText />,
+    });
+  }
+  if (datasetRows != null) {
+    dataRows.push({
+      label: <HelpTip text={tip("submit.dataset_size")}>{msg("optimization.config.rows")}</HelpTip>,
+      value: String(datasetRows),
+      icon: <Table />,
+    });
+  }
+  if (job.stored_bytes) {
+    dataRows.push({
+      label: (
+        <HelpTip text={tip("submit.dataset_size")}>
+          {msg("auto.features.submit.components.steps.summarystep.8")}
+        </HelpTip>
+      ),
+      value: formatBytes(job.stored_bytes),
+      icon: <HardDrives />,
+    });
+  }
 
   return (
     <>
@@ -265,40 +568,74 @@ export function ConfigTab({
             {activeSlide === 0 && (
               <div className="flex min-h-[24rem] flex-col gap-5">
                 <div className="grid items-stretch gap-3 md:grid-cols-2">
-                  {items.slice(0, 2).map((item, index) => (
-                    <SlideHeroCard
-                      key={index}
-                      index={index}
-                      label={item.label}
-                      value={item.value}
-                      icon={item.icon}
-                    />
-                  ))}
+                  <SlideHeroCard
+                    index={0}
+                    label={
+                      <HelpTip text={tip("submit.name")}>
+                        {msg("auto.features.submit.components.steps.summarystep.3")}
+                        {TERMS.optimization}
+                      </HelpTip>
+                    }
+                    value={name}
+                    icon={<Tag />}
+                  />
+                  <SlideHeroCard
+                    index={1}
+                    label={
+                      <HelpTip text={tip("submit.optimization_type")}>
+                        {msg("auto.features.submit.components.steps.summarystep.4")}
+                        {TERMS.optimization}
+                      </HelpTip>
+                    }
+                    value={
+                      isGrid
+                        ? msg("auto.features.submit.components.steps.summarystep.literal.5")
+                        : msg("auto.features.submit.components.steps.summarystep.literal.4")
+                    }
+                    icon={<Stack />}
+                  />
                 </div>
-
-                {items.length > 2 && (
-                  <div
-                    className="grid flex-1 gap-3"
-                    style={{
-                      gridTemplateColumns: "repeat(auto-fit, minmax(min(11rem, 100%), 1fr))",
-                    }}
-                  >
-                    {items.slice(2).map((item, index) => (
-                      <SlideMiniCard
-                        key={index}
-                        label={item.label}
-                        value={item.value}
-                        icon={item.icon}
-                      />
-                    ))}
-                  </div>
+                <MiniGrid rows={generalRows} />
+                {description && (
+                  <SlideNote
+                    label={
+                      <HelpTip text={tip("config.description")}>
+                        {msg("optimization.config.description")}
+                      </HelpTip>
+                    }
+                    text={description}
+                  />
                 )}
               </div>
             )}
 
             {activeSlide === 1 && (
+              <div className="flex min-h-[24rem] flex-col gap-5">
+                <div className="grid items-stretch gap-3 md:grid-cols-2">
+                  <SlideHeroCard
+                    index={0}
+                    label={
+                      <HelpTip text={tip("module.choice")}>
+                        {msg("auto.features.optimizations.components.configtab.1")}
+                      </HelpTip>
+                    }
+                    value={moduleLabel(job.module_name)}
+                    icon={<Cube />}
+                  />
+                  <SlideHeroCard
+                    index={1}
+                    label={<HelpTip text={tip("optimizer.choice")}>{TERMS.optimizer}</HelpTip>}
+                    value={job.optimizer_name ?? "—"}
+                    icon={<Target />}
+                  />
+                </div>
+                <MiniGrid rows={optimizationRows} />
+              </div>
+            )}
+
+            {activeSlide === 2 && (
               <div className="min-h-[24rem]">
-                {job.optimization_type !== "grid_search" ? (
+                {!isGrid ? (
                   <div
                     className="grid gap-4"
                     style={{
@@ -307,7 +644,13 @@ export function ConfigTab({
                   >
                     {modelCfg && <ModelCard label={msg("model.generation.label")} cfg={modelCfg} />}
                     {reflCfg && <ModelCard label={TERMS.reflectionModel} cfg={reflCfg} />}
-                    {taskCfg && <ModelCard label={msg("model.generation.label")} cfg={taskCfg} />}
+                    {taskCfg && (
+                      <ModelCard
+                        label={msg("submit.blackbox.roles.task.label")}
+                        labelTip={tip("config.task_model")}
+                        cfg={taskCfg}
+                      />
+                    )}
                     {!modelCfg && !reflCfg && !taskCfg && job.model_name && (
                       <>
                         <ModelCard
@@ -318,6 +661,13 @@ export function ConfigTab({
                           <ModelCard
                             label={TERMS.reflectionModel}
                             cfg={{ name: job.reflection_model_name }}
+                          />
+                        )}
+                        {job.task_model_name && (
+                          <ModelCard
+                            label={msg("submit.blackbox.roles.task.label")}
+                            labelTip={tip("config.task_model")}
+                            cfg={{ name: job.task_model_name }}
                           />
                         )}
                       </>
@@ -393,15 +743,12 @@ export function ConfigTab({
               </div>
             )}
 
-            {activeSlide === 2 && (
-              <div className="flex min-h-[24rem] flex-col gap-6">
+            {activeSlide === 3 && (
+              <div className="flex min-h-[24rem] flex-col gap-5">
                 {job.source_dataset_id && (
                   <Link
                     href={`/datasets?open=${job.source_dataset_id}`}
-                    className={cn(
-                      "group/srclink flex min-h-28 items-center gap-4 rounded-2xl border border-border/60 bg-[#F8F4EE] p-5 transition-[background-color,border-color,transform] hover:border-[#C8A882]/70 hover:bg-[#F4EEE6] active:scale-[0.995] sm:p-6",
-                      !advanced && "flex-1",
-                    )}
+                    className="group/srclink flex min-h-28 items-center gap-4 rounded-2xl border border-border/60 bg-[#F8F4EE] p-5 transition-[background-color,border-color,transform] hover:border-[#C8A882]/70 hover:bg-[#F4EEE6] active:scale-[0.995] sm:p-6"
                   >
                     <span className="grid size-14 shrink-0 place-items-center rounded-2xl bg-[#3D2E22] text-[#FAF8F5] shadow-sm">
                       <Books className="size-6" aria-hidden="true" />
@@ -423,53 +770,46 @@ export function ConfigTab({
                     <ArrowUpRight className="size-4 shrink-0 text-muted-foreground/60 transition-colors group-hover/srclink:text-foreground" />
                   </Link>
                 )}
-                {advanced && (
-                  <div className="flex flex-1 flex-col gap-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="grid size-9 place-items-center rounded-xl bg-[#EDE7DD] text-[#8C7A6B]">
-                        <Database className="size-4" aria-hidden="true" />
-                      </span>
-                      <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
-                        <HelpTip text={tip("data.split_explanation")}>
-                          {msg("auto.features.optimizations.components.configtab.9")}
-                          {TERMS.dataset}
-                        </HelpTip>
-                      </p>
-                    </div>
-                    <SplitBar fractions={splitFractions} />
+                <MiniGrid rows={dataRows} />
+                {columnMapping && <ColumnRoles mapping={columnMapping} order={columnOrder} />}
+                <div className="flex flex-1 flex-col gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="grid size-9 place-items-center rounded-xl bg-[#EDE7DD] text-[#8C7A6B]">
+                      <Database className="size-4" aria-hidden="true" />
+                    </span>
+                    <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
+                      <HelpTip text={tip("data.split_explanation")}>
+                        {msg("auto.features.optimizations.components.configtab.9")}
+                        {TERMS.dataset}
+                      </HelpTip>
+                    </p>
                   </div>
-                )}
-                {advanced && (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <InfoCard
-                      label={
-                        <HelpTip text={tip("data.shuffle_explanation")}>
-                          {msg("auto.features.optimizations.components.configtab.13")}
-                        </HelpTip>
-                      }
-                      value={
-                        shuffleVal
-                          ? msg("auto.features.optimizations.components.configtab.literal.16")
-                          : msg("auto.features.optimizations.components.configtab.literal.17")
-                      }
-                      icon={<Shuffle className="size-3.5" />}
-                    />
-                    {seedVal != null && (
-                      <InfoCard
-                        label={
-                          <HelpTip text={tip("data.seed")}>
-                            {msg("auto.features.optimizations.components.configtab.14")}
-                          </HelpTip>
-                        }
-                        value={seedVal}
-                        icon={<DiceFive className="size-3.5" />}
-                      />
-                    )}
-                  </div>
-                )}
-                {!job.source_dataset_id && !advanced && (
-                  <p className="py-12 text-center text-sm text-muted-foreground">—</p>
-                )}
+                  <SplitBar fractions={splitFractions} />
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <InfoCard
+                    label={
+                      <HelpTip text={tip("data.shuffle_explanation")}>
+                        {msg("auto.features.optimizations.components.configtab.13")}
+                      </HelpTip>
+                    }
+                    value={
+                      shuffleVal
+                        ? msg("auto.features.optimizations.components.configtab.literal.16")
+                        : msg("auto.features.optimizations.components.configtab.literal.17")
+                    }
+                    icon={<Shuffle className="size-3.5" />}
+                  />
+                  <InfoCard
+                    label={
+                      <HelpTip text={tip("data.seed")}>
+                        {msg("auto.features.optimizations.components.configtab.14")}
+                      </HelpTip>
+                    }
+                    value={seedVal ?? null}
+                    icon={<DiceFive className="size-3.5" />}
+                  />
+                </div>
               </div>
             )}
           </>
