@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer-motion";
-import { CaretLeft, CaretRight, TextT, Thermometer } from "@/shared/ui/icons";
+import { CaretLeft, CaretRight, Key, Plug, TextT, Thermometer, Wallet } from "@/shared/ui/icons";
 import { useUserPrefs } from "@/features/settings";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { msg } from "@/shared/lib/messages";
@@ -98,6 +98,20 @@ export function SlideMiniCard({
         </div>
       </div>
     </article>
+  );
+}
+
+/** Free-text block for prose the wizard captured (description, objective, background). */
+export function SlideNote({ label, text }: { label: ReactNode; text: string }) {
+  return (
+    <div className="rounded-xl border border-border/45 bg-background/65 p-4">
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <p className="whitespace-pre-wrap text-sm" dir="auto">
+        {text}
+      </p>
+    </div>
   );
 }
 
@@ -393,6 +407,26 @@ export function ModelCard({
   const reasoning = extra.reasoning_effort as string | undefined;
   const temperatureLabel = msg("auto.features.submit.components.modelconfigmodal.5");
   const maxTokensLabel = msg("auto.features.submit.components.modelconfigmodal.7");
+  // Billing and endpoint facts sit on the config itself, not under `extra`,
+  // and are worth a chip even when sampling parameters are hidden: they say
+  // whose key paid for the calls and where they went.
+  const tokenSource =
+    cfg.token_source === "byok" || cfg.token_source === "managed" ? cfg.token_source : null;
+  const byokProvider =
+    typeof cfg.byok_provider === "string" && cfg.byok_provider ? cfg.byok_provider : null;
+  const baseUrl =
+    typeof cfg.base_url === "string" && cfg.base_url.trim() ? cfg.base_url.trim() : null;
+  const billingLabel = msg("submit.budget.billing_source");
+  const billingValue =
+    tokenSource === "byok"
+      ? byokProvider
+        ? `${msg("billing.mode.byok")} · ${byokProvider}`
+        : msg("billing.mode.byok")
+      : tokenSource === "managed"
+        ? msg("billing.mode.managed")
+        : null;
+  const endpointLabel = msg("optimization.config.model_endpoint");
+  const showParams = params && (temp != null || maxTok != null || reasoning);
   return (
     <article className="flex min-h-36 min-w-0 flex-col justify-between gap-5 rounded-2xl border border-border/60 bg-[#F8F4EE] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
       <div className="flex min-w-0 items-start gap-3.5">
@@ -412,12 +446,12 @@ export function ModelCard({
           </span>
         </div>
       </div>
-      {params && (temp != null || maxTok != null || reasoning) && (
+      {(showParams || billingValue || baseUrl) && (
         <div
           className="flex flex-wrap items-center gap-2 text-[0.6875rem] text-muted-foreground"
           dir="ltr"
         >
-          {temp != null && (
+          {params && temp != null && (
             <span
               className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
               aria-label={`${temperatureLabel}: ${temp}`}
@@ -427,7 +461,7 @@ export function ModelCard({
               {temp}
             </span>
           )}
-          {maxTok != null && (
+          {params && maxTok != null && (
             <span
               className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
               aria-label={`${maxTokensLabel}: ${maxTok}`}
@@ -437,7 +471,31 @@ export function ModelCard({
               {maxTok}
             </span>
           )}
-          {reasoning && <ReasoningPill value={reasoning} />}
+          {params && reasoning && <ReasoningPill value={reasoning} />}
+          {billingValue && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
+              aria-label={`${billingLabel}: ${billingValue}`}
+              title={billingLabel}
+            >
+              {tokenSource === "byok" ? (
+                <Key className="size-3" aria-hidden="true" />
+              ) : (
+                <Wallet className="size-3" aria-hidden="true" />
+              )}
+              {billingValue}
+            </span>
+          )}
+          {baseUrl && (
+            <span
+              className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/45 bg-background/75 px-2.5 py-1"
+              aria-label={`${endpointLabel}: ${baseUrl}`}
+              title={`${endpointLabel}: ${baseUrl}`}
+            >
+              <Plug className="size-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">{baseUrl}</span>
+            </span>
+          )}
         </div>
       )}
     </article>
