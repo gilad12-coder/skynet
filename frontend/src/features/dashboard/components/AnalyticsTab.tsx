@@ -31,14 +31,14 @@ const chartFallback = (height: number) => (
   </div>
 );
 
-const RangeHistogram = dynamic(
-  () => import("./AnalyticsCharts").then((m) => m.RangeHistogram),
-  { ssr: false, loading: () => chartFallback(240) },
-);
-const StackedTimeline = dynamic(
-  () => import("./AnalyticsCharts").then((m) => m.StackedTimeline),
-  { ssr: false, loading: () => chartFallback(220) },
-);
+const RangeHistogram = dynamic(() => import("./AnalyticsCharts").then((m) => m.RangeHistogram), {
+  ssr: false,
+  loading: () => chartFallback(240),
+});
+const StackedTimeline = dynamic(() => import("./AnalyticsCharts").then((m) => m.StackedTimeline), {
+  ssr: false,
+  loading: () => chartFallback(220),
+});
 const SharingBreakdown = dynamic(() => import("./UsageCharts"), {
   ssr: false,
   loading: () => <div className="h-[260px]" />,
@@ -316,7 +316,6 @@ function AnalyticsTabImpl({
   }
 
   const kpis = chartData.kpis;
-  const granularityLabel = msg(`dashboard.analytics.timeline_by_${chartData.timelineGranularity}`);
   const noSuccessMessage = msg("dashboard.analytics.no_successful_runs");
 
   return (
@@ -450,9 +449,6 @@ function AnalyticsTabImpl({
                 title={
                   <HelpTip text={tip("analytics.submissions_per_day")}>
                     {msg("auto.features.dashboard.components.analyticstab.30")}
-                    <span className="ms-2 text-xs font-normal text-muted-foreground">
-                      {granularityLabel}
-                    </span>
                   </HelpTip>
                 }
                 defaultOpen={true}
