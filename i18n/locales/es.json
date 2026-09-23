@@ -237,7 +237,6 @@
     "wizard.split_fractions_not_number": "Los valores de split_fractions deben ser números: {error}",
     "wizard.split_fractions_not_object": "split_fractions debe ser un objeto con claves train/val/test.",
     "wizard.split_fractions_sum": "split_fractions debe sumar 1.0, pero se obtuvo {total}",
-    "serve.request_budget_required": "Establece max_cost_credits para esta única solicitud.",
     "budget.idempotency_required": "Envía una Idempotency-Key única para esta solicitud.",
     "serve.caller_tool_connection_required": "Esta ejecución usa una conexión de herramienta vinculada al propietario. Conecta la herramienta a tu cuenta antes de invocarla.",
     "serve.protected_interaction_failed": "La solicitud en el entorno aislado falló: {error}"

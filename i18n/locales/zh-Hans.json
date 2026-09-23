@@ -237,7 +237,6 @@
     "wizard.split_fractions_not_number": "split_fractions 的取值必须是数字：{error}",
     "wizard.split_fractions_not_object": "split_fractions 必须是一个包含 train/val/test 键的对象。",
     "wizard.split_fractions_sum": "split_fractions 之和必须为 1.0，实际得到 {total}。",
-    "serve.request_budget_required": "请为该单次请求设置 max_cost_credits。",
     "budget.idempotency_required": "请为该请求发送唯一的 Idempotency-Key。",
     "serve.caller_tool_connection_required": "本次运行使用绑定所有者的工具连接。请先将该工具连接到您的账户，再进行调用。",
     "serve.protected_interaction_failed": "沙盒请求失败：{error}"

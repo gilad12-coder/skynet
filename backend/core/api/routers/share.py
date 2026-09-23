@@ -1273,7 +1273,7 @@ def create_share_router(*, job_store) -> APIRouter:
 
         Raises:
             DomainError: 404 when the token is unknown/revoked; 400 (bad inputs,
-                missing request budget, or no model);
+                missing replay key, or no model);
                 409 when the optimization is not in a serveable state.
         """
         with Session(job_store.engine) as session:
@@ -1284,8 +1284,6 @@ def create_share_router(*, job_store) -> APIRouter:
                 raise DomainError("share.inference_forbidden", status=403)
             link = get_link_by_token(session, token)
             optimization_id = link.optimization_id
-        if req.max_cost_credits is None:
-            raise DomainError("serve.request_budget_required", status=400)
         key = (idempotency_key or "").strip()
         if not key:
             raise DomainError("budget.idempotency_required", status=400)

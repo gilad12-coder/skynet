@@ -1915,13 +1915,12 @@ export function claimSharedOptimization(token: string) {
 export function serveSharedOptimization(
   token: string,
   inputs: Record<string, string>,
-  maxCostCredits: number,
   idempotencyKey: string,
 ) {
   return request<ServeResponse>(`/share/${encodeURIComponent(token)}/serve`, {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
+    body: JSON.stringify({ inputs }),
   });
 }
 
@@ -2354,13 +2353,12 @@ export function getPairTestResults(optimizationId: string, pairIndex: number) {
 export function serveProgram(
   optimizationId: string,
   inputs: Record<string, string>,
-  maxCostCredits: number,
   idempotencyKey: string,
 ) {
   return request<ServeResponse>(`/serve/${optimizationId}`, {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
+    body: JSON.stringify({ inputs }),
   });
 }
 
@@ -2369,13 +2367,12 @@ export function servePairProgram(
   optimizationId: string,
   pairIndex: number,
   inputs: Record<string, string>,
-  maxCostCredits: number,
   idempotencyKey: string,
 ) {
   return request<ServeResponse>(`/serve/${optimizationId}/pair/${pairIndex}`, {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
+    body: JSON.stringify({ inputs }),
   });
 }
 
@@ -2397,7 +2394,6 @@ export interface StreamServeHandlers {
 export async function serveProgramStream(
   optimizationId: string,
   inputs: Record<string, string>,
-  maxCostCredits: number,
   idempotencyKey: string,
   handlers: StreamServeHandlers,
 ): Promise<void> {
@@ -2410,7 +2406,7 @@ export async function serveProgramStream(
         Accept: "text/event-stream",
         "Idempotency-Key": idempotencyKey,
       },
-      body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
+      body: JSON.stringify({ inputs }),
       signal: handlers.signal,
     });
   } catch (err) {
@@ -2455,7 +2451,6 @@ export async function servePairProgramStream(
   optimizationId: string,
   pairIndex: number,
   inputs: Record<string, string>,
-  maxCostCredits: number,
   idempotencyKey: string,
   handlers: StreamServeHandlers,
 ): Promise<void> {
@@ -2470,7 +2465,7 @@ export async function servePairProgramStream(
           Accept: "text/event-stream",
           "Idempotency-Key": idempotencyKey,
         },
-        body: JSON.stringify({ inputs, max_cost_credits: maxCostCredits }),
+        body: JSON.stringify({ inputs }),
         signal: handlers.signal,
       },
     );

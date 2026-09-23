@@ -1224,7 +1224,7 @@ def test_protected_evaluate_examples_never_executes_metric_side_effects_in_api_p
         )
 
     assert resp.status_code == 400
-    assert "max_cost_credits" in resp.json()["detail"]
+    assert "Idempotency-Key" in resp.json()["detail"]
     assert env_name not in os.environ
     assert not marker.exists()
     urlopen.assert_not_called()

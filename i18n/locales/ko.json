@@ -237,7 +237,6 @@
     "wizard.split_fractions_not_number": "split_fractions 값은 숫자여야 합니다: {error}",
     "wizard.split_fractions_not_object": "split_fractions는 train/val/test 키를 가진 객체여야 합니다.",
     "wizard.split_fractions_sum": "split_fractions의 합은 1.0이어야 하는데 {total}입니다.",
-    "serve.request_budget_required": "이 단일 요청에 대해 max_cost_credits를 설정하세요.",
     "budget.idempotency_required": "이 요청에 대해 고유한 Idempotency-Key를 보내세요.",
     "serve.caller_tool_connection_required": "이 실행은 소유자에게 연결된 도구 연결을 사용합니다. 호출하기 전에 도구를 계정에 연결하세요.",
     "serve.protected_interaction_failed": "샌드박스 요청이 실패했습니다: {error}"

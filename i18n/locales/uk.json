@@ -237,7 +237,6 @@
     "wizard.split_fractions_not_number": "Значення split_fractions мають бути числами: {error}",
     "wizard.split_fractions_not_object": "split_fractions має бути об'єктом із ключами train/val/test.",
     "wizard.split_fractions_sum": "split_fractions мають у сумі давати 1.0, отримано {total}",
-    "serve.request_budget_required": "Задайте max_cost_credits для цього окремого запиту.",
     "budget.idempotency_required": "Надішліть унікальний Idempotency-Key для цього запиту.",
     "serve.caller_tool_connection_required": "Цей запуск використовує підключення інструмента, прив'язане до власника. Підключіть інструмент до свого облікового запису перед його викликом.",
     "serve.protected_interaction_failed": "Запит у пісочниці завершився помилкою: {error}"

@@ -324,7 +324,7 @@ def test_protected_serve_metadata_never_executes_signature_side_effects_in_api_p
         "prompt": "Try the optimized prompt",
     }
     assert execution.status_code == 400
-    assert execution.json()["code"] == "serve.request_budget_required"
+    assert execution.json()["code"] == "budget.idempotency_required"
     assert env_name not in os.environ
     assert not marker.exists()
     urlopen.assert_not_called()
@@ -681,7 +681,7 @@ def test_protected_pair_metadata_never_deserializes_persisted_program(
         "prompt": "Compare this pair",
     }
     assert execution.status_code == 400
-    assert execution.json()["code"] == "serve.request_budget_required"
+    assert execution.json()["code"] == "budget.idempotency_required"
     assert not marker.exists()
 
 

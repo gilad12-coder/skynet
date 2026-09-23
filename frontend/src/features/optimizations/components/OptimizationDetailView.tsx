@@ -2,7 +2,6 @@
 
 import { formatBudgetUsd } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import { parseBudgetInput } from "@/shared/lib/budget-input";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -26,7 +25,6 @@ import {
   Play,
   Pause,
   HardDrive,
-  RocketLaunch,
   GridFour,
   Package,
   Cube,
@@ -363,8 +361,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const [serveInfo, setServeInfo] = useState<ServeInfoResponse | null>(null);
   const [serveInfoError, setServeInfoError] = useState<string | null>(null);
   const [serveLoading, setServeLoading] = useState(false);
-  // Typed in dollars; "0.10" is the $0.10 (10-credit) default cap.
-  const [serveBudgetCredits, setServeBudgetCredits] = useState("0.10");
   const [runHistory, setRunHistory] = useState<
     Array<{
       inputs: Record<string, string>;
@@ -748,15 +744,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       );
       return;
     }
-    // The field is typed in dollars; the API is billed in credits (×100). A
-    // number input's value is always canonical (ASCII, "." decimal), parsed in
-    // a fixed locale rather than the UI's.
-    const parsedBudget = parseBudgetInput(serveBudgetCredits, "en");
-    if (parsedBudget.kind !== "value") {
-      toast.error(msg("optimizations.serve.request_budget_invalid"));
-      return;
-    }
-    const maxCostCredits = parsedBudget.value;
     const idempotencyKey = crypto.randomUUID();
     // Abort any in-flight stream, then start a new one tagged with a fresh id
     streamAbortRef.current?.abort();
@@ -785,12 +772,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
         return;
       }
       try {
-        const res = await serveSharedOptimization(
-          shareToken,
-          inputs,
-          maxCostCredits,
-          idempotencyKey,
-        );
+        const res = await serveSharedOptimization(shareToken, inputs, idempotencyKey);
         if (isStale()) return;
         setRunHistory((prev) => {
           const next = [
@@ -827,7 +809,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     // does not.
     if ((job?.module_name ?? "").toLowerCase() === "workflow" && activePairIndex == null) {
       try {
-        const res = await serveProgram(id, inputs, maxCostCredits, idempotencyKey);
+        const res = await serveProgram(id, inputs, idempotencyKey);
         if (isStale()) return;
         setRunHistory((prev) => {
           const next = [
@@ -862,10 +844,10 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
     }
     const streamFn =
       job?.optimization_type === "grid_search" && activePairIndex != null
-        ? (i: Record<string, string>, h: Parameters<typeof serveProgramStream>[4]) =>
-            servePairProgramStream(id, activePairIndex, i, maxCostCredits, idempotencyKey, h)
-        : (i: Record<string, string>, h: Parameters<typeof serveProgramStream>[4]) =>
-            serveProgramStream(id, i, maxCostCredits, idempotencyKey, h);
+        ? (i: Record<string, string>, h: Parameters<typeof serveProgramStream>[3]) =>
+            servePairProgramStream(id, activePairIndex, i, idempotencyKey, h)
+        : (i: Record<string, string>, h: Parameters<typeof serveProgramStream>[3]) =>
+            serveProgramStream(id, i, idempotencyKey, h);
     await streamFn(inputs, {
       signal: controller.signal,
       onToken: (field, chunk) => {
@@ -1196,24 +1178,17 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 {job.optimization_id}
               </code>
               <div className="flex items-center gap-3 flex-wrap text-sm text-muted-foreground">
-                <span className="flex items-center gap-1.5">
-                  {job.optimization_type === "grid_search" ? (
-                    <>
-                      <GridFour className="size-3.5" />
-                      {msg("auto.app.optimizations.id.page.literal.2")}
-                    </>
-                  ) : jobIsBlackbox ? (
-                    <>
-                      <Cube className="size-3.5" />
-                      {msg("optimization.blackbox.badge")}
-                    </>
-                  ) : (
-                    <>
-                      <RocketLaunch className="size-3.5" />
-                      {msg("auto.app.optimizations.id.page.literal.3")}
-                    </>
-                  )}
-                </span>
+                {job.optimization_type === "grid_search" ? (
+                  <span className="flex items-center gap-1.5">
+                    <GridFour className="size-3.5" />
+                    {msg("auto.app.optimizations.id.page.literal.2")}
+                  </span>
+                ) : jobIsBlackbox ? (
+                  <span className="flex items-center gap-1.5">
+                    <Cube className="size-3.5" />
+                    {msg("optimization.blackbox.badge")}
+                  </span>
+                ) : null}
                 <LiveElapsedBadge
                   isActive={isActive}
                   startedAt={startedAt}
@@ -1626,8 +1601,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                     chatScrollRef={chatScrollRef}
                     handleServe={handleServe}
                     handleStopServe={handleStopServe}
-                    requestBudgetCredits={serveBudgetCredits}
-                    onRequestBudgetCreditsChange={setServeBudgetCredits}
                     optimizationId={job.optimization_id}
                     pairIndex={isPairContext ? activePair.pair_index : undefined}
                     onClearHistory={handleClearHistory}

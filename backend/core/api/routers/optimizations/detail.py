@@ -161,7 +161,7 @@ class EvaluateExamplesRequest(BaseModel):
         ge=1,
         le=MAX_CREDITS,
         strict=True,
-        description="Maximum credits authorized for this one evaluation request; required for protected runs.",
+        description="Optional cap on credits for this one evaluation request; omitted, it draws on the account balance.",
     )
 
 
@@ -517,8 +517,6 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
 
         job_data = load_job_for_user(job_store, optimization_id, current_user)
         if _protected_api_runtime(job_data) is not None:
-            if req.max_cost_credits is None:
-                raise DomainError("serve.request_budget_required", status=400)
             key = (idempotency_key or "").strip()
             if not key:
                 raise DomainError("budget.idempotency_required", status=400)

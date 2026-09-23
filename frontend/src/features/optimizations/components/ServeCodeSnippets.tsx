@@ -40,7 +40,6 @@ export function ServeCodeSnippets({
     .join(", ");
   const inputsJson = JSON.stringify({
     inputs: Object.fromEntries(serveInfo.input_fields.map((f) => [f, valueFor(f)])),
-    max_cost_credits: 10,
   });
   const tokenHint = `# Generate a token in Settings → API, then set it in your environment`;
   const snippets = {
@@ -69,7 +68,7 @@ export function ServeCodeSnippets({
       `        "Authorization": f"Bearer {token}",`,
       `        "Idempotency-Key": str(uuid.uuid4()),`,
       `    },`,
-      `    json={"inputs": {${inputsObj}}, "max_cost_credits": 10},`,
+      `    json={"inputs": {${inputsObj}}},`,
       `)`,
       ``,
       `# Parse and print the results`,
@@ -90,7 +89,7 @@ export function ServeCodeSnippets({
       `  },`,
       `  body: JSON.stringify({ inputs: { ${serveInfo.input_fields
         .map((f) => `${f}: ${JSON.stringify(valueFor(f))}`)
-        .join(", ")} }, max_cost_credits: 10 }),`,
+        .join(", ")} } }),`,
       `});`,
       ``,
       `// Parse and use the results`,
@@ -117,7 +116,6 @@ export function ServeCodeSnippets({
       `\t\t"inputs": map[string]string{`,
       ...serveInfo.input_fields.map((f) => `\t\t\t"${f}": ${JSON.stringify(valueFor(f))},`),
       `\t\t},`,
-      `\t\t"max_cost_credits": 10,`,
       `\t})`,
       ``,
       `\t// Send an authenticated POST request to the optimized program`,
