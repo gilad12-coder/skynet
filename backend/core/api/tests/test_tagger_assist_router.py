@@ -728,43 +728,80 @@ def test_ownership_enforced_on_assist_routes() -> None:
     assert resp.status_code == 404
 
 
-def test_synthesize_forwards_brief_and_returns_rows(monkeypatch) -> None:
-    """The synthesize route forwards the brief, columns and count and meters the run."""
+_SYNTHETIC_BODY = {
+    **_SESSION_BODY,
+    "config": {"mode": "freetext", "modeProvisional": True, "inputColumns": [], "synthetic": True},
+    "columns": [],
+    "data": [],
+    "annotations": {},
+    "assist": {**_SESSION_BODY["assist"], "model": "openai/gpt-test", "provenance": {}},
+}
+
+
+def test_synthesize_persists_rows_on_the_session(monkeypatch) -> None:
+    """The route writes the rows with the session's model and stores them as input columns."""
     seen: dict = {}
 
     def fake_synthesize(brief, columns, count, usage_sink=None, model_config=None):
         """Capture the request and return a tiny dataset."""
         seen.update({"brief": brief, "columns": columns, "count": count, "model": model_config.name})
-        return ["text"], [{"text": "Card declined"}, {"text": "Love the app"}], 3
+        return ["text", "channel"], [{"text": "Card declined", "channel": "chat"}], 3
 
     monkeypatch.setattr(tagging, "synthesize_rows", fake_synthesize)
     monkeypatch.setattr(tagger_assist, "get_catalog_cached", lambda: _catalog_with("openai/gpt-test"))
     client, _ = _client(_ALICE)
+    resp = client.post("/tagging-sessions", json=_SYNTHETIC_BODY)
+    assert resp.status_code == 201, resp.text
+    session_id = resp.json()["id"]
     resp = client.post(
-        "/tagging-sessions/synthesize",
-        json={"brief": "Bank support chats", "rows": 2, "columns": ["text"], "model": "openai/gpt-test"},
+        f"/tagging-sessions/{session_id}/assist/synthesize",
+        json={"brief": "Bank support chats", "rows": 1, "columns": ["text", "channel"]},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["columns"] == ["text"]
-    assert [r["text"] for r in body["rows"]] == ["Card declined", "Love the app"]
+    assert body["columns"] == ["text", "channel"]
+    assert body["rows"] == [
+        {
+            "text": "text: Card declined\nchannel: chat",
+            "channel": "chat",
+            "id": 1,
+            "fields": [{"column": "text", "value": "Card declined"}, {"column": "channel", "value": "chat"}],
+        }
+    ]
     assert body["credits"] == 3
     assert body["model"] == "openai/gpt-test"
-    assert seen == {"brief": "Bank support chats", "columns": ["text"], "count": 2, "model": "openai/gpt-test"}
+    assert seen == {"brief": "Bank support chats", "columns": ["text", "channel"], "count": 1, "model": "openai/gpt-test"}
+    detail = client.get(f"/tagging-sessions/{session_id}").json()
+    assert detail["row_count"] == 1
+    assert detail["columns"] == ["text", "channel"]
+    assert detail["config"]["inputColumns"] == ["text", "channel"]
+    assert detail["data"] == body["rows"]
+    # A second run would overwrite generated rows, so it is refused.
+    resp = client.post(
+        f"/tagging-sessions/{session_id}/assist/synthesize", json={"brief": "Bank support chats", "rows": 1}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "tagger.assist.not_synthetic"
 
 
-def test_synthesize_validates_and_rejects_unknown_model(monkeypatch) -> None:
-    """Row-count and column limits are enforced, and a non-catalog model is refused before spending."""
+def test_synthesize_refuses_sessions_with_data_or_unknown_models(monkeypatch) -> None:
+    """Only data-less synthetic sessions generate, and a non-catalog model is refused before spending."""
     called = []
     monkeypatch.setattr(tagging, "synthesize_rows", lambda *a, **k: called.append(1))
     monkeypatch.setattr(tagger_assist, "get_catalog_cached", lambda: _catalog_with("openai/gpt-test"))
     client, _ = _client(_ALICE)
-    assert client.post("/tagging-sessions/synthesize", json={"brief": "x", "rows": 5}).status_code == 422
+    uploaded = _create(client)
+    resp = client.post(f"/tagging-sessions/{uploaded}/assist/synthesize", json={"brief": "Reviews", "rows": 5})
+    assert resp.status_code == 409
+    body = dict(_SYNTHETIC_BODY)
+    body["assist"] = {**_SYNTHETIC_BODY["assist"], "model": "openai/nope"}
+    session_id = client.post("/tagging-sessions", json=body).json()["id"]
     too_many = tagging.MAX_SYNTH_ROWS + 1
-    assert client.post("/tagging-sessions/synthesize", json={"brief": "Reviews", "rows": too_many}).status_code == 422
     resp = client.post(
-        "/tagging-sessions/synthesize", json={"brief": "Reviews", "rows": 5, "model": "openai/nope"}
+        f"/tagging-sessions/{session_id}/assist/synthesize", json={"brief": "Reviews", "rows": too_many}
     )
+    assert resp.status_code == 422
+    resp = client.post(f"/tagging-sessions/{session_id}/assist/synthesize", json={"brief": "Reviews", "rows": 5})
     assert resp.status_code == 422
     assert resp.json()["code"] == "tagger.assist.unknown_model"
     assert called == []
@@ -778,7 +815,9 @@ def test_synthesize_maps_engine_failure_to_502(monkeypatch) -> None:
         raise RuntimeError("no rows")
 
     monkeypatch.setattr(tagging, "synthesize_rows", boom)
+    monkeypatch.setattr(tagger_assist, "get_catalog_cached", lambda: _catalog_with("openai/gpt-test"))
     client, _ = _client(_ALICE)
-    resp = client.post("/tagging-sessions/synthesize", json={"brief": "Reviews", "rows": 5})
+    session_id = client.post("/tagging-sessions", json=_SYNTHETIC_BODY).json()["id"]
+    resp = client.post(f"/tagging-sessions/{session_id}/assist/synthesize", json={"brief": "Reviews", "rows": 5})
     assert resp.status_code == 502
     assert resp.json()["code"] == "tagger.assist.llm_failed"

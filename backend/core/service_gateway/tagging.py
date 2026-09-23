@@ -43,6 +43,9 @@ from .language_models import (
 logger = logging.getLogger(__name__)
 
 MAX_INTERVIEW_QUESTIONS = 5
+# A synthetic session's interview defines the dataset before the task, so it
+# gets room for both.
+MAX_SYNTHETIC_INTERVIEW_QUESTIONS = 8
 BATCH_SIZE = 10
 BATCH_CONCURRENCY = 4
 MAX_EXAMPLES = 40
@@ -188,7 +191,11 @@ class InterviewTurnSig(dspy.Signature):
     Y when ..."), not process. Whenever the question has a small set of likely
     answers, offer 2-4 of them in ``options_json`` — each a short pickable
     answer with a one-line description of what choosing it means — so the user
-    can answer in one click. Every option must be a concrete, self-contained
+    can answer in one click. When the task description says no dataset exists
+    yet, the dataset is yours to specify from the interview alone: pin down
+    the data first (domain, what kind of text each row holds, the variety and
+    edge cases to include, the language, how many rows), then the task, and
+    when done describe that data in ``dataset_json``; otherwise leave it {}. Every option must be a concrete, self-contained
     answer. The composer under the options is always the free-text path, so
     never spend an option on an escape hatch — no "other", "something else",
     "none of these", "I use my own ...", or any rewording whose real meaning
@@ -228,6 +235,17 @@ class InterviewTurnSig(dspy.Signature):
             '{"categories": ["..."]}; for freetext use {"prompt": "..."}. When the '
             "task description says the answer style is yours to decide, also include "
             '"mode": "binary" | "multiclass" | "freetext" next to its definition.'
+        )
+    )
+    dataset_json: str = dspy.OutputField(
+        desc=(
+            "Only when the task description says no dataset exists yet, and only "
+            'once done: {"brief": <2-5 sentences describing the data to write — '
+            "domain, what each row holds, the variety, tone and edge cases to "
+            "cover, and the language the rows are written in>, "
+            '"columns": [<1-3 snake_case column names, the main text column '
+            'first>], "rows": <row count the user asked for, default 30>}. '
+            "{} otherwise."
         )
     )
     session_title: str = dspy.OutputField(
@@ -390,6 +408,26 @@ def task_description(config: dict[str, Any]) -> str:
         A compact English framing of the task; user-authored parts (question,
         category names, prompt) are passed through verbatim in their language.
     """
+    # A synthetic session has no rows until the interview has specified them:
+    # the data and the task are both derived from the conversation alone.
+    if config.get("_synthetic_pending"):
+        return (
+            "No dataset exists yet: the user chose to label synthetic data, and the "
+            "rows will be generated from a specification you derive from this "
+            "interview. Your first job is to pin down the data: open by asking what "
+            "domain the rows come from and what kind of text each row holds (for "
+            "example support chats, product reviews, headlines); then cover the "
+            "variety and edge cases the data should include, the language the rows "
+            "are written in, and how many rows the user wants (offer 30 / 50 / 100 "
+            "as options). Then define the labeling task: what the user wants to learn "
+            "or decide about each row and what the labels will be used for. You decide "
+            "the answer style — binary (one yes/no question per row), multiclass (a "
+            "fixed set of categories), or freetext (text extracted or written per "
+            "row) — from the user's goal; ask about it only when the goal genuinely "
+            "fits more than one style. When done, return the data specification in "
+            '"dataset_json" and the chosen style in the task config as "mode" '
+            "together with its matching definition."
+        )
     # A provisional-mode session (assisted setup, no interface picked) leaves
     # the answer style itself to the interview. Autopilot autonomy covers the
     # tagging phase only — the task itself is always defined with the user.
@@ -467,6 +505,17 @@ def summarize_dataset(config: dict[str, Any], columns: list[str], data: list[dic
         A compact text profile: row count, input columns, and sample rows
         spread across the dataset.
     """
+    if config.get("_synthetic_pending"):
+        return json.dumps(
+            {
+                "row_count": 0,
+                "note": (
+                    "No rows exist yet. The dataset is generated after the interview "
+                    "from the specification you return in dataset_json."
+                ),
+            },
+            ensure_ascii=False,
+        )
     input_cols = [str(c) for c in config.get("inputColumns") or []]
     step = max(1, len(data) // SAMPLE_ROWS)
     sample = [_row_text(row) for row in data[::step][:SAMPLE_ROWS]]
@@ -637,7 +686,7 @@ def _interview_inputs(
     return {
         "task_description": task_description(config)
         + (
-            f"\nQuestions asked so far: {asked} of at most {MAX_INTERVIEW_QUESTIONS}."
+            f"\nQuestions asked so far: {asked} of at most {_question_cap(config)}."
             " If the limit is reached you MUST finish now."
             if asked
             else ""
@@ -645,6 +694,46 @@ def _interview_inputs(
         "dataset_summary": summarize_dataset(config, columns, data),
         "transcript_json": json.dumps(turns, ensure_ascii=False),
         "reply_language": _reply_language(locale),
+    }
+
+
+def _question_cap(config: dict[str, Any]) -> int:
+    """Return how many questions the interviewer may ask on this session.
+
+    Args:
+        config: The session's interview configuration.
+
+    Returns:
+        The synthetic cap when the dataset is still to be specified, else the
+        regular one.
+    """
+    return MAX_SYNTHETIC_INTERVIEW_QUESTIONS if config.get("_synthetic_pending") else MAX_INTERVIEW_QUESTIONS
+
+
+def normalize_dataset_spec(raw: Any) -> dict[str, Any]:
+    """Normalize a model-produced synthetic dataset specification.
+
+    Args:
+        raw: Parsed ``dataset_json`` output.
+
+    Returns:
+        ``{brief, columns, rows}`` with the brief non-empty, the column names
+        cleaned and the row count clamped to ``1..MAX_SYNTH_ROWS``; an empty
+        mapping when there is no usable brief.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    brief = str(raw.get("brief") or "").strip()[:2000]
+    if not brief:
+        return {}
+    try:
+        rows = int(raw.get("rows") or 0)
+    except (TypeError, ValueError):
+        rows = 0
+    return {
+        "brief": brief,
+        "columns": _clean_column_names(raw.get("columns")),
+        "rows": max(1, min(rows or 30, MAX_SYNTH_ROWS)),
     }
 
 
@@ -731,7 +820,7 @@ def _parse_interview_prediction(pred: Any, asked: int, config: dict[str, Any]) -
     done = str(getattr(pred, "done", "")).strip().lower() in {"true", "yes", "1"}
     rubric = _parse_json(getattr(pred, "rubric_json", "[]"), [])
     rubric = [str(r).strip() for r in rubric if str(r).strip()] if isinstance(rubric, list) else []
-    if asked >= MAX_INTERVIEW_QUESTIONS and not done:
+    if asked >= _question_cap(config) and not done:
         done = True
     options = normalize_options(_parse_json(getattr(pred, "options_json", "[]"), []))
     task_override = _normalize_task_override(
@@ -743,11 +832,17 @@ def _parse_interview_prediction(pred: Any, asked: int, config: dict[str, Any]) -
     # reaches the session card. The DB name column caps at 200; 80 keeps
     # session cards to one line.
     title = strip_adapter_debris(str(getattr(pred, "session_title", ""))).strip().strip("\"'")[:80]
+    dataset_spec = (
+        normalize_dataset_spec(_parse_json(getattr(pred, "dataset_json", "{}"), {}))
+        if config.get("_synthetic_pending")
+        else {}
+    )
     return {
         "message": str(getattr(pred, "message", "")).strip(),
         "options": [] if done else options,
         "rubric": rubric if done else [],
         "task_override": task_override if done else {},
+        "dataset_spec": dataset_spec if done else {},
         "title": title if done else "",
         "done": done,
         "model": assist_model_name(),
@@ -758,7 +853,14 @@ def _parse_interview_prediction(pred: Any, asked: int, config: dict[str, Any]) -
 # structure, not prose; these markers are the transition points where a stream
 # that began as prose drifts into the payload's remaining fields.
 _LEAK_PREFIXES = ("{", "[", "`")
-_LEAK_MARKERS = ("[[ ##", '"options_json"', '"rubric_json"', '"task_config_json"', '"session_title"')
+_LEAK_MARKERS = (
+    "[[ ##",
+    '"options_json"',
+    '"rubric_json"',
+    '"task_config_json"',
+    '"dataset_json"',
+    '"session_title"',
+)
 
 
 class _MessageLeakGuard:
@@ -1605,3 +1707,29 @@ def synthesize_rows(
         selected.token_source or TOKEN_SOURCE_MANAGED,
     )
     return settled, rows[:count], credits
+
+
+def build_data_rows(columns: list[str], rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Turn generated rows into the tagger's stored ``DataRow`` payloads.
+
+    Mirrors the setup wizard's mapping of a parsed file: ``text`` is the flat
+    string the export, search and single-column fallbacks read, prefixed
+    per column when a row spans several; ``fields`` is what the annotation
+    UI renders.
+
+    Args:
+        columns: The dataset's (input) columns, in display order.
+        rows: Generated rows keyed by those columns.
+
+    Returns:
+        Rows carrying ``id``, ``text`` and ``fields`` next to their cells.
+    """
+    built: list[dict[str, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        fields = [{"column": col, "value": row.get(col, "")} for col in columns]
+        text = "\n".join(
+            f"{field['column']}: {field['value']}" if len(columns) > 1 else str(field["value"])
+            for field in fields
+        )
+        built.append({**row, "id": index, "text": text, "fields": fields})
+    return built

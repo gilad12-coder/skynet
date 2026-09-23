@@ -1717,23 +1717,24 @@ export function taggerAssistAutotagCancel(sessionId: string) {
 }
 
 /**
- * Generate a fully synthetic dataset from a plain-language brief — the setup
- * wizard's third data source next to upload and library. Nothing is persisted;
- * the caller creates the session with the returned rows like a parsed file.
+ * Generate a synthetic session's dataset from the specification the
+ * interview derived. The server writes the rows with the session's tagging
+ * model and persists them on the session; the returned rows are what it
+ * stored.
  */
-export function synthesizeTaggerDataset(body: {
-  brief: string;
-  rows: number;
-  columns?: string[];
-  model?: string;
-  model_params?: Record<string, unknown>;
-}) {
+export function synthesizeTaggerDataset(
+  sessionId: string,
+  body: { brief: string; rows: number; columns: string[] },
+) {
   return request<{
     columns: string[];
     rows: Array<Record<string, unknown>>;
     credits: number;
     model: string;
-  }>("/tagging-sessions/synthesize", { method: "POST", body: JSON.stringify(body) });
+  }>(`/tagging-sessions/${sessionId}/assist/synthesize`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 /**

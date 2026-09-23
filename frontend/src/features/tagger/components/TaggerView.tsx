@@ -54,10 +54,7 @@ export function TaggerView({ initialSession }: { initialSession?: TaggerSessionD
     if (new URLSearchParams(window.location.search).has("dataset")) setStartingNew(true);
   }, []);
 
-  useEffect(
-    () => registerTutorialHook("setTaggerStartingNew", setStartingNew),
-    [],
-  );
+  useEffect(() => registerTutorialHook("setTaggerStartingNew", setStartingNew), []);
 
   if (!initialSession && !startingNew) {
     // The shell leaves /tagger unwrapped for the annotation surfaces; the
@@ -125,10 +122,7 @@ export function TaggerView({ initialSession }: { initialSession?: TaggerSessionD
     return (
       <PageContainer full>
         <div className="mb-3">
-          <TaggerBackLink
-            onExit={() => setFocusRow(false)}
-            label={msg("tagger.results.back")}
-          />
+          <TaggerBackLink onExit={() => setFocusRow(false)} label={msg("tagger.results.back")} />
         </div>
         <TaggerAnnotation
           config={tagger.config}
@@ -167,6 +161,8 @@ export function TaggerView({ initialSession }: { initialSession?: TaggerSessionD
           rowCount={tagger.data.length}
           estimate={tagger.estimate}
           onFetchEstimate={() => void tagger.fetchEstimate()}
+          generating={tagger.generating}
+          onGenerateDataset={tagger.generateDataset}
           onSetModel={tagger.setAssistModel}
           onSetInterviewModel={tagger.setInterviewModel}
           onSetInterviewEffort={tagger.setInterviewEffort}
@@ -317,10 +313,7 @@ export function TaggerView({ initialSession }: { initialSession?: TaggerSessionD
       <PageContainer full>
         {browsing && allLabeled ? (
           <div className="mb-3 flex items-center justify-between gap-3">
-            <TaggerBackLink
-              onExit={() => setFocusRow(false)}
-              label={msg("tagger.results.back")}
-            />
+            <TaggerBackLink onExit={() => setFocusRow(false)} label={msg("tagger.results.back")} />
             {finishedAssist && (
               <Tooltip>
                 <TooltipTrigger asChild>

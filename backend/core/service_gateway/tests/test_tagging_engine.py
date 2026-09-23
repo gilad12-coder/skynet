@@ -24,9 +24,11 @@ from ..tagging import (
     _StreamedArrayItems,
     assist_model_config,
     assist_model_name,
+    build_data_rows,
     compile_instructions,
     effective_task_config,
     estimate_credits_for_rows,
+    normalize_dataset_spec,
     normalize_label,
     select_examples,
     summarize_dataset,
@@ -168,6 +170,68 @@ def test_provisional_override_carries_inferred_mode() -> None:
     assert _parse_interview_prediction(pred, 1, provisional)["task_override"] == {}
     pred.task_config_json = '{"mode": "freetext"}'
     assert _parse_interview_prediction(pred, 1, provisional)["task_override"] == {"mode": "freetext"}
+
+
+def test_synthetic_session_interviews_for_the_data_first() -> None:
+    """A data-less synthetic session gets the data-first briefing and an empty summary."""
+    config = {"mode": "freetext", "modeProvisional": True, "synthetic": True, "_synthetic_pending": True}
+    description = task_description(config)
+    assert "No dataset exists yet" in description
+    assert "dataset_json" in description
+    assert "how many rows" in description
+    summary = json.loads(summarize_dataset(config, [], []))
+    assert summary["row_count"] == 0
+    assert "dataset_json" in summary["note"]
+    # Once rows exist the flag is off and the regular provisional briefing applies.
+    assert "No dataset exists yet" not in task_description({"mode": "freetext", "modeProvisional": True, "synthetic": True})
+    assert len(InterviewTurnSig.output_fields) == 7
+    assert list(InterviewTurnSig.output_fields)[-2:] == ["dataset_json", "session_title"]
+
+
+def test_dataset_spec_rides_the_final_turn_of_synthetic_sessions_only() -> None:
+    """The dataset spec is normalized, gated on ``done`` and dropped off synthetic sessions."""
+    pending = {"mode": "freetext", "modeProvisional": True, "synthetic": True, "_synthetic_pending": True}
+    pred = SimpleNamespace(
+        done="true",
+        message="Ready",
+        options_json="[]",
+        rubric_json='["Rule."]',
+        task_config_json='{"mode": "binary", "question": "Is it a complaint?"}',
+        dataset_json='{"brief": " Bank support chats ", "columns": ["text", "", "text", "channel"], "rows": "500"}',
+        session_title="Bank complaints",
+    )
+    turn = _parse_interview_prediction(pred, 3, pending)
+    assert turn["dataset_spec"] == {"brief": "Bank support chats", "columns": ["text", "channel"], "rows": 200}
+    assert turn["task_override"] == {"mode": "binary", "question": "Is it a complaint?"}
+    pred.done = "false"
+    assert _parse_interview_prediction(pred, 3, pending)["dataset_spec"] == {}
+    pred.done = "true"
+    assert _parse_interview_prediction(pred, 3, _FREE)["dataset_spec"] == {}
+    assert normalize_dataset_spec({"brief": "x", "rows": None}) == {"brief": "x", "columns": [], "rows": 30}
+    assert normalize_dataset_spec({"columns": ["text"]}) == {}
+    assert normalize_dataset_spec("nope") == {}
+
+
+def test_synthetic_sessions_get_a_longer_interview() -> None:
+    """The forced finish waits for the synthetic cap, since the data comes first."""
+    pending = {"mode": "freetext", "modeProvisional": True, "synthetic": True, "_synthetic_pending": True}
+    pred = SimpleNamespace(done="false", message="Next?", options_json="[]", rubric_json="[]", task_config_json="{}")
+    assert _parse_interview_prediction(pred, 5, pending)["done"] is False
+    assert _parse_interview_prediction(pred, 8, pending)["done"] is True
+    assert _parse_interview_prediction(pred, 5, _FREE)["done"] is True
+
+
+def test_build_data_rows_mirrors_the_setup_wizard_mapping() -> None:
+    """Rows get ids, structured fields and the flat text the export and search read."""
+    single = build_data_rows(["text"], [{"text": "Card declined"}])
+    assert single == [{"text": "Card declined", "id": 1, "fields": [{"column": "text", "value": "Card declined"}]}]
+    multi = build_data_rows(["text", "channel"], [{"text": "Hi", "channel": "chat"}, {"text": "Bye"}])
+    assert multi[0]["text"] == "text: Hi\nchannel: chat"
+    assert multi[1] == {
+        "text": "text: Bye\nchannel: ",
+        "id": 2,
+        "fields": [{"column": "text", "value": "Bye"}, {"column": "channel", "value": ""}],
+    }
 
 
 def test_interview_title_rides_the_final_turn_only() -> None:

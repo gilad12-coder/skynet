@@ -2,9 +2,9 @@
 
 Drives the tagger's assist modes on top of the persisted session rows:
 the dataset interview (rubric distillation), batched label predictions for
-calibration and review rounds, pre-run credit estimates, and the bulk
-auto-tag job — plus, ahead of any session, a synthetic-dataset generator for
-users who want to label data they do not have yet.
+calibration and review rounds, pre-run credit estimates, the bulk auto-tag
+job — and, on sessions created without data, the synthetic-dataset generator
+that writes the rows from the specification the interview derived.
 
 The bulk job is a ``tagging_autotag`` row in the shared jobs table, claimed
 by the DB-lease background worker (any pod) and executed by
@@ -116,6 +116,7 @@ class InterviewResponse(BaseModel):
     options: list[InterviewOption] = Field(default_factory=list)
     rubric: list[str] = Field(default_factory=list)
     task_override: dict[str, Any] = Field(default_factory=dict)
+    dataset_spec: dict[str, Any] = Field(default_factory=dict)
     done: bool
     model: str | None = None
 
@@ -162,7 +163,7 @@ class AutotagStatusResponse(BaseModel):
 
 
 class SynthesizeRequest(BaseModel):
-    """Brief for a fully synthetic dataset to label, generated before any session exists."""
+    """The dataset specification the interview derived, echoed by the client."""
 
     brief: str = Field(
         min_length=3,
@@ -175,18 +176,10 @@ class SynthesizeRequest(BaseModel):
         max_length=tagging.MAX_SYNTH_COLUMNS,
         description="Column names to fill; empty lets the model choose them.",
     )
-    model: str | None = Field(
-        default=None,
-        description="LiteLLM id of the catalog model writing the rows; absent uses the tagging default.",
-    )
-    model_params: dict[str, Any] | None = Field(
-        default=None,
-        description="Sampling/billing parameters saved with the chosen model (same shape as assist.modelParams).",
-    )
 
 
 class SynthesizeResponse(BaseModel):
-    """A generated dataset ready to be labeled."""
+    """The generated dataset, now persisted on the session."""
 
     columns: list[str]
     rows: list[dict[str, Any]]
@@ -308,6 +301,8 @@ def _interview_config(row: TaggingSessionModel) -> dict[str, Any]:
     config = _effective_config(row)
     assist = cast("dict[str, Any]", row.assist) or {}
     config["_assist_mode"] = assist.get("mode")
+    # A synthetic session interviews for the data itself until it has rows.
+    config["_synthetic_pending"] = bool(config.get("synthetic")) and not row.data
     return config
 
 
@@ -784,34 +779,41 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
         return {"cancelled": locally_cancelled or store_cancelled}
 
     @router.post(
-        "/tagging-sessions/synthesize",
+        "/tagging-sessions/{session_id}/assist/synthesize",
         response_model=SynthesizeResponse,
-        summary="Generate a synthetic dataset to label",
+        summary="Generate the session's synthetic dataset from the interview's specification",
     )
-    def synthesize_dataset(req: SynthesizeRequest, user: AuthenticatedUserDep) -> SynthesizeResponse:
-        """Write a brand-new dataset from a plain-language brief.
+    def assist_synthesize(session_id: str, req: SynthesizeRequest, user: AuthenticatedUserDep) -> SynthesizeResponse:
+        """Write the rows a synthetic session will label and persist them.
 
-        The setup wizard's third data source next to upload and library: the
-        rows come back to the client, which creates the session with them
-        exactly as it would with a parsed file, so nothing is persisted here.
+        The session was created without data; the interview derived the
+        dataset specification (brief, columns, row count) and the client
+        echoes it here. The rows are written with the session's tagging
+        model, stored on the session row exactly as an uploaded file would
+        be, and every generated column becomes an input column.
 
         Args:
-            req: The brief, the row count, optional column names and the
-                model to write with.
-            user: Authenticated caller; the run is metered to their account.
+            session_id: UUID of the tagger session.
+            req: The dataset specification the interview produced.
+            user: Authenticated caller; needs at least ``editor`` access.
 
         Returns:
-            The settled columns, the generated rows and the credit cost.
+            The settled columns, the stored rows and the credit cost.
 
         Raises:
-            DomainError: 422 when the chosen model is outside the catalog,
-                400 when a BYOK pick lacks a verified connection, 502 when
-                the model produced no usable rows.
+            DomainError: 409 when the session was not created as synthetic or
+                already holds rows, 422 when the chosen model is outside the
+                catalog, 400 when a BYOK pick lacks a verified connection, 502
+                when the model produced no usable rows.
         """
         enforce_llm_credits(job_store, user.username)
-        model_config = _resolve_assist_model(
-            job_store, user.username, {"model": req.model, "modelParams": req.model_params}
-        )
+        with Session(job_store.engine) as db:
+            row = _load_for_role(db, session_id, user)
+            config = cast("dict[str, Any]", row.config)
+            if not config.get("synthetic") or row.data:
+                raise DomainError("tagger.assist.not_synthetic", status=409)
+            assist = cast("dict[str, Any]", row.assist) or {}
+        model_config = _resolve_assist_model(job_store, user.username, assist)
         usage_sink: list = []
         try:
             columns, rows, credits = tagging.synthesize_rows(
@@ -822,7 +824,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                 model_config=model_config,
             )
         except Exception as exc:
-            logger.exception("synthetic dataset generation failed for %s", user.username)
+            logger.exception("synthetic dataset generation failed for session %s", session_id)
             raise DomainError("tagger.assist.llm_failed", status=502) from exc
         finally:
             # A failed slice's completed calls still consumed tokens; bill what ran.
@@ -833,6 +835,15 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                 description="Synthetic tagging dataset",
                 token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
             )
-        return SynthesizeResponse(columns=columns, rows=rows, credits=credits, model=model_config.name)
+        data = tagging.build_data_rows(columns, rows)
+        with Session(job_store.engine) as db:
+            row = _load_for_role(db, session_id, user)
+            row.config = cast(Any, {**cast("dict[str, Any]", row.config), "inputColumns": columns})
+            row.columns = cast(Any, columns)
+            row.data = cast(Any, data)
+            row.row_count = cast(Any, len(data))
+            row.updated_at = cast(Any, datetime.now(UTC))
+            db.commit()
+        return SynthesizeResponse(columns=columns, rows=data, credits=credits, model=model_config.name)
 
     return router
