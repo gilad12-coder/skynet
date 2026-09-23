@@ -27,6 +27,7 @@ from ...billing.budget_amounts import MAX_CREDITS
 from ...billing.metering import meter_llm_run
 from ...config import settings
 from ...constants import (
+    PAYLOAD_OVERVIEW_COLUMN_MAPPING,
     PAYLOAD_OVERVIEW_GENERATION_MODELS,
     PAYLOAD_OVERVIEW_MODEL_NAME,
     PAYLOAD_OVERVIEW_MODEL_SETTINGS,
@@ -380,6 +381,8 @@ def _protected_program_call(
         input_fields = workflow.input_field_names()
         output_fields = workflow.output_field_names()
     if not input_fields:
+        input_fields, output_fields = _column_mapping_fields(overview)
+    if not input_fields:
         raise DomainError("serve.no_declared_inputs", status=400)
     missing = [field for field in input_fields if field not in req.inputs]
     if missing:
@@ -486,6 +489,38 @@ def _artifact_prompt_fields(artifact: Any) -> tuple[list[str], list[str], str | 
         prompt.instructions,
         len(prompt.demos),
     )
+
+
+def _column_mapping_fields(overview: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Read signature field names from the submission's persisted column mapping.
+
+    Flex programs run optimizer-authored code in an interpreter and expose no
+    named predictor, so their artifact carries no ``optimized_prompt``. The
+    column mapping still names every signature input and output field.
+
+    Args:
+        overview: Persisted payload overview.
+
+    Returns:
+        ``(input_fields, output_fields)``, both empty when no mapping exists.
+    """
+    mapping = overview.get(PAYLOAD_OVERVIEW_COLUMN_MAPPING)
+    if not isinstance(mapping, dict):
+        return [], []
+
+    def _names(kind: str) -> list[str]:
+        """Return the signature field names mapped under ``kind``.
+
+        Args:
+            kind: Mapping side, either ``inputs`` or ``outputs``.
+
+        Returns:
+            Field names in their persisted order.
+        """
+        raw = mapping.get(kind)
+        return [name for name in raw if isinstance(name, str)] if isinstance(raw, dict) else []
+
+    return _names("inputs"), _names("outputs")
 
 
 def _workflow_anchor_fields(overview: dict[str, Any]) -> tuple[list[str], list[str]] | None:
@@ -774,6 +809,8 @@ def create_serve_router(*, job_store) -> APIRouter:
         workflow_fields = _workflow_anchor_fields(overview)
         if workflow_fields is not None:
             input_fields, output_fields = workflow_fields
+        if not input_fields:
+            input_fields, output_fields = _column_mapping_fields(overview)
 
         return ServeInfoResponse(
             optimization_id=optimization_id,
@@ -942,6 +979,8 @@ def create_serve_router(*, job_store) -> APIRouter:
             output_fields = workflow_spec.output_field_names()
 
         if not input_fields:
+            input_fields, output_fields = _column_mapping_fields(overview)
+        if not input_fields:
             raise DomainError("serve.no_declared_inputs", status=400)
         missing = [f for f in input_fields if f not in req.inputs]
         if missing:
@@ -1082,6 +1121,8 @@ def create_serve_router(*, job_store) -> APIRouter:
             output_fields = workflow_spec.output_field_names()
 
         if not input_fields:
+            input_fields, output_fields = _column_mapping_fields(overview)
+        if not input_fields:
             raise DomainError("serve.no_declared_inputs", status=400)
         missing = [f for f in input_fields if f not in req.inputs]
         if missing:
@@ -1152,6 +1193,8 @@ def create_serve_router(*, job_store) -> APIRouter:
         """
         artifact, pair, overview = load_pair_program_metadata(job_store, optimization_id, pair_index, current_user)
         input_fields, output_fields, instructions, demo_count = _artifact_prompt_fields(artifact)
+        if not input_fields:
+            input_fields, output_fields = _column_mapping_fields(overview)
         model_name = pair.get("generation_model", "") if isinstance(pair, dict) else pair.generation_model
 
         return ServeInfoResponse(

@@ -117,7 +117,7 @@ from ._helpers import (
 )
 from .constants import TERMINAL_STATUSES
 from .optimizations._local import remap_test_indices
-from .serve import _artifact_prompt_fields
+from .serve import _artifact_prompt_fields, _column_mapping_fields
 
 logger = logging.getLogger(__name__)
 
@@ -1304,6 +1304,8 @@ def create_share_router(*, job_store) -> APIRouter:
         if workflow is not None:
             input_fields = workflow.input_field_names()
             output_fields = workflow.output_field_names()
+        if not input_fields:
+            input_fields, output_fields = _column_mapping_fields(overview)
         if not input_fields:
             raise DomainError("serve.no_declared_inputs", status=400)
         missing = [f for f in input_fields if f not in req.inputs]
