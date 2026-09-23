@@ -11,6 +11,7 @@ import {
   CursorText,
   ListChecks,
   Plus,
+  Sparkle,
   Trash,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -87,6 +88,11 @@ interface Props {
   rowCount: number;
   estimate: AutotagEstimate | null;
   onFetchEstimate: () => void;
+  /** A synthetic session's rows are being written from the interview's
+   *  specification; the launch button shows the wait. */
+  generating: boolean;
+  /** Write the synthetic rows; resolves false when nothing was written. */
+  onGenerateDataset: () => Promise<boolean>;
   /** Persist the picked tagging model config on the session's assist state. */
   onSetModel: (config: ModelConfig) => void;
   /** Persist the interviewer's model (the composer's model menu). */
@@ -124,6 +130,8 @@ export function TaggerInterview({
   estimate,
   onFetchEstimate,
   onSetModel,
+  generating,
+  onGenerateDataset,
   onSetInterviewModel,
   onSetInterviewEffort,
   onSend,
@@ -137,10 +145,16 @@ export function TaggerInterview({
   useCompletionNotification(busy, () => msg("notify.interview.turn"));
   const [draft, setDraft] = useState("");
   const done = assist.interview.done;
+  // A synthetic session has no rows until the interview has specified them.
+  const datasetPending = Boolean(config.synthetic) && rowCount === 0;
   // Skipping asks the interviewer to finish with its best guess, so it only
-  // makes sense once the agent has seen the data and said something.
+  // makes sense once the agent has seen the data and said something — and
+  // never while the data itself is still being specified.
   const canSkip =
-    !done && !busy && assist.interview.turns.some((turn) => turn.role === "assistant");
+    !done &&
+    !busy &&
+    !datasetPending &&
+    assist.interview.turns.some((turn) => turn.role === "assistant");
   const messages: AgentMessage[] = assist.interview.turns.map((turn) => ({
     role: turn.role,
     content: turn.content,
@@ -171,9 +185,13 @@ export function TaggerInterview({
         <RubricCard
           config={config}
           assist={assist}
-          rowCount={rowCount}
+          rowCount={datasetPending ? (assist.datasetSpec?.rows ?? 0) : rowCount}
+          datasetPending={datasetPending}
+          generating={generating}
+          error={error}
           estimate={estimate}
           onFetchEstimate={onFetchEstimate}
+          onGenerateDataset={onGenerateDataset}
           onSetModel={onSetModel}
           onConfirm={onConfirmRubric}
         />
@@ -378,26 +396,36 @@ function RubricCard({
   config,
   assist,
   rowCount,
+  datasetPending,
+  generating,
+  error,
   estimate,
   onFetchEstimate,
+  onGenerateDataset,
   onSetModel,
   onConfirm,
 }: {
   config: TaggerConfig;
   assist: AssistState;
   rowCount: number;
+  /** The rows don't exist yet: the launch writes them from the spec first. */
+  datasetPending: boolean;
+  generating: boolean;
+  error: string | null;
   estimate: AutotagEstimate | null;
   onFetchEstimate: () => void;
+  onGenerateDataset: () => Promise<boolean>;
   onSetModel: (config: ModelConfig) => void;
   onConfirm: (rubric: string[], task: TaskContract) => void;
 }) {
   const autopilot = assist.mode === "autopilot";
   // Cost before commitment: the bulk button carries the live estimate, so it
   // is fetched the moment the contract card appears — and again whenever the
-  // tagging model changes, since pricing is per model.
+  // tagging model changes, since pricing is per model. Priced from real rows,
+  // so it waits until a synthetic dataset exists.
   useEffect(() => {
-    if (autopilot) onFetchEstimate();
-  }, [autopilot, onFetchEstimate, assist.model]);
+    if (autopilot && !datasetPending) onFetchEstimate();
+  }, [autopilot, datasetPending, onFetchEstimate, assist.model]);
   // Stable identity per assist snapshot: the model dialog resyncs its draft
   // whenever this prop changes, so an inline object would reset an open
   // dialog on any unrelated re-render (e.g. the estimate arriving).
@@ -505,8 +533,11 @@ function RubricCard({
       cancelled = true;
     };
   }, [catalogModels]);
-  const launch = () => {
-    if (launching) return;
+  const launch = async () => {
+    if (launching || generating) return;
+    // A synthetic session writes its rows first, with the wait shown on the
+    // button; the splash only plays once there is data to launch into.
+    if (datasetPending && !(await onGenerateDataset())) return;
     setLaunching(true);
     window.setTimeout(confirm, SUBMIT_SPLASH_HOLD_MS);
   };
@@ -541,6 +572,38 @@ function RubricCard({
             "lg:[mask-image:linear-gradient(to_bottom,black,black_calc(100%-10px),transparent)]",
           )}
         >
+          {datasetPending && assist.datasetSpec && (
+            <Card className="shrink-0">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Sparkle className="size-4 text-primary" />
+                  {msg("tagger.assist.rubric.dataset_title")}
+                </CardTitle>
+                <CardDescription>{msg("tagger.assist.rubric.dataset_hint")}</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <p className="text-sm leading-relaxed" dir="auto">
+                  {assist.datasetSpec.brief}
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                  <span className="rounded-md border border-border/60 bg-muted/40 px-2 py-0.5 tabular-nums">
+                    {formatMsg("tagger.assist.rubric.dataset_rows", {
+                      count: assist.datasetSpec.rows,
+                    })}
+                  </span>
+                  {assist.datasetSpec.columns.map((column) => (
+                    <span
+                      key={column}
+                      className="rounded-md border border-border/60 bg-muted/40 px-2 py-0.5 font-mono"
+                    >
+                      {column}
+                    </span>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="shrink-0">
             <CardHeader>
               <CardTitle className="text-base">
@@ -745,8 +808,8 @@ function RubricCard({
         <Rise delay={0.16} className="flex min-w-0 justify-end lg:min-h-0">
           <motion.button
             type="button"
-            onClick={launch}
-            disabled={!taskValid || launching}
+            onClick={() => void launch()}
+            disabled={!taskValid || launching || generating}
             animate={{ scale: [1, 1.01, 1] }}
             transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
             className={cn(
@@ -761,11 +824,17 @@ function RubricCard({
           >
             <span className="flex flex-col items-center gap-1 px-4">
               <span>
-                {autopilot
-                  ? formatMsg("tagger.assist.rubric.start_autotag", { rows: rowCount })
-                  : formatMsg("tagger.assist.rubric.start_copilot_round", { rows: copilotBatch })}
+                {generating
+                  ? msg("tagger.assist.rubric.generating")
+                  : autopilot
+                    ? formatMsg("tagger.assist.rubric.start_autotag", { rows: rowCount })
+                    : formatMsg("tagger.assist.rubric.start_copilot_round", { rows: copilotBatch })}
               </span>
-              {!taskValid ? (
+              {!generating && error === "synthesize" ? (
+                <span className="text-xs font-normal text-primary-foreground/90" dir="auto">
+                  {msg("tagger.assist.synthesize_error")}
+                </span>
+              ) : !taskValid ? (
                 <span className="text-xs font-normal text-primary-foreground/75" dir="auto">
                   {msg("auto.features.tagger.components.taggersetup.9")}
                 </span>
@@ -787,14 +856,18 @@ function RubricCard({
                 )
               )}
             </span>
-            <div
-              dir="ltr"
-              className="flex items-center -space-x-7 opacity-70 transition-opacity duration-200 group-hover:opacity-100 rtl:-scale-x-100 [&>svg]:animate-[cascadeDown_1s_ease-in-out_infinite] group-hover:[&>svg]:animate-[cascadeRightHyper_0.5s_ease-out_infinite]"
-            >
-              <CaretRight className="size-7 [animation-delay:0s] group-hover:[animation-delay:0s] lg:size-10" />
-              <CaretRight className="size-7 [animation-delay:0.15s] group-hover:[animation-delay:0.08s] lg:size-10" />
-              <CaretRight className="size-7 [animation-delay:0.3s] group-hover:[animation-delay:0.16s] lg:size-10" />
-            </div>
+            {generating ? (
+              <CircleNotch className="size-7 animate-spin opacity-80 lg:size-10" />
+            ) : (
+              <div
+                dir="ltr"
+                className="flex items-center -space-x-7 opacity-70 transition-opacity duration-200 group-hover:opacity-100 rtl:-scale-x-100 [&>svg]:animate-[cascadeDown_1s_ease-in-out_infinite] group-hover:[&>svg]:animate-[cascadeRightHyper_0.5s_ease-out_infinite]"
+              >
+                <CaretRight className="size-7 [animation-delay:0s] group-hover:[animation-delay:0s] lg:size-10" />
+                <CaretRight className="size-7 [animation-delay:0.15s] group-hover:[animation-delay:0.08s] lg:size-10" />
+                <CaretRight className="size-7 [animation-delay:0.3s] group-hover:[animation-delay:0.16s] lg:size-10" />
+              </div>
+            )}
           </motion.button>
         </Rise>
       </div>
