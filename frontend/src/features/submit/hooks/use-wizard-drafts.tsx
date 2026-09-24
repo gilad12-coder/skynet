@@ -85,7 +85,6 @@ export function useWizardDrafts(): WizardDraftsApi {
   return useContext(WizardDraftsContext);
 }
 
-
 function offerToastId(draftId: string): string {
   return `draft-restore:${draftId}`;
 }
@@ -219,27 +218,30 @@ export function useWizardDraftController({
       .then(({ record: fresh, resetGeneration }) => {
         if (offerRef.current !== current || accountRef.current !== account) return;
         if (clone) {
+          // Cloning was an explicit choice: the clone replaces whatever was
+          // left behind rather than asking over the already filled form. That
+          // holds when the clone failed to load or the old draft cannot be
+          // reset, so the offer never surfaces on a clone link.
           if (!fresh || !hasMeaningfulDraft(fresh)) {
             saver.adopt(null, resetGeneration);
             saver.hold(false);
             dismissOffer();
             return;
           }
-          // A clone that failed to load leaves the saved draft as the only
-          // thing worth offering.
-          if (!clone.data) {
-            setComparingClone(false);
+          const recipe = recipeToOpen(fresh);
+          if (recipe && clone.data && matchesClonedDraft(fresh, clone.recipe, clone.data)) {
+            saver.adopt(fresh, resetGeneration);
+            saver.hold(false);
+            dismissOffer();
+            transitions.current.onContinue(recipe);
             return;
           }
-          if (!matchesClonedDraft(fresh, clone.recipe, clone.data)) {
-            // Cloning was an explicit choice, so the clone replaces whatever
-            // was left behind rather than asking over the already filled form.
-            void discardDraft(saver).then((ok) => {
-              if (!ok && offerRef.current === current) setComparingClone(false);
-            });
-            return;
-          }
-          setComparingClone(false);
+          void discardDraft(saver).then((ok) => {
+            if (ok || offerRef.current !== current) return;
+            dismissOffer();
+            saver.hold(false);
+          });
+          return;
         }
         const recipe = recipeToOpen(fresh);
         if (!fresh || !recipe) {
@@ -254,7 +256,8 @@ export function useWizardDraftController({
       .catch(() => {
         if (offerRef.current !== current) return;
         if (clone) {
-          setComparingClone(false);
+          dismissOffer();
+          saver.hold(false);
           return;
         }
         show("failed", msg("submit.draft.restore.failed"));
