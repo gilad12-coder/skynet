@@ -21,7 +21,6 @@ import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
 import { DatasetPreviewLayout } from "../DatasetPreviewLayout";
 import { DatasetPickerDialog } from "@/features/datasets";
-import { useUserPrefs } from "@/features/settings";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 
@@ -53,7 +52,6 @@ export function DatasetStep({
     setShuffle,
   } = w;
   const [pickerOpen, setPickerOpen] = useState(false);
-  const { prefs } = useUserPrefs();
 
   // Auto-detected kinds straight from the profiler — used to mark a column
   // as "auto-detected as image" (vs a user-driven manual flip) in the UI.
@@ -123,7 +121,7 @@ export function DatasetStep({
               onChange={handleFileUpload}
             />
           </label>
-          {parsedDataset && prefs.advancedMode && (
+          {parsedDataset && (
             <div className="flex items-center justify-between">
               <Label htmlFor="shuffle" className="cursor-pointer text-sm">
                 <HelpTip text={tip("data.shuffle_explanation")}>

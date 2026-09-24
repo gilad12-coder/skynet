@@ -44,7 +44,6 @@ import { ModelChip } from "@/shared/ui/model-chip";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { ModelRoleRow } from "../blackbox/ModelRoleRow";
 import { formatCreditsUsd } from "@/features/billing";
-import { useUserPrefs } from "@/features/settings";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 import { aggregateTokenSource, chargeableBracket } from "../../lib/cost-bracket";
@@ -80,8 +79,6 @@ export function SummaryStep({
   w: SubmitWizardContext;
   onEditStage?: (stage: Exclude<WizardStageId, "review">) => void;
 }) {
-  const { prefs } = useUserPrefs();
-  const advanced = prefs.advancedMode;
   const {
     summaryTab,
     setSummaryTab,
@@ -361,70 +358,57 @@ export function SummaryStep({
                       </div>
                     </div>
                   )}
-                  {/* Split breakdown is advanced-mode machinery. */}
-                  {advanced && (
-                    <>
-                      <Separator />
-                      <div className="space-y-3">
-                        <HelpTip text={tip("data.split_explanation")}>
-                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Stack className="size-3.5" />
-                            {msg("auto.features.submit.components.steps.summarystep.12")}
-                            {TERMS.dataset}
-                          </span>
-                        </HelpTip>
-                        <div className="flex h-3 rounded-full overflow-hidden">
-                          <div
-                            className="bg-[#3D2E22]"
-                            style={{ width: `${split.train * 100}%` }}
-                          />
-                          <div className="bg-[#C8A882]" style={{ width: `${split.val * 100}%` }} />
-                          <div className="bg-[#8C7A6B]" style={{ width: `${split.test * 100}%` }} />
-                        </div>
-                        <div className="grid grid-cols-3 gap-4">
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <HelpTip
-                              text={tip("data.split.train")}
-                              className="items-center gap-1.5"
-                            >
-                              <span className="inline-block w-2 h-2 rounded-full bg-[#3D2E22]" />
-                              {msg("auto.features.submit.components.steps.summarystep.13")}
-                              {split.train}
-                            </HelpTip>
-                          </div>
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <HelpTip text={tip("data.split.val")} className="items-center gap-1.5">
-                              <span className="inline-block w-2 h-2 rounded-full bg-[#C8A882]" />
-                              {msg("auto.features.submit.components.steps.summarystep.14")}
-                              {split.val}
-                            </HelpTip>
-                          </div>
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <HelpTip text={tip("data.split.test")} className="items-center gap-1.5">
-                              <span className="inline-block w-2 h-2 rounded-full bg-[#8C7A6B]" />
-                              {msg("auto.features.submit.components.steps.summarystep.15")}
-                              {split.test}
-                            </HelpTip>
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                  {advanced && (
-                    <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                      <HelpTip text={tip("data.shuffle_explanation")}>
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Shuffle className="size-3.5" />
-                          {msg("auto.features.submit.components.steps.summarystep.16")}
-                        </span>
-                      </HelpTip>
-                      <span className="text-sm font-medium">
-                        {shuffle
-                          ? msg("auto.features.submit.components.steps.summarystep.literal.9")
-                          : msg("auto.features.submit.components.steps.summarystep.literal.10")}
+                  <Separator />
+                  <div className="space-y-3">
+                    <HelpTip text={tip("data.split_explanation")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Stack className="size-3.5" />
+                        {msg("auto.features.submit.components.steps.summarystep.12")}
+                        {TERMS.dataset}
                       </span>
+                    </HelpTip>
+                    <div className="flex h-3 rounded-full overflow-hidden">
+                      <div className="bg-[#3D2E22]" style={{ width: `${split.train * 100}%` }} />
+                      <div className="bg-[#C8A882]" style={{ width: `${split.val * 100}%` }} />
+                      <div className="bg-[#8C7A6B]" style={{ width: `${split.test * 100}%` }} />
                     </div>
-                  )}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <HelpTip text={tip("data.split.train")} className="items-center gap-1.5">
+                          <span className="inline-block w-2 h-2 rounded-full bg-[#3D2E22]" />
+                          {msg("auto.features.submit.components.steps.summarystep.13")}
+                          {split.train}
+                        </HelpTip>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <HelpTip text={tip("data.split.val")} className="items-center gap-1.5">
+                          <span className="inline-block w-2 h-2 rounded-full bg-[#C8A882]" />
+                          {msg("auto.features.submit.components.steps.summarystep.14")}
+                          {split.val}
+                        </HelpTip>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <HelpTip text={tip("data.split.test")} className="items-center gap-1.5">
+                          <span className="inline-block w-2 h-2 rounded-full bg-[#8C7A6B]" />
+                          {msg("auto.features.submit.components.steps.summarystep.15")}
+                          {split.test}
+                        </HelpTip>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between py-2.5 border-b border-border/40">
+                    <HelpTip text={tip("data.shuffle_explanation")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Shuffle className="size-3.5" />
+                        {msg("auto.features.submit.components.steps.summarystep.16")}
+                      </span>
+                    </HelpTip>
+                    <span className="text-sm font-medium">
+                      {shuffle
+                        ? msg("auto.features.submit.components.steps.summarystep.literal.9")
+                        : msg("auto.features.submit.components.steps.summarystep.literal.10")}
+                    </span>
+                  </div>
                 </div>
               )}
 
@@ -555,68 +539,64 @@ export function SummaryStep({
                         ? msg("auto.features.submit.components.steps.summarystep.literal.11")
                         : autoLevel === "medium"
                           ? msg("auto.features.submit.components.steps.summarystep.literal.12")
-                          : msg("auto.features.submit.components.steps.summarystep.literal.13")}
+                          : autoLevel === "heavy"
+                            ? msg("auto.features.submit.components.steps.summarystep.literal.13")
+                            : msg("submit.depth.custom")}
                     </span>
                   </div>
-                  {advanced && (
-                    <>
-                      <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                        <HelpTip text={tip("submit.target_score")}>
-                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Target className="size-3.5" />
-                            {msg("auto.features.submit.components.steps.summarystep.25")}
-                          </span>
-                        </HelpTip>
-                        <span className="text-sm font-medium font-mono" dir="ltr">
-                          {targetScore ? `${targetScore}%` : "—"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                        <HelpTip text={tip("submit.reflection_minibatch")}>
-                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Database className="size-3.5" />
-                            {msg("auto.features.submit.components.steps.summarystep.20")}
-                          </span>
-                        </HelpTip>
-                        <span className="text-sm font-medium font-mono">
-                          {reflectionMinibatchSize || "—"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                        <HelpTip text={tip("submit.eval_rounds")}>
-                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Stack className="size-3.5" />
-                            {msg("auto.features.submit.components.steps.summarystep.21")}
-                          </span>
-                        </HelpTip>
-                        <span className="text-sm font-medium font-mono">{maxFullEvals || "—"}</span>
-                      </div>
-                      <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                        <HelpTip text={tip("submit.metric_calls")}>
-                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Gauge className="size-3.5" />
-                            {msg("submit.metric_calls")}
-                          </span>
-                        </HelpTip>
-                        <span className="text-sm font-medium font-mono">
-                          {maxMetricCalls || "—"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between py-2.5 border-b border-border/40">
-                        <HelpTip text={tip("submit.merge")}>
-                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Shuffle className="size-3.5" />
-                            {msg("auto.features.submit.components.steps.summarystep.22")}
-                          </span>
-                        </HelpTip>
-                        <span className="text-sm font-medium">
-                          {useMerge
-                            ? msg("auto.features.submit.components.steps.summarystep.literal.14")
-                            : msg("auto.features.submit.components.steps.summarystep.literal.15")}
-                        </span>
-                      </div>
-                    </>
-                  )}
+                  <div className="flex items-center justify-between py-2.5 border-b border-border/40">
+                    <HelpTip text={tip("submit.target_score")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Target className="size-3.5" />
+                        {msg("auto.features.submit.components.steps.summarystep.25")}
+                      </span>
+                    </HelpTip>
+                    <span className="text-sm font-medium font-mono" dir="ltr">
+                      {targetScore ? `${targetScore}%` : "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-2.5 border-b border-border/40">
+                    <HelpTip text={tip("submit.reflection_minibatch")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Database className="size-3.5" />
+                        {msg("auto.features.submit.components.steps.summarystep.20")}
+                      </span>
+                    </HelpTip>
+                    <span className="text-sm font-medium font-mono">
+                      {reflectionMinibatchSize || "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-2.5 border-b border-border/40">
+                    <HelpTip text={tip("submit.eval_rounds")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Stack className="size-3.5" />
+                        {msg("auto.features.submit.components.steps.summarystep.21")}
+                      </span>
+                    </HelpTip>
+                    <span className="text-sm font-medium font-mono">{maxFullEvals || "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-2.5 border-b border-border/40">
+                    <HelpTip text={tip("submit.metric_calls")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Gauge className="size-3.5" />
+                        {msg("submit.metric_calls")}
+                      </span>
+                    </HelpTip>
+                    <span className="text-sm font-medium font-mono">{maxMetricCalls || "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-2.5 border-b border-border/40">
+                    <HelpTip text={tip("submit.merge")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Shuffle className="size-3.5" />
+                        {msg("auto.features.submit.components.steps.summarystep.22")}
+                      </span>
+                    </HelpTip>
+                    <span className="text-sm font-medium">
+                      {useMerge
+                        ? msg("auto.features.submit.components.steps.summarystep.literal.14")
+                        : msg("auto.features.submit.components.steps.summarystep.literal.15")}
+                    </span>
+                  </div>
                 </div>
               )}
 
