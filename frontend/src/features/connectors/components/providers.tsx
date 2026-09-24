@@ -58,7 +58,6 @@ export interface ProviderMeta {
   helpUrl?: string;
   helpUrlLabel?: string;
   fields: CredentialField[];
-  viaOAuth: string;
   reconnectHint: string;
   toastConnected: string;
   toastDisconnected: string;
@@ -137,7 +136,6 @@ const generic = (
   id,
   category,
   name,
-  viaOAuth: formatMsg("connectors.via_oauth", { provider: name }),
   reconnectHint: formatMsg("connectors.reconnect_hint", { provider: name }),
   toastConnected: formatMsg("connectors.toast.provider_connected", { provider: name }),
   toastDisconnected: formatMsg("connectors.toast.provider_disconnected", { provider: name }),
@@ -190,7 +188,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
             required: true,
           },
         ],
-        viaOAuth: msg("connectors.hf.via_oauth"),
         reconnectHint: msg("connectors.hf.reconnect_hint"),
         toastConnected: msg("connectors.toast.connected"),
         toastDisconnected: msg("connectors.toast.disconnected"),

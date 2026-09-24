@@ -24,14 +24,16 @@ import {
 const TOUCH_ICON = "size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]";
 const TOUCH_INPUT = "h-[44px] sm:h-8 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]";
 
-/** The status pill next to a linked account. Gold when healthy, destructive when it needs a reconnect. */
+/** The status pill next to a linked account. Green when healthy, destructive when it needs a reconnect. */
 function StatusPill({ status }: { status: NonNullable<ConnectorStatus["status"]> }) {
   const healthy = status === "connected";
   return (
     <span
       className={cn(
         "rounded-full px-2 py-0.5 text-[0.6875rem] font-medium",
-        healthy ? "bg-[#C8A882]/15 text-[#8a6d44]" : "bg-destructive/10 text-destructive",
+        healthy
+          ? "bg-[var(--success-dim)] text-[var(--success)]"
+          : "bg-destructive/10 text-destructive",
       )}
     >
       {healthy ? msg("connectors.status.connected") : msg("connectors.status.invalid")}
@@ -56,34 +58,6 @@ function useConnectorErrorParam() {
       `${url.pathname}${url.search}${url.hash}`,
     );
   }, []);
-}
-
-/** "via …" wording for pasted credentials, by what the provider actually asked for. */
-function credentialsLabel(meta: ProviderMeta) {
-  switch (meta.id) {
-    case "postgres":
-    case "mysql":
-      return msg("connectors.via_connection_url");
-    case "kaggle":
-    case "langfuse":
-      return msg("connectors.via_api_keys");
-    default:
-      return msg("connectors.via_credentials");
-  }
-}
-
-/** How a linked account was authenticated, for the card's subtitle. */
-function authMethodLabel(meta: ProviderMeta, method: ConnectorStatus["auth_method"]) {
-  switch (method) {
-    case "oauth":
-      return meta.viaOAuth;
-    case "service_account":
-      return msg("connectors.via_service_account");
-    case "credentials":
-      return credentialsLabel(meta);
-    default:
-      return msg("connectors.hf.via_token");
-  }
 }
 
 /** One input of the credentials form; secrets are masked, long pastes get a textarea. */
@@ -222,17 +196,15 @@ function ProviderCard({
         <div className="flex min-w-0 items-center gap-2.5">
           <meta.Avatar size={28} />
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-foreground">{meta.name}</span>
-              {connected && status?.status && <StatusPill status={status.status} />}
-            </span>
+            <span className="text-sm font-medium text-foreground">{meta.name}</span>
             {connected ? (
-              <span className="truncate text-xs text-muted-foreground">
-                {status?.account_label
-                  ? formatMsg("connectors.hf.connected_as", { account: status.account_label })
-                  : msg("connectors.status.connected")}
-                {" · "}
-                {authMethodLabel(meta, status?.auth_method ?? null)}
+              <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                {status?.status && <StatusPill status={status.status} />}
+                <span className="truncate">
+                  {status?.account_label
+                    ? formatMsg("connectors.hf.connected_as", { account: status.account_label })
+                    : msg("connectors.status.connected")}
+                </span>
               </span>
             ) : (
               <span className="text-xs text-muted-foreground">{meta.blurb}</span>
