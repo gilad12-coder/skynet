@@ -13,7 +13,9 @@ import {
   Info,
   ListChecks,
   Lock,
+  Minus,
   Play,
+  Plus,
   Terminal,
   Wallet,
   WarningCircle,
@@ -64,6 +66,9 @@ type BudgetContext = Pick<
   availableCredits?: number | null;
 };
 
+const BUDGET_STEP_CREDITS = 100;
+const BUDGET_STEP_BUTTON_CLASS =
+  "flex h-full w-12 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30";
 const ISOLATE_START = "⁦";
 const ISOLATE_END = "⁩";
 
@@ -136,6 +141,15 @@ export function TotalBudgetCard({
   const suggested = creditsToBudgetText(suggestedCeiling, locale);
 
   const parsed = parseBudgetInput(text, locale);
+  // The +/- nudge the limit by a dollar and never below one credit; an empty
+  // field steps from the suggested limit rather than from zero.
+  const nudge = (direction: 1 | -1) => {
+    const base = parsed.kind === "value" ? parsed.value : suggestedCeiling;
+    const next = Math.max(1, base + direction * BUDGET_STEP_CREDITS);
+    setMaxCostCredits(next);
+    setText(creditsToBudgetText(next, locale));
+  };
+  const atFloor = parsed.kind === "value" && parsed.value <= 1;
   const minimum = minimumTotalCredits == null ? null : Math.ceil(minimumTotalCredits);
   const minimumMessage =
     minimum == null
@@ -290,6 +304,15 @@ export function TotalBudgetCard({
             )}
           >
             <div dir="ltr" className="flex h-12 items-center">
+              <button
+                type="button"
+                onClick={() => nudge(-1)}
+                disabled={atFloor}
+                className={BUDGET_STEP_BUTTON_CLASS}
+                aria-label={msg("shared.number_input.decrease")}
+              >
+                <Minus className="size-3" />
+              </button>
               <Input
                 id="totalBudgetInput"
                 inputMode="numeric"
@@ -304,11 +327,19 @@ export function TotalBudgetCard({
                 }}
                 placeholder={formatMsg("submit.budget.placeholder", { suggested })}
                 dir="ltr"
-                className="h-full rounded-none border-0 bg-transparent px-4 text-lg tabular-nums shadow-none backdrop-blur-none md:text-lg focus-visible:border-transparent focus-visible:ring-0"
+                className="h-full rounded-none border-0 bg-transparent px-2 text-center text-lg tabular-nums shadow-none backdrop-blur-none md:text-lg focus-visible:border-transparent focus-visible:ring-0"
               />
-              <span id="totalBudgetUnit" className="shrink-0 px-4 text-muted-foreground" dir="auto">
+              <span id="totalBudgetUnit" className="shrink-0 pe-1 text-muted-foreground" dir="auto">
                 {unit}
               </span>
+              <button
+                type="button"
+                onClick={() => nudge(1)}
+                className={BUDGET_STEP_BUTTON_CLASS}
+                aria-label={msg("shared.number_input.increase")}
+              >
+                <Plus className="size-3" />
+              </button>
             </div>
             <div className="border-t border-border/40 bg-[#FAF8F5] px-3.5 py-3">
               <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">

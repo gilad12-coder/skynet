@@ -641,14 +641,14 @@ function EditableBudgetCell({
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState<string>(toMb(bytes));
   const [saving, setSaving] = React.useState(false);
-  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const fieldRef = React.useRef<HTMLSpanElement | null>(null);
 
   React.useEffect(() => {
     if (!editing) setDraft(toMb(bytes));
   }, [bytes, editing, toMb]);
 
   React.useEffect(() => {
-    if (editing) inputRef.current?.select();
+    if (editing) fieldRef.current?.querySelector("input")?.select();
   }, [editing]);
 
   const cancel = React.useCallback(() => {
@@ -681,25 +681,32 @@ function EditableBudgetCell({
 
   if (editing) {
     return (
-      <span className="inline-flex items-center justify-center gap-1" dir="ltr">
-        <input
-          ref={inputRef}
-          type="number"
+      <span
+        ref={fieldRef}
+        className="inline-flex items-center justify-center gap-1"
+        dir="ltr"
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            void commit();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            cancel();
+          }
+        }}
+        onBlur={(event) => {
+          // Moving between the field and its own +/- buttons is not leaving it.
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+          cancel();
+        }}
+      >
+        <NumberInput
           min={1}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              void commit();
-            } else if (event.key === "Escape") {
-              event.preventDefault();
-              cancel();
-            }
-          }}
-          onBlur={cancel}
+          value={draft === "" ? "" : Number(draft)}
+          onChange={(value) => setDraft(String(value))}
+          onClear={() => setDraft("")}
           disabled={saving}
-          className="h-7 w-24 rounded-md border border-border/60 bg-background px-2 text-center text-xs tabular-nums outline-none focus:border-primary"
+          className="h-7 w-28 rounded-md [&_button]:size-7 [&_input]:text-xs"
         />
         <span className="text-[0.6875rem] text-muted-foreground">MB</span>
       </span>

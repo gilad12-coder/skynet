@@ -338,13 +338,14 @@ export function BlackboxOptimizerStep({
               htmlFor="bb-stop-at"
               tip="blackbox.config.budget_stop"
             >
-              <Input
+              <NumberInput
                 id="bb-stop-at"
-                inputMode="decimal"
-                value={stopAtScore}
-                onChange={(e) => setStopAtScore(e.target.value)}
-                dir="ltr"
-                className={MOBILE_INPUT_CLASS}
+                value={stopAtScore === "" ? "" : Number(stopAtScore)}
+                onChange={(v) => setStopAtScore(String(v))}
+                onClear={() => setStopAtScore("")}
+                min={0}
+                step={0.1}
+                className={MOBILE_NUMBER_INPUT_CLASS}
               />
             </Field>
             {iterationLimitSupported && (
