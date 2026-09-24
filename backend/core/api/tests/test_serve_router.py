@@ -168,6 +168,26 @@ def serve_client(serve_store: _FakeJobStore) -> TestClient:
     return TestClient(app, raise_server_exceptions=False)
 
 
+def test_serve_info_falls_back_to_column_mapping_fields(serve_client: TestClient, serve_store: _FakeJobStore) -> None:
+    """A Flex artifact carries no prompt; the column mapping still names its fields."""
+    _seed_run_job(
+        serve_store,
+        "flex-run",
+        artifact=ProgramArtifact(program_state_json={}, optimized_prompt=None),
+        overview_extra={
+            "module_name": "flex",
+            "column_mapping": {"inputs": {"review": "text"}, "outputs": {"score": "stars"}},
+        },
+    )
+
+    resp = serve_client.get("/serve/flex-run/info")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["input_fields"] == ["review"]
+    assert body["output_fields"] == ["score"]
+
+
 def test_serve_info_returns_404_for_unknown_id(serve_client: TestClient) -> None:
     """A serve-info request against an unknown id returns 404."""
     resp = serve_client.get("/serve/ghost/info")
