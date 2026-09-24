@@ -117,6 +117,37 @@ const glyphMark =
   ) =>
   ({ size }: { size: number }) => <Glyph size={size} style={{ color }} />;
 
+/**
+ * Google Sheets ships no logo in the icon set: a spreadsheet page with a folded corner and a
+ * 2×2 grid. Drawn on a 16-unit grid with integer edges so it stays crisp at 16px.
+ */
+function GoogleSheetsGlyph({ size, page, grid }: { size: number; page: string; grid: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M4.5 1H9l4 4v8.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 13.5v-11A1.5 1.5 0 0 1 4.5 1Z"
+        fill={page}
+      />
+      <path d="M9 1v4h4Z" fill={grid} fillOpacity={0.5} />
+      <rect x="5" y="8" width="7" height="5" fill={grid} />
+      <rect x="5" y="10" width="7" height="1" fill={page} />
+      <rect x="8" y="8" width="1" height="5" fill={page} />
+    </svg>
+  );
+}
+const GOOGLE_SHEETS_GREEN = "#1E8E3E";
+const GoogleSheetsAvatar = ({ size }: { size: number }) => (
+  <span
+    className="inline-flex shrink-0 items-center justify-center rounded-full"
+    style={{ width: size, height: size, background: GOOGLE_SHEETS_GREEN }}
+  >
+    <GoogleSheetsGlyph size={Math.round(size * (4 / 7))} page="#fff" grid={GOOGLE_SHEETS_GREEN} />
+  </span>
+);
+const GoogleSheetsMark = ({ size }: { size: number }) => (
+  <GoogleSheetsGlyph size={size} page={GOOGLE_SHEETS_GREEN} grid="#fff" />
+);
+
 const KaggleAvatar = glyphAvatar(Trophy, "#20BEFF");
 const KaggleMark = glyphMark(Trophy, "#20BEFF");
 const PostgresAvatar = glyphAvatar(Database, "#336791");
@@ -199,8 +230,8 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "docs", msg("connectors.google_sheets.name")),
         blurb: msg("connectors.google_sheets.blurb"),
-        Avatar: Google.Avatar,
-        Mark: Google.Color,
+        Avatar: GoogleSheetsAvatar,
+        Mark: GoogleSheetsMark,
         oauthButton: msg("connectors.google_sheets.oauth_button"),
         credentialsHelp: msg("connectors.google_sheets.credentials_help"),
         fields: [serviceAccountField()],
