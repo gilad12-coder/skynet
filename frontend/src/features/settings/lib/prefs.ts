@@ -13,13 +13,7 @@ export interface AgentShortcut {
 }
 
 export interface UserPrefs {
-  // The abstraction dial: off (default) hides expert machinery — grid-search
-  // sweeps, low-level optimizer tuning, train/val/test split controls, and
-  // per-split result views — behind a simple single-run flow. A capability
-  // gate, unlike expandAdvanced below.
-  advancedMode: boolean;
-  // Layout preference, not a capability gate: advanced sections are always
-  // reachable; this only pre-expands them everywhere.
+  // Layout preference: the wizard's collapsible sections start expanded.
   expandAdvanced: boolean;
   // Lightweight mode for low-resource machines: kills motion/blur and swaps the
   // heavy visualizations (charts, SVG trajectory tree, code editor) for static
@@ -48,7 +42,6 @@ export interface UserPrefs {
 export type AgentPreferencePatch = Partial<
   Pick<
     UserPrefs,
-    | "advancedMode"
     | "expandAdvanced"
     | "liteMode"
     | "wizardCodeAssist"
@@ -59,7 +52,6 @@ export type AgentPreferencePatch = Partial<
 >;
 
 const AGENT_PREFERENCE_FIELDS: Record<string, keyof AgentPreferencePatch> = {
-  advanced_mode: "advancedMode",
   expand_advanced: "expandAdvanced",
   lite_mode: "liteMode",
   wizard_code_assist: "wizardCodeAssist",
@@ -105,7 +97,6 @@ export function parseAgentPreferencePatch(value: unknown): AgentPreferencePatch 
 }
 
 export const PREF_KEYS: Record<keyof UserPrefs, string> = {
-  advancedMode: "skynet.prefs.advanced-mode",
   expandAdvanced: "skynet.prefs.expand-advanced",
   liteMode: "skynet.prefs.lite-mode",
   wizardCodeAssist: "skynet.prefs.wizard.code-assist",
@@ -133,7 +124,6 @@ const DEFAULT_AGENT_SHORTCUT: AgentShortcut = {
 };
 
 export const DEFAULT_PREFS: UserPrefs = {
-  advancedMode: false,
   expandAdvanced: false,
   liteMode: false,
   wizardCodeAssist: "auto",
@@ -147,11 +137,8 @@ export const DEFAULT_PREFS: UserPrefs = {
   taggerAssistModel: { name: "" },
 };
 
-// `skynet.prefs.advanced-mode` once belonged to a retired toggle that a
-// migration folded into expandAdvanced and deleted. The migration is gone —
-// advancedMode reclaims the key as a real capability gate, and a stale legacy
-// "true" from a browser the migration never reached simply re-enables advanced
-// mode for what was an advanced user.
+// `skynet.prefs.advanced-mode` belonged to a retired toggle; a stale value in
+// an old browser is simply ignored now.
 export function migrateLegacyPrefs(): void {
   /* No pending migrations. Kept so callers don't churn when one appears. */
 }

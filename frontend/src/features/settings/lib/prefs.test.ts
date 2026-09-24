@@ -6,13 +6,13 @@ test("parseAgentPreferencePatch accepts the validated agent response envelope", 
   assert.deepEqual(
     parseAgentPreferencePatch({
       updates: {
-        advanced_mode: true,
+        lite_mode: true,
         wizard_split_mode: "manual",
         agent_trust_mode: "yolo",
       },
     }),
     {
-      advancedMode: true,
+      liteMode: true,
       wizardSplitMode: "manual",
     },
   );

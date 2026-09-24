@@ -23,7 +23,6 @@ import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 import { getOptimizationDataset, getTestResults, getPairTestResults } from "@/shared/lib/api";
-import { useUserPrefs } from "@/features/settings";
 import type {
   OptimizationDatasetResponse,
   OptimizationStatusResponse,
@@ -89,14 +88,6 @@ export function DataTab({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [split, setSplit] = useState<Split>("test");
-  // Simple mode collapses the split machinery: only the scored (test) rows are
-  // shown and the four-way selector disappears — the val-vs-test distinction is
-  // an advanced-mode concept.
-  const { prefs } = useUserPrefs();
-  const advanced = prefs.advancedMode;
-  useEffect(() => {
-    if (!advanced && split !== "test") setSplit("test");
-  }, [advanced, split]);
   const [programType, setProgramType] = useState<ProgramType>("optimized");
   const [testResults, setTestResults] = useState<Record<string, Record<number, EvalExampleResult>>>(
     { optimized: {}, baseline: {} },
@@ -331,13 +322,7 @@ export function DataTab({
   return (
     <div className="space-y-4 mt-4">
       <FadeIn>
-        <p className="text-sm text-muted-foreground">
-          {msg(
-            advanced
-              ? "optimizations.datatab.description"
-              : "optimizations.datatab.description_simple",
-          )}
-        </p>
+        <p className="text-sm text-muted-foreground">{msg("optimizations.datatab.description")}</p>
       </FadeIn>
       {/* Test evaluation bar — shows cached results */}
       {split === "test" && (
@@ -418,40 +403,39 @@ export function DataTab({
 
       <FadeIn delay={0.3}>
         <div className="flex items-center gap-3 flex-wrap">
-          {advanced &&
-            (() => {
-              const splits: Array<[Split, string]> = [
-                ["all", msg("auto.features.optimizations.components.datatab.literal.4")],
-                ["train", msg("auto.features.optimizations.components.datatab.literal.5")],
-                ["val", msg("auto.features.optimizations.components.datatab.literal.6")],
-                ["test", msg("auto.features.optimizations.components.datatab.literal.7")],
-              ];
-              const idx = splits.findIndex(([s]) => s === split);
-              const count = splits.length;
-              return (
+          {(() => {
+            const splits: Array<[Split, string]> = [
+              ["all", msg("auto.features.optimizations.components.datatab.literal.4")],
+              ["train", msg("auto.features.optimizations.components.datatab.literal.5")],
+              ["val", msg("auto.features.optimizations.components.datatab.literal.6")],
+              ["test", msg("auto.features.optimizations.components.datatab.literal.7")],
+            ];
+            const idx = splits.findIndex(([s]) => s === split);
+            const count = splits.length;
+            return (
+              <div
+                className="relative flex w-full rounded-lg bg-muted p-1 gap-1 text-[0.6875rem]"
+                data-tutorial="split-selector"
+              >
                 <div
-                  className="relative flex w-full rounded-lg bg-muted p-1 gap-1 text-[0.6875rem]"
-                  data-tutorial="split-selector"
-                >
-                  <div
-                    className="absolute top-1 bottom-1 rounded-md bg-background shadow-sm transition-[inset-inline-start] duration-150 ease-out"
-                    style={{
-                      width: `calc(${100 / count}% - 6px)`,
-                      insetInlineStart: `calc(${(idx / count) * 100}% + 4px)`,
-                    }}
-                  />
-                  {splits.map(([s, label]) => (
-                    <button
-                      key={s}
-                      onClick={() => setSplit(s)}
-                      className={`relative z-10 flex-1 rounded-md px-3 py-1.5 cursor-pointer text-center transition-colors duration-150 ${split === s ? "text-foreground font-semibold" : "text-foreground/50 hover:text-foreground"}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              );
-            })()}
+                  className="absolute top-1 bottom-1 rounded-md bg-background shadow-sm transition-[inset-inline-start] duration-150 ease-out"
+                  style={{
+                    width: `calc(${100 / count}% - 6px)`,
+                    insetInlineStart: `calc(${(idx / count) * 100}% + 4px)`,
+                  }}
+                />
+                {splits.map(([s, label]) => (
+                  <button
+                    key={s}
+                    onClick={() => setSplit(s)}
+                    className={`relative z-10 flex-1 rounded-md px-3 py-1.5 cursor-pointer text-center transition-colors duration-150 ${split === s ? "text-foreground font-semibold" : "text-foreground/50 hover:text-foreground"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
           <ResetFiltersButton filters={colFilters} />
           <ResetColumnsButton resize={colResize} />
           <div className="text-[0.625rem] text-muted-foreground tabular-nums me-auto">
