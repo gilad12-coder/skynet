@@ -54,7 +54,6 @@ export interface ProviderMeta {
   Mark: React.ComponentType<{ size: number }>;
   /** Label of the OAuth button; absent for providers that only take credentials. */
   oauthButton?: string;
-  credentialsToggle: string;
   credentialsHelp: string;
   helpUrl?: string;
   helpUrlLabel?: string;
@@ -179,7 +178,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         Avatar: HuggingFace.Avatar,
         Mark: HuggingFace.Color,
         oauthButton: msg("connectors.hf.oauth_button"),
-        credentialsToggle: msg("connectors.hf.token_toggle"),
         credentialsHelp: msg("connectors.hf.token_help"),
         helpUrl: "https://huggingface.co/settings/tokens",
         helpUrlLabel: "huggingface.co/settings/tokens",
@@ -207,7 +205,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         Avatar: Google.Avatar,
         Mark: Google.Color,
         oauthButton: msg("connectors.google_sheets.oauth_button"),
-        credentialsToggle: msg("connectors.google_sheets.credentials_toggle"),
         credentialsHelp: msg("connectors.google_sheets.credentials_help"),
         fields: [serviceAccountField()],
       };
@@ -218,7 +215,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         Avatar: Github.Avatar,
         Mark: Github,
         oauthButton: msg("connectors.github.oauth_button"),
-        credentialsToggle: msg("connectors.github.credentials_toggle"),
         credentialsHelp: msg("connectors.github.credentials_help"),
         helpUrl: "https://github.com/settings/tokens",
         helpUrlLabel: "github.com/settings/tokens",
@@ -238,7 +234,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.s3.blurb"),
         Avatar: Aws.Avatar,
         Mark: Aws.Color,
-        credentialsToggle: msg("connectors.s3.credentials_toggle"),
         credentialsHelp: msg("connectors.s3.credentials_help"),
         fields: [
           {
@@ -272,7 +267,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.gcs.blurb"),
         Avatar: GoogleCloud.Avatar,
         Mark: GoogleCloud.Color,
-        credentialsToggle: msg("connectors.gcs.credentials_toggle"),
         credentialsHelp: msg("connectors.gcs.credentials_help"),
         fields: [serviceAccountField(), { key: "bucket", label: msg("connectors.field.bucket") }],
       };
@@ -282,7 +276,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.azure_blob.blurb"),
         Avatar: Azure.Avatar,
         Mark: Azure.Color,
-        credentialsToggle: msg("connectors.azure_blob.credentials_toggle"),
         credentialsHelp: msg("connectors.azure_blob.credentials_help"),
         fields: [
           {
@@ -302,7 +295,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.kaggle.blurb"),
         Avatar: KaggleAvatar,
         Mark: KaggleMark,
-        credentialsToggle: msg("connectors.kaggle.credentials_toggle"),
         credentialsHelp: msg("connectors.kaggle.credentials_help"),
         helpUrl: "https://www.kaggle.com/settings",
         helpUrlLabel: "kaggle.com/settings",
@@ -318,7 +310,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         Avatar: Google.Avatar,
         Mark: Google.Color,
         oauthButton: msg("connectors.google_drive.oauth_button"),
-        credentialsToggle: msg("connectors.google_drive.credentials_toggle"),
         credentialsHelp: msg("connectors.google_drive.credentials_help"),
         fields: [serviceAccountField()],
       };
@@ -329,7 +320,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         Avatar: Microsoft.Avatar,
         Mark: Microsoft.Color,
         oauthButton: msg("connectors.onedrive.oauth_button"),
-        credentialsToggle: "",
         credentialsHelp: "",
         fields: [],
       };
@@ -339,7 +329,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.notion.blurb"),
         Avatar: Notion.Avatar,
         Mark: Notion,
-        credentialsToggle: msg("connectors.notion.credentials_toggle"),
         credentialsHelp: msg("connectors.notion.credentials_help"),
         helpUrl: "https://www.notion.so/profile/integrations",
         helpUrlLabel: "notion.so/profile/integrations",
@@ -357,7 +346,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.postgres.blurb"),
         Avatar: PostgresAvatar,
         Mark: PostgresMark,
-        credentialsToggle: msg("connectors.postgres.credentials_toggle"),
         credentialsHelp: msg("connectors.postgres.credentials_help"),
         fields: [
           secretField(
@@ -373,7 +361,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.mysql.blurb"),
         Avatar: MySqlAvatar,
         Mark: MySqlMark,
-        credentialsToggle: msg("connectors.mysql.credentials_toggle"),
         credentialsHelp: msg("connectors.mysql.credentials_help"),
         fields: [
           secretField(
@@ -389,7 +376,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.bigquery.blurb"),
         Avatar: BigQueryAvatar,
         Mark: BigQueryMark,
-        credentialsToggle: msg("connectors.bigquery.credentials_toggle"),
         credentialsHelp: msg("connectors.bigquery.credentials_help"),
         fields: [
           serviceAccountField(),
@@ -406,7 +392,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.snowflake.blurb"),
         Avatar: Snowflake.Avatar,
         Mark: Snowflake.Color,
-        credentialsToggle: msg("connectors.snowflake.credentials_toggle"),
         credentialsHelp: msg("connectors.snowflake.credentials_help"),
         fields: [
           {
@@ -426,7 +411,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.langfuse.blurb"),
         Avatar: Langfuse.Avatar,
         Mark: Langfuse.Color,
-        credentialsToggle: msg("connectors.langfuse.credentials_toggle"),
         credentialsHelp: msg("connectors.langfuse.credentials_help"),
         fields: [
           {
@@ -453,7 +437,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.langsmith.blurb"),
         Avatar: LangSmith.Avatar,
         Mark: LangSmith.Color,
-        credentialsToggle: msg("connectors.langsmith.credentials_toggle"),
         credentialsHelp: msg("connectors.langsmith.credentials_help"),
         helpUrl: "https://smith.langchain.com/settings",
         helpUrlLabel: "smith.langchain.com/settings",
@@ -476,7 +459,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.braintrust.blurb"),
         Avatar: BraintrustAvatar,
         Mark: BraintrustMark,
-        credentialsToggle: msg("connectors.braintrust.credentials_toggle"),
         credentialsHelp: msg("connectors.braintrust.credentials_help"),
         helpUrl: "https://www.braintrust.dev/app/settings?subroute=api-keys",
         helpUrlLabel: "braintrust.dev/app/settings",

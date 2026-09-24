@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { toast } from "react-toastify";
-import { ArrowSquareOut, CircleNotch, Key, Trash, X } from "@/shared/ui/icons";
+import { ArrowSquareOut, CircleNotch, FloppyDisk, Key, Trash, X } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
@@ -260,7 +260,7 @@ function ProviderCard({
               className={TOUCH_BUTTON}
             >
               <Key className="size-3.5" />
-              {meta.credentialsToggle}
+              {msg("settings.keys.add")}
             </Button>
           )}
           {!connected && meta.fields.length === 0 && status && !status.oauth_available && (
@@ -297,74 +297,87 @@ function ProviderCard({
       )}
 
       {!connected && formOpen && (
-        <div className="mt-2.5 flex flex-col gap-2.5 animate-in fade-in-0 slide-in-from-top-1">
-          <div className={cn("grid gap-2.5", meta.fields.length > 2 && "sm:grid-cols-2")}>
-            {meta.fields.map((field, index) => {
-              const id = `connector-${meta.id}-${field.key}`;
-              return (
-                <div
-                  key={field.key}
-                  className={cn("flex flex-col gap-1", field.multiline && "sm:col-span-2")}
-                >
-                  <Label htmlFor={id} className="text-xs">
-                    {field.label}
-                  </Label>
-                  <CredentialInput
-                    field={field}
-                    id={id}
-                    value={values[field.key] ?? ""}
-                    onChange={(value) => setValues((prev) => ({ ...prev, [field.key]: value }))}
-                    autoFocus={index === 0}
-                    onSubmit={() => void handleSave()}
-                    onCancel={closeForm}
-                  />
-                </div>
-              );
-            })}
-          </div>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-[0.6875rem] text-muted-foreground/80">
-              {meta.credentialsHelp}
-              {meta.helpUrl && (
-                <>
-                  {" "}
-                  <a
-                    href={meta.helpUrl}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="inline-flex items-center gap-0.5 font-medium text-[#8a6d44] underline-offset-2 hover:underline"
-                  >
-                    {meta.helpUrlLabel}
-                    <ArrowSquareOut className="size-3" />
-                  </a>
-                </>
-              )}
-            </p>
-            <div className="flex shrink-0 items-center justify-end gap-2">
-              <Button
-                size="sm"
-                onClick={handleSave}
-                disabled={!complete || saving}
-                className={TOUCH_BUTTON}
-              >
-                {saving ? (
-                  <CircleNotch className="size-3.5 animate-spin" />
+        <div className="mt-2.5 flex flex-col gap-2 animate-in fade-in-0 slide-in-from-top-1">
+          {meta.fields.map((field, index) => {
+            const id = `connector-${meta.id}-${field.key}`;
+            const last = index === meta.fields.length - 1;
+            const input = (
+              <CredentialInput
+                field={field}
+                id={id}
+                value={values[field.key] ?? ""}
+                onChange={(value) => setValues((prev) => ({ ...prev, [field.key]: value }))}
+                autoFocus={index === 0}
+                onSubmit={() => void handleSave()}
+                onCancel={closeForm}
+              />
+            );
+            return (
+              <div key={field.key} className="flex flex-col gap-1">
+                <Label htmlFor={id} className="text-xs">
+                  {field.label}
+                </Label>
+                {last ? (
+                  <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                    <div className="min-w-0 flex-1">{input}</div>
+                    <div className="flex items-center justify-end gap-2">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="icon-sm"
+                            onClick={handleSave}
+                            disabled={!complete || saving}
+                            className={TOUCH_ICON}
+                            aria-label={msg("settings.keys.save")}
+                          >
+                            {saving ? (
+                              <CircleNotch className="size-3.5 animate-spin" />
+                            ) : (
+                              <FloppyDisk className="size-3.5" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{msg("settings.keys.save")}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={closeForm}
+                            className={TOUCH_ICON}
+                            aria-label={msg("settings.keys.cancel")}
+                          >
+                            <X className="size-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{msg("settings.keys.cancel")}</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </div>
                 ) : (
-                  <Key className="size-3.5" />
+                  input
                 )}
-                {msg("connectors.hf.token_save")}
-              </Button>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                onClick={closeForm}
-                className={TOUCH_ICON}
-                aria-label={msg("connectors.cancel")}
-              >
-                <X className="size-3.5" />
-              </Button>
-            </div>
-          </div>
+              </div>
+            );
+          })}
+          <p className="text-[0.6875rem] text-muted-foreground/70">
+            {meta.credentialsHelp}
+            {meta.helpUrl && (
+              <>
+                {" "}
+                <a
+                  href={meta.helpUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-0.5 font-medium text-[#8a6d44] underline-offset-2 hover:underline"
+                >
+                  {meta.helpUrlLabel}
+                  <ArrowSquareOut className="size-3" />
+                </a>
+              </>
+            )}
+          </p>
         </div>
       )}
     </div>
@@ -418,8 +431,6 @@ export function ConnectorsTab() {
           ))}
         </div>
       )}
-
-      <p className="text-xs text-muted-foreground">{msg("connectors.import_hint")}</p>
     </div>
   );
 }
