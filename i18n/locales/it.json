@@ -65,6 +65,7 @@
     "winningCandidate": "candidato vincente"
   },
   "messages": {
+    "connectors.query_failed": "{provider} non è riuscito a eseguire la query: {reason}",
     "connectors.expired": "La tua sessione {provider} è scaduta. Accedi di nuovo dalle Impostazioni.",
     "connectors.file_unsupported": "Impossibile leggere questo file come tabella. Formati supportati: CSV, TSV, JSON, JSONL e Parquet.",
     "connectors.import_too_large": "Il file è troppo grande per essere importato (il limite è {max_mb} MB).",

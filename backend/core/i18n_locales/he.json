@@ -262,6 +262,7 @@
     "connectors.rejected": "{provider} דחה את הבקשה. ייתכן שלפרטי הגישה שלכם אין הרשאה לפריט הזה.",
     "connectors.not_found": "הפריט לא נמצא ב-{provider}, או שלחשבון שלכם אין גישה אליו.",
     "connectors.provider_error": "{provider} החזיר שגיאה לא צפויה (HTTP {status_code}). נסו שוב בעוד רגע.",
+    "connectors.query_failed": "{provider} לא הצליח להריץ את השאילתה: {reason}",
     "connectors.file_unsupported": "לא ניתן לקרוא את הקובץ כטבלה. פורמטים נתמכים: CSV, TSV, JSON, JSONL ו-Parquet.",
     "connectors.import_too_large": "הקובץ גדול מדי לייבוא (המגבלה היא {max_mb} MB).",
     "connectors.invalid_ref": "המיקום הזה אינו תקין. בחרו קובץ מהרשימה.",

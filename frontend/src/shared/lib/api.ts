@@ -1126,11 +1126,22 @@ export function importHuggingFaceDataset(body: {
 /** Every connector the backend knows, in the order ``GET /connectors`` lists them. */
 export type ConnectorProvider =
   | "huggingface"
+  | "kaggle"
   | "google_sheets"
+  | "google_drive"
+  | "onedrive"
   | "github"
   | "s3"
   | "gcs"
-  | "azure_blob";
+  | "azure_blob"
+  | "postgres"
+  | "mysql"
+  | "bigquery"
+  | "snowflake"
+  | "langfuse"
+  | "langsmith"
+  | "braintrust"
+  | "notion";
 
 /** One row of a connector's browse listing: a folder to descend into or a file to import. */
 export interface ConnectorEntry {

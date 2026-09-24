@@ -65,6 +65,7 @@
     "winningCandidate": "المرشّح الفائز"
   },
   "messages": {
+    "connectors.query_failed": "تعذّر على {provider} تنفيذ الاستعلام: {reason}",
     "connectors.expired": "انتهت صلاحية جلسة {provider} الخاصة بك. أعد الاتصال من الإعدادات.",
     "connectors.file_unsupported": "تعذّرت قراءة هذا الملف كجدول بيانات. الصيغ المدعومة: CSV وTSV وJSON وJSONL وParquet.",
     "connectors.import_too_large": "هذا الملف كبير جدًا ليتم استيراده (الحد الأقصى هو {max_mb} ميغابايت).",

@@ -65,6 +65,7 @@
     "winningCandidate": "نامزد برنده"
   },
   "messages": {
+    "connectors.query_failed": "{provider} نتوانست کوئری را اجرا کند: {reason}",
     "connectors.expired": "نشست {provider} شما منقضی شده است. دوباره از بخش تنظیمات متصل شوید.",
     "connectors.file_unsupported": "این فایل را نمی‌توان به‌صورت جدول خواند. فرمت‌های پشتیبانی‌شده: CSV، TSV، JSON، JSONL و Parquet.",
     "connectors.import_too_large": "این فایل برای وارد کردن خیلی بزرگ است (حداکثر مجاز {max_mb} مگابایت است).",

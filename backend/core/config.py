@@ -187,6 +187,21 @@ class Settings(BaseSettings):
         alias="GITHUB_OAUTH_REDIRECT_URI",
         description="Absolute URL of this backend's /connectors/github/oauth/callback as registered on the GitHub app. Unset derives it from the incoming request.",
     )
+    microsoft_oauth_client_id: str | None = Field(
+        default=None,
+        alias="MICROSOFT_OAUTH_CLIENT_ID",
+        description="Application (client) id of the Microsoft Entra app used by the OneDrive connector. Unset hides the connector's sign-in button; OneDrive has no pasted-credential fallback.",
+    )
+    microsoft_oauth_client_secret: SecretStr | None = Field(
+        default=None,
+        alias="MICROSOFT_OAUTH_CLIENT_SECRET",
+        description="Client secret of the Microsoft Entra app.",
+    )
+    microsoft_oauth_redirect_uri: str | None = Field(
+        default=None,
+        alias="MICROSOFT_OAUTH_REDIRECT_URI",
+        description="Absolute URL of this backend's /connectors/onedrive/oauth/callback as registered on the Entra app. Unset derives it from the incoming request.",
+    )
     litellm_proxy_url: str | None = Field(
         default=None,
         alias="LITELLM_PROXY_URL",
@@ -408,6 +423,12 @@ class Settings(BaseSettings):
         default=50 * 1024 * 1024,
         ge=1,
         description="Per-file cap on compressed dataset bytes saved to a user's library",
+    )
+    connector_import_max_rows: int = Field(
+        default=20000,
+        ge=1,
+        alias="CONNECTOR_IMPORT_MAX_ROWS",
+        description="Row cap for connectors that import records rather than files (database tables, LLM traces, Notion databases).",
     )
     user_storage_quota_bytes: int = Field(
         default=250 * 1024 * 1024,

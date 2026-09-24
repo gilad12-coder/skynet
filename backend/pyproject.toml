@@ -74,6 +74,7 @@ dependencies = [
     "sentry-sdk>=2.67,<3",
     "pip==26.2.1",
     "pyarrow>=17",
+    "pymysql>=1.1",
 ]
 
 [project.optional-dependencies]

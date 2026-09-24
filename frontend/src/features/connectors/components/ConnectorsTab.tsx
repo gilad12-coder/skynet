@@ -12,7 +12,13 @@ import { tI18n } from "@/shared/lib/i18n";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { useConnectors } from "../hooks/use-connectors";
-import { ALL_PROVIDERS, providerMeta, type CredentialField, type ProviderMeta } from "./providers";
+import {
+  PROVIDER_GROUPS,
+  categoryLabel,
+  providerMeta,
+  type CredentialField,
+  type ProviderMeta,
+} from "./providers";
 
 const TOUCH_BUTTON =
   "min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]";
@@ -53,6 +59,20 @@ function useConnectorErrorParam() {
   }, []);
 }
 
+/** "via …" wording for pasted credentials, by what the provider actually asked for. */
+function credentialsLabel(meta: ProviderMeta) {
+  switch (meta.id) {
+    case "postgres":
+    case "mysql":
+      return msg("connectors.via_connection_url");
+    case "kaggle":
+    case "langfuse":
+      return msg("connectors.via_api_keys");
+    default:
+      return msg("connectors.via_credentials");
+  }
+}
+
 /** How a linked account was authenticated, for the card's subtitle. */
 function authMethodLabel(meta: ProviderMeta, method: ConnectorStatus["auth_method"]) {
   switch (method) {
@@ -61,7 +81,7 @@ function authMethodLabel(meta: ProviderMeta, method: ConnectorStatus["auth_metho
     case "service_account":
       return msg("connectors.via_service_account");
     case "credentials":
-      return msg("connectors.via_credentials");
+      return credentialsLabel(meta);
     default:
       return msg("connectors.hf.via_token");
   }
@@ -232,7 +252,7 @@ function ProviderCard({
               {meta.oauthButton}
             </Button>
           )}
-          {!connected && !formOpen && (
+          {!connected && !formOpen && meta.fields.length > 0 && (
             <Button
               variant="outline"
               size="sm"
@@ -242,6 +262,11 @@ function ProviderCard({
               <Key className="size-3.5" />
               {meta.credentialsToggle}
             </Button>
+          )}
+          {!connected && meta.fields.length === 0 && status && !status.oauth_available && (
+            <span className="text-xs text-muted-foreground">
+              {formatMsg("connectors.oauth_only_unavailable", { provider: meta.name })}
+            </span>
           )}
           {connected && (
             <Tooltip>
@@ -375,14 +400,21 @@ export function ConnectorsTab() {
           </Button>
         </div>
       ) : (
-        <div className="flex flex-col gap-2.5">
-          {ALL_PROVIDERS.map((id: ConnectorProvider) => (
-            <ProviderCard
-              key={id}
-              meta={providerMeta(id)}
-              status={byProvider(id)}
-              onChange={setConnectors}
-            />
+        <div className="flex flex-col gap-5">
+          {PROVIDER_GROUPS.map((group) => (
+            <section key={group.category} className="flex flex-col gap-2.5">
+              <h4 className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground/70">
+                {categoryLabel(group.category)}
+              </h4>
+              {group.providers.map((id: ConnectorProvider) => (
+                <ProviderCard
+                  key={id}
+                  meta={providerMeta(id)}
+                  status={byProvider(id)}
+                  onChange={setConnectors}
+                />
+              ))}
+            </section>
           ))}
         </div>
       )}

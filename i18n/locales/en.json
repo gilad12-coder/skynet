@@ -262,6 +262,7 @@
     "connectors.rejected": "{provider} refused the request. Your credentials may not have access to this item.",
     "connectors.not_found": "That item wasn't found on {provider}, or your account can't access it.",
     "connectors.provider_error": "{provider} returned an unexpected error (HTTP {status_code}). Try again in a moment.",
+    "connectors.query_failed": "{provider} could not run the query: {reason}",
     "connectors.file_unsupported": "That file can't be read as a table. Supported formats: CSV, TSV, JSON, JSONL and Parquet.",
     "connectors.import_too_large": "That file is too large to import (the limit is {max_mb} MB).",
     "connectors.invalid_ref": "That location isn't valid. Pick a file from the list.",

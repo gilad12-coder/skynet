@@ -294,6 +294,8 @@ pyjwt==2.13.0
     # via
     #   mcp
     #   redis
+pymysql==1.2.3
+    # via skynet
 pyopenssl==26.4.0
     # via webauthn
 pyotp==2.10.0

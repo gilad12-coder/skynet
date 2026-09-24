@@ -1,7 +1,20 @@
 "use client";
 
-import type * as React from "react";
-import { Aws, Azure, Github, Google, GoogleCloud, HuggingFace } from "@lobehub/icons";
+import * as React from "react";
+import {
+  Aws,
+  Azure,
+  Github,
+  Google,
+  GoogleCloud,
+  HuggingFace,
+  Langfuse,
+  LangSmith,
+  Microsoft,
+  Notion,
+  Snowflake,
+} from "@lobehub/icons";
+import { Brain, Database, Table, Trophy } from "@/shared/ui/icons";
 import {
   removeConnector,
   removeHuggingFaceConnector,
@@ -26,9 +39,13 @@ export interface CredentialField {
   required?: boolean;
 }
 
+/** Section a provider is listed under, in menus and on the Connectors tab. */
+export type ProviderCategory = "hubs" | "files" | "docs" | "databases" | "traces";
+
 /** Everything the UI needs to draw and drive one connector. */
 export interface ProviderMeta {
   id: ConnectorProvider;
+  category: ProviderCategory;
   name: string;
   blurb: string;
   /** Round brand mark for cards and dialog headers. */
@@ -51,20 +68,75 @@ export interface ProviderMeta {
   remove: () => Promise<ConnectorListResponse>;
 }
 
-/** Providers that browse through the generic import dialog (Hugging Face has its own). */
-export const BROWSE_PROVIDERS: ConnectorProvider[] = [
-  "google_sheets",
-  "github",
-  "s3",
-  "gcs",
-  "azure_blob",
+/** Display order of the sections, with the providers each one lists. */
+export const PROVIDER_GROUPS: Array<{
+  category: ProviderCategory;
+  providers: ConnectorProvider[];
+}> = [
+  { category: "hubs", providers: ["huggingface", "kaggle"] },
+  {
+    category: "files",
+    providers: ["google_drive", "onedrive", "github", "s3", "gcs", "azure_blob"],
+  },
+  { category: "docs", providers: ["google_sheets", "notion"] },
+  { category: "databases", providers: ["postgres", "mysql", "bigquery", "snowflake"] },
+  { category: "traces", providers: ["langfuse", "langsmith", "braintrust"] },
 ];
 
-/** Display order on the Connectors tab. */
-export const ALL_PROVIDERS: ConnectorProvider[] = ["huggingface", ...BROWSE_PROVIDERS];
+/** Every provider, in display order. */
+export const ALL_PROVIDERS: ConnectorProvider[] = PROVIDER_GROUPS.flatMap((g) => g.providers);
 
-const generic = (id: Exclude<ConnectorProvider, "huggingface">, name: string) => ({
+/** Providers that browse through the generic import dialog (Hugging Face has its own). */
+export const BROWSE_PROVIDERS: ConnectorProvider[] = ALL_PROVIDERS.filter(
+  (id) => id !== "huggingface",
+);
+
+/** Translated heading of one section. */
+export function categoryLabel(category: ProviderCategory): string {
+  return msg(`connectors.category.${category}`);
+}
+
+/** Brand-coloured disc around a Phosphor glyph, for services without a shipped logo. */
+const glyphAvatar =
+  (
+    Glyph: React.ComponentType<{ size?: number | string; className?: string }>,
+    background: string,
+  ) =>
+  ({ size }: { size: number }) => (
+    <span
+      className="inline-flex shrink-0 items-center justify-center rounded-full text-white"
+      style={{ width: size, height: size, background }}
+    >
+      <Glyph size={Math.round(size * 0.55)} />
+    </span>
+  );
+
+/** Flat Phosphor glyph tinted in a brand colour, for menu rows. */
+const glyphMark =
+  (
+    Glyph: React.ComponentType<{ size?: number | string; style?: React.CSSProperties }>,
+    color: string,
+  ) =>
+  ({ size }: { size: number }) => <Glyph size={size} style={{ color }} />;
+
+const KaggleAvatar = glyphAvatar(Trophy, "#20BEFF");
+const KaggleMark = glyphMark(Trophy, "#20BEFF");
+const PostgresAvatar = glyphAvatar(Database, "#336791");
+const PostgresMark = glyphMark(Database, "#336791");
+const MySqlAvatar = glyphAvatar(Database, "#00758F");
+const MySqlMark = glyphMark(Database, "#00758F");
+const BigQueryAvatar = glyphAvatar(Table, "#4285F4");
+const BigQueryMark = glyphMark(Table, "#4285F4");
+const BraintrustAvatar = glyphAvatar(Brain, "#1F1F1F");
+const BraintrustMark = glyphMark(Brain, "#1F1F1F");
+
+const generic = (
+  id: Exclude<ConnectorProvider, "huggingface">,
+  category: ProviderCategory,
+  name: string,
+) => ({
   id,
+  category,
   name,
   viaOAuth: formatMsg("connectors.via_oauth", { provider: name }),
   reconnectHint: formatMsg("connectors.reconnect_hint", { provider: name }),
@@ -73,6 +145,14 @@ const generic = (id: Exclude<ConnectorProvider, "huggingface">, name: string) =>
   startOAuth: () => startConnectorOAuth(id),
   saveCredentials: (fields: Record<string, string>) => saveConnectorCredentials(id, fields),
   remove: () => removeConnector(id),
+});
+
+const secretField = (key: string, label: string, placeholder?: string): CredentialField => ({
+  key,
+  label,
+  placeholder,
+  secret: true,
+  required: true,
 });
 
 const serviceAccountField = (): CredentialField => ({
@@ -93,6 +173,7 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
     case "huggingface":
       return {
         id,
+        category: "hubs",
         name: msg("connectors.hf.name"),
         blurb: msg("connectors.hf.blurb"),
         Avatar: HuggingFace.Avatar,
@@ -121,7 +202,7 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       };
     case "google_sheets":
       return {
-        ...generic(id, msg("connectors.google_sheets.name")),
+        ...generic(id, "docs", msg("connectors.google_sheets.name")),
         blurb: msg("connectors.google_sheets.blurb"),
         Avatar: Google.Avatar,
         Mark: Google.Color,
@@ -132,7 +213,7 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       };
     case "github":
       return {
-        ...generic(id, msg("connectors.github.name")),
+        ...generic(id, "files", msg("connectors.github.name")),
         blurb: msg("connectors.github.blurb"),
         Avatar: Github.Avatar,
         Mark: Github,
@@ -153,7 +234,7 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       };
     case "s3":
       return {
-        ...generic(id, msg("connectors.s3.name")),
+        ...generic(id, "files", msg("connectors.s3.name")),
         blurb: msg("connectors.s3.blurb"),
         Avatar: Aws.Avatar,
         Mark: Aws.Color,
@@ -187,7 +268,7 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       };
     case "gcs":
       return {
-        ...generic(id, msg("connectors.gcs.name")),
+        ...generic(id, "files", msg("connectors.gcs.name")),
         blurb: msg("connectors.gcs.blurb"),
         Avatar: GoogleCloud.Avatar,
         Mark: GoogleCloud.Color,
@@ -197,7 +278,7 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       };
     case "azure_blob":
       return {
-        ...generic(id, msg("connectors.azure_blob.name")),
+        ...generic(id, "files", msg("connectors.azure_blob.name")),
         blurb: msg("connectors.azure_blob.blurb"),
         Avatar: Azure.Avatar,
         Mark: Azure.Color,
@@ -213,6 +294,198 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
             required: true,
           },
           { key: "container", label: msg("connectors.field.container") },
+        ],
+      };
+    case "kaggle":
+      return {
+        ...generic(id, "hubs", msg("connectors.kaggle.name")),
+        blurb: msg("connectors.kaggle.blurb"),
+        Avatar: KaggleAvatar,
+        Mark: KaggleMark,
+        credentialsToggle: msg("connectors.kaggle.credentials_toggle"),
+        credentialsHelp: msg("connectors.kaggle.credentials_help"),
+        helpUrl: "https://www.kaggle.com/settings",
+        helpUrlLabel: "kaggle.com/settings",
+        fields: [
+          { key: "username", label: msg("connectors.field.username"), required: true },
+          secretField("key", msg("connectors.field.key")),
+        ],
+      };
+    case "google_drive":
+      return {
+        ...generic(id, "files", msg("connectors.google_drive.name")),
+        blurb: msg("connectors.google_drive.blurb"),
+        Avatar: Google.Avatar,
+        Mark: Google.Color,
+        oauthButton: msg("connectors.google_drive.oauth_button"),
+        credentialsToggle: msg("connectors.google_drive.credentials_toggle"),
+        credentialsHelp: msg("connectors.google_drive.credentials_help"),
+        fields: [serviceAccountField()],
+      };
+    case "onedrive":
+      return {
+        ...generic(id, "files", msg("connectors.onedrive.name")),
+        blurb: msg("connectors.onedrive.blurb"),
+        Avatar: Microsoft.Avatar,
+        Mark: Microsoft.Color,
+        oauthButton: msg("connectors.onedrive.oauth_button"),
+        credentialsToggle: "",
+        credentialsHelp: "",
+        fields: [],
+      };
+    case "notion":
+      return {
+        ...generic(id, "docs", msg("connectors.notion.name")),
+        blurb: msg("connectors.notion.blurb"),
+        Avatar: Notion.Avatar,
+        Mark: Notion,
+        credentialsToggle: msg("connectors.notion.credentials_toggle"),
+        credentialsHelp: msg("connectors.notion.credentials_help"),
+        helpUrl: "https://www.notion.so/profile/integrations",
+        helpUrlLabel: "notion.so/profile/integrations",
+        fields: [
+          secretField(
+            "token",
+            msg("connectors.field.notion_token"),
+            msg("connectors.field.notion_token_placeholder"),
+          ),
+        ],
+      };
+    case "postgres":
+      return {
+        ...generic(id, "databases", msg("connectors.postgres.name")),
+        blurb: msg("connectors.postgres.blurb"),
+        Avatar: PostgresAvatar,
+        Mark: PostgresMark,
+        credentialsToggle: msg("connectors.postgres.credentials_toggle"),
+        credentialsHelp: msg("connectors.postgres.credentials_help"),
+        fields: [
+          secretField(
+            "url",
+            msg("connectors.field.database_url"),
+            msg("connectors.field.postgres_url_placeholder"),
+          ),
+        ],
+      };
+    case "mysql":
+      return {
+        ...generic(id, "databases", msg("connectors.mysql.name")),
+        blurb: msg("connectors.mysql.blurb"),
+        Avatar: MySqlAvatar,
+        Mark: MySqlMark,
+        credentialsToggle: msg("connectors.mysql.credentials_toggle"),
+        credentialsHelp: msg("connectors.mysql.credentials_help"),
+        fields: [
+          secretField(
+            "url",
+            msg("connectors.field.database_url"),
+            msg("connectors.field.mysql_url_placeholder"),
+          ),
+        ],
+      };
+    case "bigquery":
+      return {
+        ...generic(id, "databases", msg("connectors.bigquery.name")),
+        blurb: msg("connectors.bigquery.blurb"),
+        Avatar: BigQueryAvatar,
+        Mark: BigQueryMark,
+        credentialsToggle: msg("connectors.bigquery.credentials_toggle"),
+        credentialsHelp: msg("connectors.bigquery.credentials_help"),
+        fields: [
+          serviceAccountField(),
+          {
+            key: "project",
+            label: msg("connectors.field.project"),
+            placeholder: msg("connectors.field.project_placeholder"),
+          },
+        ],
+      };
+    case "snowflake":
+      return {
+        ...generic(id, "databases", msg("connectors.snowflake.name")),
+        blurb: msg("connectors.snowflake.blurb"),
+        Avatar: Snowflake.Avatar,
+        Mark: Snowflake.Color,
+        credentialsToggle: msg("connectors.snowflake.credentials_toggle"),
+        credentialsHelp: msg("connectors.snowflake.credentials_help"),
+        fields: [
+          {
+            key: "account",
+            label: msg("connectors.field.account"),
+            placeholder: msg("connectors.field.account_placeholder"),
+            required: true,
+          },
+          secretField("token", msg("connectors.field.pat")),
+          { key: "warehouse", label: msg("connectors.field.warehouse"), required: true },
+          { key: "role", label: msg("connectors.field.role") },
+        ],
+      };
+    case "langfuse":
+      return {
+        ...generic(id, "traces", msg("connectors.langfuse.name")),
+        blurb: msg("connectors.langfuse.blurb"),
+        Avatar: Langfuse.Avatar,
+        Mark: Langfuse.Color,
+        credentialsToggle: msg("connectors.langfuse.credentials_toggle"),
+        credentialsHelp: msg("connectors.langfuse.credentials_help"),
+        fields: [
+          {
+            key: "public_key",
+            label: msg("connectors.field.public_key"),
+            placeholder: msg("connectors.field.public_key_placeholder"),
+            required: true,
+          },
+          secretField(
+            "secret_key",
+            msg("connectors.field.secret_key"),
+            msg("connectors.field.secret_key_placeholder"),
+          ),
+          {
+            key: "host",
+            label: msg("connectors.field.host"),
+            placeholder: msg("connectors.field.host_placeholder"),
+          },
+        ],
+      };
+    case "langsmith":
+      return {
+        ...generic(id, "traces", msg("connectors.langsmith.name")),
+        blurb: msg("connectors.langsmith.blurb"),
+        Avatar: LangSmith.Avatar,
+        Mark: LangSmith.Color,
+        credentialsToggle: msg("connectors.langsmith.credentials_toggle"),
+        credentialsHelp: msg("connectors.langsmith.credentials_help"),
+        helpUrl: "https://smith.langchain.com/settings",
+        helpUrlLabel: "smith.langchain.com/settings",
+        fields: [
+          secretField(
+            "api_key",
+            msg("connectors.field.api_key"),
+            msg("connectors.field.langsmith_key_placeholder"),
+          ),
+          {
+            key: "endpoint",
+            label: msg("connectors.field.endpoint"),
+            placeholder: msg("connectors.field.endpoint_placeholder"),
+          },
+        ],
+      };
+    case "braintrust":
+      return {
+        ...generic(id, "traces", msg("connectors.braintrust.name")),
+        blurb: msg("connectors.braintrust.blurb"),
+        Avatar: BraintrustAvatar,
+        Mark: BraintrustMark,
+        credentialsToggle: msg("connectors.braintrust.credentials_toggle"),
+        credentialsHelp: msg("connectors.braintrust.credentials_help"),
+        helpUrl: "https://www.braintrust.dev/app/settings?subroute=api-keys",
+        helpUrlLabel: "braintrust.dev/app/settings",
+        fields: [
+          secretField(
+            "api_key",
+            msg("connectors.field.api_key"),
+            msg("connectors.field.braintrust_key_placeholder"),
+          ),
         ],
       };
   }

@@ -69,10 +69,13 @@ function formatBytes(n: number) {
   return `${n} B`;
 }
 
-/** Secondary text of a listing row: size for objects, row count for sheet tabs. */
+/** Providers whose ``size`` is a row count (sheet tabs, tables, examples) rather than bytes. */
+const ROW_COUNT_PROVIDERS = new Set<ConnectorProvider>(["google_sheets", "langsmith", "snowflake"]);
+
+/** Secondary text of a listing row: size for objects, row count for tables. */
 function entryDetail(provider: ConnectorProvider, entry: ConnectorEntry) {
   if (entry.kind === "file" && entry.size != null) {
-    return provider === "google_sheets"
+    return ROW_COUNT_PROVIDERS.has(provider)
       ? formatMsg("connector_import.size_rows", { count: entry.size.toLocaleString() })
       : formatBytes(entry.size);
   }
