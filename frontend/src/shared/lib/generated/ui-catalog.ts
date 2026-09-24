@@ -2225,6 +2225,9 @@ export type MessageKey =
   | "optimizations.serve.request_spent"
   | "optimizations.source_dataset.label"
   | "optimizations.source_dataset.view"
+  | "pipeline.stage.duration"
+  | "pipeline.stage.failed"
+  | "pipeline.stage.running"
   | "pipeline.stage.skipped"
   | "search.clear"
   | "settings.about.api_url.label"
@@ -5983,6 +5986,9 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "optimizations.serve.request_spent": "נוצלו {credits}",
   "optimizations.source_dataset.label": "מקור הנתונים: {term.dataset} מהספרייה",
   "optimizations.source_dataset.view": "מעבר ל{term.dataset}",
+  "pipeline.stage.duration": "משך השלב",
+  "pipeline.stage.failed": "נכשל",
+  "pipeline.stage.running": "בתהליך",
   "pipeline.stage.skipped": "דולג",
   "search.clear": "נקה/נקי את החיפוש",
   "settings.about.api_url.label": "API URL",
@@ -17287,6 +17293,9 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "optimizations.serve.request_spent": "Used {credits}",
   "optimizations.source_dataset.label": "Data source: {term.dataset} from the library",
   "optimizations.source_dataset.view": "Go to {term.dataset}",
+  "pipeline.stage.duration": "Stage duration",
+  "pipeline.stage.failed": "Failed",
+  "pipeline.stage.running": "In progress",
   "pipeline.stage.skipped": "Skipped",
   "search.clear": "Clear the search",
   "settings.about.api_url.label": "API URL",
