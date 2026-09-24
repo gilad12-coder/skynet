@@ -1,6 +1,6 @@
 import type { WizardStageId } from "./wizard-steps";
 
-/** A concrete problem surfaced where it can be fixed, instead of as a toast. */
+/** A concrete problem: toasted, and holding its stage until it is fixed. */
 export interface WizardIssue {
   stage: WizardStageId;
   /** DOM id or `data-tutorial` handle of the control that fixes it. */

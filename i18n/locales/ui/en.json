@@ -2532,7 +2532,6 @@
   "submit.composition.workflow_desc": "Wire several modules into one graph.",
   "submit.composition.back": "Back",
   "submit.nav.validating": "Validating…",
-  "submit.issue.fix": "Go to field",
   "submit.pxn.batch_hint": "{total} candidates evaluated per round",
   "submit.pxn.parents": "Candidates to improve (p)",
   "submit.pxn.proposals": "Proposals per candidate (n)",

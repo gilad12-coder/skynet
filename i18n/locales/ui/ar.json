@@ -3102,7 +3102,6 @@
   "submit.module.change": "تبديل الوحدة",
   "submit.module.picker_title": "اختيار وحدة",
   "submit.nav.validating": "جارٍ التحقّق…",
-  "submit.issue.fix": "الانتقال إلى الحقل",
   "submit.react.auth_label": "ترويسة المصادقة (اختياري)",
   "submit.react.mcp_checking": "جارٍ التحقق من الاتصال…",
   "submit.react.mcp_connected": "متصل — {p1} أداة متاحة",

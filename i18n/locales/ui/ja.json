@@ -3102,7 +3102,6 @@
   "submit.module.change": "モジュールを切り替え",
   "submit.module.picker_title": "モジュールを選択",
   "submit.nav.validating": "検証中…",
-  "submit.issue.fix": "フィールドへ移動",
   "submit.react.auth_label": "認証ヘッダー（任意）",
   "submit.react.mcp_checking": "接続を確認しています…",
   "submit.react.mcp_connected": "接続しました — {p1} 個のツールが利用可能",
