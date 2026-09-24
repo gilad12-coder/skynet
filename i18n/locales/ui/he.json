@@ -2010,6 +2010,7 @@
   "optimization.blackbox.config.slide_target": "יעד ומדד",
   "optimization.config.slide_general": "כללי",
   "optimization.config.description": "תיאור",
+  "optimization.config.expand": "הצגת הטקסט המלא",
   "optimization.config.runtime": "סביבת הרצה",
   "optimization.config.rows": "שורות",
   "optimization.config.model_endpoint": "נקודת קצה מותאמת",
