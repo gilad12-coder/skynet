@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Visual pipeline timeline — renders the 5 DSPy stages (validating →
- * splitting → baseline → optimizing → evaluating) as a connected row of
- * nodes. Each finished stage shows how far into the run it was reached
- * (like chapter markers on a video) plus the wall-clock time.
+ * Visual pipeline timeline — renders the run's planned stages (validating →
+ * splitting → baseline → optimizing [→ refining] → evaluating, see
+ * `planPipelineStages`) as a connected row of nodes. Each finished stage
+ * shows how far into the run it was reached (like chapter markers on a
+ * video) plus the wall-clock time.
  *
  * Used by OverviewTab for both the job-wide pipeline and (when scoped by
  * pair_index) the per-pair pipeline inside a grid_search. Stage detection
@@ -14,7 +15,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, CircleNotch, Minus, X } from "@/shared/ui/icons";
-import { PIPELINE_STAGES, type PipelineStage } from "../constants";
+import type { PipelineStage } from "../constants";
+import type { PlannedStage } from "../lib/pipeline-plan";
 import type { ProgressEvent } from "@/shared/types/api";
 import { msg } from "@/shared/lib/messages";
 import { formatDuration } from "@/shared/lib/formatters";
@@ -82,8 +84,10 @@ export function computeStageTimestamps(
   };
 
   const stageTs: Partial<Record<PipelineStage, StageTs>> = {};
+  let handoffIso: string | null = null;
   for (const ev of events) {
     if (!ev.event || !ev.timestamp) continue;
+    if (ev.event === "lane_handoff") handoffIso = ev.timestamp;
     const evPairIndex = ev.metrics?.pair_index;
     const isPairScoped = ev.event in pairMap;
 
@@ -94,6 +98,12 @@ export function computeStageTimestamps(
     const sk = globalMap[ev.event] ?? pairMap[ev.event];
     if (!sk) continue;
     stageTs[sk] = fmtTs(ev.timestamp);
+  }
+  // After a black-box handoff the optimizer events belong to the GEPA
+  // refinement lane; exploration itself ended at the handoff.
+  if (handoffIso) {
+    stageTs.refining = stageTs.optimizing;
+    stageTs.optimizing = fmtTs(handoffIso);
   }
   if (startedAt && !stageTs.validating) {
     stageTs.validating = fmtTs(startedAt);
@@ -168,7 +178,21 @@ function StatusText({ state, text }: { state: StageState; text: string }) {
   );
 }
 
+function StageDetail({ state, text }: { state: StageState; text: string }) {
+  return (
+    <span
+      className={cn(
+        "max-w-full truncate text-[0.625rem]",
+        state === "pending" ? "text-muted-foreground/60" : "text-muted-foreground",
+      )}
+    >
+      {text}
+    </span>
+  );
+}
+
 export function PipelineStages({
+  plan,
   currentStage,
   stageTs,
   startedAt,
@@ -177,6 +201,8 @@ export function PipelineStages({
   skippedStages = [],
   dataTutorial,
 }: {
+  /** The run's stages in order, with the algorithm behind each. */
+  plan: readonly PlannedStage[];
   currentStage: PipelineStage | "done";
   stageTs: Partial<Record<PipelineStage, StageTs>>;
   /** Zero point of the elapsed markers; the run's start time. */
@@ -187,9 +213,9 @@ export function PipelineStages({
   skippedStages?: readonly PipelineStage[];
   dataTutorial?: string;
 }) {
-  const stageCount = PIPELINE_STAGES.length;
+  const stageCount = plan.length;
   const completedStageIdx =
-    currentStage === "done" ? stageCount : PIPELINE_STAGES.findIndex((s) => s.key === currentStage);
+    currentStage === "done" ? stageCount : plan.findIndex((s) => s.key === currentStage);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVertical, setIsVertical] = useState(false);
@@ -212,7 +238,7 @@ export function PipelineStages({
   const progressFraction = Math.min(completedStageIdx, stageCount - 1) / (stageCount - 1);
   const origin = startedAt ?? stageTs.validating?.iso ?? null;
 
-  const stages = PIPELINE_STAGES.map((s, i) => {
+  const stages = plan.map((s, i) => {
     const isDone = i < completedStageIdx;
     const state: StageState =
       isFailed && i === completedStageIdx
@@ -225,7 +251,7 @@ export function PipelineStages({
               ? "done"
               : "pending";
     const ts = state === "done" ? stageTs[s.key] : undefined;
-    const prev = i > 0 ? PIPELINE_STAGES[i - 1] : null;
+    const prev = i > 0 ? plan[i - 1] : null;
     const prevTs = prev ? stageTs[prev.key] : undefined;
     const elapsed = secondsSince(origin, ts?.iso);
     const dateChanged = ts != null && ts.date !== prevTs?.date;
@@ -268,7 +294,10 @@ export function PipelineStages({
             className="relative z-10 flex w-full min-w-0 items-center gap-3 px-1 py-1.5"
           >
             <StageNode state={s.state} />
-            <span className={cn("truncate text-xs", LABEL_STYLES[s.state])}>{s.label}</span>
+            <span className="flex min-w-0 flex-col leading-tight">
+              <span className={cn("truncate text-xs", LABEL_STYLES[s.state])}>{s.label}</span>
+              {s.detail && <StageDetail state={s.state} text={s.detail} />}
+            </span>
             <span className="ms-auto flex shrink-0 items-center gap-2" dir="ltr">
               {s.statusText && <StatusText state={s.state} text={s.statusText} />}
               {s.ts && (
@@ -314,8 +343,11 @@ export function PipelineStages({
           className="relative z-10 flex min-w-0 flex-col items-center gap-2 px-1 pb-1"
         >
           <StageNode state={s.state} />
-          <span className={cn("max-w-full truncate text-xs", LABEL_STYLES[s.state])}>
-            {s.label}
+          <span className="flex max-w-full flex-col items-center leading-tight">
+            <span className={cn("max-w-full truncate text-xs", LABEL_STYLES[s.state])}>
+              {s.label}
+            </span>
+            {s.detail && <StageDetail state={s.state} text={s.detail} />}
           </span>
           <span className="-mt-1 flex flex-col items-center gap-1 leading-tight" dir="ltr">
             {s.statusText ? (

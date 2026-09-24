@@ -21,6 +21,9 @@ export function detectStage(job: OptimizationStatusResponse): PipelineStage {
   // Every flow (DSPy, react, black-box) fires this once its optimizer is done
   // and the final held-out scoring of the winner begins.
   if (eventNames.includes("evaluation_started")) return "evaluating";
+  // The black-box auto strategy hands its best explore candidate to a GEPA
+  // lane; from then until the final evaluation the run is refining.
+  if (eventNames.includes("lane_handoff")) return "refining";
   if (eventNames.includes("optimizer_progress")) return "optimizing";
   if (eventNames.includes("baseline_evaluated")) return "optimizing";
   if (eventNames.includes("grid_pair_started")) return "baseline";
