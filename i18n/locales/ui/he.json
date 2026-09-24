@@ -2741,7 +2741,6 @@
   "submit.module.tagline.predict": "קריאה אחת למודל, תשובה אחת",
   "submit.module.tagline.react": "קורא לכלים בלולאה עד לתשובה",
   "submit.nav.validating": "מאמת…",
-  "submit.issue.fix": "לשדה",
   "submit.pxn.batch_hint": "{total} מועמדים נבדקים בכל סבב",
   "submit.pxn.parents": "מועמדים לשיפור (p)",
   "submit.pxn.proposals": "הצעות לכל מועמד (n)",

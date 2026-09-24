@@ -3094,7 +3094,6 @@
   "submit.module.change": "मॉड्यूल बदलें",
   "submit.module.picker_title": "एक मॉड्यूल चुनें",
   "submit.nav.validating": "मान्य किया जा रहा है…",
-  "submit.issue.fix": "फ़ील्ड पर जाएँ",
   "submit.react.auth_label": "Auth हेडर (वैकल्पिक)",
   "submit.react.mcp_checking": "कनेक्शन जाँचा जा रहा है…",
   "submit.react.mcp_connected": "कनेक्ट हो गया — {p1} टूल उपलब्ध",

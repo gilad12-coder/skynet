@@ -14,13 +14,13 @@ import { useBlackboxWizard, type BlackboxRecipe } from "../../hooks/use-blackbox
 import { emptyModelConfig, slideVariants } from "../../constants";
 import { budgetShortfall } from "../../lib/budget-limit";
 import { toastBudgetShortfall } from "../../lib/budget-toast";
+import { blackboxIssueStage } from "../../lib/blackbox-issue-stage";
 import { focusField } from "../../lib/focus-field";
 import { WIZARD_STAGE, stageAt, type WizardStageId } from "../../lib/wizard-steps";
 import { SubmitStepper } from "../SubmitStepper";
 import { SubmitNav } from "../SubmitNav";
 import { ModelConfigModal } from "../ModelConfigModal";
 import { TotalBudgetCard } from "../TotalBudgetCard";
-import { WizardIssueNotice } from "../WizardIssueNotice";
 import { WizardSubsteps } from "../WizardSubsteps";
 import { SplitSection } from "../steps/SplitSection";
 import { BlackboxBasicsStep } from "./BlackboxBasicsStep";
@@ -43,12 +43,6 @@ function evaluationStepFor(field: string | undefined, hasCases: boolean): Evalua
   if (field.startsWith("bb-scor")) return "scorer";
   if (field === "bb-split") return hasCases ? "split" : "cases";
   return null;
-}
-
-/** Resolve the owning stage when a different stage reports a field error. */
-function stageOwning(stage: WizardStageId, field?: string): WizardStageId {
-  if (field === "totalBudgetInput") return "evaluation";
-  return field === "bb-cases" ? "evaluation" : stage;
 }
 
 export function BlackboxWizard({
@@ -90,30 +84,14 @@ export function BlackboxWizard({
     [evaluationSteps, hasCases],
   );
   useEffect(() => registerTutorialHook("showWizardSubstep", routeSubstep), [routeSubstep]);
-  const handleEditField = (stage: WizardStageId, field?: string) => {
-    const target = stageOwning(stage, field);
-    routeSubstep(target, field);
-    w.goTo(WIZARD_STAGE[target]);
-    if (field) focusField(field);
-  };
   // A reported problem opens the substep that holds its field and lands focus there.
   useEffect(() => {
     if (!w.issue) return;
-    routeSubstep(stageOwning(w.issue.stage, w.issue.fieldId), w.issue.fieldId);
+    routeSubstep(blackboxIssueStage(w.issue), w.issue.fieldId);
     if (w.issue.fieldId) focusField(w.issue.fieldId);
   }, [w.issue, routeSubstep]);
 
   const stage = stageAt(w.step);
-  // Validation problems stay live: they follow the stage's current state until
-  // it validates. Setup-check problems hold until the checked setup changes.
-  const issue =
-    w.issue && w.issue.stage === stage
-      ? w.issue.identity
-        ? w.preflight.identity === w.issue.identity
-          ? w.issue
-          : null
-        : w.stageIssue(w.step)
-      : null;
 
   // Optimization ends on the one setup check: the last pass for this setup,
   // or what Continue will run.
@@ -243,11 +221,7 @@ export function BlackboxWizard({
         ariaLabel={msg("submit.stage.review")}
         steps={REVIEW_STEPS}
       >
-        {activeReviewPart === 0 ? (
-          <BlackboxBasicsStep w={w} />
-        ) : (
-          <BlackboxSummaryStep w={w} />
-        )}
+        {activeReviewPart === 0 ? <BlackboxBasicsStep w={w} /> : <BlackboxSummaryStep w={w} />}
       </WizardSubsteps>
     ),
   };
@@ -278,8 +252,7 @@ export function BlackboxWizard({
         : w.step === WIZARD_STAGE.review
           ? handleReviewNext
           : w.handleNext;
-  const showSubmit =
-    w.step === WIZARD_STAGE.review && activeReviewPart === REVIEW_STEPS.length - 1;
+  const showSubmit = w.step === WIZARD_STAGE.review && activeReviewPart === REVIEW_STEPS.length - 1;
   // Auto mode seats the agent pane beside the form on the Goal stage and the
   // scorer, so those take the wide column; plain forms keep the narrow one.
   const wideAuthoringPanel =
@@ -323,12 +296,6 @@ export function BlackboxWizard({
               exit="exit"
               transition={{ duration: 0.1 }}
             >
-              {issue && (
-                <WizardIssueNotice
-                  issue={issue}
-                  onFix={() => handleEditField(issue.stage, issue.fieldId)}
-                />
-              )}
               {stageViews[stage]}
             </motion.div>
           </AnimatePresence>

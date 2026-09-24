@@ -3094,7 +3094,6 @@
   "submit.module.change": "Змінити модуль",
   "submit.module.picker_title": "Виберіть модуль",
   "submit.nav.validating": "Перевіряється…",
-  "submit.issue.fix": "Перейти до поля",
   "submit.react.auth_label": "Заголовок авторизації (необов’язково)",
   "submit.react.mcp_checking": "Перевірка з'єднання…",
   "submit.react.mcp_connected": "Підключено — доступно інструментів: {p1}",

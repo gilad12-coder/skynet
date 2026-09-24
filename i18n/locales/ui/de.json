@@ -3094,7 +3094,6 @@
   "submit.module.change": "Modul wechseln",
   "submit.module.picker_title": "Modul auswählen",
   "submit.nav.validating": "Wird validiert…",
-  "submit.issue.fix": "Zum Feld",
   "submit.react.auth_label": "Auth-Header (optional)",
   "submit.react.mcp_checking": "Verbindung wird geprüft…",
   "submit.react.mcp_connected": "Verbunden — {p1} Tools verfügbar",

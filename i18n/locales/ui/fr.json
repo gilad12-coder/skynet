@@ -3094,7 +3094,6 @@
   "submit.module.change": "Changer de module",
   "submit.module.picker_title": "Choisir un module",
   "submit.nav.validating": "Validation en cours…",
-  "submit.issue.fix": "Aller au champ",
   "submit.react.auth_label": "En-tête d'authentification (facultatif)",
   "submit.react.mcp_checking": "Vérification de la connexion…",
   "submit.react.mcp_connected": "Connecté — {p1} outils disponibles",

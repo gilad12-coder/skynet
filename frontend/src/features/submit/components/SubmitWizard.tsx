@@ -9,7 +9,6 @@ import { useCredits } from "@/features/billing";
 import { registerTutorialHook } from "@/features/tutorial";
 
 import { TotalBudgetCard } from "./TotalBudgetCard";
-import { WizardIssueNotice } from "./WizardIssueNotice";
 import { WizardSubsteps } from "./WizardSubsteps";
 import { aggregateTokenSource } from "../lib/cost-bracket";
 import { useSubmitWizard } from "../hooks/use-submit-wizard";
@@ -60,13 +59,6 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
       setOptimizationPart(field === "totalBudgetInput" ? 2 : field === "model-catalog" ? 1 : 0);
   }, []);
   useEffect(() => registerTutorialHook("showWizardSubstep", routeSubstep), [routeSubstep]);
-  const goToField = (stage: WizardStageId, field?: string) => {
-    // Budget errors return to the last configuration panel.
-    const target: WizardStageId = field === "totalBudgetInput" ? "optimization" : stage;
-    routeSubstep(target, field);
-    w.goTo(WIZARD_STAGE[target]);
-    if (field) focusField(field);
-  };
   // A reported problem opens the substep that holds its field and lands focus there.
   useEffect(() => {
     if (!w.issue) return;
@@ -75,16 +67,6 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
   }, [w.issue, routeSubstep]);
 
   const stage = stageAt(w.step);
-  // Validation problems stay live: they follow the stage's current state until
-  // it validates. Setup-check problems hold until the checked setup changes.
-  const issue =
-    w.issue && w.issue.stage === stage
-      ? w.issue.identity
-        ? w.preflight.identity === w.issue.identity
-          ? w.issue
-          : null
-        : w.stageIssue(w.step, true)
-      : null;
 
   const budgetMode = aggregateTokenSource(
     w.jobType === "grid_search"
@@ -261,12 +243,6 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
               exit="exit"
               transition={{ duration: 0.1 }}
             >
-              {issue && (
-                <WizardIssueNotice
-                  issue={issue}
-                  onFix={() => goToField(issue.stage, issue.fieldId)}
-                />
-              )}
               {stageViews[stage]}
             </motion.div>
           </AnimatePresence>

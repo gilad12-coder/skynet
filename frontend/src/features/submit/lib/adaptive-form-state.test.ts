@@ -5,6 +5,7 @@ import { runInNewContext } from "node:vm";
 import ts from "typescript";
 
 import { WIZARD_STAGE, stageAt } from "./wizard-steps.ts";
+import { blackboxIssueStage } from "./blackbox-issue-stage.ts";
 import { detectLanguage, looksLikeCode } from "./seed-format.ts";
 
 // Execute the real handlers without loading the wizard's network and browser
@@ -267,7 +268,8 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
       setAdvancing: () => {},
       setIssue: () => {},
       validateStep: () => true,
-      goTo: (stage: number) => {
+      leaveStage: () => true,
+      moveTo: (stage: number) => {
         visited.push(stage);
       },
       settleHeldCheck: () => {},
@@ -296,7 +298,8 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
       setAdvancing: () => {},
       setIssue: () => {},
       validateStep: () => true,
-      goTo: (stage: number) => visited.push(stage),
+      leaveStage: () => true,
+      moveTo: (stage: number) => visited.push(stage),
       settleHeldCheck: () => {
         settled += 1;
       },
@@ -330,7 +333,8 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
       setAdvancing: () => {},
       setIssue: () => {},
       validateStep: (stage: number) => stage !== WIZARD_STAGE.optimization,
-      goTo: (stage: number) => {
+      leaveStage: () => true,
+      moveTo: (stage: number) => {
         visited.push(stage);
       },
       settleHeldCheck: () => {},
@@ -490,6 +494,49 @@ test("typing into a restored no-seed draft makes the starting point active", () 
   assert.equal(edited, true);
 });
 
+test("a stage problem is toasted and holds Back and Continue alike", () => {
+  const hook = source("../hooks/use-submit-wizard.ts");
+  const reported: object[] = [];
+  const problem = { stage: "optimization", fieldId: "target-score", message: "fix it" };
+  const leaveStage = evaluate(variable(hook, "leaveStage"), {
+    currentIssue: () => problem,
+    reportIssue: (found: object) => reported.push(found),
+  });
+  assert.equal(leaveStage(), false);
+  assert.deepEqual(reported, [problem]);
+  const moved: number[] = [];
+  const goTo = evaluate(variable(hook, "goTo"), {
+    step: WIZARD_STAGE.optimization,
+    leaveStage: () => false,
+    moveTo: (idx: number) => moved.push(idx),
+  });
+  goTo(WIZARD_STAGE.evaluation);
+  goTo(WIZARD_STAGE.review);
+  assert.deepEqual(moved, []);
+});
+
+test("Anything lets a problem's own stage be reached, and holds every other move", () => {
+  const reported: object[] = [];
+  const leaveStage = evaluate(variable(wizard, "leaveStage"), {
+    WIZARD_STAGE,
+    blackboxIssueStage,
+    currentIssue: () => ({ stage: "optimization", fieldId: "bb-cases", message: "add cases" }),
+    reportIssue: (found: object) => reported.push(found),
+  });
+  assert.equal(leaveStage(WIZARD_STAGE.evaluation), true);
+  assert.equal(leaveStage(WIZARD_STAGE.review), false);
+  assert.equal(leaveStage(WIZARD_STAGE.goal), false);
+  assert.equal(reported.length, 3);
+  const onStage = evaluate(variable(wizard, "leaveStage"), {
+    WIZARD_STAGE,
+    blackboxIssueStage,
+    currentIssue: () => ({ stage: "evaluation", fieldId: "bb-split", message: "fix split" }),
+    reportIssue: () => {},
+  });
+  assert.equal(onStage(WIZARD_STAGE.goal), false);
+  assert.equal(onStage(WIZARD_STAGE.optimization), false);
+});
+
 test("Anything Evaluation moves on to Optimization without a check", async () => {
   const visited: number[] = [];
   const scopes: string[] = [];
@@ -501,7 +548,8 @@ test("Anything Evaluation moves on to Optimization without a check", async () =>
     setAdvancing: () => {},
     setIssue: () => {},
     validateStep: () => true,
-    goTo: (stage: number) => visited.push(stage),
+    leaveStage: () => true,
+    moveTo: (stage: number) => visited.push(stage),
     settleHeldCheck: () => {},
     preflight: { reusable: () => null },
     ensureEvaluatorChecked: async (scope: string) => {
@@ -526,7 +574,8 @@ for (const success of [true, false]) {
       setAdvancing: () => {},
       setIssue: () => {},
       validateStep: () => true,
-      goTo: (stage: number) => visited.push(stage),
+      leaveStage: () => true,
+      moveTo: (stage: number) => visited.push(stage),
       settleHeldCheck: () => {},
       preflight: { reusable: () => null },
       ensureEvaluatorChecked: async (scope: string) => {
@@ -551,7 +600,8 @@ test("Anything holds on a check run from Optimization and moves on with a reused
     setAdvancing: () => {},
     setIssue: () => {},
     validateStep: () => true,
-    goTo: (stage: number) => visited.push(stage),
+    leaveStage: () => true,
+    moveTo: (stage: number) => visited.push(stage),
     settleHeldCheck: () => {},
     preflight: { reusable: () => reusable },
     ensureEvaluatorChecked: async () => ({}),
@@ -584,7 +634,10 @@ for (const path of ["../hooks/use-submit-wizard.ts", "../hooks/use-blackbox-wiza
     };
     assert.equal(settle(WIZARD_STAGE.optimization, { status: "succeeded", scope: "execution" }), 1);
     assert.equal(settle(WIZARD_STAGE.evaluation, { status: "succeeded", scope: "evaluation" }), 0);
-    assert.equal(settle(WIZARD_STAGE.optimization, { status: "succeeded", scope: "evaluation" }), 0);
+    assert.equal(
+      settle(WIZARD_STAGE.optimization, { status: "succeeded", scope: "evaluation" }),
+      0,
+    );
     assert.equal(settle(WIZARD_STAGE.review, { status: "succeeded", scope: "execution" }), 0);
     assert.equal(settle(WIZARD_STAGE.optimization, { status: "running", scope: "execution" }), 0);
     assert.equal(settle(WIZARD_STAGE.optimization, null), 0);
