@@ -39,6 +39,7 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { useSettingsModal } from "@/features/settings";
 import { useConnectors } from "../hooks/use-connectors";
+import { BROWSE_CARET_CLASS, BROWSE_LIST_CLASS, BROWSE_ROW_CLASS } from "./browse-list";
 import { PreviewTable } from "./PreviewTable";
 import { providerMeta } from "./providers";
 
@@ -319,7 +320,7 @@ export function ConnectorImportDialog({
               </span>
             </div>
 
-            <div className="mt-3 max-h-[min(24rem,55vh)] space-y-1.5 overflow-y-auto">
+            <div className="mt-3 max-h-[min(24rem,55vh)] overflow-y-auto">
               {browseFailed ? (
                 <div className="flex flex-col items-center gap-2 px-1 py-6 text-center text-sm text-muted-foreground">
                   {msg("connector_import.browse_error")}
@@ -331,40 +332,46 @@ export function ConnectorImportDialog({
                 <p className="px-1 py-6 text-center text-sm text-muted-foreground">
                   {msg("connector_import.empty")}
                 </p>
-              ) : (
-                visibleEntries.map((entry) => {
-                  const detail = entryDetail(provider, entry);
-                  return (
-                    <button
-                      key={entry.ref}
-                      type="button"
-                      onClick={() => openEntry(entry)}
-                      className="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-[#DDD4C8]/60 bg-gradient-to-b from-white/95 to-[#F8F4EF] px-3 py-2.5 text-start transition-colors hover:border-[#C8B9A8]/70"
-                    >
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#3D2E22]/8 text-[#3D2E22]">
-                        {entry.kind === "folder" ? (
-                          <Folder className="size-4" />
-                        ) : (
-                          <FileText className="size-4" />
-                        )}
-                      </span>
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span dir="ltr" className="truncate text-sm font-medium text-foreground">
-                          {entry.name}
-                        </span>
-                        {detail && (
-                          <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
-                            {detail}
+              ) : visibleEntries.length > 0 ? (
+                <ul className={BROWSE_LIST_CLASS}>
+                  {visibleEntries.map((entry) => {
+                    const detail = entryDetail(provider, entry);
+                    const EntryIcon = entry.kind === "folder" ? Folder : FileText;
+                    return (
+                      <li key={entry.ref}>
+                        <button
+                          type="button"
+                          onClick={() => openEntry(entry)}
+                          className={BROWSE_ROW_CLASS}
+                        >
+                          <EntryIcon
+                            className="size-4 shrink-0 text-muted-foreground"
+                            aria-hidden="true"
+                          />
+                          <span
+                            dir="ltr"
+                            className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
+                          >
+                            {entry.name}
                           </span>
-                        )}
-                      </span>
-                      {entry.kind === "folder" && (
-                        <CaretRight className="size-3.5 shrink-0 text-muted-foreground/60 rtl:-scale-x-100" />
-                      )}
-                    </button>
-                  );
-                })
-              )}
+                          {detail && (
+                            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                              {detail}
+                            </span>
+                          )}
+                          <CaretRight
+                            className={cn(
+                              BROWSE_CARET_CLASS,
+                              entry.kind !== "folder" && "invisible",
+                            )}
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
             </div>
           </div>
         ) : (

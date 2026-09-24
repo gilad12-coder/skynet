@@ -6,6 +6,7 @@ import { toast } from "react-toastify";
 import {
   ArrowLeft,
   ArrowSquareOut,
+  CaretRight,
   CircleNotch,
   DownloadSimple,
   Lock,
@@ -44,6 +45,7 @@ import {
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { useSettingsModal } from "@/features/settings";
 import { useConnectors } from "../hooks/use-connectors";
+import { BROWSE_CARET_CLASS, BROWSE_LIST_CLASS, BROWSE_ROW_CLASS } from "./browse-list";
 import { PreviewTable } from "./PreviewTable";
 
 /** Props for {@link HuggingFaceImportDialog}. */
@@ -98,6 +100,7 @@ export function HuggingFaceImportDialog({
   const connected = huggingFace?.connected ?? false;
   const trimmedQuery = query.trim();
   const looksLikeRepo = /^[\w.-]+\/[\w.-]+$/.test(trimmedQuery);
+  const showOpenRepo = looksLikeRepo && !results.some((d) => d.id === trimmedQuery);
 
   React.useEffect(() => {
     if (!open) {
@@ -278,68 +281,77 @@ export function HuggingFaceImportDialog({
               </span>
             </div>
 
-            <div className="mt-3 max-h-[min(24rem,55vh)] space-y-1.5 overflow-y-auto">
-              {looksLikeRepo && !results.some((d) => d.id === trimmedQuery) && (
-                <button
-                  type="button"
-                  onClick={() => setRepoId(trimmedQuery)}
-                  className="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-dashed border-[#C8B9A8]/70 px-3 py-2.5 text-start transition-colors hover:bg-[#F8F4EF]"
-                >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#3D2E22]/8 text-[#3D2E22]">
-                    <ArrowSquareOut className="size-4" />
-                  </span>
-                  <span dir="ltr" className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {formatMsg("hf_import.open_repo", { repo: trimmedQuery })}
-                  </span>
-                </button>
-              )}
+            <div className="mt-3 max-h-[min(24rem,55vh)] overflow-y-auto">
               {searchFailed ? (
                 <p className="px-1 py-6 text-center text-sm text-muted-foreground">
                   {msg("hf_import.search_error")}
                 </p>
-              ) : !searching && results.length === 0 && !looksLikeRepo ? (
+              ) : !searching && results.length === 0 && !showOpenRepo ? (
                 <p className="px-1 py-6 text-center text-sm text-muted-foreground">
                   {msg("hf_import.search_empty")}
                 </p>
-              ) : (
-                results.map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => setRepoId(d.id)}
-                    className="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-[#DDD4C8]/60 bg-gradient-to-b from-white/95 to-[#F8F4EF] px-3 py-2.5 text-start transition-colors hover:border-[#C8B9A8]/70"
-                  >
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#3D2E22]/8 text-[#3D2E22]">
-                      {d.gated || d.private ? (
-                        <Lock className="size-4" />
-                      ) : (
-                        <HuggingFace.Color size={16} />
-                      )}
-                    </span>
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span dir="ltr" className="truncate text-sm font-medium text-foreground">
-                        {d.id}
-                      </span>
-                      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.6875rem] text-muted-foreground">
-                        <span className="inline-flex items-center gap-1">
-                          <DownloadSimple className="size-3" />
-                          {formatMsg("hf_import.downloads", { count: formatCount(d.downloads) })}
+              ) : results.length > 0 || showOpenRepo ? (
+                <ul className={BROWSE_LIST_CLASS}>
+                  {showOpenRepo && (
+                    <li>
+                      <button
+                        type="button"
+                        onClick={() => setRepoId(trimmedQuery)}
+                        className={BROWSE_ROW_CLASS}
+                      >
+                        <span
+                          dir="ltr"
+                          className="min-w-0 flex-1 truncate text-sm font-medium text-primary"
+                        >
+                          {formatMsg("hf_import.open_repo", { repo: trimmedQuery })}
                         </span>
-                        {d.gated && (
-                          <span className="rounded-full bg-[#C8A882]/15 px-1.5 py-px font-medium text-[#8a6d44]">
-                            {msg("hf_import.gated")}
+                        <CaretRight className={BROWSE_CARET_CLASS} aria-hidden="true" />
+                      </button>
+                    </li>
+                  )}
+                  {results.map((d) => {
+                    const slash = d.id.indexOf("/");
+                    const owner = slash > 0 ? d.id.slice(0, slash + 1) : "";
+                    const repoName = d.id.slice(owner.length);
+                    return (
+                      <li key={d.id}>
+                        <button
+                          type="button"
+                          onClick={() => setRepoId(d.id)}
+                          className={BROWSE_ROW_CLASS}
+                        >
+                          <span
+                            dir="ltr"
+                            className="flex min-w-0 flex-1 items-center gap-2 text-sm"
+                          >
+                            <span className="truncate">
+                              <span className="text-muted-foreground">{owner}</span>
+                              <span className="font-medium text-foreground">{repoName}</span>
+                            </span>
+                            {d.gated && (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#C8A882]/15 px-1.5 py-px text-[0.6875rem] font-medium text-[#8a6d44]">
+                                <Lock className="size-3" aria-hidden="true" />
+                                {msg("hf_import.gated")}
+                              </span>
+                            )}
+                            {d.private && (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-px text-[0.6875rem] font-medium text-muted-foreground">
+                                <Lock className="size-3" aria-hidden="true" />
+                                {msg("hf_import.private")}
+                              </span>
+                            )}
                           </span>
-                        )}
-                        {d.private && (
-                          <span className="rounded-full bg-muted px-1.5 py-px font-medium text-muted-foreground">
-                            {msg("hf_import.private")}
+                          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums">
+                            <DownloadSimple className="size-3.5" aria-hidden="true" />
+                            {formatMsg("hf_import.downloads", { count: formatCount(d.downloads) })}
                           </span>
-                        )}
-                      </span>
-                    </span>
-                  </button>
-                ))
-              )}
+                          <CaretRight className={BROWSE_CARET_CLASS} aria-hidden="true" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
             </div>
           </div>
         ) : (
