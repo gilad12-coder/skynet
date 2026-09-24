@@ -239,7 +239,19 @@
     "notifier.email.ref": "מזהה",
     "budget.idempotency_required": "יש לשלוח Idempotency-Key ייחודי לבקשה הזאת.",
     "serve.caller_tool_connection_required": "הריצה משתמשת בחיבור כלים של הבעלים. יש לחבר את הכלי לחשבון שלך לפני ההפעלה.",
-    "serve.protected_interaction_failed": "הבקשה בסביבת הבידוד נכשלה: {error}"
+    "serve.protected_interaction_failed": "הבקשה בסביבת הבידוד נכשלה: {error}",
+    "connectors.vault_not_configured": "כספת האישורים לא מוגדרת בפריסה הזו, ולכן אי אפשר לקשר חשבונות.",
+    "connectors.reconnect_required": "הקישור ל-{provider} כבר לא ניתן לקריאה. נתקו וחברו מחדש.",
+    "connectors.hf_oauth_not_configured": "התחברות דרך Hugging Face לא מוגדרת בפריסה הזו. הדביקו טוקן גישה במקום.",
+    "connectors.hf_not_connected": "קודם חברו את חשבון Hugging Face שלכם.",
+    "connectors.hf_invalid_token": "Hugging Face דחה את הטוקן הזה. בדקו אותו ונסו שוב.",
+    "connectors.hf_unreachable": "לא הצלחנו להגיע ל-Hugging Face. נסו שוב בעוד רגע.",
+    "connectors.hf_dataset_not_found": "ה{term.dataset} {repo_id} לא נמצא ב-Hugging Face, או שלחשבון שלכם אין גישה אליו.",
+    "connectors.hf_dataset_unsupported": "Hugging Face עדיין לא יכול להגיש את {repo_id} (אין נתוני viewer או המרת parquet).",
+    "connectors.hf_expired": "הסשן שלכם ב-Hugging Face פג. התחברו שוב מההגדרות.",
+    "connectors.hf_oauth_failed": "ההתחברות ל-Hugging Face לא הושלמה. נסו שוב.",
+    "connectors.hf_oauth_state_invalid": "קישור ההתחברות ל-Hugging Face לא תקין או שפג תוקפו. התחילו מחדש.",
+    "connectors.hf_import_too_large": "הפיצול הזה גדול מדי לייבוא (מגבלת הקובץ הדחוס היא {max_mb}MB)."
   },
   "backend": {
     "constants": {

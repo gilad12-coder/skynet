@@ -65,6 +65,18 @@
     "winningCandidate": "candidato ganador"
   },
   "messages": {
+    "connectors.hf_dataset_not_found": "El conjunto de datos {repo_id} no se encontró en Hugging Face o su cuenta no tiene acceso a él.",
+    "connectors.hf_dataset_unsupported": "Hugging Face aún no puede servir {repo_id} (sin datos del visor ni conversión a parquet).",
+    "connectors.hf_expired": "Su sesión de Hugging Face caducó. Vuelva a conectarse desde Configuración.",
+    "connectors.hf_import_too_large": "Ese split es demasiado grande para importarlo (el límite de archivo comprimido es de {max_mb} MB).",
+    "connectors.hf_invalid_token": "Hugging Face rechazó ese token. Compruébelo e inténtelo de nuevo.",
+    "connectors.hf_not_connected": "Conecte primero su cuenta de Hugging Face.",
+    "connectors.hf_oauth_failed": "El inicio de sesión con Hugging Face no se completó. Inténtelo de nuevo.",
+    "connectors.hf_oauth_not_configured": "El inicio de sesión con Hugging Face no está configurado en esta instalación. Pegue un token de acceso en su lugar.",
+    "connectors.hf_oauth_state_invalid": "El enlace de inicio de sesión de Hugging Face no es válido o ha caducado. Empiece de nuevo.",
+    "connectors.hf_unreachable": "No se pudo conectar con Hugging Face. Inténtelo de nuevo en unos instantes.",
+    "connectors.reconnect_required": "Ya no se puede leer su vínculo con {provider}. Desconecte y vuelva a conectar.",
+    "connectors.vault_not_configured": "El almacén de credenciales no está configurado en esta instalación, por lo que no se pueden vincular conectores.",
     "accounts.email_delivery_unavailable": "La entrega de correo electrónico no está configurada en este servidor.",
     "accounts.email_not_verified": "Verifica tu correo electrónico antes de iniciar sesión.",
     "accounts.email_send_failed": "No se pudo enviar el correo electrónico de verificación. Inténtalo de nuevo.",

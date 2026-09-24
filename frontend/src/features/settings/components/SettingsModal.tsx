@@ -60,6 +60,7 @@ import { Switch } from "@/shared/ui/primitives/switch";
 import { Button } from "@/shared/ui/primitives/button";
 import { CopyButton } from "@/shared/ui/copy-button";
 import { WalletTab, UsageTab, ByokKeysSection } from "@/features/billing";
+import { ConnectorsTab } from "@/features/connectors";
 import { Input } from "@/shared/ui/primitives/input";
 import { NumberInput } from "@/shared/ui/number-input";
 import {
@@ -1426,6 +1427,7 @@ const SETTINGS_TAB_ORDER = [
   "billing",
   "usage",
   "providers",
+  "connectors",
   "api",
   "admin",
   "about",
@@ -1484,6 +1486,11 @@ const SETTINGS_TAB_META: Record<
   providers: {
     icon: Plug,
     labelKey: "settings.tab.providers",
+    group: "access",
+  },
+  connectors: {
+    icon: HardDrives,
+    labelKey: "settings.tab.connectors",
     group: "access",
   },
   api: {
@@ -1661,6 +1668,9 @@ export function SettingsModal() {
               </TabsContent>
               <TabsContent value="providers" data-tutorial="settings-providers">
                 <ByokKeysSection />
+              </TabsContent>
+              <TabsContent value="connectors">
+                <ConnectorsTab />
               </TabsContent>
               <TabsContent value="api">
                 <ApiTab />

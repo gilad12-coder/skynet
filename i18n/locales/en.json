@@ -239,6 +239,18 @@
     "workflow.validation_failed": "Workflow validation failed: {error}",
     "budget.idempotency_required": "Send a unique Idempotency-Key for this request.",
     "serve.caller_tool_connection_required": "This run uses an owner-bound tool connection. Connect the tool to your account before invoking it.",
-    "serve.protected_interaction_failed": "The sandboxed request failed: {error}"
+    "serve.protected_interaction_failed": "The sandboxed request failed: {error}",
+    "connectors.vault_not_configured": "The credential vault is not configured on this deployment, so connectors can't be linked.",
+    "connectors.reconnect_required": "Your {provider} link can no longer be read. Disconnect and connect again.",
+    "connectors.hf_oauth_not_configured": "Sign-in with Hugging Face isn't set up on this deployment. Paste an access token instead.",
+    "connectors.hf_not_connected": "Connect your Hugging Face account first.",
+    "connectors.hf_invalid_token": "Hugging Face rejected that token. Check it and try again.",
+    "connectors.hf_unreachable": "Hugging Face could not be reached. Try again in a moment.",
+    "connectors.hf_dataset_not_found": "Dataset {repo_id} wasn't found on Hugging Face, or your account can't access it.",
+    "connectors.hf_dataset_unsupported": "Hugging Face can't serve {repo_id} yet (no viewer data or parquet conversion).",
+    "connectors.hf_expired": "Your Hugging Face session expired. Connect again from Settings.",
+    "connectors.hf_oauth_failed": "Hugging Face sign-in didn't complete. Try again.",
+    "connectors.hf_oauth_state_invalid": "The Hugging Face sign-in link is invalid or expired. Start again.",
+    "connectors.hf_import_too_large": "That split is too large to import (the compressed-file limit is {max_mb} MB)."
   }
 }

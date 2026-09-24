@@ -65,6 +65,18 @@
     "winningCandidate": "نامزد برنده"
   },
   "messages": {
+    "connectors.hf_dataset_not_found": "مجموعه‌دادهٔ {repo_id} در Hugging Face پیدا نشد یا حساب شما به آن دسترسی ندارد.",
+    "connectors.hf_dataset_unsupported": "Hugging Face هنوز نمی‌تواند {repo_id} را ارائه دهد (دادهٔ نمایشگر یا تبدیل parquet در دسترس نیست).",
+    "connectors.hf_expired": "نشست Hugging Face شما منقضی شده است. از تنظیمات دوباره متصل شوید.",
+    "connectors.hf_import_too_large": "این بخش برای وارد کردن بیش از حد بزرگ است (حد مجاز فایل فشرده {max_mb} مگابایت است).",
+    "connectors.hf_invalid_token": "Hugging Face این توکن را رد کرد. آن را بررسی کنید و دوباره تلاش کنید.",
+    "connectors.hf_not_connected": "ابتدا حساب Hugging Face خود را متصل کنید.",
+    "connectors.hf_oauth_failed": "ورود به Hugging Face کامل نشد. دوباره تلاش کنید.",
+    "connectors.hf_oauth_not_configured": "ورود با Hugging Face در این استقرار تنظیم نشده است. به‌جای آن یک توکن دسترسی وارد کنید.",
+    "connectors.hf_oauth_state_invalid": "پیوند ورود به Hugging Face نامعتبر یا منقضی است. دوباره شروع کنید.",
+    "connectors.hf_unreachable": "دسترسی به Hugging Face ممکن نشد. کمی بعد دوباره تلاش کنید.",
+    "connectors.reconnect_required": "پیوند {provider} شما دیگر قابل خواندن نیست. اتصال را قطع کنید و دوباره متصل شوید.",
+    "connectors.vault_not_configured": "مخزن اطلاعات ورود در این استقرار پیکربندی نشده است، بنابراین اتصال‌دهنده‌ها را نمی‌توان پیوند داد.",
     "accounts.email_delivery_unavailable": "ارسال ایمیل روی این سرور پیکربندی نشده است.",
     "accounts.email_not_verified": "لطفاً پیش از ورود، ایمیل خود را تأیید کنید.",
     "accounts.email_send_failed": "ارسال ایمیل تأیید ناموفق بود. دوباره تلاش کنید.",

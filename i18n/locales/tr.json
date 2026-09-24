@@ -65,6 +65,18 @@
     "winningCandidate": "kazanan aday"
   },
   "messages": {
+    "connectors.hf_dataset_not_found": "{repo_id} veri kümesi Hugging Face'te bulunamadı veya hesabınızın buna erişimi yok.",
+    "connectors.hf_dataset_unsupported": "Hugging Face, {repo_id} veri kümesini henüz sunamıyor (görüntüleyici verisi veya Parquet dönüşümü yok).",
+    "connectors.hf_expired": "Hugging Face oturumunuzun süresi doldu. Ayarlar'dan yeniden bağlanın.",
+    "connectors.hf_import_too_large": "Bu split içe aktarılamayacak kadar büyük (sıkıştırılmış dosya sınırı {max_mb} MB).",
+    "connectors.hf_invalid_token": "Hugging Face bu belirteci reddetti. Kontrol edip yeniden deneyin.",
+    "connectors.hf_not_connected": "Önce Hugging Face hesabınızı bağlayın.",
+    "connectors.hf_oauth_failed": "Hugging Face ile oturum açma tamamlanamadı. Yeniden deneyin.",
+    "connectors.hf_oauth_not_configured": "Bu kurulumda Hugging Face ile oturum açma yapılandırılmamış. Bunun yerine bir erişim belirteci yapıştırın.",
+    "connectors.hf_oauth_state_invalid": "Hugging Face oturum açma bağlantısı geçersiz veya süresi dolmuş. Yeniden başlayın.",
+    "connectors.hf_unreachable": "Hugging Face'e ulaşılamadı. Kısa süre sonra yeniden deneyin.",
+    "connectors.reconnect_required": "{provider} bağlantınız artık okunamıyor. Bağlantıyı kesip yeniden bağlanın.",
+    "connectors.vault_not_configured": "Bu kurulumda kimlik bilgisi kasası yapılandırılmamış, bu nedenle bağlayıcılar bağlanamıyor.",
     "accounts.email_delivery_unavailable": "Bu sunucuda e-posta teslimatı yapılandırılmamış.",
     "accounts.email_not_verified": "Lütfen giriş yapmadan önce e-posta adresinizi doğrulayın.",
     "accounts.email_send_failed": "Doğrulama e-postası gönderilemedi. Tekrar deneyin.",

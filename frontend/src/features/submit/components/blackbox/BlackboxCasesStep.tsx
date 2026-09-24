@@ -1,11 +1,13 @@
 "use client";
 
-import { Books, UploadSimple } from "@/shared/ui/icons";
+import { useState } from "react";
+import { Books, DownloadSimple, UploadSimple } from "@/shared/ui/icons";
 import { Badge } from "@/shared/ui/primitives/badge";
 import { Button } from "@/shared/ui/primitives/button";
 import { Separator } from "@/shared/ui/primitives/separator";
 import { DatasetPreviewLayout } from "../DatasetPreviewLayout";
 import { DatasetPickerDialog } from "@/features/datasets";
+import { HuggingFaceImportDialog } from "@/features/connectors";
 import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
@@ -33,6 +35,7 @@ export function BlackboxCasesStep({
     libraryOpen,
     setLibraryOpen,
   } = w;
+  const [hfOpen, setHfOpen] = useState(false);
 
   return (
     <StepCard
@@ -99,11 +102,25 @@ export function BlackboxCasesStep({
           <Books className="size-4" />
           {msg("submit.dataset.library_pick")}
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setHfOpen(true)}
+          className="min-h-[44px] w-full justify-center gap-2 lg:min-h-0"
+        >
+          <DownloadSimple className="size-4" />
+          {msg("hf_import.button")}
+        </Button>
       </DatasetPreviewLayout>
       <DatasetPickerDialog
         open={libraryOpen}
         onOpenChange={setLibraryOpen}
         onPick={handlePickFromLibrary}
+      />
+      <HuggingFaceImportDialog
+        open={hfOpen}
+        onOpenChange={setHfOpen}
+        onImported={handlePickFromLibrary}
       />
     </StepCard>
   );

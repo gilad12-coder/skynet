@@ -65,6 +65,18 @@
     "winningCandidate": "विजेता उम्मीदवार"
   },
   "messages": {
+    "connectors.hf_dataset_not_found": "डेटासेट {repo_id} Hugging Face पर नहीं मिला, या आपके अकाउंट को इसकी पहुँच नहीं है।",
+    "connectors.hf_dataset_unsupported": "Hugging Face अभी {repo_id} उपलब्ध नहीं करा सकता (व्यूअर डेटा या parquet रूपांतरण मौजूद नहीं है)।",
+    "connectors.hf_expired": "आपका Hugging Face सत्र समाप्त हो गया। सेटिंग्स से फिर से कनेक्ट करें।",
+    "connectors.hf_import_too_large": "यह split इंपोर्ट के लिए बहुत बड़ा है (संपीड़ित फ़ाइल की सीमा {max_mb} MB है)।",
+    "connectors.hf_invalid_token": "Hugging Face ने यह टोकन अस्वीकार कर दिया। इसे जाँचकर फिर से कोशिश करें।",
+    "connectors.hf_not_connected": "पहले अपना Hugging Face अकाउंट कनेक्ट करें।",
+    "connectors.hf_oauth_failed": "Hugging Face साइन-इन पूरा नहीं हुआ। फिर से कोशिश करें।",
+    "connectors.hf_oauth_not_configured": "इस डिप्लॉयमेंट पर Hugging Face से साइन-इन सेट अप नहीं है। इसके बजाय एक्सेस टोकन पेस्ट करें।",
+    "connectors.hf_oauth_state_invalid": "Hugging Face साइन-इन लिंक अमान्य है या समाप्त हो चुका है। फिर से शुरू करें।",
+    "connectors.hf_unreachable": "Hugging Face से संपर्क नहीं हो सका। थोड़ी देर बाद फिर से कोशिश करें।",
+    "connectors.reconnect_required": "आपका {provider} लिंक अब पढ़ा नहीं जा सकता। डिस्कनेक्ट करके फिर से कनेक्ट करें।",
+    "connectors.vault_not_configured": "इस डिप्लॉयमेंट पर क्रेडेंशियल वॉल्ट कॉन्फ़िगर नहीं है, इसलिए कनेक्टर लिंक नहीं किए जा सकते।",
     "accounts.email_delivery_unavailable": "इस सर्वर पर ईमेल डिलीवरी कॉन्फ़िगर नहीं है।",
     "accounts.email_not_verified": "कृपया साइन इन करने से पहले अपने ईमेल को सत्यापित करें।",
     "accounts.email_send_failed": "सत्यापन ईमेल नहीं भेजा जा सका। पुनः प्रयास करें।",
