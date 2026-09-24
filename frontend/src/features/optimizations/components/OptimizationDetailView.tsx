@@ -84,7 +84,6 @@ import { ACTIVE_STATUSES, TERMINAL_STATUSES } from "@/shared/constants/job-statu
 import { registerTutorialHook } from "@/features/tutorial";
 import type { OptimizationStatusResponse, OptimizationPayloadResponse } from "@/shared/types/api";
 import type { SharedOptimizationData } from "@/shared/lib/api";
-import type { PipelineStage } from "../constants";
 import { extractScoresFromLogs } from "../lib/extract-scores";
 import { extractBlackboxScorePoints } from "../lib/blackbox";
 import { extractCandidates, scopeToLatestLane } from "@/features/trajectory";
@@ -98,7 +97,6 @@ import { StatusBadge } from "@/shared/ui/status-badge";
 import { ConfigTab } from "./ConfigTab";
 import { CodeTab } from "./CodeTab";
 import { ArtifactTab } from "./ArtifactTab";
-import { StageInfoModal } from "./StageInfoModal";
 import { PairSelectionStrip } from "./PairSelectionStrip";
 import { OverviewTab } from "./OverviewTab";
 import { BudgetTab } from "./BudgetTab";
@@ -380,7 +378,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const textareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const [serveError, setServeError] = useState<string | null>(null);
-  const [stageModal, setStageModal] = useState<PipelineStage | null>(null);
 
   const activePairIndex =
     searchParams.get("pair") != null ? parseInt(searchParams.get("pair")!, 10) : null;
@@ -1566,7 +1563,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 scorePoints={isPairContext ? pairScorePoints : scorePoints}
                 activePairIndex={activePairIndex}
                 activePair={activePair}
-                onStageClick={setStageModal}
                 onPairSelect={handlePairSelect}
                 onPairDeleted={handlePairDeleted}
                 payload={payload}
@@ -1684,8 +1680,6 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
           </Tabs>
         );
       })()}
-
-      <StageInfoModal stage={stageModal} job={job} onClose={() => setStageModal(null)} />
     </div>
   );
 }

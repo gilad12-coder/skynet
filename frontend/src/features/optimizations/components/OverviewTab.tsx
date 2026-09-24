@@ -21,8 +21,9 @@ import type {
   OptimizationStatusResponse,
   PairResult,
 } from "@/shared/types/api";
-import { PIPELINE_STAGES, type PipelineStage } from "../constants";
+import type { PipelineStage } from "../constants";
 import { detectPairStage, detectStage } from "../lib/detect-stage";
+import { planPipelineStages } from "../lib/pipeline-plan";
 import {
   formatBlackboxDelta,
   formatBlackboxScore,
@@ -109,7 +110,6 @@ function OverviewTabImpl({
   scorePoints,
   activePairIndex,
   activePair,
-  onStageClick,
   onPairSelect,
   onPairDeleted,
   trajectoryPreviewLayout,
@@ -120,7 +120,6 @@ function OverviewTabImpl({
   scorePoints: ScorePoint[];
   activePairIndex: number | null;
   activePair?: PairResult | null;
-  onStageClick: (stage: PipelineStage) => void;
   onPairSelect: (pairIndex: number) => void;
   onPairDeleted?: (pairIndex: number) => void;
   trajectoryPreviewLayout?: { width: number; height: number };
@@ -165,6 +164,7 @@ function OverviewTabImpl({
   const renderGridAgg = job.optimization_type === "grid_search" && !isPairContext;
 
   const pairIndex = isPairContext ? activePair.pair_index : undefined;
+  const stagePlan = planPipelineStages(job, payload);
   const currentStage = isPairContext
     ? detectPairStage(job, activePair.pair_index)
     : job.status === "success"
@@ -215,12 +215,19 @@ function OverviewTabImpl({
   // without a test split; black-box runs measure no baseline without a
   // starting point) must not read as completed once the run is past it.
   const stageIndex = (stage: PipelineStage | "done") =>
-    stage === "done" ? PIPELINE_STAGES.length : PIPELINE_STAGES.findIndex((s) => s.key === stage);
+    stage === "done" ? stagePlan.length : stagePlan.findIndex((s) => s.key === stage);
   const skippedStages: PipelineStage[] = [];
   if (baseline == null && stageIndex(currentStage) > stageIndex("baseline"))
     skippedStages.push("baseline");
   if (optimized == null && currentStage === "done" && !stagesFailed)
     skippedStages.push("evaluating");
+  // An auto black-box run that ended without a handoff never refined.
+  if (
+    stageIndex("refining") !== -1 &&
+    stageIndex(currentStage) > stageIndex("refining") &&
+    !job.progress_events?.some((e) => e.event === "lane_handoff")
+  )
+    skippedStages.push("refining");
   const scoresReady =
     (runResult != null || bbResult != null) &&
     baseline != null &&
@@ -373,12 +380,13 @@ function OverviewTabImpl({
       {renderRunBlocks && (
         <FadeIn delay={0.05}>
           <PipelineStages
+            plan={stagePlan}
             currentStage={currentStage}
             stageTs={stageTs}
+            startedAt={job.started_at}
             isActive={stagesActive}
             isFailed={stagesFailed}
             skippedStages={skippedStages}
-            onStageClick={onStageClick}
             dataTutorial={isPairContext ? undefined : "pipeline-stages"}
           />
         </FadeIn>

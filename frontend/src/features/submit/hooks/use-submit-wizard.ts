@@ -47,6 +47,7 @@ import { emptyModelConfig, defaultSplit, defaultReactConfig } from "../constants
 import type { ReactConfig, ColumnRole } from "../constants";
 import { LAST_WIZARD_STAGE, WIZARD_STAGE, stageAt, type WizardStageId } from "../lib/wizard-steps";
 import type { WizardIssue } from "../lib/wizard-issue";
+import { toastWizardIssue } from "../lib/wizard-issue-toast";
 import { preflightDestination } from "../lib/preflight-destination";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import { beginValidationToast, type ValidationToast } from "../lib/validation-toast";
@@ -1734,6 +1735,7 @@ export function useSubmitWizard() {
     }
   };
   const goPrev = () => {
+    if (!leaveStage()) return;
     navigationRevisionRef.current += 1;
     validationToastRef.current?.dismiss();
     preflight.cancel();
@@ -1743,7 +1745,7 @@ export function useSubmitWizard() {
       setStep((s) => s - 1);
     }
   };
-  const goTo = (idx: number) => {
+  const moveTo = (idx: number) => {
     navigationRevisionRef.current += 1;
     validationToastRef.current?.dismiss();
     preflight.cancel();
@@ -1906,11 +1908,34 @@ export function useSubmitWizard() {
         return null;
     }
   };
-  /** Validates a stage; `report` records its first problem for inline display. */
+  /** Toasts a problem and opens the field that fixes it. */
+  const reportIssue = (found: WizardIssue) => {
+    setIssue({ ...found });
+    toastWizardIssue(found);
+  };
+  /** Validates a stage; `report` surfaces its first problem. */
   const validateStep = (s: number, report = false, structureOnly = false): boolean => {
     const found = stageIssue(s, structureOnly);
-    if (found && report) setIssue(found);
+    if (found && report) reportIssue(found);
     return found == null;
+  };
+  // A check failure holds its stage until the checked setup changes; a
+  // validation problem holds it until the stage validates.
+  const currentIssue = (): WizardIssue | null => {
+    if (issue?.identity && issue.stage === stageAt(step) && issue.identity === preflight.identity)
+      return issue;
+    return stageIssue(step, true);
+  };
+  /** Whether the wizard may leave its stage: a problem is reported and holds it. */
+  const leaveStage = (): boolean => {
+    const found = currentIssue();
+    if (!found) return true;
+    reportIssue(found);
+    return false;
+  };
+  const goTo = (idx: number) => {
+    if (idx !== step && !leaveStage()) return;
+    moveTo(idx);
   };
 
   const maxReachableStep = furthestReachedStep;
@@ -2061,7 +2086,7 @@ export function useSubmitWizard() {
   };
 
   const advance = async (target: number) => {
-    if (advancingRef.current) return;
+    if (advancingRef.current || !leaveStage()) return;
     advancingRef.current = true;
     setAdvancing(true);
     setIssue(null);
@@ -2069,7 +2094,7 @@ export function useSubmitWizard() {
       settleHeldCheck();
       for (let i = 0; i < target; i++) {
         if (!validateStep(i, true, true)) {
-          goTo(i);
+          moveTo(i);
           return;
         }
       }
@@ -2081,7 +2106,7 @@ export function useSubmitWizard() {
         if (!(await ensureSetupChecked("execution"))) return;
         if (!reused && step === WIZARD_STAGE.optimization) return;
       }
-      if (mountedRef.current) goTo(target);
+      if (mountedRef.current) moveTo(target);
     } finally {
       advancingRef.current = false;
       if (mountedRef.current) setAdvancing(false);
@@ -2257,7 +2282,7 @@ export function useSubmitWizard() {
       t.fail(failure?.message ?? msg("submit.preflight.failed"));
       if (preserveWorkflowResult && response.workflow_result) return response;
       const destination = preflightDestination("dspy", failure?.field ?? failure?.key, scope);
-      goTo(WIZARD_STAGE[destination.stage]);
+      moveTo(WIZARD_STAGE[destination.stage]);
       setIssue({
         ...destination,
         message: failure?.message ?? msg("submit.preflight.failed"),
@@ -2269,7 +2294,7 @@ export function useSubmitWizard() {
         const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
         t.fail(message.startsWith("budget.") ? msg(message as MessageKey) : message);
         if (message.startsWith("budget.")) {
-          goTo(WIZARD_STAGE.optimization);
+          moveTo(WIZARD_STAGE.optimization);
           setIssue({
             stage: "optimization",
             fieldId: "totalBudgetInput",
@@ -2289,7 +2314,7 @@ export function useSubmitWizard() {
     setIssue(null);
     for (let i = 0; i <= LAST_WIZARD_STAGE; i++) {
       if (!validateStep(i, true, true)) {
-        goTo(i);
+        moveTo(i);
         return;
       }
     }
@@ -2511,7 +2536,7 @@ export function useSubmitWizard() {
     goTo,
     maxReachableStep,
     validateStep,
-    stageIssue,
+    leaveStage,
     issue,
     handleNext,
     evaluationStatus,

@@ -31,6 +31,19 @@ test("progress events drive the running-job stage", () => {
   assert.equal(at("dataset_splits_ready"), "baseline");
 });
 
+test("a black-box lane handoff moves the run into refining", () => {
+  const running = (events: ProgressEvent[]) =>
+    job({ status: "running", optimization_type: "blackbox", progress_events: events });
+  assert.equal(
+    detectStage(running([ev("lane_started"), ev("optimizer_progress"), ev("lane_handoff")])),
+    "refining",
+  );
+  assert.equal(
+    detectStage(running([ev("lane_handoff"), ev("optimizer_progress"), ev("evaluation_started")])),
+    "evaluating",
+  );
+});
+
 test("the final evaluation reports as evaluating until its result lands", () => {
   const running = (events: ProgressEvent[]) => job({ status: "running", progress_events: events });
   assert.equal(

@@ -56,6 +56,8 @@ import { splitExampleCounts } from "../lib/split-example-counts";
 import { detectLanguage, looksLikeCode, type SeedLanguage } from "../lib/seed-format";
 import { cloneBasics, cloneRows, cloneSourceRecipe } from "../lib/clone-payload";
 import type { WizardIssue } from "../lib/wizard-issue";
+import { toastWizardIssue } from "../lib/wizard-issue-toast";
+import { blackboxIssueStage } from "../lib/blackbox-issue-stage";
 import { preflightDestination } from "../lib/preflight-destination";
 import { preflightMayAdvance, preflightPendingMessageKey } from "../lib/preflight-outcome";
 import {
@@ -1339,10 +1341,15 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     }
   };
 
-  /** Validates a stage; `report` records its first problem for inline display. */
+  /** Toasts a problem and opens the field that fixes it. */
+  const reportIssue = (found: WizardIssue) => {
+    setIssue({ ...found });
+    toastWizardIssue(found);
+  };
+  /** Validates a stage; `report` surfaces its first problem. */
   const validateStep = (s: number, report = false): boolean => {
     const found = stageIssue(s);
-    if (found && report) setIssue(found);
+    if (found && report) reportIssue(found);
     return found == null;
   };
 
@@ -1369,7 +1376,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     if (progress?.status !== "succeeded" || progress.scope !== "execution") return;
     if (step === WIZARD_STAGE.optimization) preflight.progress.clear();
   };
-  const goTo = (idx: number) => {
+  const moveTo = (idx: number) => {
     navigationRevisionRef.current += 1;
     dryRunAttemptRef.current += 1;
     setDryRun((current) => (current.status === "running" ? { status: "idle" } : current));
@@ -1379,6 +1386,31 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setDirection(idx > step ? 1 : -1);
     setStep(idx);
     setFurthestReachedStep((prev) => Math.max(prev, idx));
+  };
+  // A check failure holds its stage until the checked setup changes; a
+  // validation problem holds it until the stage validates.
+  const currentIssue = (): WizardIssue | null => {
+    if (
+      issue?.identity &&
+      blackboxIssueStage(issue) === stageAt(step) &&
+      issue.identity === preflight.identity
+    )
+      return issue;
+    return stageIssue(step);
+  };
+  /**
+   * Whether the wizard may leave its stage for `target`: a problem is reported
+   * and holds it, unless the field that fixes it is on the target stage.
+   */
+  const leaveStage = (target: number): boolean => {
+    const found = currentIssue();
+    if (!found) return true;
+    reportIssue(found);
+    return WIZARD_STAGE[blackboxIssueStage(found)] === target;
+  };
+  const goTo = (idx: number) => {
+    if (idx !== step && !leaveStage(idx)) return;
+    moveTo(idx);
   };
   const goPrev = () => {
     if (step > 0) goTo(step - 1);
@@ -1422,7 +1454,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       const failure = response.checks.find((check) => check.status === "failed");
       t.fail(failure?.message ?? msg("submit.preflight.failed"));
       const destination = preflightDestination("anything", failure?.field ?? failure?.key, scope);
-      goTo(WIZARD_STAGE[destination.stage]);
+      moveTo(WIZARD_STAGE[destination.stage]);
       setIssue({
         ...destination,
         message: failure?.message ?? msg("submit.preflight.failed"),
@@ -1434,7 +1466,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         const message = error instanceof Error ? error.message : msg("submit.preflight.failed");
         t.fail(message.startsWith("budget.") ? msg(message as MessageKey) : message);
         if (message.startsWith("budget.")) {
-          goTo(WIZARD_STAGE.evaluation);
+          moveTo(WIZARD_STAGE.evaluation);
           setIssue({
             stage: "evaluation",
             fieldId: "totalBudgetInput",
@@ -1449,7 +1481,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     }
   };
   const advance = async (target: number) => {
-    if (advancingRef.current) return;
+    if (advancingRef.current || !leaveStage(target)) return;
     advancingRef.current = true;
     setAdvancing(true);
     setIssue(null);
@@ -1457,7 +1489,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       settleHeldCheck();
       for (let i = 0; i < target; i++) {
         if (!validateStep(i, true)) {
-          goTo(i);
+          moveTo(i);
           return;
         }
       }
@@ -1471,7 +1503,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         if (!(await ensureEvaluatorChecked("execution"))) return;
         if (!reused && step === WIZARD_STAGE.optimization) return;
       }
-      goTo(target);
+      moveTo(target);
     } finally {
       advancingRef.current = false;
       if (mountedRef.current) setAdvancing(false);
@@ -1520,7 +1552,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setIssue(null);
     for (let i = 0; i < LAST_WIZARD_STAGE; i++) {
       if (!validateStep(i, true)) {
-        goTo(i);
+        moveTo(i);
         return;
       }
     }
@@ -1665,7 +1697,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     submitting,
     submitPhase,
     validateStep,
-    stageIssue,
+    leaveStage,
     issue,
     goTo,
     goPrev,
