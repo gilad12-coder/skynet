@@ -3885,7 +3885,7 @@
   "hf_import.toast.imported": "מערך הנתונים יובא לספרייה שלכם",
   "hf_import.toast.deduplicated": "מערך הנתונים הזה כבר היה בספרייה שלכם",
   "hf_import.toast.failed": "הייבוא נכשל. נסו שוב.",
-  "connector_import.button": "ייבוא מ…",
+  "connector_import.button": "ייבוא",
   "connector_import.title": "ייבוא מ-{provider}",
   "connector_import.subtitle": "עיינו במה שהחשבון שלכם רואה, הציצו בקובץ ושמרו אותו לספרייה.",
   "connector_import.not_connected": "חברו את חשבון {provider} שלכם כדי לעיין בו.",

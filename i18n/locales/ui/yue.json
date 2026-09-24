@@ -67,7 +67,7 @@
   "connector_import.back": "返回",
   "connector_import.breadcrumb": "位置",
   "connector_import.browse_error": "呢個位置載入唔到。",
-  "connector_import.button": "匯入…",
+  "connector_import.button": "匯入",
   "connector_import.cancel": "取消",
   "connector_import.connect_link": "連接 {provider}",
   "connector_import.empty": "呢度冇嘢可以匯入。",

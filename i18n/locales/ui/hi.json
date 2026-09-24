@@ -67,7 +67,7 @@
   "connector_import.back": "वापस",
   "connector_import.breadcrumb": "स्थान",
   "connector_import.browse_error": "यह स्थान लोड नहीं हो सका।",
-  "connector_import.button": "आयात करें…",
+  "connector_import.button": "आयात करें",
   "connector_import.cancel": "रद्द करें",
   "connector_import.connect_link": "{provider} कनेक्ट करें",
   "connector_import.empty": "यहाँ आयात करने के लिए कुछ भी नहीं है।",

@@ -67,7 +67,7 @@
   "connector_import.back": "Indietro",
   "connector_import.breadcrumb": "Posizione",
   "connector_import.browse_error": "Impossibile caricare questa posizione.",
-  "connector_import.button": "Importa da…",
+  "connector_import.button": "Importa",
   "connector_import.cancel": "Annulla",
   "connector_import.connect_link": "Connetti {provider}",
   "connector_import.empty": "Niente da importare qui.",

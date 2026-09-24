@@ -67,7 +67,7 @@
   "connector_import.back": "戻る",
   "connector_import.breadcrumb": "場所",
   "connector_import.browse_error": "この場所を読み込めませんでした。",
-  "connector_import.button": "インポート元…",
+  "connector_import.button": "インポート",
   "connector_import.cancel": "キャンセル",
   "connector_import.connect_link": "{provider} を接続",
   "connector_import.empty": "ここにはインポートできるものがありません。",

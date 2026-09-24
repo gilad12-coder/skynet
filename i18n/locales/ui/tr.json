@@ -67,7 +67,7 @@
   "connector_import.back": "Geri",
   "connector_import.breadcrumb": "Konum",
   "connector_import.browse_error": "Bu konum yüklenemedi.",
-  "connector_import.button": "İçe Aktar…",
+  "connector_import.button": "İçe aktar",
   "connector_import.cancel": "İptal",
   "connector_import.connect_link": "{provider} bağlayın",
   "connector_import.empty": "Burada içe aktarılabilecek bir şey yok.",

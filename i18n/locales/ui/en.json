@@ -3885,7 +3885,7 @@
   "hf_import.toast.imported": "Dataset imported to your library",
   "hf_import.toast.deduplicated": "This dataset was already in your library",
   "hf_import.toast.failed": "Import failed. Try again.",
-  "connector_import.button": "Import from…",
+  "connector_import.button": "Import",
   "connector_import.title": "Import from {provider}",
   "connector_import.subtitle": "Browse what your account can see, preview a file, and save it to your library.",
   "connector_import.not_connected": "Connect your {provider} account to browse it.",

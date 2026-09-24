@@ -67,7 +67,7 @@
   "connector_import.back": "Zurück",
   "connector_import.breadcrumb": "Ort",
   "connector_import.browse_error": "Dieser Ort konnte nicht geladen werden.",
-  "connector_import.button": "Importieren aus…",
+  "connector_import.button": "Importieren",
   "connector_import.cancel": "Abbrechen",
   "connector_import.connect_link": "{provider} verbinden",
   "connector_import.empty": "Hier gibt es nichts zu importieren.",

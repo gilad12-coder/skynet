@@ -67,7 +67,7 @@
   "connector_import.back": "Назад",
   "connector_import.breadcrumb": "Розташування",
   "connector_import.browse_error": "Не вдалося завантажити це розташування.",
-  "connector_import.button": "Імпорт з…",
+  "connector_import.button": "Імпорт",
   "connector_import.cancel": "Скасувати",
   "connector_import.connect_link": "Підключити {provider}",
   "connector_import.empty": "Тут немає нічого для імпорту.",

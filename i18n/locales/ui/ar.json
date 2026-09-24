@@ -67,7 +67,7 @@
   "connector_import.back": "رجوع",
   "connector_import.breadcrumb": "الموقع",
   "connector_import.browse_error": "تعذّر تحميل هذا الموقع.",
-  "connector_import.button": "استيراد من…",
+  "connector_import.button": "استيراد",
   "connector_import.cancel": "إلغاء",
   "connector_import.connect_link": "ربط {provider}",
   "connector_import.empty": "لا يوجد هنا ما يمكن استيراده.",
