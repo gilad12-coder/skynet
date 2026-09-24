@@ -113,18 +113,14 @@ def test_list_is_empty_and_reports_oauth_unavailable(vault_key: str) -> None:
     """A fresh user sees the HF provider unlinked with no OAuth button."""
     client, _ = _make_client()
     body = client.get("/connectors").json()
-    assert body == {
-        "connectors": [
-            {
-                "provider": "huggingface",
-                "connected": False,
-                "status": None,
-                "account_label": None,
-                "auth_method": None,
-                "oauth_available": False,
-                "connected_at": None,
-            }
-        ]
+    assert body["connectors"][0] == {
+        "provider": "huggingface",
+        "connected": False,
+        "status": None,
+        "account_label": None,
+        "auth_method": None,
+        "oauth_available": False,
+        "connected_at": None,
     }
 
 

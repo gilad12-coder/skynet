@@ -251,6 +251,20 @@
     "connectors.hf_expired": "Your Hugging Face session expired. Connect again from Settings.",
     "connectors.hf_oauth_failed": "Hugging Face sign-in didn't complete. Try again.",
     "connectors.hf_oauth_state_invalid": "The Hugging Face sign-in link is invalid or expired. Start again.",
-    "connectors.hf_import_too_large": "That split is too large to import (the compressed-file limit is {max_mb} MB)."
+    "connectors.hf_import_too_large": "That split is too large to import (the compressed-file limit is {max_mb} MB).",
+    "connectors.oauth_not_configured": "Sign-in with {provider} isn't set up on this deployment. Paste credentials instead.",
+    "connectors.oauth_failed": "{provider} sign-in didn't complete. Try again.",
+    "connectors.oauth_state_invalid": "The sign-in link is invalid or expired. Start again.",
+    "connectors.unreachable": "{provider} could not be reached. Try again in a moment.",
+    "connectors.expired": "Your {provider} session expired. Connect again from Settings.",
+    "connectors.not_connected": "Connect your {provider} account first.",
+    "connectors.invalid_credentials": "Those credentials were rejected. Check them and try again.",
+    "connectors.rejected": "{provider} refused the request. Your credentials may not have access to this item.",
+    "connectors.not_found": "That item wasn't found on {provider}, or your account can't access it.",
+    "connectors.provider_error": "{provider} returned an unexpected error (HTTP {status_code}). Try again in a moment.",
+    "connectors.file_unsupported": "That file can't be read as a table. Supported formats: CSV, TSV, JSON, JSONL and Parquet.",
+    "connectors.import_too_large": "That file is too large to import (the limit is {max_mb} MB).",
+    "connectors.invalid_ref": "That location isn't valid. Pick a file from the list.",
+    "connectors.unknown_provider": "Unknown connector: {provider}."
   }
 }

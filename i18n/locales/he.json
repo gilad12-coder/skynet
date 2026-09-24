@@ -251,7 +251,21 @@
     "connectors.hf_expired": "הסשן שלכם ב-Hugging Face פג. התחברו שוב מההגדרות.",
     "connectors.hf_oauth_failed": "ההתחברות ל-Hugging Face לא הושלמה. נסו שוב.",
     "connectors.hf_oauth_state_invalid": "קישור ההתחברות ל-Hugging Face לא תקין או שפג תוקפו. התחילו מחדש.",
-    "connectors.hf_import_too_large": "הפיצול הזה גדול מדי לייבוא (מגבלת הקובץ הדחוס היא {max_mb}MB)."
+    "connectors.hf_import_too_large": "הפיצול הזה גדול מדי לייבוא (מגבלת הקובץ הדחוס היא {max_mb}MB).",
+    "connectors.oauth_not_configured": "התחברות דרך {provider} לא מוגדרת בפריסה הזו. הדביקו פרטי גישה במקום.",
+    "connectors.oauth_failed": "ההתחברות ל-{provider} לא הושלמה. נסו שוב.",
+    "connectors.oauth_state_invalid": "קישור ההתחברות אינו תקין או שפג תוקפו. התחילו מחדש.",
+    "connectors.unreachable": "לא ניתן להגיע ל-{provider}. נסו שוב בעוד רגע.",
+    "connectors.expired": "פג תוקף ההתחברות ל-{provider}. חברו מחדש מההגדרות.",
+    "connectors.not_connected": "חברו קודם את חשבון ה-{provider} שלכם.",
+    "connectors.invalid_credentials": "פרטי הגישה נדחו. בדקו אותם ונסו שוב.",
+    "connectors.rejected": "{provider} דחה את הבקשה. ייתכן שלפרטי הגישה שלכם אין הרשאה לפריט הזה.",
+    "connectors.not_found": "הפריט לא נמצא ב-{provider}, או שלחשבון שלכם אין גישה אליו.",
+    "connectors.provider_error": "{provider} החזיר שגיאה לא צפויה (HTTP {status_code}). נסו שוב בעוד רגע.",
+    "connectors.file_unsupported": "לא ניתן לקרוא את הקובץ כטבלה. פורמטים נתמכים: CSV, TSV, JSON, JSONL ו-Parquet.",
+    "connectors.import_too_large": "הקובץ גדול מדי לייבוא (המגבלה היא {max_mb} MB).",
+    "connectors.invalid_ref": "המיקום הזה אינו תקין. בחרו קובץ מהרשימה.",
+    "connectors.unknown_provider": "מחבר לא מוכר: {provider}."
   },
   "backend": {
     "constants": {

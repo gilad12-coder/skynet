@@ -1028,8 +1028,8 @@ export interface ConnectorStatus {
   connected: boolean;
   status: "connected" | "invalid" | null;
   account_label: string | null;
-  auth_method: "oauth" | "token" | null;
-  /** Whether the deployment can offer "Continue with Hugging Face" (OAuth app configured). */
+  auth_method: "oauth" | "token" | "service_account" | "credentials" | null;
+  /** Whether the deployment can offer "Continue with <provider>" (OAuth app configured). */
   oauth_available: boolean;
   connected_at: string | null;
 }
@@ -1120,6 +1120,71 @@ export function importHuggingFaceDataset(body: {
   return request<SaveDatasetResponse>("/connectors/huggingface/import", {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+/** Every connector the backend knows, in the order ``GET /connectors`` lists them. */
+export type ConnectorProvider =
+  | "huggingface"
+  | "google_sheets"
+  | "github"
+  | "s3"
+  | "gcs"
+  | "azure_blob";
+
+/** One row of a connector's browse listing: a folder to descend into or a file to import. */
+export interface ConnectorEntry {
+  ref: string;
+  name: string;
+  kind: "folder" | "file";
+  size: number | null;
+  modified: string | null;
+}
+
+/**
+ * Link a provider with pasted credentials (token, service-account key, access
+ * keys…). The backend verifies them against the service and encrypts them at
+ * rest; they are never echoed back.
+ */
+export function saveConnectorCredentials(
+  provider: ConnectorProvider,
+  fields: Record<string, string>,
+) {
+  return request<ConnectorListResponse>(`/connectors/${provider}/credentials`, {
+    method: "PUT",
+    body: JSON.stringify({ fields }),
+  });
+}
+
+/** Forget the caller's credentials for one provider; returns the updated list. */
+export function removeConnector(provider: ConnectorProvider) {
+  return request<ConnectorListResponse>(`/connectors/${provider}`, { method: "DELETE" });
+}
+
+/** Mint the OAuth authorize URL for a provider the browser should be sent to. */
+export function startConnectorOAuth(provider: ConnectorProvider) {
+  return request<{ authorize_url: string }>(`/connectors/${provider}/oauth/start`, {
+    method: "POST",
+  });
+}
+
+/** List what the linked account can see at ``location`` (empty for the root). */
+export function browseConnector(provider: ConnectorProvider, location: string, search: string) {
+  const params = new URLSearchParams({ location, search });
+  return request<{ entries: ConnectorEntry[] }>(`/connectors/${provider}/browse?${params}`);
+}
+
+/** Decode the first rows of one browse entry. */
+export function previewConnectorRef(provider: ConnectorProvider, ref: string) {
+  const params = new URLSearchParams({ ref });
+  return request<HubPreview>(`/connectors/${provider}/preview?${params}`);
+}
+
+/** Import one browse entry into the caller's library (gated by the file cap and storage quota). */
+export function importConnectorRef(provider: ConnectorProvider, ref: string, name?: string) {
+  return request<SaveDatasetResponse>(`/connectors/${provider}/import`, {
+    method: "POST",
+    body: JSON.stringify({ ref, name }),
   });
 }
 
