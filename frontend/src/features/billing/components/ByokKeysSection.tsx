@@ -134,15 +134,20 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
           {!saved && !editing && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={startEditing}
-              className="min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
-            >
-              <Key className="size-3.5" />
-              {msg("settings.keys.add")}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={startEditing}
+                  className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                  aria-label={msg("settings.keys.add")}
+                >
+                  <Key className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{msg("settings.keys.add")}</TooltipContent>
+            </Tooltip>
           )}
           {saved && !editing && (
             <Tooltip>
@@ -293,15 +298,7 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
 export function ByokKeysSection() {
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <Key className="size-4 text-muted-foreground" aria-hidden="true" />
-          <span className="text-sm font-semibold text-foreground">
-            {msg("settings.keys.title")}
-          </span>
-        </div>
-        <p className="text-xs text-muted-foreground">{msg("settings.keys.description")}</p>
-      </div>
+      <p className="text-xs text-muted-foreground">{msg("settings.keys.description")}</p>
 
       <div className="flex flex-col gap-2">
         {BYOK_PROVIDERS.map((p) => (

@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { toast } from "react-toastify";
-import { ArrowSquareOut, CircleNotch, FloppyDisk, Key, Trash, X } from "@/shared/ui/icons";
+import { ArrowSquareOut, CircleNotch, FloppyDisk, Key, SignIn, Trash, X } from "@/shared/ui/icons";
+import { RetryIconButton } from "@/shared/ui/retry-icon-button";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
@@ -20,8 +21,6 @@ import {
   type ProviderMeta,
 } from "./providers";
 
-const TOUCH_BUTTON =
-  "min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]";
 const TOUCH_ICON = "size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]";
 const TOUCH_INPUT = "h-[44px] sm:h-8 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]";
 
@@ -243,25 +242,41 @@ function ProviderCard({
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
           {!connected && !formOpen && meta.oauthButton && status?.oauth_available && (
-            <Button size="sm" onClick={handleOAuth} disabled={starting} className={TOUCH_BUTTON}>
-              {starting ? (
-                <CircleNotch className="size-3.5 animate-spin" />
-              ) : (
-                <ArrowSquareOut className="size-3.5" />
-              )}
-              {meta.oauthButton}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={handleOAuth}
+                  disabled={starting}
+                  className={TOUCH_ICON}
+                  aria-label={meta.oauthButton}
+                >
+                  {starting ? (
+                    <CircleNotch className="size-3.5 animate-spin" />
+                  ) : (
+                    <SignIn className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{meta.oauthButton}</TooltipContent>
+            </Tooltip>
           )}
           {!connected && !formOpen && meta.fields.length > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setFormOpen(true)}
-              className={TOUCH_BUTTON}
-            >
-              <Key className="size-3.5" />
-              {msg("settings.keys.add")}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => setFormOpen(true)}
+                  className={TOUCH_ICON}
+                  aria-label={msg("settings.keys.add")}
+                >
+                  <Key className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{msg("settings.keys.add")}</TooltipContent>
+            </Tooltip>
           )}
           {!connected && meta.fields.length === 0 && status && !status.oauth_available && (
             <span className="text-xs text-muted-foreground">
@@ -396,10 +411,7 @@ export function ConnectorsTab() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h3 className="text-sm font-semibold text-foreground">{msg("connectors.title")}</h3>
-        <p className="mt-1 text-xs text-muted-foreground">{msg("connectors.subtitle")}</p>
-      </div>
+      <p className="text-xs text-muted-foreground">{msg("connectors.subtitle")}</p>
 
       {loading ? (
         <div className="flex items-center justify-center py-8">
@@ -408,9 +420,7 @@ export function ConnectorsTab() {
       ) : error ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 px-3 py-2.5">
           <p className="text-sm text-muted-foreground">{msg("connectors.error")}</p>
-          <Button variant="outline" size="sm" onClick={refetch}>
-            {msg("connectors.retry")}
-          </Button>
+          <RetryIconButton label={msg("connectors.retry")} onClick={refetch} />
         </div>
       ) : (
         <div className="flex flex-col gap-5">
