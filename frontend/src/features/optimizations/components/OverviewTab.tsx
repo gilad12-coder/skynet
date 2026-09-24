@@ -109,7 +109,6 @@ function OverviewTabImpl({
   scorePoints,
   activePairIndex,
   activePair,
-  onStageClick,
   onPairSelect,
   onPairDeleted,
   trajectoryPreviewLayout,
@@ -120,7 +119,6 @@ function OverviewTabImpl({
   scorePoints: ScorePoint[];
   activePairIndex: number | null;
   activePair?: PairResult | null;
-  onStageClick: (stage: PipelineStage) => void;
   onPairSelect: (pairIndex: number) => void;
   onPairDeleted?: (pairIndex: number) => void;
   trajectoryPreviewLayout?: { width: number; height: number };
@@ -375,10 +373,10 @@ function OverviewTabImpl({
           <PipelineStages
             currentStage={currentStage}
             stageTs={stageTs}
+            startedAt={job.started_at}
             isActive={stagesActive}
             isFailed={stagesFailed}
             skippedStages={skippedStages}
-            onStageClick={onStageClick}
             dataTutorial={isPairContext ? undefined : "pipeline-stages"}
           />
         </FadeIn>

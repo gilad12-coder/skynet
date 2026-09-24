@@ -3,12 +3,13 @@
 /**
  * Visual pipeline timeline — renders the 5 DSPy stages (validating →
  * splitting → baseline → optimizing → evaluating) as a connected row of
- * nodes with per-stage timestamps and the time each stage took.
+ * nodes. Each finished stage shows how far into the run it was reached
+ * (like chapter markers on a video) plus the wall-clock time.
  *
  * Used by OverviewTab for both the job-wide pipeline and (when scoped by
  * pair_index) the per-pair pipeline inside a grid_search. Stage detection
- * + timestamp derivation live in the caller; this component is a pure
- * renderer.
+ * + timestamp derivation live in the caller; this component is a pure,
+ * non-interactive renderer.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -49,9 +50,9 @@ function sentenceCase(label: string): string {
   return label.charAt(0).toLocaleUpperCase(getActiveIntlLocale()) + label.slice(1);
 }
 
-function secondsBetween(from: StageTs | undefined, to: StageTs | undefined): number | null {
-  if (!from || !to) return null;
-  const ms = new Date(to.iso).getTime() - new Date(from.iso).getTime();
+function secondsSince(originIso: string | null, iso: string | undefined): number | null {
+  if (!originIso || !iso) return null;
+  const ms = new Date(iso).getTime() - new Date(originIso).getTime();
   return Number.isFinite(ms) && ms >= 0 ? ms / 1000 : null;
 }
 
@@ -125,7 +126,7 @@ function StageNode({ state }: { state: StageState }) {
   return (
     <span
       className={cn(
-        "grid size-8 shrink-0 place-items-center rounded-full transition-[box-shadow,transform,background-color] duration-300 ease-out group-hover/node:-translate-y-0.5 group-hover/node:shadow-[0_6px_14px_-6px_rgba(61,46,34,0.45)]",
+        "grid size-8 shrink-0 place-items-center rounded-full transition-colors duration-300 ease-out",
         NODE_STYLES[state],
       )}
       aria-hidden="true"
@@ -139,14 +140,14 @@ function StageNode({ state }: { state: StageState }) {
   );
 }
 
-function DurationChip({ seconds, className }: { seconds: number; className?: string }) {
+function ElapsedChip({ seconds, className }: { seconds: number; className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex h-4 items-center rounded-full border border-border/70 bg-background px-1.5 font-mono text-[0.625rem] leading-none tabular-nums text-muted-foreground",
+        "inline-flex h-4 items-center rounded-full border border-border/70 bg-background px-1.5 font-mono text-[0.625rem] leading-none tabular-nums text-foreground/80",
         className,
       )}
-      title={msg("pipeline.stage.duration")}
+      title={msg("pipeline.stage.elapsed")}
       dir="ltr"
     >
       {formatDuration(seconds)}
@@ -154,22 +155,36 @@ function DurationChip({ seconds, className }: { seconds: number; className?: str
   );
 }
 
+function StatusText({ state, text }: { state: StageState; text: string }) {
+  return (
+    <span
+      className={cn(
+        "text-[0.625rem] uppercase tracking-[0.08em]",
+        state === "stopped" ? "text-destructive" : "text-muted-foreground",
+      )}
+    >
+      {text}
+    </span>
+  );
+}
+
 export function PipelineStages({
   currentStage,
   stageTs,
+  startedAt,
   isActive,
   isFailed,
   skippedStages = [],
-  onStageClick,
   dataTutorial,
 }: {
   currentStage: PipelineStage | "done";
   stageTs: Partial<Record<PipelineStage, StageTs>>;
+  /** Zero point of the elapsed markers; the run's start time. */
+  startedAt: string | null | undefined;
   isActive: boolean;
   isFailed: boolean;
   /** Stages the run went past without executing (no test split, no starting point). */
   skippedStages?: readonly PipelineStage[];
-  onStageClick: (stage: PipelineStage) => void;
   dataTutorial?: string;
 }) {
   const stageCount = PIPELINE_STAGES.length;
@@ -195,6 +210,7 @@ export function PipelineStages({
   const railInsetPct = 50 / stageCount;
   const railSpanPct = 100 - railInsetPct * 2;
   const progressFraction = Math.min(completedStageIdx, stageCount - 1) / (stageCount - 1);
+  const origin = startedAt ?? stageTs.validating?.iso ?? null;
 
   const stages = PIPELINE_STAGES.map((s, i) => {
     const isDone = i < completedStageIdx;
@@ -211,7 +227,7 @@ export function PipelineStages({
     const ts = state === "done" ? stageTs[s.key] : undefined;
     const prev = i > 0 ? PIPELINE_STAGES[i - 1] : null;
     const prevTs = prev ? stageTs[prev.key] : undefined;
-    const elapsed = state === "done" ? secondsBetween(prevTs, ts) : null;
+    const elapsed = secondsSince(origin, ts?.iso);
     const dateChanged = ts != null && ts.date !== prevTs?.date;
     const statusText =
       state === "current"
@@ -225,8 +241,6 @@ export function PipelineStages({
   });
 
   const railColor = isFailed ? "bg-destructive/70" : "bg-primary";
-  const buttonBase =
-    "group/node relative z-10 min-w-0 cursor-pointer rounded-xl text-start outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
   if (isVertical) {
     return (
@@ -248,41 +262,23 @@ export function PipelineStages({
           aria-hidden="true"
         />
         {stages.map((s) => (
-          <button
+          <div
             key={s.key}
-            type="button"
-            onClick={() => onStageClick(s.key)}
             aria-current={s.state === "current" ? "step" : undefined}
-            className={cn(buttonBase, "flex w-full items-center gap-3 px-1 py-1.5")}
+            className="relative z-10 flex w-full min-w-0 items-center gap-3 px-1 py-1.5"
           >
             <StageNode state={s.state} />
-            <span className={cn("truncate text-xs transition-colors", LABEL_STYLES[s.state])}>
-              {s.label}
-            </span>
+            <span className={cn("truncate text-xs", LABEL_STYLES[s.state])}>{s.label}</span>
             <span className="ms-auto flex shrink-0 items-center gap-2" dir="ltr">
-              {s.statusText && (
-                <span
-                  className={cn(
-                    "text-[0.625rem] uppercase tracking-[0.08em]",
-                    s.state === "stopped" ? "text-destructive" : "text-muted-foreground",
-                  )}
-                >
-                  {s.statusText}
+              {s.statusText && <StatusText state={s.state} text={s.statusText} />}
+              {s.ts && (
+                <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground">
+                  {s.dateChanged ? `${s.ts.date} · ${s.ts.time}` : s.ts.time}
                 </span>
               )}
-              {s.ts && (
-                <>
-                  <span className="text-[0.625rem] uppercase tracking-[0.08em] text-muted-foreground">
-                    {s.ts.date}
-                  </span>
-                  <span className="font-mono text-[0.6875rem] tabular-nums text-foreground/70">
-                    {s.ts.time}
-                  </span>
-                </>
-              )}
-              {s.elapsed != null && <DurationChip seconds={s.elapsed} />}
+              {s.elapsed != null && <ElapsedChip seconds={s.elapsed} />}
             </span>
-          </button>
+          </div>
         ))}
       </div>
     );
@@ -311,65 +307,29 @@ export function PipelineStages({
         }}
         aria-hidden="true"
       />
-      {stages.map(
-        (s) =>
-          s.elapsed != null && (
-            <div
-              key={`${s.key}-elapsed`}
-              className="absolute top-2 z-10 flex justify-center"
-              style={{
-                insetInlineStart: `${railInsetPct + (s.i - 1) * railInsetPct * 2}%`,
-                width: `${railInsetPct * 2}%`,
-              }}
-            >
-              <DurationChip seconds={s.elapsed} />
-            </div>
-          ),
-      )}
       {stages.map((s) => (
-        <button
+        <div
           key={s.key}
-          type="button"
-          onClick={() => onStageClick(s.key)}
           aria-current={s.state === "current" ? "step" : undefined}
-          className={cn(buttonBase, "flex flex-col items-center gap-2 px-1 pb-1")}
+          className="relative z-10 flex min-w-0 flex-col items-center gap-2 px-1 pb-1"
         >
           <StageNode state={s.state} />
-          <span
-            className={cn(
-              "max-w-full truncate text-xs transition-colors group-hover/node:text-primary",
-              LABEL_STYLES[s.state],
-            )}
-          >
+          <span className={cn("max-w-full truncate text-xs", LABEL_STYLES[s.state])}>
             {s.label}
           </span>
-          <span className="-mt-1 flex flex-col items-center leading-tight" dir="ltr">
+          <span className="-mt-1 flex flex-col items-center gap-1 leading-tight" dir="ltr">
             {s.statusText ? (
-              <span
-                className={cn(
-                  "text-[0.625rem] uppercase tracking-[0.08em]",
-                  s.state === "stopped" ? "text-destructive" : "text-muted-foreground",
-                )}
-              >
-                {s.statusText}
-              </span>
+              <StatusText state={s.state} text={s.statusText} />
             ) : s.ts ? (
               <>
-                <span
-                  className={cn(
-                    "text-[0.625rem] uppercase tracking-[0.08em] text-muted-foreground",
-                    !s.dateChanged && "invisible",
-                  )}
-                >
-                  {s.ts.date}
-                </span>
-                <span className="font-mono text-[0.6875rem] tabular-nums text-foreground/70">
-                  {s.ts.time}
+                {s.elapsed != null && <ElapsedChip seconds={s.elapsed} />}
+                <span className="font-mono text-[0.625rem] tabular-nums text-muted-foreground">
+                  {s.dateChanged ? `${s.ts.date} · ${s.ts.time}` : s.ts.time}
                 </span>
               </>
             ) : null}
           </span>
-        </button>
+        </div>
       ))}
     </div>
   );
