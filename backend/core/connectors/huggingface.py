@@ -24,6 +24,11 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
+
+# dspy parks a lazy numpy proxy in sys.modules; importing a numpy submodule
+# materialises the real package before pyarrow's C extension reaches for it,
+# which otherwise re-executes numpy mid-import and fails.
+import numpy.version  # noqa: F401
 import pyarrow.parquet as pq
 from cryptography.fernet import InvalidToken
 
