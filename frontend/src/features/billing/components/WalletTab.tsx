@@ -1,8 +1,18 @@
 "use client";
 
+import { InlineErrorRow } from "@/shared/ui/inline-error-row";
+import { EmptyState } from "@/shared/ui/empty-state";
 import * as React from "react";
 import { motion } from "framer-motion";
-import { ArrowSquareOut, CircleNotch, Coins, CreditCard, PencilSimple, Plus, Sparkle } from "@/shared/ui/icons";
+import {
+  ArrowSquareOut,
+  CircleNotch,
+  Coins,
+  CreditCard,
+  PencilSimple,
+  Plus,
+  Sparkle,
+} from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
@@ -11,6 +21,8 @@ import { useLocale } from "@/shared/providers";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import { Button } from "@/shared/ui/primitives/button";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
+import { StatusPill } from "@/shared/ui/status-badge";
+import { Badge } from "@/shared/ui/primitives/badge";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import {
   createBillingPortalSession,
@@ -102,7 +114,7 @@ function AddCreditsControls() {
     <div
       role="group"
       aria-label={msg("billing.plans.credits.pack_aria")}
-      className="relative flex w-full max-w-full flex-wrap items-center gap-0.5 rounded-xl border border-border/50 bg-muted/40 p-0.5 sm:w-auto sm:flex-nowrap sm:rounded-full"
+      className="relative flex w-full max-w-full flex-wrap items-center gap-0.5 rounded-lg bg-muted p-0.5 sm:w-auto sm:flex-nowrap"
     >
       {CREDIT_PACKS.map((p) => {
         const active = p.id === selection;
@@ -114,8 +126,8 @@ function AddCreditsControls() {
             aria-checked={active}
             onClick={() => setSelection(p.id)}
             className={cn(
-              "relative min-h-[44px] min-w-[44px] rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold tabular-nums transition-colors duration-150 cursor-pointer sm:min-h-0 sm:min-w-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:min-w-[44px]",
-              active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+              "relative rounded-md px-2.5 py-1 text-xs font-medium tabular-nums transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45",
+              active ? "text-foreground" : "text-foreground/60 hover:text-foreground",
             )}
           >
             {/* Shared-layout pill slides between segments instead of the selected
@@ -123,7 +135,7 @@ function AddCreditsControls() {
             {active && (
               <motion.span
                 layoutId="credit-pack-pill"
-                className="absolute inset-0 rounded-full bg-background shadow-sm"
+                className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
                 transition={PILL_TRANSITION}
                 aria-hidden="true"
               />
@@ -140,7 +152,7 @@ function AddCreditsControls() {
         {customActive && (
           <motion.span
             layoutId="credit-pack-pill"
-            className="absolute inset-0 rounded-full bg-background shadow-sm"
+            className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
             transition={PILL_TRANSITION}
             aria-hidden="true"
           />
@@ -158,15 +170,12 @@ function AddCreditsControls() {
           placeholder={msg("billing.plans.credits.custom")}
           aria-label={msg("billing.plans.credits.custom_amount_aria")}
           className={cn(
-            "relative z-10 h-[44px] w-16 rounded-full bg-transparent px-2 py-0.5 text-center text-[0.6875rem] font-semibold tabular-nums outline-none transition-colors duration-150 placeholder:font-normal placeholder:text-muted-foreground/70 sm:h-auto [@media(hover:none)_and_(pointer:coarse)]:h-[44px]",
-            customActive ? "text-foreground" : "text-muted-foreground",
+            "relative z-10 h-[44px] w-16 rounded-md bg-transparent px-2.5 py-1 text-center text-xs font-medium tabular-nums outline-none transition-colors duration-200 placeholder:font-normal placeholder:text-muted-foreground/90 lg:h-auto [@media(hover:none)_and_(pointer:coarse)]:h-[44px]",
+            customActive ? "text-foreground" : "text-foreground/60",
           )}
         />
       </span>
-      <span
-        aria-hidden="true"
-        className="mx-0.5 hidden h-3.5 w-px shrink-0 bg-border/70 sm:block"
-      />
+      <span aria-hidden="true" className="mx-0.5 hidden h-4 w-px shrink-0 bg-border/70 sm:block" />
       <Button
         variant="outline"
         size="sm"
@@ -175,7 +184,11 @@ function AddCreditsControls() {
         disabled={buying || (!pack && !customValid)}
         className="h-[44px] rounded-full px-2.5 text-[0.6875rem] font-semibold border-[#C8A882]/70 text-[#8a6d44] hover:bg-[#C8A882]/10 hover:text-[#8a6d44] sm:h-6 [@media(hover:none)_and_(pointer:coarse)]:h-[44px] [&_svg:not([class*='size-'])]:size-3"
       >
-        {buying ? <CircleNotch className="animate-spin" /> : <Sparkle aria-hidden="true" />}
+        {buying ? (
+          <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        ) : (
+          <Sparkle aria-hidden="true" />
+        )}
         {formatMsg("billing.upgrade.buy", { p1: priceLabel })}
       </Button>
     </div>
@@ -240,7 +253,7 @@ function TransactionHistory() {
         )}
       </div>
       {failed ? (
-        <div className="flex items-center justify-between gap-3 border-y border-border/35 py-3">
+        <div className="flex items-center justify-between gap-3 border-y border-border/40 py-3">
           <span className="text-xs text-muted-foreground">
             {msg("billing.transactions.load_error")}
           </span>
@@ -248,27 +261,31 @@ function TransactionHistory() {
         </div>
       ) : data == null ? (
         <div
-          className="flex h-20 items-center justify-center border-y border-border/35"
+          className="flex h-20 items-center justify-center border-y border-border/40"
           aria-busy="true"
         >
           <CircleNotch className="size-4 animate-spin text-muted-foreground" aria-hidden="true" />
         </div>
       ) : data.entries.length === 0 ? (
-        <div className="flex items-center gap-2 border-y border-border/35 py-4 text-xs text-muted-foreground">
-          <CreditCard className="size-4 shrink-0" aria-hidden="true" />
-          {data.available
-            ? msg("billing.transactions.empty")
-            : msg("billing.transactions.unavailable")}
-        </div>
+        <EmptyState
+          variant="list"
+          icon={CreditCard}
+          title={
+            data.available
+              ? msg("billing.transactions.empty")
+              : msg("billing.transactions.unavailable")
+          }
+          className="border-y border-border/40"
+        />
       ) : (
-        <ul className="divide-y divide-border/35 border-y border-border/35">
+        <ul className="divide-y divide-border/40 border-y border-border/40">
           {data.entries.map((transaction) => {
             const statusTone =
               transaction.status === "paid"
-                ? "bg-emerald-700/10 text-emerald-800"
+                ? "success"
                 : transaction.status === "processing"
-                  ? "bg-amber-700/10 text-amber-800"
-                  : "bg-destructive/10 text-destructive";
+                  ? "running"
+                  : "failed";
             return (
               <li key={transaction.id} className="flex flex-wrap items-center gap-3 py-3">
                 <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
@@ -287,28 +304,29 @@ function TransactionHistory() {
                   </span>
                 </span>
                 <span className="ms-11 flex w-[calc(100%_-_2.75rem)] min-w-0 items-center justify-between gap-2 sm:ms-auto sm:w-auto sm:shrink-0 sm:justify-start">
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 text-[0.625rem] font-semibold",
-                      statusTone,
-                    )}
-                  >
+                  <StatusPill tone={statusTone}>
                     {msg(TRANSACTION_STATUS_LABEL[transaction.status])}
-                  </span>
+                  </StatusPill>
                   <span dir="ltr" className="text-sm font-semibold tabular-nums text-foreground">
                     {formatTransactionAmount(transaction.amount, transaction.currency, locale)}
                   </span>
                   {transaction.document_url && (
-                    <a
-                      href={transaction.document_url}
-                      target="_blank"
-                      rel="noreferrer"
+                    <Button
+                      asChild
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground hover:text-foreground"
                       aria-label={msg("billing.transactions.receipt")}
-                      title={msg("billing.transactions.receipt")}
-                      className="grid size-[44px] place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
                     >
-                      <ArrowSquareOut className="size-3.5" aria-hidden="true" />
-                    </a>
+                      <a
+                        href={transaction.document_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={msg("billing.transactions.receipt")}
+                      >
+                        <ArrowSquareOut className="size-4" aria-hidden="true" />
+                      </a>
+                    </Button>
                   )}
                 </span>
               </li>
@@ -384,18 +402,21 @@ function BillingDetails() {
               size="icon-sm"
               disabled={unavailable || portalFlow !== null}
               onClick={() => void openPortal("manage")}
-              className="size-[44px] text-muted-foreground hover:text-foreground sm:size-8"
+              className="text-muted-foreground hover:text-foreground"
               aria-label={msg("billing.profile.edit")}
             >
               {portalFlow === "manage" ? (
-                <CircleNotch className="size-4 animate-spin" aria-hidden="true" />
+                <CircleNotch
+                  className="animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
               ) : (
                 <PencilSimple className="size-4" aria-hidden="true" />
               )}
             </Button>
           </TooltipButton>
         </div>
-        <dl className="divide-y divide-border/35 border-y border-border/35">
+        <dl className="divide-y divide-border/40 border-y border-border/40">
           {[
             [msg("billing.profile.email"), profile.email],
             [msg("billing.profile.name"), profile.name],
@@ -426,11 +447,14 @@ function BillingDetails() {
               size="icon-sm"
               disabled={unavailable || portalFlow !== null}
               onClick={() => void openPortal("payment_method")}
-              className="size-[44px] text-muted-foreground hover:text-foreground sm:size-8"
+              className="text-muted-foreground hover:text-foreground"
               aria-label={msg("billing.payment_methods.add")}
             >
               {portalFlow === "payment_method" ? (
-                <CircleNotch className="size-4 animate-spin" aria-hidden="true" />
+                <CircleNotch
+                  className="animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
               ) : (
                 <Plus className="size-4" aria-hidden="true" />
               )}
@@ -438,14 +462,18 @@ function BillingDetails() {
           </TooltipButton>
         </div>
         {profile.payment_methods.length === 0 ? (
-          <div className="flex items-center gap-2 border-y border-border/35 py-4 text-xs text-muted-foreground">
-            <CreditCard className="size-4 shrink-0" aria-hidden="true" />
-            {unavailable
-              ? msg("billing.profile.unavailable")
-              : msg("billing.payment_methods.empty")}
-          </div>
+          <EmptyState
+            variant="list"
+            icon={CreditCard}
+            title={
+              unavailable
+                ? msg("billing.profile.unavailable")
+                : msg("billing.payment_methods.empty")
+            }
+            className="border-y border-border/40"
+          />
         ) : (
-          <ul className="divide-y divide-border/35 border-y border-border/35">
+          <ul className="divide-y divide-border/40 border-y border-border/40">
             {profile.payment_methods.map((method) => (
               <li key={method.id} className="flex items-center gap-3 py-3">
                 <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
@@ -458,9 +486,9 @@ function BillingDetails() {
                     </span>
                     {method.last4 && <span dir="ltr">•••• {method.last4}</span>}
                     {method.is_default && (
-                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[0.625rem] font-semibold text-muted-foreground">
+                      <Badge variant="secondary" size="sm">
                         {msg("billing.payment_methods.default")}
-                      </span>
+                      </Badge>
                     )}
                   </span>
                   {method.exp_month != null && method.exp_year != null && (
@@ -495,22 +523,22 @@ export function WalletTab() {
   return (
     <div className="flex flex-col gap-5">
       {loadError && (
-        <div
-          role="alert"
-          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2"
-        >
-          <span className="text-xs text-destructive">{msg("billing.wallet.load_error")}</span>
-          <RetryIconButton
-            label={msg("billing.wallet.retry")}
-            loading={loading}
-            onClick={refresh}
-          />
-        </div>
+        <InlineErrorRow
+          message={msg("billing.wallet.load_error")}
+          className="items-center py-2"
+          action={
+            <RetryIconButton
+              label={msg("billing.wallet.retry")}
+              loading={loading}
+              onClick={refresh}
+            />
+          }
+        />
       )}
       <section className="flex flex-col gap-5" data-tutorial="settings-billing">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="flex flex-col gap-1">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
               {msg("billing.popover.title")}
             </span>
             <div className="flex items-center gap-2" aria-busy={syncing || undefined}>
@@ -545,10 +573,7 @@ export function WalletTab() {
         </div>
 
         <div>
-          <SettingsRow
-            icon={Sparkle}
-            label={msg("billing.action.add_credits")}
-          >
+          <SettingsRow icon={Sparkle} label={msg("billing.action.add_credits")}>
             <AddCreditsControls />
           </SettingsRow>
         </div>

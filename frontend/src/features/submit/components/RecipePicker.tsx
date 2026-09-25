@@ -136,7 +136,7 @@ export function RecipeChip({ recipe, onChange }: { recipe: Recipe; onChange: () 
     >
       <Icon className="size-3.5 shrink-0 text-[#3D2E22]" aria-hidden />
       <span className="min-w-0 truncate font-semibold text-foreground">{recipeTitle(recipe)}</span>
-      <span aria-hidden className="ms-auto h-3 w-px shrink-0 bg-border/80" />
+      <span aria-hidden className="ms-auto h-3 w-px shrink-0 bg-border/70" />
       <span className="flex shrink-0 items-center gap-1 font-medium text-muted-foreground transition-colors group-hover:text-foreground">
         {msg("submit.recipe.change")}
         <Repeat className="size-3" />

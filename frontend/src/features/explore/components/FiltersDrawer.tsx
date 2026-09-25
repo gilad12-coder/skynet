@@ -1,5 +1,7 @@
 "use client";
 
+import { Skeleton } from "@/shared/ui/skeleton";
+import { CountPill } from "@/shared/ui/count-badge";
 import * as React from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { CaretDown, Check, CircleNotch, MagnifyingGlass, X } from "@/shared/ui/icons";
@@ -9,9 +11,11 @@ import { msg, formatMsg } from "@/shared/lib/messages";
 import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
+import { Button } from "@/shared/ui/primitives/button";
 import { Sheet, SheetContent, SheetTitle } from "@/shared/ui/primitives/sheet";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { SkynetDatePicker } from "@/shared/ui/skynet-date-picker";
+import { CheckboxIndicator } from "@/shared/ui/select-checkbox";
 import { useIsWideViewport } from "../hooks/use-wide-viewport";
 import { pickerRows } from "../lib/facet-options";
 import { DATE_PRESETS, lastDaysRange, matchingPreset } from "../lib/date-range";
@@ -195,16 +199,14 @@ function FiltersPanel({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className={cn("flex flex-row items-center justify-between gap-3 pt-5 pb-3", gutter)}>
-        <SheetTitle className="text-[17px] font-medium tracking-tight text-foreground">
-          {msg("explore.filters.title")}
-        </SheetTitle>
+        <SheetTitle>{msg("explore.filters.title")}</SheetTitle>
         <button
           type="button"
           onClick={onClose}
           aria-label={msg("explore.filters.close")}
-          className={`inline-flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground lg:size-9 ${FOCUS_RING}`}
+          className="close-button shrink-0"
         >
-          <X className="size-4" aria-hidden="true" />
+          <X aria-hidden="true" />
         </button>
       </div>
 
@@ -249,27 +251,31 @@ function FiltersPanel({
       </div>
 
       {showFooter && (
-        <div className={cn("flex items-center justify-between gap-3 border-t border-border/60 py-4", gutter)}>
-          <button
+        <div
+          className={cn(
+            "flex items-center justify-between gap-3 border-t border-border/60 py-4",
+            gutter,
+          )}
+        >
+          <Button
             type="button"
+            variant="ghost"
+            size="lg"
             onClick={onClearAll}
             disabled={totalActive === 0}
-            className={`h-10 cursor-pointer rounded-lg px-3 text-[13px] text-foreground/65 transition-colors hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:text-foreground/65 ${FOCUS_RING}`}
           >
             {msg("explore.filters.reset")}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className={`inline-flex h-10 min-w-[9.5rem] cursor-pointer items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-[13px] font-medium text-background transition-opacity hover:opacity-90 ${FOCUS_RING}`}
-          >
+          </Button>
+          <Button type="button" size="lg" onClick={onClose} className="min-w-[9.5rem]">
             {resultsLoading && <CircleNotch className="size-3.5 animate-spin" aria-hidden="true" />}
             <span className="tabular-nums">
               {resultTotal === 1
                 ? msg("explore.filters.show_results_one")
-                : formatMsg("explore.filters.show_results", { n: numberFormat.format(resultTotal) })}
+                : formatMsg("explore.filters.show_results", {
+                    n: numberFormat.format(resultTotal),
+                  })}
             </span>
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -368,7 +374,9 @@ export function FilterSummary({
               </span>
             )}
             <span>{part.label}</span>
-            <span className="max-w-[14rem] truncate font-medium text-foreground/80">{part.value}</span>
+            <span className="max-w-[14rem] truncate font-medium text-foreground/80">
+              {part.value}
+            </span>
             {part.more > 0 && <span className="tabular-nums">+{part.more}</span>}
           </span>
         ))}
@@ -441,11 +449,7 @@ function FieldRow({
           >
             {summary ?? msg("explore.filters.field.any")}
           </span>
-          {count > 1 && (
-            <span className="shrink-0 rounded-full bg-foreground/10 px-1.5 py-px text-[11px] font-medium tabular-nums text-foreground/75">
-              {numberFormat.format(count)}
-            </span>
-          )}
+          {count > 1 && <CountPill className="shrink-0">{numberFormat.format(count)}</CountPill>}
         </button>
         {onClear && (
           <TooltipButton tooltip={msg("explore.filters.picker.clear")} side="top">
@@ -453,9 +457,9 @@ function FieldRow({
               type="button"
               onClick={onClear}
               aria-label={msg("explore.filters.picker.clear")}
-              className={`flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground/45 transition-colors hover:bg-foreground/10 hover:text-foreground ${FOCUS_RING}`}
+              className="close-button [--close-btn-size:20px] [--close-btn-radius:6px] [--close-btn-icon:12px] shrink-0"
             >
-              <X className="size-3.5" aria-hidden="true" />
+              <X aria-hidden="true" />
             </button>
           </TooltipButton>
         )}
@@ -492,20 +496,6 @@ function FieldRow({
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-function CheckBox({ checked }: { checked: boolean }) {
-  return (
-    <span
-      className={cn(
-        "flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors",
-        checked ? "border-foreground bg-foreground text-background" : "border-border",
-      )}
-      aria-hidden="true"
-    >
-      {checked && <Check className="size-3" />}
-    </span>
   );
 }
 
@@ -567,9 +557,7 @@ function FacetField({
   };
   const moveHighlight = (next: number) => {
     setHighlight(next);
-    listRef.current
-      ?.querySelector(`[data-index="${next}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+    listRef.current?.querySelector(`[data-index="${next}"]`)?.scrollIntoView({ block: "nearest" });
   };
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (rows.length === 0) return;
@@ -653,9 +641,9 @@ function FacetField({
                 setHighlight(0);
               }}
               aria-label={msg("explore.filters.search.clear")}
-              className={`inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground/45 hover:bg-accent hover:text-foreground ${FOCUS_RING}`}
+              className="size-7 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-foreground/55 transition-[background-color,color] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
             >
-              <X className="size-3" aria-hidden="true" />
+              <X className="size-3.5" aria-hidden="true" />
             </button>
           )}
         </div>
@@ -680,11 +668,11 @@ function FacetField({
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => toggle(row.value)}
               className={cn(
-                "flex h-11 cursor-pointer select-none items-center gap-2.5 px-3 text-[13px] lg:h-9",
+                "group flex h-11 cursor-pointer select-none items-center gap-2.5 px-3 text-[13px] lg:h-9",
                 index === activeIndex && "bg-accent",
               )}
             >
-              <CheckBox checked={row.checked} />
+              <CheckboxIndicator checked={row.checked} />
               <span dir={dir} className="min-w-0 flex-1 truncate text-foreground">
                 {displayName(row.value)}
               </span>
@@ -698,16 +686,23 @@ function FacetField({
           {rows.length === 0 &&
             (loading ? (
               Array.from({ length: 5 }, (_, index) => (
-                <li key={index} className="flex h-11 items-center gap-2.5 px-3 lg:h-9" aria-hidden="true">
-                  <span className="size-4 rounded-[4px] border border-border/60" />
-                  <span
-                    className="h-2.5 animate-pulse rounded bg-foreground/8"
-                    style={{ width: `${45 + ((index * 17) % 35)}%` }}
+                <li
+                  key={index}
+                  className="flex h-11 items-center gap-2.5 px-3 lg:h-9"
+                  aria-hidden="true"
+                >
+                  <span className="size-5 shrink-0 rounded-md border border-border/70 bg-background" />
+                  <Skeleton
+                    height={10}
+                    width={`${45 + ((index * 17) % 35)}%`}
+                    containerClassName="flex-1 leading-none"
                   />
                 </li>
               ))
             ) : (
-              <li className="px-3 py-4 text-center text-[12.5px] text-foreground/50">{emptyMessage}</li>
+              <li className="px-3 py-4 text-center text-[12.5px] text-foreground/50">
+                {emptyMessage}
+              </li>
             ))}
         </ul>
 
@@ -785,11 +780,11 @@ function TypeField({
                 disabled={disabled}
                 onClick={() => toggle(type.value)}
                 className={cn(
-                  "flex h-11 w-full cursor-pointer items-center gap-2.5 px-3 text-[13px] text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent lg:h-9",
+                  "group flex h-11 w-full cursor-pointer items-center gap-2.5 px-3 text-[13px] text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent lg:h-9",
                   FOCUS_RING,
                 )}
               >
-                <CheckBox checked={checked} />
+                <CheckboxIndicator checked={checked} />
                 <span className="min-w-0 flex-1 truncate text-start">{msg(type.labelKey)}</span>
                 {count !== null && (
                   <span className="shrink-0 text-[12px] tabular-nums text-foreground/45">
@@ -872,7 +867,9 @@ function DateField({
         </span>
         <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1.5">
-            <span className="text-[11.5px] text-foreground/55">{msg("explore.filters.date.from")}</span>
+            <span className="text-[11.5px] text-foreground/55">
+              {msg("explore.filters.date.from")}
+            </span>
             <SkynetDatePicker
               value={dateFrom}
               onChange={(next) => onChange(next, dateTo)}
@@ -881,7 +878,9 @@ function DateField({
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[11.5px] text-foreground/55">{msg("explore.filters.date.to")}</span>
+            <span className="text-[11.5px] text-foreground/55">
+              {msg("explore.filters.date.to")}
+            </span>
             <SkynetDatePicker
               value={dateTo}
               onChange={(next) => onChange(dateFrom, next)}

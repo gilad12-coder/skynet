@@ -12,6 +12,7 @@ import {
   Thermometer,
   Wallet,
 } from "@/shared/ui/icons";
+import { Button } from "@/shared/ui/primitives/button";
 import { Dialog, DialogContent } from "@/shared/ui/primitives/dialog";
 import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
@@ -71,14 +72,16 @@ function ExpandTextButton({
   return (
     <>
       <TooltipButton tooltip={expandLabel}>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           onClick={() => setOpen(true)}
           aria-label={expandLabel}
-          className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg text-[#8C7A6B] transition-colors hover:bg-[#EDE7DD] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="text-muted-foreground hover:text-foreground"
         >
           <ArrowsOut className="size-3.5" aria-hidden="true" />
-        </button>
+        </Button>
       </TooltipButton>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="w-[min(40rem,92vw)] max-w-[min(40rem,92vw)] sm:max-w-[min(40rem,92vw)]">
@@ -120,7 +123,7 @@ export function SlideHeroCard({
         </span>
       </div>
       <div className="min-w-0">
-        <div className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
+        <div className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
           {label}
         </div>
         <div className="mt-1 flex min-w-0 items-center gap-2">
@@ -150,7 +153,7 @@ export function SlideMiniCard({
 }) {
   return (
     <article className="flex min-h-28 min-w-0 flex-col justify-between gap-4 rounded-xl border border-border/45 bg-background/65 p-4">
-      <span className="grid size-9 place-items-center rounded-xl bg-[#EDE7DD] text-[#8C7A6B] [&_svg]:size-4">
+      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-muted-foreground [&_svg]:size-4">
         {icon}
       </span>
       <div className="min-w-0">
@@ -176,7 +179,7 @@ export function SlideNote({ label, text }: { label: ReactNode; text: string }) {
   return (
     <div className="rounded-xl border border-border/45 bg-background/65 p-4">
       <div className="mb-1 flex items-center justify-between gap-2">
-        <div className="min-w-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="min-w-0 text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
           {label}
         </div>
         {long && <ExpandTextButton label={label} text={text} />}
@@ -323,7 +326,7 @@ export function ConfigCarousel({
               aria-current={activeSlide === index ? "step" : undefined}
               className={cn(
                 "flex min-w-0 cursor-pointer items-center gap-2 rounded-xl border px-2.5 py-2 text-start transition-[background-color,border-color,color,transform] duration-150",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882] focus-visible:ring-offset-2 active:scale-[0.98]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 focus-visible:ring-offset-2 active:scale-[0.98]",
                 activeSlide === index
                   ? "border-[#C8A882]/70 bg-background text-foreground shadow-sm"
                   : "border-transparent text-muted-foreground hover:border-border/60 hover:bg-background/55 hover:text-foreground",
@@ -385,7 +388,7 @@ export function ConfigCarousel({
           onClick={() => goToSlide(activeSlide - 1)}
           disabled={!previousSlide}
           aria-label={msg("auto.features.agent.panel.components.toolscarousel.literal.14")}
-          className="inline-flex min-h-[44px] min-w-[44px] cursor-pointer items-center gap-2 rounded-xl px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882] disabled:cursor-not-allowed disabled:opacity-30"
+          className="inline-flex cursor-pointer items-center gap-2 rounded-xl px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 disabled:cursor-not-allowed disabled:opacity-30"
         >
           <PreviousIcon className="size-4" aria-hidden="true" />
           <span className="hidden sm:inline">{previousSlide?.label}</span>
@@ -399,7 +402,7 @@ export function ConfigCarousel({
               onClick={() => goToSlide(index)}
               aria-label={slide.label}
               aria-current={activeSlide === index ? "step" : undefined}
-              className="flex size-[44px] cursor-pointer items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]"
+              className="flex size-6 cursor-pointer items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
             >
               <span
                 className={cn(
@@ -416,7 +419,7 @@ export function ConfigCarousel({
           onClick={() => goToSlide(activeSlide + 1)}
           disabled={!nextSlide}
           aria-label={msg("auto.features.agent.panel.components.toolscarousel.literal.15")}
-          className="inline-flex min-h-[44px] min-w-[44px] cursor-pointer items-center gap-2 rounded-xl px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882] disabled:cursor-not-allowed disabled:opacity-30"
+          className="inline-flex cursor-pointer items-center gap-2 rounded-xl px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 disabled:cursor-not-allowed disabled:opacity-30"
         >
           <span className="hidden sm:inline">{nextSlide?.label}</span>
           <NextIcon className="size-4" aria-hidden="true" />
@@ -507,7 +510,7 @@ export function ModelCard({
           <ProviderLogo slug={modelProviderSlug(name)} size={30} />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <span className="text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
+          <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
             {cardTip ? <HelpTip text={cardTip}>{label}</HelpTip> : label}
           </span>
           <span

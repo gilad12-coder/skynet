@@ -1,5 +1,6 @@
 "use client";
 
+import { Skeleton } from "@/shared/ui/skeleton";
 import * as React from "react";
 
 import { cn } from "@/shared/lib/utils";
@@ -153,10 +154,10 @@ export function QuestionChoicesSkeleton({ className }: { className?: string }) {
             key={index}
             className="flex w-full items-start gap-2.5 rounded-lg border border-border/60 bg-background px-3 py-2.5"
           >
-            <span className="mt-px size-5 shrink-0 rounded-md bg-muted motion-safe:animate-pulse" />
+            <Skeleton width={20} height={20} containerClassName="mt-px shrink-0 leading-none" />
             <span className="flex min-w-0 flex-1 flex-col gap-1.5 py-0.5">
-              <span className="h-3.5 w-2/5 rounded bg-muted motion-safe:animate-pulse" />
-              <span className="h-3 w-3/4 rounded bg-muted/70 motion-safe:animate-pulse" />
+              <Skeleton height={14} containerClassName="w-2/5 leading-none" />
+              <Skeleton height={12} containerClassName="w-3/4 leading-none" />
             </span>
           </div>
         ))}

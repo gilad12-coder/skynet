@@ -15,7 +15,6 @@ import { toast } from "react-toastify";
 import { startOpenRouterOAuth } from "@/shared/lib/api";
 import { tI18n } from "@/shared/lib/i18n";
 import { msg, formatMsg } from "@/shared/lib/messages";
-import { cn } from "@/shared/lib/utils";
 import { useLocale } from "@/shared/providers";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
@@ -24,30 +23,20 @@ import { useByokKeys } from "../providers/byok-provider";
 import { formatResetDate } from "../lib/credit";
 import { BYOK_PROVIDERS, type ByokProviderInfo, type KeyStatus } from "../lib/byok";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
+import { StatusPill, type StatusTone } from "@/shared/ui/status-badge";
 import { ByokJsonImport } from "./ByokJsonImport";
+import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
+import { cn } from "@/shared/lib/utils";
 
-/** The status pill next to a saved key. Gold for verified, calm muted/destructive otherwise. */
-function StatusPill({ status }: { status: KeyStatus }) {
-  const map: Record<KeyStatus, { label: string; className: string }> = {
-    verified: {
-      label: msg("settings.keys.verified"),
-      className: "bg-[#C8A882]/15 text-[#8a6d44]",
-    },
-    unverified: {
-      label: msg("settings.keys.unverified"),
-      className: "bg-muted text-muted-foreground",
-    },
-    invalid: {
-      label: msg("settings.keys.invalid"),
-      className: "bg-destructive/10 text-destructive",
-    },
+/** The status pill next to a saved key. */
+function KeyStatusPill({ status }: { status: KeyStatus }) {
+  const map: Record<KeyStatus, { label: string; tone: StatusTone }> = {
+    verified: { label: msg("settings.keys.verified"), tone: "success" },
+    unverified: { label: msg("settings.keys.unverified"), tone: "pending" },
+    invalid: { label: msg("settings.keys.invalid"), tone: "failed" },
   };
-  const { label, className } = map[status];
-  return (
-    <span className={cn("rounded-full px-2 py-0.5 text-[0.6875rem] font-medium", className)}>
-      {label}
-    </span>
-  );
+  const { label, tone } = map[status];
+  return <StatusPill tone={tone}>{label}</StatusPill>;
 }
 
 /**
@@ -153,7 +142,7 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
     <div className="rounded-lg border border-border/50 px-3 py-2.5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
-          <ProviderLogo slug={provider.slug} size={28} />
+          <ProviderLogo slug={provider.slug} size={24} />
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="text-sm font-medium text-foreground">{provider.label}</span>
             {saved && (
@@ -161,7 +150,7 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
                 <code dir="ltr" className="font-mono text-xs text-muted-foreground">
                   ••••&nbsp;{saved.last4}
                 </code>
-                <StatusPill status={saved.status} />
+                <KeyStatusPill status={saved.status} />
               </span>
             )}
             {saved?.apiBase && (
@@ -201,13 +190,13 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="icon-sm"
                   onClick={startEditing}
-                  className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                  className="text-muted-foreground hover:text-foreground"
                   aria-label={msg("settings.keys.add")}
                 >
-                  <Key className="size-3.5" />
+                  <Key className="size-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{msg("settings.keys.add")}</TooltipContent>
@@ -217,17 +206,20 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="icon-sm"
                   disabled={verifying}
                   onClick={handleVerify}
-                  className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                  className="text-muted-foreground hover:text-foreground"
                   aria-label={msg("settings.keys.verify")}
                 >
                   {verifying ? (
-                    <CircleNotch className="size-3.5 animate-spin" />
+                    <CircleNotch
+                      className="animate-spin motion-reduce:animate-none"
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <SealCheck className="size-3.5" />
+                    <SealCheck className="size-4" />
                   )}
                 </Button>
               </TooltipTrigger>
@@ -241,13 +233,13 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-sm"
                     onClick={startEditing}
-                    className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                    className="text-muted-foreground hover:text-foreground"
                     aria-label={msg("settings.keys.replace")}
                   >
-                    <PencilSimple className="size-3.5" />
+                    <PencilSimple className="size-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>{msg("settings.keys.replace")}</TooltipContent>
@@ -255,13 +247,13 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon-sm"
                     onClick={handleRemove}
-                    className="size-[44px] text-destructive hover:text-destructive sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     aria-label={msg("settings.keys.remove")}
                   >
-                    <Trash className="size-3.5" />
+                    <Trash className="size-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>{msg("settings.keys.remove")}</TooltipContent>
@@ -292,7 +284,7 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
                 if (e.key === "Enter") void handleSave();
                 if (e.key === "Escape") setEditing(false);
               }}
-              className="h-[44px] flex-1 sm:h-8 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+              className={cn(TOUCH_FIELD_SM, "flex-1")}
             />
             <div className="flex items-center justify-end gap-2">
               <Tooltip>
@@ -301,13 +293,15 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
                     size="icon-sm"
                     onClick={handleSave}
                     disabled={!secret.trim() || saving}
-                    className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
                     aria-label={msg("settings.keys.save")}
                   >
                     {saving ? (
-                      <CircleNotch className="size-3.5 animate-spin" />
+                      <CircleNotch
+                        className="animate-spin motion-reduce:animate-none"
+                        aria-hidden="true"
+                      />
                     ) : (
-                      <FloppyDisk className="size-3.5" />
+                      <FloppyDisk className="size-4" />
                     )}
                   </Button>
                 </TooltipTrigger>
@@ -319,10 +313,9 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
                     variant="ghost"
                     size="icon-sm"
                     onClick={() => setEditing(false)}
-                    className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
                     aria-label={msg("settings.keys.cancel")}
                   >
-                    <X className="size-3.5" />
+                    <X className="size-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>{msg("settings.keys.cancel")}</TooltipContent>
@@ -340,7 +333,7 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
               if (e.key === "Enter") void handleSave();
               if (e.key === "Escape") setEditing(false);
             }}
-            className="h-[44px] text-xs sm:h-7 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+            className={cn(TOUCH_FIELD_SM, "text-xs")}
           />
           <p className="text-[0.6875rem] text-muted-foreground/70">
             {msg("settings.keys.base_url_hint")}

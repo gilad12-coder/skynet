@@ -1,7 +1,9 @@
 "use client";
 
+import { notifyCopied } from "@/shared/lib/notify";
+import { InlineErrorRow } from "@/shared/ui/inline-error-row";
+import { ProgressBar } from "@/shared/ui/progress-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
 import { toast } from "react-toastify";
 import { CircleNotch, ClockCounterClockwise, MagicWand, Tray } from "@/shared/ui/icons";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
@@ -18,8 +20,8 @@ import {
 import { DataTabSkeleton } from "./DataTabSkeleton";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { FadeIn } from "@/shared/ui/motion";
+import { Segmented } from "@/shared/ui/segmented";
 import { HelpTip } from "@/shared/ui/help-tip";
-import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { DatasetRowReader, ExpandTableButton } from "@/features/datasets";
@@ -370,9 +372,9 @@ export function DataTab({
   if (loading) return <DataTabSkeleton />;
   if (error || !dataset)
     return (
-      <div className="text-sm text-destructive text-center py-16">
-        {error ?? msg("auto.features.optimizations.components.datatab.literal.2")}
-      </div>
+      <InlineErrorRow
+        message={error ?? msg("auto.features.optimizations.components.datatab.literal.2")}
+      />
     );
 
   return (
@@ -395,60 +397,28 @@ export function DataTab({
                   </HelpTip>
                 </div>
               </div>
-              <div className="relative inline-flex shrink-0 gap-1 rounded-lg bg-[#F0EBE4] p-1">
-                <TooltipButton
-                  tooltip={msg("auto.features.optimizations.components.datatab.2")}
-                  side="top"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setProgramType("baseline")}
-                    aria-label={msg("auto.features.optimizations.components.datatab.2")}
-                    aria-pressed={programType === "baseline"}
-                    className={`relative inline-flex size-[44px] cursor-pointer items-center justify-center rounded-md transition-colors duration-150 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px] ${programType === "baseline" ? "text-[#FAF8F5]" : "text-[#8C7A6B] hover:text-[#3D2E22]"}`}
-                  >
-                    {programType === "baseline" && (
-                      <motion.span
-                        layoutId="datatab-program-pill"
-                        className="absolute inset-0 rounded-md bg-[#3D2E22] shadow-sm"
-                        transition={{
-                          type: "tween",
-                          duration: 0.18,
-                          ease: [0.22, 1, 0.36, 1],
-                        }}
-                        aria-hidden="true"
-                      />
-                    )}
-                    <ClockCounterClockwise className="relative z-10 size-4" aria-hidden="true" />
-                  </button>
-                </TooltipButton>
-                <TooltipButton
-                  tooltip={msg("auto.features.optimizations.components.datatab.3")}
-                  side="top"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setProgramType("optimized")}
-                    aria-label={msg("auto.features.optimizations.components.datatab.3")}
-                    aria-pressed={programType === "optimized"}
-                    className={`relative inline-flex size-[44px] cursor-pointer items-center justify-center rounded-md transition-colors duration-150 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px] ${programType === "optimized" ? "text-[#FAF8F5]" : "text-[#8C7A6B] hover:text-[#3D2E22]"}`}
-                  >
-                    {programType === "optimized" && (
-                      <motion.span
-                        layoutId="datatab-program-pill"
-                        className="absolute inset-0 rounded-md bg-[#3D2E22] shadow-sm"
-                        transition={{
-                          type: "tween",
-                          duration: 0.18,
-                          ease: [0.22, 1, 0.36, 1],
-                        }}
-                        aria-hidden="true"
-                      />
-                    )}
-                    <MagicWand className="relative z-10 size-4" aria-hidden="true" />
-                  </button>
-                </TooltipButton>
-              </div>
+              <Segmented<ProgramType>
+                size="sm"
+                iconOnly
+                className="shrink-0"
+                segmentClassName="min-w-[44px] px-0 lg:min-h-8 lg:min-w-8"
+                value={programType}
+                onChange={setProgramType}
+                options={[
+                  {
+                    value: "baseline",
+                    label: msg("auto.features.optimizations.components.datatab.2"),
+                    tip: msg("auto.features.optimizations.components.datatab.2"),
+                    icon: <ClockCounterClockwise className="size-3.5" aria-hidden="true" />,
+                  },
+                  {
+                    value: "optimized",
+                    label: msg("auto.features.optimizations.components.datatab.3"),
+                    tip: msg("auto.features.optimizations.components.datatab.3"),
+                    icon: <MagicWand className="size-3.5" aria-hidden="true" />,
+                  },
+                ]}
+              />
               {testResultsLoading && (
                 <CircleNotch className="size-4 animate-spin text-[#8C7A6B] shrink-0" />
               )}
@@ -459,39 +429,32 @@ export function DataTab({
 
       <FadeIn delay={0.3}>
         <div className="flex items-center gap-3 flex-wrap">
-          {(() => {
-            const splits: Array<[Split, string]> = [
-              ["all", msg("auto.features.optimizations.components.datatab.literal.4")],
-              ["train", msg("auto.features.optimizations.components.datatab.literal.5")],
-              ["val", msg("auto.features.optimizations.components.datatab.literal.6")],
-              ["test", msg("auto.features.optimizations.components.datatab.literal.7")],
-            ];
-            const idx = splits.findIndex(([s]) => s === split);
-            const count = splits.length;
-            return (
-              <div
-                className="relative flex w-full rounded-lg bg-muted p-1 gap-1 text-[0.6875rem]"
-                data-tutorial="split-selector"
-              >
-                <div
-                  className="absolute top-1 bottom-1 rounded-md bg-background shadow-sm transition-[inset-inline-start] duration-150 ease-out"
-                  style={{
-                    width: `calc(${100 / count}% - 6px)`,
-                    insetInlineStart: `calc(${(idx / count) * 100}% + 4px)`,
-                  }}
-                />
-                {splits.map(([s, label]) => (
-                  <button
-                    key={s}
-                    onClick={() => setSplit(s)}
-                    className={`relative z-10 flex-1 rounded-md px-3 py-1.5 cursor-pointer text-center transition-colors duration-150 ${split === s ? "text-foreground font-semibold" : "text-foreground/50 hover:text-foreground"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            );
-          })()}
+          <div className="w-full" data-tutorial="split-selector">
+            <Segmented<Split>
+              size="sm"
+              className="w-full"
+              value={split}
+              onChange={setSplit}
+              options={[
+                {
+                  value: "all",
+                  label: msg("auto.features.optimizations.components.datatab.literal.4"),
+                },
+                {
+                  value: "train",
+                  label: msg("auto.features.optimizations.components.datatab.literal.5"),
+                },
+                {
+                  value: "val",
+                  label: msg("auto.features.optimizations.components.datatab.literal.6"),
+                },
+                {
+                  value: "test",
+                  label: msg("auto.features.optimizations.components.datatab.literal.7"),
+                },
+              ]}
+            />
+          </div>
           <ResetFiltersButton filters={colFilters} />
           <ResetColumnsButton resize={colResize} />
           <div className="text-[0.625rem] text-muted-foreground tabular-nums me-auto">
@@ -643,7 +606,7 @@ export function DataTab({
                         return (
                           <TableRow
                             key={row.index}
-                            className="cursor-pointer"
+                            className="cursor-pointer transition-colors duration-150 hover:bg-muted/50"
                             onDoubleClick={() => openReader(i)}
                             onClick={(e) => {
                               if (window.matchMedia("(any-pointer: coarse)").matches) {
@@ -660,7 +623,7 @@ export function DataTab({
                                 pendingCopy.current = null;
                                 navigator.clipboard
                                   .writeText(text)
-                                  .then(() => toast.success(msg("clipboard.copied")))
+                                  .then(notifyCopied)
                                   .catch(() => toast.error(msg("clipboard.copy_failed")));
                               }, 250);
                             }}
@@ -694,15 +657,11 @@ export function DataTab({
                                       {ev.error ? "⚠ " : ""}
                                       {ev.score.toFixed(2)}
                                     </span>
-                                    <div className="w-full h-1.5 rounded-full overflow-hidden bg-muted">
-                                      <div
-                                        className="h-full rounded-full"
-                                        style={{
-                                          width: `${Math.max(0, Math.min(1, ev.score)) * 100}%`,
-                                          background: scoreColor(ev.score),
-                                        }}
-                                      />
-                                    </div>
+                                    <ProgressBar
+                                      value={ev.score}
+                                      max={1}
+                                      color={scoreColor(ev.score)}
+                                    />
                                   </div>
                                 ) : (
                                   <span className="text-[0.625rem] text-[#E5DDD4] flex justify-center">

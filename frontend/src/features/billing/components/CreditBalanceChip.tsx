@@ -1,5 +1,7 @@
 "use client";
 
+import { Skeleton } from "@/shared/ui/skeleton";
+import { Button } from "@/shared/ui/primitives/button";
 import * as React from "react";
 import { Coins, Plus } from "@/shared/ui/icons";
 import { msg, formatMsg } from "@/shared/lib/messages";
@@ -26,12 +28,11 @@ export function CreditBalanceChip({ className }: { className?: string }) {
 
   if (loading) {
     return (
-      <div
-        className={cn(
-          "h-[26px] w-16 animate-pulse rounded-lg border border-border/60 bg-muted/60",
-          className,
-        )}
-        aria-hidden="true"
+      <Skeleton
+        width={64}
+        height={26}
+        borderRadius={8}
+        containerClassName={cn("leading-none", className)}
       />
     );
   }
@@ -53,7 +54,9 @@ export function CreditBalanceChip({ className }: { className?: string }) {
         <button
           type="button"
           aria-label={formatMsg("billing.chip.aria", {
-            p1: !available ? msg("billing.chip.unavailable") : formatCreditsUsd(totalCredits, locale),
+            p1: !available
+              ? msg("billing.chip.unavailable")
+              : formatCreditsUsd(totalCredits, locale),
           })}
           aria-busy={syncing || undefined}
           className={cn(
@@ -152,16 +155,18 @@ export function CreditBalanceChip({ className }: { className?: string }) {
           )}
 
           <div className="flex items-center gap-2 border-t border-border/40 p-3">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={() => {
                 setOpen(false);
                 openTo("billing");
               }}
-              className="inline-flex w-full items-center justify-center rounded-lg border border-border/70 px-3 py-1.5 text-xs font-medium text-foreground transition-colors duration-200 cursor-pointer hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
+              className="w-full"
             >
               {msg("billing.action.view_wallet")}
-            </button>
+            </Button>
           </div>
         </div>
       </PopoverContent>

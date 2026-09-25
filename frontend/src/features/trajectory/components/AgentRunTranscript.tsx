@@ -231,7 +231,7 @@ function StepEntry({ block, live }: { block: StepBlock; live: boolean }) {
         </span>
         {running ? (
           live ? (
-            <PingDot className="scale-75" />
+            <PingDot size="sm" />
           ) : null
         ) : (
           <span
@@ -442,7 +442,7 @@ function ToolEntry({ tool, live }: { tool: ToolPart; live: boolean }) {
         ) : null}
         {running ? (
           <span className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground">
-            <PingDot className="scale-75" />
+            <PingDot size="sm" />
             {msg("agent_run.transcript.tool_running")}
           </span>
         ) : failed ? (
@@ -460,8 +460,7 @@ function ToolEntry({ tool, live }: { tool: ToolPart; live: boolean }) {
             text={copyText}
             ariaLabel={msg("agent_run.transcript.copy_input")}
             copiedAriaLabel={msg("agent_run.transcript.copied")}
-            className="size-6 text-muted-foreground"
-            iconClassName="size-3"
+            className="text-muted-foreground"
           />
         ) : null}
       </div>
@@ -605,7 +604,7 @@ export function AgentRunTranscript({ transcript, live }: { transcript: string; l
       <div className="flex h-7 items-center gap-2">
         {live ? (
           <span className="inline-flex shrink-0 items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <PingDot className="scale-75" />
+            <PingDot size="sm" />
             {msg("agent_run.transcript.live")}
           </span>
         ) : null}

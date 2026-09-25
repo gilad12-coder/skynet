@@ -1,18 +1,14 @@
 "use client";
 
+import { LoadingState } from "@/shared/ui/loading-state";
+import { CountPill } from "@/shared/ui/count-badge";
 import { DatasetRowsView } from "./DatasetRowsView";
 import { ExpandTableButton } from "./DatasetPreviewPanel";
 import * as React from "react";
 import Link from "next/link";
-import { ArrowUpRight, CircleNotch, Sparkle, Table as Table2 } from "@/shared/ui/icons";
-import { motion } from "framer-motion";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/primitives/dialog";
+import { ArrowUpRight, Sparkle, Table as Table2 } from "@/shared/ui/icons";
+import { Segmented } from "@/shared/ui/segmented";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/shared/ui/primitives/dialog";
 import { StatusBadge } from "@/shared/ui/status-badge";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { FadeIn } from "@/shared/ui/motion";
@@ -28,7 +24,6 @@ import { formatRelativeTime } from "@/shared/lib/formatters";
 import { cn } from "@/shared/lib/utils";
 
 // Mirrors the Explore corpus toggle so the sliding pill feels identical app-wide.
-const PILL_TRANSITION = { type: "tween", duration: 0.18, ease: [0.22, 1, 0.36, 1] } as const;
 
 type DetailTab = "rows" | "usage";
 
@@ -90,7 +85,7 @@ export function DatasetDetailDialog({
     <Dialog open={dataset !== null} onOpenChange={(next) => !next && onClose()}>
       <DialogContent
         className={cn(
-          "overflow-hidden p-0 transition-[max-width] duration-200 ease-out motion-reduce:transition-none max-lg:[&_[data-slot=dialog-close]]:!size-[44px]",
+          "overflow-hidden p-0 transition-[max-width] duration-200 ease-out motion-reduce:transition-none",
           expanded
             ? "max-w-[96vw] sm:max-w-[96vw]"
             : "max-w-[min(72rem,94vw)] sm:max-w-[min(72rem,94vw)]",
@@ -111,61 +106,32 @@ export function DatasetDetailDialog({
         <div
           className={cn("flex flex-col", expanded && tab === "rows" ? "h-[94dvh]" : "max-h-[85vh]")}
         >
-          <DialogHeader className="shrink-0 px-4 pb-4 pt-6 text-start sm:px-6">
+          <DialogHeader className="shrink-0 px-4 pb-4 pt-6 sm:px-6">
             <DialogTitle className="truncate">{dataset?.name}</DialogTitle>
-            {dataset && (
-              <DialogDescription>
-                {formatMsg("datasets.count.rows", { count: dataset.row_count })}
-                {" · "}
-                {formatMsg("datasets.count.columns", { count: dataset.column_count })}
-              </DialogDescription>
-            )}
           </DialogHeader>
 
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex shrink-0 justify-center border-b border-border/40 px-4 pb-4 sm:px-6">
-              <div
-                role="radiogroup"
-                aria-label={msg("datasets.detail.view_aria")}
-                className="relative inline-flex items-center rounded-full border border-border/80 bg-muted/40 p-0.5"
-              >
-                {segments.map((seg) => {
-                  const active = seg.value === tab;
+              <Segmented
+                size="sm"
+                label={msg("datasets.detail.view_aria")}
+                value={tab}
+                onChange={(value) => {
+                  if (value !== tab) setTab(value);
+                }}
+                options={segments.map((seg) => {
                   const Icon = seg.icon;
-                  return (
-                    <button
-                      key={seg.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={active}
-                      onClick={() => !active && setTab(seg.value)}
-                      className={`relative inline-flex min-h-[44px] items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[12.5px] font-medium transition-colors duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-0 ${
-                        active
-                          ? "text-foreground"
-                          : "cursor-pointer text-foreground/60 hover:text-foreground"
-                      }`}
-                    >
-                      {active && (
-                        <motion.span
-                          layoutId="dataset-detail-tab-pill"
-                          className="absolute inset-0 rounded-full bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
-                          transition={PILL_TRANSITION}
-                          aria-hidden="true"
-                        />
-                      )}
-                      <span className="relative z-10 inline-flex items-center gap-1.5">
-                        <Icon className="size-3.5" aria-hidden="true" />
-                        <span>{seg.label}</span>
-                        {seg.value === "usage" && usageCount > 0 && (
-                          <span className="rounded-full bg-foreground/10 px-1.5 text-[0.6875rem] font-bold tabular-nums">
-                            {usageCount}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                  );
+                  return {
+                    value: seg.value,
+                    label: seg.label,
+                    icon: <Icon className="size-3.5" aria-hidden="true" />,
+                    trailing:
+                      seg.value === "usage" && usageCount > 0 ? (
+                        <CountPill>{usageCount}</CountPill>
+                      ) : undefined,
+                  };
                 })}
-              </div>
+              />
             </div>
 
             <div className={tab === "rows" ? "contents" : "hidden"}>
@@ -174,6 +140,10 @@ export function DatasetDetailDialog({
                 filename={dataset?.name}
                 readerIndex={readerIndex}
                 setReaderIndex={setReaderIndex}
+                toolbarLeading={
+                  dataset &&
+                  `${formatMsg("datasets.count.rows", { count: dataset.row_count })} · ${formatMsg("datasets.count.columns", { count: dataset.column_count })}`
+                }
                 toolbarActions={
                   <ExpandTableButton
                     ref={expandButton}
@@ -186,16 +156,10 @@ export function DatasetDetailDialog({
             {tab !== "rows" && (
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
                 {optimizations === null ? (
-                  <div
-                    role="status"
-                    className="flex min-h-40 flex-1 items-center justify-center py-10"
-                  >
-                    <CircleNotch
-                      className="size-7 animate-spin text-muted-foreground/70 motion-reduce:animate-[spin_1.5s_linear_infinite]"
-                      aria-hidden="true"
-                    />
-                    <span className="sr-only">{msg("datasets.detail.loading")}</span>
-                  </div>
+                  <LoadingState
+                    srLabel={msg("datasets.detail.loading")}
+                    className="min-h-40 flex-1"
+                  />
                 ) : optimizations.length === 0 ? (
                   <div className="py-8">
                     <EmptyState

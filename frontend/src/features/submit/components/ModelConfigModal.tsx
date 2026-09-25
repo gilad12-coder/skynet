@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import { Coins, Key, X } from "@/shared/ui/icons";
 import { useByokKeys, litellmProviderForByok, type TokenSourceMode } from "@/features/billing";
 import { useSettingsModal } from "@/features/settings";
@@ -18,8 +17,8 @@ import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { modelProviderSlug } from "@/shared/lib/model-provider";
 import { effortLabel, effortsFor } from "@/shared/lib/model-efforts";
 import { NumberInput } from "@/shared/ui/number-input";
+import { Segmented } from "@/shared/ui/segmented";
 import { Disclosure } from "./Disclosure";
-import { MOBILE_NUMBER_INPUT_CLASS } from "./blackbox/shared";
 import { cn } from "@/shared/lib/utils";
 import type { ModelConfig, CatalogModel } from "@/shared/types/api";
 import { HelpTip } from "@/shared/ui/help-tip";
@@ -58,12 +57,6 @@ const TOKEN_SOURCE_SEGMENTS: Array<{
   { mode: "byok", icon: Key, labelKey: "billing.mode.byok" },
 ];
 
-const TOKEN_SOURCE_TRANSITION = {
-  type: "tween",
-  duration: 0.16,
-  ease: [0.22, 1, 0.36, 1],
-} as const;
-
 function withoutInlineConnection(config: ModelConfig): ModelConfig {
   const { base_url: _baseUrl, ...rest } = config;
   const {
@@ -95,11 +88,8 @@ export function ModelConfigModal({
 }: ModelConfigModalProps) {
   const { keys } = useByokKeys();
   const { openTo } = useSettingsModal();
-  const prefersReducedMotion = useReducedMotion();
   // Two of these modals coexist (generation + reflection); the sliding-pill
   // layoutId must be unique per instance or Framer pairs them up.
-  const effortPillId = React.useId();
-  const tokenSourcePillId = React.useId();
   const parametersId = React.useId();
   const [parametersOpen, setParametersOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<ModelConfig>(() => withoutInlineConnection(config));
@@ -203,13 +193,13 @@ export function ModelConfigModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[85vh] sm:max-w-2xl [&_[data-slot=dialog-close]]:size-[44px] lg:[&_[data-slot=dialog-close]]:size-8">
-        <DialogTitleRow title={roleLabel} className="px-4 pt-4 sm:px-6 sm:pt-6" />
+      <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[85vh] sm:max-w-2xl">
+        <DialogTitleRow title={roleLabel} className="px-4 pt-6 sm:px-6" />
 
         <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6">
           {visibleRecent.length > 0 && (
             <div className="space-y-1.5">
-              <Label className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+              <Label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
                 {msg("auto.features.submit.components.modelconfigmodal.2")}
               </Label>
               <div className="flex gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin" dir="ltr">
@@ -235,9 +225,9 @@ export function ModelConfigModal({
                               !!rc.extra?.reasoning_effort,
                           );
                         }}
-                        className="flex min-h-[44px] items-center gap-1.5 cursor-pointer outline-none lg:min-h-0"
+                        className="flex items-center gap-1.5 cursor-pointer outline-none"
                       >
-                        <ProviderLogo slug={modelProviderSlug(rc.name)} size={14} />
+                        <ProviderLogo slug={modelProviderSlug(rc.name)} size={16} />
                         <span className="truncate max-w-[120px]">{rc.name.split("/").pop()}</span>
                         {!nameOnly && !modelDefaultsOnly && (
                           <span className="text-[9px] opacity-60">{rc.temperature}</span>
@@ -254,9 +244,9 @@ export function ModelConfigModal({
                             e.stopPropagation();
                             onRemoveRecent(rc.name);
                           }}
-                          className="ms-0.5 inline-flex size-[44px] items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive lg:size-4"
+                          className="close-button [--close-btn-size:20px] [--close-btn-radius:6px] [--close-btn-icon:12px] ms-0.5"
                         >
-                          <X className="h-3 w-3" />
+                          <X />
                         </button>
                       )}
                     </div>
@@ -270,53 +260,29 @@ export function ModelConfigModal({
           {!nameOnly && (
             <>
               <div className="space-y-2">
-                <Label className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">
+                <Label className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
                   {msg("billing.mode.label")}
                 </Label>
-                <div
-                  role="group"
-                  aria-label={msg("billing.mode.aria")}
-                  data-tutorial="model-billing-source"
-                  className="flex w-full rounded-lg bg-muted p-0.5"
-                >
-                  {TOKEN_SOURCE_SEGMENTS.map(({ mode: value, icon: Icon, labelKey }) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() =>
-                        setDraft((current) =>
-                          withoutInlineConnection({
-                            ...current,
-                            name: "",
-                            token_source: value,
-                            byok_provider: undefined,
-                          }),
-                        )
-                      }
-                      aria-pressed={mode === value}
-                      className={cn(
-                        "relative flex min-h-[44px] flex-1 cursor-pointer items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors lg:min-h-0",
-                        mode === value
-                          ? "text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {mode === value && (
-                        <motion.span
-                          layoutId={`token-source-pill-${tokenSourcePillId}`}
-                          className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
-                          transition={
-                            prefersReducedMotion ? { duration: 0 } : TOKEN_SOURCE_TRANSITION
-                          }
-                          aria-hidden="true"
-                        />
-                      )}
-                      <span className="relative z-10 flex items-center gap-1.5">
-                        <Icon className="size-3.5" aria-hidden="true" />
-                        {msg(labelKey)}
-                      </span>
-                    </button>
-                  ))}
+                <div data-tutorial="model-billing-source">
+                  <Segmented<TokenSourceMode>
+                    label={msg("billing.mode.aria")}
+                    value={mode}
+                    onChange={(value) =>
+                      setDraft((current) =>
+                        withoutInlineConnection({
+                          ...current,
+                          name: "",
+                          token_source: value,
+                          byok_provider: undefined,
+                        }),
+                      )
+                    }
+                    options={TOKEN_SOURCE_SEGMENTS.map(({ mode: value, icon: Icon, labelKey }) => ({
+                      value,
+                      label: msg(labelKey),
+                      icon: <Icon className="size-3.5" aria-hidden="true" />,
+                    }))}
+                  />
                 </div>
                 {mode === "managed" && (
                   <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
@@ -337,7 +303,7 @@ export function ModelConfigModal({
                           openTo("providers");
                         }}
                         aria-label={msg("billing.mode.manage_keys")}
-                        className="inline-flex size-[44px] shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/60 lg:size-8"
+                        className="size-8 inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/60"
                       >
                         <Key className="size-4" aria-hidden="true" />
                       </button>
@@ -412,7 +378,6 @@ export function ModelConfigModal({
                       onClear={() =>
                         setDraft((current) => ({ ...current, temperature: undefined }))
                       }
-                      className={MOBILE_NUMBER_INPUT_CLASS}
                     />
                   </div>
                   <div className="space-y-2">
@@ -430,7 +395,6 @@ export function ModelConfigModal({
                         setDraft((current) => ({ ...current, max_tokens: value }))
                       }
                       onClear={() => setDraft((current) => ({ ...current, max_tokens: undefined }))}
-                      className={MOBILE_NUMBER_INPUT_CLASS}
                     />
                   </div>
 
@@ -440,50 +404,22 @@ export function ModelConfigModal({
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
                           <Label>{msg("auto.features.submit.components.modelconfigmodal.8")}</Label>
-                          <Switch
-                            checked={thinkingEnabled}
-                            onCheckedChange={setThinking}
-                            className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
-                          />
+                          <Switch checked={thinkingEnabled} onCheckedChange={setThinking} />
                         </div>
                         {thinkingEnabled && (
                           <div className="space-y-2 p-3 border rounded-lg bg-muted/30">
                             <Label>
                               {msg("auto.features.submit.components.modelconfigmodal.9")}
                             </Label>
-                            <div className="flex rounded-lg bg-muted p-0.5 w-full">
-                              {effortLadder.map((val) => (
-                                <button
-                                  key={val}
-                                  type="button"
-                                  onClick={() => setEffort(val)}
-                                  className={cn(
-                                    "relative min-h-[44px] flex-1 cursor-pointer rounded-md px-2 py-1.5 text-center text-xs font-medium transition-colors sm:px-3 lg:min-h-0",
-                                    reasoningEffort === val
-                                      ? "text-foreground"
-                                      : "text-muted-foreground hover:text-foreground",
-                                  )}
-                                >
-                                  {reasoningEffort === val && (
-                                    <motion.span
-                                      layoutId={effortPillId}
-                                      transition={
-                                        prefersReducedMotion
-                                          ? { duration: 0 }
-                                          : {
-                                              type: "tween",
-                                              duration: 0.2,
-                                              ease: [0.2, 0.8, 0.2, 1],
-                                            }
-                                      }
-                                      className="absolute inset-0 rounded-md bg-background shadow-sm"
-                                      aria-hidden="true"
-                                    />
-                                  )}
-                                  <span className="relative">{effortLabel(val)}</span>
-                                </button>
-                              ))}
-                            </div>
+                            <Segmented
+                              label={msg("auto.features.submit.components.modelconfigmodal.9")}
+                              value={reasoningEffort}
+                              onChange={setEffort}
+                              options={effortLadder.map((val) => ({
+                                value: val,
+                                label: effortLabel(val),
+                              }))}
+                            />
                           </div>
                         )}
                       </div>
@@ -496,11 +432,7 @@ export function ModelConfigModal({
         </div>
 
         <DialogFooter className="border-t border-border/40 px-4 pb-4 pt-4 sm:px-6 sm:pb-6">
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            className="min-h-[44px] flex-1 lg:min-h-0"
-          >
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
             {msg("auto.features.submit.components.modelconfigmodal.10")}
           </Button>
           <Button
@@ -516,7 +448,6 @@ export function ModelConfigModal({
                   (draft.max_tokens != null &&
                     (!Number.isInteger(draft.max_tokens) || draft.max_tokens < 1))))
             }
-            className="min-h-[44px] flex-1 lg:min-h-0"
           >
             {msg("auto.features.submit.components.modelconfigmodal.11")}
           </Button>

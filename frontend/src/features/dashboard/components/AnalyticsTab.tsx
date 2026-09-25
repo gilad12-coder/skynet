@@ -1,8 +1,12 @@
 import { memo } from "react";
+import { InlineWarningRow } from "@/shared/ui/inline-warning-row";
+import { ProgressBar } from "@/shared/ui/progress-bar";
 import type { KeyboardEvent, ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
 import { AnimatedNumber, StaggerContainer, StaggerItem } from "@/shared/ui/motion";
+import { Segmented } from "@/shared/ui/segmented";
+import { PanelHeading } from "@/shared/ui/panel-heading";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { formatElapsed, modelDisplayName } from "@/shared/lib";
 import type { DashboardAnalytics } from "@/shared/lib/api";
@@ -10,7 +14,7 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { cn } from "@/shared/lib/utils";
-import { STATUS_COLORS } from "../constants";
+import { ACCENT_DOT, ACCENT_TEXT, STATUS_COLORS, type StatAccent } from "../constants";
 import { AnalyticsEmpty } from "./AnalyticsEmpty";
 import { AnalyticsFilterChips } from "./AnalyticsFilterChips";
 import { AnalyticsSection } from "./AnalyticsSection";
@@ -53,25 +57,7 @@ type AnalyticsTabProps = {
   onOpenJob: (optimizationId: string) => void;
 };
 
-type KpiAccent = "default" | "success" | "warning" | "danger";
-
-const KPI_DOT: Record<KpiAccent, string> = {
-  default: "bg-foreground/25",
-  success: "bg-emerald-500",
-  warning: "bg-[var(--warning)]",
-  danger: "bg-red-500",
-};
-
-const KPI_TEXT: Record<KpiAccent, string> = {
-  default: "text-foreground",
-  success: "text-emerald-600",
-  warning: "text-[var(--warning)]",
-  danger: "text-red-600",
-};
-
 const RANGE_OPTIONS: readonly AnalyticsRange[] = ["7d", "30d", "90d", "all"];
-
-const PILL_TRANSITION = { type: "tween", duration: 0.16, ease: [0.22, 1, 0.36, 1] } as const;
 
 function KpiCard({
   label,
@@ -83,13 +69,13 @@ function KpiCard({
   label: string;
   value: ReactNode;
   detail?: ReactNode;
-  accent: KpiAccent;
+  accent: StatAccent;
   valueDir?: "ltr" | "rtl";
 }) {
   return (
     <div className="flex h-full min-h-[9.5rem] min-w-0 flex-col gap-4 rounded-2xl border border-border/40 bg-card/60 p-5 transition-colors duration-300 hover:border-border/70 sm:p-6">
       <div className="flex items-center gap-2">
-        <span className={`size-1.5 rounded-full ${KPI_DOT[accent]}`} aria-hidden />
+        <span className={`size-1.5 rounded-full ${ACCENT_DOT[accent]}`} aria-hidden />
         <p className="text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
           {label}
         </p>
@@ -97,7 +83,7 @@ function KpiCard({
       <div className="flex flex-1 flex-col items-center justify-center gap-2">
         <p
           dir={valueDir}
-          className={`text-center text-[2.5rem] font-bold leading-[0.9] tracking-tight tabular-nums sm:text-[3rem] ${KPI_TEXT[accent]}`}
+          className={`text-center text-[2.5rem] font-bold leading-[0.9] tracking-tight tabular-nums sm:text-[3rem] ${ACCENT_TEXT[accent]}`}
         >
           {value}
         </p>
@@ -133,7 +119,7 @@ function pointsText(value: number | null | undefined): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
-function pointsAccent(value: number | null): KpiAccent {
+function pointsAccent(value: number | null): StatAccent {
   if (value == null || value === 0) return "default";
   return value > 0 ? "success" : "danger";
 }
@@ -147,45 +133,16 @@ function RangeControl({
   onChange: (next: AnalyticsRange) => void;
 }) {
   return (
-    <div
-      role="group"
-      aria-label={msg("usage.range.label")}
-      className="flex items-center gap-0.5 rounded-lg bg-muted/60 p-0.5"
-    >
-      {RANGE_OPTIONS.map((option) => {
-        const active = option === value;
-        return (
-          <button
-            key={option}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(option)}
-            className={cn(
-              "relative min-h-[44px] cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]",
-              active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {active && (
-              <motion.span
-                layoutId="analytics-range-pill"
-                className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
-                transition={PILL_TRANSITION}
-                aria-hidden="true"
-              />
-            )}
-            <span className="relative z-10">{msg(`usage.range.${option}`)}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function PanelHeading({ children }: { children: ReactNode }) {
-  return (
-    <p className="mb-3 text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
-      {children}
-    </p>
+    <Segmented
+      size="sm"
+      label={msg("usage.range.label")}
+      value={value}
+      onChange={onChange}
+      options={RANGE_OPTIONS.map((option) => ({
+        value: option,
+        label: msg(`usage.range.${option}`),
+      }))}
+    />
   );
 }
 
@@ -234,12 +191,7 @@ function ShareBars({
                 </span>
               </span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-muted/60">
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{ width: `${bar.pct}%`, backgroundColor: fill }}
-              />
-            </div>
+            <ProgressBar value={bar.pct} color={fill} />
           </div>
         );
       })}
@@ -322,11 +274,7 @@ function AnalyticsTabImpl({
     <div data-tutorial="analytics-content" className="space-y-6">
       {toolbar}
 
-      {chartData.truncated && (
-        <p className="rounded-lg border border-[var(--warning)]/30 bg-[var(--warning)]/10 px-3 py-2 text-xs text-foreground/80">
-          {msg("dashboard.analytics.truncated")}
-        </p>
-      )}
+      {chartData.truncated && <InlineWarningRow message={msg("dashboard.analytics.truncated")} />}
 
       <AnimatePresence mode="wait">
         <motion.div
@@ -552,7 +500,7 @@ function AnalyticsTabImpl({
                               className={cn(
                                 "hidden text-[0.6875rem] sm:inline",
                                 m.avgImprovement != null && m.avgImprovement > 0
-                                  ? "text-emerald-600"
+                                  ? "text-[var(--success)]"
                                   : "text-muted-foreground",
                               )}
                             >
@@ -561,15 +509,12 @@ function AnalyticsTabImpl({
                             <span className="font-medium">{m.count}</span>
                           </span>
                         </div>
-                        <div className="ms-6 h-2 overflow-hidden rounded-full bg-muted" dir="ltr">
-                          <div
-                            className="h-full rounded-full transition-all"
-                            style={{
-                              width: `${m.share}%`,
-                              backgroundColor: MODEL_RAMP[Math.min(i, MODEL_RAMP.length - 1)],
-                            }}
-                          />
-                        </div>
+                        <ProgressBar
+                          dir="ltr"
+                          value={m.share}
+                          color={MODEL_RAMP[Math.min(i, MODEL_RAMP.length - 1)]}
+                          className="ms-6 w-auto"
+                        />
                       </div>
                     ))}
                   </div>

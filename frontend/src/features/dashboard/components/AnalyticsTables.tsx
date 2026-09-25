@@ -1,14 +1,9 @@
 "use client";
 
+import { ProgressBar } from "@/shared/ui/progress-bar";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHeader,
-  TableRow,
-} from "@/shared/ui/primitives/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/shared/ui/primitives/table";
 import {
   ColumnHeader,
   ResetColumnsButton,
@@ -30,7 +25,6 @@ import type { OptimizerRow } from "../lib/transform-chart-data";
 // dashboards read as one table family.
 const TABLE_CLASS =
   "table-stack no-copy-underline [&_thead_th]:ps-1 [&_thead_th]:pe-2 [&_thead_th]:py-2 [&_thead_th]:text-[0.6875rem] [&_thead_th_button]:px-1 [&_thead_svg]:size-2.5 [&_tbody_td]:px-1.5";
-const HEADER_CLASS = "bg-muted/20 [&_tr]:border-b-border/40";
 const ROW_CLASS =
   "group cursor-pointer border-border/30 transition-colors duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:bg-muted/50";
 
@@ -41,7 +35,7 @@ function pointsText(value: number | null | undefined): string {
 
 function pointsClass(value: number | null | undefined): string {
   if (value == null || value === 0) return "";
-  return value > 0 ? "text-emerald-600" : "text-red-600";
+  return value > 0 ? "text-[var(--success)]" : "text-[var(--danger)]";
 }
 
 // Leaderboard rows carry the raw metric delta; ratio-scale metrics (|delta| <= 1)
@@ -91,7 +85,7 @@ function Toolbar({
 }) {
   return (
     <div className="mb-3 flex min-h-[44px] items-center gap-2 max-lg:[&_button]:size-[44px] lg:min-h-0">
-      <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
+      <span className="text-xs text-muted-foreground tabular-nums">
         {count}
         {msg("auto.features.dashboard.components.jobstab.3")}
       </span>
@@ -151,7 +145,10 @@ export function OptimizerTable({
   const { filters, setColumnFilter, openFilter, setOpenFilter } = columnFilters;
 
   const nameOptions = useMemo(
-    () => rows.map((r) => ({ value: r.name, label: r.name })).sort((a, b) => a.label.localeCompare(b.label)),
+    () =>
+      rows
+        .map((r) => ({ value: r.name, label: r.name }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
     [rows],
   );
 
@@ -195,7 +192,14 @@ export function OptimizerTable({
         filters={columnFilters}
         resize={resize}
         exportData={() => ({
-          columns: ["optimizer", "runs", "share_pct", "success_rate_pct", "avg_improvement_pts", "avg_runtime_minutes"],
+          columns: [
+            "optimizer",
+            "runs",
+            "share_pct",
+            "success_rate_pct",
+            "avg_improvement_pts",
+            "avg_runtime_minutes",
+          ],
           rows: visible.map((r) => ({
             optimizer: r.name,
             runs: r.count,
@@ -208,7 +212,7 @@ export function OptimizerTable({
         })}
       />
       <TableFrame minWidth="560px">
-        <TableHeader className={HEADER_CLASS}>
+        <TableHeader>
           <TableRow>
             {header(labels.name, "name", true)}
             {header(labels.count, "count")}
@@ -242,12 +246,7 @@ export function OptimizerTable({
               </TableCell>
               <TableCell className="px-2" data-label={labels.share}>
                 <div className="flex items-center gap-2" dir="ltr">
-                  <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted/60">
-                    <div
-                      className="h-full rounded-full bg-[var(--color-chart-2)] transition-all duration-500"
-                      style={{ width: `${row.share}%` }}
-                    />
-                  </div>
+                  <ProgressBar value={row.share} color="var(--color-chart-2)" className="w-16" />
                   <span className="text-[0.6875rem] tabular-nums text-muted-foreground">
                     {Math.round(row.share)}%
                   </span>
@@ -263,7 +262,11 @@ export function OptimizerTable({
               >
                 {pointsText(row.avgImprovement)}
               </TableCell>
-              <TableCell className="px-2 tabular-nums" data-label={labels.avgRuntimeMinutes} dir="ltr">
+              <TableCell
+                className="px-2 tabular-nums"
+                data-label={labels.avgRuntimeMinutes}
+                dir="ltr"
+              >
                 {row.avgRuntimeMinutes == null ? "—" : formatElapsed(row.avgRuntimeMinutes * 60)}
               </TableCell>
             </TableRow>
@@ -411,7 +414,7 @@ export function Leaderboard({
         })}
       />
       <TableFrame minWidth="640px">
-        <TableHeader className={HEADER_CLASS}>
+        <TableHeader>
           <TableRow>
             {header(labels.rank, "rank")}
             {header(labels.name, "name")}
@@ -439,7 +442,10 @@ export function Leaderboard({
                 }
               }}
             >
-              <TableCell className="px-2 tabular-nums text-muted-foreground/70" data-label={labels.rank}>
+              <TableCell
+                className="px-2 tabular-nums text-muted-foreground/70"
+                data-label={labels.rank}
+              >
                 {row.rank}
               </TableCell>
               <TableCell
@@ -467,10 +473,17 @@ export function Leaderboard({
               >
                 {pointsText(row.improvement)}
               </TableCell>
-              <TableCell className="px-2 tabular-nums" dir="ltr" data-label={labels.elapsed_seconds}>
+              <TableCell
+                className="px-2 tabular-nums"
+                dir="ltr"
+                data-label={labels.elapsed_seconds}
+              >
                 {row.elapsed_seconds == null ? "—" : formatElapsed(row.elapsed_seconds)}
               </TableCell>
-              <TableCell className="whitespace-nowrap px-2 tabular-nums" data-label={labels.created_at}>
+              <TableCell
+                className="whitespace-nowrap px-2 tabular-nums"
+                data-label={labels.created_at}
+              >
                 {row.created_at
                   ? new Date(row.created_at).toLocaleDateString(locale, {
                       day: "numeric",

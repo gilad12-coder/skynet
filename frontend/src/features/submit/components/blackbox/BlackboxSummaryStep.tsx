@@ -28,6 +28,7 @@ import {
 import { cn } from "@/shared/lib/utils";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
 import { formatCreditsUsd } from "@/features/billing";
 import { harnessLabel } from "@/shared/lib/blackbox-harness";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -278,7 +279,6 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
           });
 
   const hasHoldout = split.val > 0 || split.test > 0;
-  const scorerCodeLines = metricCode.split("\n").length;
 
   const tabs: Array<{ id: string; label: string; icon: ReactNode }> = [
     {
@@ -547,7 +547,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                   </Row>
                   {runDisabledReason && (
                     <span
-                      className="mt-1 flex items-start gap-1.5 text-xs text-amber-700"
+                      className="mt-1 flex items-start gap-1.5 text-xs text-[var(--warning)]"
                       role="status"
                     >
                       <Warning className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
@@ -573,7 +573,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       <CodeEditor
                         value={metricCode}
                         onChange={() => {}}
-                        height={`${Math.min(scorerCodeLines + 1, 12) * 19.6 + 8}px`}
+                        height={readOnlyEditorHeight(metricCode, { maxLines: 12 })}
                         readOnly
                       />
                     </div>

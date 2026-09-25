@@ -31,7 +31,8 @@ import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 import { useExecutionBudget } from "../hooks/use-execution-budget";
 import { Disclosure } from "./Disclosure";
 import { Figure, buildEstimateSections, type CalcSection } from "./EstimateBreakdown";
-import { Segmented, StepCard } from "./blackbox/shared";
+import { Segmented } from "@/shared/ui/segmented";
+import { StepCard } from "./blackbox/shared";
 
 /**
  * The one budget surface of both wizards: a spending limit that covers setup
@@ -271,7 +272,7 @@ export function TotalBudgetCard({
       title={msg("submit.budget.label")}
       trailing={
         <Segmented<"limit" | "uncapped">
-          compact
+          size="sm"
           label={msg("submit.budget.label")}
           value={budgetUncapped ? "uncapped" : "limit"}
           onChange={(value) => setBudgetUncapped(value === "uncapped")}
@@ -297,10 +298,10 @@ export function TotalBudgetCard({
           </Label>
           <div
             className={cn(
-              "overflow-hidden rounded-lg border bg-background transition-[border-color,box-shadow] focus-within:ring-[3px]",
+              "overflow-hidden rounded-xl border bg-background/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.72),0_12px_26px_-24px_rgba(15,23,42,0.45)] backdrop-blur-sm transition-[border-color,box-shadow] focus-within:ring-[3px]",
               fieldError
                 ? "border-destructive focus-within:border-destructive focus-within:ring-destructive/20"
-                : "border-input focus-within:border-ring focus-within:ring-ring/50",
+                : "border-input/90 focus-within:border-ring focus-within:ring-ring/50",
             )}
           >
             <div dir="ltr" className="flex h-12 items-center">
@@ -422,7 +423,7 @@ export function TotalBudgetCard({
           {budgetError && (
             <p
               role="alert"
-              className="flex items-start gap-2 text-xs leading-snug text-destructive"
+              className="flex items-start gap-1.5 text-xs leading-snug text-destructive"
               dir="auto"
             >
               <WarningCircle className="mt-px size-3.5 shrink-0" aria-hidden="true" />

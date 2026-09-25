@@ -18,6 +18,7 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
+import { TOUCH_FIELD } from "@/shared/ui/touch";
 
 const PYPI = "https://pypi.org/simple";
 
@@ -178,7 +179,7 @@ function RegistryForm({ owner }: { owner: string }) {
           aria-describedby="settings-package-registry-hint"
           autoComplete="off"
           spellCheck={false}
-          className="min-h-[44px] flex-1 font-mono text-sm"
+          className={cn(TOUCH_FIELD, "flex-1 font-mono text-sm")}
         />
         <Tooltip>
           <TooltipTrigger asChild>
@@ -192,7 +193,10 @@ function RegistryForm({ owner }: { owner: string }) {
               className="size-[44px] shrink-0"
             >
               {checking ? (
-                <CircleNotch className="size-4 animate-spin" />
+                <CircleNotch
+                  className="animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
               ) : (
                 <Plug className="size-4" />
               )}
@@ -288,7 +292,7 @@ function RegistryForm({ owner }: { owner: string }) {
         </div>
       )}
       {error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-xs leading-snug text-destructive">
           {error}
         </p>
       )}

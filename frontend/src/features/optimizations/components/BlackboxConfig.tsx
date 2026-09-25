@@ -728,10 +728,10 @@ export function BlackboxConfigCard({
                   (holdout ? (
                     <div className="flex flex-1 flex-col gap-3">
                       <div className="flex items-center gap-2.5">
-                        <span className="grid size-9 place-items-center rounded-xl bg-[#EDE7DD] text-[#8C7A6B]">
+                        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-muted-foreground [&_svg]:size-4">
                           <Shuffle className="size-4" aria-hidden="true" />
                         </span>
-                        <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
+                        <p className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
                           <HelpTip text={tip("blackbox.config.split")}>
                             {msg("optimization.blackbox.config.split")}
                           </HelpTip>

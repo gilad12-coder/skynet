@@ -1,5 +1,6 @@
 "use client";
 
+import { EmptyState } from "@/shared/ui/empty-state";
 import * as React from "react";
 import { Check, MagicWand, Translate } from "@/shared/ui/icons";
 import { LOCALES, LOCALE_REGISTRY, type Locale } from "@/shared/lib/locale";
@@ -109,7 +110,7 @@ export function LanguageSwitcher({ className }: { className?: string }) {
           placeholder={msg("shared.language.search_placeholder")}
           dir="auto"
           aria-label={msg("shared.language.switch_aria")}
-          className="mb-1 w-full rounded-md border-b border-border/60 bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+          className="mb-1 w-full rounded-md border-b border-border/60 bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground/90"
         />
         {!query.trim() && (
           <button
@@ -138,9 +139,11 @@ export function LanguageSwitcher({ className }: { className?: string }) {
         )}
         <div ref={listRef} role="listbox" className="max-h-72 overflow-y-auto">
           {results.length === 0 ? (
-            <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-              {msg("shared.language.no_results")}
-            </p>
+            <EmptyState
+              variant="compact"
+              title={msg("shared.language.no_results")}
+              className="gap-1 px-3 py-3"
+            />
           ) : (
             results.map((l, i) => {
               const entry = LOCALE_REGISTRY[l];

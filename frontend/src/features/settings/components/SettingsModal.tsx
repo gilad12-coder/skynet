@@ -1,5 +1,10 @@
 "use client";
 
+import { InlineErrorRow } from "@/shared/ui/inline-error-row";
+import { cn } from "@/shared/lib/utils";
+import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
+import { EmptyState } from "@/shared/ui/empty-state";
+import { StorageUsageBar } from "@/shared/ui/progress-bar";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { useSession } from "next-auth/react";
@@ -138,7 +143,10 @@ function WizardTab() {
           value={prefs.wizardCodeAssist}
           onValueChange={(v) => setPref("wizardCodeAssist", v as typeof prefs.wizardCodeAssist)}
         >
-          <SelectTrigger className="h-[44px] w-full min-w-0 sm:h-8 sm:w-auto sm:min-w-[160px] [@media(hover:none)_and_(pointer:coarse)]:h-[44px]">
+          <SelectTrigger
+            size="sm"
+            className={cn(TOUCH_FIELD_SM, "w-full min-w-0 sm:w-auto sm:min-w-[160px]")}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -153,7 +161,10 @@ function WizardTab() {
           value={prefs.wizardSplitMode}
           onValueChange={(v) => setPref("wizardSplitMode", v as typeof prefs.wizardSplitMode)}
         >
-          <SelectTrigger className="h-[44px] w-full min-w-0 sm:h-8 sm:w-auto sm:min-w-[160px] [@media(hover:none)_and_(pointer:coarse)]:h-[44px]">
+          <SelectTrigger
+            size="sm"
+            className={cn(TOUCH_FIELD_SM, "w-full min-w-0 sm:w-auto sm:min-w-[160px]")}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -362,7 +373,10 @@ function AgentTab() {
           value={prefs.agentTrustMode}
           onValueChange={(v) => setPref("agentTrustMode", v as typeof prefs.agentTrustMode)}
         >
-          <SelectTrigger className="h-[44px] w-full min-w-0 sm:h-8 sm:w-auto sm:min-w-[160px] [@media(hover:none)_and_(pointer:coarse)]:h-[44px]">
+          <SelectTrigger
+            size="sm"
+            className={cn(TOUCH_FIELD_SM, "w-full min-w-0 sm:w-auto sm:min-w-[160px]")}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -580,7 +594,7 @@ function UsernameCombobox({
             // pointer-events-auto: the parent Sheet sets pointer-events:none on
             // <body>, which this body-portaled popup would otherwise inherit,
             // leaving the suggestions unclickable.
-            className="pointer-events-auto fixed z-[9999] overflow-auto rounded-md border border-border/60 bg-background shadow-md"
+            className="pointer-events-auto fixed z-[9999] overflow-auto rounded-md border border-border/70 bg-popover shadow-lg"
             style={{
               top: pos.top,
               left: pos.left,
@@ -597,7 +611,7 @@ function UsernameCombobox({
                 {msg("settings.admin.storage.no_suggestions")}
               </div>
             ) : (
-              <ul role="listbox">
+              <ul role="listbox" className="py-1">
                 {results.map((entry) => (
                   <li key={`${entry.source}:${entry.username}`}>
                     <button
@@ -607,7 +621,7 @@ function UsernameCombobox({
                         onSelect(entry);
                         setOpen(false);
                       }}
-                      className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-start text-xs hover:bg-accent/50"
+                      className="flex min-h-[44px] w-full items-center justify-between gap-2 px-3 py-1.5 text-start text-xs hover:bg-accent/60 lg:min-h-0"
                       dir="ltr"
                     >
                       <span className="font-semibold text-foreground">{entry.username}</span>
@@ -742,14 +756,7 @@ function UsageMeter({ used, budget }: { used: number; budget: number }) {
       >
         {formatStorageSize(used)}
       </span>
-      <div className="h-1 w-16 overflow-hidden rounded-full bg-[#E5DDD4]">
-        <div
-          className={`h-full rounded-full transition-[width] duration-300 ease-out ${
-            over ? "bg-destructive" : "bg-[#3D2E22]/70"
-          }`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      <StorageUsageBar value={pct} over={over} size="sm" className="w-16" />
     </div>
   );
 }
@@ -915,9 +922,7 @@ function AdminTab() {
   return (
     <div className="space-y-4">
       {!session?.backendAccessToken && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-          {msg("settings.admin.storage.auth_missing")}
-        </div>
+        <InlineErrorRow message={msg("settings.admin.storage.auth_missing")} />
       )}
 
       <SettingsRow
@@ -993,7 +998,7 @@ function AdminTab() {
           <div className="flex-1 overflow-auto">
             <div className="table-scroll">
               <Table style={{ minWidth: "560px" }}>
-                <TableHeader className="sticky top-0 z-10 bg-muted/40 backdrop-blur-sm">
+                <TableHeader>
                   <TableRow>
                     <ColumnHeader
                       label={msg("settings.admin.storage.username")}
@@ -1047,7 +1052,7 @@ function AdminTab() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  <TableRow className="border-border/40 bg-muted/10">
+                  <TableRow className="bg-muted/10">
                     <TableCell className="text-center" dir="ltr">
                       <UsernameCombobox
                         value={pendingUsername}
@@ -1064,7 +1069,8 @@ function AdminTab() {
                           onChange={setPendingBudgetMb}
                           min={1}
                           disabled={busy}
-                          className="mx-auto h-8 w-36"
+                          size="sm"
+                          className="mx-auto w-36"
                         />
                         <span className="text-[0.6875rem] text-muted-foreground">MB</span>
                       </span>
@@ -1096,18 +1102,23 @@ function AdminTab() {
 
                   {filteredOverrides.length === 0 ? (
                     <TableRow>
-                      <TableCell
-                        colSpan={5}
-                        className="px-6 py-10 text-center text-sm text-muted-foreground"
-                      >
-                        {overrides.length === 0
-                          ? msg("settings.admin.storage.empty")
-                          : msg("settings.admin.storage.no_results")}
+                      <TableCell colSpan={5}>
+                        <EmptyState
+                          variant="list"
+                          title={
+                            overrides.length === 0
+                              ? msg("settings.admin.storage.empty")
+                              : msg("settings.admin.storage.no_results")
+                          }
+                        />
                       </TableCell>
                     </TableRow>
                   ) : (
                     filteredOverrides.map((item) => (
-                      <TableRow key={item.username} className="border-border/40 hover:bg-accent/30">
+                      <TableRow
+                        key={item.username}
+                        className="transition-colors duration-150 hover:bg-muted/50"
+                      >
                         <TableCell
                           className="max-w-[200px] truncate text-center font-semibold text-xs text-foreground"
                           dir="ltr"
@@ -1300,20 +1311,12 @@ function ApiTab() {
   const docsUrl = `${getRuntimeEnv().apiUrl}/scalar`;
 
   if (!hasAuth) {
-    return (
-      <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-        {msg("settings.api.auth_missing")}
-      </div>
-    );
+    return <InlineErrorRow message={msg("settings.api.auth_missing")} />;
   }
 
   return (
     <div className="space-y-4">
-      {loadError && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-          {loadError}
-        </div>
-      )}
+      {loadError && <InlineErrorRow message={loadError} />}
 
       <SettingsRow icon={Key} label={msg("settings.api.title")}>
         {loaded &&
@@ -1359,11 +1362,8 @@ function ApiTab() {
             <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
             <span>{msg("settings.api.reveal_warning")}</span>
           </div>
-          <div
-            dir="ltr"
-            className="flex items-center justify-between gap-2 rounded bg-[#3D2E22]/5 px-2 py-1.5"
-          >
-            <code className="min-w-0 flex-1 break-all font-mono text-xs text-[#3D2E22]">
+          <div dir="ltr" className="flex items-center gap-2 rounded-lg bg-muted/40 py-1 ps-3 pe-1">
+            <code className="min-w-0 flex-1 break-all font-mono text-xs text-foreground">
               {revealed}
             </code>
             <Tooltip>
@@ -1548,7 +1548,7 @@ function SettingsPanelHeader({ tab }: { tab: SettingsTab }) {
   const { icon: Icon, labelKey } = SETTINGS_TAB_META[tab];
   return (
     <div className="mb-4 flex items-center gap-3 border-b border-border/50 pb-3">
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/[0.08] text-primary">
+      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-muted-foreground [&_svg]:size-4">
         <Icon className="size-4" aria-hidden="true" />
       </span>
       <h2 className="text-base font-semibold tracking-tight text-foreground">{msg(labelKey)}</h2>
@@ -1598,7 +1598,7 @@ export function SettingsModal() {
         data-settings-text-buttons
         className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0 sm:max-w-4xl [&_[data-slot=button]]:min-h-[44px] [&_[data-slot=button]]:min-w-[44px] [&_[data-slot=select-trigger]]:min-h-[44px] sm:[&_[data-slot=button]]:min-h-0 sm:[&_[data-slot=button]]:min-w-0 sm:[&_[data-slot=select-trigger]]:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-w-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=select-trigger]]:min-h-[44px]"
       >
-        <DialogHeader className="border-b border-border/40 px-4 py-3 pe-12 text-start sm:px-5 sm:py-4">
+        <DialogHeader className="border-b border-border/40 px-4 py-3 pe-12 sm:px-5 sm:py-4">
           <div className="min-w-0">
             <DialogTitle>{msg("settings.title")}</DialogTitle>
             <DialogDescription className="mt-1 text-xs">
@@ -1633,6 +1633,7 @@ export function SettingsModal() {
                           <motion.div
                             layoutId="settings-rail-active"
                             className="absolute inset-0 rounded-lg bg-primary/[0.08] ring-1 ring-primary/10"
+                            style={{ borderInlineStart: "3px solid var(--primary)" }}
                             transition={
                               prefersReduced
                                 ? { duration: 0 }

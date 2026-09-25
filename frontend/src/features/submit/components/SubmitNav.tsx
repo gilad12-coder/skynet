@@ -12,12 +12,7 @@ import type { SubmitWizardContext } from "../hooks/use-submit-wizard";
 
 type NavContext = Pick<
   SubmitWizardContext,
-  | "step"
-  | "goPrev"
-  | "handleNext"
-  | "handleSubmit"
-  | "submitting"
-  | "advancing"
+  "step" | "goPrev" | "handleNext" | "handleSubmit" | "submitting" | "advancing"
 > & {
   // Why the run cannot start right now (an engine that cannot run here yet);
   // the button stays visible so the reason stays visible with it.
@@ -42,14 +37,7 @@ export function SubmitNav({
   showSubmit,
 }: SubmitNavProps) {
   const reducedMotion = useReducedMotion();
-  const {
-    step,
-    goPrev,
-    handleNext,
-    handleSubmit,
-    submitting,
-    advancing,
-  } = w;
+  const { step, goPrev, handleNext, handleSubmit, submitting, advancing } = w;
   const runDisabledReason = w.runDisabledReason ?? null;
 
   // Back points toward the start, Next toward the end — the physical direction
@@ -64,9 +52,10 @@ export function SubmitNav({
     return (
       <div className="flex items-stretch justify-between gap-3">
         <Button
+          variant="outline"
           onClick={onBack ?? goPrev}
           disabled={(backDisabled ?? step === 0) || advancing}
-          className="min-h-[44px] min-w-0 flex-1 gap-2 whitespace-normal sm:flex-none sm:whitespace-nowrap"
+          className="min-h-[44px] lg:min-h-0 min-w-0 flex-1 gap-2 whitespace-normal sm:flex-none sm:whitespace-nowrap"
         >
           <BackChevron className="h-4 w-4" />
           {msg("auto.features.submit.components.submitnav.1")}
@@ -76,15 +65,12 @@ export function SubmitNav({
           disabled={advancing}
           aria-busy={advancing || undefined}
           aria-live="polite"
-          className="min-h-[44px] min-w-0 flex-1 justify-center gap-2 whitespace-normal sm:min-w-[88px] sm:flex-none sm:whitespace-nowrap"
+          className="min-h-[44px] lg:min-h-0 min-w-0 flex-1 justify-center gap-2 whitespace-normal sm:min-w-[88px] sm:flex-none sm:whitespace-nowrap"
           data-tutorial="wizard-next"
         >
           {advancing ? (
             <>
-              <CircleNotch
-                className="h-4 w-4 animate-spin motion-reduce:animate-none"
-                aria-hidden="true"
-              />
+              <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
               <span>{msg("submit.nav.validating")}</span>
             </>
           ) : (

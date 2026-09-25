@@ -35,8 +35,8 @@ export function EngineSlide({
       <Banner />
       <div className="flex flex-col items-center justify-center gap-2 px-4 pb-6 pt-5 text-center sm:px-6 sm:pb-7 sm:pt-6 @3xl:flex-1 @3xl:px-10 @3xl:py-8">
         <div className="flex flex-wrap items-center justify-center gap-2.5">
-          <span className="flex size-9 items-center justify-center rounded-lg bg-[#F3EDE3] text-[#3D2E22]">
-            <Icon className="size-[1.125rem]" />
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-muted-foreground [&_svg]:size-4">
+            <Icon className="size-4" />
           </span>
           <h4 dir="ltr" className="text-lg font-semibold tracking-tight text-foreground">
             {engine.label}
@@ -53,13 +53,13 @@ export function EngineSlide({
           {engine.description}
         </p>
         {blocked ? (
-          <p className="max-w-md text-xs text-amber-700">
+          <p className="max-w-md text-xs text-[var(--warning)]">
             {msg("submit.blackbox.validation.engine_parts")}
           </p>
         ) : (
           !engine.available &&
           engine.unavailable_reason && (
-            <p className="max-w-md text-xs text-amber-700" dir="auto">
+            <p className="max-w-md text-xs text-[var(--warning)]" dir="auto">
               {engine.unavailable_reason}
             </p>
           )

@@ -1,7 +1,8 @@
 "use client";
 
+import { LoadingState } from "@/shared/ui/loading-state";
 import * as React from "react";
-import { CircleNotch, Plus, ArrowCounterClockwise, Trash } from "@/shared/ui/icons";
+import { Plus, ArrowCounterClockwise, Trash } from "@/shared/ui/icons";
 
 import { Button } from "@/shared/ui/primitives/button";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
@@ -17,6 +18,7 @@ import {
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import type { CodeInterviewState } from "@/shared/hooks/use-code-interview";
+import { Textarea } from "@/shared/ui/primitives/textarea";
 
 interface Props {
   interview: CodeInterviewState;
@@ -72,7 +74,6 @@ export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
           size="icon-sm"
           onClick={interview.reset}
           disabled={interview.busy || (interview.messages.length === 0 && !interview.done)}
-          className="max-lg:size-[44px]"
           aria-label={msg("submit.code.interview.restart")}
         >
           <ArrowCounterClockwise className="size-3.5" />
@@ -95,10 +96,7 @@ export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
               // is unreachable the error strip below is the truth, so the
               // empty thread stays quiet instead of spinning forever.
               interview.error ? null : (
-                <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-                  <CircleNotch className="size-5 animate-spin" />
-                  <p className="text-sm">{msg(copy.reading)}</p>
-                </div>
+                <LoadingState label={msg(copy.reading)} className="h-full py-0" />
               )
             }
           >
@@ -113,7 +111,9 @@ export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
 
           {interview.error && (
             <div className="flex items-center justify-between gap-3 border-t border-border/40 px-4 py-2.5">
-              <p className="text-sm text-destructive">{msg("submit.code.interview.error")}</p>
+              <p role="alert" className="text-xs text-destructive">
+                {msg("submit.code.interview.error")}
+              </p>
               <RetryIconButton
                 label={msg("submit.code.interview.retry")}
                 onClick={interview.retry}
@@ -156,7 +156,7 @@ export function CodeInterviewPanel({ interview, blackbox, className }: Props) {
               variant="ghost"
               size="sm"
               onClick={interview.skip}
-              className="min-h-[44px] text-muted-foreground lg:min-h-0"
+              className="text-muted-foreground"
             >
               {msg("submit.code.interview.skip")}
             </Button>
@@ -198,14 +198,11 @@ function BriefCard({ interview, copy }: { interview: CodeInterviewState; copy: I
         {directives.map((directive, idx) => (
           <div key={idx} className="flex items-start gap-2">
             <span className="mt-2.5 size-1.5 shrink-0 rounded-full bg-primary/50" />
-            <textarea
+            <Textarea
               value={directive}
               onChange={(e) => update(idx, e.target.value)}
               rows={2}
-              className={cn(
-                "min-h-[44px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-base lg:text-sm",
-                "leading-relaxed outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
-              )}
+              className="flex-1 leading-relaxed"
               dir="auto"
             />
             <Button
@@ -213,7 +210,7 @@ function BriefCard({ interview, copy }: { interview: CodeInterviewState; copy: I
               size="icon-xs"
               onClick={() => remove(idx)}
               aria-label={msg("submit.code.interview.brief.remove")}
-              className="mt-1.5 size-[44px] lg:size-7"
+              className="mt-1.5"
             >
               <Trash className="size-3.5 text-muted-foreground" />
             </Button>
@@ -225,17 +222,14 @@ function BriefCard({ interview, copy }: { interview: CodeInterviewState; copy: I
             size="sm"
             onClick={() => setDirectives((prev) => [...prev, ""])}
             aria-label={msg("submit.code.interview.brief.add")}
-            className="mt-1 min-h-[44px] w-full lg:min-h-0"
+            className="mt-1 w-full"
           >
             <Plus className="size-3.5" aria-hidden="true" />
           </Button>
         </TooltipButton>
       </div>
       <div className="border-t border-border/40 p-4 shrink-0">
-        <Button
-          onClick={() => interview.confirm(cleaned)}
-          className="min-h-[44px] w-full lg:min-h-0"
-        >
+        <Button onClick={() => interview.confirm(cleaned)} className="w-full">
           {msg(copy.briefConfirm)}
         </Button>
       </div>

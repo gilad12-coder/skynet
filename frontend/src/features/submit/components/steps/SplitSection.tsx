@@ -1,5 +1,6 @@
 "use client";
 
+import { EmptyState } from "@/shared/ui/empty-state";
 import {
   Card,
   CardContent,
@@ -23,8 +24,6 @@ import { splitExampleCounts } from "../../lib/split-example-counts";
 export type SplitControls = SplitPlanControls &
   Pick<SubmitWizardContext, "split" | "updateSplit" | "splitSum">;
 
-const MOBILE_NUMBER_INPUT_CLASS =
-  "h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm";
 
 // The recommendation card carries the mode switch; the manual fractions
 // only appear once the user picks manual selection, each with the number
@@ -52,7 +51,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
             </HelpTip>
           </CardTitle>
           {splitSum !== 1 && (
-            <Badge variant="destructive" className="text-xs">
+            <Badge variant="destructive" size="sm">
               {msg("auto.features.submit.components.steps.paramsstep.5")}
               {splitSum}
             </Badge>
@@ -62,7 +61,7 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
       </CardHeader>
       <CardContent className="space-y-3 px-4 sm:px-6" data-tutorial="data-splits">
         {!splitPlan && !profileLoading && (
-          <p className="text-sm text-muted-foreground">{msg("submit.split.empty")}</p>
+          <EmptyState variant="list" title={msg("submit.split.empty")} />
         )}
         <SplitRecommendationCard w={w} />
         {splitMode === "manual" && (
@@ -96,7 +95,6 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
                   max={1}
                   value={split.train}
                   onChange={(v) => updateSplit("train", String(v))}
-                  className={MOBILE_NUMBER_INPUT_CLASS}
                 />
                 {totalRows > 0 && (
                   <p className="text-xs tabular-nums text-[#8C7A6B]" aria-live="polite" dir="auto">
@@ -116,7 +114,6 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
                   max={1}
                   value={split.val}
                   onChange={(v) => updateSplit("val", String(v))}
-                  className={MOBILE_NUMBER_INPUT_CLASS}
                 />
                 {totalRows > 0 && (
                   <p className="text-xs tabular-nums text-[#8C7A6B]" aria-live="polite" dir="auto">
@@ -136,7 +133,6 @@ export function SplitSection({ w, totalRows }: { w: SplitControls; totalRows: nu
                   max={1}
                   value={split.test}
                   onChange={(v) => updateSplit("test", String(v))}
-                  className={MOBILE_NUMBER_INPUT_CLASS}
                 />
                 {totalRows > 0 && (
                   <p className="text-xs tabular-nums text-[#8C7A6B]" aria-live="polite" dir="auto">

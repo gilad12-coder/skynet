@@ -1,5 +1,6 @@
 "use client";
 
+import { ProgressBar } from "@/shared/ui/progress-bar";
 import * as React from "react";
 import {
   ArrowDownLeft,
@@ -11,7 +12,6 @@ import {
   Sparkle,
   type Icon,
 } from "@/shared/ui/icons";
-import { motion } from "framer-motion";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartTooltip, ChartEmptyState } from "@/shared/charts/chart-utils";
 import { ChartTable } from "@/shared/charts/chart-table";
@@ -24,6 +24,8 @@ import { useLocale } from "@/shared/providers";
 import { getUsage, type BillingUsageEntry, type BillingUsageResponse } from "@/shared/lib/api";
 import { SkynetDatePicker, toISODate } from "@/shared/ui/skynet-date-picker";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
+import { Segmented } from "@/shared/ui/segmented";
+import { PanelHeading } from "@/shared/ui/panel-heading";
 import { Button } from "@/shared/ui/primitives/button";
 import { useCredits } from "../providers/credit-provider";
 import { formatCredits, formatCreditsUsd, formatResetDate, type UsageEntry } from "../lib/credit";
@@ -71,7 +73,6 @@ const MODEL_RAMP = [
 const BILLED_FILL = "var(--color-chart-1)";
 
 // Mirrors the wallet ledger pill so every segmented control in billing slides alike.
-const PILL_TRANSITION = { type: "tween", duration: 0.16, ease: [0.22, 1, 0.36, 1] } as const;
 
 const ENTRY_CAP = 200;
 
@@ -196,67 +197,10 @@ function bucketDays(
     .map(([key, billed]) => ({ key, label: formatDay(key, locale), billed }));
 }
 
-function PanelHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
-      {children}
-    </p>
-  );
-}
-
-/** A sliding segmented control, matching the wallet ledger filter. */
-function Segmented<T extends string>({
-  options,
-  value,
-  onChange,
-  ariaLabel,
-  layoutId,
-}: {
-  options: ReadonlyArray<{ value: T; label: string }>;
-  value: T;
-  onChange: (next: T) => void;
-  ariaLabel: string;
-  layoutId: string;
-}) {
-  return (
-    <div
-      role="group"
-      aria-label={ariaLabel}
-      className="flex items-center gap-0.5 rounded-lg bg-muted/60 p-0.5"
-    >
-      {options.map((option) => {
-        const active = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              "relative min-h-[44px] cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]",
-              active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {active && (
-              <motion.span
-                layoutId={layoutId}
-                className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
-                transition={PILL_TRANSITION}
-                aria-hidden="true"
-              />
-            )}
-            <span className="relative z-10">{option.label}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function StatCard({ icon: Icon, label, value }: { icon: Icon; label: string; value: string }) {
   return (
     <div className="flex flex-col gap-1 rounded-xl border border-border/60 bg-muted/20 px-4 py-3.5">
-      <span className="flex items-center gap-1.5 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">
+      <span className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70">
         <Icon className="size-3.5" aria-hidden="true" />
         {label}
       </span>
@@ -355,9 +299,7 @@ function ModelBreakdown({
 }) {
   const lite = useLiteMode();
   if (rows.length === 0) {
-    return (
-      <p className="py-6 text-center text-xs text-muted-foreground">{msg("usage.empty.title")}</p>
-    );
+    return <EmptyState variant="list" title={msg("usage.empty.title")} />;
   }
   if (lite) {
     return (
@@ -411,15 +353,10 @@ function ModelBreakdown({
                 </span>
               </span>
             </div>
-            <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${Math.round((row.credits / max) * 100)}%`,
-                  backgroundColor: MODEL_RAMP[index % MODEL_RAMP.length],
-                }}
-              />
-            </div>
+            <ProgressBar
+              value={Math.round((row.credits / max) * 100)}
+              color={MODEL_RAMP[index % MODEL_RAMP.length]}
+            />
           </li>
         );
       })}
@@ -434,30 +371,24 @@ function RunBreakdown({ entries, locale }: { entries: BillingUsageEntry[]; local
     .sort((a, b) => a.credits - b.credits)
     .slice(0, 6);
   if (runs.length === 0) {
-    return (
-      <p className="py-6 text-center text-xs text-muted-foreground">{msg("usage.empty.title")}</p>
-    );
+    return <EmptyState variant="list" title={msg("usage.empty.title")} />;
   }
   return (
     <ul className="flex flex-col">
       {runs.map((run) => (
         <li
           key={run.id}
-          className="flex items-center gap-3 border-b border-border/30 py-2 last:border-b-0"
+          className="flex items-center gap-3 border-b border-border/40 py-3 last:border-b-0"
         >
-          <span className="grid size-7 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
-            <Sparkle className="size-3.5" aria-hidden="true" />
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
+            <Sparkle className="size-4" aria-hidden="true" />
           </span>
           <span className="flex min-w-0 flex-1 flex-col">
-            <span dir="auto" className="truncate text-sm text-foreground">
+            <span dir="auto" className="truncate text-sm font-medium text-foreground">
               {run.label}
             </span>
             {run.model && (
-              <span
-                dir="ltr"
-                className="truncate text-[0.6875rem] text-muted-foreground"
-                title={run.model}
-              >
+              <span dir="ltr" className="truncate text-xs text-muted-foreground" title={run.model}>
                 {modelDisplayName(run.model)}
               </span>
             )}
@@ -477,24 +408,20 @@ function LedgerRow({ entry, locale }: { entry: BillingUsageEntry; locale: string
   const credited = entry.credits > 0;
   const free = entry.credits === 0;
   return (
-    <li className="flex items-center gap-3 border-b border-border/30 py-2.5 last:border-b-0">
-      <span className="grid size-7 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
+    <li className="flex items-center gap-3 border-b border-border/40 py-3 last:border-b-0">
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
         {credited ? (
-          <Icon className="size-3.5" aria-hidden="true" />
+          <Icon className="size-4" aria-hidden="true" />
         ) : (
-          <ArrowDownLeft className="size-3.5 rtl:-scale-x-100" aria-hidden="true" />
+          <ArrowDownLeft className="size-4 rtl:-scale-x-100" aria-hidden="true" />
         )}
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span dir="auto" className="truncate text-sm text-foreground">
+        <span dir="auto" className="truncate text-sm font-medium text-foreground">
           {entry.label}
         </span>
         {entry.model && (
-          <span
-            dir="ltr"
-            className="truncate text-[0.6875rem] text-muted-foreground"
-            title={entry.model}
-          >
+          <span dir="ltr" className="truncate text-xs text-muted-foreground" title={entry.model}>
             {modelDisplayName(entry.model)}
           </span>
         )}
@@ -605,8 +532,8 @@ export function UsageTab() {
             options={rangeOptions}
             value={range}
             onChange={onRangeChange}
-            ariaLabel={msg("usage.range.label")}
-            layoutId="usage-range-pill"
+            size="sm"
+            label={msg("usage.range.label")}
           />
         </div>
         <div className="flex items-center gap-2">
@@ -614,8 +541,8 @@ export function UsageTab() {
             options={groupOptions}
             value={groupBy}
             onChange={setGroupBy}
-            ariaLabel={msg("usage.group.label")}
-            layoutId="usage-group-pill"
+            size="sm"
+            label={msg("usage.group.label")}
           />
           <ExportTableMenu
             iconOnly
@@ -714,7 +641,7 @@ export function UsageTab() {
       </div>
 
       <div className="flex flex-col gap-3">
-        <PanelHeading>{msg("usage.panel.over_time")}</PanelHeading>
+        <PanelHeading className="mb-0">{msg("usage.panel.over_time")}</PanelHeading>
         <SpendChart buckets={buckets} locale={locale} />
       </div>
 
@@ -723,23 +650,21 @@ export function UsageTab() {
         style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(240px, 100%), 1fr))" }}
       >
         <div className="flex flex-col gap-3">
-          <PanelHeading>{msg("usage.panel.by_model")}</PanelHeading>
+          <PanelHeading className="mb-0">{msg("usage.panel.by_model")}</PanelHeading>
           <ModelBreakdown rows={data.by_model} locale={locale} />
         </div>
         <div className="flex flex-col gap-3">
-          <PanelHeading>{msg("usage.panel.by_run")}</PanelHeading>
+          <PanelHeading className="mb-0">{msg("usage.panel.by_run")}</PanelHeading>
           <RunBreakdown entries={entries} locale={locale} />
         </div>
       </div>
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-3">
-          <PanelHeading>{msg("usage.panel.recent")}</PanelHeading>
+          <PanelHeading className="mb-0">{msg("usage.panel.recent")}</PanelHeading>
         </div>
         {entries.length === 0 ? (
-          <p className="px-1 py-6 text-center text-xs text-muted-foreground">
-            {msg("billing.wallet.filter_empty")}
-          </p>
+          <EmptyState variant="list" title={msg("billing.wallet.filter_empty")} />
         ) : (
           <ul className="flex max-h-72 flex-col overflow-y-auto pe-1">
             {entries.map((entry) => (

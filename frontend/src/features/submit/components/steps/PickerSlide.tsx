@@ -45,8 +45,8 @@ export function PickerSlide({
       <Banner />
       <div className="flex flex-col items-center justify-center gap-2 px-4 pb-6 pt-5 text-center sm:px-6 sm:pb-7 sm:pt-6 @3xl:flex-1 @3xl:px-10 @3xl:py-8">
         <div className="flex items-center gap-2.5">
-          <span className="flex size-9 items-center justify-center rounded-lg bg-[#F3EDE3] text-[#3D2E22]">
-            <Icon className="size-[1.125rem]" />
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-muted-foreground [&_svg]:size-4">
+            <Icon className="size-4" />
           </span>
           <h4 dir={labelDir} className="text-lg font-semibold tracking-tight text-foreground">
             {label}
@@ -90,7 +90,7 @@ export function ChooseButton({
       <Button
         variant={selected ? "default" : "outline"}
         size="icon-lg"
-        className="mt-2 size-[44px] rounded-full lg:size-10"
+        className="mt-2 rounded-full"
         aria-label={name}
         aria-pressed={selected}
         disabled={disabled}

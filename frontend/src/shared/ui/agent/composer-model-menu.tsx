@@ -245,7 +245,7 @@ export function ComposerModelMenu({
           <CaretDown className="size-3 shrink-0 text-muted-foreground" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" sideOffset={6} className="w-64 py-1.5">
+      <DropdownMenuContent align="start" sideOffset={6} className="w-64">
         <DropdownMenuSub>
           <DropdownMenuSubTrigger className="py-2.5">
             <span className="shrink-0">{msg("agent.model_menu.model")}</span>
@@ -260,14 +260,14 @@ export function ComposerModelMenu({
                 selected={value === null}
                 label={msg("agent.model_menu.auto")}
                 description={msg("agent.model_menu.auto_hint")}
-                icon={<ProviderLogo slug="openrouter" size={18} />}
+                icon={<ProviderLogo slug="openrouter" size={16} />}
                 onSelect={() => pick(null)}
               />
               <MenuItem
                 selected={value === AUTO_INTELLIGENT_MODEL}
                 label={msg("agent.model_menu.auto_intelligent")}
                 description={msg("agent.model_menu.auto_intelligent_hint")}
-                icon={<ProviderLogo slug="openrouter" size={18} />}
+                icon={<ProviderLogo slug="openrouter" size={16} />}
                 onSelect={() => pick(AUTO_INTELLIGENT_MODEL)}
               />
               {currentExtra && (
@@ -275,7 +275,7 @@ export function ComposerModelMenu({
                   selected
                   label={shortName(currentExtra.value)}
                   description={modelDescription(currentExtra.value)}
-                  icon={<ProviderLogo slug={modelProviderSlug(currentExtra.value)} size={18} />}
+                  icon={<ProviderLogo slug={modelProviderSlug(currentExtra.value)} size={16} />}
                   onSelect={() => pick(currentExtra.value)}
                 />
               )}
@@ -285,7 +285,7 @@ export function ComposerModelMenu({
                   selected={value === m.value}
                   label={shortName(m.value)}
                   description={modelDescription(m.value)}
-                  icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={18} />}
+                  icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={16} />}
                   onSelect={() => pick(m.value)}
                 />
               ))}
@@ -300,7 +300,7 @@ export function ComposerModelMenu({
             </span>
             <CaretRight className="size-3.5 shrink-0 text-muted-foreground rtl:rotate-180" />
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-60 py-1">
+          <DropdownMenuSubContent className="w-60">
             {[null, ...efforts].map((level) => (
               <MenuItem
                 key={level ?? "default"}

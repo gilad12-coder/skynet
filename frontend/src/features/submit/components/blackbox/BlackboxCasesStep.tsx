@@ -66,7 +66,7 @@ export function BlackboxCasesStep({
             {casesName || msg("submit.blackbox.cases.upload")}
           </p>
           {parsedCases && (
-            <Badge variant="secondary" className="mt-2">
+            <Badge variant="secondary" size="sm" className="mt-2">
               {formatMsg("submit.blackbox.cases.loaded", {
                 rows: parsedCases.rowCount,
                 cols: parsedCases.columns.length,

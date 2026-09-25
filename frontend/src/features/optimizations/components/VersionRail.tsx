@@ -37,7 +37,12 @@ function scoreTip(version: CandidateVersion): string | null {
 function BestMark({ className }: { className?: string }) {
   return (
     <HelpTip text={tip("blackbox.versions.best")}>
-      <span className={cn("inline-flex items-center gap-1 font-medium text-amber-700", className)}>
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 font-medium text-[var(--warning)]",
+          className,
+        )}
+      >
         <Trophy className="size-3 shrink-0" aria-hidden="true" />
         {msg("optimization.blackbox.versions.best")}
       </span>
@@ -64,7 +69,7 @@ function VersionRow({
     <DropdownMenuItem
       onSelect={onSelect}
       aria-current={selected ? "true" : undefined}
-      className="gap-2 py-1.5 text-xs tabular-nums"
+      className="tabular-nums"
     >
       <Check
         className={cn("size-3.5 shrink-0 text-primary", !selected && "invisible")}

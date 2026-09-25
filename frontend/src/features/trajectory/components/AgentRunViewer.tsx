@@ -110,7 +110,7 @@ function Stat({
 }) {
   return (
     <div className="flex-1 min-w-0 px-2.5 py-1.5 border-s border-border/30 first:border-s-0">
-      <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/85 truncate">
+      <div className="text-[0.625rem] font-semibold uppercase tracking-wider text-muted-foreground truncate">
         {label}
       </div>
       <div
@@ -144,9 +144,8 @@ function AnswerTab({ record }: { record: BlackboxAgentRunResponse }) {
         <RenderedText text={output} kind={kind} title={msg("agent_run.tab.answer")} />
       ) : null}
       <pre
-        className="rounded-lg border border-border/50 bg-background/80 px-4 py-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-foreground/90"
+        className="whitespace-pre-wrap break-words rounded-lg border border-border/50 bg-muted/30 p-4 font-mono text-[0.8125rem] leading-relaxed text-foreground/90"
         dir="ltr"
-        style={{ wordBreak: "break-word" }}
       >
         {output}
       </pre>
@@ -209,9 +208,9 @@ function RunBody({ optimizationId, run }: { optimizationId: string; run: AgentRu
 
   return (
     <>
-      <SheetHeader className="border-b border-border/30">
-        <SheetTitle className="flex items-center gap-2 text-base">
-          <Terminal className="size-4 text-[#7C6350]" aria-hidden="true" />
+      <SheetHeader className="border-b border-border/40">
+        <SheetTitle className="flex items-center gap-2">
+          <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
           <span>
             {formatMsg("agent_run.title", { phase: agentRunPhaseText(run), case: caseText })}
           </span>
@@ -247,8 +246,8 @@ function RunBody({ optimizationId, run }: { optimizationId: string; run: AgentRu
           <p className="text-[11px] text-[#a85a3b]">{msg("agent_run.error.load")}</p>
         ) : record === null ? (
           <div className="space-y-2" aria-busy="true" aria-label={msg("agent_run.loading")}>
-            <Skeleton className="h-4 w-1/3" />
-            <Skeleton className="h-24 w-full" />
+            <Skeleton height={16} width="33%" />
+            <Skeleton height={96} />
           </div>
         ) : (
           <Tabs
@@ -288,9 +287,8 @@ function RunBody({ optimizationId, run }: { optimizationId: string; run: AgentRu
             {record.check != null ? (
               <TabsContent value="check" className="min-h-0 overflow-y-auto">
                 <pre
-                  className="rounded-lg border border-border/50 bg-background/80 px-4 py-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-foreground/90"
+                  className="whitespace-pre-wrap break-words rounded-lg border border-border/50 bg-muted/30 p-4 font-mono text-[0.8125rem] leading-relaxed text-foreground/90"
                   dir="ltr"
-                  style={{ wordBreak: "break-word" }}
                 >
                   {JSON.stringify(record.check, null, 2)}
                 </pre>
@@ -321,7 +319,7 @@ export function AgentRunViewer({ optimizationId, run, open, onOpenChange }: Agen
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side={isRtl ? "left" : "right"}
-        className="flex w-full flex-col overflow-hidden bg-[#fbf8f3] sm:max-w-md md:max-w-[min(640px,92vw)]"
+        className="flex w-full flex-col overflow-hidden sm:max-w-md md:max-w-[min(640px,92vw)]"
       >
         {run !== null ? (
           <RunBody key={run.run_id} optimizationId={optimizationId} run={run} />
