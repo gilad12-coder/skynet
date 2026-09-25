@@ -242,8 +242,12 @@ function useLayoutMorph(
   target: LayoutResult,
   morphKey: boolean,
   reduceMotion: boolean,
-): LayoutResult {
-  const [frame, setFrame] = useState<{ target: LayoutResult; layout: LayoutResult } | null>(null);
+): { layout: LayoutResult; progress: number } {
+  const [frame, setFrame] = useState<{
+    target: LayoutResult;
+    layout: LayoutResult;
+    progress: number;
+  } | null>(null);
   const shownRef = useRef(target);
   const keyRef = useRef(morphKey);
   // A layout effect so the first tween frame replaces the new target before
@@ -256,19 +260,21 @@ function useLayoutMorph(
       shownRef.current = target;
       return;
     }
-    setFrame({ target, layout: from });
+    setFrame({ target, layout: from, progress: 0 });
     const controls = animate(0, 1, {
       ...MORPH_TRANSITION,
       onUpdate: (t) => {
         const layout = interpolateLayout(from, target, t);
         shownRef.current = layout;
-        setFrame({ target, layout });
+        setFrame({ target, layout, progress: t });
       },
       onComplete: () => setFrame(null),
     });
     return () => controls.stop();
   }, [target, morphKey, reduceMotion]);
-  return frame !== null && frame.target === target ? frame.layout : target;
+  return frame !== null && frame.target === target
+    ? { layout: frame.layout, progress: frame.progress }
+    : { layout: target, progress: 1 };
 }
 
 export function TrajectoryTree({
@@ -318,7 +324,14 @@ export function TrajectoryTree({
         : collapseGhosts(fullLayout, layoutWithoutRejected),
     [layers.rejected, fullLayout, layoutWithoutRejected],
   );
-  const layout = useLayoutMorph(targetLayout, layers.rejected, !!reduceMotion);
+  const { layout, progress: morphProgress } = useLayoutMorph(
+    targetLayout,
+    layers.rejected,
+    !!reduceMotion,
+  );
+  // Morph progress already covered by the recentering glide, or null when no
+  // glide is running.
+  const recenterFromRef = useRef<number | null>(null);
   const { nodes, ghosts, edges, width, height } = layout;
   const fitWidth = Math.max(width, previewLayout?.width ?? 0);
   const fitHeight = Math.max(height, previewLayout?.height ?? 0);
@@ -348,11 +361,34 @@ export function TrajectoryTree({
     // unmounts/remounts the host div, so the previous observer is stale.
   }, [isMaximized]);
 
+  // Toggling rejected proposals reshapes the whole tree, so it recenters even
+  // after the user has panned. Declared before the fit effect so both run in
+  // the same commit when motion is reduced.
+  useEffect(() => {
+    if (!userInteractedRef.current) return;
+    userInteractedRef.current = false;
+    recenterFromRef.current = 0;
+  }, [layers.rejected]);
+
   useEffect(() => {
     if (size.w < 2 || size.h < 2) return;
     if (userInteractedRef.current) return;
-    setView(fitView(size, fitWidth, fitHeight));
-  }, [size, fitWidth, fitHeight]);
+    const fit = fitView(size, fitWidth, fitHeight);
+    const from = recenterFromRef.current;
+    if (from === null || from >= 1) {
+      setView(fit);
+      return;
+    }
+    // Close the same share of the remaining gap as the morph just covered,
+    // so the view lands on the fit exactly when the tree settles.
+    const step = (morphProgress - from) / (1 - from);
+    recenterFromRef.current = morphProgress >= 1 ? null : morphProgress;
+    setView((v) => ({
+      k: v.k + (fit.k - v.k) * step,
+      tx: v.tx + (fit.tx - v.tx) * step,
+      ty: v.ty + (fit.ty - v.ty) * step,
+    }));
+  }, [size, fitWidth, fitHeight, morphProgress]);
 
   // Toggling maximize resizes the container; release the interaction lock so
   // the new viewport gets a fresh fit.
@@ -821,66 +857,78 @@ const TreeContent = memo(function TreeContent({
               />
             );
           })}
-          {ghosts.map((ghost) => {
-            const isHovered = ghost.rejection_id === hoveredGhostId;
-            const r = TRAJECTORY_LAYOUT.nodeRadius;
-            const mark = r * 0.28;
-            return (
-              <motion.g
-                key={`ghost-${ghost.rejection_id}`}
-                role="treeitem"
-                aria-label={formatMsg("trajectory.a11y.ghost_label", {
-                  parent: displayCandidateId(ghost.parent_id),
-                  score: ghost.proposal_score.toFixed(2),
-                })}
-                aria-selected={false}
-                tabIndex={-1}
-                onMouseEnter={() => setHoveredGhostId(ghost.rejection_id)}
-                onMouseLeave={() => setHoveredGhostId(null)}
-                onClick={(e) => onGhostClick(ghost.rejection_id, e)}
-                initial={reduceMotion ? false : { scale: 0.7, opacity: 0 }}
-                animate={reduceMotion ? undefined : { scale: 1, opacity: isHovered ? 0.95 : 0.7 }}
-                transition={reduceMotion ? undefined : { duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
-                style={{ cursor: "pointer", opacity: reduceMotion ? 0.7 : undefined }}
-              >
-                <circle
-                  cx={ghost.x}
-                  cy={ghost.y}
-                  r={r - 0.75}
-                  fill={GHOST_FILL}
-                  fillOpacity={0.55}
-                  stroke={isHovered ? GHOST_STROKE_HOVER : GHOST_STROKE}
-                  strokeWidth={1.5}
-                  strokeDasharray="5 4"
-                />
-                <path
-                  d={`M ${ghost.x - mark} ${ghost.y - mark} L ${ghost.x + mark} ${ghost.y + mark} M ${ghost.x + mark} ${ghost.y - mark} L ${ghost.x - mark} ${ghost.y + mark}`}
-                  stroke={GHOST_STROKE}
-                  strokeWidth={1.6}
-                  strokeLinecap="round"
-                  pointerEvents="none"
-                />
-                <text
-                  x={ghost.x}
-                  y={ghost.y + r + 14}
-                  textAnchor="middle"
-                  fontFamily="var(--font-mono, monospace)"
-                  fontSize="10.5"
-                  fontWeight={600}
-                  fill="rgba(28, 22, 18, 0.6)"
-                  stroke={LABEL_HALO}
-                  strokeWidth={2.5}
-                  strokeLinejoin="round"
-                  pointerEvents="none"
-                  style={{ fontVariantNumeric: "tabular-nums", paintOrder: "stroke" }}
-                >
-                  {ghost.proposal_score.toFixed(2)}
-                </text>
-              </motion.g>
-            );
-          })}
         </g>
       </LayerFade>
+
+      {/* Each ghost drives its own opacity from the toggle rather than
+          inheriting a group fade: with only mount and hover animating it,
+          some ghosts stayed invisible after re-showing until hovered. */}
+      <g>
+        {ghosts.map((ghost) => {
+          const isHovered = ghost.rejection_id === hoveredGhostId;
+          const r = TRAJECTORY_LAYOUT.nodeRadius;
+          const mark = r * 0.28;
+          const restOpacity = !showRejected ? 0 : isHovered ? 0.95 : 0.7;
+          return (
+            <motion.g
+              key={`ghost-${ghost.rejection_id}`}
+              role="treeitem"
+              aria-label={formatMsg("trajectory.a11y.ghost_label", {
+                parent: displayCandidateId(ghost.parent_id),
+                score: ghost.proposal_score.toFixed(2),
+              })}
+              aria-selected={false}
+              tabIndex={-1}
+              onMouseEnter={() => setHoveredGhostId(ghost.rejection_id)}
+              onMouseLeave={() => setHoveredGhostId(null)}
+              onClick={(e) => onGhostClick(ghost.rejection_id, e)}
+              aria-hidden={!showRejected}
+              initial={reduceMotion ? false : { scale: 0.7, opacity: 0 }}
+              animate={reduceMotion ? undefined : { scale: 1, opacity: restOpacity }}
+              transition={reduceMotion ? undefined : { duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{
+                cursor: "pointer",
+                pointerEvents: showRejected ? "auto" : "none",
+                opacity: reduceMotion ? restOpacity : undefined,
+              }}
+            >
+              <circle
+                cx={ghost.x}
+                cy={ghost.y}
+                r={r - 0.75}
+                fill={GHOST_FILL}
+                fillOpacity={0.55}
+                stroke={isHovered ? GHOST_STROKE_HOVER : GHOST_STROKE}
+                strokeWidth={1.5}
+                strokeDasharray="5 4"
+              />
+              <path
+                d={`M ${ghost.x - mark} ${ghost.y - mark} L ${ghost.x + mark} ${ghost.y + mark} M ${ghost.x + mark} ${ghost.y - mark} L ${ghost.x - mark} ${ghost.y + mark}`}
+                stroke={GHOST_STROKE}
+                strokeWidth={1.6}
+                strokeLinecap="round"
+                pointerEvents="none"
+              />
+              <text
+                x={ghost.x}
+                y={ghost.y + r + 14}
+                textAnchor="middle"
+                fontFamily="var(--font-mono, monospace)"
+                fontSize="10.5"
+                fontWeight={600}
+                fill="rgba(28, 22, 18, 0.6)"
+                stroke={LABEL_HALO}
+                strokeWidth={2.5}
+                strokeLinejoin="round"
+                pointerEvents="none"
+                style={{ fontVariantNumeric: "tabular-nums", paintOrder: "stroke" }}
+              >
+                {ghost.proposal_score.toFixed(2)}
+              </text>
+            </motion.g>
+          );
+        })}
+      </g>
 
       <g>
         {nodes.map((node) => {
