@@ -38,8 +38,9 @@ import {
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { useSettingsModal } from "@/features/settings";
+import { DatasetPreviewPanel } from "@/features/datasets";
 import { useConnectors } from "../hooks/use-connectors";
-import { PreviewTable } from "./PreviewTable";
+import { BROWSE_CARET_CLASS, BROWSE_LIST_CLASS, BROWSE_ROW_CLASS } from "./browse-list";
 import { providerMeta } from "./providers";
 
 /** Props for {@link ConnectorImportDialog}. */
@@ -69,10 +70,13 @@ function formatBytes(n: number) {
   return `${n} B`;
 }
 
-/** Secondary text of a listing row: size for objects, row count for sheet tabs. */
+/** Providers whose ``size`` is a row count (sheet tabs, tables, examples) rather than bytes. */
+const ROW_COUNT_PROVIDERS = new Set<ConnectorProvider>(["google_sheets", "langsmith", "snowflake"]);
+
+/** Secondary text of a listing row: size for objects, row count for tables. */
 function entryDetail(provider: ConnectorProvider, entry: ConnectorEntry) {
   if (entry.kind === "file" && entry.size != null) {
-    return provider === "google_sheets"
+    return ROW_COUNT_PROVIDERS.has(provider)
       ? formatMsg("connector_import.size_rows", { count: entry.size.toLocaleString() })
       : formatBytes(entry.size);
   }
@@ -110,6 +114,14 @@ export function ConnectorImportDialog({
   const [selected, setSelected] = React.useState<ConnectorEntry | null>(null);
   const [preview, setPreview] = React.useState<HubPreview | null>(null);
   const [previewLoading, setPreviewLoading] = React.useState(false);
+  const [previewExpanded, setPreviewExpanded] = React.useState(false);
+  const previewRows = React.useMemo(
+    () =>
+      previewLoading
+        ? null
+        : { columns: preview?.columns.map((c) => c.name) ?? [], rows: preview?.rows ?? [] },
+    [preview, previewLoading],
+  );
   const [name, setName] = React.useState("");
   const [importing, setImporting] = React.useState(false);
 
@@ -124,6 +136,7 @@ export function ConnectorImportDialog({
       setQuery("");
       setSelected(null);
       setPreview(null);
+      setPreviewExpanded(false);
       setName("");
       setImporting(false);
     }
@@ -160,6 +173,7 @@ export function ConnectorImportDialog({
     let cancelled = false;
     setPreviewLoading(true);
     setPreview(null);
+    setPreviewExpanded(false);
     setName(selected.name);
     previewConnectorRef(provider, selected.ref)
       .then((res) => {
@@ -230,7 +244,14 @@ export function ConnectorImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(40rem,94vw)] max-w-[min(40rem,94vw)] gap-0 p-0 sm:max-w-2xl">
+      <DialogContent
+        className={cn(
+          "max-h-[96dvh] gap-0 overflow-y-auto p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
+          previewExpanded
+            ? "w-[min(72rem,96vw)] max-w-[min(72rem,96vw)] sm:max-w-[min(72rem,96vw)]"
+            : "w-[min(40rem,94vw)] max-w-[min(40rem,94vw)] sm:max-w-2xl",
+        )}
+      >
         <DialogHeader className="px-5 pt-5 text-start">
           <div className="flex items-center gap-2.5">
             <meta.Avatar size={28} />
@@ -316,7 +337,7 @@ export function ConnectorImportDialog({
               </span>
             </div>
 
-            <div className="mt-3 max-h-[min(24rem,55vh)] space-y-1.5 overflow-y-auto">
+            <div className="mt-3 max-h-[min(24rem,55vh)] overflow-y-auto">
               {browseFailed ? (
                 <div className="flex flex-col items-center gap-2 px-1 py-6 text-center text-sm text-muted-foreground">
                   {msg("connector_import.browse_error")}
@@ -328,40 +349,46 @@ export function ConnectorImportDialog({
                 <p className="px-1 py-6 text-center text-sm text-muted-foreground">
                   {msg("connector_import.empty")}
                 </p>
-              ) : (
-                visibleEntries.map((entry) => {
-                  const detail = entryDetail(provider, entry);
-                  return (
-                    <button
-                      key={entry.ref}
-                      type="button"
-                      onClick={() => openEntry(entry)}
-                      className="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-[#DDD4C8]/60 bg-gradient-to-b from-white/95 to-[#F8F4EF] px-3 py-2.5 text-start transition-colors hover:border-[#C8B9A8]/70"
-                    >
-                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#3D2E22]/8 text-[#3D2E22]">
-                        {entry.kind === "folder" ? (
-                          <Folder className="size-4" />
-                        ) : (
-                          <FileText className="size-4" />
-                        )}
-                      </span>
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span dir="ltr" className="truncate text-sm font-medium text-foreground">
-                          {entry.name}
-                        </span>
-                        {detail && (
-                          <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
-                            {detail}
+              ) : visibleEntries.length > 0 ? (
+                <ul className={BROWSE_LIST_CLASS}>
+                  {visibleEntries.map((entry) => {
+                    const detail = entryDetail(provider, entry);
+                    const EntryIcon = entry.kind === "folder" ? Folder : FileText;
+                    return (
+                      <li key={entry.ref}>
+                        <button
+                          type="button"
+                          onClick={() => openEntry(entry)}
+                          className={BROWSE_ROW_CLASS}
+                        >
+                          <EntryIcon
+                            className="size-4 shrink-0 text-muted-foreground"
+                            aria-hidden="true"
+                          />
+                          <span
+                            dir="ltr"
+                            className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
+                          >
+                            {entry.name}
                           </span>
-                        )}
-                      </span>
-                      {entry.kind === "folder" && (
-                        <CaretRight className="size-3.5 shrink-0 text-muted-foreground/60 rtl:-scale-x-100" />
-                      )}
-                    </button>
-                  );
-                })
-              )}
+                          {detail && (
+                            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                              {detail}
+                            </span>
+                          )}
+                          <CaretRight
+                            className={cn(
+                              BROWSE_CARET_CLASS,
+                              entry.kind !== "folder" && "invisible",
+                            )}
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
             </div>
           </div>
         ) : (
@@ -396,19 +423,22 @@ export function ConnectorImportDialog({
 
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-foreground">
-                  {msg("connector_import.preview_title")}
+                <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                  {msg("datasets.detail.row_reader.hint")}
                 </span>
                 {rowTotal != null && (
-                  <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
+                  <span className="shrink-0 whitespace-nowrap text-[0.6875rem] text-muted-foreground tabular-nums">
                     {formatMsg("connector_import.size_rows", { count: rowTotal.toLocaleString() })}
                   </span>
                 )}
               </div>
-              <PreviewTable
-                preview={preview}
-                loading={previewLoading}
-                emptyLabel={msg("connector_import.preview_empty")}
+              <DatasetPreviewPanel
+                rows={previewRows}
+                emptyTitle={msg("connector_import.preview_empty")}
+                expanded={previewExpanded}
+                onExpandedChange={setPreviewExpanded}
+                className="h-80"
+                expandedClassName="h-[62dvh] min-h-80"
               />
             </div>
 

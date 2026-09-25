@@ -7,13 +7,15 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/shared/ui/primitives/dropdown-menu";
 import type { ConnectorProvider, DatasetSummary } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
 import { ConnectorImportDialog } from "./ConnectorImportDialog";
 import { HuggingFaceImportDialog } from "./HuggingFaceImportDialog";
-import { ALL_PROVIDERS, providerMeta } from "./providers";
+import { PROVIDER_GROUPS, categoryLabel, providerMeta } from "./providers";
 
 /** Props for {@link ImportFromMenu}. */
 export interface ImportFromMenuProps {
@@ -56,18 +58,24 @@ export function ImportFromMenu({
             <CaretDown className="size-3 opacity-60" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[14rem]">
-          {ALL_PROVIDERS.map((id) => {
-            const meta = providerMeta(id);
-            return (
-              <DropdownMenuItem key={id} onSelect={() => choose(id)} className="gap-2.5">
-                <span className="flex size-5 shrink-0 items-center justify-center">
-                  <meta.Mark size={16} />
-                </span>
-                {meta.name}
-              </DropdownMenuItem>
-            );
-          })}
+        <DropdownMenuContent align="end" className="max-h-[70vh] min-w-[15rem] overflow-y-auto">
+          {PROVIDER_GROUPS.map((group, index) => (
+            <React.Fragment key={group.category}>
+              {index > 0 && <DropdownMenuSeparator />}
+              <DropdownMenuLabel>{categoryLabel(group.category)}</DropdownMenuLabel>
+              {group.providers.map((id) => {
+                const meta = providerMeta(id);
+                return (
+                  <DropdownMenuItem key={id} onSelect={() => choose(id)} className="gap-2.5">
+                    <span className="flex size-5 shrink-0 items-center justify-center">
+                      <meta.Mark size={16} />
+                    </span>
+                    {meta.name}
+                  </DropdownMenuItem>
+                );
+              })}
+            </React.Fragment>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
 

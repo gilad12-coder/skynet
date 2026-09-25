@@ -24,7 +24,10 @@ export function formatRelativeTime(iso: string): string {
     if (hours < 24) return formatMsg("auto.shared.lib.formatters.template.2", { p1: hours });
     const days = Math.floor(hours / 24);
     if (days < 7) return formatMsg("auto.shared.lib.formatters.template.3", { p1: days });
-    return formatDate(iso);
+    // Past a week the time of day is noise in a list; the day alone reads cleaner.
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    return date.toLocaleDateString(getActiveIntlLocale(), { dateStyle: "medium" });
   } catch {
     return formatDate(iso);
   }

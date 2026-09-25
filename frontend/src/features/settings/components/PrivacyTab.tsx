@@ -10,6 +10,7 @@ import {
   Database,
   DownloadSimple,
   Envelope,
+  Eraser,
   Trash,
   User,
 } from "@/shared/ui/icons";
@@ -31,6 +32,7 @@ import { SettingsRow } from "@/shared/ui/settings-row";
 import { CopyButton } from "@/shared/ui/copy-button";
 import { Button } from "@/shared/ui/primitives/button";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import { Switch } from "@/shared/ui/primitives/switch";
@@ -258,9 +260,16 @@ export function PrivacyTab() {
           label={msg("settings.privacy.clear_cache.label")}
           description={msg("settings.privacy.clear_cache.description")}
         >
-          <Button variant="outline" size="sm" onClick={handleClearCache}>
-            {msg("settings.privacy.clear_cache.action")}
-          </Button>
+          <TooltipButton tooltip={msg("settings.privacy.clear_cache.action")}>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={handleClearCache}
+              aria-label={msg("settings.privacy.clear_cache.action")}
+            >
+              <Eraser className="size-3.5" aria-hidden="true" />
+            </Button>
+          </TooltipButton>
         </SettingsRow>
 
         <CopyValueRow
@@ -286,16 +295,21 @@ export function PrivacyTab() {
           label={msg("settings.privacy.export.label")}
           description={msg("settings.privacy.export.description")}
         >
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={signedOut || exporting}
-            onClick={() => void handleExport()}
-            className="gap-1.5"
-          >
-            {exporting && <CircleNotch className="size-3.5 animate-spin" aria-hidden="true" />}
-            {msg("settings.privacy.export.action")}
-          </Button>
+          <TooltipButton tooltip={msg("settings.privacy.export.action")}>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              disabled={signedOut || exporting}
+              onClick={() => void handleExport()}
+              aria-label={msg("settings.privacy.export.action")}
+            >
+              {exporting ? (
+                <CircleNotch className="size-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <DownloadSimple className="size-3.5" aria-hidden="true" />
+              )}
+            </Button>
+          </TooltipButton>
         </SettingsRow>
 
         <SettingsRow

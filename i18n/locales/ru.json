@@ -65,6 +65,7 @@
     "winningCandidate": "победивший кандидат"
   },
   "messages": {
+    "connectors.query_failed": "{provider} не удалось выполнить запрос: {reason}",
     "connectors.expired": "Сеанс {provider} истёк. Подключитесь снова в настройках.",
     "connectors.file_unsupported": "Этот файл нельзя прочитать как таблицу. Поддерживаемые форматы: CSV, TSV, JSON, JSONL и Parquet.",
     "connectors.import_too_large": "Файл слишком большой для импорта (максимум — {max_mb} МБ).",

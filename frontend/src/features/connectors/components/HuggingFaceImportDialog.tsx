@@ -6,6 +6,8 @@ import { toast } from "react-toastify";
 import {
   ArrowLeft,
   ArrowSquareOut,
+  ArrowUpRight,
+  CaretRight,
   CircleNotch,
   DownloadSimple,
   Lock,
@@ -30,6 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/primitives/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import {
   getHuggingFaceSplits,
   importHuggingFaceDataset,
@@ -42,9 +45,11 @@ import {
   type HubSplit,
 } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { cn } from "@/shared/lib/utils";
 import { useSettingsModal } from "@/features/settings";
+import { DatasetPreviewPanel } from "@/features/datasets";
 import { useConnectors } from "../hooks/use-connectors";
-import { PreviewTable } from "./PreviewTable";
+import { BROWSE_CARET_CLASS, BROWSE_LIST_CLASS, BROWSE_ROW_CLASS } from "./browse-list";
 
 /** Props for {@link HuggingFaceImportDialog}. */
 export interface HuggingFaceImportDialogProps {
@@ -92,12 +97,21 @@ export function HuggingFaceImportDialog({
   const [splitKey, setSplitKey] = React.useState<string>("");
   const [preview, setPreview] = React.useState<HubPreview | null>(null);
   const [previewLoading, setPreviewLoading] = React.useState(false);
+  const [previewExpanded, setPreviewExpanded] = React.useState(false);
+  const previewRows = React.useMemo(
+    () =>
+      previewLoading
+        ? null
+        : { columns: preview?.columns.map((c) => c.name) ?? [], rows: preview?.rows ?? [] },
+    [preview, previewLoading],
+  );
   const [name, setName] = React.useState("");
   const [importing, setImporting] = React.useState(false);
 
   const connected = huggingFace?.connected ?? false;
   const trimmedQuery = query.trim();
   const looksLikeRepo = /^[\w.-]+\/[\w.-]+$/.test(trimmedQuery);
+  const showOpenRepo = looksLikeRepo && !results.some((d) => d.id === trimmedQuery);
 
   React.useEffect(() => {
     if (!open) {
@@ -108,6 +122,7 @@ export function HuggingFaceImportDialog({
       setSplits([]);
       setSplitKey("");
       setPreview(null);
+      setPreviewExpanded(false);
       setName("");
       setImporting(false);
     }
@@ -148,6 +163,7 @@ export function HuggingFaceImportDialog({
     setSplits([]);
     setSplitKey("");
     setPreview(null);
+    setPreviewExpanded(false);
     getHuggingFaceSplits(encodeRepoId(repoId))
       .then((res) => {
         if (cancelled) return;
@@ -224,7 +240,15 @@ export function HuggingFaceImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(40rem,94vw)] max-w-[min(40rem,94vw)] gap-0 p-0 sm:max-w-2xl">
+      <DialogContent
+        className={cn(
+          "gap-0 overflow-y-auto p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
+          // Same footprint as the dataset detail dialog so the two read as one family.
+          previewExpanded
+            ? "max-h-[96dvh] w-[min(72rem,96vw)] max-w-[min(72rem,96vw)] sm:max-w-[min(72rem,96vw)]"
+            : "max-h-[85vh] w-[min(72rem,94vw)] max-w-[min(72rem,94vw)] sm:max-w-[min(72rem,94vw)]",
+        )}
+      >
         <DialogHeader className="px-5 pt-5 text-start">
           <div className="flex items-center gap-2.5">
             <HuggingFace.Avatar size={28} />
@@ -278,68 +302,77 @@ export function HuggingFaceImportDialog({
               </span>
             </div>
 
-            <div className="mt-3 max-h-[min(24rem,55vh)] space-y-1.5 overflow-y-auto">
-              {looksLikeRepo && !results.some((d) => d.id === trimmedQuery) && (
-                <button
-                  type="button"
-                  onClick={() => setRepoId(trimmedQuery)}
-                  className="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-dashed border-[#C8B9A8]/70 px-3 py-2.5 text-start transition-colors hover:bg-[#F8F4EF]"
-                >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#3D2E22]/8 text-[#3D2E22]">
-                    <ArrowSquareOut className="size-4" />
-                  </span>
-                  <span dir="ltr" className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {formatMsg("hf_import.open_repo", { repo: trimmedQuery })}
-                  </span>
-                </button>
-              )}
+            <div className="mt-3 max-h-[min(36rem,60vh)] overflow-y-auto">
               {searchFailed ? (
                 <p className="px-1 py-6 text-center text-sm text-muted-foreground">
                   {msg("hf_import.search_error")}
                 </p>
-              ) : !searching && results.length === 0 && !looksLikeRepo ? (
+              ) : !searching && results.length === 0 && !showOpenRepo ? (
                 <p className="px-1 py-6 text-center text-sm text-muted-foreground">
                   {msg("hf_import.search_empty")}
                 </p>
-              ) : (
-                results.map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => setRepoId(d.id)}
-                    className="group flex w-full cursor-pointer items-center gap-3 rounded-lg border border-[#DDD4C8]/60 bg-gradient-to-b from-white/95 to-[#F8F4EF] px-3 py-2.5 text-start transition-colors hover:border-[#C8B9A8]/70"
-                  >
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#3D2E22]/8 text-[#3D2E22]">
-                      {d.gated || d.private ? (
-                        <Lock className="size-4" />
-                      ) : (
-                        <HuggingFace.Color size={16} />
-                      )}
-                    </span>
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span dir="ltr" className="truncate text-sm font-medium text-foreground">
-                        {d.id}
-                      </span>
-                      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.6875rem] text-muted-foreground">
-                        <span className="inline-flex items-center gap-1">
-                          <DownloadSimple className="size-3" />
-                          {formatMsg("hf_import.downloads", { count: formatCount(d.downloads) })}
+              ) : results.length > 0 || showOpenRepo ? (
+                <ul className={BROWSE_LIST_CLASS}>
+                  {showOpenRepo && (
+                    <li>
+                      <button
+                        type="button"
+                        onClick={() => setRepoId(trimmedQuery)}
+                        className={BROWSE_ROW_CLASS}
+                      >
+                        <span
+                          dir="ltr"
+                          className="min-w-0 flex-1 truncate text-sm font-medium text-primary"
+                        >
+                          {formatMsg("hf_import.open_repo", { repo: trimmedQuery })}
                         </span>
-                        {d.gated && (
-                          <span className="rounded-full bg-[#C8A882]/15 px-1.5 py-px font-medium text-[#8a6d44]">
-                            {msg("hf_import.gated")}
+                        <CaretRight className={BROWSE_CARET_CLASS} aria-hidden="true" />
+                      </button>
+                    </li>
+                  )}
+                  {results.map((d) => {
+                    const slash = d.id.indexOf("/");
+                    const owner = slash > 0 ? d.id.slice(0, slash + 1) : "";
+                    const repoName = d.id.slice(owner.length);
+                    return (
+                      <li key={d.id}>
+                        <button
+                          type="button"
+                          onClick={() => setRepoId(d.id)}
+                          className={BROWSE_ROW_CLASS}
+                        >
+                          <span
+                            dir="ltr"
+                            className="flex min-w-0 flex-1 items-center gap-2 text-sm"
+                          >
+                            <span className="truncate">
+                              <span className="text-muted-foreground">{owner}</span>
+                              <span className="font-medium text-foreground">{repoName}</span>
+                            </span>
+                            {d.gated && (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#C8A882]/15 px-1.5 py-px text-[0.6875rem] font-medium text-[#8a6d44]">
+                                <Lock className="size-3" aria-hidden="true" />
+                                {msg("hf_import.gated")}
+                              </span>
+                            )}
+                            {d.private && (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-px text-[0.6875rem] font-medium text-muted-foreground">
+                                <Lock className="size-3" aria-hidden="true" />
+                                {msg("hf_import.private")}
+                              </span>
+                            )}
                           </span>
-                        )}
-                        {d.private && (
-                          <span className="rounded-full bg-muted px-1.5 py-px font-medium text-muted-foreground">
-                            {msg("hf_import.private")}
+                          <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums">
+                            <DownloadSimple className="size-3.5" aria-hidden="true" />
+                            {formatMsg("hf_import.downloads", { count: formatCount(d.downloads) })}
                           </span>
-                        )}
-                      </span>
-                    </span>
-                  </button>
-                ))
-              )}
+                          <CaretRight className={BROWSE_CARET_CLASS} aria-hidden="true" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
             </div>
           </div>
         ) : (
@@ -354,16 +387,32 @@ export function HuggingFaceImportDialog({
               >
                 <ArrowLeft className="size-4 rtl:-scale-x-100" />
               </Button>
-              <a
-                href={`https://huggingface.co/datasets/${repoId}`}
-                target="_blank"
-                rel="noreferrer noopener"
+              <span
                 dir="ltr"
-                className="inline-flex min-w-0 items-center gap-1 truncate text-sm font-medium text-foreground underline-offset-2 hover:underline"
+                className="min-w-0 flex-1 truncate text-start text-sm font-medium text-foreground"
               >
-                <span className="truncate">{repoId}</span>
-                <ArrowSquareOut className="size-3.5 shrink-0 text-muted-foreground" />
-              </a>
+                {repoId}
+              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    asChild
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={msg("hf_import.view_on_hub")}
+                    className="size-[44px] shrink-0 text-muted-foreground hover:text-foreground sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                  >
+                    <a
+                      href={`https://huggingface.co/datasets/${repoId}`}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      <ArrowUpRight className="size-4" />
+                    </a>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{msg("hf_import.view_on_hub")}</TooltipContent>
+              </Tooltip>
             </div>
 
             {splitsLoading ? (
@@ -372,7 +421,7 @@ export function HuggingFaceImportDialog({
               </div>
             ) : (
               <>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3">
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="hf-split" className="text-xs">
                       {msg("hf_import.split_label")}
@@ -425,19 +474,22 @@ export function HuggingFaceImportDialog({
 
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-foreground">
-                      {msg("hf_import.preview_title")}
+                    <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                      {msg("datasets.detail.row_reader.hint")}
                     </span>
                     {rowTotal != null && (
-                      <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
+                      <span className="shrink-0 whitespace-nowrap text-[0.6875rem] text-muted-foreground tabular-nums">
                         {formatMsg("hf_import.rows_total", { count: rowTotal.toLocaleString() })}
                       </span>
                     )}
                   </div>
-                  <PreviewTable
-                    preview={preview}
-                    loading={previewLoading}
-                    emptyLabel={msg("hf_import.preview_empty")}
+                  <DatasetPreviewPanel
+                    rows={previewRows}
+                    emptyTitle={msg("hf_import.preview_empty")}
+                    expanded={previewExpanded}
+                    onExpandedChange={setPreviewExpanded}
+                    className="h-80"
+                    expandedClassName="h-[62dvh] min-h-80"
                   />
                 </div>
 

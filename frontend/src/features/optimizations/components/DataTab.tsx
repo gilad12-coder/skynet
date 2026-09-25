@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "react-toastify";
 import { CircleNotch, ClockCounterClockwise, MagicWand, Tray } from "@/shared/ui/icons";
@@ -21,6 +21,8 @@ import { FadeIn } from "@/shared/ui/motion";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { msg } from "@/shared/lib/messages";
+import { cn } from "@/shared/lib/utils";
+import { DatasetRowReader, ExpandTableButton } from "@/features/datasets";
 import { tip } from "@/shared/lib/tooltips";
 import { getOptimizationDataset, getTestResults, getPairTestResults } from "@/shared/lib/api";
 import type {
@@ -295,6 +297,60 @@ export function DataTab({
     return result;
   }, [rows, colFilters.filters, sortKey, sortDir]);
 
+  // The export and the row reader show the same flattened record.
+  const buildRecords = () => {
+    const includeEval = split === "test" && evalCount > 0;
+    const scoreLabel = msg("auto.features.optimizations.components.datatab.literal.8");
+    const columns: string[] = [
+      ...(includeEval ? [scoreLabel] : []),
+      ...inputFields,
+      ...outputFields,
+      ...(includeEval ? outputFields.map((f) => `pred_${f}`) : []),
+      ...(includeEval ? loggedMetricNames : []),
+    ];
+    const rows = filtered.map((row) => {
+      const ev = currentResults[row.index];
+      const rec: Record<string, unknown> = {};
+      if (includeEval) rec[scoreLabel] = ev ? ev.score : null;
+      for (const f of inputFields) rec[f] = formatCellValue(row.row[f]);
+      for (const f of outputFields) rec[f] = formatCellValue(row.row[f]);
+      if (includeEval) {
+        for (const f of outputFields) {
+          const sigField = Object.entries(dataset?.column_mapping.outputs ?? {}).find(
+            ([, col]) => col === f,
+          )?.[0];
+          rec[`pred_${f}`] = formatCellValue(ev?.outputs[sigField ?? ""]);
+        }
+        for (const name of loggedMetricNames) {
+          const value = ev?.logged_metrics?.[name];
+          rec[name] = value != null ? Number(value.toFixed(3)) : null;
+        }
+      }
+      return rec;
+    });
+    return { columns, rows };
+  };
+
+  // Index into ``filtered``; non-null swaps the table for the row reader.
+  const [readerIndex, setReaderIndex] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const expandButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => setReaderIndex(null), [filtered]);
+  const reader = readerIndex === null ? null : buildRecords();
+
+  // A single click copies the cell, but a double-click opens the reader, so
+  // the copy waits long enough to know no second click is coming.
+  const pendingCopy = useRef<number | null>(null);
+  const cancelPendingCopy = useCallback(() => {
+    if (pendingCopy.current !== null) window.clearTimeout(pendingCopy.current);
+    pendingCopy.current = null;
+  }, []);
+  useEffect(() => cancelPendingCopy, [cancelPendingCopy]);
+  const openReader = (index: number) => {
+    cancelPendingCopy();
+    setReaderIndex(index);
+  };
+
   const filterOptions = useMemo(() => {
     const opts: Record<string, Array<{ value: string; label: string }>> = {};
     for (const col of allColumns) {
@@ -442,41 +498,16 @@ export function DataTab({
             {filtered.length}
             {msg("auto.features.optimizations.components.datatab.4")}
           </div>
+          <ExpandTableButton
+            ref={expandButton}
+            expanded={expanded}
+            controls="data-tab-table"
+            onToggle={() => setExpanded(!expanded)}
+          />
           <ExportTableMenu
             iconOnly
             disabled={filtered.length === 0}
-            getData={() => {
-              const includeEval = split === "test" && evalCount > 0;
-              const scoreLabel = msg("auto.features.optimizations.components.datatab.literal.8");
-              const columns: string[] = [
-                ...(includeEval ? [scoreLabel] : []),
-                ...inputFields,
-                ...outputFields,
-                ...(includeEval ? outputFields.map((f) => `pred_${f}`) : []),
-                ...(includeEval ? loggedMetricNames : []),
-              ];
-              const rows = filtered.map((row) => {
-                const ev = currentResults[row.index];
-                const rec: Record<string, unknown> = {};
-                if (includeEval) rec[scoreLabel] = ev ? ev.score : null;
-                for (const f of inputFields) rec[f] = formatCellValue(row.row[f]);
-                for (const f of outputFields) rec[f] = formatCellValue(row.row[f]);
-                if (includeEval) {
-                  for (const f of outputFields) {
-                    const sigField = Object.entries(dataset.column_mapping.outputs).find(
-                      ([, col]) => col === f,
-                    )?.[0];
-                    rec[`pred_${f}`] = formatCellValue(ev?.outputs[sigField ?? ""]);
-                  }
-                  for (const name of loggedMetricNames) {
-                    const value = ev?.logged_metrics?.[name];
-                    rec[name] = value != null ? Number(value.toFixed(3)) : null;
-                  }
-                }
-                return rec;
-              });
-              return { columns, rows, filename: `dataset_${split}` };
-            }}
+            getData={() => ({ ...buildRecords(), filename: `dataset_${split}` })}
           />
         </div>
       </FadeIn>
@@ -489,256 +520,301 @@ export function DataTab({
             title={msg("auto.features.optimizations.components.datatab.5")}
           />
         ) : (
-          <Card data-tutorial="data-table">
+          <Card
+            id="data-tab-table"
+            data-tutorial="data-table"
+            onKeyDown={(e) => {
+              if (e.key !== "Escape") return;
+              if (readerIndex !== null) setReaderIndex(null);
+              else if (expanded) {
+                setExpanded(false);
+                expandButton.current?.focus();
+              }
+            }}
+          >
             <CardContent className="p-0">
-              <div className="table-scroll max-h-[520px] overflow-y-auto">
-                <Table className="table-fixed">
-                  <TableHeader>
-                    <TableRow>
-                      {split === "test" && evalCount > 0 && (
-                        <ColumnHeader
-                          label={msg("auto.features.optimizations.components.datatab.literal.8")}
-                          sortKey="_score"
-                          currentSort={sortKey}
-                          sortDir={sortDir}
-                          onSort={toggleSort}
-                          width={colResize.widths["_score"]}
-                          onResize={colResize.setColumnWidth}
-                        />
-                      )}
-                      {inputFields.map((f) => (
-                        <ColumnHeader
-                          key={f}
-                          label={f}
-                          sortKey={f}
-                          currentSort={sortKey}
-                          sortDir={sortDir}
-                          onSort={toggleSort}
-                          filterCol={f}
-                          filterOptions={filterOptions[f] ?? []}
-                          filters={colFilters.filters}
-                          onFilter={colFilters.setColumnFilter}
-                          openFilter={colFilters.openFilter}
-                          setOpenFilter={colFilters.setOpenFilter}
-                          width={colResize.widths[f]}
-                          onResize={colResize.setColumnWidth}
-                        />
-                      ))}
-                      {outputFields.map((f) => (
-                        <ColumnHeader
-                          key={f}
-                          label={f}
-                          sortKey={f}
-                          currentSort={sortKey}
-                          sortDir={sortDir}
-                          onSort={toggleSort}
-                          filterCol={f}
-                          filterOptions={filterOptions[f] ?? []}
-                          filters={colFilters.filters}
-                          onFilter={colFilters.setColumnFilter}
-                          openFilter={colFilters.openFilter}
-                          setOpenFilter={colFilters.setOpenFilter}
-                          width={colResize.widths[f]}
-                          onResize={colResize.setColumnWidth}
-                        />
-                      ))}
-                      {split === "test" &&
-                        evalCount > 0 &&
-                        outputFields.map((f) => (
-                          <ColumnHeader
-                            key={`pred-${f}`}
-                            label={`pred_${f}`}
-                            sortKey={`_pred_${f}`}
-                            currentSort={sortKey}
-                            sortDir={sortDir}
-                            onSort={toggleSort}
-                            width={colResize.widths[`_pred_${f}`]}
-                            onResize={colResize.setColumnWidth}
-                          />
-                        ))}
-                      {split === "test" &&
-                        evalCount > 0 &&
-                        loggedMetricNames.map((name) => (
-                          <ColumnHeader
-                            key={`lm-${name}`}
-                            label={name}
-                            sortKey={`_lm_${name}`}
-                            currentSort={sortKey}
-                            sortDir={sortDir}
-                            onSort={toggleSort}
-                            width={colResize.widths[`_lm_${name}`]}
-                            onResize={colResize.setColumnWidth}
-                          />
-                        ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.slice(0, 200).map((row) => {
-                      const ev = currentResults[row.index];
-                      return (
-                        <TableRow
-                          key={row.index}
-                          className="cursor-pointer"
-                          onClick={(e) => {
-                            const td = (e.target as HTMLElement).closest("td");
-                            if (!td || td === td.parentElement?.lastElementChild) return;
-                            const text = td.textContent?.trim();
-                            if (!text) return;
-                            navigator.clipboard
-                              .writeText(text)
-                              .then(() => toast.success(msg("clipboard.copied")))
-                              .catch(() => toast.error(msg("clipboard.copy_failed")));
-                          }}
-                        >
-                          {split === "test" && evalCount > 0 && (
-                            <TableCell
-                              className="!p-0 !px-1.5 !py-1"
-                              style={
-                                colResize.widths["_score"]
-                                  ? { width: colResize.widths["_score"] }
-                                  : { width: 72 }
-                              }
-                            >
-                              {ev ? (
-                                <div
-                                  className="flex flex-col items-center gap-0.5"
-                                  title={
-                                    ev.error
-                                      ? ev.error
-                                      : ev.logged_metrics
-                                        ? Object.entries(ev.logged_metrics)
-                                            .map(([k, v]) => `${k}: ${Number(v.toFixed(3))}`)
-                                            .join(" · ")
-                                        : undefined
-                                  }
-                                >
-                                  <span
-                                    className="text-[0.625rem] font-mono tabular-nums font-medium"
-                                    style={{ color: scoreColor(ev.score) }}
-                                  >
-                                    {ev.error ? "⚠ " : ""}
-                                    {ev.score.toFixed(2)}
-                                  </span>
-                                  <div className="w-full h-1.5 rounded-full overflow-hidden bg-muted">
-                                    <div
-                                      className="h-full rounded-full"
-                                      style={{
-                                        width: `${Math.max(0, Math.min(1, ev.score)) * 100}%`,
-                                        background: scoreColor(ev.score),
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              ) : (
-                                <span className="text-[0.625rem] text-[#E5DDD4] flex justify-center">
-                                  —
-                                </span>
-                              )}
-                            </TableCell>
-                          )}
-                          {inputFields.map((f) => (
-                            <TableCell
-                              key={f}
-                              className="text-xs font-mono truncate overflow-hidden"
-                              style={
-                                colResize.widths[f]
-                                  ? { width: colResize.widths[f], maxWidth: colResize.widths[f] }
-                                  : undefined
-                              }
-                              title={formatCellValue(row.row[f], true)}
-                            >
-                              {formatCellValue(row.row[f])}
-                            </TableCell>
-                          ))}
-                          {outputFields.map((f) => (
-                            <TableCell
-                              key={f}
-                              className="text-xs font-mono truncate overflow-hidden"
-                              style={
-                                colResize.widths[f]
-                                  ? { width: colResize.widths[f], maxWidth: colResize.widths[f] }
-                                  : undefined
-                              }
-                              title={formatCellValue(row.row[f], true)}
-                            >
-                              {formatCellValue(row.row[f])}
-                            </TableCell>
-                          ))}
-                          {split === "test" &&
-                            evalCount > 0 &&
-                            outputFields.map((f) => {
-                              const sigField = Object.entries(dataset.column_mapping.outputs).find(
-                                ([, col]) => col === f,
-                              )?.[0];
-                              const pred = ev?.outputs[sigField ?? ""];
-                              const key = `_pred_${f}`;
-                              return (
-                                <TableCell
-                                  key={key}
-                                  className="text-xs font-mono truncate overflow-hidden"
-                                  style={{
-                                    ...(colResize.widths[key]
-                                      ? {
-                                          width: colResize.widths[key],
-                                          maxWidth: colResize.widths[key],
-                                        }
-                                      : {}),
-                                    color: ev ? scoreColor(ev.score) : undefined,
-                                  }}
-                                  title={formatCellValue(pred, true)}
-                                >
-                                  {formatCellValue(pred)}
-                                </TableCell>
-                              );
-                            })}
-                          {split === "test" &&
-                            evalCount > 0 &&
-                            loggedMetricNames.map((name) => {
-                              const key = `_lm_${name}`;
-                              const value = ev?.logged_metrics?.[name];
-                              return (
-                                <TableCell
-                                  key={key}
-                                  className="text-xs font-mono tabular-nums truncate overflow-hidden"
-                                  style={{
-                                    ...(colResize.widths[key]
-                                      ? {
-                                          width: colResize.widths[key],
-                                          maxWidth: colResize.widths[key],
-                                        }
-                                      : {}),
-                                    // Rate-like values (0–1) reuse the score scale;
-                                    // anything else keeps neutral ink.
-                                    color:
-                                      value != null && value >= 0 && value <= 1
-                                        ? scoreColor(value)
-                                        : undefined,
-                                  }}
-                                >
-                                  {value != null ? String(Number(value.toFixed(3))) : ""}
-                                </TableCell>
-                              );
-                            })}
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                  {filtered.length > 200 && (
-                    <tfoot>
-                      <tr>
-                        <td
-                          colSpan={99}
-                          className="text-center py-3 text-[0.625rem] text-muted-foreground"
-                        >
-                          {msg("auto.features.optimizations.components.datatab.6")}
-                          {filtered.length}
-                          {msg("auto.features.optimizations.components.datatab.7")}
-                        </td>
-                      </tr>
-                    </tfoot>
+              {reader && readerIndex !== null && reader.rows[readerIndex] ? (
+                <div className={cn("flex flex-col", expanded ? "h-[80dvh]" : "h-[520px]")}>
+                  <DatasetRowReader
+                    columns={reader.columns}
+                    row={reader.rows[readerIndex]}
+                    index={readerIndex}
+                    total={reader.rows.length}
+                    onStep={(delta) =>
+                      setReaderIndex((cur) =>
+                        cur === null || cur + delta < 0 || cur + delta >= filtered.length
+                          ? cur
+                          : cur + delta,
+                      )
+                    }
+                    onClose={() => setReaderIndex(null)}
+                  />
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "table-scroll overflow-y-auto",
+                    expanded ? "max-h-[80dvh]" : "max-h-[520px]",
                   )}
-                </Table>
-              </div>
+                >
+                  <Table className="table-fixed">
+                    <TableHeader>
+                      <TableRow>
+                        {split === "test" && evalCount > 0 && (
+                          <ColumnHeader
+                            label={msg("auto.features.optimizations.components.datatab.literal.8")}
+                            sortKey="_score"
+                            currentSort={sortKey}
+                            sortDir={sortDir}
+                            onSort={toggleSort}
+                            width={colResize.widths["_score"]}
+                            onResize={colResize.setColumnWidth}
+                          />
+                        )}
+                        {inputFields.map((f) => (
+                          <ColumnHeader
+                            key={f}
+                            label={f}
+                            sortKey={f}
+                            currentSort={sortKey}
+                            sortDir={sortDir}
+                            onSort={toggleSort}
+                            filterCol={f}
+                            filterOptions={filterOptions[f] ?? []}
+                            filters={colFilters.filters}
+                            onFilter={colFilters.setColumnFilter}
+                            openFilter={colFilters.openFilter}
+                            setOpenFilter={colFilters.setOpenFilter}
+                            width={colResize.widths[f]}
+                            onResize={colResize.setColumnWidth}
+                          />
+                        ))}
+                        {outputFields.map((f) => (
+                          <ColumnHeader
+                            key={f}
+                            label={f}
+                            sortKey={f}
+                            currentSort={sortKey}
+                            sortDir={sortDir}
+                            onSort={toggleSort}
+                            filterCol={f}
+                            filterOptions={filterOptions[f] ?? []}
+                            filters={colFilters.filters}
+                            onFilter={colFilters.setColumnFilter}
+                            openFilter={colFilters.openFilter}
+                            setOpenFilter={colFilters.setOpenFilter}
+                            width={colResize.widths[f]}
+                            onResize={colResize.setColumnWidth}
+                          />
+                        ))}
+                        {split === "test" &&
+                          evalCount > 0 &&
+                          outputFields.map((f) => (
+                            <ColumnHeader
+                              key={`pred-${f}`}
+                              label={`pred_${f}`}
+                              sortKey={`_pred_${f}`}
+                              currentSort={sortKey}
+                              sortDir={sortDir}
+                              onSort={toggleSort}
+                              width={colResize.widths[`_pred_${f}`]}
+                              onResize={colResize.setColumnWidth}
+                            />
+                          ))}
+                        {split === "test" &&
+                          evalCount > 0 &&
+                          loggedMetricNames.map((name) => (
+                            <ColumnHeader
+                              key={`lm-${name}`}
+                              label={name}
+                              sortKey={`_lm_${name}`}
+                              currentSort={sortKey}
+                              sortDir={sortDir}
+                              onSort={toggleSort}
+                              width={colResize.widths[`_lm_${name}`]}
+                              onResize={colResize.setColumnWidth}
+                            />
+                          ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filtered.slice(0, 200).map((row, i) => {
+                        const ev = currentResults[row.index];
+                        return (
+                          <TableRow
+                            key={row.index}
+                            className="cursor-pointer"
+                            onDoubleClick={() => openReader(i)}
+                            onClick={(e) => {
+                              if (window.matchMedia("(any-pointer: coarse)").matches) {
+                                openReader(i);
+                                return;
+                              }
+                              if (e.detail !== 1) return;
+                              const td = (e.target as HTMLElement).closest("td");
+                              if (!td || td === td.parentElement?.lastElementChild) return;
+                              const text = td.textContent?.trim();
+                              if (!text) return;
+                              cancelPendingCopy();
+                              pendingCopy.current = window.setTimeout(() => {
+                                pendingCopy.current = null;
+                                navigator.clipboard
+                                  .writeText(text)
+                                  .then(() => toast.success(msg("clipboard.copied")))
+                                  .catch(() => toast.error(msg("clipboard.copy_failed")));
+                              }, 250);
+                            }}
+                          >
+                            {split === "test" && evalCount > 0 && (
+                              <TableCell
+                                className="!p-0 !px-1.5 !py-1"
+                                style={
+                                  colResize.widths["_score"]
+                                    ? { width: colResize.widths["_score"] }
+                                    : { width: 72 }
+                                }
+                              >
+                                {ev ? (
+                                  <div
+                                    className="flex flex-col items-center gap-0.5"
+                                    title={
+                                      ev.error
+                                        ? ev.error
+                                        : ev.logged_metrics
+                                          ? Object.entries(ev.logged_metrics)
+                                              .map(([k, v]) => `${k}: ${Number(v.toFixed(3))}`)
+                                              .join(" · ")
+                                          : undefined
+                                    }
+                                  >
+                                    <span
+                                      className="text-[0.625rem] font-mono tabular-nums font-medium"
+                                      style={{ color: scoreColor(ev.score) }}
+                                    >
+                                      {ev.error ? "⚠ " : ""}
+                                      {ev.score.toFixed(2)}
+                                    </span>
+                                    <div className="w-full h-1.5 rounded-full overflow-hidden bg-muted">
+                                      <div
+                                        className="h-full rounded-full"
+                                        style={{
+                                          width: `${Math.max(0, Math.min(1, ev.score)) * 100}%`,
+                                          background: scoreColor(ev.score),
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-[0.625rem] text-[#E5DDD4] flex justify-center">
+                                    —
+                                  </span>
+                                )}
+                              </TableCell>
+                            )}
+                            {inputFields.map((f) => (
+                              <TableCell
+                                key={f}
+                                className="text-xs font-mono truncate overflow-hidden"
+                                style={
+                                  colResize.widths[f]
+                                    ? { width: colResize.widths[f], maxWidth: colResize.widths[f] }
+                                    : undefined
+                                }
+                                title={formatCellValue(row.row[f], true)}
+                              >
+                                {formatCellValue(row.row[f])}
+                              </TableCell>
+                            ))}
+                            {outputFields.map((f) => (
+                              <TableCell
+                                key={f}
+                                className="text-xs font-mono truncate overflow-hidden"
+                                style={
+                                  colResize.widths[f]
+                                    ? { width: colResize.widths[f], maxWidth: colResize.widths[f] }
+                                    : undefined
+                                }
+                                title={formatCellValue(row.row[f], true)}
+                              >
+                                {formatCellValue(row.row[f])}
+                              </TableCell>
+                            ))}
+                            {split === "test" &&
+                              evalCount > 0 &&
+                              outputFields.map((f) => {
+                                const sigField = Object.entries(
+                                  dataset.column_mapping.outputs,
+                                ).find(([, col]) => col === f)?.[0];
+                                const pred = ev?.outputs[sigField ?? ""];
+                                const key = `_pred_${f}`;
+                                return (
+                                  <TableCell
+                                    key={key}
+                                    className="text-xs font-mono truncate overflow-hidden"
+                                    style={{
+                                      ...(colResize.widths[key]
+                                        ? {
+                                            width: colResize.widths[key],
+                                            maxWidth: colResize.widths[key],
+                                          }
+                                        : {}),
+                                      color: ev ? scoreColor(ev.score) : undefined,
+                                    }}
+                                    title={formatCellValue(pred, true)}
+                                  >
+                                    {formatCellValue(pred)}
+                                  </TableCell>
+                                );
+                              })}
+                            {split === "test" &&
+                              evalCount > 0 &&
+                              loggedMetricNames.map((name) => {
+                                const key = `_lm_${name}`;
+                                const value = ev?.logged_metrics?.[name];
+                                return (
+                                  <TableCell
+                                    key={key}
+                                    className="text-xs font-mono tabular-nums truncate overflow-hidden"
+                                    style={{
+                                      ...(colResize.widths[key]
+                                        ? {
+                                            width: colResize.widths[key],
+                                            maxWidth: colResize.widths[key],
+                                          }
+                                        : {}),
+                                      // Rate-like values (0–1) reuse the score scale;
+                                      // anything else keeps neutral ink.
+                                      color:
+                                        value != null && value >= 0 && value <= 1
+                                          ? scoreColor(value)
+                                          : undefined,
+                                    }}
+                                  >
+                                    {value != null ? String(Number(value.toFixed(3))) : ""}
+                                  </TableCell>
+                                );
+                              })}
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                    {filtered.length > 200 && (
+                      <tfoot>
+                        <tr>
+                          <td
+                            colSpan={99}
+                            className="text-center py-3 text-[0.625rem] text-muted-foreground"
+                          >
+                            {msg("auto.features.optimizations.components.datatab.6")}
+                            {filtered.length}
+                            {msg("auto.features.optimizations.components.datatab.7")}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </Table>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

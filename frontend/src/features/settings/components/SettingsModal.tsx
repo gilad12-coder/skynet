@@ -23,6 +23,7 @@ import {
   type Icon,
   Translate,
   Microphone,
+  PaperPlaneTilt,
   PencilSimple,
   PencilSimpleLine,
   Plug,
@@ -1194,9 +1195,21 @@ function AboutTab() {
         label={msg("settings.about.feedback.label")}
         description={msg("settings.about.feedback.description")}
       >
-        <Button variant="outline" size="sm" asChild>
-          <a href={feedbackHref}>{msg("settings.about.feedback.action")}</a>
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              asChild
+              aria-label={msg("settings.about.feedback.action")}
+            >
+              <a href={feedbackHref}>
+                <PaperPlaneTilt className="size-3.5" aria-hidden="true" />
+              </a>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{msg("settings.about.feedback.action")}</TooltipContent>
+        </Tooltip>
       </SettingsRow>
 
       <SettingsRow

@@ -10,6 +10,8 @@ import {
   Fingerprint,
   PencilSimple,
   Plus,
+  Shield,
+  ShieldCheck,
   Trash,
   X,
 } from "@/shared/ui/icons";
@@ -28,6 +30,7 @@ import { Label } from "@/shared/ui/primitives/label";
 import { Switch } from "@/shared/ui/primitives/switch";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import { CopyButton } from "@/shared/ui/copy-button";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { tI18n } from "@/shared/lib/i18n";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
@@ -240,20 +243,32 @@ export function SecurityTab() {
             description={msg("settings.security.totp.description")}
           >
             {status.totp_enabled ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setDisableCode("");
-                  setDisableOpen(true);
-                }}
-              >
-                {msg("settings.security.disable")}
-              </Button>
+              <TooltipButton tooltip={msg("settings.security.disable")}>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => {
+                    setDisableCode("");
+                    setDisableOpen(true);
+                  }}
+                  className="text-destructive hover:text-destructive"
+                  aria-label={msg("settings.security.disable")}
+                >
+                  <Shield className="size-3.5" aria-hidden="true" />
+                </Button>
+              </TooltipButton>
             ) : (
-              <Button size="sm" disabled={busy} onClick={() => void beginTotpSetup()}>
-                {msg("settings.security.enable")}
-              </Button>
+              <TooltipButton tooltip={msg("settings.security.enable")}>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={busy}
+                  onClick={() => void beginTotpSetup()}
+                  aria-label={msg("settings.security.enable")}
+                >
+                  <ShieldCheck className="size-3.5" aria-hidden="true" />
+                </Button>
+              </TooltipButton>
             )}
           </SettingsRow>
 
@@ -292,18 +307,20 @@ export function SecurityTab() {
             : msg("settings.security.passkeys.unsupported")
         }
       >
-        <Button
-          size="sm"
-          disabled={!passkeysSupported || busy}
-          onClick={() => {
-            setPasskeyName("");
-            setPasskeyOpen(true);
-          }}
-          className="gap-1.5"
-        >
-          <Plus className="size-3.5" aria-hidden="true" />
-          {msg("settings.security.passkeys.add")}
-        </Button>
+        <TooltipButton tooltip={msg("settings.security.passkeys.add")}>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            disabled={!passkeysSupported || busy}
+            onClick={() => {
+              setPasskeyName("");
+              setPasskeyOpen(true);
+            }}
+            aria-label={msg("settings.security.passkeys.add")}
+          >
+            <Plus className="size-3.5" aria-hidden="true" />
+          </Button>
+        </TooltipButton>
       </SettingsRow>
 
       {status.passkeys.length === 0 ? (

@@ -464,8 +464,12 @@ def create_connectors_router(*, job_store) -> APIRouter:
         Returns:
             The absolute callback URL registered on that provider's OAuth app.
         """
+        google = settings.google_oauth_redirect_uri
         configured = {
-            "google_sheets": settings.google_oauth_redirect_uri,
+            "google_sheets": google,
+            # One Google client serves both connectors; the Drive callback must be registered on it too.
+            "google_drive": google.replace("google_sheets", "google_drive") if google else None,
+            "onedrive": settings.microsoft_oauth_redirect_uri,
             "github": settings.github_oauth_redirect_uri,
         }.get(provider)
         return configured or str(request.url_for("connector_oauth_callback", provider=provider))

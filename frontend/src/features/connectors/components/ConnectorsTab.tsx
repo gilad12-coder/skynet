@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { toast } from "react-toastify";
-import { ArrowSquareOut, CircleNotch, Key, Trash, X } from "@/shared/ui/icons";
+import { ArrowSquareOut, CircleNotch, FloppyDisk, Key, SignIn, Trash, X } from "@/shared/ui/icons";
+import { RetryIconButton } from "@/shared/ui/retry-icon-button";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
@@ -12,21 +13,27 @@ import { tI18n } from "@/shared/lib/i18n";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { useConnectors } from "../hooks/use-connectors";
-import { ALL_PROVIDERS, providerMeta, type CredentialField, type ProviderMeta } from "./providers";
+import {
+  PROVIDER_GROUPS,
+  categoryLabel,
+  providerMeta,
+  type CredentialField,
+  type ProviderMeta,
+} from "./providers";
 
-const TOUCH_BUTTON =
-  "min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]";
 const TOUCH_ICON = "size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]";
 const TOUCH_INPUT = "h-[44px] sm:h-8 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]";
 
-/** The status pill next to a linked account. Gold when healthy, destructive when it needs a reconnect. */
+/** The status pill next to a linked account. Green when healthy, destructive when it needs a reconnect. */
 function StatusPill({ status }: { status: NonNullable<ConnectorStatus["status"]> }) {
   const healthy = status === "connected";
   return (
     <span
       className={cn(
         "rounded-full px-2 py-0.5 text-[0.6875rem] font-medium",
-        healthy ? "bg-[#C8A882]/15 text-[#8a6d44]" : "bg-destructive/10 text-destructive",
+        healthy
+          ? "bg-[var(--success-dim)] text-[var(--success)]"
+          : "bg-destructive/10 text-destructive",
       )}
     >
       {healthy ? msg("connectors.status.connected") : msg("connectors.status.invalid")}
@@ -51,20 +58,6 @@ function useConnectorErrorParam() {
       `${url.pathname}${url.search}${url.hash}`,
     );
   }, []);
-}
-
-/** How a linked account was authenticated, for the card's subtitle. */
-function authMethodLabel(meta: ProviderMeta, method: ConnectorStatus["auth_method"]) {
-  switch (method) {
-    case "oauth":
-      return meta.viaOAuth;
-    case "service_account":
-      return msg("connectors.via_service_account");
-    case "credentials":
-      return msg("connectors.via_credentials");
-    default:
-      return msg("connectors.hf.via_token");
-  }
 }
 
 /** One input of the credentials form; secrets are masked, long pastes get a textarea. */
@@ -203,17 +196,15 @@ function ProviderCard({
         <div className="flex min-w-0 items-center gap-2.5">
           <meta.Avatar size={28} />
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-foreground">{meta.name}</span>
-              {connected && status?.status && <StatusPill status={status.status} />}
-            </span>
+            <span className="text-sm font-medium text-foreground">{meta.name}</span>
             {connected ? (
-              <span className="truncate text-xs text-muted-foreground">
-                {status?.account_label
-                  ? formatMsg("connectors.hf.connected_as", { account: status.account_label })
-                  : msg("connectors.status.connected")}
-                {" · "}
-                {authMethodLabel(meta, status?.auth_method ?? null)}
+              <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                {status?.status && <StatusPill status={status.status} />}
+                <span className="truncate">
+                  {status?.account_label
+                    ? formatMsg("connectors.hf.connected_as", { account: status.account_label })
+                    : msg("connectors.status.connected")}
+                </span>
               </span>
             ) : (
               <span className="text-xs text-muted-foreground">{meta.blurb}</span>
@@ -223,25 +214,46 @@ function ProviderCard({
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
           {!connected && !formOpen && meta.oauthButton && status?.oauth_available && (
-            <Button size="sm" onClick={handleOAuth} disabled={starting} className={TOUCH_BUTTON}>
-              {starting ? (
-                <CircleNotch className="size-3.5 animate-spin" />
-              ) : (
-                <ArrowSquareOut className="size-3.5" />
-              )}
-              {meta.oauthButton}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={handleOAuth}
+                  disabled={starting}
+                  className={TOUCH_ICON}
+                  aria-label={meta.oauthButton}
+                >
+                  {starting ? (
+                    <CircleNotch className="size-3.5 animate-spin" />
+                  ) : (
+                    <SignIn className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{meta.oauthButton}</TooltipContent>
+            </Tooltip>
           )}
-          {!connected && !formOpen && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setFormOpen(true)}
-              className={TOUCH_BUTTON}
-            >
-              <Key className="size-3.5" />
-              {meta.credentialsToggle}
-            </Button>
+          {!connected && !formOpen && meta.fields.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={() => setFormOpen(true)}
+                  className={TOUCH_ICON}
+                  aria-label={msg("settings.keys.add")}
+                >
+                  <Key className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{msg("settings.keys.add")}</TooltipContent>
+            </Tooltip>
+          )}
+          {!connected && meta.fields.length === 0 && status && !status.oauth_available && (
+            <span className="text-xs text-muted-foreground">
+              {formatMsg("connectors.oauth_only_unavailable", { provider: meta.name })}
+            </span>
           )}
           {connected && (
             <Tooltip>
@@ -272,74 +284,87 @@ function ProviderCard({
       )}
 
       {!connected && formOpen && (
-        <div className="mt-2.5 flex flex-col gap-2.5 animate-in fade-in-0 slide-in-from-top-1">
-          <div className={cn("grid gap-2.5", meta.fields.length > 2 && "sm:grid-cols-2")}>
-            {meta.fields.map((field, index) => {
-              const id = `connector-${meta.id}-${field.key}`;
-              return (
-                <div
-                  key={field.key}
-                  className={cn("flex flex-col gap-1", field.multiline && "sm:col-span-2")}
-                >
-                  <Label htmlFor={id} className="text-xs">
-                    {field.label}
-                  </Label>
-                  <CredentialInput
-                    field={field}
-                    id={id}
-                    value={values[field.key] ?? ""}
-                    onChange={(value) => setValues((prev) => ({ ...prev, [field.key]: value }))}
-                    autoFocus={index === 0}
-                    onSubmit={() => void handleSave()}
-                    onCancel={closeForm}
-                  />
-                </div>
-              );
-            })}
-          </div>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-[0.6875rem] text-muted-foreground/80">
-              {meta.credentialsHelp}
-              {meta.helpUrl && (
-                <>
-                  {" "}
-                  <a
-                    href={meta.helpUrl}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="inline-flex items-center gap-0.5 font-medium text-[#8a6d44] underline-offset-2 hover:underline"
-                  >
-                    {meta.helpUrlLabel}
-                    <ArrowSquareOut className="size-3" />
-                  </a>
-                </>
-              )}
-            </p>
-            <div className="flex shrink-0 items-center justify-end gap-2">
-              <Button
-                size="sm"
-                onClick={handleSave}
-                disabled={!complete || saving}
-                className={TOUCH_BUTTON}
-              >
-                {saving ? (
-                  <CircleNotch className="size-3.5 animate-spin" />
+        <div className="mt-2.5 flex flex-col gap-2 animate-in fade-in-0 slide-in-from-top-1">
+          {meta.fields.map((field, index) => {
+            const id = `connector-${meta.id}-${field.key}`;
+            const last = index === meta.fields.length - 1;
+            const input = (
+              <CredentialInput
+                field={field}
+                id={id}
+                value={values[field.key] ?? ""}
+                onChange={(value) => setValues((prev) => ({ ...prev, [field.key]: value }))}
+                autoFocus={index === 0}
+                onSubmit={() => void handleSave()}
+                onCancel={closeForm}
+              />
+            );
+            return (
+              <div key={field.key} className="flex flex-col gap-1">
+                <Label htmlFor={id} className="text-xs">
+                  {field.label}
+                </Label>
+                {last ? (
+                  <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                    <div className="min-w-0 flex-1">{input}</div>
+                    <div className="flex items-center justify-end gap-2">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="icon-sm"
+                            onClick={handleSave}
+                            disabled={!complete || saving}
+                            className={TOUCH_ICON}
+                            aria-label={msg("settings.keys.save")}
+                          >
+                            {saving ? (
+                              <CircleNotch className="size-3.5 animate-spin" />
+                            ) : (
+                              <FloppyDisk className="size-3.5" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{msg("settings.keys.save")}</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={closeForm}
+                            className={TOUCH_ICON}
+                            aria-label={msg("settings.keys.cancel")}
+                          >
+                            <X className="size-3.5" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{msg("settings.keys.cancel")}</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </div>
                 ) : (
-                  <Key className="size-3.5" />
+                  input
                 )}
-                {msg("connectors.hf.token_save")}
-              </Button>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                onClick={closeForm}
-                className={TOUCH_ICON}
-                aria-label={msg("connectors.cancel")}
-              >
-                <X className="size-3.5" />
-              </Button>
-            </div>
-          </div>
+              </div>
+            );
+          })}
+          <p className="text-[0.6875rem] text-muted-foreground/70">
+            {meta.credentialsHelp}
+            {meta.helpUrl && (
+              <>
+                {" "}
+                <a
+                  href={meta.helpUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-0.5 font-medium text-[#8a6d44] underline-offset-2 hover:underline"
+                >
+                  {meta.helpUrlLabel}
+                  <ArrowSquareOut className="size-3" />
+                </a>
+              </>
+            )}
+          </p>
         </div>
       )}
     </div>
@@ -358,10 +383,7 @@ export function ConnectorsTab() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h3 className="text-sm font-semibold text-foreground">{msg("connectors.title")}</h3>
-        <p className="mt-1 text-xs text-muted-foreground">{msg("connectors.subtitle")}</p>
-      </div>
+      <p className="text-xs text-muted-foreground">{msg("connectors.subtitle")}</p>
 
       {loading ? (
         <div className="flex items-center justify-center py-8">
@@ -370,24 +392,27 @@ export function ConnectorsTab() {
       ) : error ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 px-3 py-2.5">
           <p className="text-sm text-muted-foreground">{msg("connectors.error")}</p>
-          <Button variant="outline" size="sm" onClick={refetch}>
-            {msg("connectors.retry")}
-          </Button>
+          <RetryIconButton label={msg("connectors.retry")} onClick={refetch} />
         </div>
       ) : (
-        <div className="flex flex-col gap-2.5">
-          {ALL_PROVIDERS.map((id: ConnectorProvider) => (
-            <ProviderCard
-              key={id}
-              meta={providerMeta(id)}
-              status={byProvider(id)}
-              onChange={setConnectors}
-            />
+        <div className="flex flex-col gap-5">
+          {PROVIDER_GROUPS.map((group) => (
+            <section key={group.category} className="flex flex-col gap-2.5">
+              <h4 className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground/70">
+                {categoryLabel(group.category)}
+              </h4>
+              {group.providers.map((id: ConnectorProvider) => (
+                <ProviderCard
+                  key={id}
+                  meta={providerMeta(id)}
+                  status={byProvider(id)}
+                  onChange={setConnectors}
+                />
+              ))}
+            </section>
           ))}
         </div>
       )}
-
-      <p className="text-xs text-muted-foreground">{msg("connectors.import_hint")}</p>
     </div>
   );
 }

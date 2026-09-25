@@ -1,4 +1,5 @@
-"""Tests for the generic connectors (Google Sheets, GitHub, S3, GCS, Azure Blob).
+"""Tests for the generic connectors (Google Sheets, GitHub, S3, GCS, Azure Blob,
+Kaggle, Google Drive, OneDrive, SQL sources, LLM observability and Notion).
 
 Every outbound call is mocked at the :mod:`httpx` boundary inside
 :mod:`core.connectors.transport`, so the tests cover the request signing
@@ -9,9 +10,12 @@ shared routes, and the generic OAuth start/callback pair.
 
 from __future__ import annotations
 
+import base64
 import io
 import json
+import zipfile
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
@@ -23,11 +27,11 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from pydantic import SecretStr
-from sqlalchemy import select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from ...config import settings
-from ...connectors import azure_blob, github, oauth, s3, tabular
+from ...connectors import azure_blob, github, oauth, s3, sql_base, tabular
 from ...connectors.vault import ConnectorVault
 from ...storage.dataset_library import DatasetLibraryStore, PostgresDatasetBlobStore
 from ...storage.models import UserConnectorModel
@@ -39,10 +43,12 @@ JSONL = b'{"name": "ada", "score": 1}\n{"name": "bob", "score": 2}\n'
 
 @pytest.fixture
 def generic_oauth_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hide the Google and GitHub OAuth buttons unless a test opts in."""
+    """Hide the Google, Microsoft and GitHub OAuth buttons unless a test opts in."""
     for name in ("google_oauth_client_id", "google_oauth_client_secret", "github_oauth_client_id"):
         monkeypatch.setattr(settings, name, None)
     monkeypatch.setattr(settings, "github_oauth_client_secret", None)
+    monkeypatch.setattr(settings, "microsoft_oauth_client_id", None)
+    monkeypatch.setattr(settings, "microsoft_oauth_client_secret", None)
     monkeypatch.setattr(settings, "google_oauth_redirect_uri", None)
     monkeypatch.setattr(settings, "github_oauth_redirect_uri", None)
 
@@ -172,15 +178,26 @@ def test_azure_connection_parsing_and_shared_key_string() -> None:
 
 
 def test_status_lists_every_provider(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
-    """A fresh user sees all six providers unlinked, OAuth hidden everywhere."""
+    """A fresh user sees every provider unlinked, OAuth hidden everywhere."""
     body = _make_client()[0].get("/connectors").json()
     assert [c["provider"] for c in body["connectors"]] == [
         "huggingface",
+        "kaggle",
         "google_sheets",
+        "google_drive",
+        "onedrive",
         "github",
         "s3",
         "gcs",
         "azure_blob",
+        "postgres",
+        "mysql",
+        "bigquery",
+        "snowflake",
+        "langfuse",
+        "langsmith",
+        "braintrust",
+        "notion",
     ]
     assert all(c["connected"] is False and c["oauth_available"] is False for c in body["connectors"])
 
@@ -544,3 +561,478 @@ def test_generic_oauth_token_refresh_marks_expired_grants(monkeypatch: pytest.Mo
     assert response.status_code == 409
     assert response.json()["code"] == "connectors.expired"
     assert vault.get("alice", "github").status == "invalid"
+
+
+def _basic(header: str) -> str:
+    """Decode a Basic auth header.
+
+    Args:
+        header: The ``Authorization`` value.
+
+    Returns:
+        ``user:secret``.
+    """
+    assert header.startswith("Basic ")
+    return base64.b64decode(header.removeprefix("Basic ")).decode()
+
+
+def test_kaggle_browse_and_import_unzips(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """The kaggle.json pair is stored, datasets list mine-then-hottest, and a zipped file unpacks."""
+    client, store = _make_client()
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w") as archive:
+        archive.writestr("train.csv", CSV)
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the Kaggle listings."""
+        assert _basic(kwargs["headers"]["Authorization"]) == "ada:key-1"
+        path = urlparse(url).path
+        if path == "/api/v1/datasets/list":
+            if kwargs["params"].get("user") == "ada":
+                return _response(200, [{"ref": "ada/mine", "title": "Mine", "totalBytes": 10}])
+            return _response(200, [{"ref": "ada/mine", "title": "Mine"}, {"ref": "zoo/cats", "title": "Cats"}])
+        if path == "/api/v1/datasets/list/zoo/cats":
+            return _response(
+                200, {"datasetFiles": [{"name": "train.csv", "totalBytes": 30}, {"name": "notes.txt", "totalBytes": 3}]}
+            )
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with patch("core.connectors.transport.httpx.request", side_effect=fake_request):
+        saved = client.put("/connectors/kaggle/credentials", json={"fields": {"username": "ada", "key": "key-1"}})
+        assert saved.status_code == 200, saved.text
+        entry = next(c for c in saved.json()["connectors"] if c["provider"] == "kaggle")
+        assert (entry["account_label"], entry["auth_method"]) == ("ada", "credentials")
+        root = client.get("/connectors/kaggle/browse").json()["entries"]
+        assert [(e["ref"], e["name"], e["size"]) for e in root] == [
+            ("ada/mine", "Mine", 10),
+            ("zoo/cats", "Cats", None),
+        ]
+        files = client.get("/connectors/kaggle/browse", params={"location": "zoo/cats"}).json()["entries"]
+        assert [(e["ref"], e["size"]) for e in files] == [("zoo/cats/train.csv", 30)]
+        with patch("core.connectors.transport.httpx.stream", return_value=_StreamCtx(zipped.getvalue())) as stream:
+            preview = client.get("/connectors/kaggle/preview", params={"ref": "zoo/cats/train.csv"}).json()
+            assert preview["rows"] == [{"name": "ada", "score": "1"}, {"name": "bob", "score": "2"}]
+            assert stream.call_args.args[1].endswith("/datasets/download/zoo/cats/train.csv")
+            imported = client.post("/connectors/kaggle/import", json={"ref": "zoo/cats/train.csv"})
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["dataset"]["name"] == "cats/train.csv"
+    library = DatasetLibraryStore(store.engine, PostgresDatasetBlobStore(store.engine))
+    assert len(library.get_rows(imported.json()["dataset"]["id"])) == 2
+
+
+def test_notion_database_flattens_properties(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """A Notion database's pages become rows, title column first, cursor paging honoured."""
+    client, store = _make_client()
+    page = {
+        "properties": {
+            "Score": {"type": "number", "number": 3},
+            "Tags": {"type": "multi_select", "multi_select": [{"name": "a"}, {"name": "b"}]},
+            "Name": {"type": "title", "title": [{"plain_text": "First "}, {"plain_text": "row"}]},
+        }
+    }
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the Notion API."""
+        assert kwargs["headers"]["Authorization"] == "Bearer ntn_1"
+        assert kwargs["headers"]["Notion-Version"]
+        path = urlparse(url).path
+        if path == "/v1/users/me":
+            return _response(200, {"bot": {"workspace_name": "Acme"}})
+        if path == "/v1/search":
+            assert kwargs["json"]["filter"] == {"property": "object", "value": "database"}
+            return _response(200, {"results": [{"id": "db1", "title": [{"plain_text": "Evals"}]}]})
+        if path == "/v1/databases/db1":
+            return _response(200, {"title": [{"plain_text": "Evals"}], "properties": page["properties"]})
+        if path == "/v1/databases/db1/query":
+            if kwargs["json"].get("start_cursor") == "c2":
+                return _response(200, {"results": [page], "has_more": False, "next_cursor": None})
+            return _response(200, {"results": [page], "has_more": True, "next_cursor": "c2"})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with patch("core.connectors.transport.httpx.request", side_effect=fake_request):
+        saved = client.put("/connectors/notion/credentials", json={"fields": {"token": "ntn_1"}})
+        assert saved.status_code == 200, saved.text
+        assert next(c for c in saved.json()["connectors"] if c["provider"] == "notion")["account_label"] == "Acme"
+        root = client.get("/connectors/notion/browse").json()["entries"]
+        assert [(e["ref"], e["name"], e["kind"]) for e in root] == [("db1", "Evals", "file")]
+        preview = client.get("/connectors/notion/preview", params={"ref": "db1"}).json()
+        assert [c["name"] for c in preview["columns"]] == ["Name", "Score", "Tags"]
+        assert preview["rows"][0] == {"Name": "First row", "Score": 3, "Tags": "a, b"}
+        imported = client.post("/connectors/notion/import", json={"ref": "db1"})
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["dataset"]["name"] == "Evals"
+    library = DatasetLibraryStore(store.engine, PostgresDatasetBlobStore(store.engine))
+    assert len(library.get_rows(imported.json()["dataset"]["id"])) == 2
+
+
+def test_langfuse_traces_flatten_input_and_output(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """Traces page through ``meta.totalPages`` and nested input/output spread into columns."""
+    client, store = _make_client()
+    trace = {"id": "t1", "name": "chat", "input": {"q": "hi"}, "output": "hello", "tags": ["a"], "latency": 1.5}
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the Langfuse public API."""
+        assert _basic(kwargs["headers"]["Authorization"]) == "pk:sk"
+        parsed = urlparse(url)
+        assert parsed.netloc == "langfuse.example.com"
+        if parsed.path == "/api/public/projects":
+            return _response(200, {"data": [{"name": "demo"}]})
+        if parsed.path == "/api/public/v2/datasets":
+            return _response(200, {"data": [{"name": "golden", "updatedAt": "2026-01-01"}]})
+        if parsed.path == "/api/public/traces":
+            page = kwargs["params"]["page"]
+            return _response(200, {"data": [trace], "meta": {"page": page, "totalPages": 2}})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with patch("core.connectors.transport.httpx.request", side_effect=fake_request):
+        saved = client.put(
+            "/connectors/langfuse/credentials",
+            json={"fields": {"public_key": "pk", "secret_key": "sk", "host": "langfuse.example.com/"}},
+        )
+        assert saved.status_code == 200, saved.text
+        assert next(c for c in saved.json()["connectors"] if c["provider"] == "langfuse")["account_label"] == "demo"
+        root = client.get("/connectors/langfuse/browse").json()["entries"]
+        assert [e["ref"] for e in root] == ["traces", "generations", "dataset/golden"]
+        preview = client.get("/connectors/langfuse/preview", params={"ref": "traces"}).json()
+        assert preview["rows"][0] == {
+            "id": "t1",
+            "name": "chat",
+            "input.q": "hi",
+            "output": "hello",
+            "tags": '["a"]',
+            "latency": 1.5,
+        }
+        imported = client.post("/connectors/langfuse/import", json={"ref": "traces"})
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["dataset"]["name"] == "langfuse-traces"
+    library = DatasetLibraryStore(store.engine, PostgresDatasetBlobStore(store.engine))
+    assert len(library.get_rows(imported.json()["dataset"]["id"])) == 2
+
+
+def test_langsmith_runs_query_and_datasets(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """Projects open into root/LLM run views; runs are queried by POST with a cursor."""
+    client, _ = _make_client()
+    run = {"id": "r1", "name": "agent", "run_type": "chain", "inputs": {"q": "hi"}, "outputs": {"a": "yo"}}
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the LangSmith API."""
+        assert kwargs["headers"]["x-api-key"] == "lsv2_key"
+        path = urlparse(url).path
+        if path == "/api/v1/sessions":
+            return _response(200, [{"id": "p1", "name": "prod"}])
+        if path == "/api/v1/tenants/current":
+            return _response(200, {"display_name": "Team"})
+        if path == "/api/v1/datasets":
+            return _response(200, [{"id": "d1", "name": "golden", "example_count": 5}])
+        if path == "/api/v1/runs/query":
+            assert method == "POST"
+            assert kwargs["json"]["session"] == ["p1"]
+            assert kwargs["json"]["run_type"] == "llm"
+            if kwargs["json"].get("cursor") == "n1":
+                return _response(200, {"runs": [run], "cursors": {"next": None}})
+            return _response(200, {"runs": [run], "cursors": {"next": "n1"}})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with patch("core.connectors.transport.httpx.request", side_effect=fake_request):
+        saved = client.put("/connectors/langsmith/credentials", json={"fields": {"api_key": "lsv2_key"}})
+        assert saved.status_code == 200, saved.text
+        assert next(c for c in saved.json()["connectors"] if c["provider"] == "langsmith")["account_label"] == "Team"
+        root = client.get("/connectors/langsmith/browse").json()["entries"]
+        assert [(e["ref"], e["kind"], e["size"]) for e in root] == [
+            ("project/p1", "folder", None),
+            ("dataset/d1", "file", 5),
+        ]
+        views = client.get("/connectors/langsmith/browse", params={"location": "project/p1"}).json()["entries"]
+        assert [e["ref"] for e in views] == ["project/p1/runs", "project/p1/llm"]
+        preview = client.get("/connectors/langsmith/preview", params={"ref": "project/p1/llm"}).json()
+    assert preview["rows"][0] == {"id": "r1", "name": "agent", "run_type": "chain", "inputs.q": "hi", "outputs.a": "yo"}
+    assert len(preview["rows"]) == 2
+
+
+def test_braintrust_experiment_fetch_follows_cursor(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """Projects list logs, experiments and datasets; fetch pages until the cursor runs out."""
+    client, _ = _make_client()
+    event = {"id": "e1", "input": "q", "output": "a", "expected": "a", "scores": {"exact": 1}}
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the Braintrust API."""
+        assert kwargs["headers"]["Authorization"] == "Bearer bt_key"
+        path = urlparse(url).path
+        if path == "/v1/project":
+            return _response(200, {"objects": [{"id": "p1", "name": "assistant"}]})
+        if path == "/v1/organization":
+            return _response(200, {"objects": [{"name": "Acme"}]})
+        if path == "/v1/experiment":
+            return _response(200, {"objects": [{"id": "x1", "name": "run-3"}]})
+        if path == "/v1/dataset":
+            return _response(200, {"objects": []})
+        if path == "/v1/experiment/x1/fetch":
+            if kwargs["params"].get("cursor") == "c1":
+                return _response(200, {"events": [event], "cursor": None})
+            return _response(200, {"events": [event], "cursor": "c1"})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with patch("core.connectors.transport.httpx.request", side_effect=fake_request):
+        saved = client.put("/connectors/braintrust/credentials", json={"fields": {"api_key": "bt_key"}})
+        assert saved.status_code == 200, saved.text
+        assert next(c for c in saved.json()["connectors"] if c["provider"] == "braintrust")["account_label"] == "Acme"
+        root = client.get("/connectors/braintrust/browse").json()["entries"]
+        assert [(e["ref"], e["kind"]) for e in root] == [("project/p1", "folder")]
+        inside = client.get("/connectors/braintrust/browse", params={"location": "project/p1"}).json()["entries"]
+        assert [(e["ref"], e["name"]) for e in inside] == [("project/p1/logs", "Logs"), ("experiment/x1", "run-3")]
+        preview = client.get("/connectors/braintrust/preview", params={"ref": "experiment/x1"}).json()
+    assert preview["rows"] == [
+        {"id": "e1", "input": "q", "output": "a", "expected": "a", "scores.exact": 1},
+        {"id": "e1", "input": "q", "output": "a", "expected": "a", "scores.exact": 1},
+    ]
+
+
+def test_postgres_url_normalises_and_reads_tables(
+    vault_key: str,  # noqa: F811
+    generic_oauth_off: None,
+    tmp_path: Path,
+) -> None:
+    """A ``postgres://`` URL is pinned to our driver; browse, preview and import go through SQLAlchemy."""
+    client, store = _make_client()
+    # The connector disposes of the engine after every call, so the table has to outlive a pool.
+    engine = create_engine(f"sqlite:///{tmp_path / 'source.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE scores (name TEXT, score INTEGER, note BLOB)"))
+        connection.execute(text("INSERT INTO scores VALUES ('ada', 1, X'00'), ('bob', 2, NULL)"))
+
+    assert (
+        sql_base.normalise_url(
+            "postgres://u:p@db.example.com:5432/app", {"postgres": "postgresql+psycopg2"}, "postgres"
+        )
+        == "postgresql+psycopg2://u:p@db.example.com:5432/app"
+    )
+    with pytest.raises(Exception, match="invalid_credentials"):
+        sql_base.normalise_url("mysql://u:p@h/db", {"postgres": "postgresql+psycopg2"}, "postgres")
+
+    with patch("core.connectors.sql_base.make_engine", return_value=engine):
+        saved = client.put(
+            "/connectors/postgres/credentials", json={"fields": {"url": "postgres://u:p@db.example.com/app"}}
+        )
+        assert saved.status_code == 200, saved.text
+        entry = next(c for c in saved.json()["connectors"] if c["provider"] == "postgres")
+        assert entry["account_label"] == "u@db.example.com/app"
+        assert (
+            ConnectorVault(store.engine)
+            .resolve("alice", "postgres")
+            .access_token.startswith("postgresql+psycopg2://u:p@")
+        )
+        schemas = client.get("/connectors/postgres/browse").json()["entries"]
+        assert [(e["ref"], e["kind"]) for e in schemas] == [("main", "folder")]
+        tables = client.get("/connectors/postgres/browse", params={"location": "main"}).json()["entries"]
+        assert [(e["ref"], e["kind"]) for e in tables] == [("main.scores", "file")]
+        preview = client.get("/connectors/postgres/preview", params={"ref": "main.scores"}).json()
+        assert [c["name"] for c in preview["columns"]] == ["name", "score", "note"]
+        assert preview["rows"] == [
+            {"name": "ada", "score": 1, "note": "AA=="},
+            {"name": "bob", "score": 2, "note": None},
+        ]
+        missing = client.get("/connectors/postgres/preview", params={"ref": "main.nope"})
+        assert missing.status_code == 404
+        imported = client.post("/connectors/postgres/import", json={"ref": "main.scores"})
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["dataset"]["name"] == "scores"
+    assert imported.json()["dataset"]["source"] == "postgres"
+
+
+def test_bigquery_decodes_nested_rows(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """Datasets and tables list; ``tabledata.list`` rows decode typed, nested and repeated fields."""
+    client, _ = _make_client()
+    schema = {
+        "fields": [
+            {"name": "n", "type": "INTEGER"},
+            {"name": "ok", "type": "BOOLEAN"},
+            {"name": "tags", "type": "STRING", "mode": "REPEATED"},
+            {"name": "meta", "type": "RECORD", "fields": [{"name": "k", "type": "STRING"}]},
+        ]
+    }
+    row = {"f": [{"v": "7"}, {"v": "true"}, {"v": [{"v": "a"}, {"v": "b"}]}, {"v": {"f": [{"v": "x"}]}}]}
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the BigQuery REST API."""
+        assert kwargs["headers"]["Authorization"] == "Bearer bq-token"
+        path = urlparse(url).path
+        if path == "/bigquery/v2/projects/proj-1/datasets":
+            return _response(200, {"datasets": [{"datasetReference": {"datasetId": "analytics"}}]})
+        if path == "/bigquery/v2/projects/proj-1/datasets/analytics/tables":
+            return _response(200, {"tables": [{"tableReference": {"tableId": "events"}, "creationTime": "1"}]})
+        if path == "/bigquery/v2/projects/proj-1/datasets/analytics/tables/events":
+            return _response(200, {"schema": schema, "type": "TABLE"})
+        if path == "/bigquery/v2/projects/proj-1/datasets/analytics/tables/events/data":
+            return _response(200, {"rows": [row]})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with (
+        patch("core.connectors.bigquery.service_account_token", return_value="bq-token"),
+        patch("core.connectors.transport.httpx.request", side_effect=fake_request),
+    ):
+        saved = client.put(
+            "/connectors/bigquery/credentials", json={"fields": {"service_account_json": _service_account_json()}}
+        )
+        assert saved.status_code == 200, saved.text
+        entry = next(c for c in saved.json()["connectors"] if c["provider"] == "bigquery")
+        assert entry["account_label"] == "bot@proj-1.iam.gserviceaccount.com (proj-1)"
+        assert [e["ref"] for e in client.get("/connectors/bigquery/browse").json()["entries"]] == ["analytics"]
+        tables = client.get("/connectors/bigquery/browse", params={"location": "analytics"}).json()["entries"]
+        assert [(e["ref"], e["kind"]) for e in tables] == [("analytics.events", "file")]
+        preview = client.get("/connectors/bigquery/preview", params={"ref": "analytics.events"}).json()
+        bad = client.get("/connectors/bigquery/preview", params={"ref": "analytics.`x`"})
+    assert preview["rows"] == [{"n": 7, "ok": True, "tags": '["a", "b"]', "meta": '{"k": "x"}'}]
+    assert bad.status_code == 400
+
+
+def test_snowflake_statements_and_partitions(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """Linking runs ``CURRENT_USER()``, browsing uses SHOW, and reads drain every partition."""
+    client, _ = _make_client()
+
+    def result(columns: list[tuple[str, str]], rows: list[list[Any]], partitions: int = 1) -> dict[str, Any]:
+        """Shape a SQL API result set."""
+        return {
+            "statementHandle": "h1",
+            "resultSetMetaData": {
+                "rowType": [{"name": n, "type": t, "scale": 0} for n, t in columns],
+                "partitionInfo": [{"rowCount": 1}] * partitions,
+            },
+            "data": rows,
+        }
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the Snowflake SQL API."""
+        assert kwargs["headers"]["Authorization"] == "Bearer pat-1"
+        assert kwargs["headers"]["X-Snowflake-Authorization-Token-Type"] == "PROGRAMMATIC_ACCESS_TOKEN"
+        parsed = urlparse(url)
+        assert parsed.netloc == "xy123.eu-central-1.snowflakecomputing.com"
+        if method == "POST":
+            statement = kwargs["json"]["statement"]
+            assert kwargs["json"]["warehouse"] == "WH"
+            if statement.startswith("SELECT CURRENT_USER()"):
+                return _response(200, result([("USER", "text")], [["ADA"]]))
+            if statement == "SHOW TERSE DATABASES":
+                return _response(200, result([("name", "text")], [["SALES"]]))
+            if statement == 'SHOW TERSE SCHEMAS IN DATABASE "SALES"':
+                return _response(200, result([("name", "text")], [["PUBLIC"], ["INFORMATION_SCHEMA"]]))
+            if statement == 'SHOW TABLES IN SCHEMA "SALES"."PUBLIC"':
+                return _response(200, result([("name", "text"), ("rows", "fixed")], [["ORDERS", "2"]]))
+            if statement == 'SHOW VIEWS IN SCHEMA "SALES"."PUBLIC"':
+                return _response(200, result([("name", "text")], []))
+            if statement == 'SELECT * FROM "SALES"."PUBLIC"."ORDERS" LIMIT 20':
+                return _response(200, result([("ID", "fixed"), ("PAID", "boolean")], [["1", "true"]], partitions=2))
+            raise AssertionError(statement)
+        if parsed.path == "/api/v2/statements/h1" and kwargs["params"] == {"partition": 1}:
+            return _response(200, {"data": [["2", "false"]]})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with patch("core.connectors.transport.httpx.request", side_effect=fake_request):
+        saved = client.put(
+            "/connectors/snowflake/credentials",
+            json={"fields": {"account": "XY123.eu-central-1", "token": "pat-1", "warehouse": "WH"}},
+        )
+        assert saved.status_code == 200, saved.text
+        entry = next(c for c in saved.json()["connectors"] if c["provider"] == "snowflake")
+        assert entry["account_label"] == "ADA@xy123.eu-central-1"
+        assert [e["ref"] for e in client.get("/connectors/snowflake/browse").json()["entries"]] == ["SALES"]
+        schemas = client.get("/connectors/snowflake/browse", params={"location": "SALES"}).json()["entries"]
+        assert [e["ref"] for e in schemas] == ["SALES.PUBLIC"]
+        tables = client.get("/connectors/snowflake/browse", params={"location": "SALES.PUBLIC"}).json()["entries"]
+        assert [(e["ref"], e["size"]) for e in tables] == [("SALES.PUBLIC.ORDERS", 2)]
+        preview = client.get("/connectors/snowflake/preview", params={"ref": "SALES.PUBLIC.ORDERS"}).json()
+    assert preview["rows"] == [{"ID": 1, "PAID": True}, {"ID": 2, "PAID": False}]
+
+
+def test_google_drive_browses_and_exports_sheets(vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """The top level merges My Drive and shared files; a Google Sheet previews through CSV export."""
+    client, _ = _make_client()
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the Drive API."""
+        assert kwargs["headers"]["Authorization"] == "Bearer sa-token"
+        path = urlparse(url).path
+        if path == "/drive/v3/files":
+            query = kwargs["params"]["q"]
+            if "sharedWithMe" in query:
+                return _response(
+                    200,
+                    {
+                        "files": [
+                            {"id": "f1", "name": "raw.csv", "mimeType": "text/csv", "size": "30"},
+                            {"id": "d1", "name": "data", "mimeType": "application/vnd.google-apps.folder"},
+                            {"id": "s1", "name": "Sheet", "mimeType": "application/vnd.google-apps.spreadsheet"},
+                            {"id": "x1", "name": "photo.png", "mimeType": "image/png"},
+                        ]
+                    },
+                )
+            assert query.startswith("('d1' in parents)")
+            return _response(200, {"files": []})
+        if path == "/drive/v3/files/s1":
+            return _response(200, {"id": "s1", "name": "Sheet", "mimeType": "application/vnd.google-apps.spreadsheet"})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with (
+        patch("core.connectors.google_drive.service_account_token", return_value="sa-token"),
+        patch("core.connectors.transport.httpx.request", side_effect=fake_request),
+    ):
+        saved = client.put(
+            "/connectors/google_drive/credentials", json={"fields": {"service_account_json": _service_account_json()}}
+        )
+        assert saved.status_code == 200, saved.text
+        root = client.get("/connectors/google_drive/browse").json()["entries"]
+        assert [(e["ref"], e["kind"], e["size"]) for e in root] == [
+            ("d1", "folder", None),
+            ("f1", "file", 30),
+            ("s1", "file", None),
+        ]
+        assert client.get("/connectors/google_drive/browse", params={"location": "d1"}).json()["entries"] == []
+        with patch("core.connectors.transport.httpx.stream", return_value=_StreamCtx(CSV)) as stream:
+            preview = client.get("/connectors/google_drive/preview", params={"ref": "s1"}).json()
+    assert preview["rows"][0] == {"name": "ada", "score": "1"}
+    assert stream.call_args.args[1].endswith("/files/s1/export")
+    assert stream.call_args.kwargs["params"] == {"mimeType": "text/csv"}
+
+
+def test_onedrive_is_oauth_only_and_browses_graph(
+    vault_key: str,  # noqa: F811
+    generic_oauth_off: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pasted credentials are refused; a stored OAuth grant browses and downloads through Graph."""
+    monkeypatch.setattr(settings, "microsoft_oauth_client_id", "ms-client")
+    client, store = _make_client()
+    refused = client.put("/connectors/onedrive/credentials", json={"fields": {"token": "x"}})
+    assert refused.status_code == 400
+    status = next(c for c in client.get("/connectors").json()["connectors"] if c["provider"] == "onedrive")
+    assert status["oauth_available"] is True
+    ConnectorVault(store.engine).save(
+        "alice", "onedrive", access_token="ms-token", auth_method="oauth", account_label="ada@example.com"
+    )
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve Microsoft Graph."""
+        assert kwargs["headers"]["Authorization"] == "Bearer ms-token"
+        path = urlparse(url).path
+        if path == "/v1.0/me/drive/root/children":
+            return _response(
+                200,
+                {
+                    "value": [
+                        {"id": "i1", "name": "train.jsonl", "size": 40, "file": {}},
+                        {"id": "i2", "name": "Docs", "folder": {"childCount": 1}},
+                        {"id": "i3", "name": "slides.pptx", "size": 9, "file": {}},
+                    ]
+                },
+            )
+        if path == "/v1.0/me/drive/items/i1":
+            return _response(200, {"id": "i1", "name": "train.jsonl", "size": 40})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    with patch("core.connectors.transport.httpx.request", side_effect=fake_request):
+        root = client.get("/connectors/onedrive/browse").json()["entries"]
+        assert [(e["ref"], e["kind"]) for e in root] == [("i2", "folder"), ("i1", "file")]
+        with patch("core.connectors.transport.httpx.stream", return_value=_StreamCtx(JSONL)) as stream:
+            imported = client.post("/connectors/onedrive/import", json={"ref": "i1"})
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["dataset"]["name"] == "train.jsonl"
+    assert stream.call_args.args[1].endswith("/me/drive/items/i1/content")

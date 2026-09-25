@@ -1,10 +1,8 @@
 "use client";
 
-import { useId, useRef, useState, type ReactNode } from "react";
-import { ArrowsIn, ArrowsOut } from "@/shared/ui/icons";
-import { Button } from "@/shared/ui/primitives/button";
+import { useId, type ReactNode } from "react";
 import { msg } from "@/shared/lib/messages";
-import { DatasetRowsView } from "@/features/datasets";
+import { DatasetPreviewPanel } from "@/features/datasets";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 
 export function DatasetPreviewLayout({
@@ -25,8 +23,6 @@ export function DatasetPreviewLayout({
   children: ReactNode;
 }) {
   const id = useId();
-  const expandButton = useRef<HTMLButtonElement>(null);
-  const [readerIndex, setReaderIndex] = useState<number | null>(null);
   const visible = Boolean(data && open);
   return (
     <div className="min-w-0 space-y-4">
@@ -65,56 +61,15 @@ export function DatasetPreviewLayout({
           </div>
         </div>
       )}
-      <div
-        id={id}
-        onKeyDown={(event) => {
-          if (event.key !== "Escape" || !visible) return;
-          if (readerIndex !== null) {
-            event.preventDefault();
-            setReaderIndex(null);
-          } else if (expanded) {
-            event.preventDefault();
-            onExpandedChange(false);
-            expandButton.current?.focus();
-          }
-        }}
-      >
+      <div id={id}>
         <div className={visible ? "hidden" : "space-y-5"}>{children}</div>
         {data && (
-          <div
-            className={
-              visible
-                ? `flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border ${expanded ? "h-[70dvh] min-h-96" : "h-96"}`
-                : "hidden"
-            }
-          >
-            <DatasetRowsView
+          <div className={visible ? undefined : "hidden"}>
+            <DatasetPreviewPanel
               rows={data}
               filename={filename ?? undefined}
-              readerIndex={readerIndex}
-              setReaderIndex={setReaderIndex}
-              toolbarActions={
-                <Button
-                  ref={expandButton}
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={msg(
-                    expanded
-                      ? "shared.expandable_textarea.collapse"
-                      : "shared.expandable_textarea.expand",
-                  )}
-                  aria-expanded={expanded}
-                  aria-controls={id}
-                  onClick={() => onExpandedChange(!expanded)}
-                >
-                  {expanded ? (
-                    <ArrowsIn className="size-[1.05rem] text-primary" aria-hidden="true" />
-                  ) : (
-                    <ArrowsOut className="size-[1.05rem] text-primary" aria-hidden="true" />
-                  )}
-                </Button>
-              }
+              expanded={expanded}
+              onExpandedChange={onExpandedChange}
             />
           </div>
         )}

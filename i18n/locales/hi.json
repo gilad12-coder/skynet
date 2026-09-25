@@ -65,6 +65,7 @@
     "winningCandidate": "विजेता उम्मीदवार"
   },
   "messages": {
+    "connectors.query_failed": "{provider} क्वेरी नहीं चला सका: {reason}",
     "connectors.expired": "आपका {provider} सेशन समाप्त हो गया है। सेटिंग्स से दोबारा कनेक्ट करें।",
     "connectors.file_unsupported": "इस फ़ाइल को टेबल के रूप में नहीं पढ़ा जा सकता। समर्थित फ़ॉर्मैट: CSV, TSV, JSON, JSONL और Parquet।",
     "connectors.import_too_large": "यह फ़ाइल इंपोर्ट करने के लिए बहुत बड़ी है (सीमा {max_mb} MB है)।",

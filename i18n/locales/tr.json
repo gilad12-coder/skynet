@@ -65,6 +65,7 @@
     "winningCandidate": "kazanan aday"
   },
   "messages": {
+    "connectors.query_failed": "{provider} sorguyu çalıştıramadı: {reason}",
     "connectors.expired": "{provider} oturumunuzun süresi doldu. Ayarlar'dan tekrar bağlanın.",
     "connectors.file_unsupported": "Bu dosya tablo olarak okunamıyor. Desteklenen biçimler: CSV, TSV, JSON, JSONL ve Parquet.",
     "connectors.import_too_large": "Bu dosya içe aktarılamayacak kadar büyük (sınır {max_mb} MB).",

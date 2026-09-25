@@ -2,7 +2,7 @@
 
 Every module here exposes ``PROVIDER``, ``verify_credentials``, ``browse``,
 ``preview`` and ``import_ref``; the OAuth-capable ones (Google Sheets,
-GitHub) additionally expose ``oauth_app``, ``oauth_available`` and
+Google Drive, OneDrive, GitHub) additionally expose ``oauth_app``, ``oauth_available`` and
 ``fetch_account_label``. Hugging Face keeps its own module and routes.
 """
 
@@ -11,16 +11,44 @@ from __future__ import annotations
 from types import ModuleType
 
 from ..api.errors import DomainError
-from . import azure_blob, gcs, github, google_sheets, s3
+from . import (
+    azure_blob,
+    bigquery,
+    braintrust,
+    gcs,
+    github,
+    google_drive,
+    google_sheets,
+    kaggle,
+    langfuse,
+    langsmith,
+    mysql,
+    notion,
+    onedrive,
+    postgres,
+    s3,
+    snowflake,
+)
 
 PROVIDERS: dict[str, ModuleType] = {
+    kaggle.PROVIDER: kaggle,
     google_sheets.PROVIDER: google_sheets,
+    google_drive.PROVIDER: google_drive,
+    onedrive.PROVIDER: onedrive,
     github.PROVIDER: github,
     s3.PROVIDER: s3,
     gcs.PROVIDER: gcs,
     azure_blob.PROVIDER: azure_blob,
+    postgres.PROVIDER: postgres,
+    mysql.PROVIDER: mysql,
+    bigquery.PROVIDER: bigquery,
+    snowflake.PROVIDER: snowflake,
+    langfuse.PROVIDER: langfuse,
+    langsmith.PROVIDER: langsmith,
+    braintrust.PROVIDER: braintrust,
+    notion.PROVIDER: notion,
 }
-OAUTH_PROVIDERS = frozenset({google_sheets.PROVIDER, github.PROVIDER})
+OAUTH_PROVIDERS = frozenset({google_sheets.PROVIDER, google_drive.PROVIDER, onedrive.PROVIDER, github.PROVIDER})
 
 
 def get_provider(name: str) -> ModuleType:

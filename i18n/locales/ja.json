@@ -65,6 +65,7 @@
     "winningCandidate": "最良候補"
   },
   "messages": {
+    "connectors.query_failed": "{provider} はクエリを実行できませんでした: {reason}",
     "connectors.expired": "{provider}のセッションが切れました。設定画面から再度接続してください。",
     "connectors.file_unsupported": "このファイルは表形式として読み込めません。対応形式:CSV、TSV、JSON、JSONL、Parquet。",
     "connectors.import_too_large": "ファイルサイズが大きすぎるためインポートできません(上限は{max_mb} MBです)。",

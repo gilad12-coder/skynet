@@ -22,6 +22,17 @@ PROVIDER_LABELS = {
     "s3": "Amazon S3",
     "gcs": "Google Cloud Storage",
     "azure_blob": "Azure Blob Storage",
+    "kaggle": "Kaggle",
+    "google_drive": "Google Drive",
+    "onedrive": "OneDrive",
+    "postgres": "PostgreSQL",
+    "mysql": "MySQL",
+    "bigquery": "BigQuery",
+    "snowflake": "Snowflake",
+    "langfuse": "Langfuse",
+    "langsmith": "LangSmith",
+    "braintrust": "Braintrust",
+    "notion": "Notion",
 }
 API_TIMEOUT = httpx.Timeout(30.0)
 DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, read=300.0)
@@ -68,6 +79,7 @@ def request(
     headers: dict[str, str] | None = None,
     params: dict[str, Any] | None = None,
     data: dict[str, str] | None = None,
+    json: Any = None,
 ) -> httpx.Response:
     """Perform one API call and map failures to domain errors.
 
@@ -78,6 +90,7 @@ def request(
         headers: Request headers.
         params: Query parameters.
         data: Form body, if any.
+        json: JSON body, if any.
 
     Returns:
         A successful response.
@@ -88,7 +101,14 @@ def request(
     """
     try:
         response = httpx.request(
-            method, url, headers=headers, params=params, data=data, timeout=API_TIMEOUT, follow_redirects=True
+            method,
+            url,
+            headers=headers,
+            params=params,
+            data=data,
+            json=json,
+            timeout=API_TIMEOUT,
+            follow_redirects=True,
         )
     except httpx.HTTPError as exc:
         raise DomainError("connectors.unreachable", status=502, provider=label(provider)) from exc
@@ -112,6 +132,31 @@ def get_json(url: str, *, provider: str, headers: dict[str, str], params: dict[s
         DomainError: 502 ``provider_error`` when the body is not JSON.
     """
     response = request("GET", url, provider=label(provider), headers=headers, params=params)
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise DomainError("connectors.provider_error", status=502, provider=label(provider), status_code=200) from exc
+
+
+def post_json(
+    url: str, *, provider: str, headers: dict[str, str], body: Any, params: dict[str, Any] | None = None
+) -> Any:
+    """POST a JSON body and decode the JSON reply.
+
+    Args:
+        url: Absolute URL.
+        provider: Connector name for error messages.
+        headers: Request headers.
+        body: The JSON body.
+        params: Query parameters.
+
+    Returns:
+        The decoded reply.
+
+    Raises:
+        DomainError: 502 ``provider_error`` when the reply is not JSON.
+    """
+    response = request("POST", url, provider=provider, headers=headers, params=params, json=body)
     try:
         return response.json()
     except ValueError as exc:
