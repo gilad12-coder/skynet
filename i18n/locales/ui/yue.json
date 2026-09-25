@@ -67,6 +67,8 @@
   "connectors.snowflake.credentials_help": "幫你嘅使用者整一個程式化存取權杖，再指定一個佢角色用得嘅倉庫",
   "connectors.snowflake.name": "Snowflake",
   "connector_import.back": "返回",
+  "connector_import.up": "上一層資料夾",
+  "connector_import.more_folders": "之前嘅資料夾",
   "connector_import.breadcrumb": "位置",
   "connector_import.browse_error": "呢個位置載入唔到。",
   "connector_import.button": "匯入",

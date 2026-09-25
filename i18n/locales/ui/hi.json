@@ -67,6 +67,8 @@
   "connectors.snowflake.credentials_help": "अपने यूज़र के लिए एक प्रोग्रामेटिक एक्सेस टोकन बनाएं, और एक वेयरहाउस बताएं जिसे उसका रोल इस्तेमाल कर सके.",
   "connectors.snowflake.name": "Snowflake",
   "connector_import.back": "वापस",
+  "connector_import.up": "एक फ़ोल्डर ऊपर",
+  "connector_import.more_folders": "पिछले फ़ोल्डर",
   "connector_import.breadcrumb": "स्थान",
   "connector_import.browse_error": "यह स्थान लोड नहीं हो सका।",
   "connector_import.button": "आयात करें",

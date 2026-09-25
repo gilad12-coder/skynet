@@ -67,6 +67,8 @@
   "connectors.snowflake.credentials_help": "Erstellen Sie ein programmatisches Zugriffstoken für Ihren Benutzer und geben Sie ein Warehouse an, das die zugehörige Rolle nutzen kann",
   "connectors.snowflake.name": "Snowflake",
   "connector_import.back": "Zurück",
+  "connector_import.up": "Einen Ordner nach oben",
+  "connector_import.more_folders": "Frühere Ordner",
   "connector_import.breadcrumb": "Ort",
   "connector_import.browse_error": "Dieser Ort konnte nicht geladen werden.",
   "connector_import.button": "Importieren",

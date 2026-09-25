@@ -67,6 +67,8 @@
   "connectors.snowflake.credentials_help": "Crea un token de acceso programático para tu usuario, e indica un warehouse que su rol pueda usar",
   "connectors.snowflake.name": "Snowflake",
   "connector_import.back": "Atrás",
+  "connector_import.up": "Subir una carpeta",
+  "connector_import.more_folders": "Carpetas anteriores",
   "connector_import.breadcrumb": "Ubicación",
   "connector_import.browse_error": "No se pudo cargar esta ubicación.",
   "connector_import.button": "Importar",

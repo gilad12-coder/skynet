@@ -67,6 +67,8 @@
   "connectors.snowflake.credentials_help": "ユーザー用のプログラマティックアクセストークンを作成し、そのロールが使用できるウェアハウスを指定してください。",
   "connectors.snowflake.name": "Snowflake",
   "connector_import.back": "戻る",
+  "connector_import.up": "1つ上のフォルダへ",
+  "connector_import.more_folders": "上位のフォルダ",
   "connector_import.breadcrumb": "場所",
   "connector_import.browse_error": "この場所を読み込めませんでした。",
   "connector_import.button": "インポート",

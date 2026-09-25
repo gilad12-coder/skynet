@@ -3903,6 +3903,8 @@
   "connector_import.empty": "אין כאן שום דבר שאפשר לייבא.",
   "connector_import.browse_error": "לא ניתן לטעון את המיקום הזה.",
   "connector_import.back": "חזרה",
+  "connector_import.up": "תיקייה אחת למעלה",
+  "connector_import.more_folders": "תיקיות קודמות",
   "connector_import.name_label": "שמירה בשם",
   "connector_import.preview_empty": "אין תצוגה מקדימה זמינה לקובץ הזה.",
   "connector_import.import": "ייבוא",

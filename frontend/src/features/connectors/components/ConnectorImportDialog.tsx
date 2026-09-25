@@ -9,10 +9,10 @@ import {
   ArrowSquareOut,
   CaretRight,
   CircleNotch,
+  DotsThree,
   DownloadSimple,
   FileText,
   Folder,
-  House,
   Plug,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -24,6 +24,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shared/ui/primitives/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/shared/ui/primitives/dropdown-menu";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import {
@@ -45,6 +51,7 @@ import { BROWSE_CARET_CLASS, BROWSE_LIST_CLASS, BROWSE_ROW_CLASS } from "./brows
 import { providerMeta } from "./providers";
 import { SearchInput } from "@/shared/ui/search-input";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
+import { TooltipButton } from "@/shared/ui/tooltip-button";
 
 /** Props for {@link ConnectorImportDialog}. */
 export interface ConnectorImportDialogProps {
@@ -58,6 +65,13 @@ export interface ConnectorImportDialogProps {
 const SEARCH_DEBOUNCE_MS = 300;
 const TOUCH_BUTTON =
   "min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]";
+
+// Deeper paths keep the root and the last two folders visible and fold the
+// middle into a menu, so the trail stays on one line.
+const MAX_VISIBLE_CRUMBS = 3;
+const CRUMB_CLASS =
+  "max-w-[12rem] cursor-pointer truncate rounded-md px-1.5 py-1 hover:bg-accent hover:text-foreground";
+const CURRENT_CRUMB_CLASS = "cursor-default font-medium text-foreground hover:bg-transparent";
 
 interface Crumb {
   ref: string;
@@ -195,9 +209,11 @@ export function ConnectorImportDialog({
   }, [provider, selected]);
 
   const visibleEntries = React.useMemo(() => {
-    if (!trimmedQuery || !location) return entries;
     const needle = trimmedQuery.toLowerCase();
-    return entries.filter((e) => e.name.toLowerCase().includes(needle));
+    const matches =
+      needle && location ? entries.filter((e) => e.name.toLowerCase().includes(needle)) : entries;
+    // Folders first, keeping the provider's own order within each group.
+    return [...matches].sort((a, b) => Number(b.kind === "folder") - Number(a.kind === "folder"));
   }, [entries, location, trimmedQuery]);
 
   const openEntry = (entry: ConnectorEntry) => {
@@ -215,6 +231,15 @@ export function ConnectorImportDialog({
     setQuery("");
     setEntries([]);
   };
+
+  const goUp = () => {
+    if (path.length > 0) jumpTo(path.length - 1);
+  };
+
+  const collapsed = path.length > MAX_VISIBLE_CRUMBS;
+  const hiddenCrumbs = collapsed ? path.slice(0, -2) : [];
+  const shownCrumbs = collapsed ? path.slice(-2) : path;
+  const shownOffset = path.length - shownCrumbs.length;
 
   const handleImport = async () => {
     if (!selected || importing) return;
@@ -283,40 +308,84 @@ export function ConnectorImportDialog({
           </div>
         ) : selected === null ? (
           <div className="px-5 pb-5 pt-4">
-            <nav
-              aria-label={msg("connector_import.breadcrumb")}
-              className="mb-3 flex min-w-0 flex-wrap items-center gap-0.5 text-xs text-muted-foreground"
-            >
-              <button
-                type="button"
-                onClick={() => jumpTo(0)}
-                disabled={path.length === 0}
-                aria-label={meta.name}
-                className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md hover:bg-accent hover:text-foreground disabled:cursor-default disabled:text-foreground disabled:hover:bg-transparent"
+            <div className="mb-3 flex min-w-0 items-center gap-1.5">
+              <TooltipButton tooltip={msg("connector_import.up")}>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={goUp}
+                  disabled={path.length === 0}
+                  aria-label={msg("connector_import.up")}
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                >
+                  <ArrowLeft className="size-4 rtl:-scale-x-100" />
+                </Button>
+              </TooltipButton>
+              <nav
+                aria-label={msg("connector_import.breadcrumb")}
+                className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden text-xs text-muted-foreground"
               >
-                <House className="size-3.5" />
-              </button>
-              {path.map((crumb, index) => {
-                const last = index === path.length - 1;
-                return (
-                  <React.Fragment key={crumb.ref}>
+                <button
+                  type="button"
+                  onClick={() => jumpTo(0)}
+                  disabled={path.length === 0}
+                  aria-current={path.length === 0 ? "location" : undefined}
+                  className={cn(CRUMB_CLASS, "shrink-0", path.length === 0 && CURRENT_CRUMB_CLASS)}
+                >
+                  {meta.name}
+                </button>
+                {collapsed && (
+                  <>
                     <CaretRight className="size-3 shrink-0 rtl:-scale-x-100" />
-                    <button
-                      type="button"
-                      dir="ltr"
-                      onClick={() => jumpTo(index + 1)}
-                      disabled={last}
-                      className={cn(
-                        "max-w-[12rem] cursor-pointer truncate rounded-md px-1.5 py-1 hover:bg-accent hover:text-foreground",
-                        last && "cursor-default font-medium text-foreground hover:bg-transparent",
-                      )}
-                    >
-                      {crumb.name}
-                    </button>
-                  </React.Fragment>
-                );
-              })}
-            </nav>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={msg("connector_import.more_folders")}
+                          className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
+                        >
+                          <DotsThree className="size-4" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="max-w-[18rem]">
+                        {hiddenCrumbs.map((crumb, index) => (
+                          <DropdownMenuItem
+                            key={crumb.ref}
+                            onSelect={() => jumpTo(index + 1)}
+                            className="gap-2"
+                          >
+                            <Folder className="size-4 shrink-0 text-muted-foreground" />
+                            <span dir="ltr" className="truncate">
+                              {crumb.name}
+                            </span>
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </>
+                )}
+                {shownCrumbs.map((crumb, index) => {
+                  const depth = shownOffset + index + 1;
+                  const last = depth === path.length;
+                  return (
+                    <React.Fragment key={crumb.ref}>
+                      <CaretRight className="size-3 shrink-0 rtl:-scale-x-100" />
+                      <button
+                        type="button"
+                        dir="ltr"
+                        onClick={() => jumpTo(depth)}
+                        disabled={last}
+                        aria-current={last ? "location" : undefined}
+                        title={crumb.name}
+                        className={cn(CRUMB_CLASS, "min-w-0", last && CURRENT_CRUMB_CLASS)}
+                      >
+                        {crumb.name}
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
+              </nav>
+            </div>
 
             <SearchInput
               dir="ltr"
@@ -325,6 +394,13 @@ export function ConnectorImportDialog({
               aria-label={msg("connector_import.search_placeholder")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                // Backspace on an empty filter steps up a folder, like a file manager.
+                if (e.key === "Backspace" && query === "" && path.length > 0) {
+                  e.preventDefault();
+                  goUp();
+                }
+              }}
               busy={browsing}
             />
 

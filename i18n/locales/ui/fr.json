@@ -67,6 +67,8 @@
   "connectors.snowflake.credentials_help": "Créez un jeton d'accès programmatique pour votre utilisateur, et indiquez un warehouse que son rôle peut utiliser.",
   "connectors.snowflake.name": "Snowflake",
   "connector_import.back": "Retour",
+  "connector_import.up": "Remonter d’un dossier",
+  "connector_import.more_folders": "Dossiers précédents",
   "connector_import.breadcrumb": "Emplacement",
   "connector_import.browse_error": "Impossible de charger cet emplacement.",
   "connector_import.button": "Importer",

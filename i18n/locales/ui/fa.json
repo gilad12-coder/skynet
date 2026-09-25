@@ -67,6 +67,8 @@
   "connectors.snowflake.credentials_help": "برای کاربر خود یک توکن دسترسی برنامه‌ای بسازید و یک Warehouse مشخص کنید که Role او بتواند از آن استفاده کند.",
   "connectors.snowflake.name": "Snowflake",
   "connector_import.back": "بازگشت",
+  "connector_import.up": "یک پوشه بالاتر",
+  "connector_import.more_folders": "پوشه‌های قبلی",
   "connector_import.breadcrumb": "مکان",
   "connector_import.browse_error": "این مکان بارگذاری نشد.",
   "connector_import.button": "وارد کردن",
