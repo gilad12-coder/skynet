@@ -2,7 +2,13 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { CircleNotch, Database, MagnifyingGlass, UploadSimple } from "@/shared/ui/icons";
+import {
+  CircleNotch,
+  Database,
+  DownloadSimple,
+  MagnifyingGlass,
+  UploadSimple,
+} from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 import { Button } from "@/shared/ui/primitives/button";
 import {
@@ -28,6 +34,7 @@ import { parseDatasetFile } from "@/shared/lib/parse-dataset";
 import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { cn } from "@/shared/lib/utils";
 import { ListPageSkeleton } from "@/shared/ui/list-page-skeleton";
+import { HuggingFaceImportDialog } from "@/features/connectors";
 import { useDatasets } from "../hooks/use-datasets";
 import { DatasetCard } from "./DatasetCard";
 import { DatasetDetailDialog } from "./DatasetDetailDialog";
@@ -43,6 +50,7 @@ const UPLOAD_ACCEPT = ".csv,.json,.xlsx,.xls";
  */
 export function DatasetsView() {
   const { datasets, loading, error, refetch } = useDatasets();
+  const [hfOpen, setHfOpen] = React.useState(false);
   const searchParams = useSearchParams();
   const [search, setSearch] = React.useState("");
   const [selected, setSelected] = React.useState<DatasetSummary | null>(null);
@@ -206,6 +214,15 @@ export function DatasetsView() {
           />
           <Button
             variant="outline"
+            onClick={() => setHfOpen(true)}
+            data-telemetry="datasets-hf-import"
+            className="!h-[44px] w-full shrink-0 rounded-2xl sm:w-auto"
+          >
+            <DownloadSimple className="size-4" />
+            {msg("hf_import.button")}
+          </Button>
+          <Button
+            variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
             data-telemetry="datasets-upload"
@@ -245,7 +262,18 @@ export function DatasetsView() {
             title={msg("datasets.empty.title")}
             description={msg("datasets.empty.body")}
             action={{ label: msg("datasets.upload"), onClick: () => fileInputRef.current?.click() }}
-          />
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setHfOpen(true)}
+              data-telemetry="datasets-hf-import"
+              className="min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
+            >
+              <DownloadSimple className="size-4" />
+              {msg("hf_import.button")}
+            </Button>
+          </EmptyState>
         ) : filtered.length === 0 ? (
           <EmptyState icon={MagnifyingGlass} title={msg("datasets.search.empty")} />
         ) : (
@@ -314,6 +342,14 @@ export function DatasetsView() {
         </DialogContent>
       </Dialog>
 
+      <HuggingFaceImportDialog
+        open={hfOpen}
+        onOpenChange={setHfOpen}
+        onImported={(dataset) => {
+          track(TelemetryEvent.DatasetCreated, { source: "huggingface", rows: dataset.row_count });
+          refetch();
+        }}
+      />
       <DatasetDetailDialog dataset={selected} onClose={() => setSelected(null)} />
     </div>
   );

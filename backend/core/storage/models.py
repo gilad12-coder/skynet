@@ -500,6 +500,42 @@ class BillingProviderKeyModel(Base):
     __table_args__ = (Index("ix_billing_provider_keys_username_provider", "username", "provider"),)
 
 
+class UserConnectorModel(Base):
+    """One linked third-party data account (a "connector") for a user.
+
+    Connectors let a user import data from services they already use — today
+    Hugging Face datasets — with their own account, so private and gated
+    resources resolve with their permissions. Only Fernet ciphertext of the
+    access token (and, for OAuth links, the refresh token) is persisted, under
+    the same vault key as BYOK provider keys. ``auth_method`` records how the
+    link was made (``oauth`` or a pasted ``token``), ``account_label`` is the
+    remote account name for display, ``token_expires_at`` drives OAuth refresh,
+    and ``status`` flips to ``invalid`` once the remote rejects the credential
+    so the UI can prompt a reconnect. One row per ``(username, provider)``.
+    """
+
+    __tablename__ = "user_connectors"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid4().hex)
+    username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    auth_method: Mapped[str] = mapped_column(String(16), nullable=False)
+    account_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    scopes: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    secret_ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    refresh_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="connected", server_default="connected")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    __table_args__ = (UniqueConstraint("username", "provider", name="uq_user_connectors_username_provider"),)
+
+
 class ProtectedCredentialModel(Base):
     """One execution-scoped secret encrypted for use by a trusted parent relay.
 

@@ -65,6 +65,18 @@
     "winningCandidate": "победивший кандидат"
   },
   "messages": {
+    "connectors.hf_dataset_not_found": "Датасет {repo_id} не найден на Hugging Face, либо у вашего аккаунта нет к нему доступа.",
+    "connectors.hf_dataset_unsupported": "Hugging Face пока не может отдать {repo_id} (нет данных для просмотра или конвертации в parquet).",
+    "connectors.hf_expired": "Срок действия вашей сессии Hugging Face истёк. Подключитесь снова в настройках.",
+    "connectors.hf_import_too_large": "Этот сплит слишком велик для импорта (лимит на сжатый файл — {max_mb} МБ).",
+    "connectors.hf_invalid_token": "Hugging Face отклонил этот токен. Проверьте его и попробуйте ещё раз.",
+    "connectors.hf_not_connected": "Сначала подключите свой аккаунт Hugging Face.",
+    "connectors.hf_oauth_failed": "Вход через Hugging Face не был завершён. Попробуйте ещё раз.",
+    "connectors.hf_oauth_not_configured": "Вход через Hugging Face не настроен в этом развёртывании. Вместо этого вставьте токен доступа.",
+    "connectors.hf_oauth_state_invalid": "Ссылка для входа через Hugging Face недействительна или устарела. Начните заново.",
+    "connectors.hf_unreachable": "Не удалось связаться с Hugging Face. Попробуйте ещё раз через минуту.",
+    "connectors.reconnect_required": "Привязку {provider} больше не удаётся прочитать. Отключите её и подключите снова.",
+    "connectors.vault_not_configured": "Хранилище учётных данных не настроено в этом развёртывании, поэтому коннекторы нельзя привязать.",
     "accounts.email_delivery_unavailable": "На этом сервере не настроена отправка электронной почты.",
     "accounts.email_not_verified": "Пожалуйста, подтвердите адрес электронной почты перед входом.",
     "accounts.email_send_failed": "Не удалось отправить письмо с подтверждением. Попробуйте еще раз.",

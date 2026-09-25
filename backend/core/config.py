@@ -145,6 +145,21 @@ class Settings(BaseSettings):
         alias="BYOK_VAULT_KEY",
         description="Fernet key (urlsafe base64, 32 bytes) that encrypts stored BYOK provider secrets at rest. Unset disables saving keys (the vault degrades to read-only); reads of already-stored masked metadata still work.",
     )
+    hf_oauth_client_id: str | None = Field(
+        default=None,
+        alias="HF_OAUTH_CLIENT_ID",
+        description="Client id of the Hugging Face OAuth app (huggingface.co/settings/applications). Unset hides 'Continue with Hugging Face'; users can still paste an access token.",
+    )
+    hf_oauth_client_secret: SecretStr | None = Field(
+        default=None,
+        alias="HF_OAUTH_CLIENT_SECRET",
+        description="Client secret of the Hugging Face OAuth app. Optional: a public (secret-less) app authenticates the token exchange with PKCE alone.",
+    )
+    hf_oauth_redirect_uri: str | None = Field(
+        default=None,
+        alias="HF_OAUTH_REDIRECT_URI",
+        description="Absolute URL of this backend's /connectors/huggingface/oauth/callback as registered on the OAuth app. Unset derives it from the incoming request, which is right whenever the proxy forwards scheme and host.",
+    )
     litellm_proxy_url: str | None = Field(
         default=None,
         alias="LITELLM_PROXY_URL",

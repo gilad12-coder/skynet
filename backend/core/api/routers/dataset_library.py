@@ -303,9 +303,7 @@ def _schema_from_run_payload(payload: dict[str, Any], rows: list[dict[str, Any]]
     }
 
 
-def _copy_session_sharing_to_dataset(
-    db: Session, *, session_id: str, dataset_id: str, actor: str
-) -> None:
+def _copy_session_sharing_to_dataset(db: Session, *, session_id: str, dataset_id: str, actor: str) -> None:
     """Mirror a tagger session's sharing onto a freshly-created dataset.
 
     Copies the session's live share link (its general-access policy and tier)
@@ -347,6 +345,55 @@ def _copy_session_sharing_to_dataset(
         )
 
 
+def save_rows_gated(
+    job_store,
+    store: DatasetLibraryStore,
+    *,
+    owner: str,
+    name: str,
+    source: str,
+    rows: list[dict[str, Any]],
+    column_schema: dict[str, Any],
+) -> tuple[DatasetRecord, bool]:
+    """Stage rows and persist them as a new owned entry, gating size/quota.
+
+    Shared by the save, clone and connector-import paths: serialize/compress
+    once, reject an over-cap file (413), return an existing byte-identical
+    entry instead of storing a copy (dedupe), then reject a save that would
+    push the owner over their unified storage budget (409) before committing.
+
+    Args:
+        job_store: Storage backend whose engine carries the usage tables.
+        store: Library store the entry is committed through.
+        owner: Lowercased owner the entry is saved under.
+        name: Display name for the entry.
+        source: Producing surface recorded on the entry.
+        rows: The rows to store.
+        column_schema: Saved column roles/kinds/order.
+
+    Returns:
+        A ``(record, deduplicated)`` pair — ``deduplicated`` is ``True`` when
+        an existing identical entry was returned instead of a new one.
+
+    Raises:
+        DomainError: 413 over the per-file cap; 409 over the unified storage
+            budget.
+    """
+    staged: StagedDataset = store.stage(rows, column_schema)
+    if staged.stored_bytes > settings.dataset_max_file_bytes:
+        raise DomainError(
+            "dataset.library.too_large",
+            status=413,
+            max_mb=round(settings.dataset_max_file_bytes / (1024 * 1024), 1),
+        )
+    existing = store.find_by_hash(owner, staged.digest)
+    if existing is not None:
+        return existing, True
+    enforce_storage_quota(job_store, owner, incoming_bytes=staged.byte_size)
+    record = store.commit_staged(owner_username=owner, name=name, source=source, staged=staged)
+    return record, False
+
+
 def create_dataset_library_router(*, job_store) -> APIRouter:
     """Build the personal dataset-library CRUD router.
 
@@ -386,12 +433,7 @@ def create_dataset_library_router(*, job_store) -> APIRouter:
     def _save_gated(
         *, owner: str, name: str, source: str, rows: list[dict[str, Any]], column_schema: dict[str, Any]
     ) -> tuple[DatasetRecord, bool]:
-        """Stage rows and persist them as a new owned entry, gating size/quota.
-
-        Shared by the save and clone paths: serialize/compress once, reject an
-        over-cap file (413), return an existing byte-identical entry instead of
-        storing a copy (dedupe), then reject a save that would push the owner
-        over their unified storage budget (409) before committing.
+        """Persist rows as a new owned entry via :func:`save_rows_gated`.
 
         Args:
             owner: Lowercased owner the entry is saved under.
@@ -401,26 +443,11 @@ def create_dataset_library_router(*, job_store) -> APIRouter:
             column_schema: Saved column roles/kinds/order.
 
         Returns:
-            A ``(record, deduplicated)`` pair — ``deduplicated`` is ``True`` when
-            an existing identical entry was returned instead of a new one.
-
-        Raises:
-            DomainError: 413 over the per-file cap; 409 over the unified storage
-                budget.
+            A ``(record, deduplicated)`` pair.
         """
-        staged: StagedDataset = store.stage(rows, column_schema)
-        if staged.stored_bytes > settings.dataset_max_file_bytes:
-            raise DomainError(
-                "dataset.library.too_large",
-                status=413,
-                max_mb=round(settings.dataset_max_file_bytes / (1024 * 1024), 1),
-            )
-        existing = store.find_by_hash(owner, staged.digest)
-        if existing is not None:
-            return existing, True
-        enforce_storage_quota(job_store, owner, incoming_bytes=staged.byte_size)
-        record = store.commit_staged(owner_username=owner, name=name, source=source, staged=staged)
-        return record, False
+        return save_rows_gated(
+            job_store, store, owner=owner, name=name, source=source, rows=rows, column_schema=column_schema
+        )
 
     router = APIRouter()
 

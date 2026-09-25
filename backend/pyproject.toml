@@ -73,6 +73,7 @@ dependencies = [
     "python-json-logger>=2.0",
     "sentry-sdk>=2.67,<3",
     "pip==26.2.1",
+    "pyarrow>=17",
 ]
 
 [project.optional-dependencies]

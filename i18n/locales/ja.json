@@ -65,6 +65,18 @@
     "winningCandidate": "最良候補"
   },
   "messages": {
+    "connectors.hf_dataset_not_found": "データセット {repo_id} が Hugging Face に見つからないか、お使いのアカウントではアクセスできません。",
+    "connectors.hf_dataset_unsupported": "Hugging Face はまだ {repo_id} を提供できません(ビューアデータまたは parquet 変換がありません)。",
+    "connectors.hf_expired": "Hugging Face のセッションが期限切れです。設定から再度連携してください。",
+    "connectors.hf_import_too_large": "このスプリットは大きすぎてインポートできません(圧縮ファイルの上限は {max_mb} MB です)。",
+    "connectors.hf_invalid_token": "Hugging Face にそのトークンが拒否されました。確認のうえ、もう一度お試しください。",
+    "connectors.hf_not_connected": "まず Hugging Face アカウントを連携してください。",
+    "connectors.hf_oauth_failed": "Hugging Face のサインインが完了しませんでした。もう一度お試しください。",
+    "connectors.hf_oauth_not_configured": "このデプロイでは Hugging Face でのサインインが設定されていません。代わりにアクセストークンを貼り付けてください。",
+    "connectors.hf_oauth_state_invalid": "Hugging Face のサインインリンクが無効か期限切れです。最初からやり直してください。",
+    "connectors.hf_unreachable": "Hugging Face に接続できませんでした。しばらくしてからもう一度お試しください。",
+    "connectors.reconnect_required": "{provider} の連携情報を読み取れなくなりました。連携を解除してから再度連携してください。",
+    "connectors.vault_not_configured": "このデプロイでは認証情報ボールトが設定されていないため、コネクタを連携できません。",
     "accounts.email_delivery_unavailable": "このサーバーではメール送信が設定されていません。",
     "accounts.email_not_verified": "サインインする前にメールアドレスを認証してください。",
     "accounts.email_send_failed": "確認メールを送信できませんでした。もう一度お試しください。",

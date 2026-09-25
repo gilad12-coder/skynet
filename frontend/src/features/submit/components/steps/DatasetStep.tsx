@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Image as ImageIcon, Books, TextT as TypeIcon, UploadSimple } from "@/shared/ui/icons";
+import {
+  Image as ImageIcon,
+  Books,
+  DownloadSimple,
+  TextT as TypeIcon,
+  UploadSimple,
+} from "@/shared/ui/icons";
 import {
   Card,
   CardContent,
@@ -21,6 +27,7 @@ import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
 import { DatasetPreviewLayout } from "../DatasetPreviewLayout";
 import { DatasetPickerDialog } from "@/features/datasets";
+import { HuggingFaceImportDialog } from "@/features/connectors";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 
@@ -52,6 +59,7 @@ export function DatasetStep({
     setShuffle,
   } = w;
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [hfOpen, setHfOpen] = useState(false);
 
   // Auto-detected kinds straight from the profiler — used to mark a column
   // as "auto-detected as image" (vs a user-driven manual flip) in the UI.
@@ -154,11 +162,25 @@ export function DatasetStep({
             <Books className="size-4" />
             {msg("submit.dataset.library_pick")}
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setHfOpen(true)}
+            className="min-h-[44px] w-full justify-center gap-2 lg:min-h-0"
+          >
+            <DownloadSimple className="size-4" />
+            {msg("hf_import.button")}
+          </Button>
         </DatasetPreviewLayout>
         <DatasetPickerDialog
           open={pickerOpen}
           onOpenChange={setPickerOpen}
           onPick={handlePickFromLibrary}
+        />
+        <HuggingFaceImportDialog
+          open={hfOpen}
+          onOpenChange={setHfOpen}
+          onImported={handlePickFromLibrary}
         />
 
         {parsedDataset && parsedDataset.columns.length > 0 && (

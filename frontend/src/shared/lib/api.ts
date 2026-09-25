@@ -1022,6 +1022,107 @@ export function removeProviderKey(provider: string) {
   return request<ProviderKeysResponse>(`/billing/byok/keys/${provider}`, { method: "DELETE" });
 }
 
+/** One outside-service account link (a "connector") for the caller, never carrying the secret. */
+export interface ConnectorStatus {
+  provider: string;
+  connected: boolean;
+  status: "connected" | "invalid" | null;
+  account_label: string | null;
+  auth_method: "oauth" | "token" | null;
+  /** Whether the deployment can offer "Continue with Hugging Face" (OAuth app configured). */
+  oauth_available: boolean;
+  connected_at: string | null;
+}
+
+/** Envelope for ``GET /connectors``. */
+export interface ConnectorListResponse {
+  connectors: ConnectorStatus[];
+}
+
+/** One Hugging Face Hub dataset search hit. */
+export interface HubDataset {
+  id: string;
+  author: string | null;
+  downloads: number;
+  likes: number;
+  private: boolean;
+  gated: boolean;
+  last_modified: string | null;
+}
+
+/** One ``(config, split)`` of a Hub dataset with its size when the viewer knows it. */
+export interface HubSplit {
+  config: string;
+  split: string;
+  num_rows: number | null;
+  num_bytes: number | null;
+}
+
+/** The first rows of a Hub split, as the dataset viewer describes them. */
+export interface HubPreview {
+  columns: Array<{ name: string; type: string }>;
+  rows: Array<Record<string, unknown>>;
+  num_rows_total: number | null;
+}
+
+/** List the caller's connectors (one entry per supported provider). */
+export function getConnectors() {
+  return request<ConnectorListResponse>("/connectors");
+}
+
+/**
+ * Link Hugging Face with a pasted access token. The token is verified against
+ * the Hub and encrypted at rest on the backend; it is never echoed back.
+ */
+export function saveHuggingFaceToken(token: string) {
+  return request<ConnectorListResponse>("/connectors/huggingface/token", {
+    method: "PUT",
+    body: JSON.stringify({ token }),
+  });
+}
+
+/** Forget the caller's Hugging Face credentials; returns the updated list. */
+export function removeHuggingFaceConnector() {
+  return request<ConnectorListResponse>("/connectors/huggingface", { method: "DELETE" });
+}
+
+/** Mint the Hugging Face OAuth authorize URL the browser should be sent to. */
+export function startHuggingFaceOAuth() {
+  return request<{ authorize_url: string }>("/connectors/huggingface/oauth/start", {
+    method: "POST",
+  });
+}
+
+/** Search Hub datasets as the caller (anonymously when unlinked). */
+export function searchHuggingFaceDatasets(search: string, limit = 30) {
+  const params = new URLSearchParams({ search, limit: String(limit) });
+  return request<{ datasets: HubDataset[] }>(`/connectors/huggingface/datasets?${params}`);
+}
+
+/** List the importable configs/splits of one Hub dataset. */
+export function getHuggingFaceSplits(repoId: string) {
+  return request<{ splits: HubSplit[] }>(`/connectors/huggingface/datasets/${repoId}/splits`);
+}
+
+/** Preview the first rows of a Hub split. */
+export function previewHuggingFaceSplit(repoId: string, config: string, split: string) {
+  const params = new URLSearchParams({ config, split });
+  return request<HubPreview>(`/connectors/huggingface/datasets/${repoId}/preview?${params}`);
+}
+
+/** Import a whole Hub split into the caller's library (gated by the file cap and storage quota). */
+export function importHuggingFaceDataset(body: {
+  repo_id: string;
+  config: string;
+  split: string;
+  name?: string;
+}) {
+  return request<SaveDatasetResponse>("/connectors/huggingface/import", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export interface DirectoryUserMatch {
   username: string;
   display_name?: string | null;

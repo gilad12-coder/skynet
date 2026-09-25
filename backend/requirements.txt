@@ -259,6 +259,8 @@ psycopg2-binary==2.9.11
     # via skynet
 py-key-value-aio==0.4.4
     # via fastmcp
+pyarrow==25.0.1
+    # via skynet
 pyasn1==0.6.4
     # via
     #   ldap3

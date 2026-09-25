@@ -65,6 +65,18 @@
     "program": "程式"
   },
   "messages": {
+    "connectors.hf_dataset_not_found": "喺 Hugging Face 搵唔到數據集 {repo_id},或者你嘅帳戶冇權限存取。",
+    "connectors.hf_dataset_unsupported": "Hugging Face 暫時未能提供 {repo_id}(冇檢視器數據或者 parquet 轉換)。",
+    "connectors.hf_expired": "你嘅 Hugging Face 工作階段已過期。去「設定」重新連結。",
+    "connectors.hf_import_too_large": "嗰個分割太大,匯入唔到(壓縮檔上限係 {max_mb} MB)。",
+    "connectors.hf_invalid_token": "Hugging Face 唔接受呢個權杖。檢查一下再試。",
+    "connectors.hf_not_connected": "先連結你嘅 Hugging Face 帳戶。",
+    "connectors.hf_oauth_failed": "Hugging Face 登入未完成。再試一次。",
+    "connectors.hf_oauth_not_configured": "呢個部署未設定 Hugging Face 登入。改為貼上存取權杖。",
+    "connectors.hf_oauth_state_invalid": "Hugging Face 登入連結無效或者已過期。重新開始。",
+    "connectors.hf_unreachable": "連接唔到 Hugging Face。等陣再試。",
+    "connectors.reconnect_required": "你嘅 {provider} 連結已經讀取唔到。解除連結之後再連結一次。",
+    "connectors.vault_not_configured": "呢個部署未設定憑證保管庫,所以連結唔到連接器。",
     "accounts.email_delivery_unavailable": "此伺服器未設定電郵發送功能。",
     "accounts.email_not_verified": "請喺登入前驗證你嘅電郵地址。",
     "accounts.email_send_failed": "發送唔到驗證電郵。請再試一次。",

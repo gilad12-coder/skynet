@@ -65,6 +65,18 @@
     "winningCandidate": "candidato vencedor"
   },
   "messages": {
+    "connectors.hf_dataset_not_found": "O conjunto de dados {repo_id} não foi encontrado no Hugging Face ou a sua conta não tem acesso ao mesmo.",
+    "connectors.hf_dataset_unsupported": "O Hugging Face ainda não consegue servir {repo_id} (sem dados do visualizador nem conversão para Parquet).",
+    "connectors.hf_expired": "A sua sessão no Hugging Face expirou. Volte a ligar a conta a partir das Definições.",
+    "connectors.hf_import_too_large": "Esse split é demasiado grande para ser importado (o limite do ficheiro comprimido é de {max_mb} MB).",
+    "connectors.hf_invalid_token": "O Hugging Face rejeitou esse token. Verifique-o e tente novamente.",
+    "connectors.hf_not_connected": "Ligue primeiro a sua conta do Hugging Face.",
+    "connectors.hf_oauth_failed": "O início de sessão no Hugging Face não foi concluído. Tente novamente.",
+    "connectors.hf_oauth_not_configured": "O início de sessão com o Hugging Face não está configurado nesta instalação. Em alternativa, cole um token de acesso.",
+    "connectors.hf_oauth_state_invalid": "A ligação de início de sessão do Hugging Face é inválida ou expirou. Comece de novo.",
+    "connectors.hf_unreachable": "Não foi possível contactar o Hugging Face. Tente novamente dentro de momentos.",
+    "connectors.reconnect_required": "A sua ligação ao {provider} já não pode ser lida. Desligue e volte a ligar.",
+    "connectors.vault_not_configured": "O cofre de credenciais não está configurado nesta instalação, pelo que não é possível associar conectores.",
     "accounts.email_delivery_unavailable": "O envio de emails não está configurado neste servidor.",
     "accounts.email_not_verified": "Verifique o seu email antes de iniciar sessão.",
     "accounts.email_send_failed": "Não foi possível enviar o email de verificação. Tente novamente.",

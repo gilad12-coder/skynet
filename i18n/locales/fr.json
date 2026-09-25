@@ -65,6 +65,18 @@
     "winningCandidate": "candidat gagnant"
   },
   "messages": {
+    "connectors.hf_dataset_not_found": "Le jeu de données {repo_id} est introuvable sur Hugging Face, ou votre compte n'y a pas accès.",
+    "connectors.hf_dataset_unsupported": "Hugging Face ne peut pas encore servir {repo_id} (aucune donnée du visualiseur ni conversion Parquet).",
+    "connectors.hf_expired": "Votre session Hugging Face a expiré. Reconnectez-vous depuis les Paramètres.",
+    "connectors.hf_import_too_large": "Ce split est trop volumineux pour être importé (la limite du fichier compressé est de {max_mb} Mo).",
+    "connectors.hf_invalid_token": "Hugging Face a rejeté ce jeton. Vérifiez-le et réessayez.",
+    "connectors.hf_not_connected": "Connectez d'abord votre compte Hugging Face.",
+    "connectors.hf_oauth_failed": "La connexion à Hugging Face n'a pas abouti. Veuillez réessayer.",
+    "connectors.hf_oauth_not_configured": "La connexion avec Hugging Face n'est pas configurée sur ce déploiement. Collez plutôt un jeton d'accès.",
+    "connectors.hf_oauth_state_invalid": "Le lien de connexion Hugging Face est invalide ou a expiré. Recommencez.",
+    "connectors.hf_unreachable": "Impossible de joindre Hugging Face. Réessayez dans un instant.",
+    "connectors.reconnect_required": "Votre liaison {provider} ne peut plus être lue. Déconnectez-la, puis reconnectez-la.",
+    "connectors.vault_not_configured": "Le coffre d'identifiants n'est pas configuré sur ce déploiement ; les connecteurs ne peuvent donc pas être liés.",
     "accounts.email_delivery_unavailable": "L'envoi d'e-mails n'est pas configuré sur ce serveur.",
     "accounts.email_not_verified": "Veuillez vérifier votre adresse e-mail avant de vous connecter.",
     "accounts.email_send_failed": "Impossible d'envoyer l'e-mail de vérification. Réessayez.",
