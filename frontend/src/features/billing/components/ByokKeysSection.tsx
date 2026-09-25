@@ -26,6 +26,7 @@ import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { StatusPill, type StatusTone } from "@/shared/ui/status-badge";
 import { ByokJsonImport } from "./ByokJsonImport";
 import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
+import { KeyFormActions } from "@/shared/ui/key-form-actions";
 import { cn } from "@/shared/lib/utils";
 
 /** The status pill next to a saved key. */
@@ -271,57 +272,20 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
 
       {editing && (
         <div className="mt-2.5 flex flex-col gap-2 animate-in fade-in-0 slide-in-from-top-1">
-          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-            <Input
-              dir="ltr"
-              type="password"
-              autoFocus
-              autoComplete="new-password"
-              placeholder={provider.placeholder}
-              value={secret}
-              onChange={(e) => setSecret(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void handleSave();
-                if (e.key === "Escape") setEditing(false);
-              }}
-              className={cn(TOUCH_FIELD_SM, "flex-1")}
-            />
-            <div className="flex items-center justify-end gap-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="icon-sm"
-                    onClick={handleSave}
-                    disabled={!secret.trim() || saving}
-                    aria-label={msg("settings.keys.save")}
-                  >
-                    {saving ? (
-                      <CircleNotch
-                        className="animate-spin motion-reduce:animate-none"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <FloppyDisk className="size-4" />
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{msg("settings.keys.save")}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setEditing(false)}
-                    aria-label={msg("settings.keys.cancel")}
-                  >
-                    <X className="size-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{msg("settings.keys.cancel")}</TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
+          <Input
+            dir="ltr"
+            type="password"
+            autoFocus
+            autoComplete="new-password"
+            placeholder={provider.placeholder}
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSave();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            className={TOUCH_FIELD_SM}
+          />
           <Input
             dir="ltr"
             type="url"
@@ -338,6 +302,14 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
           <p className="text-[0.6875rem] text-muted-foreground/70">
             {msg("settings.keys.base_url_hint")}
           </p>
+          <KeyFormActions
+            submitLabel={msg("settings.keys.save")}
+            submitIcon={<FloppyDisk className="size-4" aria-hidden="true" />}
+            busy={saving}
+            disabled={!secret.trim() || saving}
+            onSubmit={() => void handleSave()}
+            onCancel={() => setEditing(false)}
+          />
         </div>
       )}
     </div>
