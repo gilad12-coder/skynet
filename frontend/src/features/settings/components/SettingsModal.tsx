@@ -1572,11 +1572,7 @@ const SETTINGS_RAIL_ITEM_CLASS =
 
 // Tabs dense enough (ledgers, connection lists, admin tables) to earn a
 // toggle that grows the modal to fill the screen.
-const EXPANDABLE_SETTINGS_TABS: ReadonlySet<SettingsTab> = new Set([
-  "usage",
-  "connectors",
-  "admin",
-]);
+const EXPANDABLE_SETTINGS_TABS: ReadonlySet<SettingsTab> = new Set(["usage", "admin"]);
 
 function SettingsPanelHeader({ tab, action }: { tab: SettingsTab; action?: React.ReactNode }) {
   const { icon: Icon, labelKey } = SETTINGS_TAB_META[tab];
