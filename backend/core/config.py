@@ -1015,6 +1015,30 @@ class Settings(BaseSettings):
             "replicas via Redis. Bounds a runaway script or abusive key. 0 disables the cap."
         ),
     )
+    rate_limit_transcriptions_per_hour: int = Field(
+        default=120,
+        ge=0,
+        description=(
+            "Per-account cap on dictation clips per hour, enforced across replicas via Redis. "
+            "Dictation runs on the platform's Groq key and is not billed to credits. 0 disables the cap."
+        ),
+    )
+    groq_monthly_budget_usd: float = Field(
+        default=10.0,
+        ge=0,
+        description=(
+            "Platform-wide monthly cap on Groq dictation spend in dollars, counted in Redis from each "
+            "clip's billed duration. Dictation answers a typed 503 once it is reached. 0 disables the cap."
+        ),
+    )
+    embeddings_monthly_token_cap: int = Field(
+        default=50_000_000,
+        ge=0,
+        description=(
+            "Platform-wide monthly cap on embedding API tokens, counted in Redis. Once reached, new "
+            "embeddings are skipped and search falls back as if the embedder were down. 0 disables the cap."
+        ),
+    )
     rate_limit_account_requests_per_hour: int = Field(
         default=20,
         ge=0,
