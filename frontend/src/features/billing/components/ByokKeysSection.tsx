@@ -1,8 +1,19 @@
 "use client";
 
 import * as React from "react";
-import { CircleNotch, FloppyDisk, Key, PencilSimple, SealCheck, Trash, X } from "@/shared/ui/icons";
+import {
+  CircleNotch,
+  FloppyDisk,
+  Key,
+  PencilSimple,
+  SealCheck,
+  SignIn,
+  Trash,
+  X,
+} from "@/shared/ui/icons";
 import { toast } from "react-toastify";
+import { startOpenRouterOAuth } from "@/shared/lib/api";
+import { tI18n } from "@/shared/lib/i18n";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { useLocale } from "@/shared/providers";
@@ -39,8 +50,27 @@ function StatusPill({ status }: { status: KeyStatus }) {
   );
 }
 
+/**
+ * Consume a ``?byok_error=<code>`` left by the OpenRouter OAuth callback redirect:
+ * toast the translated message once and strip the param so a reload stays quiet.
+ */
+function useByokErrorParam() {
+  React.useEffect(() => {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get("byok_error");
+    if (!code) return;
+    toast.error(tI18n(code));
+    url.searchParams.delete("byok_error");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, []);
+}
+
 function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
-  const { keyFor, saveKey, verifyKey, removeKey } = useByokKeys();
+  const { keyFor, saveKey, verifyKey, removeKey, openrouterOAuthAvailable } = useByokKeys();
   const { locale } = useLocale();
   const saved = keyFor(provider.slug);
 
@@ -49,6 +79,19 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
   const [baseUrl, setBaseUrl] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [verifying, setVerifying] = React.useState(false);
+  const [startingOAuth, setStartingOAuth] = React.useState(false);
+  const offerOAuth = provider.slug === "openrouter" && openrouterOAuthAvailable;
+
+  const handleOAuth = async () => {
+    setStartingOAuth(true);
+    try {
+      const { authorize_url } = await startOpenRouterOAuth();
+      window.location.assign(authorize_url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : msg("settings.keys.save_failed_toast"));
+      setStartingOAuth(false);
+    }
+  };
 
   const startEditing = () => {
     setSecret("");
@@ -133,6 +176,27 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+          {offerOAuth && !saved && !editing && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={handleOAuth}
+                  disabled={startingOAuth}
+                  className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                  aria-label={msg("settings.keys.openrouter_oauth")}
+                >
+                  {startingOAuth ? (
+                    <CircleNotch className="size-3.5 animate-spin" />
+                  ) : (
+                    <SignIn className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{msg("settings.keys.openrouter_oauth")}</TooltipContent>
+            </Tooltip>
+          )}
           {!saved && !editing && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -296,6 +360,7 @@ function ProviderKeyRow({ provider }: { provider: ByokProviderInfo }) {
  * the in-app home referenced by the model picker's BYOK mode.
  */
 export function ByokKeysSection() {
+  useByokErrorParam();
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">{msg("settings.keys.description")}</p>

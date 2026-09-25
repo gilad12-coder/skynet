@@ -18,6 +18,8 @@ interface ByokContextValue {
   keys: ProviderKey[];
   /** True while the saved keys are being fetched on mount. */
   loading: boolean;
+  /** Whether "Continue with OpenRouter" is offered (the backend vault is configured). */
+  openrouterOAuthAvailable: boolean;
   /** The saved key for a provider slug, or null. */
   keyFor: (provider: string) => ProviderKey | null;
   /**
@@ -80,12 +82,15 @@ export function ByokKeysProvider({
 }) {
   const [keys, setKeys] = React.useState<ProviderKey[]>(initialKeys);
   const [loading, setLoading] = React.useState(true);
+  const [openrouterOAuthAvailable, setOpenrouterOAuthAvailable] = React.useState(false);
 
   React.useEffect(() => {
     let active = true;
     getProviderKeys()
       .then((r) => {
-        if (active) setKeys(r.keys.map(toProviderKey));
+        if (!active) return;
+        setKeys(r.keys.map(toProviderKey));
+        setOpenrouterOAuthAvailable(r.openrouter_oauth_available ?? false);
       })
       .catch(() => {
         /* keep the current keys — no backend or signed-out */
@@ -134,8 +139,8 @@ export function ByokKeysProvider({
   }, []);
 
   const value = React.useMemo<ByokContextValue>(
-    () => ({ keys, loading, keyFor, saveKey, verifyKey, removeKey }),
-    [keys, loading, keyFor, saveKey, verifyKey, removeKey],
+    () => ({ keys, loading, openrouterOAuthAvailable, keyFor, saveKey, verifyKey, removeKey }),
+    [keys, loading, openrouterOAuthAvailable, keyFor, saveKey, verifyKey, removeKey],
   );
 
   return <ByokContext.Provider value={value}>{children}</ByokContext.Provider>;

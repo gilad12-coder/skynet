@@ -217,6 +217,11 @@ class Settings(BaseSettings):
         alias="NOTION_OAUTH_REDIRECT_URI",
         description="Absolute URL of this backend's /connectors/notion/oauth/callback as registered on the Notion integration. Unset derives it from the incoming request.",
     )
+    openrouter_oauth_redirect_uri: str | None = Field(
+        default=None,
+        alias="OPENROUTER_OAUTH_REDIRECT_URI",
+        description="Absolute URL of this backend's /billing/byok/openrouter/oauth/callback, used as the 'Continue with OpenRouter' callback. Unset derives it from the incoming request, which is right whenever the proxy forwards scheme and host.",
+    )
     litellm_proxy_url: str | None = Field(
         default=None,
         alias="LITELLM_PROXY_URL",

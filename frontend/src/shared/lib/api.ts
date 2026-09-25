@@ -981,6 +981,8 @@ export interface SaveProviderKeyOptions {
 /** The caller's stored BYOK provider keys, masked. */
 export interface ProviderKeysResponse {
   keys: ProviderKeyResponse[];
+  /** Whether "Continue with OpenRouter" can mint and store a key on this deployment. */
+  openrouter_oauth_available?: boolean;
 }
 
 /** List the caller's stored BYOK provider keys (masked). Reads work without the vault key. */
@@ -1015,6 +1017,17 @@ export function saveProviderKey(provider: string, secret: string, opts?: SavePro
 /** Re-run the verify probe against a stored BYOK key and return the fresh verdict. */
 export function verifyProviderKey(provider: string) {
   return request<ProviderKeyResponse>(`/billing/byok/keys/${provider}/verify`, { method: "POST" });
+}
+
+/**
+ * Begin "Continue with OpenRouter": returns the OpenRouter sign-in URL. The
+ * backend callback saves the minted key like a pasted one and redirects back to
+ * the providers tab (with `?byok_error=<code>` on failure).
+ */
+export function startOpenRouterOAuth() {
+  return request<{ authorize_url: string }>("/billing/byok/openrouter/oauth/start", {
+    method: "POST",
+  });
 }
 
 /** Forget a stored BYOK provider key; returns the remaining masked keys. */

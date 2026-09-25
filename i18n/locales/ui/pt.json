@@ -2963,6 +2963,7 @@
   "settings.keys.json_validate": "Validar",
   "settings.keys.json_warn_dupe": "Item {n}: entrada {provider} duplicada — a última prevalece.",
   "settings.keys.json_warn_replace": "{provider} já tem uma chave salva — importar a substitui.",
+  "settings.keys.openrouter_oauth": "Continuar com OpenRouter",
   "settings.keys.remove": "Remover",
   "settings.keys.remove_failed_toast": "Não foi possível remover a chave. Tente novamente.",
   "settings.keys.removed_toast": "Chave removida.",

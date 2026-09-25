@@ -2963,6 +2963,7 @@
   "settings.keys.json_validate": "검증",
   "settings.keys.json_warn_dupe": "항목 {n}: 중복된 {provider} 항목 — 마지막 항목이 적용됩니다.",
   "settings.keys.json_warn_replace": "{provider}에 저장된 키가 이미 있습니다 — 가져오면 교체됩니다.",
+  "settings.keys.openrouter_oauth": "OpenRouter로 계속하기",
   "settings.keys.remove": "제거",
   "settings.keys.remove_failed_toast": "키를 삭제할 수 없습니다. 다시 시도하세요.",
   "settings.keys.removed_toast": "키가 제거되었습니다.",
