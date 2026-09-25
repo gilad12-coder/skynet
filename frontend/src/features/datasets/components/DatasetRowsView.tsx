@@ -148,9 +148,12 @@ export function DatasetRowsView({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6">
           {rows === null ? (
-            <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
-              <CircleNotch className="size-4 animate-spin" />
-              {msg("datasets.detail.loading")}
+            <div role="status" className="flex min-h-40 flex-1 items-center justify-center py-10">
+              <CircleNotch
+                className="size-7 animate-spin text-muted-foreground/70 motion-reduce:animate-[spin_1.5s_linear_infinite]"
+                aria-hidden="true"
+              />
+              <span className="sr-only">{msg("datasets.detail.loading")}</span>
             </div>
           ) : columns.length === 0 || allRows.length === 0 ? (
             <div className="py-8">
