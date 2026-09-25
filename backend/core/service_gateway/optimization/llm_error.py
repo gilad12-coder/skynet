@@ -29,6 +29,28 @@ _GENERIC_MARKERS = (
 # Ordered most-specific first: (matcher, plain-language explanation).
 _LLM_ERROR_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
+        re.compile(r"managed_funds_exhausted", re.IGNORECASE),
+        (
+            "Provider funds: the managed model provider refused the run for lack of funds. "
+            "The refused calls were not charged and your credits are untouched. The team "
+            "has been alerted; retry shortly."
+        ),
+    ),
+    (
+        re.compile(r"byok_funds_exhausted", re.IGNORECASE),
+        (
+            "OpenRouter credits: your own OpenRouter account or key ran out of credits. "
+            "Add credits on OpenRouter or raise the key's limit, then retry."
+        ),
+    ),
+    (
+        re.compile(r"provider_budget_busy", re.IGNORECASE),
+        (
+            "Provider busy: the model provider held the run while earlier spend settled. "
+            "Retry in a minute."
+        ),
+    ),
+    (
         re.compile(r"insufficient_quota|exceeded your current quota|check your plan and billing|billing", re.IGNORECASE),
         (
             "Billing/quota: the language-model provider rejected the request for billing "

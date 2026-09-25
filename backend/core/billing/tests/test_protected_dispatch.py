@@ -13,7 +13,13 @@ from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session
 
 from core.billing.budgets import BudgetInsufficientError, BudgetService
-from core.billing.model_dispatch import OpenRouterDispatcher, response_usage
+from core.billing.model_dispatch import (
+    BYOK_FUNDS_EXHAUSTED,
+    FUNDS_BUSY,
+    MANAGED_FUNDS_EXHAUSTED,
+    OpenRouterDispatcher,
+    response_usage,
+)
 from core.billing.openrouter_quotes import price_text_request
 from core.billing.operation_pricing import ChargePolicy, UnpricedOperationError
 from core.billing.runtime import BudgetRuntime, OperationCompletedError, UsagePendingError
@@ -291,3 +297,65 @@ def test_responses_dispatch_reserves_the_actual_protocol_body(database: Engine) 
     snapshot = runtime.service.get(runtime.budget_id, "alice")
     assert snapshot.setup_spent_credits == Decimal("0.2")
     assert snapshot.reserved_credits == 0
+
+
+def _refusing_dispatcher(database: Engine, kind: str, headers: dict[str, str], calls: list) -> tuple:
+    """Build a dispatcher whose fake OpenRouter answers every inference with 402."""
+    runtime = _runtime(database)
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        """Serve the price catalog and refuse inference for lack of credits."""
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": CATALOG})
+        calls.append(request)
+        body = {"error": {"code": 402, "message": "Your account or API key has insufficient credits"}}
+        return httpx.Response(402, json=body, headers=headers)
+
+    client = httpx.Client(transport=httpx.MockTransport(provider))
+    dispatcher = OpenRouterDispatcher(
+        runtime, api_key="private", model="fixture/text", role="task", policy=ChargePolicy(kind), client=client
+    )
+    return runtime, dispatcher, client
+
+
+@pytest.mark.parametrize(
+    ("kind", "headers", "code"),
+    [
+        ("managed_model", {}, MANAGED_FUNDS_EXHAUSTED),
+        ("byok_model", {}, BYOK_FUNDS_EXHAUSTED),
+        ("managed_model", {"Retry-After": "5"}, FUNDS_BUSY),
+    ],
+)
+def test_funds_refusal_is_named_uncharged_and_not_resent(
+    database: Engine, monkeypatch: pytest.MonkeyPatch, kind: str, headers: dict, code: str
+) -> None:
+    """A 402 says which funds ran out, costs nothing, and later retries never reach OpenRouter."""
+    alerts: list[str] = []
+    monkeypatch.setattr("core.billing.model_dispatch.notify_managed_refusal", alerts.append)
+    calls: list = []
+    runtime, dispatcher, client = _refusing_dispatcher(database, kind, headers, calls)
+    with client:
+        first = dispatcher.dispatch("/chat/completions", REQUEST)
+        second = dispatcher.dispatch("/chat/completions", REQUEST, attempt=1)
+    assert first.status == second.status == 402
+    assert json.loads(first.body)["error"]["type"] == code
+    assert second.body == first.body
+    assert len(calls) == 1
+    snapshot = runtime.service.get(runtime.budget_id, "alice")
+    assert snapshot.billed_credits == 0
+    assert snapshot.reserved_credits == 0
+    assert alerts == (["fixture/text"] if code == MANAGED_FUNDS_EXHAUSTED else [])
+
+
+def test_funds_refusal_hold_expires(database: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Once the hold lapses the route asks OpenRouter again."""
+    calls: list = []
+    clock = [1000.0]
+    monkeypatch.setattr("core.billing.model_dispatch.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("core.billing.model_dispatch.notify_managed_refusal", lambda model: None)
+    _, dispatcher, client = _refusing_dispatcher(database, "managed_model", {"Retry-After": "5"}, calls)
+    with client:
+        dispatcher.dispatch("/chat/completions", REQUEST)
+        clock[0] += 6
+        dispatcher.dispatch("/chat/completions", REQUEST, attempt=1)
+    assert len(calls) == 2

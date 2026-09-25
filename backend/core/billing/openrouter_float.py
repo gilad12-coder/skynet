@@ -226,10 +226,50 @@ def notify_low_float(status: FloatStatus, *, now: float | None = None) -> bool:
     Returns:
         True when the cooldown allowed a notification to be dispatched.
     """
+    subject, body = _format_low_float(status)
+    return _notify(subject, body, now=now)
+
+
+def notify_managed_refusal(model: str, *, now: float | None = None) -> bool:
+    """Alert the operator that OpenRouter refused a managed call with 402.
+
+    The refusal is the float breach itself, seen from the request side: it can
+    land between two sweeps, or come from a provisioned key at its limit while
+    the account balance looks fine. Shares the low-float cooldown, so a burst
+    of refusals sends one alert.
+
+    Args:
+        model: The model the refused call asked for.
+        now: Monotonic clock override for the cooldown (tests).
+
+    Returns:
+        True when the cooldown allowed a notification to be dispatched.
+    """
+    subject = f"OpenRouter refused a managed {model} call for lack of funds (402)"
+    body = (
+        "A managed run was refused by OpenRouter with 402. Either the master "
+        "account is out of credits or the run's provisioned key hit its limit. "
+        "Check the balance and Auto Top-Up at https://openrouter.ai/settings/credits "
+        "and the key limits at https://openrouter.ai/settings/keys. The user was "
+        "not charged for the refused call."
+    )
+    return _notify(subject, body, now=now)
+
+
+def _notify(subject: str, body: str, *, now: float | None = None) -> bool:
+    """Send one operator alert to the webhook and the email, under the cooldown.
+
+    Args:
+        subject: Alert subject.
+        body: Plain-text alert body.
+        now: Monotonic clock override for the cooldown (tests).
+
+    Returns:
+        True when the cooldown allowed a notification to be dispatched.
+    """
     try:
         if not _cooldown_allows(now):
             return False
-        subject, body = _format_low_float(status)
         send_alert(subject, body=body, level="WARNING")
         recipient = settings.openrouter_float_alert_email.strip()
         if recipient and email_configured():
