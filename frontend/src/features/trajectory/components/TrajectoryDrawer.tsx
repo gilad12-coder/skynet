@@ -45,11 +45,6 @@ import {
   type FlexSignature,
 } from "../lib/flex-source";
 import { cn } from "@/shared/lib/utils";
-import {
-  ExpandToggleButton,
-  SHEET_EXPAND_TOGGLE_CLASS,
-  SHEET_EXPANDED_CLASS,
-} from "@/shared/ui/expand-toggle-button";
 import { formatBlackboxScore } from "@/shared/lib";
 import {
   detectRenderKind,
@@ -262,8 +257,6 @@ export function TrajectoryDrawer({
   onOpenRun,
 }: TrajectoryDrawerProps) {
   const isRtl = getActiveDir() === "rtl";
-  const [expanded, setExpanded] = useState(false);
-  const expandButton = useRef<HTMLButtonElement>(null);
   if (selection === null) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
@@ -282,33 +275,11 @@ export function TrajectoryDrawer({
   const view = toNodeView(selection);
 
   return (
-    <Sheet
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) setExpanded(false);
-        onOpenChange(next);
-      }}
-    >
+    <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side={isRtl ? "left" : "right"}
-        onEscapeKeyDown={(e) => {
-          if (expanded) {
-            e.preventDefault();
-            setExpanded(false);
-            expandButton.current?.focus();
-          }
-        }}
-        className={cn(
-          "w-full sm:max-w-md md:max-w-[min(520px,92vw)] overflow-hidden flex flex-col",
-          expanded && SHEET_EXPANDED_CLASS,
-        )}
+        className="w-full sm:max-w-md md:max-w-[min(520px,92vw)] overflow-hidden flex flex-col"
       >
-        <ExpandToggleButton
-          ref={expandButton}
-          expanded={expanded}
-          onToggle={() => setExpanded(!expanded)}
-          className={SHEET_EXPAND_TOGGLE_CLASS}
-        />
         <NodeBody
           view={view}
           valsetRows={valsetRows}
@@ -470,7 +441,7 @@ function NodeBody({
   return (
     <ToolSeveritiesContext.Provider value={toolSeverities ?? EMPTY_SEVERITIES}>
       <ToolDescriptionsContext.Provider value={toolDescriptions}>
-        <SheetHeader className="border-b border-border/40 sm:pe-24">
+        <SheetHeader className="border-b border-border/40">
           <SheetTitle className="flex items-center gap-2">
             {view.kind === "rejected" ? (
               <XCircle className="size-4 text-[#a85a3b]" aria-hidden="true" />

@@ -65,11 +65,7 @@ import {
 import { Switch } from "@/shared/ui/primitives/switch";
 import { Button } from "@/shared/ui/primitives/button";
 import { CopyButton } from "@/shared/ui/copy-button";
-import {
-  ExpandToggleButton,
-  SHEET_EXPAND_TOGGLE_CLASS,
-  SHEET_EXPANDED_CLASS,
-} from "@/shared/ui/expand-toggle-button";
+import { ExpandToggleButton } from "@/shared/ui/expand-toggle-button";
 import { WalletTab, UsageTab, ByokKeysSection } from "@/features/billing";
 import { ConnectorsTab } from "@/features/connectors";
 import { Input } from "@/shared/ui/primitives/input";
@@ -774,8 +770,6 @@ function AdminTab() {
   const [loading, setLoading] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [tableOpen, setTableOpen] = React.useState(false);
-  const [tableExpanded, setTableExpanded] = React.useState(false);
-  const tableExpandButton = React.useRef<HTMLButtonElement>(null);
   const [pendingUsername, setPendingUsername] = React.useState("");
   const [pendingBudgetMb, setPendingBudgetMb] = React.useState<number | "">("");
   const colFilters = useColumnFilters();
@@ -946,13 +940,7 @@ function AdminTab() {
         <span />
       </SettingsRow>
 
-      <Sheet
-        open={tableOpen}
-        onOpenChange={(next) => {
-          setTableOpen(next);
-          if (!next) setTableExpanded(false);
-        }}
-      >
+      <Sheet open={tableOpen} onOpenChange={setTableOpen}>
         <SheetTrigger asChild>
           <Button
             variant="outline"
@@ -966,22 +954,9 @@ function AdminTab() {
         <SheetContent
           side={isRtl ? "left" : "right"}
           aria-describedby={undefined}
-          onEscapeKeyDown={(e) => {
-            if (tableExpanded) {
-              e.preventDefault();
-              setTableExpanded(false);
-              tableExpandButton.current?.focus();
-            }
-          }}
-          className={cn("w-full gap-0 p-0 sm:max-w-2xl", tableExpanded && SHEET_EXPANDED_CLASS)}
+          className="w-full gap-0 p-0 sm:max-w-2xl"
         >
-          <ExpandToggleButton
-            ref={tableExpandButton}
-            expanded={tableExpanded}
-            onToggle={() => setTableExpanded(!tableExpanded)}
-            className={SHEET_EXPAND_TOGGLE_CLASS}
-          />
-          <SheetHeader className="border-b border-border/40 px-6 py-4 sm:pe-24">
+          <SheetHeader className="border-b border-border/40 px-6 py-4">
             <div className="flex items-center gap-2">
               <HardDrive className="size-4 text-muted-foreground" aria-hidden="true" />
               <SheetTitle>{msg("settings.admin.storage.title")}</SheetTitle>

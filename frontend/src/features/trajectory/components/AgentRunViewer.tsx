@@ -1,18 +1,13 @@
 "use client";
 
 import { Terminal } from "@/shared/ui/icons";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { getAgentRun } from "@/shared/lib/api";
 import { detectRenderKind, isDrawable } from "@/shared/lib/candidate-render";
 import { formatDuration } from "@/shared/lib/formatters";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
-import {
-  ExpandToggleButton,
-  SHEET_EXPAND_TOGGLE_CLASS,
-  SHEET_EXPANDED_CLASS,
-} from "@/shared/ui/expand-toggle-button";
 import type { BlackboxAgentRunResponse } from "@/shared/types/api";
 import {
   Sheet,
@@ -213,7 +208,7 @@ function RunBody({ optimizationId, run }: { optimizationId: string; run: AgentRu
 
   return (
     <>
-      <SheetHeader className="border-b border-border/40 sm:pe-24">
+      <SheetHeader className="border-b border-border/40">
         <SheetTitle className="flex items-center gap-2">
           <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
           <span>
@@ -320,36 +315,12 @@ export interface AgentRunViewerProps {
  */
 export function AgentRunViewer({ optimizationId, run, open, onOpenChange }: AgentRunViewerProps) {
   const isRtl = getActiveDir() === "rtl";
-  const [expanded, setExpanded] = useState(false);
-  const expandButton = useRef<HTMLButtonElement>(null);
   return (
-    <Sheet
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) setExpanded(false);
-        onOpenChange(next);
-      }}
-    >
+    <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side={isRtl ? "left" : "right"}
-        onEscapeKeyDown={(e) => {
-          if (expanded) {
-            e.preventDefault();
-            setExpanded(false);
-            expandButton.current?.focus();
-          }
-        }}
-        className={cn(
-          "flex w-full flex-col overflow-hidden sm:max-w-md md:max-w-[min(640px,92vw)]",
-          expanded && SHEET_EXPANDED_CLASS,
-        )}
+        className="flex w-full flex-col overflow-hidden sm:max-w-md md:max-w-[min(640px,92vw)]"
       >
-        <ExpandToggleButton
-          ref={expandButton}
-          expanded={expanded}
-          onToggle={() => setExpanded(!expanded)}
-          className={SHEET_EXPAND_TOGGLE_CLASS}
-        />
         {run !== null ? (
           <RunBody key={run.run_id} optimizationId={optimizationId} run={run} />
         ) : null}

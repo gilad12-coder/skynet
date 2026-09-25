@@ -5,7 +5,7 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { msg } from "@/shared/lib/messages";
 
-/** The grow/shrink toggle for tables, dialogs and drawers that can fill the screen. */
+/** The grow/shrink toggle for tables and dialogs that can fill the screen. */
 export function ExpandToggleButton({
   ref,
   expanded,
@@ -48,14 +48,3 @@ export function ExpandToggleButton({
     </Tooltip>
   );
 }
-
-/**
- * Places the toggle just inside a sheet's close button, centered on it at both
- * close-button sizes (44px below ``lg``, 26px at ``lg``). Hidden on phones,
- * where sheets already fill the screen.
- */
-export const SHEET_EXPAND_TOGGLE_CLASS =
-  "absolute top-3.5 end-14 z-10 hidden sm:inline-flex lg:top-3 lg:end-12";
-
-/** Width of an expanded side sheet, overriding its ``sm``/``md`` caps. */
-export const SHEET_EXPANDED_CLASS = "sm:max-w-[96vw] md:max-w-[96vw]";
