@@ -413,7 +413,7 @@ export function ConnectorImportDialog({
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="min-w-0 truncate text-xs font-medium text-foreground">
-                  {msg("datasets.detail.row_reader.hint")}
+                  {previewRows?.rows.length ? msg("datasets.detail.row_reader.hint") : null}
                 </span>
                 {rowTotal != null && (
                   <span className="shrink-0 whitespace-nowrap text-[0.6875rem] text-muted-foreground tabular-nums">
