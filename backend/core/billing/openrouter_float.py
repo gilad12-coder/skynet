@@ -24,6 +24,7 @@ break because a monitor read timed out.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -42,6 +43,11 @@ from ..config import settings
 logger = logging.getLogger("skynet.billing.openrouter_float")
 
 OPENROUTER_CREDITS_URL = "https://openrouter.ai/api/v1/credits"
+OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
+# Highest spend limit a key used off Railway may carry before startup warns. A
+# local backend has no float watch or alert history of its own, so it should
+# run on its own small-limit key rather than the production key.
+LOCAL_KEY_LIMIT_CEILING_DOLLARS = 20.0
 _REQUEST_TIMEOUT_SECONDS = 6.0
 _CREDITS_PER_DOLLAR = 100
 # Continues the 7421370000xx advisory-lock series in core/api/observability.py;
@@ -112,6 +118,55 @@ def read_account_balance_credits() -> int | None:
         logger.warning("OpenRouter balance read had an unexpected shape: %s", exc)
         return None
     return round(remaining_dollars * _CREDITS_PER_DOLLAR)
+
+
+def local_key_limit_problem() -> str | None:
+    """Say what is wrong with the OpenRouter key when running off Railway.
+
+    Railway sets ``RAILWAY_ENVIRONMENT_NAME`` on every deployed service, so its
+    absence means a developer machine. There the key should be a separate one
+    with a small spend limit: a local run on the production key spends the
+    same balance that backs every user's credits. Fails open.
+
+    Returns:
+        A warning to log, or ``None`` when deployed, no key is set, the key is
+        capped low enough, or the key could not be read.
+    """
+    key = settings.openrouter_api_key
+    if key is None or os.environ.get("RAILWAY_ENVIRONMENT_NAME"):
+        return None
+    try:
+        response = httpx.get(
+            OPENROUTER_KEY_URL,
+            headers={"Authorization": f"Bearer {key.get_secret_value()}"},
+            timeout=_REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        limit = (response.json().get("data") or {}).get("limit")
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
+        logger.debug("OpenRouter key read failed: %s", exc)
+        return None
+    if limit is not None and float(limit) <= LOCAL_KEY_LIMIT_CEILING_DOLLARS:
+        return None
+    cap = "no spend limit" if limit is None else f"a ${float(limit):.2f} spend limit"
+    return (
+        f"OPENROUTER_API_KEY has {cap} and this backend is not on Railway. Local runs "
+        "spend the same balance that backs user credits. Create a separate key at "
+        f"https://openrouter.ai/settings/keys with a limit of ${LOCAL_KEY_LIMIT_CEILING_DOLLARS:.0f} "
+        "or less and put it in backend/.env."
+    )
+
+
+def warn_if_local_key_uncapped() -> None:
+    """Log :func:`local_key_limit_problem` on a daemon thread so startup never waits on it."""
+
+    def run() -> None:
+        """Read the key and log the warning, if any."""
+        problem = local_key_limit_problem()
+        if problem:
+            logger.warning(problem)
+
+    threading.Thread(target=run, name="openrouter-local-key-check", daemon=True).start()
 
 
 def check_float(outstanding_credits: int) -> FloatStatus | None:

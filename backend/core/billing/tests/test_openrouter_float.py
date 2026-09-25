@@ -429,3 +429,40 @@ def test_webhook_monitor_runs_once_on_redelivery(engine: object, stripe_ready: N
     assert monitor.call_count == 1
     with Session(engine) as session:
         assert session.get(BillingCustomerModel, "u@x.com").credit_balance == 500
+
+
+def _key_response(limit: float | None) -> Mock:
+    """Fake a ``GET /api/v1/key`` answer carrying ``limit``."""
+    response = Mock()
+    response.raise_for_status = Mock()
+    response.json = Mock(return_value={"data": {"limit": limit}})
+    return response
+
+
+@pytest.mark.parametrize(("limit", "warns"), [(None, True), (100.0, True), (5.0, False), (20.0, False)])
+def test_local_key_limit_problem_flags_uncapped_keys(
+    monkeypatch: pytest.MonkeyPatch, limit: float | None, warns: bool
+) -> None:
+    """Off Railway, a key with no limit or a large one draws a warning."""
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.setattr(openrouter_float.settings, "openrouter_api_key", SecretStr("sk-or-test"))
+    with patch.object(openrouter_float.httpx, "get", return_value=_key_response(limit)):
+        problem = openrouter_float.local_key_limit_problem()
+    assert (problem is not None) is warns
+
+
+def test_local_key_limit_problem_is_silent_on_railway(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deployed service uses the production key on purpose and never reads it here."""
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+    monkeypatch.setattr(openrouter_float.settings, "openrouter_api_key", SecretStr("sk-or-test"))
+    with patch.object(openrouter_float.httpx, "get") as get:
+        assert openrouter_float.local_key_limit_problem() is None
+    get.assert_not_called()
+
+
+def test_local_key_limit_problem_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unreachable key endpoint yields no warning and no exception."""
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.setattr(openrouter_float.settings, "openrouter_api_key", SecretStr("sk-or-test"))
+    with patch.object(openrouter_float.httpx, "get", side_effect=httpx.ConnectError("down")):
+        assert openrouter_float.local_key_limit_problem() is None
