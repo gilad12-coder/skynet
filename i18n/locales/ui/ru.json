@@ -67,6 +67,8 @@
   "connectors.snowflake.credentials_help": "Создайте программный токен доступа для своего пользователя и укажите warehouse, который может использовать его роль.",
   "connectors.snowflake.name": "Snowflake",
   "connector_import.back": "Назад",
+  "connector_import.up": "На папку выше",
+  "connector_import.more_folders": "Предыдущие папки",
   "connector_import.breadcrumb": "Расположение",
   "connector_import.browse_error": "Не удалось загрузить это расположение.",
   "connector_import.button": "Импорт",

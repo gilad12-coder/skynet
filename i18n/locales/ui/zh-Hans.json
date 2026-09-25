@@ -67,6 +67,8 @@
   "connectors.snowflake.credentials_help": "为您的用户创建一个程序化访问令牌，并指定其角色可使用的仓库。",
   "connectors.snowflake.name": "Snowflake",
   "connector_import.back": "返回",
+  "connector_import.up": "上一级文件夹",
+  "connector_import.more_folders": "上级文件夹",
   "connector_import.breadcrumb": "位置",
   "connector_import.browse_error": "无法加载此位置。",
   "connector_import.button": "导入",

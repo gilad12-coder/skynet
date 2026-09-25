@@ -67,6 +67,8 @@
   "connectors.snowflake.credentials_help": "Kullanıcınız için bir programatik erişim belirteci oluşturun ve rolünün kullanabileceği bir warehouse belirleyin.",
   "connectors.snowflake.name": "Snowflake",
   "connector_import.back": "Geri",
+  "connector_import.up": "Bir klasör yukarı",
+  "connector_import.more_folders": "Önceki klasörler",
   "connector_import.breadcrumb": "Konum",
   "connector_import.browse_error": "Bu konum yüklenemedi.",
   "connector_import.button": "İçe aktar",

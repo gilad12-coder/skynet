@@ -67,6 +67,8 @@
   "connectors.snowflake.credentials_help": "أنشئ رمز وصول برمجي لمستخدمك، وحدد مستودعًا يمكن لدوره استخدامه",
   "connectors.snowflake.name": "Snowflake",
   "connector_import.back": "رجوع",
+  "connector_import.up": "مجلد واحد للأعلى",
+  "connector_import.more_folders": "المجلدات السابقة",
   "connector_import.breadcrumb": "الموقع",
   "connector_import.browse_error": "تعذّر تحميل هذا الموقع.",
   "connector_import.button": "استيراد",
