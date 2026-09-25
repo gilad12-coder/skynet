@@ -429,3 +429,14 @@ def test_webhook_monitor_runs_once_on_redelivery(engine: object, stripe_ready: N
     assert monitor.call_count == 1
     with Session(engine) as session:
         assert session.get(BillingCustomerModel, "u@x.com").credit_balance == 500
+
+
+def test_notify_managed_refusal_shares_the_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A burst of 402 refusals sends one alert, naming the refused model."""
+    sent: list[str] = []
+    monkeypatch.setattr(openrouter_float, "_cooldown_allows", lambda now=None: not sent)
+    monkeypatch.setattr(openrouter_float, "send_alert", lambda subject, **_: sent.append(subject))
+    assert openrouter_float.notify_managed_refusal("fixture/text") is True
+    assert openrouter_float.notify_managed_refusal("fixture/text") is False
+    assert len(sent) == 1
+    assert "fixture/text" in sent[0]
