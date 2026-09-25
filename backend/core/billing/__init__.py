@@ -20,6 +20,7 @@ from .byok_vault import (
     VaultSnapshot,
     byok_provider_for_litellm,
 )
+from .issuing_float import FundingResult, IssuingFundingSweeper, fund_issuing_once, start_issuing_funding_sweeper
 from .openrouter_float import (
     FloatStatus,
     OpenRouterFloatSweeper,
@@ -43,6 +44,8 @@ __all__ = [
     "FREE_GRANT_CREDITS",
     "PACK_CREDITS",
     "FloatStatus",
+    "FundingResult",
+    "IssuingFundingSweeper",
     "LedgerRow",
     "OpenRouterFloatSweeper",
     "OpenRouterKeyProvisioner",
@@ -56,6 +59,7 @@ __all__ = [
     "check_float",
     "committed_spend_credits",
     "cost_ceiling_budget",
+    "fund_issuing_once",
     "inject_byok_connections",
     "inject_provisioned_openrouter_key",
     "notify_low_float",
@@ -63,5 +67,6 @@ __all__ = [
     "provider_slug_for_model",
     "read_account_balance_credits",
     "resolve_byok_model_config",
+    "start_issuing_funding_sweeper",
     "start_openrouter_float_sweeper",
 ]
