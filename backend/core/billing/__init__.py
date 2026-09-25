@@ -28,6 +28,7 @@ from .openrouter_float import (
     notify_low_float,
     read_account_balance_credits,
     start_openrouter_float_sweeper,
+    warn_if_local_key_uncapped,
 )
 from .openrouter_keys import OpenRouterKeyProvisioner, inject_provisioned_openrouter_key
 from .service import (
@@ -69,4 +70,5 @@ __all__ = [
     "resolve_byok_model_config",
     "start_issuing_funding_sweeper",
     "start_openrouter_float_sweeper",
+    "warn_if_local_key_uncapped",
 ]
