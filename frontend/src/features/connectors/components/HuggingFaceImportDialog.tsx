@@ -6,6 +6,7 @@ import { toast } from "react-toastify";
 import {
   ArrowLeft,
   ArrowSquareOut,
+  ArrowUpRight,
   CaretRight,
   CircleNotch,
   DownloadSimple,
@@ -385,18 +386,29 @@ export function HuggingFaceImportDialog({
               >
                 <ArrowLeft className="size-4 rtl:-scale-x-100" />
               </Button>
+              <span
+                dir="ltr"
+                className="min-w-0 flex-1 truncate text-start text-sm font-medium text-foreground"
+              >
+                {repoId}
+              </span>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <a
-                    href={`https://huggingface.co/datasets/${repoId}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    dir="ltr"
-                    className="group flex min-w-0 flex-1 items-center justify-between gap-2 text-sm font-medium text-foreground"
+                  <Button
+                    asChild
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={msg("hf_import.view_on_hub")}
+                    className="size-[44px] shrink-0 text-muted-foreground hover:text-foreground sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
                   >
-                    <span className="truncate">{repoId}</span>
-                    <ArrowSquareOut className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
-                  </a>
+                    <a
+                      href={`https://huggingface.co/datasets/${repoId}`}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    >
+                      <ArrowUpRight className="size-4" />
+                    </a>
+                  </Button>
                 </TooltipTrigger>
                 <TooltipContent>{msg("hf_import.view_on_hub")}</TooltipContent>
               </Tooltip>
