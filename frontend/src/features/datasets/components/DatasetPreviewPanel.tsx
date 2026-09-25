@@ -1,9 +1,6 @@
 "use client";
 import * as React from "react";
-import { ArrowsIn, ArrowsOut } from "@/shared/ui/icons";
-import { Button } from "@/shared/ui/primitives/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
-import { msg } from "@/shared/lib/messages";
+import { ExpandToggleButton } from "@/shared/ui/expand-toggle-button";
 import { cn } from "@/shared/lib/utils";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import { DatasetRowsView } from "./DatasetRowsView";
@@ -89,7 +86,7 @@ export function DatasetPreviewPanel({
         readerIndex={readerIndex}
         setReaderIndex={setReaderIndex}
         toolbarActions={
-          <ExpandTableButton
+          <ExpandToggleButton
             ref={expandButton}
             expanded={expanded}
             controls={id}
@@ -102,42 +99,4 @@ export function DatasetPreviewPanel({
 }
 
 /** The grow/shrink toggle every dataset table puts in its toolbar. */
-export function ExpandTableButton({
-  ref,
-  expanded,
-  controls,
-  onToggle,
-}: {
-  ref?: React.Ref<HTMLButtonElement>;
-  expanded: boolean;
-  /** Id of the element that grows. */
-  controls?: string;
-  onToggle: () => void;
-}) {
-  const label = msg(
-    expanded ? "shared.expandable_textarea.collapse" : "shared.expandable_textarea.expand",
-  );
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          ref={ref}
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={label}
-          aria-expanded={expanded}
-          aria-controls={controls}
-          onClick={onToggle}
-        >
-          {expanded ? (
-            <ArrowsIn className="size-[1.05rem] text-primary" aria-hidden="true" />
-          ) : (
-            <ArrowsOut className="size-[1.05rem] text-primary" aria-hidden="true" />
-          )}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  );
-}
+export { ExpandToggleButton as ExpandTableButton };

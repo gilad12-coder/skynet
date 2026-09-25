@@ -28,7 +28,13 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/shared/ui/primit
 import { formatStorageSize } from "@/shared/lib/formatters";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
+import { cn } from "@/shared/lib/utils";
 import { SelectCheckbox } from "@/shared/ui/select-checkbox";
+import {
+  ExpandToggleButton,
+  SHEET_EXPAND_TOGGLE_CLASS,
+  SHEET_EXPANDED_CLASS,
+} from "@/shared/ui/expand-toggle-button";
 import { StorageItemRow } from "./StorageItemRow";
 
 /** Per-category label keys, mirroring the backend ``STORAGE_CATEGORIES``. */
@@ -97,12 +103,15 @@ export function StorageCategoryDrawer({
   const [anchorIndex, setAnchorIndex] = React.useState<number | null>(null);
   const [bulkConfirm, setBulkConfirm] = React.useState(false);
   const [progress, setProgress] = React.useState<{ done: number; total: number } | null>(null);
+  const [expanded, setExpanded] = React.useState(false);
+  const expandButton = React.useRef<HTMLButtonElement>(null);
 
   React.useEffect(() => {
     setSelected(new Set());
     setAnchorIndex(null);
     if (!category) {
       setItems(null);
+      setExpanded(false);
       return;
     }
     let cancelled = false;
@@ -250,9 +259,22 @@ export function StorageCategoryDrawer({
         <SheetContent
           side={isRtl ? "left" : "right"}
           aria-describedby={undefined}
-          className="w-full gap-0 p-0 sm:max-w-lg"
+          onEscapeKeyDown={(e) => {
+            if (expanded) {
+              e.preventDefault();
+              setExpanded(false);
+              expandButton.current?.focus();
+            }
+          }}
+          className={cn("w-full gap-0 p-0 sm:max-w-lg", expanded && SHEET_EXPANDED_CLASS)}
         >
-          <SheetHeader className="shrink-0 border-b border-border/40 px-6 py-4">
+          <ExpandToggleButton
+            ref={expandButton}
+            expanded={expanded}
+            onToggle={() => setExpanded(!expanded)}
+            className={SHEET_EXPAND_TOGGLE_CLASS}
+          />
+          <SheetHeader className="shrink-0 border-b border-border/40 px-6 py-4 sm:pe-24">
             <div className="flex items-center gap-2">
               <HardDrive className="size-4 text-muted-foreground" aria-hidden="true" />
               <SheetTitle>{labelKey ? msg(labelKey) : ""}</SheetTitle>

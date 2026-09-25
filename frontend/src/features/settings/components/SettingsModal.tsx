@@ -65,6 +65,11 @@ import {
 import { Switch } from "@/shared/ui/primitives/switch";
 import { Button } from "@/shared/ui/primitives/button";
 import { CopyButton } from "@/shared/ui/copy-button";
+import {
+  ExpandToggleButton,
+  SHEET_EXPAND_TOGGLE_CLASS,
+  SHEET_EXPANDED_CLASS,
+} from "@/shared/ui/expand-toggle-button";
 import { WalletTab, UsageTab, ByokKeysSection } from "@/features/billing";
 import { ConnectorsTab } from "@/features/connectors";
 import { Input } from "@/shared/ui/primitives/input";
@@ -769,6 +774,8 @@ function AdminTab() {
   const [loading, setLoading] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [tableOpen, setTableOpen] = React.useState(false);
+  const [tableExpanded, setTableExpanded] = React.useState(false);
+  const tableExpandButton = React.useRef<HTMLButtonElement>(null);
   const [pendingUsername, setPendingUsername] = React.useState("");
   const [pendingBudgetMb, setPendingBudgetMb] = React.useState<number | "">("");
   const colFilters = useColumnFilters();
@@ -939,7 +946,13 @@ function AdminTab() {
         <span />
       </SettingsRow>
 
-      <Sheet open={tableOpen} onOpenChange={setTableOpen}>
+      <Sheet
+        open={tableOpen}
+        onOpenChange={(next) => {
+          setTableOpen(next);
+          if (!next) setTableExpanded(false);
+        }}
+      >
         <SheetTrigger asChild>
           <Button
             variant="outline"
@@ -953,9 +966,22 @@ function AdminTab() {
         <SheetContent
           side={isRtl ? "left" : "right"}
           aria-describedby={undefined}
-          className="w-full gap-0 p-0 sm:max-w-2xl"
+          onEscapeKeyDown={(e) => {
+            if (tableExpanded) {
+              e.preventDefault();
+              setTableExpanded(false);
+              tableExpandButton.current?.focus();
+            }
+          }}
+          className={cn("w-full gap-0 p-0 sm:max-w-2xl", tableExpanded && SHEET_EXPANDED_CLASS)}
         >
-          <SheetHeader className="border-b border-border/40 px-6 py-4">
+          <ExpandToggleButton
+            ref={tableExpandButton}
+            expanded={tableExpanded}
+            onToggle={() => setTableExpanded(!tableExpanded)}
+            className={SHEET_EXPAND_TOGGLE_CLASS}
+          />
+          <SheetHeader className="border-b border-border/40 px-6 py-4 sm:pe-24">
             <div className="flex items-center gap-2">
               <HardDrive className="size-4 text-muted-foreground" aria-hidden="true" />
               <SheetTitle>{msg("settings.admin.storage.title")}</SheetTitle>
@@ -1544,6 +1570,10 @@ const SETTINGS_GROUPS = [
 const SETTINGS_RAIL_ITEM_CLASS =
   "min-h-[44px] w-full flex-none justify-start gap-2.5 rounded-lg px-3 py-2 font-medium text-sidebar-foreground/60 data-[state=inactive]:hover:bg-sidebar-accent/40 data-[state=inactive]:hover:text-sidebar-foreground data-[state=active]:bg-transparent data-[state=active]:border-transparent data-[state=active]:font-medium data-[state=active]:text-primary data-[state=active]:hover:text-primary max-md:w-auto! md:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]";
 
+// Tabs dense enough (ledgers, connection lists, admin tables) to earn a
+// toggle that grows the modal to fill the screen.
+const EXPANDABLE_SETTINGS_TABS: ReadonlySet<SettingsTab> = new Set(["usage", "connectors", "admin"]);
+
 function SettingsPanelHeader({ tab }: { tab: SettingsTab }) {
   const { icon: Icon, labelKey } = SETTINGS_TAB_META[tab];
   return (
@@ -1564,6 +1594,11 @@ export function SettingsModal() {
   const isPhone = useIsPhone();
   const prefersReduced = useReducedMotion();
   const [activeTab, setActiveTab] = React.useState<SettingsTab>(isPhone ? "account" : "wizard");
+  const [expandedState, setExpanded] = React.useState(false);
+  const expandButton = React.useRef<HTMLButtonElement>(null);
+  const canExpand = !isPhone && EXPANDABLE_SETTINGS_TABS.has(activeTab);
+  const expanded = canExpand && expandedState;
+  const settingsTabsId = React.useId();
   const selectTab = React.useCallback((tab: SettingsTab) => {
     setActiveTab(tab);
     track(TelemetryEvent.SettingsTabChanged, { tab });
@@ -1596,22 +1631,46 @@ export function SettingsModal() {
     <Dialog open={open} onOpenChange={setOpen} modal={!tutorialState.isVisible}>
       <DialogContent
         data-settings-text-buttons
-        className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0 sm:max-w-4xl [&_[data-slot=button]]:min-h-[44px] [&_[data-slot=button]]:min-w-[44px] [&_[data-slot=select-trigger]]:min-h-[44px] sm:[&_[data-slot=button]]:min-h-0 sm:[&_[data-slot=button]]:min-w-0 sm:[&_[data-slot=select-trigger]]:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-w-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=select-trigger]]:min-h-[44px]"
+        onEscapeKeyDown={(e) => {
+          // Escape leaves full screen before it closes settings.
+          if (expanded) {
+            e.preventDefault();
+            setExpanded(false);
+            expandButton.current?.focus();
+          }
+        }}
+        className={cn(
+          "max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0 transition-[max-width] duration-200 ease-out motion-reduce:transition-none",
+          expanded ? "sm:max-w-[96vw]" : "sm:max-w-4xl",
+          "[&_[data-slot=button]]:min-h-[44px] [&_[data-slot=button]]:min-w-[44px] [&_[data-slot=select-trigger]]:min-h-[44px] sm:[&_[data-slot=button]]:min-h-0 sm:[&_[data-slot=button]]:min-w-0 sm:[&_[data-slot=select-trigger]]:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-w-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=select-trigger]]:min-h-[44px]",
+        )}
       >
-        <DialogHeader className="border-b border-border/40 px-4 py-3 pe-12 sm:px-5 sm:py-4">
-          <div className="min-w-0">
+        <DialogHeader className="flex-row items-center gap-2 border-b border-border/40 px-4 py-3 pe-12 sm:px-5 sm:py-4">
+          <div className="min-w-0 flex-1">
             <DialogTitle>{msg("settings.title")}</DialogTitle>
             <DialogDescription className="mt-1 text-xs">
               {msg("settings.subtitle")}
             </DialogDescription>
           </div>
+          {canExpand && (
+            <ExpandToggleButton
+              ref={expandButton}
+              expanded={expanded}
+              controls={settingsTabsId}
+              onToggle={() => setExpanded(!expanded)}
+            />
+          )}
         </DialogHeader>
 
         <Tabs
           orientation="vertical"
           value={activeTab}
           onValueChange={(v) => selectTab(v as SettingsTab)}
-          className="flex h-[calc(100dvh-5.75rem)] max-h-[680px] min-h-0 flex-col gap-0 sm:h-[min(72vh,680px)] md:flex-row"
+          id={settingsTabsId}
+          className={cn(
+            "flex h-[calc(100dvh-5.75rem)] min-h-0 flex-col gap-0 transition-[height] duration-200 ease-out motion-reduce:transition-none md:flex-row",
+            expanded ? "sm:h-[calc(94dvh-5.75rem)]" : "max-h-[680px] sm:h-[min(72vh,680px)]",
+          )}
         >
           <TabsList
             aria-label={msg("settings.title")}
