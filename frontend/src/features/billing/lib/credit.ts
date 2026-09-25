@@ -91,6 +91,20 @@ export interface CreditPack {
   popular?: boolean;
 }
 
+/** The caller's platform plan — Pro lifts storage, job, and concurrency limits. */
+export interface PlanState {
+  plan: "free" | "pro";
+  /** ISO end of the current billing period, when subscribed. */
+  renewsAt: string | null;
+  /** True when Pro ends at `renewsAt` instead of renewing. */
+  cancelAtPeriodEnd: boolean;
+  /** Whether this deployment sells Pro at all. */
+  available: boolean;
+}
+
+/** Monthly Skynet Pro price in USD — mirrors `_PRO_MONTHLY` in provision_stripe.py. */
+export const PRO_MONTHLY_USD = 9;
+
 /** The whole wallet as the UI needs it. */
 export interface CreditWallet {
   /** Purchased credits, on top of the free grant. */
@@ -98,6 +112,7 @@ export interface CreditWallet {
   freeGrant: FreeGrant;
   /** Most-recent-first ledger rows. */
   usage: UsageEntry[];
+  plan: PlanState;
 }
 
 /** Convert a credit count to its USD platform value. */
@@ -179,4 +194,5 @@ export const EMPTY_WALLET: CreditWallet = {
   paidBalanceCredits: 0,
   freeGrant: { creditsRemaining: 0, creditsTotal: 0 },
   usage: [],
+  plan: { plan: "free", renewsAt: null, cancelAtPeriodEnd: false, available: false },
 };

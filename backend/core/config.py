@@ -104,6 +104,11 @@ class Settings(BaseSettings):
     stripe_price_pack_pro: str = Field(
         default="", alias="STRIPE_PRICE_PACK_PRO", description="Stripe price id for the 'pro' one-time credit pack."
     )
+    stripe_price_pro_monthly: str = Field(
+        default="",
+        alias="STRIPE_PRICE_PRO_MONTHLY",
+        description="Stripe recurring price id for the Skynet Pro monthly plan. Unset hides the upgrade.",
+    )
     app_public_url: str = Field(
         default="http://localhost:3000",
         alias="APP_PUBLIC_URL",
@@ -454,6 +459,11 @@ class Settings(BaseSettings):
         default=250 * 1024 * 1024,
         ge=1,
         description="Per-user unified storage budget in bytes across all of their Skynet data",
+    )
+    pro_storage_quota_bytes: int = Field(
+        default=10 * 1024 * 1024 * 1024,
+        ge=1,
+        description="Unified storage budget in bytes for an account on the Skynet Pro plan",
     )
     cancel_poll_interval: float = Field(
         default=1.0, ge=0.1, le=10.0, description="Seconds between cancel signal checks"
@@ -983,6 +993,11 @@ class Settings(BaseSettings):
             "Cap on a single user's concurrently active runs (pending/validating/running/"
             "paused); further submissions are refused until one finishes. 0 disables the cap."
         ),
+    )
+    pro_max_concurrent_jobs_per_user: int = Field(
+        default=20,
+        ge=0,
+        description="Concurrent active-run cap for an account on the Skynet Pro plan. 0 disables the cap.",
     )
     global_daily_spend_ceiling_credits: int = Field(
         default=0,

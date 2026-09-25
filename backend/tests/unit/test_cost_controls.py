@@ -281,3 +281,25 @@ def test_credits_spent_since_empty_window_is_zero() -> None:
     service = StripeBillingService(engine=engine)
 
     assert service.credits_spent_since(datetime.now(UTC) - timedelta(hours=24)) == 0
+
+
+class _ProStore(_FakeStore):
+    """A store whose account holds an entitled Pro subscription."""
+
+    def has_pro_plan(self, username: str) -> bool:
+        """Report every account as Pro."""
+        return True
+
+
+def test_admission_pro_plan_uses_higher_concurrency_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Pro account is held to the Pro active-run cap, not the free one."""
+    monkeypatch.setattr(settings, "submissions_paused", False)
+    monkeypatch.setattr(settings, "global_daily_spend_ceiling_credits", 0)
+    monkeypatch.setattr(settings, "max_concurrent_jobs_per_user", 2)
+    monkeypatch.setattr(settings, "pro_max_concurrent_jobs_per_user", 5)
+
+    submissions._enforce_submission_admission(_ProStore(active=4), "alice")
+    with pytest.raises(DomainError) as exc:
+        submissions._enforce_submission_admission(_ProStore(active=5), "alice")
+
+    assert exc.value.params["limit"] == 5

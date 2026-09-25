@@ -257,12 +257,23 @@ class UsageEntryResponse(BaseModel):
     kind: str = Field(description="Entry kind: 'run', 'topup', or 'grant'.")
 
 
+class PlanResponse(BaseModel):
+    """The caller's platform plan: free, or the Skynet Pro subscription."""
+
+    plan: Literal["free", "pro"] = Field(description="'pro' while the subscription is entitled, else 'free'.")
+    status: str | None = Field(default=None, description="Mirrored Stripe subscription status, or null.")
+    renews_at: str | None = Field(default=None, description="ISO-8601 end of the current Pro billing period.")
+    cancel_at_period_end: bool = Field(default=False, description="True when Pro lapses at renews_at.")
+    available: bool = Field(default=False, description="Whether Pro can be purchased on this deployment.")
+
+
 class WalletResponse(BaseModel):
     """The caller's wallet: purchased balance, free grant, recent ledger."""
 
     paid_balance_credits: int = Field(description="Purchased credit balance, on top of the free grant.")
     free_grant: FreeGrantResponse
     usage: list[UsageEntryResponse] = Field(default_factory=list, description="Most-recent-first ledger rows.")
+    plan: PlanResponse = Field(default_factory=lambda: PlanResponse(plan="free"))
 
 
 class UsageDayResponse(BaseModel):
@@ -465,6 +476,13 @@ def create_billing_router(*, job_store) -> APIRouter:
                 )
                 for row in snapshot.usage
             ],
+            plan=PlanResponse(
+                plan="pro" if snapshot.plan.plan == "pro" else "free",
+                status=snapshot.plan.status,
+                renews_at=snapshot.plan.renews_at,
+                cancel_at_period_end=snapshot.plan.cancel_at_period_end,
+                available=snapshot.plan.available,
+            ),
         )
 
     @router.get(
@@ -634,6 +652,22 @@ def create_billing_router(*, job_store) -> APIRouter:
         else:
             raise DomainError("billing.invalid_amount", status=400)
         return CheckoutSessionResponse(url=url)
+
+    @router.post(
+        "/billing/subscription/checkout",
+        response_model=CheckoutSessionResponse,
+        summary="Start a Stripe Checkout session that subscribes the caller to Skynet Pro",
+    )
+    def create_subscription_checkout(user: AuthenticatedUserDep) -> CheckoutSessionResponse:
+        """Create a subscription Checkout session for the Skynet Pro monthly plan.
+
+        Args:
+            user: Authenticated subscriber; the plan lands on their account via webhook.
+
+        Returns:
+            The hosted Checkout URL to redirect the subscriber to.
+        """
+        return CheckoutSessionResponse(url=service.create_subscription_checkout(user.username))
 
     @router.post(
         "/billing/portal",

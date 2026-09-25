@@ -999,3 +999,224 @@ def test_webhook_dispute_after_partial_refund_nets(engine: object, webhook_ready
     dispute_rows = _ledger_rows(engine, "u@x.com", "dispute")
     assert len(dispute_rows) == 1
     assert dispute_rows[0].delta_credits == -300
+
+
+def _subscription(
+    subscription_id: str,
+    username: str,
+    status: str,
+    *,
+    period_end: int = 1_800_000_000,
+    cancel_at_period_end: bool = False,
+) -> dict:
+    """Build a Subscription object shaped like the 2025+ Stripe API.
+
+    Args:
+        subscription_id: Stripe subscription id.
+        username: Account stamped into the subscription metadata.
+        status: Stripe subscription status.
+        period_end: Epoch seconds of the current period end, carried on the item.
+        cancel_at_period_end: Whether the subscription lapses at period end.
+
+    Returns:
+        A subscription mapping with the fields the handler reads.
+    """
+    return {
+        "id": subscription_id,
+        "customer": f"cus_{username}",
+        "status": status,
+        "cancel_at_period_end": cancel_at_period_end,
+        "cancel_at": None,
+        "metadata": {"username": username, "plan": "pro"},
+        "items": {"data": [{"current_period_end": period_end}]},
+    }
+
+
+def _subscription_event(event_id: str, event_type: str, subscription: dict) -> dict:
+    """Wrap a subscription in a ``customer.subscription.*`` event.
+
+    Args:
+        event_id: Stripe event id.
+        event_type: One of the subscription lifecycle event types.
+        subscription: The event's Subscription object.
+
+    Returns:
+        An event dict shaped like the fields ``handle_webhook`` reads.
+    """
+    return {"id": event_id, "type": event_type, "data": {"object": subscription}}
+
+
+@pytest.fixture
+def pro_price(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configure a Pro monthly price id."""
+    monkeypatch.setattr(settings, "stripe_price_pro_monthly", "price_pro")
+
+
+def test_subscription_checkout_builds_subscription_session(engine: object, configured: None, pro_price: None) -> None:
+    """Pro checkout is a subscription session that stamps the username on the subscription."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    captured: dict[str, object] = {}
+
+    def _create(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return SimpleNamespace(url="https://stripe.test/c/cs_pro")
+
+    with patch("stripe.checkout.Session.create", side_effect=_create):
+        url = service.create_subscription_checkout("u@x.com")
+    assert url == "https://stripe.test/c/cs_pro"
+    assert captured["mode"] == "subscription"
+    assert captured["customer"] == "cus_u@x.com"
+    assert captured["line_items"] == [{"price": "price_pro", "quantity": 1}]
+    assert captured["subscription_data"] == {"metadata": {"username": "u@x.com", "plan": "pro"}}
+    assert str(captured["success_url"]).endswith("/?billing=pro")
+
+
+def test_subscription_checkout_unavailable_without_price(engine: object, configured: None) -> None:
+    """With no Pro price configured the upgrade is a 503, before any Stripe call."""
+    service = StripeBillingService(engine=engine)
+    with patch("stripe.checkout.Session.create") as create, pytest.raises(DomainError) as exc:
+        service.create_subscription_checkout("u@x.com")
+    assert exc.value.status_code == 503
+    assert exc.value.code == "billing.plan_unavailable"
+    create.assert_not_called()
+
+
+def test_subscription_checkout_refuses_existing_subscriber(engine: object, configured: None, pro_price: None) -> None:
+    """An account already on Pro can't start a second subscription."""
+    _seed_customer(engine, "u@x.com")
+    with Session(engine) as session:
+        session.get(BillingCustomerModel, "u@x.com").subscription_status = "active"
+        session.commit()
+    service = StripeBillingService(engine=engine)
+    with patch("stripe.checkout.Session.create") as create, pytest.raises(DomainError) as exc:
+        service.create_subscription_checkout("u@x.com")
+    assert exc.value.status_code == 409
+    assert exc.value.code == "billing.already_subscribed"
+    create.assert_not_called()
+
+
+def test_webhook_subscription_lifecycle_mirrors_latest_state(engine: object, webhook_ready: None) -> None:
+    """Created, cancel-scheduled and deleted events each mirror the re-read subscription."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    active = _subscription("sub_1", "u@x.com", "active")
+    with (
+        patch(
+            "stripe.Webhook.construct_event",
+            return_value=_subscription_event("evt_s1", "customer.subscription.created", active),
+        ),
+        patch("stripe.Subscription.retrieve", return_value=active),
+    ):
+        service.handle_webhook(b"{}", "sig")
+    wallet = service.get_wallet("u@x.com")
+    assert wallet.plan.plan == "pro"
+    assert wallet.plan.renews_at == datetime.fromtimestamp(1_800_000_000, UTC).isoformat()
+    assert wallet.plan.cancel_at_period_end is False
+
+    cancelling = _subscription("sub_1", "u@x.com", "active", cancel_at_period_end=True)
+    with (
+        patch(
+            "stripe.Webhook.construct_event",
+            return_value=_subscription_event("evt_s2", "customer.subscription.updated", cancelling),
+        ),
+        patch("stripe.Subscription.retrieve", return_value=cancelling),
+    ):
+        service.handle_webhook(b"{}", "sig")
+    assert service.get_wallet("u@x.com").plan.cancel_at_period_end is True
+
+    canceled = _subscription("sub_1", "u@x.com", "canceled")
+    with (
+        patch(
+            "stripe.Webhook.construct_event",
+            return_value=_subscription_event("evt_s3", "customer.subscription.deleted", canceled),
+        ),
+        patch("stripe.Subscription.retrieve", return_value=canceled),
+    ):
+        service.handle_webhook(b"{}", "sig")
+    assert service.get_wallet("u@x.com").plan.plan == "free"
+
+
+def test_webhook_subscription_out_of_order_event_applies_current_state(engine: object, webhook_ready: None) -> None:
+    """A late ``created`` event carrying ``incomplete`` can't downgrade an active subscription."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    stale = _subscription("sub_1", "u@x.com", "incomplete")
+    current = _subscription("sub_1", "u@x.com", "active")
+    with (
+        patch(
+            "stripe.Webhook.construct_event",
+            return_value=_subscription_event("evt_late", "customer.subscription.created", stale),
+        ),
+        patch("stripe.Subscription.retrieve", return_value=current),
+    ):
+        service.handle_webhook(b"{}", "sig")
+    assert service.get_wallet("u@x.com").plan.plan == "pro"
+
+
+def test_webhook_subscription_falls_back_to_event_copy(engine: object, webhook_ready: None) -> None:
+    """When the re-read fails, the event's own subscription snapshot is applied."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    active = _subscription("sub_1", "u@x.com", "active")
+    with (
+        patch(
+            "stripe.Webhook.construct_event",
+            return_value=_subscription_event("evt_fb", "customer.subscription.created", active),
+        ),
+        patch("stripe.Subscription.retrieve", side_effect=stripe.APIConnectionError("down")),
+    ):
+        service.handle_webhook(b"{}", "sig")
+    assert service.get_wallet("u@x.com").plan.plan == "pro"
+
+
+def test_webhook_abandoned_second_subscription_keeps_live_one(engine: object, webhook_ready: None) -> None:
+    """An expired duplicate subscription does not overwrite the one being paid for."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    live = _subscription("sub_live", "u@x.com", "active")
+    with (
+        patch(
+            "stripe.Webhook.construct_event",
+            return_value=_subscription_event("evt_a", "customer.subscription.created", live),
+        ),
+        patch("stripe.Subscription.retrieve", return_value=live),
+    ):
+        service.handle_webhook(b"{}", "sig")
+    dead = _subscription("sub_dead", "u@x.com", "incomplete_expired")
+    with (
+        patch(
+            "stripe.Webhook.construct_event",
+            return_value=_subscription_event("evt_b", "customer.subscription.updated", dead),
+        ),
+        patch("stripe.Subscription.retrieve", return_value=dead),
+    ):
+        service.handle_webhook(b"{}", "sig")
+    with Session(engine) as session:
+        row = session.get(BillingCustomerModel, "u@x.com")
+        assert row.stripe_subscription_id == "sub_live"
+        assert row.subscription_status == "active"
+
+
+def test_webhook_subscription_resolves_account_by_customer_id(engine: object, webhook_ready: None) -> None:
+    """A subscription without username metadata is matched through its Stripe customer."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    active = _subscription("sub_1", "u@x.com", "past_due")
+    active["metadata"] = {}
+    with (
+        patch(
+            "stripe.Webhook.construct_event",
+            return_value=_subscription_event("evt_c", "customer.subscription.updated", active),
+        ),
+        patch("stripe.Subscription.retrieve", return_value=active),
+    ):
+        service.handle_webhook(b"{}", "sig")
+    assert service.get_wallet("u@x.com").plan.plan == "pro"
+
+
+def test_wallet_plan_reports_availability(engine: object, configured: None, pro_price: None) -> None:
+    """A new account reads as free, with the upgrade available once a Pro price is set."""
+    plan = StripeBillingService(engine=engine).get_wallet("new@x.com").plan
+    assert plan.plan == "free"
+    assert plan.available is True
