@@ -43,14 +43,18 @@ JSONL = b'{"name": "ada", "score": 1}\n{"name": "bob", "score": 2}\n'
 
 @pytest.fixture
 def generic_oauth_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hide the Google, Microsoft and GitHub OAuth buttons unless a test opts in."""
+    """Hide the Google, Microsoft, GitHub and Notion OAuth buttons unless a test opts in."""
     for name in ("google_oauth_client_id", "google_oauth_client_secret", "github_oauth_client_id"):
         monkeypatch.setattr(settings, name, None)
     monkeypatch.setattr(settings, "github_oauth_client_secret", None)
     monkeypatch.setattr(settings, "microsoft_oauth_client_id", None)
     monkeypatch.setattr(settings, "microsoft_oauth_client_secret", None)
+    monkeypatch.setattr(settings, "notion_oauth_client_id", None)
+    monkeypatch.setattr(settings, "notion_oauth_client_secret", None)
     monkeypatch.setattr(settings, "google_oauth_redirect_uri", None)
+    monkeypatch.setattr(settings, "microsoft_oauth_redirect_uri", None)
     monkeypatch.setattr(settings, "github_oauth_redirect_uri", None)
+    monkeypatch.setattr(settings, "notion_oauth_redirect_uri", None)
 
 
 class _StreamCtx:
@@ -1036,3 +1040,230 @@ def test_onedrive_is_oauth_only_and_browses_graph(
     assert imported.status_code == 200, imported.text
     assert imported.json()["dataset"]["name"] == "train.jsonl"
     assert stream.call_args.args[1].endswith("/me/drive/items/i1/content")
+
+
+def _start_oauth(client: Any, provider: str, fields: dict[str, str] | None = None) -> dict[str, list[str]]:
+    """Start a provider's OAuth flow and return the authorize URL's query.
+
+    Args:
+        client: The test client.
+        provider: Provider slug.
+        fields: Optional pre-sign-in fields.
+
+    Returns:
+        The parsed query string, plus ``_host`` and ``_path`` of the URL.
+    """
+    start = client.post(f"/connectors/{provider}/oauth/start", json={"fields": fields} if fields else None)
+    assert start.status_code == 200, start.text
+    url = urlparse(start.json()["authorize_url"])
+    return {**parse_qs(url.query), "_host": [url.netloc], "_path": [url.path]}
+
+
+def _finish_oauth(client: Any, provider: str, state: str, token_body: dict[str, Any], api: Any) -> Any:
+    """Run the callback with a mocked token endpoint and provider API.
+
+    Args:
+        client: The test client.
+        provider: Provider slug.
+        state: The state minted at start.
+        token_body: What the token endpoint returns.
+        api: Side effect serving ``transport.httpx.request``.
+
+    Returns:
+        The mock of ``oauth.httpx.post`` for asserting the exchange.
+    """
+    with (
+        patch("core.connectors.oauth.httpx.post", return_value=_response(200, token_body)) as post,
+        patch("core.connectors.transport.httpx.request", side_effect=api),
+    ):
+        callback = client.get(
+            f"/connectors/{provider}/oauth/callback", params={"code": "c-1", "state": state}, follow_redirects=False
+        )
+    assert callback.status_code == 303
+    assert "connector_error" not in callback.headers["location"], callback.headers["location"]
+    return post
+
+
+@pytest.fixture
+def google_oauth_on(monkeypatch: pytest.MonkeyPatch, vault_key: str, generic_oauth_off: None) -> None:  # noqa: F811
+    """Register a Google OAuth client with a Sheets callback to derive the others from."""
+    monkeypatch.setattr(settings, "google_oauth_client_id", "g-client")
+    monkeypatch.setattr(settings, "google_oauth_client_secret", SecretStr("g-secret"))
+    monkeypatch.setattr(
+        settings, "google_oauth_redirect_uri", "https://api.example/connectors/google_sheets/oauth/callback"
+    )
+
+
+def test_gcs_oauth_lists_projects_then_buckets(google_oauth_on: None) -> None:
+    """Continue with Google on GCS asks for storage read, then browses projects and buckets with the user token."""
+    client, store = _make_client()
+    statuses = {c["provider"]: c["oauth_available"] for c in client.get("/connectors").json()["connectors"]}
+    assert statuses["gcs"] is True
+    assert statuses["bigquery"] is True
+    assert statuses["s3"] is False
+    query = _start_oauth(client, "gcs")
+    assert query["_host"] == ["accounts.google.com"]
+    assert query["client_id"] == ["g-client"]
+    assert query["redirect_uri"] == ["https://api.example/connectors/gcs/oauth/callback"]
+    scopes = query["scope"][0].split()
+    assert "https://www.googleapis.com/auth/devstorage.read_only" in scopes
+    assert {"openid", "email"} <= set(scopes)
+
+    def api(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve userinfo, Resource Manager and the bucket listing."""
+        assert kwargs["headers"]["Authorization"] == "Bearer ya29.gcs"
+        parts = urlparse(url)
+        if parts.path == "/oauth2/v3/userinfo":
+            return _response(200, {"email": "ada@example.com"})
+        if parts.netloc == "cloudresourcemanager.googleapis.com":
+            return _response(200, {"projects": [{"projectId": "proj-1", "name": "Proj One"}]})
+        if parts.path == "/storage/v1/b":
+            assert kwargs["params"]["project"] == "proj-1"
+            return _response(200, {"items": [{"name": "warehouse"}]})
+        raise AssertionError(url)
+
+    token = {"access_token": "ya29.gcs", "refresh_token": "r", "expires_in": 3600, "token_type": "Bearer"}
+    post = _finish_oauth(client, "gcs", query["state"][0], token, api)
+    assert post.call_args.kwargs["data"]["client_secret"] == "g-secret"
+    assert post.call_args.kwargs["data"]["code_verifier"]
+    secret = ConnectorVault(store.engine).resolve("alice", "gcs")
+    assert (secret.access_token, secret.auth_method) == ("ya29.gcs", "oauth")
+    with patch("core.connectors.transport.httpx.request", side_effect=api):
+        root = client.get("/connectors/gcs/browse").json()["entries"]
+        assert [(e["ref"], e["name"]) for e in root] == [("project:proj-1", "Proj One")]
+        buckets = client.get("/connectors/gcs/browse", params={"location": "project:proj-1"}).json()["entries"]
+    assert [e["ref"] for e in buckets] == ["warehouse"]
+    entry = next(c for c in client.get("/connectors").json()["connectors"] if c["provider"] == "gcs")
+    assert entry["account_label"] == "ada@example.com"
+
+
+def test_bigquery_oauth_browses_projects_and_reads_with_user_token(google_oauth_on: None) -> None:
+    """A user-token BigQuery link picks a project first; refs carry it through preview."""
+    client, _ = _make_client()
+    query = _start_oauth(client, "bigquery")
+    assert query["redirect_uri"] == ["https://api.example/connectors/bigquery/oauth/callback"]
+    assert "https://www.googleapis.com/auth/bigquery.readonly" in query["scope"][0].split()
+    schema = {"fields": [{"name": "n", "type": "INTEGER"}]}
+
+    def api(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve userinfo and the BigQuery REST API for a domain-scoped project."""
+        assert kwargs["headers"]["Authorization"] == "Bearer ya29.bq"
+        path = urlparse(url).path
+        base = "/bigquery/v2/projects"
+        if path == "/oauth2/v3/userinfo":
+            return _response(200, {"email": "ada@example.com"})
+        if path == base:
+            return _response(200, {"projects": [{"projectReference": {"projectId": "acme.com:lab"}}]})
+        if path == f"{base}/acme.com%3Alab/datasets" or path == f"{base}/acme.com:lab/datasets":
+            return _response(200, {"datasets": [{"datasetReference": {"datasetId": "analytics"}}]})
+        if path.endswith("/datasets/analytics/tables"):
+            return _response(200, {"tables": [{"tableReference": {"tableId": "events"}}]})
+        if path.endswith("/datasets/analytics/tables/events"):
+            assert "acme.com" in path
+            return _response(200, {"schema": schema, "type": "TABLE"})
+        if path.endswith("/datasets/analytics/tables/events/data"):
+            return _response(200, {"rows": [{"f": [{"v": "7"}]}]})
+        raise AssertionError(f"unexpected call {method} {url}")
+
+    token = {"access_token": "ya29.bq", "refresh_token": "r", "expires_in": 3600, "token_type": "Bearer"}
+    _finish_oauth(client, "bigquery", query["state"][0], token, api)
+    with patch("core.connectors.transport.httpx.request", side_effect=api):
+        projects = client.get("/connectors/bigquery/browse").json()["entries"]
+        assert [(e["ref"], e["kind"]) for e in projects] == [("acme.com:lab", "folder")]
+        datasets = client.get("/connectors/bigquery/browse", params={"location": "acme.com:lab"}).json()["entries"]
+        assert [e["ref"] for e in datasets] == ["acme.com:lab/analytics"]
+        tables = client.get("/connectors/bigquery/browse", params={"location": "acme.com:lab/analytics"}).json()[
+            "entries"
+        ]
+        assert [e["ref"] for e in tables] == ["acme.com:lab/analytics.events"]
+        preview = client.get("/connectors/bigquery/preview", params={"ref": "acme.com:lab/analytics.events"}).json()
+        bad = client.get("/connectors/bigquery/browse", params={"location": "a b/analytics"})
+    assert preview["rows"] == [{"n": 7}]
+    assert bad.status_code == 400
+
+
+def test_azure_blob_oauth_names_account_and_uses_bearer(
+    monkeypatch: pytest.MonkeyPatch,
+    vault_key: str,  # noqa: F811
+    generic_oauth_off: None,
+) -> None:
+    """The storage account named before sign-in rides the state; blob calls carry the user's bearer."""
+    monkeypatch.setattr(settings, "microsoft_oauth_client_id", "ms-client")
+    monkeypatch.setattr(settings, "microsoft_oauth_client_secret", SecretStr("ms-secret"))
+    monkeypatch.setattr(
+        settings, "microsoft_oauth_redirect_uri", "https://api.example/connectors/onedrive/oauth/callback"
+    )
+    client, store = _make_client()
+    bad = client.post("/connectors/azure_blob/oauth/start", json={"fields": {"account": "Not_Valid!"}})
+    assert bad.status_code == 400
+    assert bad.json()["code"] == "connectors.invalid_credentials"
+    assert client.post("/connectors/azure_blob/oauth/start").status_code == 400
+    query = _start_oauth(client, "azure_blob", {"account": "acct", "container": "data"})
+    assert query["_host"] == ["login.microsoftonline.com"]
+    assert query["redirect_uri"] == ["https://api.example/connectors/azure_blob/oauth/callback"]
+    assert query["scope"] == ["https://storage.azure.com/user_impersonation offline_access openid email"]
+    seen: list[tuple[str, dict[str, str]]] = []
+
+    def api(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the blob listing, recording each call."""
+        seen.append((url, kwargs["headers"]))
+        return _response(200, content=AZURE_LIST)
+
+    token = {"access_token": "eyJ.azure", "refresh_token": "r", "expires_in": 3600, "token_type": "Bearer"}
+    post = _finish_oauth(client, "azure_blob", query["state"][0], token, api)
+    assert post.call_args.kwargs["data"]["client_secret"] == "ms-secret"
+    assert seen == []
+    entry = next(c for c in client.get("/connectors").json()["connectors"] if c["provider"] == "azure_blob")
+    assert (entry["account_label"], entry["auth_method"]) == ("acct/data", "oauth")
+    with patch("core.connectors.transport.httpx.request", side_effect=api):
+        root = client.get("/connectors/azure_blob/browse").json()["entries"]
+        assert [e["ref"] for e in root] == ["data"]
+        listing = client.get("/connectors/azure_blob/browse", params={"location": "data/"}).json()["entries"]
+    assert [(e["ref"], e["kind"]) for e in listing] == [("data/2026/", "folder"), ("data/users.csv", "file")]
+    url, headers = seen[-1]
+    assert url.startswith("https://acct.blob.core.windows.net/data?restype=container&comp=list")
+    assert headers["Authorization"] == "Bearer eyJ.azure"
+    assert headers["x-ms-version"] >= "2020-04-08"
+    assert "sig=" not in url
+    assert ConnectorVault(store.engine).resolve("alice", "azure_blob").account_label == "acct/data"
+
+
+def test_notion_oauth_exchanges_with_basic_auth_json(
+    monkeypatch: pytest.MonkeyPatch,
+    vault_key: str,  # noqa: F811
+    generic_oauth_off: None,
+) -> None:
+    """Notion's token call is JSON with the client in HTTP Basic auth and no PKCE verifier."""
+    monkeypatch.setattr(settings, "notion_oauth_client_id", "n-client")
+    monkeypatch.setattr(settings, "notion_oauth_client_secret", SecretStr("n-secret"))
+    client, store = _make_client()
+    statuses = {c["provider"]: c["oauth_available"] for c in client.get("/connectors").json()["connectors"]}
+    assert statuses["notion"] is True
+    query = _start_oauth(client, "notion")
+    assert (query["_host"], query["_path"]) == (["api.notion.com"], ["/v1/oauth/authorize"])
+    assert query["owner"] == ["user"]
+    assert query["client_id"] == ["n-client"]
+    assert query["redirect_uri"] == ["http://testserver/connectors/notion/oauth/callback"]
+    assert "scope" not in query
+
+    def api(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve ``/users/me`` for the workspace label."""
+        assert kwargs["headers"]["Authorization"] == "Bearer ntn_oauth"
+        assert urlparse(url).path == "/v1/users/me"
+        return _response(200, {"bot": {"workspace_name": "Acme"}})
+
+    token = {"access_token": "ntn_oauth", "token_type": "bearer", "workspace_name": "Acme", "bot_id": "b"}
+    post = _finish_oauth(client, "notion", query["state"][0], token, api)
+    assert post.call_args.args[0] == "https://api.notion.com/v1/oauth/token"
+    assert post.call_args.kwargs["auth"] == ("n-client", "n-secret")
+    body = post.call_args.kwargs["json"]
+    assert body["grant_type"] == "authorization_code"
+    assert body["code"] == "c-1"
+    assert body["redirect_uri"] == "http://testserver/connectors/notion/oauth/callback"
+    assert "code_verifier" not in body
+    assert "client_secret" not in body
+    assert "data" not in post.call_args.kwargs
+    secret = ConnectorVault(store.engine).resolve("alice", "notion")
+    assert (secret.access_token, secret.auth_method, secret.expires_at) == ("ntn_oauth", "oauth", None)
+    entry = next(c for c in client.get("/connectors").json()["connectors"] if c["provider"] == "notion")
+    assert entry["account_label"] == "Acme"

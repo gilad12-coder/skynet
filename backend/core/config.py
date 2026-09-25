@@ -160,7 +160,7 @@ class Settings(BaseSettings):
     google_oauth_client_id: str | None = Field(
         default=None,
         alias="GOOGLE_OAUTH_CLIENT_ID",
-        description="Client id of the Google OAuth client used by the Google Sheets connector. Unset hides 'Continue with Google'; users can still paste a service-account key.",
+        description="Client id of the Google OAuth client shared by the Google Sheets, Google Drive, Cloud Storage and BigQuery connectors. Unset hides 'Continue with Google'; users can still paste a service-account key.",
     )
     google_oauth_client_secret: SecretStr | None = Field(
         default=None,
@@ -170,7 +170,7 @@ class Settings(BaseSettings):
     google_oauth_redirect_uri: str | None = Field(
         default=None,
         alias="GOOGLE_OAUTH_REDIRECT_URI",
-        description="Absolute URL of this backend's /connectors/google_sheets/oauth/callback as registered on the Google client. Unset derives it from the incoming request.",
+        description="Absolute URL of this backend's /connectors/google_sheets/oauth/callback as registered on the Google client. The Drive, Cloud Storage and BigQuery callbacks are derived from it by swapping the provider segment (/connectors/google_drive/, /connectors/gcs/, /connectors/bigquery/), so register those on the client too. Unset derives every callback from the incoming request.",
     )
     github_oauth_client_id: str | None = Field(
         default=None,
@@ -190,7 +190,7 @@ class Settings(BaseSettings):
     microsoft_oauth_client_id: str | None = Field(
         default=None,
         alias="MICROSOFT_OAUTH_CLIENT_ID",
-        description="Application (client) id of the Microsoft Entra app used by the OneDrive connector. Unset hides the connector's sign-in button; OneDrive has no pasted-credential fallback.",
+        description="Application (client) id of the Microsoft Entra app shared by the OneDrive and Azure Blob Storage connectors. Unset hides 'Continue with Microsoft'; OneDrive has no pasted-credential fallback, Azure Blob still takes a connection string or SAS URL.",
     )
     microsoft_oauth_client_secret: SecretStr | None = Field(
         default=None,
@@ -200,7 +200,22 @@ class Settings(BaseSettings):
     microsoft_oauth_redirect_uri: str | None = Field(
         default=None,
         alias="MICROSOFT_OAUTH_REDIRECT_URI",
-        description="Absolute URL of this backend's /connectors/onedrive/oauth/callback as registered on the Entra app. Unset derives it from the incoming request.",
+        description="Absolute URL of this backend's /connectors/onedrive/oauth/callback as registered on the Entra app. The Azure Blob callback is derived from it by swapping in /connectors/azure_blob/, so register that on the app too. Unset derives every callback from the incoming request.",
+    )
+    notion_oauth_client_id: str | None = Field(
+        default=None,
+        alias="NOTION_OAUTH_CLIENT_ID",
+        description="OAuth client id of the Notion public integration used by the Notion connector. Unset hides 'Continue with Notion'; users can still paste an internal-integration token.",
+    )
+    notion_oauth_client_secret: SecretStr | None = Field(
+        default=None,
+        alias="NOTION_OAUTH_CLIENT_SECRET",
+        description="OAuth client secret of the Notion public integration. Notion requires it for the code exchange.",
+    )
+    notion_oauth_redirect_uri: str | None = Field(
+        default=None,
+        alias="NOTION_OAUTH_REDIRECT_URI",
+        description="Absolute URL of this backend's /connectors/notion/oauth/callback as registered on the Notion integration. Unset derives it from the incoming request.",
     )
     litellm_proxy_url: str | None = Field(
         default=None,

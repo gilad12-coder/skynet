@@ -1,12 +1,10 @@
 "use client";
 
-import * as React from "react";
+import type * as React from "react";
 import {
   Aws,
   Azure,
   Github,
-  Google,
-  GoogleCloud,
   HuggingFace,
   Langfuse,
   LangSmith,
@@ -14,7 +12,16 @@ import {
   Notion,
   Snowflake,
 } from "@lobehub/icons";
-import { Brain, Database, Table, Trophy } from "@/shared/ui/icons";
+import {
+  BigQuery,
+  Braintrust,
+  CloudStorage,
+  GoogleDrive,
+  GoogleSheets,
+  Kaggle,
+  MySQL,
+  PostgreSQL,
+} from "@/shared/ui/brand-marks";
 import {
   removeConnector,
   removeHuggingFaceConnector,
@@ -54,6 +61,10 @@ export interface ProviderMeta {
   Mark: React.ComponentType<{ size: number }>;
   /** Label of the OAuth button; absent for providers that only take credentials. */
   oauthButton?: string;
+  /** Inputs asked before the OAuth redirect (Azure's storage account); absent when none. */
+  oauthFields?: CredentialField[];
+  /** Hint under the pre-sign-in form. */
+  oauthHelp?: string;
   credentialsHelp: string;
   helpUrl?: string;
   helpUrlLabel?: string;
@@ -61,7 +72,7 @@ export interface ProviderMeta {
   reconnectHint: string;
   toastConnected: string;
   toastDisconnected: string;
-  startOAuth: () => Promise<{ authorize_url: string }>;
+  startOAuth: (fields?: Record<string, string>) => Promise<{ authorize_url: string }>;
   saveCredentials: (fields: Record<string, string>) => Promise<ConnectorListResponse>;
   remove: () => Promise<ConnectorListResponse>;
 }
@@ -94,71 +105,6 @@ export function categoryLabel(category: ProviderCategory): string {
   return msg(`connectors.category.${category}`);
 }
 
-/** Brand-coloured disc around a Phosphor glyph, for services without a shipped logo. */
-const glyphAvatar =
-  (
-    Glyph: React.ComponentType<{ size?: number | string; className?: string }>,
-    background: string,
-  ) =>
-  ({ size }: { size: number }) => (
-    <span
-      className="inline-flex shrink-0 items-center justify-center rounded-full text-white"
-      style={{ width: size, height: size, background }}
-    >
-      <Glyph size={Math.round(size * 0.55)} />
-    </span>
-  );
-
-/** Flat Phosphor glyph tinted in a brand colour, for menu rows. */
-const glyphMark =
-  (
-    Glyph: React.ComponentType<{ size?: number | string; style?: React.CSSProperties }>,
-    color: string,
-  ) =>
-  ({ size }: { size: number }) => <Glyph size={size} style={{ color }} />;
-
-/**
- * Google Sheets ships no logo in the icon set: a spreadsheet page with a folded corner and a
- * 2×2 grid. Drawn on a 16-unit grid with integer edges so it stays crisp at 16px.
- */
-function GoogleSheetsGlyph({ size, page, grid }: { size: number; page: string; grid: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M4.5 1H9l4 4v8.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 13.5v-11A1.5 1.5 0 0 1 4.5 1Z"
-        fill={page}
-      />
-      <path d="M9 1v4h4Z" fill={grid} fillOpacity={0.5} />
-      <rect x="5" y="8" width="7" height="5" fill={grid} />
-      <rect x="5" y="10" width="7" height="1" fill={page} />
-      <rect x="8" y="8" width="1" height="5" fill={page} />
-    </svg>
-  );
-}
-const GOOGLE_SHEETS_GREEN = "#1E8E3E";
-const GoogleSheetsAvatar = ({ size }: { size: number }) => (
-  <span
-    className="inline-flex shrink-0 items-center justify-center rounded-full"
-    style={{ width: size, height: size, background: GOOGLE_SHEETS_GREEN }}
-  >
-    <GoogleSheetsGlyph size={Math.round(size * (4 / 7))} page="#fff" grid={GOOGLE_SHEETS_GREEN} />
-  </span>
-);
-const GoogleSheetsMark = ({ size }: { size: number }) => (
-  <GoogleSheetsGlyph size={size} page={GOOGLE_SHEETS_GREEN} grid="#fff" />
-);
-
-const KaggleAvatar = glyphAvatar(Trophy, "#20BEFF");
-const KaggleMark = glyphMark(Trophy, "#20BEFF");
-const PostgresAvatar = glyphAvatar(Database, "#336791");
-const PostgresMark = glyphMark(Database, "#336791");
-const MySqlAvatar = glyphAvatar(Database, "#00758F");
-const MySqlMark = glyphMark(Database, "#00758F");
-const BigQueryAvatar = glyphAvatar(Table, "#4285F4");
-const BigQueryMark = glyphMark(Table, "#4285F4");
-const BraintrustAvatar = glyphAvatar(Brain, "#1F1F1F");
-const BraintrustMark = glyphMark(Brain, "#1F1F1F");
-
 const generic = (
   id: Exclude<ConnectorProvider, "huggingface">,
   category: ProviderCategory,
@@ -170,7 +116,7 @@ const generic = (
   reconnectHint: formatMsg("connectors.reconnect_hint", { provider: name }),
   toastConnected: formatMsg("connectors.toast.provider_connected", { provider: name }),
   toastDisconnected: formatMsg("connectors.toast.provider_disconnected", { provider: name }),
-  startOAuth: () => startConnectorOAuth(id),
+  startOAuth: (fields?: Record<string, string>) => startConnectorOAuth(id, fields),
   saveCredentials: (fields: Record<string, string>) => saveConnectorCredentials(id, fields),
   remove: () => removeConnector(id),
 });
@@ -230,8 +176,8 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "docs", msg("connectors.google_sheets.name")),
         blurb: msg("connectors.google_sheets.blurb"),
-        Avatar: GoogleSheetsAvatar,
-        Mark: GoogleSheetsMark,
+        Avatar: GoogleSheets.Avatar,
+        Mark: GoogleSheets.Mark,
         oauthButton: msg("connectors.google_sheets.oauth_button"),
         credentialsHelp: msg("connectors.google_sheets.credentials_help"),
         fields: [serviceAccountField()],
@@ -293,8 +239,9 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "files", msg("connectors.gcs.name")),
         blurb: msg("connectors.gcs.blurb"),
-        Avatar: GoogleCloud.Avatar,
-        Mark: GoogleCloud.Color,
+        Avatar: CloudStorage.Avatar,
+        Mark: CloudStorage.Mark,
+        oauthButton: msg("connectors.gcs.oauth_button"),
         credentialsHelp: msg("connectors.gcs.credentials_help"),
         fields: [serviceAccountField(), { key: "bucket", label: msg("connectors.field.bucket") }],
       };
@@ -304,6 +251,17 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.azure_blob.blurb"),
         Avatar: Azure.Avatar,
         Mark: Azure.Color,
+        oauthButton: msg("connectors.azure_blob.oauth_button"),
+        oauthFields: [
+          {
+            key: "account",
+            label: msg("connectors.field.storage_account"),
+            placeholder: msg("connectors.field.storage_account_placeholder"),
+            required: true,
+          },
+          { key: "container", label: msg("connectors.field.container") },
+        ],
+        oauthHelp: msg("connectors.azure_blob.oauth_help"),
         credentialsHelp: msg("connectors.azure_blob.credentials_help"),
         fields: [
           {
@@ -321,8 +279,8 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "hubs", msg("connectors.kaggle.name")),
         blurb: msg("connectors.kaggle.blurb"),
-        Avatar: KaggleAvatar,
-        Mark: KaggleMark,
+        Avatar: Kaggle.Avatar,
+        Mark: Kaggle.Mark,
         credentialsHelp: msg("connectors.kaggle.credentials_help"),
         helpUrl: "https://www.kaggle.com/settings",
         helpUrlLabel: "kaggle.com/settings",
@@ -335,8 +293,8 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "files", msg("connectors.google_drive.name")),
         blurb: msg("connectors.google_drive.blurb"),
-        Avatar: Google.Avatar,
-        Mark: Google.Color,
+        Avatar: GoogleDrive.Avatar,
+        Mark: GoogleDrive.Mark,
         oauthButton: msg("connectors.google_drive.oauth_button"),
         credentialsHelp: msg("connectors.google_drive.credentials_help"),
         fields: [serviceAccountField()],
@@ -357,6 +315,7 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.notion.blurb"),
         Avatar: Notion.Avatar,
         Mark: Notion,
+        oauthButton: msg("connectors.notion.oauth_button"),
         credentialsHelp: msg("connectors.notion.credentials_help"),
         helpUrl: "https://www.notion.so/profile/integrations",
         helpUrlLabel: "notion.so/profile/integrations",
@@ -372,8 +331,8 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "databases", msg("connectors.postgres.name")),
         blurb: msg("connectors.postgres.blurb"),
-        Avatar: PostgresAvatar,
-        Mark: PostgresMark,
+        Avatar: PostgreSQL.Avatar,
+        Mark: PostgreSQL.Mark,
         credentialsHelp: msg("connectors.postgres.credentials_help"),
         fields: [
           secretField(
@@ -387,8 +346,8 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "databases", msg("connectors.mysql.name")),
         blurb: msg("connectors.mysql.blurb"),
-        Avatar: MySqlAvatar,
-        Mark: MySqlMark,
+        Avatar: MySQL.Avatar,
+        Mark: MySQL.Mark,
         credentialsHelp: msg("connectors.mysql.credentials_help"),
         fields: [
           secretField(
@@ -402,8 +361,9 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "databases", msg("connectors.bigquery.name")),
         blurb: msg("connectors.bigquery.blurb"),
-        Avatar: BigQueryAvatar,
-        Mark: BigQueryMark,
+        Avatar: BigQuery.Avatar,
+        Mark: BigQuery.Mark,
+        oauthButton: msg("connectors.bigquery.oauth_button"),
         credentialsHelp: msg("connectors.bigquery.credentials_help"),
         fields: [
           serviceAccountField(),
@@ -485,8 +445,8 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "traces", msg("connectors.braintrust.name")),
         blurb: msg("connectors.braintrust.blurb"),
-        Avatar: BraintrustAvatar,
-        Mark: BraintrustMark,
+        Avatar: Braintrust.Avatar,
+        Mark: Braintrust.Mark,
         credentialsHelp: msg("connectors.braintrust.credentials_help"),
         helpUrl: "https://www.braintrust.dev/app/settings?subroute=api-keys",
         helpUrlLabel: "braintrust.dev/app/settings",

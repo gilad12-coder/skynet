@@ -1,10 +1,10 @@
 """Provider-agnostic OAuth 2.0 authorization-code flow with PKCE.
 
-Google and GitHub share one flow: mint an authorize URL whose encrypted
-``state`` carries the initiating user and the PKCE verifier, trade the code
-for tokens, and refresh when a token lapses. Each provider describes itself
-with an :class:`OAuthApp`; the Hugging Face connector predates this module
-and keeps its own copy of the flow.
+Google, Microsoft, GitHub and Notion share one flow: mint an authorize URL
+whose encrypted ``state`` carries the initiating user and the PKCE verifier,
+trade the code for tokens, and refresh when a token lapses. Each provider
+describes itself with an :class:`OAuthApp`; the Hugging Face connector
+predates this module and keeps its own copy of the flow.
 """
 
 from __future__ import annotations
@@ -45,6 +45,8 @@ class OAuthApp:
     client_id: str | None
     client_secret: str | None
     extra_authorize_params: dict[str, str]
+    # Notion's token endpoint only takes a JSON body with the client in HTTP Basic auth, and no PKCE verifier.
+    basic_auth_json: bool = False
 
 
 @dataclass(frozen=True)
@@ -86,13 +88,15 @@ def _require_client_id(app: OAuthApp) -> str:
     return app.client_id
 
 
-def build_authorize_url(app: OAuthApp, username: str, redirect_uri: str) -> str:
+def build_authorize_url(app: OAuthApp, username: str, redirect_uri: str, account_label: str | None = None) -> str:
     """Start the PKCE authorization-code flow for ``username``.
 
     Args:
         app: The provider's OAuth app.
         username: The app user linking their account.
         redirect_uri: Callback URL registered on the OAuth app.
+        account_label: Label chosen before sign-in (the Azure storage account),
+            carried through ``state`` so the callback stores it.
 
     Returns:
         The URL to send the browser to.
@@ -103,21 +107,25 @@ def build_authorize_url(app: OAuthApp, username: str, redirect_uri: str) -> str:
     client_id = _require_client_id(app)
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
-    state_payload = json.dumps({"p": app.provider, "u": username, "v": verifier, "r": redirect_uri}).encode("utf-8")
+    payload = {"p": app.provider, "u": username, "v": verifier, "r": redirect_uri}
+    if account_label:
+        payload["a"] = account_label
+    state_payload = json.dumps(payload).encode("utf-8")
     state = vault_cipher().encrypt(state_payload).decode("ascii")
-    query = urlencode(
-        {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": app.scopes,
-            "state": state,
-            "code_challenge": challenge,
-            "code_challenge_method": "S256",
-            **app.extra_authorize_params,
-        }
-    )
-    return f"{app.authorize_url}?{query}"
+    params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": app.scopes,
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        **app.extra_authorize_params,
+    }
+    # Notion grants access per page at consent time and takes no scope parameter.
+    if not app.scopes:
+        del params["scope"]
+    return f"{app.authorize_url}?{urlencode(params)}"
 
 
 def parse_state(app: OAuthApp, state: str) -> dict[str, str]:
@@ -128,7 +136,8 @@ def parse_state(app: OAuthApp, state: str) -> dict[str, str]:
         state: The opaque state parameter.
 
     Returns:
-        The ``{"u": username, "v": verifier, "r": redirect_uri}`` payload.
+        The ``{"u": username, "v": verifier, "r": redirect_uri}`` payload,
+        plus ``"a"`` when an account label was chosen before sign-in.
 
     Raises:
         DomainError: 400 when the state is forged, tampered with, minted for
@@ -141,6 +150,8 @@ def parse_state(app: OAuthApp, state: str) -> dict[str, str]:
         raise DomainError("connectors.oauth_state_invalid", status=400) from exc
     if not all(isinstance(payload.get(k), str) for k in ("p", "u", "v", "r")) or payload["p"] != app.provider:
         raise DomainError("connectors.oauth_state_invalid", status=400)
+    if not isinstance(payload.get("a", ""), str):
+        raise DomainError("connectors.oauth_state_invalid", status=400)
     return payload
 
 
@@ -149,7 +160,8 @@ def _token_request(app: OAuthApp, form: dict[str, str]) -> TokenSet:
 
     Args:
         app: The provider's OAuth app.
-        form: Grant parameters; the client id/secret are added here.
+        form: Grant parameters; the client id/secret are added here, or sent
+            as HTTP Basic auth for :attr:`OAuthApp.basic_auth_json` apps.
 
     Returns:
         The issued tokens.
@@ -158,11 +170,21 @@ def _token_request(app: OAuthApp, form: dict[str, str]) -> TokenSet:
         DomainError: 502 when unreachable; 400 ``oauth_failed`` when the grant
             is refused.
     """
-    form = {**form, "client_id": _require_client_id(app)}
-    if app.client_secret:
-        form["client_secret"] = app.client_secret
+    client_id = _require_client_id(app)
     try:
-        response = httpx.post(app.token_url, data=form, headers={"Accept": "application/json"}, timeout=API_TIMEOUT)
+        if app.basic_auth_json:
+            response = httpx.post(
+                app.token_url,
+                json={k: v for k, v in form.items() if k != "code_verifier"},
+                auth=(client_id, app.client_secret or ""),
+                headers={"Accept": "application/json"},
+                timeout=API_TIMEOUT,
+            )
+        else:
+            form = {**form, "client_id": client_id}
+            if app.client_secret:
+                form["client_secret"] = app.client_secret
+            response = httpx.post(app.token_url, data=form, headers={"Accept": "application/json"}, timeout=API_TIMEOUT)
     except httpx.HTTPError as exc:
         raise DomainError("connectors.unreachable", status=502, provider=label(app.provider)) from exc
     if response.status_code >= 400:

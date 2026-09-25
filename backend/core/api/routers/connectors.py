@@ -6,9 +6,9 @@ has registered an OAuth app, or a pasted access token as the fallback. Either
 way the credential lands encrypted in :class:`core.connectors.vault.ConnectorVault`
 and only ever leaves the server inside requests to Hugging Face.
 
-The other providers (Google Sheets, GitHub, S3, GCS, Azure Blob) share one
-generic set of routes keyed by provider slug: save credentials, browse,
-preview, import, plus OAuth start/callback for the two that support it.
+The other providers share one generic set of routes keyed by provider slug:
+save credentials, browse, preview, import, plus OAuth start/callback for the
+ones in :data:`core.connectors.registry.OAUTH_PROVIDERS`.
 
 Imports reuse the library's gated save, so the per-file cap, dedupe and the
 storage quota apply exactly as they do to an upload.
@@ -465,13 +465,25 @@ def create_connectors_router(*, job_store) -> APIRouter:
             The absolute callback URL registered on that provider's OAuth app.
         """
         google = settings.google_oauth_redirect_uri
-        configured = {
-            "google_sheets": google,
-            # One Google client serves both connectors; the Drive callback must be registered on it too.
-            "google_drive": google.replace("google_sheets", "google_drive") if google else None,
-            "onedrive": settings.microsoft_oauth_redirect_uri,
-            "github": settings.github_oauth_redirect_uri,
-        }.get(provider)
+        microsoft = settings.microsoft_oauth_redirect_uri
+        # One Google client serves Sheets, Drive, GCS and BigQuery, and one Microsoft app serves
+        # OneDrive and Azure Blob; each derived callback must be registered on the shared client too.
+        derived = {
+            "google_drive": (google, "google_sheets"),
+            "gcs": (google, "google_sheets"),
+            "bigquery": (google, "google_sheets"),
+            "azure_blob": (microsoft, "onedrive"),
+        }
+        if provider in derived:
+            base, segment = derived[provider]
+            configured = base.replace(segment, provider) if base else None
+        else:
+            configured = {
+                "google_sheets": google,
+                "onedrive": microsoft,
+                "github": settings.github_oauth_redirect_uri,
+                "notion": settings.notion_oauth_redirect_uri,
+            }.get(provider)
         return configured or str(request.url_for("connector_oauth_callback", provider=provider))
 
     def _secret(username: str, provider: str) -> ConnectorSecret:
@@ -499,6 +511,7 @@ def create_connectors_router(*, job_store) -> APIRouter:
                 refresh_token=secret.refresh_token,
                 expires_at=secret.expires_at,
                 auth_method=secret.auth_method,
+                account_label=secret.account_label,
             )
         return secret
 
@@ -568,26 +581,31 @@ def create_connectors_router(*, job_store) -> APIRouter:
         provider: str,
         request: Request,
         user: Annotated[AuthenticatedUser, Depends(get_authenticated_user)],
+        body: CredentialsRequest | None = None,
     ) -> OAuthStartResponse:
         """Mint the authorization URL the browser should visit.
 
         Args:
-            provider: Provider slug (Google Sheets or GitHub).
+            provider: Provider slug; one of the OAuth-capable providers.
             request: Incoming request, for deriving the callback URL.
             user: Authenticated caller.
+            body: Fields named before sign-in; only Azure Blob uses them
+                (the storage account and optional container).
 
         Returns:
             The authorize URL.
 
         Raises:
-            DomainError: 404 when the provider has no OAuth flow; 503 when its
-                OAuth app or the vault is not configured.
+            DomainError: 400 when the pre-sign-in fields are invalid; 404 when
+                the provider has no OAuth flow; 503 when its OAuth app or the
+                vault is not configured.
         """
         module = registry.get_provider(provider)
         if provider not in registry.OAUTH_PROVIDERS:
             raise DomainError("connectors.unknown_provider", status=404, provider=provider)
+        account = module.oauth_account(body.fields if body else {}) if hasattr(module, "oauth_account") else None
         url = generic_oauth.build_authorize_url(
-            module.oauth_app(), user.username, _provider_redirect_uri(request, provider)
+            module.oauth_app(), user.username, _provider_redirect_uri(request, provider), account_label=account
         )
         return OAuthStartResponse(authorize_url=url)
 
@@ -634,7 +652,7 @@ def create_connectors_router(*, job_store) -> APIRouter:
             provider,
             access_token=tokens.access_token,
             auth_method="oauth",
-            account_label=module.fetch_account_label(tokens.access_token),
+            account_label=payload.get("a") or module.fetch_account_label(tokens.access_token),
             refresh_token=tokens.refresh_token,
             expires_at=tokens.expires_at,
             scopes=tokens.scope,

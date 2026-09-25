@@ -3,7 +3,10 @@
 Credentials are a storage-account connection string (account name plus key,
 or a blob endpoint plus SAS token) or a SAS URL, optionally scoped to one
 container. Shared Key requests are signed here directly; SAS credentials are
-appended to every URL. Only the three read calls are used: list containers,
+appended to every URL. "Continue with Microsoft" links a storage account the
+user names through Entra ID instead: the account (and optional container)
+travels through the OAuth state into the stored label, and every call carries
+the user's bearer token. Only the three read calls are used: list containers,
 list blobs under a prefix, download a blob.
 """
 
@@ -13,19 +16,27 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import xml.etree.ElementTree as ET
 from email.utils import formatdate
 from typing import Any
 from urllib.parse import quote, urlsplit
 
 from ..api.errors import DomainError
+from ..config import settings
 from .base import Credential, Entry, Fetch, import_file, preview_file, range_header, split_location
+from .oauth import OAuthApp
+from .oauth import oauth_available as _oauth_available
 from .tabular import check_size, is_supported
 from .transport import download, request
 from .vault import ConnectorSecret
 
 PROVIDER = "azure_blob"
+# Bearer (Entra ID) requests need 2020-04-08 or later; this also serves Shared Key and SAS.
 API_VERSION = "2021-08-06"
+OAUTH_SCOPES = "https://storage.azure.com/user_impersonation offline_access openid email"
+ACCOUNT_NAME = re.compile(r"^[a-z0-9]{3,24}$")
+CONTAINER_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$")
 LIST_LIMIT = 1000
 DEFAULT_SUFFIX = "core.windows.net"
 STANDARD_HEADERS = (
@@ -41,6 +52,64 @@ STANDARD_HEADERS = (
     "if-unmodified-since",
     "range",
 )
+
+
+def oauth_app() -> OAuthApp:
+    """Describe the Microsoft OAuth app from settings.
+
+    Returns:
+        The app; ``client_id`` is ``None`` when unconfigured.
+    """
+    secret = settings.microsoft_oauth_client_secret
+    return OAuthApp(
+        provider=PROVIDER,
+        authorize_url="https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        token_url="https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        scopes=OAUTH_SCOPES,
+        client_id=settings.microsoft_oauth_client_id,
+        client_secret=secret.get_secret_value() if secret is not None else None,
+        extra_authorize_params={"response_mode": "query", "prompt": "select_account"},
+    )
+
+
+def oauth_available() -> bool:
+    """Report whether "Continue with Microsoft" can be offered.
+
+    Returns:
+        ``True`` when the client id and the vault key are configured.
+    """
+    return _oauth_available(oauth_app())
+
+
+def oauth_account(fields: dict[str, str]) -> str:
+    """Validate the storage account named before an OAuth link.
+
+    Args:
+        fields: ``account`` and the optional ``container``.
+
+    Returns:
+        The label to carry through the OAuth state: ``account[/container]``.
+
+    Raises:
+        DomainError: 400 when either name is not a valid Azure name.
+    """
+    account = fields.get("account", "").strip().lower()
+    container = fields.get("container", "").strip().lower()
+    if not ACCOUNT_NAME.match(account) or (container and not CONTAINER_NAME.match(container)):
+        raise DomainError("connectors.invalid_credentials", status=400)
+    return f"{account}/{container}" if container else account
+
+
+def fetch_account_label(token: str) -> str | None:
+    """Return no label: the storage account is named before the link.
+
+    Args:
+        token: A storage-scoped access token, which cannot read the profile.
+
+    Returns:
+        Always ``None``; the label comes from :func:`oauth_account`.
+    """
+    return None
 
 
 def parse_connection(raw: str) -> dict[str, str]:
@@ -148,7 +217,9 @@ def _prepare(
     """
     headers = {"x-ms-date": formatdate(usegmt=True), "x-ms-version": API_VERSION, **(extra or {})}
     encoded = "&".join(f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in query.items())
-    if config.get("sas"):
+    if config.get("token"):
+        headers["Authorization"] = f"Bearer {config['token']}"
+    elif config.get("sas"):
         encoded = f"{encoded}&{config['sas']}" if encoded else config["sas"]
     else:
         headers["Authorization"] = sign(config, method, path, query, headers)
@@ -157,15 +228,31 @@ def _prepare(
 
 
 def _config(secret: ConnectorSecret) -> dict[str, str]:
-    """Decode the stored credential JSON.
+    """Decode the stored credential, or rebuild it for an OAuth link.
 
     Args:
         secret: The vault entry.
 
     Returns:
-        The credential dict produced by :func:`parse_connection`.
+        The credential dict produced by :func:`parse_connection`; OAuth links
+        get the account's public endpoint and a ``token`` instead of a key.
+
+    Raises:
+        DomainError: 400 when an OAuth link lost its storage account.
     """
-    return json.loads(secret.access_token)
+    if secret.auth_method != "oauth":
+        return json.loads(secret.access_token)
+    account, _, container = (secret.account_label or "").partition("/")
+    if not ACCOUNT_NAME.match(account):
+        raise DomainError("connectors.invalid_credentials", status=400)
+    return {
+        "account": account,
+        "endpoint": f"https://{account}.blob.{DEFAULT_SUFFIX}",
+        "key": "",
+        "sas": "",
+        "container": container,
+        "token": secret.access_token,
+    }
 
 
 def _xml(body: bytes) -> ET.Element:

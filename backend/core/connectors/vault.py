@@ -43,6 +43,8 @@ class ConnectorSecret:
     refresh_token: str | None
     expires_at: datetime | None
     auth_method: str
+    # Azure Blob's OAuth link keeps the storage account it opens here; the token alone doesn't name one.
+    account_label: str | None = None
 
 
 def _view(row: UserConnectorModel) -> ConnectorView:
@@ -234,4 +236,5 @@ class ConnectorVault:
                 refresh_token=refresh,
                 expires_at=expires_at,
                 auth_method=row.auth_method,
+                account_label=row.account_label,
             )

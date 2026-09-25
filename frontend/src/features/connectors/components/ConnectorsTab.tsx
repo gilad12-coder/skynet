@@ -134,23 +134,38 @@ function ProviderCard({
   onChange: (connectors: ConnectorStatus[]) => void;
 }) {
   const [formOpen, setFormOpen] = React.useState(false);
+  // The same form collects pasted credentials, or the names a provider needs before its OAuth redirect.
+  const [formMode, setFormMode] = React.useState<"credentials" | "oauth">("credentials");
   const [values, setValues] = React.useState<Record<string, string>>({});
   const [saving, setSaving] = React.useState(false);
   const [starting, setStarting] = React.useState(false);
   const [removing, setRemoving] = React.useState(false);
 
   const connected = status?.connected ?? false;
-  const complete = meta.fields.every((f) => !f.required || (values[f.key] ?? "").trim());
+  const oauthMode = formMode === "oauth";
+  const fields = oauthMode ? (meta.oauthFields ?? []) : meta.fields;
+  const complete = fields.every((f) => !f.required || (values[f.key] ?? "").trim());
+  const submitLabel = oauthMode ? (meta.oauthButton ?? "") : msg("settings.keys.save");
+  const trimmedValues = () =>
+    Object.fromEntries(
+      fields.map((f) => [f.key, (values[f.key] ?? "").trim()]).filter(([, v]) => v),
+    );
 
   const closeForm = () => {
     setFormOpen(false);
+    setFormMode("credentials");
     setValues({});
   };
 
-  const handleOAuth = async () => {
+  const openForm = (mode: "credentials" | "oauth") => {
+    setFormMode(mode);
+    setFormOpen(true);
+  };
+
+  const handleOAuth = async (oauthValues?: Record<string, string>) => {
     setStarting(true);
     try {
-      const { authorize_url } = await meta.startOAuth();
+      const { authorize_url } = await meta.startOAuth(oauthValues);
       window.location.assign(authorize_url);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"));
@@ -159,13 +174,14 @@ function ProviderCard({
   };
 
   const handleSave = async () => {
-    if (!complete || saving) return;
+    if (!complete || saving || starting) return;
+    if (oauthMode) {
+      await handleOAuth(trimmedValues());
+      return;
+    }
     setSaving(true);
     try {
-      const fields = Object.fromEntries(
-        meta.fields.map((f) => [f.key, (values[f.key] ?? "").trim()]).filter(([, v]) => v),
-      );
-      const res = await meta.saveCredentials(fields);
+      const res = await meta.saveCredentials(trimmedValues());
       onChange(res.connectors);
       closeForm();
       toast.success(meta.toastConnected);
@@ -219,7 +235,7 @@ function ProviderCard({
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  onClick={handleOAuth}
+                  onClick={() => (meta.oauthFields ? openForm("oauth") : void handleOAuth())}
                   disabled={starting}
                   className={TOUCH_ICON}
                   aria-label={meta.oauthButton}
@@ -240,7 +256,7 @@ function ProviderCard({
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  onClick={() => setFormOpen(true)}
+                  onClick={() => openForm("credentials")}
                   className={TOUCH_ICON}
                   aria-label={msg("settings.keys.add")}
                 >
@@ -285,9 +301,9 @@ function ProviderCard({
 
       {!connected && formOpen && (
         <div className="mt-2.5 flex flex-col gap-2 animate-in fade-in-0 slide-in-from-top-1">
-          {meta.fields.map((field, index) => {
+          {fields.map((field, index) => {
             const id = `connector-${meta.id}-${field.key}`;
-            const last = index === meta.fields.length - 1;
+            const last = index === fields.length - 1;
             const input = (
               <CredentialInput
                 field={field}
@@ -313,18 +329,20 @@ function ProviderCard({
                           <Button
                             size="icon-sm"
                             onClick={handleSave}
-                            disabled={!complete || saving}
+                            disabled={!complete || saving || starting}
                             className={TOUCH_ICON}
-                            aria-label={msg("settings.keys.save")}
+                            aria-label={submitLabel}
                           >
-                            {saving ? (
+                            {saving || starting ? (
                               <CircleNotch className="size-3.5 animate-spin" />
+                            ) : oauthMode ? (
+                              <SignIn className="size-3.5" />
                             ) : (
                               <FloppyDisk className="size-3.5" />
                             )}
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent>{msg("settings.keys.save")}</TooltipContent>
+                        <TooltipContent>{submitLabel}</TooltipContent>
                       </Tooltip>
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -349,8 +367,8 @@ function ProviderCard({
             );
           })}
           <p className="text-[0.6875rem] text-muted-foreground/70">
-            {meta.credentialsHelp}
-            {meta.helpUrl && (
+            {oauthMode ? meta.oauthHelp : meta.credentialsHelp}
+            {!oauthMode && meta.helpUrl && (
               <>
                 {" "}
                 <a

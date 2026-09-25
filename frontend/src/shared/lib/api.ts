@@ -1172,10 +1172,14 @@ export function removeConnector(provider: ConnectorProvider) {
   return request<ConnectorListResponse>(`/connectors/${provider}`, { method: "DELETE" });
 }
 
-/** Mint the OAuth authorize URL for a provider the browser should be sent to. */
-export function startConnectorOAuth(provider: ConnectorProvider) {
+/**
+ * Mint the OAuth authorize URL for a provider the browser should be sent to.
+ * ``fields`` carries what must be named before sign-in (Azure's storage account).
+ */
+export function startConnectorOAuth(provider: ConnectorProvider, fields?: Record<string, string>) {
   return request<{ authorize_url: string }>(`/connectors/${provider}/oauth/start`, {
     method: "POST",
+    ...(fields ? { body: JSON.stringify({ fields }) } : {}),
   });
 }
 
