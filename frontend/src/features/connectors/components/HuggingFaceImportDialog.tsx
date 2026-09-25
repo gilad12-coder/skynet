@@ -455,11 +455,11 @@ export function HuggingFaceImportDialog({
 
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-foreground">
-                      {msg("hf_import.preview_title")}
+                    <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                      {msg("datasets.detail.row_reader.hint")}
                     </span>
                     {rowTotal != null && (
-                      <span className="text-[0.6875rem] text-muted-foreground tabular-nums">
+                      <span className="shrink-0 whitespace-nowrap text-[0.6875rem] text-muted-foreground tabular-nums">
                         {formatMsg("hf_import.rows_total", { count: rowTotal.toLocaleString() })}
                       </span>
                     )}

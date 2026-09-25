@@ -3,7 +3,6 @@ import * as React from "react";
 import { toast } from "react-toastify";
 import { CircleNotch, Tray } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/shared/ui/primitives/table";
 import {
   ColumnHeader,
@@ -225,59 +224,55 @@ export function DatasetRowsView({
                     </TableHeader>
                     <TableBody>
                       {filtered.slice(0, RENDER_ROW_CAP).map((row, i) => (
-                        <Tooltip key={i} delayDuration={500}>
-                          <TooltipTrigger asChild>
-                            <TableRow
-                              className="cursor-pointer transition-colors hover:bg-muted/40"
-                              onClick={() => {
-                                if (!window.matchMedia("(any-pointer: coarse)").matches) return;
-                                cancelPendingCopy();
-                                setReaderIndex(i);
-                              }}
-                              onDoubleClick={() => {
-                                cancelPendingCopy();
-                                setReaderIndex(i);
+                        <TableRow
+                          key={i}
+                          className="cursor-pointer transition-colors hover:bg-muted/40"
+                          onClick={() => {
+                            if (!window.matchMedia("(any-pointer: coarse)").matches) return;
+                            cancelPendingCopy();
+                            setReaderIndex(i);
+                          }}
+                          onDoubleClick={() => {
+                            cancelPendingCopy();
+                            setReaderIndex(i);
+                          }}
+                        >
+                          {columns.map((col) => (
+                            <TableCell
+                              key={col}
+                              className="max-w-[280px] align-top text-xs text-foreground/80"
+                              style={
+                                colResize.widths[col]
+                                  ? {
+                                      width: colResize.widths[col],
+                                      maxWidth: colResize.widths[col],
+                                    }
+                                  : undefined
+                              }
+                              title={isImageDataUri(row[col]) ? undefined : cellText(row[col])}
+                              onClick={(e) => {
+                                if (e.detail !== 1 || isImageDataUri(row[col])) return;
+                                scheduleCellCopy(cellText(row[col]));
                               }}
                             >
-                              {columns.map((col) => (
-                                <TableCell
-                                  key={col}
-                                  className="max-w-[280px] align-top text-xs text-foreground/80"
-                                  style={
-                                    colResize.widths[col]
-                                      ? {
-                                          width: colResize.widths[col],
-                                          maxWidth: colResize.widths[col],
-                                        }
-                                      : undefined
-                                  }
-                                  title={isImageDataUri(row[col]) ? undefined : cellText(row[col])}
-                                  onClick={(e) => {
-                                    if (e.detail !== 1 || isImageDataUri(row[col])) return;
-                                    scheduleCellCopy(cellText(row[col]));
-                                  }}
+                              {isImageDataUri(row[col]) ? (
+                                <img
+                                  src={row[col] as string}
+                                  alt=""
+                                  loading="lazy"
+                                  className="size-10 rounded object-cover"
+                                />
+                              ) : (
+                                <span
+                                  dir="auto"
+                                  className="line-clamp-2 break-words whitespace-normal hover:underline underline-offset-2 decoration-foreground/40"
                                 >
-                                  {isImageDataUri(row[col]) ? (
-                                    <img
-                                      src={row[col] as string}
-                                      alt=""
-                                      loading="lazy"
-                                      className="size-10 rounded object-cover"
-                                    />
-                                  ) : (
-                                    <span
-                                      dir="auto"
-                                      className="line-clamp-2 break-words whitespace-normal hover:underline underline-offset-2 decoration-foreground/40"
-                                    >
-                                      {cellText(row[col])}
-                                    </span>
-                                  )}
-                                </TableCell>
-                              ))}
-                            </TableRow>
-                          </TooltipTrigger>
-                          <TooltipContent>{msg("datasets.detail.row_reader.hint")}</TooltipContent>
-                        </Tooltip>
+                                  {cellText(row[col])}
+                                </span>
+                              )}
+                            </TableCell>
+                          ))}
+                        </TableRow>
                       ))}
                     </TableBody>
                   </Table>
