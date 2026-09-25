@@ -242,10 +242,11 @@ export function HuggingFaceImportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          "max-h-[96dvh] gap-0 overflow-y-auto p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
+          "gap-0 overflow-y-auto p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
+          // Same footprint as the dataset detail dialog so the two read as one family.
           previewExpanded
-            ? "w-[min(72rem,96vw)] max-w-[min(72rem,96vw)] sm:max-w-[min(72rem,96vw)]"
-            : "w-[min(40rem,94vw)] max-w-[min(40rem,94vw)] sm:max-w-2xl",
+            ? "max-h-[96dvh] w-[min(72rem,96vw)] max-w-[min(72rem,96vw)] sm:max-w-[min(72rem,96vw)]"
+            : "max-h-[85vh] w-[min(72rem,94vw)] max-w-[min(72rem,94vw)] sm:max-w-[min(72rem,94vw)]",
         )}
       >
         <DialogHeader className="px-5 pt-5 text-start">
@@ -301,7 +302,7 @@ export function HuggingFaceImportDialog({
               </span>
             </div>
 
-            <div className="mt-3 max-h-[min(24rem,55vh)] overflow-y-auto">
+            <div className="mt-3 max-h-[min(36rem,60vh)] overflow-y-auto">
               {searchFailed ? (
                 <p className="px-1 py-6 text-center text-sm text-muted-foreground">
                   {msg("hf_import.search_error")}
