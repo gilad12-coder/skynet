@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from ...config import settings
 from ...connectors import azure_blob, github, oauth, s3, sql_base, tabular
+from ...connectors.registry import oauth_config_problems
 from ...connectors.vault import ConnectorVault
 from ...storage.dataset_library import DatasetLibraryStore, PostgresDatasetBlobStore
 from ...storage.models import UserConnectorModel
@@ -1267,3 +1268,20 @@ def test_notion_oauth_exchanges_with_basic_auth_json(
     assert (secret.access_token, secret.auth_method, secret.expires_at) == ("ntn_oauth", "oauth", None)
     entry = next(c for c in client.get("/connectors").json()["connectors"] if c["provider"] == "notion")
     assert entry["account_label"] == "Acme"
+
+
+def test_oauth_config_problems_names_half_configured_providers(
+    generic_oauth_off: None,
+    vault_key: str,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client id without its secret, or the reverse, is reported per provider."""
+    assert oauth_config_problems() == []
+    monkeypatch.setattr(settings, "notion_oauth_client_id", "notion-client")
+    monkeypatch.setattr(settings, "microsoft_oauth_client_secret", SecretStr("ms-secret"))
+    problems = oauth_config_problems()
+    assert "notion: client id is set but the client secret is missing" in problems
+    assert "onedrive: client secret is set but the client id is missing" in problems
+    assert "azure_blob: client secret is set but the client id is missing" in problems
+    monkeypatch.setattr(settings, "notion_oauth_client_secret", SecretStr("notion-secret"))
+    assert not any(p.startswith("notion:") for p in oauth_config_problems())

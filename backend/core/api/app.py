@@ -49,6 +49,7 @@ except ImportError:  # Optional dep: tests/CI can run without the Scalar docs UI
 from ..billing import StripeBillingService, start_openrouter_float_sweeper
 from ..billing.budgets import BudgetService
 from ..config import settings
+from ..connectors.registry import oauth_config_problems
 from ..error_reporting import capture_exception
 from ..exceptions import AppError
 from ..models import HEALTH_STATUS_OK, HealthResponse, QueueStatusResponse
@@ -734,6 +735,8 @@ def create_app(
         # periodic sweeper (below) covers steady-state; this one-shot keeps
         # boot latency low when a single replica restarts.
         job_store.recover_orphaned_jobs(budget_service=BudgetService(engine=job_store.engine))
+        for problem in oauth_config_problems():
+            logger.warning("Connector OAuth misconfigured: %s", problem)
         # ``recover_pending_jobs`` is no longer required for correctness because
         # any pod can claim a pending row via ``claim_next_job`` on its next
         # tick, but we still pass the IDs as a same-pod hint so a fresh restart

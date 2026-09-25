@@ -13,6 +13,7 @@ from __future__ import annotations
 from types import ModuleType
 
 from ..api.errors import DomainError
+from ..config import settings
 from . import (
     azure_blob,
     bigquery,
@@ -92,3 +93,25 @@ def oauth_available(name: str) -> bool:
         ``True`` only for configured OAuth providers.
     """
     return name in OAUTH_PROVIDERS and PROVIDERS[name].oauth_available()
+
+
+def oauth_config_problems() -> list[str]:
+    """List OAuth providers whose settings are only half filled in.
+
+    A client id without its secret still shows the sign-in button, then fails at
+    the token exchange, so the operator needs to hear about it at startup.
+
+    Returns:
+        One human-readable line per problem; empty when every provider is either
+        fully configured or fully unset.
+    """
+    problems: list[str] = []
+    for name in sorted(OAUTH_PROVIDERS):
+        app = PROVIDERS[name].oauth_app()
+        if app.client_id and not app.client_secret:
+            problems.append(f"{name}: client id is set but the client secret is missing")
+        elif app.client_secret and not app.client_id:
+            problems.append(f"{name}: client secret is set but the client id is missing")
+        elif app.client_id and settings.byok_vault_key is None:
+            problems.append(f"{name}: client is set but BYOK_VAULT_KEY is not, so sign-in stays hidden")
+    return problems
