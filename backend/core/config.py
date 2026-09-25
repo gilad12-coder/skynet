@@ -71,10 +71,7 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = Field(default=None, description="OpenAI API key for model access")
     openai_api_base: str | None = Field(
         default=None,
-        description=(
-            "Base URL of the OpenAI-compatible LLM gateway (LiteLLM reads the same "
-            "env var for serving)."
-        ),
+        description=("Base URL of the OpenAI-compatible LLM gateway (LiteLLM reads the same env var for serving)."),
     )
     groq_api_key: SecretStr | None = Field(
         default=None,
@@ -97,7 +94,9 @@ class Settings(BaseSettings):
         description="Stripe webhook signing secret (whsec_…) used to verify event payload authenticity.",
     )
     stripe_price_pack_starter: str = Field(
-        default="", alias="STRIPE_PRICE_PACK_STARTER", description="Stripe price id for the 'starter' one-time credit pack."
+        default="",
+        alias="STRIPE_PRICE_PACK_STARTER",
+        description="Stripe price id for the 'starter' one-time credit pack.",
     )
     stripe_price_pack_plus: str = Field(
         default="", alias="STRIPE_PRICE_PACK_PLUS", description="Stripe price id for the 'plus' one-time credit pack."
@@ -119,9 +118,7 @@ class Settings(BaseSettings):
     smtp_username: str | None = Field(
         default=None, alias="SMTP_USERNAME", description="SMTP auth username; unset sends unauthenticated."
     )
-    smtp_password: SecretStr | None = Field(
-        default=None, alias="SMTP_PASSWORD", description="SMTP auth password."
-    )
+    smtp_password: SecretStr | None = Field(default=None, alias="SMTP_PASSWORD", description="SMTP auth password.")
     smtp_from: str | None = Field(
         default=None,
         alias="SMTP_FROM",
@@ -160,6 +157,36 @@ class Settings(BaseSettings):
         alias="HF_OAUTH_REDIRECT_URI",
         description="Absolute URL of this backend's /connectors/huggingface/oauth/callback as registered on the OAuth app. Unset derives it from the incoming request, which is right whenever the proxy forwards scheme and host.",
     )
+    google_oauth_client_id: str | None = Field(
+        default=None,
+        alias="GOOGLE_OAUTH_CLIENT_ID",
+        description="Client id of the Google OAuth client used by the Google Sheets connector. Unset hides 'Continue with Google'; users can still paste a service-account key.",
+    )
+    google_oauth_client_secret: SecretStr | None = Field(
+        default=None,
+        alias="GOOGLE_OAUTH_CLIENT_SECRET",
+        description="Client secret of the Google OAuth client (web-application clients always have one).",
+    )
+    google_oauth_redirect_uri: str | None = Field(
+        default=None,
+        alias="GOOGLE_OAUTH_REDIRECT_URI",
+        description="Absolute URL of this backend's /connectors/google_sheets/oauth/callback as registered on the Google client. Unset derives it from the incoming request.",
+    )
+    github_oauth_client_id: str | None = Field(
+        default=None,
+        alias="GITHUB_OAUTH_CLIENT_ID",
+        description="Client id of the GitHub OAuth app used by the GitHub connector. Unset hides 'Continue with GitHub'; users can still paste a personal access token.",
+    )
+    github_oauth_client_secret: SecretStr | None = Field(
+        default=None,
+        alias="GITHUB_OAUTH_CLIENT_SECRET",
+        description="Client secret of the GitHub OAuth app. GitHub requires it for the code exchange.",
+    )
+    github_oauth_redirect_uri: str | None = Field(
+        default=None,
+        alias="GITHUB_OAUTH_REDIRECT_URI",
+        description="Absolute URL of this backend's /connectors/github/oauth/callback as registered on the GitHub app. Unset derives it from the incoming request.",
+    )
     litellm_proxy_url: str | None = Field(
         default=None,
         alias="LITELLM_PROXY_URL",
@@ -179,7 +206,9 @@ class Settings(BaseSettings):
         default=None, alias="VERCEL_TEAM_ID", description="Vercel team that owns the optimization sandboxes."
     )
     vercel_project_id: str | None = Field(
-        default=None, alias="VERCEL_PROJECT_ID", description="Vercel project the optimization sandboxes are created under."
+        default=None,
+        alias="VERCEL_PROJECT_ID",
+        description="Vercel project the optimization sandboxes are created under.",
     )
     vercel_sandbox_image: str = Field(
         default="vercel/sandbox/universal:latest",
@@ -620,7 +649,7 @@ class Settings(BaseSettings):
         default="",
         alias="ALERT_WEBHOOK_URL",
         description=(
-            "Incoming chat webhook (Slack-compatible {\"text\": …} payload; also "
+            'Incoming chat webhook (Slack-compatible {"text": …} payload; also '
             "accepted by Mattermost and Google Chat) that receives operational "
             "alerts — unhandled 500s, a dead worker, and code paths that call "
             "send_alert() directly. Unset (the default) disables outbound "
@@ -746,8 +775,7 @@ class Settings(BaseSettings):
     tagger_assist_base_url: str = Field(
         default="",
         description=(
-            "Optional custom base URL for the tagging-assist LM. Empty falls "
-            "back to generalist_agent_base_url."
+            "Optional custom base URL for the tagging-assist LM. Empty falls back to generalist_agent_base_url."
         ),
     )
     # TODO: On-prem / air-gap — point this at an internal OpenAI-compatible
@@ -801,20 +829,14 @@ class Settings(BaseSettings):
         default=60.0,
         ge=5.0,
         le=3600.0,
-        description=(
-            "Seconds between bounded repair passes for missing or stale Explore "
-            "embeddings."
-        ),
+        description=("Seconds between bounded repair passes for missing or stale Explore embeddings."),
         alias="EMBEDDING_INDEX_SWEEP_INTERVAL",
     )
     embedding_index_sweep_batch_size: int = Field(
         default=25,
         ge=1,
         le=500,
-        description=(
-            "Maximum number of successful jobs re-indexed during one Explore "
-            "embedding repair pass."
-        ),
+        description=("Maximum number of successful jobs re-indexed during one Explore embedding repair pass."),
         alias="EMBEDDING_INDEX_SWEEP_BATCH_SIZE",
     )
     search_backend: Literal["lexical", "bm25", "semantic"] = Field(

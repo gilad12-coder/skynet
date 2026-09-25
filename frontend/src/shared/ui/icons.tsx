@@ -86,6 +86,7 @@ import { Fingerprint as FingerprintBase } from "@phosphor-icons/react/dist/ssr/F
 import { Flag as FlagBase } from "@phosphor-icons/react/dist/ssr/Flag";
 import { FloppyDisk as FloppyDiskBase } from "@phosphor-icons/react/dist/ssr/FloppyDisk";
 import { FlowArrow as FlowArrowBase } from "@phosphor-icons/react/dist/ssr/FlowArrow";
+import { Folder as FolderBase } from "@phosphor-icons/react/dist/ssr/Folder";
 import { Funnel as FunnelBase } from "@phosphor-icons/react/dist/ssr/Funnel";
 import { FunnelX as FunnelXBase } from "@phosphor-icons/react/dist/ssr/FunnelX";
 import { Gauge as GaugeBase } from "@phosphor-icons/react/dist/ssr/Gauge";
@@ -249,6 +250,7 @@ export const Fingerprint = /* @__PURE__ */ bold(FingerprintBase);
 export const Flag = /* @__PURE__ */ bold(FlagBase);
 export const FloppyDisk = /* @__PURE__ */ bold(FloppyDiskBase);
 export const FlowArrow = /* @__PURE__ */ bold(FlowArrowBase);
+export const Folder = /* @__PURE__ */ bold(FolderBase);
 export const Funnel = /* @__PURE__ */ bold(FunnelBase);
 export const FunnelX = /* @__PURE__ */ bold(FunnelXBase);
 export const Gauge = /* @__PURE__ */ bold(GaugeBase);

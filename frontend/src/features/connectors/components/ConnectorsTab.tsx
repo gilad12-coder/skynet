@@ -1,25 +1,23 @@
 "use client";
 
 import * as React from "react";
-import { HuggingFace } from "@lobehub/icons";
 import { toast } from "react-toastify";
 import { ArrowSquareOut, CircleNotch, Key, Trash, X } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
+import { Label } from "@/shared/ui/primitives/label";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
-import {
-  removeHuggingFaceConnector,
-  saveHuggingFaceToken,
-  startHuggingFaceOAuth,
-  type ConnectorStatus,
-} from "@/shared/lib/api";
+import type { ConnectorProvider, ConnectorStatus } from "@/shared/lib/api";
 import { tI18n } from "@/shared/lib/i18n";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { useConnectors } from "../hooks/use-connectors";
+import { ALL_PROVIDERS, providerMeta, type CredentialField, type ProviderMeta } from "./providers";
 
-const HF_TOKENS_URL = "https://huggingface.co/settings/tokens";
-const HF_TOKENS_LABEL = "huggingface.co/settings/tokens";
+const TOUCH_BUTTON =
+  "min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]";
+const TOUCH_ICON = "size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]";
+const TOUCH_INPUT = "h-[44px] sm:h-8 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]";
 
 /** The status pill next to a linked account. Gold when healthy, destructive when it needs a reconnect. */
 function StatusPill({ status }: { status: NonNullable<ConnectorStatus["status"]> }) {
@@ -55,29 +53,111 @@ function useConnectorErrorParam() {
   }, []);
 }
 
-/**
- * Settings → Connectors: the accounts a user links on outside services so the
- * app can pull data with their permissions. Hugging Face is the first one;
- * it links through OAuth when the deployment registered an app, with a pasted
- * access token as the fallback. The token goes straight to the backend vault
- * and is never displayed again.
- */
-export function ConnectorsTab() {
-  const { huggingFace, loading, error, setConnectors, refetch } = useConnectors();
-  useConnectorErrorParam();
+/** How a linked account was authenticated, for the card's subtitle. */
+function authMethodLabel(meta: ProviderMeta, method: ConnectorStatus["auth_method"]) {
+  switch (method) {
+    case "oauth":
+      return meta.viaOAuth;
+    case "service_account":
+      return msg("connectors.via_service_account");
+    case "credentials":
+      return msg("connectors.via_credentials");
+    default:
+      return msg("connectors.hf.via_token");
+  }
+}
 
-  const [tokenOpen, setTokenOpen] = React.useState(false);
-  const [token, setToken] = React.useState("");
+/** One input of the credentials form; secrets are masked, long pastes get a textarea. */
+function CredentialInput({
+  field,
+  id,
+  value,
+  onChange,
+  autoFocus,
+  onSubmit,
+  onCancel,
+}: {
+  field: CredentialField;
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  autoFocus: boolean;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") onCancel();
+    if (e.key === "Enter" && !field.multiline) onSubmit();
+  };
+  if (field.multiline) {
+    return (
+      <textarea
+        id={id}
+        dir="ltr"
+        autoFocus={autoFocus}
+        autoComplete="off"
+        spellCheck={false}
+        rows={3}
+        placeholder={field.placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        className={cn(
+          "min-h-[5.5rem] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs outline-none",
+          "placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+          field.secret && value && "[-webkit-text-security:disc]",
+        )}
+      />
+    );
+  }
+  return (
+    <Input
+      id={id}
+      dir="ltr"
+      type={field.secret ? "password" : "text"}
+      autoFocus={autoFocus}
+      autoComplete="off"
+      placeholder={field.placeholder}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
+      className={TOUCH_INPUT}
+    />
+  );
+}
+
+/**
+ * One connector: brand mark, link state, and the actions to link (OAuth when
+ * the deployment registered an app, pasted credentials otherwise) or unlink.
+ * Credentials go straight to the backend vault and are never displayed again.
+ */
+function ProviderCard({
+  meta,
+  status,
+  onChange,
+}: {
+  meta: ProviderMeta;
+  status: ConnectorStatus | null;
+  onChange: (connectors: ConnectorStatus[]) => void;
+}) {
+  const [formOpen, setFormOpen] = React.useState(false);
+  const [values, setValues] = React.useState<Record<string, string>>({});
   const [saving, setSaving] = React.useState(false);
   const [starting, setStarting] = React.useState(false);
   const [removing, setRemoving] = React.useState(false);
 
-  const connected = huggingFace?.connected ?? false;
+  const connected = status?.connected ?? false;
+  const complete = meta.fields.every((f) => !f.required || (values[f.key] ?? "").trim());
+
+  const closeForm = () => {
+    setFormOpen(false);
+    setValues({});
+  };
 
   const handleOAuth = async () => {
     setStarting(true);
     try {
-      const { authorize_url } = await startHuggingFaceOAuth();
+      const { authorize_url } = await meta.startOAuth();
       window.location.assign(authorize_url);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"));
@@ -85,16 +165,17 @@ export function ConnectorsTab() {
     }
   };
 
-  const handleSaveToken = async () => {
-    const trimmed = token.trim();
-    if (!trimmed || saving) return;
+  const handleSave = async () => {
+    if (!complete || saving) return;
     setSaving(true);
     try {
-      const res = await saveHuggingFaceToken(trimmed);
-      setConnectors(res.connectors);
-      setToken("");
-      setTokenOpen(false);
-      toast.success(msg("connectors.toast.connected"));
+      const fields = Object.fromEntries(
+        meta.fields.map((f) => [f.key, (values[f.key] ?? "").trim()]).filter(([, v]) => v),
+      );
+      const res = await meta.saveCredentials(fields);
+      onChange(res.connectors);
+      closeForm();
+      toast.success(meta.toastConnected);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"));
     } finally {
@@ -106,15 +187,174 @@ export function ConnectorsTab() {
     if (removing) return;
     setRemoving(true);
     try {
-      const res = await removeHuggingFaceConnector();
-      setConnectors(res.connectors);
-      toast.success(msg("connectors.toast.disconnected"));
+      const res = await meta.remove();
+      onChange(res.connectors);
+      toast.success(meta.toastDisconnected);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : msg("connectors.toast.failed"));
     } finally {
       setRemoving(false);
     }
   };
+
+  return (
+    <div className="rounded-lg border border-border/50 px-3 py-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <meta.Avatar size={28} />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-foreground">{meta.name}</span>
+              {connected && status?.status && <StatusPill status={status.status} />}
+            </span>
+            {connected ? (
+              <span className="truncate text-xs text-muted-foreground">
+                {status?.account_label
+                  ? formatMsg("connectors.hf.connected_as", { account: status.account_label })
+                  : msg("connectors.status.connected")}
+                {" · "}
+                {authMethodLabel(meta, status?.auth_method ?? null)}
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">{meta.blurb}</span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+          {!connected && !formOpen && meta.oauthButton && status?.oauth_available && (
+            <Button size="sm" onClick={handleOAuth} disabled={starting} className={TOUCH_BUTTON}>
+              {starting ? (
+                <CircleNotch className="size-3.5 animate-spin" />
+              ) : (
+                <ArrowSquareOut className="size-3.5" />
+              )}
+              {meta.oauthButton}
+            </Button>
+          )}
+          {!connected && !formOpen && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setFormOpen(true)}
+              className={TOUCH_BUTTON}
+            >
+              <Key className="size-3.5" />
+              {meta.credentialsToggle}
+            </Button>
+          )}
+          {connected && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={handleRemove}
+                  disabled={removing}
+                  className={cn(TOUCH_ICON, "text-destructive hover:text-destructive")}
+                  aria-label={msg("connectors.disconnect")}
+                >
+                  {removing ? (
+                    <CircleNotch className="size-3.5 animate-spin" />
+                  ) : (
+                    <Trash className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{msg("connectors.disconnect")}</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+
+      {connected && status?.status === "invalid" && (
+        <p className="mt-1.5 text-[0.6875rem] text-destructive/80">{meta.reconnectHint}</p>
+      )}
+
+      {!connected && formOpen && (
+        <div className="mt-2.5 flex flex-col gap-2.5 animate-in fade-in-0 slide-in-from-top-1">
+          <div className={cn("grid gap-2.5", meta.fields.length > 2 && "sm:grid-cols-2")}>
+            {meta.fields.map((field, index) => {
+              const id = `connector-${meta.id}-${field.key}`;
+              return (
+                <div
+                  key={field.key}
+                  className={cn("flex flex-col gap-1", field.multiline && "sm:col-span-2")}
+                >
+                  <Label htmlFor={id} className="text-xs">
+                    {field.label}
+                  </Label>
+                  <CredentialInput
+                    field={field}
+                    id={id}
+                    value={values[field.key] ?? ""}
+                    onChange={(value) => setValues((prev) => ({ ...prev, [field.key]: value }))}
+                    autoFocus={index === 0}
+                    onSubmit={() => void handleSave()}
+                    onCancel={closeForm}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[0.6875rem] text-muted-foreground/80">
+              {meta.credentialsHelp}
+              {meta.helpUrl && (
+                <>
+                  {" "}
+                  <a
+                    href={meta.helpUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-0.5 font-medium text-[#8a6d44] underline-offset-2 hover:underline"
+                  >
+                    {meta.helpUrlLabel}
+                    <ArrowSquareOut className="size-3" />
+                  </a>
+                </>
+              )}
+            </p>
+            <div className="flex shrink-0 items-center justify-end gap-2">
+              <Button
+                size="sm"
+                onClick={handleSave}
+                disabled={!complete || saving}
+                className={TOUCH_BUTTON}
+              >
+                {saving ? (
+                  <CircleNotch className="size-3.5 animate-spin" />
+                ) : (
+                  <Key className="size-3.5" />
+                )}
+                {msg("connectors.hf.token_save")}
+              </Button>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                onClick={closeForm}
+                className={TOUCH_ICON}
+                aria-label={msg("connectors.cancel")}
+              >
+                <X className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Settings → Connectors: the accounts a user links on outside services so the
+ * app can pull data with their permissions. Each provider links through OAuth
+ * when the deployment registered an app, with pasted credentials as the
+ * fallback; the secrets go straight to the backend vault.
+ */
+export function ConnectorsTab() {
+  const { byProvider, loading, error, setConnectors, refetch } = useConnectors();
+  useConnectorErrorParam();
 
   return (
     <div className="space-y-4">
@@ -135,155 +375,19 @@ export function ConnectorsTab() {
           </Button>
         </div>
       ) : (
-        <div className="rounded-lg border border-border/50 px-3 py-2.5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <HuggingFace.Avatar size={28} />
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">
-                    {msg("connectors.hf.name")}
-                  </span>
-                  {connected && huggingFace?.status && <StatusPill status={huggingFace.status} />}
-                </span>
-                {connected ? (
-                  <span className="truncate text-xs text-muted-foreground">
-                    {huggingFace?.account_label
-                      ? formatMsg("connectors.hf.connected_as", {
-                          account: huggingFace.account_label,
-                        })
-                      : msg("connectors.status.connected")}
-                    {" · "}
-                    {huggingFace?.auth_method === "oauth"
-                      ? msg("connectors.hf.via_oauth")
-                      : msg("connectors.hf.via_token")}
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">
-                    {msg("connectors.hf.blurb")}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-              {!connected && !tokenOpen && huggingFace?.oauth_available && (
-                <Button
-                  size="sm"
-                  onClick={handleOAuth}
-                  disabled={starting}
-                  className="min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
-                >
-                  {starting ? (
-                    <CircleNotch className="size-3.5 animate-spin" />
-                  ) : (
-                    <ArrowSquareOut className="size-3.5" />
-                  )}
-                  {msg("connectors.hf.oauth_button")}
-                </Button>
-              )}
-              {!connected && !tokenOpen && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setTokenOpen(true)}
-                  className="min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
-                >
-                  <Key className="size-3.5" />
-                  {msg("connectors.hf.token_toggle")}
-                </Button>
-              )}
-              {connected && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="icon-sm"
-                      onClick={handleRemove}
-                      disabled={removing}
-                      className="size-[44px] text-destructive hover:text-destructive sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
-                      aria-label={msg("connectors.disconnect")}
-                    >
-                      {removing ? (
-                        <CircleNotch className="size-3.5 animate-spin" />
-                      ) : (
-                        <Trash className="size-3.5" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{msg("connectors.disconnect")}</TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-          </div>
-
-          {connected && huggingFace?.status === "invalid" && (
-            <p className="mt-1.5 text-[0.6875rem] text-destructive/80">
-              {msg("connectors.hf.reconnect_hint")}
-            </p>
-          )}
-
-          {!connected && tokenOpen && (
-            <div className="mt-2.5 flex flex-col gap-2 animate-in fade-in-0 slide-in-from-top-1">
-              <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-                <Input
-                  dir="ltr"
-                  type="password"
-                  autoFocus
-                  autoComplete="off"
-                  placeholder={msg("connectors.hf.token_placeholder")}
-                  aria-label={msg("connectors.hf.token_label")}
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void handleSaveToken();
-                    if (e.key === "Escape") setTokenOpen(false);
-                  }}
-                  className="h-[44px] flex-1 sm:h-8 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
-                />
-                <div className="flex items-center justify-end gap-2">
-                  <Button
-                    size="sm"
-                    onClick={handleSaveToken}
-                    disabled={!token.trim() || saving}
-                    className="min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
-                  >
-                    {saving ? (
-                      <CircleNotch className="size-3.5 animate-spin" />
-                    ) : (
-                      <Key className="size-3.5" />
-                    )}
-                    {msg("connectors.hf.token_save")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    onClick={() => setTokenOpen(false)}
-                    className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
-                    aria-label={msg("connectors.cancel")}
-                  >
-                    <X className="size-3.5" />
-                  </Button>
-                </div>
-              </div>
-              <p className="text-[0.6875rem] text-muted-foreground/80">
-                {msg("connectors.hf.token_help")}{" "}
-                <a
-                  href={HF_TOKENS_URL}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="inline-flex items-center gap-0.5 font-medium text-[#8a6d44] underline-offset-2 hover:underline"
-                >
-                  {HF_TOKENS_LABEL}
-                  <ArrowSquareOut className="size-3" />
-                </a>
-              </p>
-            </div>
-          )}
+        <div className="flex flex-col gap-2.5">
+          {ALL_PROVIDERS.map((id: ConnectorProvider) => (
+            <ProviderCard
+              key={id}
+              meta={providerMeta(id)}
+              status={byProvider(id)}
+              onChange={setConnectors}
+            />
+          ))}
         </div>
       )}
 
-      <p className="text-xs text-muted-foreground">{msg("connectors.hf.import_hint")}</p>
+      <p className="text-xs text-muted-foreground">{msg("connectors.import_hint")}</p>
     </div>
   );
 }

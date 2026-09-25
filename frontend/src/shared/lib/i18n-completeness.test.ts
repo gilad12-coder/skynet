@@ -12,6 +12,10 @@ const simplifiedOnlyCharacters = /[设据优这为个里进还复后发关门开
 const cantoneseEnglishAllowlist = new Set([
   "auth.halo.text_to_sql",
   "auth.login.email_placeholder",
+  "connectors.azure_blob.name",
+  "connectors.field.connection_placeholder",
+  "connectors.field.service_account_json_placeholder",
+  "connectors.gcs.name",
   "auto.features.tutorial.components.concepts.guide.literal.312",
   "auto.features.tutorial.components.concepts.guide.literal.314",
   "auto.features.tutorial.components.concepts.guide.literal.315",
