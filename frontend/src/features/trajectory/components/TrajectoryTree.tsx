@@ -862,7 +862,9 @@ const TreeContent = memo(function TreeContent({
 
       {/* Each ghost drives its own opacity from the toggle rather than
           inheriting a group fade: with only mount and hover animating it,
-          some ghosts stayed invisible after re-showing until hovered. */}
+          some ghosts stayed invisible after re-showing until hovered. Keep
+          `opacity` out of `style`: an undefined style key makes motion drop
+          the value on every morph frame, freezing the fade midway. */}
       <g>
         {ghosts.map((ghost) => {
           const isHovered = ghost.rejection_id === hoveredGhostId;
@@ -884,13 +886,12 @@ const TreeContent = memo(function TreeContent({
               onClick={(e) => onGhostClick(ghost.rejection_id, e)}
               aria-hidden={!showRejected}
               initial={reduceMotion ? false : { scale: 0.7, opacity: 0 }}
-              animate={reduceMotion ? undefined : { scale: 1, opacity: restOpacity }}
-              transition={reduceMotion ? undefined : { duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
-              style={{
-                cursor: "pointer",
-                pointerEvents: showRejected ? "auto" : "none",
-                opacity: reduceMotion ? restOpacity : undefined,
-              }}
+              animate={{ scale: 1, opacity: restOpacity }}
+              transition={
+                reduceMotion ? { duration: 0 } : { duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }
+              }
+              pointerEvents={showRejected ? "auto" : "none"}
+              style={{ cursor: "pointer" }}
             >
               <circle
                 cx={ghost.x}
