@@ -52,13 +52,20 @@ python scripts/provision_stripe.py
 ```
 
 It creates (idempotently — safe to re-run) three one-time credit-pack prices
-($5 / $20 / $50), then prints the env lines. Paste them into `backend/.env`:
+($5 / $20 / $50) and the $9/month Skynet Pro plan price, then prints the env
+lines. Paste them into `backend/.env`:
 
 ```bash
 STRIPE_PRICE_PACK_STARTER=price_...
 STRIPE_PRICE_PACK_PLUS=price_...
 STRIPE_PRICE_PACK_PRO=price_...
+STRIPE_PRICE_PRO_MONTHLY=price_...
 ```
+
+> **Skynet Pro** is the platform plan: credits still pay for usage at cost,
+> and Pro lifts the platform limits (10 GB storage, unlimited saved jobs, 20
+> concurrent runs; see the `pro_*` settings in `core/config.py`). Leaving
+> `STRIPE_PRICE_PRO_MONTHLY` unset hides the upgrade.
 
 > The **credits** each pack grants (500 / 2000 / 5000 — at par, one credit per
 > cent) live in
@@ -72,8 +79,9 @@ Dashboard → **Settings → Billing → Customer portal**:
 1. Enable customers to update billing information.
 2. Enable payment-method updates.
 3. Enable invoice history.
-4. Leave subscription cancellation and plan switching disabled — Skynet is
-   prepaid credits only.
+4. Enable subscription cancellation (at the end of the billing period) so
+   Skynet Pro subscribers can cancel themselves. Leave plan switching off —
+   there is one plan.
 5. Set the default return URL to
    `https://<your-app>/?settings=billing` and save the configuration.
 
@@ -112,6 +120,9 @@ your local backend.
    - `checkout.session.completed`
    - `charge.refunded`
    - `charge.dispute.created`
+   - `customer.subscription.created`
+   - `customer.subscription.updated`
+   - `customer.subscription.deleted`
 4. Copy the endpoint's **Signing secret** (`whsec_…`) into the deployment's
    `STRIPE_WEBHOOK_SECRET`.
 

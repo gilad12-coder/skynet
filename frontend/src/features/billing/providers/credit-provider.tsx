@@ -34,9 +34,10 @@ interface CreditContextValue {
   /**
    * Enter the post-checkout `syncing` state and poll the wallet until the webhook
    * lands (the balance changes) or a short budget elapses. Call on a Stripe
-   * `?billing=success` return so the chip never shows a false zero.
+   * `?billing=success` return so the chip never shows a false zero. With
+   * `until: "pro"` (a subscription return) it waits for the plan to flip instead.
    */
-  beginSync: () => void;
+  beginSync: (until?: "balance" | "pro") => void;
 }
 
 /** Overlay a backend wallet response onto the current wallet. */
@@ -56,6 +57,12 @@ function applyWalletResponse(prev: CreditWallet, r: BillingWalletResponse): Cred
       credits: u.credits,
       kind: u.kind as LedgerKind,
     })),
+    plan: {
+      plan: r.plan.plan,
+      renewsAt: r.plan.renews_at,
+      cancelAtPeriodEnd: r.plan.cancel_at_period_end,
+      available: r.plan.available,
+    },
   };
 }
 
@@ -111,7 +118,7 @@ export function CreditProvider({ children }: { children: React.ReactNode }) {
   // return we poll the wallet (without toggling `loading`, to avoid wiping the
   // prior balance) until it changes or a short budget elapses. The chip reads
   // `syncing` and shimmers over the prior balance instead of flashing a zero.
-  const beginSync = React.useCallback(() => {
+  const beginSync = React.useCallback((until: "balance" | "pro" = "balance") => {
     setSyncing(true);
     let attempt = 0;
     const baseline = wallet.paidBalanceCredits;
@@ -122,7 +129,9 @@ export function CreditProvider({ children }: { children: React.ReactNode }) {
           setWallet((prev) => applyWalletResponse(prev, r));
           setAvailable(true);
           setLoadError(false);
-          return r.paid_balance_credits !== baseline;
+          return until === "pro"
+            ? r.plan.plan === "pro"
+            : r.paid_balance_credits !== baseline;
         })
         .catch(() => {
           setLoadError(true);
@@ -141,7 +150,7 @@ export function CreditProvider({ children }: { children: React.ReactNode }) {
     poll();
   }, [wallet.paidBalanceCredits]);
 
-  // Stripe Checkout returns to `/?billing=success|cancel` (there is no
+  // Stripe Checkout returns to `/?billing=success|pro|cancel` (there is no
   // standalone add-credits page). On success, toast and enter the syncing
   // state; either way strip the param so a reload doesn't re-toast. beginSync's
   // identity changes as the wallet loads, but re-runs bail on the cleared param.
@@ -152,6 +161,9 @@ export function CreditProvider({ children }: { children: React.ReactNode }) {
     if (status === "success") {
       toast.success(msg("billing.upgrade.success_toast"));
       beginSync();
+    } else if (status === "pro") {
+      toast.success(msg("billing.pro.success_toast"));
+      beginSync("pro");
     }
     params.delete("billing");
     const query = params.toString();

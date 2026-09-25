@@ -8,6 +8,7 @@ import {
   ArrowSquareOut,
   CircleNotch,
   Coins,
+  Crown,
   CreditCard,
   PencilSimple,
   Plus,
@@ -27,6 +28,7 @@ import { TooltipButton } from "@/shared/ui/tooltip-button";
 import {
   createBillingPortalSession,
   createCheckoutSession,
+  createSubscriptionCheckout,
   getBillingProfile,
   getBillingTransactions,
   type BillingAddressResponse,
@@ -42,6 +44,7 @@ import {
   formatCreditsUsd,
   formatResetDate,
   formatUsd,
+  PRO_MONTHLY_USD,
   purchaseTotalUsd,
   type CreditPack,
 } from "../lib/credit";
@@ -192,6 +195,93 @@ function AddCreditsControls() {
         {formatMsg("billing.upgrade.buy", { p1: priceLabel })}
       </Button>
     </div>
+  );
+}
+
+/**
+ * Skynet Pro — the flat monthly platform plan. Credits still pay for usage;
+ * Pro lifts the storage, saved-job, and concurrent-run limits. Upgrading goes
+ * through Stripe Checkout; managing or cancelling goes through the portal.
+ */
+function ProPlanRow() {
+  const { wallet } = useCredits();
+  const { locale } = useLocale();
+  const [pending, setPending] = React.useState(false);
+  const { plan } = wallet;
+  const isPro = plan.plan === "pro";
+
+  if (!isPro && !plan.available) return null;
+
+  const onUpgrade = async () => {
+    setPending(true);
+    track(TelemetryEvent.CheckoutStarted, { pack_id: "pro_monthly", credits: 0 });
+    try {
+      const { url } = await createSubscriptionCheckout();
+      window.location.assign(url);
+    } catch {
+      setPending(false);
+      toast.error(msg("billing.checkout.error"));
+    }
+  };
+
+  const onManage = async () => {
+    setPending(true);
+    try {
+      const { url } = await createBillingPortalSession("manage");
+      window.location.assign(url);
+    } catch {
+      setPending(false);
+      toast.error(msg("billing.portal.error"));
+    }
+  };
+
+  const description = !isPro
+    ? msg("billing.pro.pitch")
+    : plan.renewsAt == null
+      ? msg("billing.pro.active")
+      : formatMsg(plan.cancelAtPeriodEnd ? "billing.pro.ends_on" : "billing.pro.renews_on", {
+          p1: formatResetDate(plan.renewsAt, locale),
+        });
+
+  return (
+    <SettingsRow
+      icon={Crown}
+      label={
+        <span className="flex items-center gap-2">
+          {msg("billing.pro.title")}
+          {isPro && (
+            <Badge variant="secondary" size="sm">
+              {msg("billing.pro.current")}
+            </Badge>
+          )}
+        </span>
+      }
+      description={description}
+    >
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => void (isPro ? onManage() : onUpgrade())}
+        disabled={pending}
+        data-telemetry={isPro ? "wallet-manage-pro" : "wallet-upgrade-pro"}
+        className={cn(
+          "h-[44px] rounded-full px-2.5 text-[0.6875rem] font-semibold sm:h-6 [@media(hover:none)_and_(pointer:coarse)]:h-[44px] [&_svg:not([class*='size-'])]:size-3",
+          !isPro &&
+            "border-[#C8A882]/70 text-[#8a6d44] hover:bg-[#C8A882]/10 hover:text-[#8a6d44]",
+        )}
+      >
+        {pending ? (
+          <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        ) : isPro ? (
+          <ArrowSquareOut aria-hidden="true" />
+        ) : (
+          <Crown aria-hidden="true" />
+        )}
+        {isPro
+          ? msg("billing.pro.manage")
+          : formatMsg("billing.pro.upgrade", { p1: formatUsdWhole(PRO_MONTHLY_USD, locale) })}
+      </Button>
+    </SettingsRow>
   );
 }
 
@@ -576,6 +666,7 @@ export function WalletTab() {
           <SettingsRow icon={Sparkle} label={msg("billing.action.add_credits")}>
             <AddCreditsControls />
           </SettingsRow>
+          <ProPlanRow />
         </div>
       </section>
 
