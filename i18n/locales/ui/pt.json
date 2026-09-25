@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "Escolha a coluna que contém o texto a marcar. As restantes colunas são mantidas na exportação",
   "tooltip.tagger.upload_file": "Carregue um ficheiro CSV, JSON ou Excel. Cada linha torna-se um item a marcar",
   "trajectory.a11y.node_label": "Candidato {id}, geração {gen}, pontuação {score}",
+  "trajectory.a11y.ghost_label": "Proposta rejeitada do candidato {parent}, pontuação {score}",
   "trajectory.a11y.tree_label": "A árvore de candidatos da otimização",
   "trajectory.chat.recorded_count": "{n} mensagens",
   "trajectory.chat.recorded_label": "Conversa registada",

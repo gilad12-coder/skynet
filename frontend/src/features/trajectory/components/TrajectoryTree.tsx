@@ -36,6 +36,7 @@ const DONUT_RING_THICKNESS = 8;
 const SCORE_TRACK_STROKE = "rgba(124, 99, 80, 0.14)";
 const GHOST_FILL = "#E8E0D3";
 const GHOST_STROKE = "rgba(124, 99, 80, 0.5)";
+const GHOST_STROKE_HOVER = "rgba(124, 99, 80, 0.85)";
 const WINNER_INDICATOR = "#9C7A3F";
 const WINNER_HALO = "rgba(156, 122, 63, 0.18)";
 const WINNER_FILL = "#F8EBC8";
@@ -85,6 +86,9 @@ interface LayerVisibility {
 
 export interface TrajectoryTreeProps {
   layout: LayoutResult;
+  // The same tree laid out without its rejected proposals. Hiding them swaps
+  // to this layout so their slots close up instead of leaving holes.
+  layoutWithoutRejected?: LayoutResult;
   selectedId: string | null;
   newestId: string | null;
   onSelectCandidate: (id: string) => void;
@@ -224,7 +228,8 @@ function fitView(size: { w: number; h: number }, layoutW: number, layoutH: numbe
 }
 
 export function TrajectoryTree({
-  layout,
+  layout: fullLayout,
+  layoutWithoutRejected,
   selectedId,
   newestId,
   onSelectCandidate,
@@ -262,6 +267,8 @@ export function TrajectoryTree({
   // freeze their framing. Reset / maximize-toggle release the lock.
   const userInteractedRef = useRef(false);
 
+  const layout =
+    !layers.rejected && layoutWithoutRejected !== undefined ? layoutWithoutRejected : fullLayout;
   const { nodes, ghosts, edges, width, height } = layout;
   const fitWidth = Math.max(width, previewLayout?.width ?? 0);
   const fitHeight = Math.max(height, previewLayout?.height ?? 0);
@@ -621,7 +628,7 @@ export function TrajectoryTree({
             }
             label={TERMS.winningCandidate}
           />
-          {ghosts.length > 0 ? (
+          {fullLayout.ghosts.length > 0 ? (
             <>
               <LegendDivider />
               <LegendToggle
@@ -629,10 +636,10 @@ export function TrajectoryTree({
                 onToggle={() => toggleLayer("rejected")}
                 swatch={
                   <span
-                    className="inline-block size-2.5 rounded-[2px]"
+                    className="inline-block size-2.5 rounded-full"
                     style={{
                       background: GHOST_FILL,
-                      border: `1px solid ${GHOST_STROKE}`,
+                      border: `1px dashed ${GHOST_STROKE}`,
                     }}
                   />
                 }
@@ -706,6 +713,7 @@ const TreeContent = memo(function TreeContent({
   onGhostClick,
   onHover,
 }: TreeContentProps) {
+  const [hoveredGhostId, setHoveredGhostId] = useState<string | null>(null);
   // A 0–1 scorer fills the arc with the raw score; anything on a larger
   // scale is measured against the tree's best candidate instead.
   const scoreScale = useMemo(() => Math.max(1, ...nodes.map((n) => n.score)), [nodes]);
@@ -745,41 +753,82 @@ const TreeContent = memo(function TreeContent({
           {ghosts.map((ghost) => {
             const parent = idIndex.get(ghost.parent_id);
             if (parent === undefined) return null;
-            // Single-corner elbow along the dominant axis, so ghost spokes
-            // stay rectilinear like the lineage edges.
+            // Same elbow as a lineage edge, dashed: a branch that was tried
+            // and dropped.
+            const midY = (parent.y + ghost.y) / 2;
             const d =
-              Math.abs(ghost.x - parent.x) > Math.abs(ghost.y - parent.y)
-                ? `M ${parent.x} ${parent.y} L ${ghost.x} ${parent.y} L ${ghost.x} ${ghost.y}`
-                : `M ${parent.x} ${parent.y} L ${parent.x} ${ghost.y} L ${ghost.x} ${ghost.y}`;
+              parent.x === ghost.x
+                ? `M ${parent.x} ${parent.y} L ${ghost.x} ${ghost.y}`
+                : `M ${parent.x} ${parent.y} L ${parent.x} ${midY} L ${ghost.x} ${midY} L ${ghost.x} ${ghost.y}`;
             return (
               <path
                 key={`ghost-edge-${ghost.rejection_id}`}
                 d={d}
                 fill="none"
                 stroke={EDGE_STROKE_GHOST}
-                strokeWidth={1}
-                strokeDasharray="3 3"
+                strokeWidth={1.2}
+                strokeDasharray="4 4"
               />
             );
           })}
-          {ghosts.map((ghost) => (
-            <motion.rect
-              key={`ghost-${ghost.rejection_id}`}
-              x={ghost.x - TRAJECTORY_LAYOUT.ghostRadius}
-              y={ghost.y - TRAJECTORY_LAYOUT.ghostRadius}
-              width={TRAJECTORY_LAYOUT.ghostRadius * 2}
-              height={TRAJECTORY_LAYOUT.ghostRadius * 2}
-              rx={1.5}
-              fill={GHOST_FILL}
-              stroke={GHOST_STROKE}
-              strokeWidth={0.9}
-              initial={reduceMotion ? false : { scale: 0.5, opacity: 0 }}
-              animate={reduceMotion ? undefined : { scale: 1, opacity: 1 }}
-              transition={reduceMotion ? undefined : { duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
-              style={{ cursor: "pointer" }}
-              onClick={(e) => onGhostClick(ghost.rejection_id, e)}
-            />
-          ))}
+          {ghosts.map((ghost) => {
+            const isHovered = ghost.rejection_id === hoveredGhostId;
+            const r = TRAJECTORY_LAYOUT.nodeRadius;
+            const mark = r * 0.28;
+            return (
+              <motion.g
+                key={`ghost-${ghost.rejection_id}`}
+                role="treeitem"
+                aria-label={formatMsg("trajectory.a11y.ghost_label", {
+                  parent: displayCandidateId(ghost.parent_id),
+                  score: ghost.proposal_score.toFixed(2),
+                })}
+                aria-selected={false}
+                tabIndex={-1}
+                onMouseEnter={() => setHoveredGhostId(ghost.rejection_id)}
+                onMouseLeave={() => setHoveredGhostId(null)}
+                onClick={(e) => onGhostClick(ghost.rejection_id, e)}
+                initial={reduceMotion ? false : { scale: 0.7, opacity: 0 }}
+                animate={reduceMotion ? undefined : { scale: 1, opacity: isHovered ? 0.95 : 0.7 }}
+                transition={reduceMotion ? undefined : { duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
+                style={{ cursor: "pointer", opacity: reduceMotion ? 0.7 : undefined }}
+              >
+                <circle
+                  cx={ghost.x}
+                  cy={ghost.y}
+                  r={r - 0.75}
+                  fill={GHOST_FILL}
+                  fillOpacity={0.55}
+                  stroke={isHovered ? GHOST_STROKE_HOVER : GHOST_STROKE}
+                  strokeWidth={1.5}
+                  strokeDasharray="5 4"
+                />
+                <path
+                  d={`M ${ghost.x - mark} ${ghost.y - mark} L ${ghost.x + mark} ${ghost.y + mark} M ${ghost.x + mark} ${ghost.y - mark} L ${ghost.x - mark} ${ghost.y + mark}`}
+                  stroke={GHOST_STROKE}
+                  strokeWidth={1.6}
+                  strokeLinecap="round"
+                  pointerEvents="none"
+                />
+                <text
+                  x={ghost.x}
+                  y={ghost.y + r + 14}
+                  textAnchor="middle"
+                  fontFamily="var(--font-mono, monospace)"
+                  fontSize="10.5"
+                  fontWeight={600}
+                  fill="rgba(28, 22, 18, 0.6)"
+                  stroke={LABEL_HALO}
+                  strokeWidth={2.5}
+                  strokeLinejoin="round"
+                  pointerEvents="none"
+                  style={{ fontVariantNumeric: "tabular-nums", paintOrder: "stroke" }}
+                >
+                  {ghost.proposal_score.toFixed(2)}
+                </text>
+              </motion.g>
+            );
+          })}
         </g>
       </LayerFade>
 

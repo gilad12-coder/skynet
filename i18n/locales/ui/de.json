@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "Wählen Sie die Spalte, die den zu taggenden Text enthält. Die übrigen Spalten bleiben im Export erhalten",
   "tooltip.tagger.upload_file": "Laden Sie eine CSV-, JSON- oder Excel-Datei hoch. Jede Zeile wird zu einem Element zum Taggen",
   "trajectory.a11y.node_label": "Kandidat {id}, Generierung {gen}, Score {score}",
+  "trajectory.a11y.ghost_label": "Abgelehnter Vorschlag von Kandidat {parent}, Score {score}",
   "trajectory.a11y.tree_label": "Der Kandidatenbaum der Optimierung",
   "trajectory.chat.recorded_count": "{n} Nachrichten",
   "trajectory.chat.recorded_label": "Aufgezeichnete Konversation",

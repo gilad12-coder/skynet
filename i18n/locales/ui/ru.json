@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "Выберите столбец, содержащий текст для разметки. Остальные столбцы сохраняются при экспорте",
   "tooltip.tagger.upload_file": "Загрузите файл CSV, JSON или Excel. Каждая строка становится элементом для разметки",
   "trajectory.a11y.node_label": "Кандидат {id}, генерация {gen}, оценка {score}",
+  "trajectory.a11y.ghost_label": "Отклонённое предложение от кандидата {parent}, оценка {score}",
   "trajectory.a11y.tree_label": "Дерево кандидатов оптимизации",
   "trajectory.chat.recorded_count": "{n} сообщений",
   "trajectory.chat.recorded_label": "Записанный разговор",

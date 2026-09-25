@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "ستونی را که متن مورد برچسب را در بر دارد انتخاب کنید. ستون‌های دیگر در خروجی حفظ می‌شوند",
   "tooltip.tagger.upload_file": "یک فایل CSV، JSON یا Excel بارگذاری کنید. هر ردیف به موردی برای برچسب‌گذاری تبدیل می‌شود",
   "trajectory.a11y.node_label": "نامزد {id}، نسل {gen}، امتیاز {score}",
+  "trajectory.a11y.ghost_label": "پیشنهاد ردشده از نامزد {parent}، امتیاز {score}",
   "trajectory.a11y.tree_label": "درخت نامزدهای بهینه‌سازی",
   "trajectory.chat.recorded_count": "{n} پیام",
   "trajectory.chat.recorded_label": "گفتگوی ضبط‌شده",
