@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "选择包含待标注文本的列。其他列会在导出时保留",
   "tooltip.tagger.upload_file": "上传 CSV、JSON 或 Excel 文件。每一行都会成为一个待标注项",
   "trajectory.a11y.node_label": "候选项 {id}，第 {gen} 代，分数 {score}",
+  "trajectory.a11y.ghost_label": "来自候选项 {parent} 的被拒绝提案，分数 {score}",
   "trajectory.a11y.tree_label": "该优化的候选项树",
   "trajectory.chat.recorded_count": "{n} 条消息",
   "trajectory.chat.recorded_label": "已记录的对话",

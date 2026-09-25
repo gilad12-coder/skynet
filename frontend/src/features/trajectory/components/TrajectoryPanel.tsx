@@ -104,6 +104,10 @@ export function TrajectoryPanel({
     () => layoutTrajectory(visibleCandidates, visibleRejected),
     [visibleCandidates, visibleRejected],
   );
+  const layoutWithoutRejected = useMemo(
+    () => layoutTrajectory(visibleCandidates),
+    [visibleCandidates],
+  );
   const [selected, setSelected] = useState<Selected | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [newestId, setNewestId] = useState<string | null>(null);
@@ -248,6 +252,7 @@ export function TrajectoryPanel({
           ) : (
             <TrajectoryTree
               layout={layout}
+              layoutWithoutRejected={layoutWithoutRejected}
               selectedId={selectedTreeId}
               newestId={newestId}
               onSelectCandidate={handleSelectCandidate}

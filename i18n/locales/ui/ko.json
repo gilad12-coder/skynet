@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "태깅할 텍스트가 들어 있는 열을 선택하세요. 나머지 열은 내보내기에 유지됩니다",
   "tooltip.tagger.upload_file": "CSV, JSON 또는 Excel 파일을 업로드하세요. 각 행이 태깅할 항목이 됩니다",
   "trajectory.a11y.node_label": "후보 {id}, 생성 {gen}, 점수 {score}",
+  "trajectory.a11y.ghost_label": "후보 {parent}의 거부된 제안, 점수 {score}",
   "trajectory.a11y.tree_label": "최적화의 후보 트리",
   "trajectory.chat.recorded_count": "{n}개 메시지",
   "trajectory.chat.recorded_label": "기록된 대화",

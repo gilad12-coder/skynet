@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "वह कॉलम चुनें जिसमें टैग करने के लिए टेक्स्ट है। अन्य कॉलम निर्यात में रखे जाते हैं",
   "tooltip.tagger.upload_file": "एक CSV, JSON या Excel फ़ाइल अपलोड करें। प्रत्येक पंक्ति टैग करने के लिए एक आइटम बन जाती है",
   "trajectory.a11y.node_label": "उम्मीदवार {id}, जनरेशन {gen}, स्कोर {score}",
+  "trajectory.a11y.ghost_label": "उम्मीदवार {parent} का अस्वीकृत प्रस्ताव, स्कोर {score}",
   "trajectory.a11y.tree_label": "ऑप्टिमाइज़ेशन का उम्मीदवार वृक्ष",
   "trajectory.chat.recorded_count": "{n} संदेश",
   "trajectory.chat.recorded_label": "रिकॉर्ड की गई बातचीत",

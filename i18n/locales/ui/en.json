@@ -2850,6 +2850,7 @@
   "tooltip.tagger.text_column": "Choose the column that contains the text to tag. The other columns are kept in the export",
   "tooltip.tagger.upload_file": "Upload a CSV, JSON or Excel file. Each row becomes an item to tag",
   "trajectory.a11y.node_label": "Candidate {id}, generation {gen}, score {score}",
+  "trajectory.a11y.ghost_label": "Rejected proposal from candidate {parent}, score {score}",
   "trajectory.a11y.tree_label": "The optimization's candidate tree",
   "trajectory.chat.recorded_count": "{n} messages",
   "trajectory.chat.recorded_label": "Recorded conversation",

@@ -3279,6 +3279,7 @@
   "tooltip.tagger.text_column": "選擇包含要標記文字嘅欄。其他欄會喺匯出時保留",
   "tooltip.tagger.upload_file": "上載 CSV、JSON 或 Excel 檔案。每行會轉為一個待標記嘅項目",
   "trajectory.a11y.node_label": "候選 {id}，第 {gen} 代，得分 {score}",
+  "trajectory.a11y.ghost_label": "由候選 {parent} 提出但被拒絕嘅建議，得分 {score}",
   "trajectory.a11y.tree_label": "優化候選方案樹",
   "trajectory.chat.recorded_label": "已記錄嘅對話",
   "trajectory.chat.recorded_label.explain": "顯示畀候選項目睇嘅訊息交流已儲存記錄 —— 唯讀，唔係即時對話。",

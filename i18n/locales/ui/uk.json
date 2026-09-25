@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "Виберіть стовпець, що містить текст для тегування. Інші стовпці зберігаються в експорті",
   "tooltip.tagger.upload_file": "Завантажте файл CSV, JSON або Excel. Кожен рядок стає елементом для тегування",
   "trajectory.a11y.node_label": "Кандидат {id}, генерація {gen}, оцінка {score}",
+  "trajectory.a11y.ghost_label": "Відхилена пропозиція від кандидата {parent}, оцінка {score}",
   "trajectory.a11y.tree_label": "Дерево кандидатів оптимізації",
   "trajectory.chat.recorded_count": "{n} повідомлень",
   "trajectory.chat.recorded_label": "Записана розмова",

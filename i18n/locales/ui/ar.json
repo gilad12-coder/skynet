@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "اختر العمود الذي يحتوي على النص المراد وسمه. تُحفَظ بقية الأعمدة في التصدير",
   "tooltip.tagger.upload_file": "ارفع ملف CSV أو JSON أو Excel. يصبح كل صف عنصرًا للوسم",
   "trajectory.a11y.node_label": "المرشّح {id}، الجيل {gen}، النتيجة {score}",
+  "trajectory.a11y.ghost_label": "اقتراح مرفوض من المرشّح {parent}، النتيجة {score}",
   "trajectory.a11y.tree_label": "شجرة مرشّحي التحسين",
   "trajectory.chat.recorded_count": "{n} رسالة",
   "trajectory.chat.recorded_label": "محادثة مسجّلة",

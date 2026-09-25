@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "Etiketlenecek metni içeren sütunu seçin. Diğer sütunlar dışa aktarımda korunur",
   "tooltip.tagger.upload_file": "Bir CSV, JSON veya Excel dosyası yükleyin. Her satır etiketlenecek bir öğe olur",
   "trajectory.a11y.node_label": "Aday {id}, üretim {gen}, puan {score}",
+  "trajectory.a11y.ghost_label": "Aday {parent} için reddedilen öneri, puan {score}",
   "trajectory.a11y.tree_label": "Optimizasyonun aday ağacı",
   "trajectory.chat.recorded_count": "{n} mesaj",
   "trajectory.chat.recorded_label": "Kaydedilmiş konuşma",

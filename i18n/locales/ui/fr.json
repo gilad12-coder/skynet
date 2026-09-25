@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "Choisissez la colonne qui contient le texte à étiqueter. Les autres colonnes sont conservées dans l'export",
   "tooltip.tagger.upload_file": "Téléversez un fichier CSV, JSON ou Excel. Chaque ligne devient un élément à étiqueter",
   "trajectory.a11y.node_label": "Candidat {id}, génération {gen}, score {score}",
+  "trajectory.a11y.ghost_label": "Proposition rejetée du candidat {parent}, score {score}",
   "trajectory.a11y.tree_label": "L'arbre des candidats de l'optimisation",
   "trajectory.chat.recorded_count": "{n} messages",
   "trajectory.chat.recorded_label": "Conversation enregistrée",

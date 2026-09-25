@@ -3145,6 +3145,7 @@
   "tooltip.tagger.text_column": "בחר/י את העמודה שמכילה את הטקסט לתיוג. שאר העמודות יישמרו בייצוא",
   "tooltip.tagger.upload_file": "העלה/העלי קובץ CSV, JSON או Excel. כל שורה תהפוך לפריט לתיוג",
   "trajectory.a11y.node_label": "מועמד {id}, דור {gen}, ציון {score}",
+  "trajectory.a11y.ghost_label": "הצעה שנדחתה ממועמד {parent}, ציון {score}",
   "trajectory.a11y.tree_label": "עץ המועמדים של האופטימיזציה",
   "trajectory.chat.recorded_count": "{n} הודעות",
   "trajectory.chat.recorded_label": "שיחה מתועדת",

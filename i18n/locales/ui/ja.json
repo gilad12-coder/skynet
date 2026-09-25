@@ -3532,6 +3532,7 @@
   "tooltip.tagger.text_column": "タグ付けするテキストを含む列を選択します。他の列はエクスポートに保持されます",
   "tooltip.tagger.upload_file": "CSV、JSON、または Excel ファイルをアップロードします。各行がタグ付けの対象項目になります",
   "trajectory.a11y.node_label": "候補 {id}、生成 {gen}、スコア {score}",
+  "trajectory.a11y.ghost_label": "候補 {parent} からの却下された提案、スコア {score}",
   "trajectory.a11y.tree_label": "最適化の候補ツリー",
   "trajectory.chat.recorded_count": "{n} 件のメッセージ",
   "trajectory.chat.recorded_label": "記録された会話",
