@@ -3,11 +3,11 @@
 import { ProgressBar } from "@/shared/ui/progress-bar";
 import * as React from "react";
 import {
-  ArrowDownLeft,
   ArrowsClockwise,
   ChartBar,
   Coins,
   Gift,
+  Minus,
   Plus,
   Sparkle,
   type Icon,
@@ -413,7 +413,7 @@ function LedgerRow({ entry, locale }: { entry: BillingUsageEntry; locale: string
         {credited ? (
           <Icon className="size-4" aria-hidden="true" />
         ) : (
-          <ArrowDownLeft className="size-4 rtl:-scale-x-100" aria-hidden="true" />
+          <Minus className="size-4" aria-hidden="true" />
         )}
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
