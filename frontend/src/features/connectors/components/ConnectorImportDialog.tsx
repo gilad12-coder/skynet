@@ -38,9 +38,9 @@ import {
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { useSettingsModal } from "@/features/settings";
+import { DatasetPreviewPanel } from "@/features/datasets";
 import { useConnectors } from "../hooks/use-connectors";
 import { BROWSE_CARET_CLASS, BROWSE_LIST_CLASS, BROWSE_ROW_CLASS } from "./browse-list";
-import { PreviewTable } from "./PreviewTable";
 import { providerMeta } from "./providers";
 
 /** Props for {@link ConnectorImportDialog}. */
@@ -114,6 +114,14 @@ export function ConnectorImportDialog({
   const [selected, setSelected] = React.useState<ConnectorEntry | null>(null);
   const [preview, setPreview] = React.useState<HubPreview | null>(null);
   const [previewLoading, setPreviewLoading] = React.useState(false);
+  const [previewExpanded, setPreviewExpanded] = React.useState(false);
+  const previewRows = React.useMemo(
+    () =>
+      previewLoading
+        ? null
+        : { columns: preview?.columns.map((c) => c.name) ?? [], rows: preview?.rows ?? [] },
+    [preview, previewLoading],
+  );
   const [name, setName] = React.useState("");
   const [importing, setImporting] = React.useState(false);
 
@@ -128,6 +136,7 @@ export function ConnectorImportDialog({
       setQuery("");
       setSelected(null);
       setPreview(null);
+      setPreviewExpanded(false);
       setName("");
       setImporting(false);
     }
@@ -164,6 +173,7 @@ export function ConnectorImportDialog({
     let cancelled = false;
     setPreviewLoading(true);
     setPreview(null);
+    setPreviewExpanded(false);
     setName(selected.name);
     previewConnectorRef(provider, selected.ref)
       .then((res) => {
@@ -234,7 +244,14 @@ export function ConnectorImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(40rem,94vw)] max-w-[min(40rem,94vw)] gap-0 p-0 sm:max-w-2xl">
+      <DialogContent
+        className={cn(
+          "max-h-[96dvh] gap-0 overflow-y-auto p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
+          previewExpanded
+            ? "w-[min(72rem,96vw)] max-w-[min(72rem,96vw)] sm:max-w-[min(72rem,96vw)]"
+            : "w-[min(40rem,94vw)] max-w-[min(40rem,94vw)] sm:max-w-2xl",
+        )}
+      >
         <DialogHeader className="px-5 pt-5 text-start">
           <div className="flex items-center gap-2.5">
             <meta.Avatar size={28} />
@@ -415,10 +432,13 @@ export function ConnectorImportDialog({
                   </span>
                 )}
               </div>
-              <PreviewTable
-                preview={preview}
-                loading={previewLoading}
-                emptyLabel={msg("connector_import.preview_empty")}
+              <DatasetPreviewPanel
+                rows={previewRows}
+                emptyTitle={msg("connector_import.preview_empty")}
+                expanded={previewExpanded}
+                onExpandedChange={setPreviewExpanded}
+                className="h-80"
+                expandedClassName="h-[62dvh] min-h-80"
               />
             </div>
 

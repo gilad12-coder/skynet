@@ -1,6 +1,7 @@
 "use client";
 
 import { DatasetRowsView } from "./DatasetRowsView";
+import { ExpandTableButton } from "./DatasetPreviewPanel";
 import * as React from "react";
 import Link from "next/link";
 import { ArrowUpRight, CircleNotch, Sparkle, Table as Table2 } from "@/shared/ui/icons";
@@ -24,6 +25,7 @@ import {
 } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { formatRelativeTime } from "@/shared/lib/formatters";
+import { cn } from "@/shared/lib/utils";
 
 // Mirrors the Explore corpus toggle so the sliding pill feels identical app-wide.
 const PILL_TRANSITION = { type: "tween", duration: 0.18, ease: [0.22, 1, 0.36, 1] } as const;
@@ -50,6 +52,8 @@ export function DatasetDetailDialog({
   const [tab, setTab] = React.useState<DetailTab>("rows");
   // Index into the filtered row order; non-null swaps the grid for the reader.
   const [readerIndex, setReaderIndex] = React.useState<number | null>(null);
+  const [expanded, setExpanded] = React.useState(false);
+  const expandButton = React.useRef<HTMLButtonElement>(null);
   const datasetId = dataset?.id ?? null;
 
   React.useEffect(() => {
@@ -59,6 +63,7 @@ export function DatasetDetailDialog({
     setOptimizations(null);
     setTab("rows");
     setReaderIndex(null);
+    setExpanded(false);
     getDatasetRows(datasetId)
       .then((res) => !cancelled && setRows(res))
       .catch(
@@ -84,17 +89,28 @@ export function DatasetDetailDialog({
   return (
     <Dialog open={dataset !== null} onOpenChange={(next) => !next && onClose()}>
       <DialogContent
-        className="max-w-[min(72rem,94vw)] overflow-hidden p-0 max-lg:[&_[data-slot=dialog-close]]:!size-[44px] sm:max-w-[min(72rem,94vw)]"
+        className={cn(
+          "overflow-hidden p-0 transition-[max-width] duration-200 ease-out motion-reduce:transition-none max-lg:[&_[data-slot=dialog-close]]:!size-[44px]",
+          expanded
+            ? "max-w-[96vw] sm:max-w-[96vw]"
+            : "max-w-[min(72rem,94vw)] sm:max-w-[min(72rem,94vw)]",
+        )}
         aria-describedby={undefined}
         onEscapeKeyDown={(e) => {
-          // Escape peels one layer: reader -> grid first, dialog second.
+          // Escape peels one layer at a time: reader, expansion, dialog.
           if (readerIndex !== null) {
             e.preventDefault();
             setReaderIndex(null);
+          } else if (expanded && tab === "rows") {
+            e.preventDefault();
+            setExpanded(false);
+            expandButton.current?.focus();
           }
         }}
       >
-        <div className="flex max-h-[85vh] flex-col">
+        <div
+          className={cn("flex flex-col", expanded && tab === "rows" ? "h-[94dvh]" : "max-h-[85vh]")}
+        >
           <DialogHeader className="shrink-0 px-4 pb-4 pt-6 text-start sm:px-6">
             <DialogTitle className="truncate">{dataset?.name}</DialogTitle>
             {dataset && (
@@ -158,6 +174,13 @@ export function DatasetDetailDialog({
                 filename={dataset?.name}
                 readerIndex={readerIndex}
                 setReaderIndex={setReaderIndex}
+                toolbarActions={
+                  <ExpandTableButton
+                    ref={expandButton}
+                    expanded={expanded}
+                    onToggle={() => setExpanded(!expanded)}
+                  />
+                }
               />
             </div>
             {tab !== "rows" && (
