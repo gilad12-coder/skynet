@@ -1,5 +1,7 @@
 "use client";
 
+import { EmptyState } from "@/shared/ui/empty-state";
+import { LoadingState } from "@/shared/ui/loading-state";
 import * as React from "react";
 import { toast } from "react-toastify";
 import {
@@ -11,7 +13,6 @@ import {
   FileText,
   Folder,
   House,
-  MagnifyingGlass,
   Plug,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -42,6 +43,8 @@ import { DatasetPreviewPanel } from "@/features/datasets";
 import { useConnectors } from "../hooks/use-connectors";
 import { BROWSE_CARET_CLASS, BROWSE_LIST_CLASS, BROWSE_ROW_CLASS } from "./browse-list";
 import { providerMeta } from "./providers";
+import { SearchInput } from "@/shared/ui/search-input";
+import { TOUCH_FIELD } from "@/shared/ui/touch";
 
 /** Props for {@link ConnectorImportDialog}. */
 export interface ConnectorImportDialogProps {
@@ -53,7 +56,6 @@ export interface ConnectorImportDialogProps {
 }
 
 const SEARCH_DEBOUNCE_MS = 300;
-const TOUCH_INPUT = "h-[44px] sm:h-9 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]";
 const TOUCH_BUTTON =
   "min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]";
 
@@ -246,13 +248,13 @@ export function ConnectorImportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          "max-h-[96dvh] gap-0 overflow-y-auto p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
+          "gap-0 overflow-y-auto p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
           previewExpanded
-            ? "w-[min(72rem,96vw)] max-w-[min(72rem,96vw)] sm:max-w-[min(72rem,96vw)]"
-            : "w-[min(40rem,94vw)] max-w-[min(40rem,94vw)] sm:max-w-2xl",
+            ? "max-h-[85vh] w-[96vw] max-w-[96vw] sm:max-w-[96vw]"
+            : "max-h-[85vh] w-[min(72rem,94vw)] max-w-[min(72rem,94vw)] sm:max-w-[min(72rem,94vw)]",
         )}
       >
-        <DialogHeader className="px-5 pt-5 text-start">
+        <DialogHeader className="px-5 pt-5">
           <div className="flex items-center gap-2.5">
             <meta.Avatar size={28} />
             <div className="min-w-0">
@@ -267,9 +269,7 @@ export function ConnectorImportDialog({
         </DialogHeader>
 
         {connectorsLoading ? (
-          <div className="flex items-center justify-center py-14">
-            <CircleNotch className="size-5 animate-spin text-primary" />
-          </div>
+          <LoadingState className="py-14" />
         ) : !connected ? (
           <div className="px-5 pb-5 pt-4">
             <div className="flex flex-col items-center gap-3 rounded-lg border border-[#C8A882]/40 bg-[#C8A882]/10 px-4 py-8 text-center text-sm text-[#6b5232]">
@@ -318,24 +318,15 @@ export function ConnectorImportDialog({
               })}
             </nav>
 
-            <div className="relative">
-              <Input
-                dir="ltr"
-                autoFocus
-                placeholder={msg("connector_import.search_placeholder")}
-                aria-label={msg("connector_import.search_placeholder")}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className={cn(TOUCH_INPUT, "pe-9")}
-              />
-              <span className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                {browsing ? (
-                  <CircleNotch className="size-4 animate-spin" />
-                ) : (
-                  <MagnifyingGlass className="size-4" />
-                )}
-              </span>
-            </div>
+            <SearchInput
+              dir="ltr"
+              autoFocus
+              placeholder={msg("connector_import.search_placeholder")}
+              aria-label={msg("connector_import.search_placeholder")}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              busy={browsing}
+            />
 
             <div className="mt-3 max-h-[min(24rem,55vh)] overflow-y-auto">
               {browseFailed ? (
@@ -346,9 +337,7 @@ export function ConnectorImportDialog({
                   </Button>
                 </div>
               ) : !browsing && visibleEntries.length === 0 ? (
-                <p className="px-1 py-6 text-center text-sm text-muted-foreground">
-                  {msg("connector_import.empty")}
-                </p>
+                <EmptyState variant="list" title={msg("connector_import.empty")} />
               ) : visibleEntries.length > 0 ? (
                 <ul className={BROWSE_LIST_CLASS}>
                   {visibleEntries.map((entry) => {
@@ -399,9 +388,9 @@ export function ConnectorImportDialog({
                 size="icon-sm"
                 onClick={() => setSelected(null)}
                 aria-label={msg("connector_import.back")}
-                className="size-[44px] shrink-0 sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                className="shrink-0 max-lg:size-[44px]"
               >
-                <ArrowLeft className="size-4 rtl:-scale-x-100" />
+                <ArrowLeft className="size-4 rtl:rotate-180" />
               </Button>
               <span dir="ltr" className="min-w-0 truncate text-sm font-medium text-foreground">
                 {selected.ref}
@@ -417,7 +406,7 @@ export function ConnectorImportDialog({
                 dir="ltr"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className={TOUCH_INPUT}
+                className={TOUCH_FIELD}
               />
             </div>
 
@@ -438,21 +427,20 @@ export function ConnectorImportDialog({
                 expanded={previewExpanded}
                 onExpandedChange={setPreviewExpanded}
                 className="h-80"
-                expandedClassName="h-[62dvh] min-h-80"
+                expandedClassName="h-80"
               />
             </div>
 
-            <DialogFooter className="gap-2 sm:gap-2">
-              <Button
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                className={TOUCH_BUTTON}
-              >
+            <DialogFooter>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
                 {msg("connector_import.cancel")}
               </Button>
-              <Button onClick={handleImport} disabled={importing} className={TOUCH_BUTTON}>
+              <Button onClick={handleImport} disabled={importing}>
                 {importing ? (
-                  <CircleNotch className="size-4 animate-spin" />
+                  <CircleNotch
+                    className="animate-spin motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
                 ) : (
                   <DownloadSimple className="size-4" />
                 )}

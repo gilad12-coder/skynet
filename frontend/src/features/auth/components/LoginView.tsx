@@ -5,7 +5,7 @@ import { signIn, getProviders, getSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
-import { CircleNotch, GithubLogo, Fingerprint, ArrowLeft } from "@/shared/ui/icons";
+import { CircleNotch, GithubLogo, Fingerprint } from "@/shared/ui/icons";
 import {
   browserSupportsWebAuthn,
   browserSupportsWebAuthnAutofill,
@@ -18,8 +18,10 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
+import { Separator } from "@/shared/ui/primitives/separator";
 import { AnimatedWordmark } from "@/shared/ui/animated-wordmark";
 import { LanguageSwitcher } from "@/shared/ui/language-switcher";
+import { BackLink } from "@/shared/ui/back-link";
 import { msg } from "@/shared/lib/messages";
 import {
   getPasskeyRegistrationOptions,
@@ -851,7 +853,7 @@ export function LoginView() {
                           animate={{ opacity: 1, height: "auto" }}
                           exit={{ opacity: 0, height: 0 }}
                           transition={{ duration: 0.2 }}
-                          className="mt-3 text-sm text-destructive"
+                          className="mt-3 text-xs text-destructive"
                           role="alert"
                         >
                           {error}
@@ -866,7 +868,10 @@ export function LoginView() {
                       className="mt-5 h-[44px] w-full gap-2 text-[0.9375rem] font-medium"
                     >
                       {passkeyOffer === "saving" ? (
-                        <CircleNotch className="size-4 animate-spin" />
+                        <CircleNotch
+                          className="animate-spin motion-reduce:animate-none"
+                          aria-hidden="true"
+                        />
                       ) : (
                         <Fingerprint className="size-[18px]" />
                       )}
@@ -885,14 +890,9 @@ export function LoginView() {
                   </div>
                 ) : twoFactor ? (
                   <div>
-                    <button
-                      type="button"
-                      onClick={leaveTwoFactor}
-                      className="mb-4 flex min-h-[44px] cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground lg:min-h-0"
-                    >
-                      <ArrowLeft className="size-3.5 rtl:-scale-x-100" aria-hidden="true" />
-                      {msg("auth.login.twofa_back")}
-                    </button>
+                    <div className="mb-4">
+                      <BackLink onClick={leaveTwoFactor} label={msg("auth.login.twofa_back")} />
+                    </div>
                     <p className="text-sm font-semibold text-foreground">
                       {msg("auth.login.twofa_heading")}
                     </p>
@@ -914,7 +914,12 @@ export function LoginView() {
                         onClick={() => void sendEmailCode()}
                         className="mt-3 gap-2"
                       >
-                        {sendingCode && <CircleNotch className="size-3.5 animate-spin" />}
+                        {sendingCode && (
+                          <CircleNotch
+                            className="animate-spin motion-reduce:animate-none"
+                            aria-hidden="true"
+                          />
+                        )}
                         {msg(
                           twoFactor.emailSent ? "auth.login.twofa_resend" : "auth.login.twofa_send",
                         )}
@@ -947,7 +952,7 @@ export function LoginView() {
                             animate={{ opacity: 1, height: "auto" }}
                             exit={{ opacity: 0, height: 0 }}
                             transition={{ duration: 0.2 }}
-                            className="text-sm text-destructive"
+                            className="text-xs leading-snug text-destructive"
                             role="alert"
                           >
                             {error}
@@ -960,7 +965,12 @@ export function LoginView() {
                         disabled={loading || !twoFactorCode.trim()}
                         className="h-[44px] w-full gap-2 text-[0.9375rem] font-medium"
                       >
-                        {loading && <CircleNotch className="size-4 animate-spin" />}
+                        {loading && (
+                          <CircleNotch
+                            className="animate-spin motion-reduce:animate-none"
+                            aria-hidden="true"
+                          />
+                        )}
                         {msg("auth.login.twofa_verify")}
                       </Button>
                     </form>
@@ -996,14 +1006,9 @@ export function LoginView() {
                   </div>
                 ) : reset ? (
                   <div>
-                    <button
-                      type="button"
-                      onClick={leaveReset}
-                      className="mb-4 flex min-h-[44px] cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground lg:min-h-0"
-                    >
-                      <ArrowLeft className="size-3.5 rtl:-scale-x-100" aria-hidden="true" />
-                      {msg("auth.login.twofa_back")}
-                    </button>
+                    <div className="mb-4">
+                      <BackLink onClick={leaveReset} label={msg("auth.login.twofa_back")} />
+                    </div>
                     <p className="text-sm font-semibold text-foreground">
                       {msg("auth.login.reset_heading")}
                     </p>
@@ -1040,7 +1045,7 @@ export function LoginView() {
                               animate={{ opacity: 1, height: "auto" }}
                               exit={{ opacity: 0, height: 0 }}
                               transition={{ duration: 0.2 }}
-                              className="text-sm text-destructive"
+                              className="text-xs leading-snug text-destructive"
                               role="alert"
                             >
                               {error}
@@ -1053,7 +1058,12 @@ export function LoginView() {
                           disabled={resetLoading || !resetEmail.trim()}
                           className="h-[44px] w-full gap-2 text-[0.9375rem] font-medium"
                         >
-                          {resetLoading && <CircleNotch className="size-4 animate-spin" />}
+                          {resetLoading && (
+                            <CircleNotch
+                              className="animate-spin motion-reduce:animate-none"
+                              aria-hidden="true"
+                            />
+                          )}
                           {msg("auth.login.reset_send")}
                         </Button>
                       </form>
@@ -1117,7 +1127,7 @@ export function LoginView() {
                               animate={{ opacity: 1, height: "auto" }}
                               exit={{ opacity: 0, height: 0 }}
                               transition={{ duration: 0.2 }}
-                              className="text-sm text-destructive"
+                              className="text-xs leading-snug text-destructive"
                               role="alert"
                             >
                               {error}
@@ -1130,7 +1140,12 @@ export function LoginView() {
                           disabled={resetLoading || !resetCode.trim() || !resetNewPassword}
                           className="h-[44px] w-full gap-2 text-[0.9375rem] font-medium"
                         >
-                          {resetLoading && <CircleNotch className="size-4 animate-spin" />}
+                          {resetLoading && (
+                            <CircleNotch
+                              className="animate-spin motion-reduce:animate-none"
+                              aria-hidden="true"
+                            />
+                          )}
                           {msg("auth.login.reset_submit")}
                         </Button>
                         <button
@@ -1146,14 +1161,9 @@ export function LoginView() {
                   </div>
                 ) : verify ? (
                   <div>
-                    <button
-                      type="button"
-                      onClick={leaveVerify}
-                      className="mb-4 flex min-h-[44px] cursor-pointer items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground lg:min-h-0"
-                    >
-                      <ArrowLeft className="size-3.5 rtl:-scale-x-100" aria-hidden="true" />
-                      {msg("auth.login.twofa_back")}
-                    </button>
+                    <div className="mb-4">
+                      <BackLink onClick={leaveVerify} label={msg("auth.login.twofa_back")} />
+                    </div>
                     <p className="text-sm font-semibold text-foreground">
                       {msg("auth.login.verify_heading")}
                     </p>
@@ -1187,7 +1197,7 @@ export function LoginView() {
                             animate={{ opacity: 1, height: "auto" }}
                             exit={{ opacity: 0, height: 0 }}
                             transition={{ duration: 0.2 }}
-                            className="text-sm text-destructive"
+                            className="text-xs leading-snug text-destructive"
                             role="alert"
                           >
                             {error}
@@ -1200,7 +1210,12 @@ export function LoginView() {
                         disabled={verifyLoading || !verifyCode.trim()}
                         className="h-[44px] w-full gap-2 text-[0.9375rem] font-medium"
                       >
-                        {verifyLoading && <CircleNotch className="size-4 animate-spin" />}
+                        {verifyLoading && (
+                          <CircleNotch
+                            className="animate-spin motion-reduce:animate-none"
+                            aria-hidden="true"
+                          />
+                        )}
                         {msg("auth.login.verify_submit")}
                       </Button>
                       <button
@@ -1218,7 +1233,7 @@ export function LoginView() {
                     <div
                       role="tablist"
                       aria-label={msg("auth.login.form_aria")}
-                      className="mb-5 flex rounded-lg bg-accent/60 p-1"
+                      className="mb-5 flex gap-1 rounded-lg bg-muted p-1"
                     >
                       {(["signin", "signup"] as const).map((tab) => (
                         <button
@@ -1228,10 +1243,10 @@ export function LoginView() {
                           aria-selected={authMode === tab}
                           onClick={() => switchMode(tab)}
                           className={cn(
-                            "relative min-h-[44px] flex-1 cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200 lg:min-h-0",
+                            "relative flex-1 cursor-pointer rounded-md px-2 py-2 text-sm font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 sm:px-3",
                             authMode === tab
                               ? "text-foreground"
-                              : "text-muted-foreground hover:text-foreground",
+                              : "text-foreground/60 hover:text-foreground",
                           )}
                         >
                           {/* Shared-layoutId pill: the same id on whichever tab is
@@ -1294,7 +1309,10 @@ export function LoginView() {
                               className="h-[44px] w-full gap-2.5 text-[0.9375rem] font-medium"
                             >
                               {passkeyLoading ? (
-                                <CircleNotch className="size-[18px] animate-spin" />
+                                <CircleNotch
+                                  className="animate-spin motion-reduce:animate-none"
+                                  aria-hidden="true"
+                                />
                               ) : (
                                 <Fingerprint className="size-[18px]" />
                               )}
@@ -1303,11 +1321,11 @@ export function LoginView() {
                           )}
                         </div>
                         <div className="my-5 flex items-center gap-3" aria-hidden="true">
-                          <span className="h-px flex-1 bg-border" />
-                          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          <Separator className="flex-1" />
+                          <span className="text-xs text-muted-foreground">
                             {msg("auth.login.divider")}
                           </span>
-                          <span className="h-px flex-1 bg-border" />
+                          <Separator className="flex-1" />
                         </div>
                       </>
                     )}
@@ -1383,7 +1401,7 @@ export function LoginView() {
                             animate={{ opacity: 1, height: "auto" }}
                             exit={{ opacity: 0, height: 0 }}
                             transition={{ duration: 0.2 }}
-                            className="text-sm text-destructive"
+                            className="text-xs leading-snug text-destructive"
                             role="alert"
                           >
                             {error}
@@ -1397,7 +1415,12 @@ export function LoginView() {
                         disabled={!canSubmit}
                         className="h-[44px] w-full gap-2 text-[0.9375rem] font-medium"
                       >
-                        {loading && <CircleNotch className="size-4 animate-spin" />}
+                        {loading && (
+                          <CircleNotch
+                            className="animate-spin motion-reduce:animate-none"
+                            aria-hidden="true"
+                          />
+                        )}
                         {msg(
                           authMode === "signin"
                             ? "auth.login.signin_submit"
@@ -1413,7 +1436,7 @@ export function LoginView() {
             <p className="mt-4 flex min-h-[44px] flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-muted-foreground sm:mt-6 lg:min-h-0">
               <Link
                 href={LEGAL_LINKS.terms}
-                className="inline-flex min-h-[44px] items-center transition-colors hover:text-foreground hover:underline lg:min-h-0"
+                className="inline-flex min-h-[44px] items-center underline-offset-2 transition-colors hover:text-foreground hover:underline lg:min-h-0"
               >
                 {msg("legal.terms_link")}
               </Link>
@@ -1422,7 +1445,7 @@ export function LoginView() {
               </span>
               <Link
                 href={LEGAL_LINKS.privacy}
-                className="inline-flex min-h-[44px] items-center transition-colors hover:text-foreground hover:underline lg:min-h-0"
+                className="inline-flex min-h-[44px] items-center underline-offset-2 transition-colors hover:text-foreground hover:underline lg:min-h-0"
               >
                 {msg("legal.privacy_link")}
               </Link>

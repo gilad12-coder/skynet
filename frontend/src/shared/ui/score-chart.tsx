@@ -13,6 +13,13 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { detectRenderKind, RENDER_KIND_LABEL } from "@/shared/lib/candidate-render";
 import { useLiteMode } from "@/features/settings";
 import { ChartTable } from "@/shared/charts/chart-table";
+import {
+  CHART_TOOLTIP_CARD_CLASS,
+  CHART_TOOLTIP_ROW_CLASS,
+  CHART_TOOLTIP_SWATCH_CLASS,
+  CHART_TOOLTIP_TITLE_CLASS,
+  CHART_TOOLTIP_VALUE_CLASS,
+} from "@/shared/charts/chart-utils";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 
 /**
@@ -68,17 +75,19 @@ function ScoreChartTooltip({
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-lg border bg-background p-3 shadow-md text-sm" dir={getActiveDir()}>
-      <p className="font-medium mb-1.5">{pointLabel(artifact, label ?? "")}</p>
-      {payload.map((p, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
-          <span className="text-muted-foreground">{p.name}:</span>
-          <span className="font-mono font-bold ms-auto" dir="ltr">
-            {typeof p.value === "number" ? p.value.toFixed(1) : "—"}
-          </span>
-        </div>
-      ))}
+    <div className={CHART_TOOLTIP_CARD_CLASS} dir={getActiveDir()}>
+      <p className={CHART_TOOLTIP_TITLE_CLASS}>{pointLabel(artifact, label ?? "")}</p>
+      <div className="space-y-1">
+        {payload.map((p, i) => (
+          <div key={i} className={CHART_TOOLTIP_ROW_CLASS}>
+            <span className={CHART_TOOLTIP_SWATCH_CLASS} style={{ backgroundColor: p.color }} />
+            <span className="text-xs">{p.name}:</span>
+            <span className={CHART_TOOLTIP_VALUE_CLASS} dir="ltr">
+              {typeof p.value === "number" ? p.value.toFixed(1) : "—"}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

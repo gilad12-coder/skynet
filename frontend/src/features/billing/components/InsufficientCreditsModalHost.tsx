@@ -1,13 +1,8 @@
 "use client";
 
 import * as React from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/primitives/dialog";
+import { Dialog, DialogContent } from "@/shared/ui/primitives/dialog";
+import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
 import { Button } from "@/shared/ui/primitives/button";
 import { msg } from "@/shared/lib/messages";
 import { I18N_KEY, tI18n } from "@/shared/lib/i18n";
@@ -37,11 +32,11 @@ export function InsufficientCreditsModalHost() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{msg("billing.upgrade.title")}</DialogTitle>
-          <DialogDescription>{tI18n(I18N_KEY.BILLING_INSUFFICIENT_CREDITS)}</DialogDescription>
-        </DialogHeader>
+      <DialogContent className="w-[min(28rem,92vw)] max-w-[min(28rem,92vw)] sm:max-w-md">
+        <DialogTitleRow
+          title={msg("billing.upgrade.title")}
+          description={tI18n(I18N_KEY.BILLING_INSUFFICIENT_CREDITS)}
+        />
 
         <Button
           onClick={() => {

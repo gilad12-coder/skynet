@@ -1,9 +1,11 @@
 "use client";
 
+import { LoadingState } from "@/shared/ui/loading-state";
 import * as React from "react";
 import { toast } from "react-toastify";
 import { ArrowSquareOut, CircleNotch, FloppyDisk, Key, SignIn, Trash, X } from "@/shared/ui/icons";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
+import { StatusPill } from "@/shared/ui/status-badge";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
@@ -20,24 +22,16 @@ import {
   type CredentialField,
   type ProviderMeta,
 } from "./providers";
+import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
+import { Textarea } from "@/shared/ui/primitives/textarea";
 
-const TOUCH_ICON = "size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]";
-const TOUCH_INPUT = "h-[44px] sm:h-8 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]";
-
-/** The status pill next to a linked account. Green when healthy, destructive when it needs a reconnect. */
-function StatusPill({ status }: { status: NonNullable<ConnectorStatus["status"]> }) {
+/** The status pill next to a linked account. Green when healthy, failed when it needs a reconnect. */
+function ConnectorStatusPill({ status }: { status: NonNullable<ConnectorStatus["status"]> }) {
   const healthy = status === "connected";
   return (
-    <span
-      className={cn(
-        "rounded-full px-2 py-0.5 text-[0.6875rem] font-medium",
-        healthy
-          ? "bg-[var(--success-dim)] text-[var(--success)]"
-          : "bg-destructive/10 text-destructive",
-      )}
-    >
+    <StatusPill tone={healthy ? "success" : "failed"}>
       {healthy ? msg("connectors.status.connected") : msg("connectors.status.invalid")}
-    </span>
+    </StatusPill>
   );
 }
 
@@ -84,7 +78,7 @@ function CredentialInput({
   };
   if (field.multiline) {
     return (
-      <textarea
+      <Textarea
         id={id}
         dir="ltr"
         autoFocus={autoFocus}
@@ -96,8 +90,7 @@ function CredentialInput({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         className={cn(
-          "min-h-[5.5rem] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-xs outline-none",
-          "placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+          "min-h-[5.5rem] resize-y font-mono text-xs",
           field.secret && value && "[-webkit-text-security:disc]",
         )}
       />
@@ -114,7 +107,7 @@ function CredentialInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={onKeyDown}
-      className={TOUCH_INPUT}
+      className={TOUCH_FIELD_SM}
     />
   );
 }
@@ -215,7 +208,7 @@ function ProviderCard({
             <span className="text-sm font-medium text-foreground">{meta.name}</span>
             {connected ? (
               <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                {status?.status && <StatusPill status={status.status} />}
+                {status?.status && <ConnectorStatusPill status={status.status} />}
                 <span className="truncate">
                   {status?.account_label
                     ? formatMsg("connectors.hf.connected_as", { account: status.account_label })
@@ -233,17 +226,20 @@ function ProviderCard({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="icon-sm"
                   onClick={() => (meta.oauthFields ? openForm("oauth") : void handleOAuth())}
                   disabled={starting}
-                  className={TOUCH_ICON}
+                  className="text-muted-foreground hover:text-foreground"
                   aria-label={meta.oauthButton}
                 >
                   {starting ? (
-                    <CircleNotch className="size-3.5 animate-spin" />
+                    <CircleNotch
+                      className="animate-spin motion-reduce:animate-none"
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <SignIn className="size-3.5" />
+                    <SignIn className="size-4" />
                   )}
                 </Button>
               </TooltipTrigger>
@@ -254,13 +250,13 @@ function ProviderCard({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="icon-sm"
                   onClick={() => openForm("credentials")}
-                  className={TOUCH_ICON}
+                  className="text-muted-foreground hover:text-foreground"
                   aria-label={msg("settings.keys.add")}
                 >
-                  <Key className="size-3.5" />
+                  <Key className="size-4" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{msg("settings.keys.add")}</TooltipContent>
@@ -275,17 +271,20 @@ function ProviderCard({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="icon-sm"
                   onClick={handleRemove}
                   disabled={removing}
-                  className={cn(TOUCH_ICON, "text-destructive hover:text-destructive")}
+                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   aria-label={msg("connectors.disconnect")}
                 >
                   {removing ? (
-                    <CircleNotch className="size-3.5 animate-spin" />
+                    <CircleNotch
+                      className="animate-spin motion-reduce:animate-none"
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <Trash className="size-3.5" />
+                    <Trash className="size-4" />
                   )}
                 </Button>
               </TooltipTrigger>
@@ -296,7 +295,9 @@ function ProviderCard({
       </div>
 
       {connected && status?.status === "invalid" && (
-        <p className="mt-1.5 text-[0.6875rem] text-destructive/80">{meta.reconnectHint}</p>
+        <p role="alert" className="mt-1.5 text-xs text-destructive">
+          {meta.reconnectHint}
+        </p>
       )}
 
       {!connected && formOpen && (
@@ -330,15 +331,17 @@ function ProviderCard({
                             size="icon-sm"
                             onClick={handleSave}
                             disabled={!complete || saving || starting}
-                            className={TOUCH_ICON}
                             aria-label={submitLabel}
                           >
                             {saving || starting ? (
-                              <CircleNotch className="size-3.5 animate-spin" />
+                              <CircleNotch
+                                className="animate-spin motion-reduce:animate-none"
+                                aria-hidden="true"
+                              />
                             ) : oauthMode ? (
-                              <SignIn className="size-3.5" />
+                              <SignIn className="size-4" />
                             ) : (
-                              <FloppyDisk className="size-3.5" />
+                              <FloppyDisk className="size-4" />
                             )}
                           </Button>
                         </TooltipTrigger>
@@ -350,10 +353,9 @@ function ProviderCard({
                             variant="ghost"
                             size="icon-sm"
                             onClick={closeForm}
-                            className={TOUCH_ICON}
                             aria-label={msg("settings.keys.cancel")}
                           >
-                            <X className="size-3.5" />
+                            <X className="size-4" />
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent>{msg("settings.keys.cancel")}</TooltipContent>
@@ -375,7 +377,7 @@ function ProviderCard({
                   href={meta.helpUrl}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="inline-flex items-center gap-0.5 font-medium text-[#8a6d44] underline-offset-2 hover:underline"
+                  className="inline-flex items-center gap-0.5 rounded-sm font-medium text-[#8A6D44] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
                 >
                   {meta.helpUrlLabel}
                   <ArrowSquareOut className="size-3" />
@@ -404,9 +406,7 @@ export function ConnectorsTab() {
       <p className="text-xs text-muted-foreground">{msg("connectors.subtitle")}</p>
 
       {loading ? (
-        <div className="flex items-center justify-center py-8">
-          <CircleNotch className="size-5 animate-spin text-primary" />
-        </div>
+        <LoadingState />
       ) : error ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 px-3 py-2.5">
           <p className="text-sm text-muted-foreground">{msg("connectors.error")}</p>
@@ -416,7 +416,7 @@ export function ConnectorsTab() {
         <div className="flex flex-col gap-5">
           {PROVIDER_GROUPS.map((group) => (
             <section key={group.category} className="flex flex-col gap-2.5">
-              <h4 className="text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground/70">
+              <h4 className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
                 {categoryLabel(group.category)}
               </h4>
               {group.providers.map((id: ConnectorProvider) => (

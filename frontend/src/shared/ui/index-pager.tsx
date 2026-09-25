@@ -51,7 +51,7 @@ export function IndexPager({
           type="button"
           onClick={() => onChange(currentIndex - 1)}
           disabled={atFirst}
-          className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          className="inline-flex size-[44px] lg:size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
           aria-label={prevLabel}
         >
           <CaretLeft className="size-4" />
@@ -65,7 +65,7 @@ export function IndexPager({
           type="button"
           onClick={() => onChange(currentIndex + 1)}
           disabled={atLast}
-          className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          className="inline-flex size-[44px] lg:size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
           aria-label={nextLabel}
         >
           <CaretRight className="size-4" />

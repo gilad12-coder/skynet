@@ -190,15 +190,16 @@ const splitCard = source("../components/SplitRecommendationCard.tsx");
 // The card's own toggle hands the chosen mode to the wizard: Manual selection
 // keeps whatever fractions are set, Use recommendation restores the plan.
 function chooseMode(bindings: ReturnType<typeof splitState>["bindings"], mode: "auto" | "manual") {
-  const button = find(
+  const toggle = find(
     splitCard,
     (node) =>
       ts.isJsxAttribute(node) &&
-      node.name.getText() === "onClick" &&
-      node.getText().includes("onChange(mode)"),
+      node.name.getText() === "onChange" &&
+      ts.isJsxSelfClosingElement(node.parent.parent) &&
+      node.parent.parent.tagName.getText() === "Segmented",
   ) as ts.JsxAttribute;
-  assert.ok(button.initializer && ts.isJsxExpression(button.initializer));
-  evaluate(button.initializer.expression!, { onChange: bindings.setSplitMode, mode })();
+  assert.ok(toggle.initializer && ts.isJsxExpression(toggle.initializer));
+  evaluate(toggle.initializer.expression!, { onChange: bindings.setSplitMode })(mode);
 }
 
 for (const mode of ["manual", "auto"]) {

@@ -1,9 +1,11 @@
 "use client";
 
+import { InlineWarningRow } from "@/shared/ui/inline-warning-row";
+import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import dynamic from "next/dynamic";
 import { useMemo, useState, type KeyboardEvent } from "react";
 import { motion } from "framer-motion";
-import { Code, Cube, DownloadSimple, Eye, GitDiff, Warning } from "@/shared/ui/icons";
+import { Code, Cube, DownloadSimple, Eye, GitDiff } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import {
   Select,
@@ -22,6 +24,8 @@ import { tip } from "@/shared/lib/tooltips";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { arrowPageStep, isEditableTarget } from "@/shared/lib/arrow-paging";
 import { cn } from "@/shared/lib/utils";
+import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
+import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
 import { CandidatePreview } from "./CandidatePreview";
 import { VersionRail } from "./VersionRail";
 import { formatBlackboxScore } from "@/shared/lib";
@@ -59,10 +63,6 @@ type View = "preview" | "code" | "diff";
 
 const VIEW_ICON = { preview: Eye, code: Code, diff: GitDiff } as const;
 
-function editorHeight(text: string): string {
-  return `${Math.min(560, Math.max(160, text.split("\n").length * 22 + 48))}px`;
-}
-
 function LineNumbered({ text }: { text: string }) {
   return (
     <div
@@ -86,7 +86,14 @@ function LineNumbered({ text }: { text: string }) {
 
 function CodePart({ text, kind }: { text: string; kind: RenderKind }) {
   if (kind === "python") {
-    return <CodeEditor value={text} onChange={() => {}} height={editorHeight(text)} readOnly />;
+    return (
+      <CodeEditor
+        value={text}
+        onChange={() => {}}
+        height={readOnlyEditorHeight(text, { maxPx: 560 })}
+        readOnly
+      />
+    );
   }
   return <LineNumbered text={kind === "json" ? formatJson(text) : text} />;
 }
@@ -180,7 +187,8 @@ function ChangesView({ versions, index }: { versions: CandidateVersion[]; index:
         <span>{msg("optimization.blackbox.versions.compare_with")}</span>
         <Select value={String(base)} onValueChange={(value) => setBase(Number(value))}>
           <SelectTrigger
-            className="h-7 w-auto min-w-[9rem] text-xs"
+            size="sm"
+            className={cn(TOUCH_FIELD_SM, "w-auto min-w-[9rem] text-xs")}
             aria-label={msg("optimization.blackbox.versions.compare_with")}
           >
             <SelectValue />
@@ -204,7 +212,7 @@ function ChangesView({ versions, index }: { versions: CandidateVersion[]; index:
   );
 }
 
-const PILL_TRANSITION = { type: "tween", duration: 0.16, ease: [0.22, 1, 0.36, 1] } as const;
+const PILL_TRANSITION = { type: "tween", duration: 0.18, ease: [0.22, 1, 0.36, 1] } as const;
 
 /**
  * Preview / Code / Changes as a proper tab list: one tab stop, ← and → move
@@ -242,7 +250,7 @@ function ViewToggle({
     <div
       role="tablist"
       onKeyDown={onKeyDown}
-      className="inline-flex h-7 items-center rounded-md border border-border/60 bg-background/70 p-0.5"
+      className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5"
     >
       {options.map((o) => {
         const Icon = VIEW_ICON[o.value];
@@ -259,14 +267,14 @@ function ViewToggle({
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(o.value)}
             className={cn(
-              "relative inline-flex h-full cursor-pointer items-center gap-1 rounded px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-              active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+              "relative inline-flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45 lg:min-h-0 lg:min-w-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]",
+              active ? "text-foreground" : "text-foreground/60 hover:text-foreground",
             )}
           >
             {active && (
               <motion.span
                 layoutId="blackbox-view-pill"
-                className="absolute inset-0 rounded bg-primary/10 shadow-sm"
+                className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
                 transition={PILL_TRANSITION}
                 aria-hidden="true"
               />
@@ -380,9 +388,7 @@ export function BestVersionTab({
 
         <div className="space-y-3 p-3 sm:p-4">
           {result.regression_guard_applied && (
-            <p className="rounded-md border border-amber-300/50 bg-amber-50/60 px-3 py-2 text-xs text-amber-900">
-              {msg("optimization.blackbox.best.regression_guard")}
-            </p>
+            <InlineWarningRow message={msg("optimization.blackbox.best.regression_guard")} />
           )}
           {!result.versions?.length && versions.length > 1 && (
             <p className="text-xs text-muted-foreground">
@@ -427,17 +433,11 @@ export function BestVersionTab({
           </div>
         </footer>
         {runError && (
-          <p
-            role="status"
-            className="mt-2 flex items-start gap-1.5 rounded-md bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive"
-          >
-            <Warning className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 break-words">
-              <span className="font-medium">{msg("optimization.blackbox.versions.run_error")}</span>
-              {" · "}
-              {runError}
-            </span>
-          </p>
+          <InlineErrorRow
+            title={msg("optimization.blackbox.versions.run_error")}
+            message={runError}
+            className="mt-2 py-2"
+          />
         )}
       </section>
     </FadeIn>

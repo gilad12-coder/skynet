@@ -1,5 +1,6 @@
 "use client";
 
+import { EmptyState } from "@/shared/ui/empty-state";
 import type { ReactNode } from "react";
 import { ChatText, Pulse, Timer } from "@/shared/ui/icons";
 import { FadeIn } from "@/shared/ui/motion";
@@ -133,7 +134,7 @@ function StageRow({
   hasReflection: boolean;
 }) {
   return (
-    <tr className="border-t border-border/40 transition-colors hover:bg-muted/30">
+    <tr className="border-t border-border/60 transition-colors duration-150 hover:bg-muted/50">
       <th
         scope="row"
         className="px-3 py-2.5 text-start text-sm font-medium text-foreground whitespace-nowrap"
@@ -213,7 +214,7 @@ function SubHeader({
   return (
     <th
       scope="col"
-      className={`px-3 pb-2 pt-1 text-end text-[11px] font-medium uppercase tracking-wide text-muted-foreground whitespace-nowrap ${
+      className={`px-3 pb-2 pt-1 text-end text-[0.75rem] font-semibold text-muted-foreground whitespace-nowrap ${
         groupStart ? "border-s border-border/50" : ""
       }`}
     >
@@ -349,18 +350,19 @@ function LMActivityMatrix({
       </header>
       <div className="px-6 pb-5">
         {!hasAnyCalls ? (
-          <p className="text-sm text-muted-foreground">
-            {msg("auto.features.optimizations.components.lmactivitytab.no_data")}
-          </p>
+          <EmptyState
+            variant="list"
+            title={msg("auto.features.optimizations.components.lmactivitytab.no_data")}
+          />
         ) : (
           <div className="overflow-x-auto -mx-2 px-2">
             <table className="guide-table w-full text-sm">
               <thead>
-                <tr className="bg-muted/20">
+                <tr className="bg-muted/40">
                   <th
                     scope="col"
                     rowSpan={2}
-                    className="px-3 py-2 text-start text-[11px] font-semibold uppercase tracking-wide text-muted-foreground align-bottom whitespace-nowrap"
+                    className="px-3 py-2 text-start text-[0.75rem] font-semibold text-muted-foreground align-bottom whitespace-nowrap"
                   >
                     <span className="sr-only">{stageLabel}</span>
                   </th>
@@ -383,7 +385,7 @@ function LMActivityMatrix({
                     </th>
                   )}
                 </tr>
-                <tr className="bg-muted/20">
+                <tr className="bg-muted/40">
                   {hasGeneration && (
                     <>
                       <SubHeader
@@ -470,7 +472,7 @@ export function BlackboxLMActivityTab({ result }: { result: BlackboxRunResult })
   const outputLabel = msg("optimization.blackbox.stats.output_col");
   const tokensLabel = msg("usage.col.tokens");
   const headCls =
-    "px-3 py-2 text-end text-[11px] font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap";
+    "px-3 py-2 text-end text-[0.75rem] font-semibold text-muted-foreground whitespace-nowrap";
   const cellCls = "px-3 py-2.5 text-end align-middle";
 
   return (
@@ -515,17 +517,18 @@ export function BlackboxLMActivityTab({ result }: { result: BlackboxRunResult })
         </header>
         <div className="px-6 pb-5">
           {rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {msg("auto.features.optimizations.components.lmactivitytab.no_data")}
-            </p>
+            <EmptyState
+              variant="list"
+              title={msg("auto.features.optimizations.components.lmactivitytab.no_data")}
+            />
           ) : (
             <div className="overflow-x-auto -mx-2 px-2">
               <table className="guide-table w-full text-sm">
                 <thead>
-                  <tr className="bg-muted/20">
+                  <tr className="bg-muted/40">
                     <th
                       scope="col"
-                      className="px-3 py-2 text-start text-[11px] font-semibold uppercase tracking-wide text-muted-foreground whitespace-nowrap"
+                      className="px-3 py-2 text-start text-[0.75rem] font-semibold text-muted-foreground whitespace-nowrap"
                     >
                       {modelLabel}
                     </th>
@@ -544,7 +547,7 @@ export function BlackboxLMActivityTab({ result }: { result: BlackboxRunResult })
                   {rows.map((u) => (
                     <tr
                       key={u.model}
-                      className="border-t border-border/40 transition-colors hover:bg-muted/30"
+                      className="border-t border-border/60 transition-colors duration-150 hover:bg-muted/50"
                     >
                       <th
                         scope="row"

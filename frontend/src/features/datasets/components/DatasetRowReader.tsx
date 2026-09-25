@@ -1,4 +1,5 @@
 "use client";
+import { notifyCopied } from "@/shared/lib/notify";
 import * as React from "react";
 import { toast } from "react-toastify";
 import { ArrowLeft, CaretLeft, CaretRight } from "@/shared/ui/icons";
@@ -67,29 +68,26 @@ export function DatasetRowReader({
           variant="ghost"
           size="icon-sm"
           onClick={onClose}
-          className="max-lg:size-[44px]"
           aria-label={msg("datasets.detail.row_reader.back")}
         >
           <ArrowLeft className="size-4 rtl:rotate-180" />
         </Button>
         <div className="ms-auto flex items-center gap-2">
           <Button
-            variant="ghost"
+            variant="outline"
             size="icon-sm"
             onClick={() => onStep(-1)}
             disabled={index === 0}
-            className="size-[44px] lg:size-8"
             aria-label={msg("datasets.detail.row_reader.prev")}
           >
             <CaretLeft className="size-4 rtl:rotate-180" />
           </Button>
           <span className="text-xs text-muted-foreground tabular-nums">{counter}</span>
           <Button
-            variant="ghost"
+            variant="outline"
             size="icon-sm"
             onClick={() => onStep(1)}
             disabled={index >= total - 1}
-            className="size-[44px] lg:size-8"
             aria-label={msg("datasets.detail.row_reader.next")}
           >
             <CaretRight className="size-4 rtl:rotate-180" />
@@ -115,7 +113,7 @@ export function DatasetRowReader({
                       ariaLabel={formatMsg("datasets.detail.row_reader.copy_field", {
                         column: col,
                       })}
-                      onCopied={() => toast.success(msg("clipboard.copied"))}
+                      onCopied={notifyCopied}
                       onCopyError={() => toast.error(msg("clipboard.copy_failed"))}
                       className="opacity-100 transition-opacity lg:opacity-0 lg:group-hover/field:opacity-100 lg:focus-visible:opacity-100"
                     />

@@ -114,7 +114,6 @@ export function ExpandableTextarea({
       onClick={() => toggle(true)}
       aria-expanded={expanded}
       aria-controls={expanded ? surfaceId : undefined}
-      className="max-lg:size-[44px]"
       aria-label={msg("shared.expandable_textarea.expand")}
     >
       <ArrowsOut className="size-3.5" />
@@ -146,7 +145,6 @@ export function ExpandableTextarea({
               variant="ghost"
               size="icon-sm"
               onClick={() => toggle(false)}
-              className="max-lg:size-[44px]"
               aria-label={msg("shared.expandable_textarea.collapse")}
             >
               <ArrowsIn className="size-3.5" />

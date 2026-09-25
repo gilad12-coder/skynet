@@ -1,5 +1,6 @@
 "use client";
 
+import { EmptyState } from "@/shared/ui/empty-state";
 import * as React from "react";
 import { Warning, CheckCircle, CircleNotch } from "@/shared/ui/icons";
 
@@ -7,6 +8,7 @@ import { Label } from "@/shared/ui/primitives/label";
 import { Input } from "@/shared/ui/primitives/input";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
+import { CheckboxIndicator } from "@/shared/ui/select-checkbox";
 import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -21,6 +23,7 @@ import {
   toggleToolSelection,
   uniqueToolNames,
 } from "../../lib/react-tool-filter";
+import { TOUCH_FIELD } from "@/shared/ui/touch";
 
 type ProbeStatus =
   | { kind: "idle" }
@@ -117,19 +120,19 @@ export function ReactConfigSection({ w }: { w: SubmitWizardContext }) {
         </p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label className="text-xs">
+            <Label>
               <HelpTip text={tip("react.mcp_url")}>{msg("submit.react.mcp_url_label")}</HelpTip>
             </Label>
             <Input
               value={reactConfig.mcpUrl}
               dir="ltr"
               placeholder="http://localhost:8000/mcp/"
-              className="h-[44px] font-mono text-base lg:h-9 lg:text-xs"
+              className={cn(TOUCH_FIELD, "font-mono lg:text-xs")}
               onChange={(e) => updateReactConfig({ mcpUrl: e.target.value })}
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs">
+            <Label>
               <HelpTip text={tip("react.auth")}>{msg("submit.react.auth_label")}</HelpTip>
             </Label>
             <Input
@@ -138,7 +141,7 @@ export function ReactConfigSection({ w }: { w: SubmitWizardContext }) {
               dir="ltr"
               autoComplete="off"
               placeholder="Bearer …"
-              className="h-[44px] font-mono text-base lg:h-9 lg:text-xs"
+              className={cn(TOUCH_FIELD, "font-mono lg:text-xs")}
               onChange={(e) => updateReactConfig({ mcpAuthHeader: e.target.value })}
             />
           </div>
@@ -179,7 +182,6 @@ export function ReactConfigSection({ w }: { w: SubmitWizardContext }) {
                 <RetryIconButton
                   label={msg("submit.react.mcp_retry")}
                   onClick={() => runProbe(reactConfig.mcpUrl.trim(), reactConfig.mcpAuthHeader)}
-                  className="size-[44px] lg:size-8"
                 />
               )}
             </div>
@@ -228,7 +230,7 @@ export function ReactConfigSection({ w }: { w: SubmitWizardContext }) {
                         <li key={`${tool.missing ? "missing" : "available"}:${tool.name}`}>
                           <label
                             className={cn(
-                              "flex min-h-[44px] cursor-pointer items-start gap-2.5 px-3 py-2.5 transition-colors hover:bg-muted/40",
+                              "group flex min-h-[44px] cursor-pointer items-start gap-2.5 px-3 py-2.5 transition-colors hover:bg-muted/40",
                               tool.missing && "bg-[#B76B3D]/8",
                               lastSelected && "cursor-not-allowed",
                             )}
@@ -248,8 +250,9 @@ export function ReactConfigSection({ w }: { w: SubmitWizardContext }) {
                                   ),
                                 })
                               }
-                              className="mt-0.5 size-4 shrink-0 cursor-pointer accent-[#8A6D44] disabled:cursor-not-allowed"
+                              className="peer sr-only"
                             />
+                            <CheckboxIndicator checked={checked} />
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-1.5 font-mono text-[0.6875rem] leading-tight font-semibold break-all text-foreground">
                                 {tool.missing && (
@@ -278,9 +281,11 @@ export function ReactConfigSection({ w }: { w: SubmitWizardContext }) {
                     })}
                   </ul>
                 ) : (
-                  <p className="px-3 py-4 text-[0.6875rem] text-muted-foreground">
-                    {msg("submit.react.tools_empty")}
-                  </p>
+                  <EmptyState
+                    variant="compact"
+                    title={msg("submit.react.tools_empty")}
+                    className="gap-1 px-3 py-3"
+                  />
                 )}
                 <p className="border-t border-border/40 px-3 py-2 text-[0.625rem] text-muted-foreground">
                   {msg("submit.react.tools_keep_one")}

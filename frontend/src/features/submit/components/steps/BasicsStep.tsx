@@ -15,6 +15,7 @@ import { Label } from "@/shared/ui/primitives/label";
 import { Separator } from "@/shared/ui/primitives/separator";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
+import { Segmented } from "@/shared/ui/segmented";
 import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
@@ -22,6 +23,8 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 import { Disclosure } from "../Disclosure";
+import { TOUCH_FIELD } from "@/shared/ui/touch";
+import { TEXTAREA_SURFACE_CLASS } from "@/shared/ui/primitives/textarea";
 
 export function BasicsStep({ w }: { w: SubmitWizardContext }) {
   const {
@@ -73,7 +76,7 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
             }
             value={jobName}
             onChange={(e) => setJobName(e.target.value)}
-            className="min-h-[44px] text-base lg:min-h-0 lg:text-sm"
+            className={TOUCH_FIELD}
           />
         </div>
         <ExpandableTextarea
@@ -88,7 +91,7 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
           })}
           rows={4}
           tutorial="job-description"
-          className="flex min-h-[44px] w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 lg:text-sm"
+          className={TEXTAREA_SURFACE_CLASS}
         >
           {({ textarea, trigger }) => (
             <Disclosure
@@ -122,48 +125,24 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
           <Label>
             <HelpTip text={tip("submit.privacy")}>{msg("submit.basics.privacy.label")}</HelpTip>
           </Label>
-          <div className="relative inline-flex w-full rounded-lg bg-muted p-1 gap-1">
-            <div
-              className="absolute top-1 bottom-1 w-[calc(50%-6px)] rounded-md bg-background shadow-sm transition-[inset-inline-start] duration-100 ease-out"
-              style={{ insetInlineStart: isPrivate ? 4 : "calc(50% + 2px)" }}
-            />
-            {(
-              [
-                [
-                  true,
-                  msg("submit.basics.privacy.private"),
-                  msg("submit.basics.privacy.private_desc"),
-                ],
-                [
-                  false,
-                  msg("submit.basics.privacy.public"),
-                  msg("submit.basics.privacy.public_desc"),
-                ],
-              ] as const
-            ).map(([val, label, desc]) => (
-              <button
-                key={String(val)}
-                type="button"
-                onClick={() => setIsPrivate(val)}
-                className={cn(
-                  "relative z-10 flex-1 cursor-pointer rounded-md px-2 py-2.5 text-center transition-colors duration-200 sm:px-4",
-                  isPrivate === val
-                    ? "text-foreground"
-                    : "text-foreground/60 hover:text-foreground",
-                )}
-              >
-                <span className="text-sm font-medium">{label}</span>
-                <span
-                  className={cn(
-                    "block text-[0.6875rem] mt-0.5 transition-colors duration-200",
-                    isPrivate === val ? "text-muted-foreground" : "text-foreground/40",
-                  )}
-                >
-                  {desc}
-                </span>
-              </button>
-            ))}
-          </div>
+          <Segmented<"private" | "public">
+            label={msg("submit.basics.privacy.label")}
+            segmentClassName="sm:px-4"
+            value={isPrivate ? "private" : "public"}
+            onChange={(v) => setIsPrivate(v === "private")}
+            options={[
+              {
+                value: "private",
+                label: msg("submit.basics.privacy.private"),
+                desc: msg("submit.basics.privacy.private_desc"),
+              },
+              {
+                value: "public",
+                label: msg("submit.basics.privacy.public"),
+                desc: msg("submit.basics.privacy.public_desc"),
+              },
+            ]}
+          />
         </div>
         <Separator />
         <div className="space-y-3">
@@ -195,53 +174,28 @@ export function BasicsStep({ w }: { w: SubmitWizardContext }) {
           </button>
           {optimizationTypeOpen && (
             <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-200">
-              <div className="relative inline-flex w-full rounded-lg bg-muted p-1 gap-1">
-                <div
-                  className="absolute top-1 bottom-1 w-[calc(50%-6px)] rounded-md bg-background shadow-sm transition-[inset-inline-start] duration-100 ease-out"
-                  style={{ insetInlineStart: jobType === "run" ? 4 : "calc(50% + 2px)" }}
-                />
-                {(
-                  [
-                    [
-                      "run",
-                      TERMS.optimizationTypeRun,
-                      formatMsg("auto.features.submit.components.steps.basicsstep.template.2", {
-                        p1: TERMS.optimization,
-                        p2: TERMS.model,
-                      }),
-                    ],
-                    [
-                      "grid_search",
-                      TERMS.optimizationTypeGrid,
-                      formatMsg("auto.features.submit.components.steps.basicsstep.template.3", {
-                        p1: TERMS.optimizationTypeGrid,
-                      }),
-                    ],
-                  ] as const
-                ).map(([val, label, desc]) => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => setOptimizationType(val)}
-                    className={cn(
-                      "relative z-10 flex-1 cursor-pointer rounded-md px-2 py-2.5 text-center transition-colors duration-200 sm:px-4",
-                      jobType === val
-                        ? "text-foreground"
-                        : "text-foreground/60 hover:text-foreground",
-                    )}
-                  >
-                    <span className="text-sm font-medium">{label}</span>
-                    <span
-                      className={cn(
-                        "block text-[0.6875rem] mt-0.5 transition-colors duration-200",
-                        jobType === val ? "text-muted-foreground" : "text-foreground/40",
-                      )}
-                    >
-                      {desc}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <Segmented<"run" | "grid_search">
+                segmentClassName="sm:px-4"
+                value={jobType}
+                onChange={setOptimizationType}
+                options={[
+                  {
+                    value: "run",
+                    label: TERMS.optimizationTypeRun,
+                    desc: formatMsg("auto.features.submit.components.steps.basicsstep.template.2", {
+                      p1: TERMS.optimization,
+                      p2: TERMS.model,
+                    }),
+                  },
+                  {
+                    value: "grid_search",
+                    label: TERMS.optimizationTypeGrid,
+                    desc: formatMsg("auto.features.submit.components.steps.basicsstep.template.3", {
+                      p1: TERMS.optimizationTypeGrid,
+                    }),
+                  },
+                ]}
+              />
             </div>
           )}
         </div>

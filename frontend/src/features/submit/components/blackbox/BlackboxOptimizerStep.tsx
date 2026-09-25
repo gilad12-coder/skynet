@@ -29,13 +29,9 @@ import { emptyModelConfig } from "../../constants";
 import { OPTIMIZATION_MODEL_DESCRIPTION } from "../../lib/model-roles";
 import { EngineSlide } from "./EngineSlide";
 import { ModelRoleRow } from "./ModelRoleRow";
-import {
-  Field,
-  MOBILE_INPUT_CLASS,
-  MOBILE_NUMBER_INPUT_CLASS,
-  Segmented,
-  StepCard,
-} from "./shared";
+import { Segmented } from "@/shared/ui/segmented";
+import { TOUCH_FIELD } from "@/shared/ui/touch";
+import { Field, StepCard } from "./shared";
 
 const PROPOSER_EFFORTS: readonly BlackboxProposerEffort[] = ["low", "medium", "high", "max"];
 
@@ -171,10 +167,7 @@ export function BlackboxOptimizerStep({
                   value={proposer.harness}
                   onValueChange={(value) => updateProposer({ harness: value as BlackboxHarness })}
                 >
-                  <SelectTrigger
-                    id="bb-proposer-harness"
-                    className={cn("w-full", MOBILE_INPUT_CLASS)}
-                  >
+                  <SelectTrigger id="bb-proposer-harness" className={cn("w-full", TOUCH_FIELD)}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -203,10 +196,7 @@ export function BlackboxOptimizerStep({
                     })
                   }
                 >
-                  <SelectTrigger
-                    id="bb-proposer-effort"
-                    className={cn("w-full", MOBILE_INPUT_CLASS)}
-                  >
+                  <SelectTrigger id="bb-proposer-effort" className={cn("w-full", TOUCH_FIELD)}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -242,7 +232,6 @@ export function BlackboxOptimizerStep({
                     }
                     min={1}
                     max={8}
-                    className={MOBILE_NUMBER_INPUT_CLASS}
                   />
                 </Field>
               )}
@@ -259,7 +248,6 @@ export function BlackboxOptimizerStep({
                     id="bb-proposer-ralph"
                     checked={proposer.ralph ?? true}
                     onCheckedChange={(checked) => updateProposer({ ralph: checked })}
-                    className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
                   />
                 </div>
               )}
@@ -267,7 +255,7 @@ export function BlackboxOptimizerStep({
           )}
 
           {runDisabledReason && (
-            <p className="flex items-start gap-2 text-xs text-amber-700" role="status">
+            <p className="flex items-start gap-2 text-xs text-[var(--warning)]" role="status">
               <Warning className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
               <span dir="auto">{runDisabledReason}</span>
             </p>
@@ -325,10 +313,9 @@ export function BlackboxOptimizerStep({
                 min={strategyMode === "auto" ? 5 : 1}
                 max={100000}
                 step={10}
-                className={MOBILE_NUMBER_INPUT_CLASS}
               />
               {strategyMode === "auto" && maxScorerRuns < 5 && (
-                <p className="text-xs text-amber-700" role="status">
+                <p className="text-xs text-[var(--warning)]" role="status">
                   {msg("submit.blackbox.validation.auto_budget")}
                 </p>
               )}
@@ -345,7 +332,6 @@ export function BlackboxOptimizerStep({
                 onClear={() => setStopAtScore("")}
                 min={0}
                 step={0.1}
-                className={MOBILE_NUMBER_INPUT_CLASS}
               />
             </Field>
             {iterationLimitSupported && (
@@ -360,7 +346,6 @@ export function BlackboxOptimizerStep({
                   onChange={setMaxIterations}
                   min={1}
                   max={1000}
-                  className={MOBILE_NUMBER_INPUT_CLASS}
                 />
               </Field>
             )}

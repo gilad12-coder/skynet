@@ -1,5 +1,6 @@
 "use client";
 
+import { PingDot } from "@/shared/ui/ping-dot";
 import { motion } from "framer-motion";
 import { TrendUp } from "@/shared/ui/icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -237,9 +238,9 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
         <CardHeader className="flex flex-row items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             <CardTitle className="text-base flex min-w-0 items-center gap-2">
-              <TrendUp className="size-4 text-[#7C6350]" aria-hidden="true" />
+              <TrendUp className="size-4" aria-hidden="true" />
               <HelpTip text={msg(ENGINE_EXPLAINERS[engine] ?? "meta_harness.explainer")}>
-                <span className="font-bold tracking-tight">{msg("meta_harness.panel.title")}</span>
+                {msg("meta_harness.panel.title")}
               </HelpTip>
             </CardTitle>
           </div>
@@ -247,16 +248,9 @@ export function MetaHarnessPanel({ job, engine, blackbox }: MetaHarnessPanelProp
             <motion.div
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/40 bg-background/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+              className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground/80 shadow-xs backdrop-blur"
             >
-              <span className="relative inline-flex size-2" aria-hidden="true">
-                <motion.span
-                  className="absolute inset-0 rounded-full bg-[var(--warning)]/40"
-                  animate={{ scale: [1, 2, 1], opacity: [0.6, 0, 0.6] }}
-                  transition={{ duration: 1.8, repeat: Infinity, ease: "easeOut" }}
-                />
-                <span className="relative inline-block size-2 rounded-full bg-[var(--warning)]" />
-              </span>
+              <PingDot size="sm" />
               <span className="tabular-nums">{versionCount}</span>
             </motion.div>
           ) : (

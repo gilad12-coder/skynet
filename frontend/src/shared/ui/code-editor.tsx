@@ -486,7 +486,7 @@ export function CodeEditor({
               aria-label={msg("shared.code_editor.find.open")}
               type="button"
               onClick={handleFind}
-              className="group/find max-lg:size-[44px]"
+              className="group/find"
             >
               <MagnifyingGlass className="size-3 transition-transform duration-150 ease-out group-hover/find:scale-110 group-focus-visible/find:scale-110 group-active/find:scale-90 motion-reduce:transform-none motion-reduce:transition-none" />
             </Button>
@@ -503,7 +503,7 @@ export function CodeEditor({
           }
           type="button"
           onClick={() => setCollapsed((c) => !c)}
-          className="group/editor-action max-lg:size-[44px]"
+          className="group/editor-action"
         >
           <CaretDown
             className={`size-3 transition-transform duration-200 ease-out motion-reduce:transition-none ${collapsed ? "" : "rotate-180"}`}
@@ -518,10 +518,13 @@ export function CodeEditor({
             type="button"
             onClick={handleRun}
             disabled={running || !value.trim()}
-            className="group/editor-action max-lg:size-[44px]"
+            className="group/editor-action"
           >
             {running ? (
-              <CircleNotch className="size-3 animate-spin motion-reduce:animate-none" />
+              <CircleNotch
+                className="size-3 animate-spin motion-reduce:animate-none"
+                aria-hidden="true"
+              />
             ) : (
               <Play className="size-3 transition-transform duration-150 ease-out group-hover/editor-action:translate-x-0.5 group-focus-visible/editor-action:translate-x-0.5 group-active/editor-action:scale-90 motion-reduce:transform-none motion-reduce:transition-none" />
             )}
@@ -535,10 +538,13 @@ export function CodeEditor({
           type="button"
           onClick={handleFormat}
           disabled={formatting || !value.trim()}
-          className="group/editor-action max-lg:size-[44px]"
+          className="group/editor-action"
         >
           {formatting ? (
-            <CircleNotch className="size-3 animate-spin motion-reduce:animate-none" />
+            <CircleNotch
+              className="size-3 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
           ) : (
             <Eraser className="size-3 transition-transform duration-150 ease-out group-hover/editor-action:-rotate-12 group-focus-visible/editor-action:-rotate-12 group-active/editor-action:scale-90 motion-reduce:transform-none motion-reduce:transition-none" />
           )}
@@ -550,7 +556,7 @@ export function CodeEditor({
           aria-label={copied ? msg("shared.code_editor.copied") : msg("shared.code_editor.copy")}
           type="button"
           onClick={handleCopy}
-          className="group/editor-action max-lg:size-[44px]"
+          className="group/editor-action"
         >
           <span className="inline-flex transition-transform duration-150 ease-out group-hover/editor-action:scale-110 group-focus-visible/editor-action:scale-110 group-active/editor-action:scale-90 motion-reduce:transform-none motion-reduce:transition-none">
             <CopyGlyph copied={copied} className="size-3" checkClassName="text-[#3D2E22]" />

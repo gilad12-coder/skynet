@@ -1,5 +1,6 @@
 "use client";
 
+import { PingDot } from "@/shared/ui/ping-dot";
 import { memo } from "react";
 import { TrendUp, Trophy } from "@/shared/ui/icons";
 import { formatBlackboxScore } from "@/shared/lib";
@@ -96,10 +97,7 @@ function MetaHarnessOutlineImpl({
                 : "border-[#7C6350]/40 hover:bg-accent/60",
             )}
           >
-            <span
-              className="inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-[var(--warning)]"
-              aria-hidden="true"
-            />
+            <PingDot size="sm" />
             <span className="min-w-0 flex-1 truncate" aria-live="polite">
               {formatMsg("meta_harness.live.scoring", {
                 id: displayCandidateId(String(pending.index)),

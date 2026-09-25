@@ -1,12 +1,14 @@
 "use client";
 
+import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import { withScorerImports } from "../../lib/scorer-dependencies";
 
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 
-import { CheckCircle, CircleNotch, Play, XCircle } from "@/shared/ui/icons";
+import { CheckCircle, CircleNotch, Play } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
+import { cn } from "@/shared/lib/utils";
 import { Label } from "@/shared/ui/primitives/label";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { ModelChip } from "@/shared/ui/model-chip";
@@ -21,7 +23,9 @@ import { VersionStepper } from "../steps/CodeAgentPanel";
 import { BlackboxAuthoringShell } from "./BlackboxAuthoringShell";
 import { emptyModelConfig } from "../../constants";
 import { EvidenceChip } from "./EvidenceChip";
-import { Field, MOBILE_INPUT_CLASS, Segmented } from "./shared";
+import { Segmented } from "@/shared/ui/segmented";
+import { TOUCH_FIELD } from "@/shared/ui/touch";
+import { Field } from "./shared";
 
 const MOBILE_MODEL_CHIP_CLASS =
   "min-h-[44px] max-lg:[&_button]:min-h-[44px] max-lg:[&_button]:min-w-[44px] max-lg:[&_button]:opacity-100";
@@ -198,7 +202,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               onChange={(e) => setScorerUrl(e.target.value)}
               placeholder="https://example.com/score"
               dir="ltr"
-              className={`${MOBILE_INPUT_CLASS} font-mono`}
+              className={cn(TOUCH_FIELD, "font-mono sm:text-sm")}
             />
           </Field>
           <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
@@ -214,7 +218,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
                 value={scorerSecret}
                 onChange={(e) => setScorerSecret(e.target.value)}
                 dir="ltr"
-                className={`${MOBILE_INPUT_CLASS} font-mono`}
+                className={cn(TOUCH_FIELD, "font-mono sm:text-sm")}
               />
             </Field>
           </div>
@@ -227,7 +231,10 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
               className="min-h-[44px] w-full gap-2 lg:min-h-0"
             >
               {dryRun.status === "running" ? (
-                <CircleNotch className="size-4 animate-spin" />
+                <CircleNotch
+                  className="animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
               ) : (
                 <Play className="size-4" />
               )}
@@ -301,7 +308,7 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
           )}
           {Object.keys(sideText).length > 0 && (
             <pre
-              className="max-h-40 overflow-auto rounded-md border border-[#E5DDD4]/60 bg-[#FAF6F0] p-2 font-mono text-[0.6875rem] leading-relaxed text-[#3D2E22]/80"
+              className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/40 bg-background/70 p-2 font-mono text-[0.6875rem]/[1.55] text-foreground/90"
               dir="ltr"
             >
               {JSON.stringify(sideText, null, 2)}
@@ -310,17 +317,10 @@ export function BlackboxScorerStep({ w }: { w: BlackboxWizardContext }) {
         </div>
       )}
       {result && !result.ok && scorerKind === "remote" && (
-        <div className="space-y-1 border-t border-border/60 pt-3" role="alert">
-          <div className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-[#A3512B]">
-            <XCircle className="size-3 shrink-0" />
-            <span>{msg("submit.blackbox.scorer.result_error")}</span>
-          </div>
-          {result.error && (
-            <p className="break-words text-xs text-foreground/80" dir="auto">
-              {result.error}
-            </p>
-          )}
-        </div>
+        <InlineErrorRow
+          title={result.error ? msg("submit.blackbox.scorer.result_error") : undefined}
+          message={result.error || msg("submit.blackbox.scorer.result_error")}
+        />
       )}
     </BlackboxAuthoringShell>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { RolePill, type ColumnRoleTone } from "@/shared/ui/role-pill";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import {
@@ -227,12 +228,6 @@ function MiniGrid({ rows }: { rows: ConfigRow[] }) {
   );
 }
 
-const ROLE_STYLES = {
-  input: "bg-[#3D2E22]/10 text-[#3D2E22]",
-  output: "bg-primary/10 text-primary",
-  ignore: "bg-muted text-muted-foreground",
-} as const;
-
 /** Every dataset column with the role the run gave it, in the file's own order. */
 function ColumnRoles({ mapping, order }: { mapping: ColumnMapping; order: string[] | null }) {
   const inputs = mapping.inputs ?? {};
@@ -246,7 +241,7 @@ function ColumnRoles({ mapping, order }: { mapping: ColumnMapping; order: string
   };
   return (
     <div className="rounded-xl border border-border/45 bg-background/65 p-4">
-      <div className="mb-3 flex items-center gap-2 text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
+      <div className="mb-3 flex items-center gap-2 text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
         <Columns className="size-3.5" aria-hidden="true" />
         <HelpTip text={tip("submit.column_roles")}>
           {msg("auto.features.submit.components.steps.summarystep.11")}
@@ -254,7 +249,7 @@ function ColumnRoles({ mapping, order }: { mapping: ColumnMapping; order: string
       </div>
       <ul className="flex flex-wrap gap-2">
         {columns.map((column) => {
-          const role: keyof typeof ROLE_STYLES =
+          const role: ColumnRoleTone =
             column in inputs ? "input" : column in outputs ? "output" : "ignore";
           const field =
             role === "input" ? inputs[column] : role === "output" ? outputs[column] : null;
@@ -267,11 +262,7 @@ function ColumnRoles({ mapping, order }: { mapping: ColumnMapping; order: string
               <span className="truncate font-mono font-medium text-foreground" dir="ltr">
                 {renamed ? `${column} · ${renamed}` : column}
               </span>
-              <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide ${ROLE_STYLES[role]}`}
-              >
-                {roleLabels[role]}
-              </span>
+              <RolePill role={role}>{roleLabels[role]}</RolePill>
             </li>
           );
         })}
@@ -700,7 +691,7 @@ export function ConfigTab({
                 ) : job.generation_models && job.reflection_models ? (
                   <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
                     <div className="space-y-3">
-                      <p className="flex items-center gap-2 text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
+                      <p className="flex items-center gap-2 text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
                         <span className="grid size-7 place-items-center rounded-lg bg-[#3D2E22] text-[#FAF8F5]">
                           <Cpu className="size-3.5" aria-hidden="true" />
                         </span>
@@ -717,7 +708,7 @@ export function ConfigTab({
                       ))}
                     </div>
                     <div className="space-y-3">
-                      <p className="flex items-center gap-2 text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
+                      <p className="flex items-center gap-2 text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
                         <span className="grid size-7 place-items-center rounded-lg bg-[#C8A882] text-[#3D2E22]">
                           <Brain className="size-3.5" aria-hidden="true" />
                         </span>
@@ -754,7 +745,7 @@ export function ConfigTab({
                       <Books className="size-6" aria-hidden="true" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
+                      <span className="block text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
                         {msg("optimizations.source_dataset.label")}
                       </span>
                       <span
@@ -774,10 +765,10 @@ export function ConfigTab({
                 {columnMapping && <ColumnRoles mapping={columnMapping} order={columnOrder} />}
                 <div className="flex flex-1 flex-col gap-3">
                   <div className="flex items-center gap-2.5">
-                    <span className="grid size-9 place-items-center rounded-xl bg-[#EDE7DD] text-[#8C7A6B]">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-muted-foreground [&_svg]:size-4">
                       <Database className="size-4" aria-hidden="true" />
                     </span>
-                    <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-[#8C7A6B]">
+                    <p className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
                       <HelpTip text={tip("data.split_explanation")}>
                         {msg("auto.features.optimizations.components.configtab.9")}
                         {TERMS.dataset}

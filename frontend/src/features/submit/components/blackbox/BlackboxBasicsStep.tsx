@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Input } from "@/shared/ui/primitives/input";
+import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -10,7 +11,9 @@ import { ExpandableTextarea } from "@/shared/ui/expandable-textarea";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { Disclosure } from "../Disclosure";
-import { Field, MOBILE_INPUT_CLASS, Segmented, StepCard, TEXTAREA_CLASS } from "./shared";
+import { Segmented } from "@/shared/ui/segmented";
+import { TOUCH_FIELD } from "@/shared/ui/touch";
+import { Field, StepCard, TEXTAREA_CLASS } from "./shared";
 
 export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
   const {
@@ -57,7 +60,7 @@ export function BlackboxBasicsStep({ w }: { w: BlackboxWizardContext }) {
           }
           value={jobName}
           onChange={(e) => setJobName(e.target.value)}
-          className={MOBILE_INPUT_CLASS}
+          className={cn(TOUCH_FIELD, "sm:text-sm")}
         />
       </Field>
       <ExpandableTextarea

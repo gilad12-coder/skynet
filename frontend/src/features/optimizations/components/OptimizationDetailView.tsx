@@ -1,5 +1,6 @@
 "use client";
 
+import { notifyCopied } from "@/shared/lib/notify";
 import { formatBudgetUsd } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
@@ -1152,28 +1153,19 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   {job.description}
                 </p>
               )}
-              <code
-                className="inline-flex min-h-[44px] items-center rounded-md text-xs font-mono text-muted-foreground/60 cursor-pointer hover:text-primary transition-colors break-all sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
-                title={msg("auto.app.optimizations.id.page.literal.1")}
-                aria-label={formatMsg("auto.app.optimizations.id.page.template.3", {
-                  p1: TERMS.optimization,
-                })}
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  void navigator.clipboard.writeText(job.optimization_id);
-                  toast.success(msg("clipboard.copied_short"), { autoClose: 1000 });
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    void navigator.clipboard.writeText(job.optimization_id);
-                    toast.success(msg("clipboard.copied_short"), { autoClose: 1000 });
-                  }
-                }}
-              >
-                {job.optimization_id}
-              </code>
+              <span className="inline-flex items-center gap-1">
+                <code className="break-all font-mono text-xs text-muted-foreground/60" dir="ltr">
+                  {job.optimization_id}
+                </code>
+                <CopyButton
+                  text={job.optimization_id}
+                  ariaLabel={formatMsg("auto.app.optimizations.id.page.template.3", {
+                    p1: TERMS.optimization,
+                  })}
+                  title={msg("auto.app.optimizations.id.page.literal.1")}
+                  onCopied={notifyCopied}
+                />
+              </span>
               <div className="flex items-center gap-3 flex-wrap text-sm text-muted-foreground">
                 {job.optimization_type === "grid_search" ? (
                   <span className="flex items-center gap-1.5">
@@ -1226,8 +1218,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   <TooltipButton tooltip={msg("auto.app.optimizations.id.page.4")}>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                      size="icon-sm"
                       onClick={() =>
                         router.push(`/submit?clone=${job.optimization_id}${cloneQuery}`)
                       }
@@ -1247,8 +1238,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                     <TooltipButton tooltip={msg("optimization.resume_tooltip")}>
                       <Button
                         variant="ghost"
-                        size="icon"
-                        className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                        size="icon-sm"
                         onClick={handleResume}
                         disabled={resuming}
                         aria-label={msg("optimization.resume")}
@@ -1265,8 +1255,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                     <TooltipButton tooltip={msg("optimization.configure_new.tooltip")}>
                       <Button
                         variant="ghost"
-                        size="icon"
-                        className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                        size="icon-sm"
                         onClick={handleRetry}
                         aria-label={msg("optimization.configure_new.label")}
                       >
@@ -1278,8 +1267,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   <TooltipButton tooltip={msg("optimization.pause_tooltip")}>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                      size="icon-sm"
                       onClick={handlePause}
                       disabled={pausing}
                       aria-label={msg("optimization.pause")}
@@ -1292,8 +1280,8 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   <TooltipButton tooltip={msg("auto.app.optimizations.id.page.5")}>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="size-[44px] text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-0 focus-visible:border-0 sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                      size="icon-sm"
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                       onClick={handleCancel}
                       aria-label={msg("auto.app.optimizations.id.page.literal.5")}
                     >
@@ -1314,8 +1302,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                 <TooltipButton tooltip={msg("share.clone_tooltip")}>
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                    size="icon-sm"
                     onClick={() =>
                       router.push(
                         shareToken

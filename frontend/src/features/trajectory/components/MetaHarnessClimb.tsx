@@ -16,10 +16,10 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
 import { cn } from "@/shared/lib/utils";
 import {
-  Tooltip as UiTooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/shared/ui/primitives/tooltip";
+  CanvasControlButton,
+  CanvasControlDivider,
+  CanvasControlGroup,
+} from "@/shared/ui/canvas-control-button";
 import {
   CLIMB_LAYOUT,
   layoutClimb,
@@ -474,45 +474,37 @@ export function MetaHarnessClimb({
         </g>
       </svg>
 
-      <div
-        data-trajectory-controls
-        className="absolute end-3 top-3 z-10 flex items-center gap-1 rounded-lg border border-border/60 bg-background/90 p-1 shadow-sm backdrop-blur-sm"
-      >
-        <MapControlButton
+      <CanvasControlGroup data-trajectory-controls className="absolute end-3 top-3 z-10">
+        <CanvasControlButton
+          icon={Plus}
           label={msg("trajectory.controls.zoom_in")}
           onClick={() => zoomFromCenter(ZOOM_BUTTON_IN)}
-        >
-          <Plus className="size-3.5" />
-        </MapControlButton>
-        <MapControlButton
+        />
+        <CanvasControlButton
+          icon={Minus}
           label={msg("trajectory.controls.zoom_out")}
           onClick={() => zoomFromCenter(ZOOM_BUTTON_OUT)}
           disabled={atZoomFloor}
-        >
-          <Minus className="size-3.5" />
-        </MapControlButton>
-        <MapControlButton label={msg("trajectory.controls.zoom_reset")} onClick={resetView}>
-          {isTransformed ? (
-            <ArrowCounterClockwise className="size-3.5" />
-          ) : (
-            <Crosshair className="size-3.5" />
-          )}
-        </MapControlButton>
-        <ControlsDivider />
-        <MapControlButton
+        />
+        <CanvasControlButton
+          icon={isTransformed ? ArrowCounterClockwise : Crosshair}
+          label={msg("trajectory.controls.zoom_reset")}
+          onClick={resetView}
+        />
+        <CanvasControlDivider />
+        <CanvasControlButton
+          icon={isMaximized ? ArrowsIn : ArrowsOut}
           label={
             isMaximized
               ? msg("trajectory.controls.fullscreen_exit")
               : msg("trajectory.controls.fullscreen_enter")
           }
           onClick={() => setIsMaximized((prev) => !prev)}
-        >
-          {isMaximized ? <ArrowsIn className="size-3.5" /> : <ArrowsOut className="size-3.5" />}
-        </MapControlButton>
-      </div>
+        />
+      </CanvasControlGroup>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-3 pb-3">
-        <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full border border-border/60 bg-background/90 px-3 py-1.5 text-[10px] text-muted-foreground shadow-sm backdrop-blur-sm">
+        <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-x-3 gap-y-1.5 rounded-full border border-border/50 bg-background/80 px-3 py-1 text-[0.6875rem] text-muted-foreground/80 shadow-xs backdrop-blur">
           <LegendToggle
             pressed={layers.improved}
             onToggle={() => toggleLayer("improved")}
@@ -1019,7 +1011,7 @@ function LegendToggle({
       aria-pressed={pressed}
       onClick={onToggle}
       className={cn(
-        "inline-flex min-h-[44px] cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 py-0.5 transition-[opacity,color,background-color] duration-150 hover:bg-accent/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 lg:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]",
+        "inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 py-0.5 transition-[opacity,color,background-color] duration-150 hover:bg-accent/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
         !pressed && "opacity-40",
       )}
     >
@@ -1030,46 +1022,5 @@ function LegendToggle({
 }
 
 function LegendDivider() {
-  return <span aria-hidden="true" className="inline-block h-3 w-px bg-border/60" />;
-}
-
-function MapControlButton({
-  label,
-  onClick,
-  disabled,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <UiTooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onClick}
-          disabled={disabled}
-          aria-label={label}
-          className="inline-flex size-[44px] items-center justify-center text-foreground transition-[background-color,color,opacity] hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#C8A882]/45 disabled:pointer-events-none disabled:opacity-50 lg:size-9 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
-        >
-          {children}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={8}>
-        {label}
-      </TooltipContent>
-    </UiTooltip>
-  );
-}
-
-function ControlsDivider() {
-  return (
-    <span
-      aria-hidden="true"
-      className="my-1.5 inline-block w-px bg-border/60"
-      style={{ alignSelf: "stretch" }}
-    />
-  );
+  return <span aria-hidden="true" className="inline-block h-3 w-px bg-border/70" />;
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { ProgressBar } from "@/shared/ui/progress-bar";
+import { Badge } from "@/shared/ui/primitives/badge";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
@@ -281,12 +283,12 @@ export function ValidationFrame({
       ? Math.min(RUNNING_BAR_CAP, totalElapsedMs / (totalElapsedMs + remainingMs))
       : Math.min(0.92, Math.max(0.08, reachedFraction));
   const barTone = success
-    ? "bg-emerald-500"
+    ? "bg-[var(--success)]"
     : failed
       ? "bg-destructive"
       : running
         ? "bg-foreground/70"
-        : "bg-amber-500";
+        : "bg-[var(--warning)]";
 
   // The estimate only earns a spot on a real wait: while running, off the
   // usage poll (which shows its own countdown), and with room left to name.
@@ -323,12 +325,12 @@ export function ValidationFrame({
           className={cn(
             "flex size-12 shrink-0 items-center justify-center rounded-full",
             success
-              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+              ? "bg-[var(--success-dim)] text-[var(--success)]"
               : failed
                 ? "bg-destructive/10 text-destructive"
                 : running
                   ? "bg-muted text-foreground"
-                  : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+                  : "bg-[var(--warning-dim)] text-[var(--warning)]",
           )}
           aria-hidden="true"
         >
@@ -347,18 +349,18 @@ export function ValidationFrame({
             <h2 className="text-2xl font-semibold tracking-tight sm:text-[1.75rem]">{title}</h2>
             <AnimatePresence initial={false}>
               {showEta && (
-                <motion.span
-                  key="eta"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground"
-                  dir="auto"
-                  initial={reduce ? false : { opacity: 0, y: -3 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
-                  transition={{ duration: 0.25, ease: "easeOut" }}
-                >
-                  <Hourglass className="size-3.5" aria-hidden="true" />
-                  {etaLabel}
-                </motion.span>
+                <Badge key="eta" asChild variant="secondary" size="sm">
+                  <motion.span
+                    dir="auto"
+                    initial={reduce ? false : { opacity: 0, y: -3 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
+                    transition={{ duration: 0.25, ease: "easeOut" }}
+                  >
+                    <Hourglass aria-hidden="true" />
+                    {etaLabel}
+                  </motion.span>
+                </Badge>
               )}
             </AnimatePresence>
           </div>
@@ -372,22 +374,11 @@ export function ValidationFrame({
         </div>
       </div>
 
-      <div
-        className="h-[3px] w-full overflow-hidden bg-border/40"
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(barFraction * 100)}
-      >
-        <div
-          className={cn(
-            "h-full rounded-full",
-            barTone,
-            !reduce && "transition-[width] duration-700 ease-out",
-          )}
-          style={{ width: `${Math.round(barFraction * 100)}%` }}
-        />
-      </div>
+      <ProgressBar
+        value={Math.round(barFraction * 100)}
+        className="h-[3px] rounded-none bg-border/40"
+        fillClassName={cn(barTone, "duration-700", reduce && "transition-none")}
+      />
 
       <ol className="divide-y divide-border/60">
         {phases.map((phase, index) => {
@@ -560,9 +551,9 @@ function PhaseRow({
             tone === "failed"
               ? "border-destructive/40 bg-destructive/10 text-destructive"
               : tone === "pending"
-                ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                ? "border-[var(--warning-border)] bg-[var(--warning-dim)] text-[var(--warning)]"
                 : tone === "done"
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  ? "border-[var(--success-border)] bg-[var(--success-dim)] text-[var(--success)]"
                   : "border-border bg-background text-foreground",
           )}
           aria-hidden="true"
@@ -649,10 +640,10 @@ function PhaseRow({
                         check.status === "failed"
                           ? "text-destructive"
                           : check.status === "pending"
-                            ? "text-amber-700 dark:text-amber-400"
+                            ? "text-[var(--warning)]"
                             : check.status === "skipped"
                               ? "text-muted-foreground"
-                              : "text-emerald-700 dark:text-emerald-400",
+                              : "text-[var(--success)]",
                       )}
                       aria-hidden="true"
                     >
@@ -697,7 +688,11 @@ function PhaseRow({
               </p>
             )}
             {message && (
-              <p className="max-w-prose break-words text-sm text-destructive" dir="auto">
+              <p
+                role="alert"
+                className="max-w-prose break-words text-xs text-destructive"
+                dir="auto"
+              >
                 {message}
               </p>
             )}

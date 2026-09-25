@@ -1,7 +1,6 @@
 "use client";
 
-import { Children, useId, type ReactNode } from "react";
-import { motion, useReducedMotion, type Transition } from "framer-motion";
+import { Children, type ReactNode } from "react";
 import {
   Card,
   CardContent,
@@ -11,19 +10,12 @@ import {
 } from "@/shared/ui/primitives/card";
 import { Label } from "@/shared/ui/primitives/label";
 import { HelpTip } from "@/shared/ui/help-tip";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
+import { TEXTAREA_SURFACE_CLASS } from "@/shared/ui/primitives/textarea";
 import { cn } from "@/shared/lib/utils";
-import { getActiveDir } from "@/shared/lib/runtime-locale";
-import { radioNavigationIndex } from "../../lib/radio-navigation";
 import { tip as tipText, type TooltipKey } from "@/shared/lib/tooltips";
 
-export const TEXTAREA_CLASS =
-  "flex min-h-[44px] w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 lg:text-sm";
-
-export const MOBILE_INPUT_CLASS = "min-h-[44px] text-base lg:min-h-0 lg:text-sm";
-
-export const MOBILE_NUMBER_INPUT_CLASS =
-  "h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm";
+// Kept as a class string so ExpandableTextarea callers can share the Textarea look.
+export const TEXTAREA_CLASS = TEXTAREA_SURFACE_CLASS;
 
 export function StepCard({
   title,
@@ -104,117 +96,6 @@ export function Field({
         <Label htmlFor={htmlFor}>{labelNode}</Label>
       )}
       {children}
-    </div>
-  );
-}
-
-const SEGMENTED_TRANSITION: Transition = {
-  type: "tween",
-  duration: 0.2,
-  ease: [0.22, 1, 0.36, 1],
-};
-
-export interface SegmentedOption<T extends string> {
-  value: T;
-  label: string;
-  desc?: string;
-  // Shown while the option is hovered or focused; explains it without taking
-  // a line in the card.
-  tip?: string;
-}
-
-/** Pill toggle in the wizard's segmented style; grows to any option count. */
-export function Segmented<T extends string>({
-  value,
-  onChange,
-  options,
-  compact = false,
-  label,
-}: {
-  value: T;
-  label: string;
-  onChange: (v: T) => void;
-  options: Array<SegmentedOption<T>>;
-  // Sized to sit inside a label row instead of spanning the field.
-  compact?: boolean;
-}) {
-  const pillId = useId();
-  const prefersReducedMotion = useReducedMotion();
-  return (
-    <div
-      className={cn(
-        "grid rounded-lg bg-muted",
-        compact ? "w-auto gap-0.5 p-0.5" : "w-full gap-1 p-1",
-      )}
-      style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
-      role="radiogroup"
-      aria-label={label}
-    >
-      {options.map((o, index) => {
-        const selected = o.value === value;
-        const button = (
-          <button
-            key={o.value}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            tabIndex={selected ? 0 : -1}
-            onKeyDown={(event) => {
-              const next = radioNavigationIndex(
-                event.key,
-                index,
-                options.length,
-                getActiveDir() === "rtl",
-              );
-              if (next === null) return;
-              event.preventDefault();
-              const option = options[next];
-              if (!option) return;
-              onChange(option.value);
-              event.currentTarget.parentElement
-                ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')
-                [next]?.focus();
-            }}
-            onClick={() => onChange(o.value)}
-            className={cn(
-              "relative cursor-pointer rounded-md text-center transition-colors duration-200 lg:min-h-0",
-              compact ? "min-h-[36px] px-2.5 py-0.5" : "min-h-[44px] px-2 py-2 sm:px-3",
-              selected ? "text-foreground" : "text-foreground/60 hover:text-foreground",
-            )}
-          >
-            {selected && (
-              <motion.span
-                layoutId={`segmented-pill-${pillId}`}
-                className="absolute inset-0 rounded-md bg-background shadow-sm"
-                transition={prefersReducedMotion ? { duration: 0 } : SEGMENTED_TRANSITION}
-                aria-hidden="true"
-              />
-            )}
-            <span className="relative z-10 block">
-              <span className={cn("font-medium", compact ? "text-xs" : "text-sm")}>{o.label}</span>
-              {o.desc ? (
-                <span
-                  className={cn(
-                    "mt-0.5 block text-[0.6875rem] transition-colors duration-200",
-                    selected ? "text-muted-foreground" : "text-foreground/40",
-                  )}
-                >
-                  {o.desc}
-                </span>
-              ) : null}
-            </span>
-          </button>
-        );
-        if (!o.tip) return button;
-        return (
-          <Tooltip key={o.value}>
-            <TooltipTrigger asChild>{button}</TooltipTrigger>
-            <TooltipContent className="max-w-64 text-center leading-relaxed" dir={getActiveDir()}>
-              {o.tip}
-            </TooltipContent>
-          </Tooltip>
-        );
-      })}
     </div>
   );
 }

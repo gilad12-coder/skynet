@@ -1,5 +1,6 @@
 "use client";
 
+import { RolePill } from "@/shared/ui/role-pill";
 import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -42,6 +43,7 @@ import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
 import { ModelRoleRow } from "../blackbox/ModelRoleRow";
 import { formatCreditsUsd } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
@@ -333,25 +335,16 @@ export function SummaryStep({
                                 : msg(
                                     "auto.features.submit.components.steps.summarystep.literal.8",
                                   );
-                          const roleColor =
-                            role === "input"
-                              ? "text-[#3D2E22] bg-[#3D2E22]/10"
-                              : role === "output"
-                                ? "text-primary bg-primary/10"
-                                : "text-muted-foreground bg-muted";
                           return (
                             <div key={col} className="flex items-center justify-between gap-2 py-1">
                               <span className="text-xs font-mono truncate" dir="ltr">
                                 {col}
                               </span>
-                              <span
-                                className={cn(
-                                  "text-[0.625rem] font-semibold px-2 py-0.5 rounded-full",
-                                  roleColor,
-                                )}
+                              <RolePill
+                                role={role === "input" || role === "output" ? role : "ignore"}
                               >
                                 {roleLabel}
-                              </span>
+                              </RolePill>
                             </div>
                           );
                         })}
@@ -644,7 +637,7 @@ export function SummaryStep({
                       <CodeEditor
                         value={displaySignatureCode}
                         onChange={() => {}}
-                        height={`${Math.min(displaySignatureCode.split("\n").length + 1, 10) * 19.6 + 8}px`}
+                        height={readOnlyEditorHeight(displaySignatureCode, { maxLines: 10 })}
                         readOnly
                       />
                     </TabsContent>
@@ -654,7 +647,7 @@ export function SummaryStep({
                       <CodeEditor
                         value={metricCode}
                         onChange={() => {}}
-                        height={`${Math.min(metricCode.split("\n").length + 1, 10) * 19.6 + 8}px`}
+                        height={readOnlyEditorHeight(metricCode, { maxLines: 10 })}
                         readOnly
                       />
                     </TabsContent>

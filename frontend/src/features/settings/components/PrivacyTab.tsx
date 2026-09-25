@@ -1,5 +1,6 @@
 "use client";
 
+import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import * as React from "react";
 import { signOut, useSession } from "next-auth/react";
 import { toast } from "react-toastify";
@@ -44,6 +45,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shared/ui/primitives/dialog";
+import { TOUCH_FIELD } from "@/shared/ui/touch";
 
 /** Localize a data-action failure: semantic backend codes when present. */
 function describeError(err: unknown, fallback: string): string {
@@ -206,19 +208,17 @@ export function PrivacyTab() {
         </SettingsRow>
 
         {notificationLoadError && (
-          <div
-            role="alert"
-            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2"
-          >
-            <span className="text-xs text-destructive">
-              {msg("settings.notifications.load_error")}
-            </span>
-            <RetryIconButton
-              label={msg("settings.notifications.retry")}
-              loading={notificationLoading}
-              onClick={() => void loadNotificationPreferences()}
-            />
-          </div>
+          <InlineErrorRow
+            message={msg("settings.notifications.load_error")}
+            className="items-center py-2"
+            action={
+              <RetryIconButton
+                label={msg("settings.notifications.retry")}
+                loading={notificationLoading}
+                onClick={() => void loadNotificationPreferences()}
+              />
+            }
+          />
         )}
 
         <SettingsRow
@@ -304,7 +304,10 @@ export function PrivacyTab() {
               aria-label={msg("settings.privacy.export.action")}
             >
               {exporting ? (
-                <CircleNotch className="size-3.5 animate-spin" aria-hidden="true" />
+                <CircleNotch
+                  className="size-3.5 animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
               ) : (
                 <DownloadSimple className="size-3.5" aria-hidden="true" />
               )}
@@ -326,7 +329,7 @@ export function PrivacyTab() {
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent
           data-settings-text-buttons
-          className="sm:max-w-md [&_[data-slot=button]]:min-h-[44px] [&_[data-slot=button]]:min-w-[44px] sm:[&_[data-slot=button]]:min-h-0 sm:[&_[data-slot=button]]:min-w-0 [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-w-[44px]"
+          className="w-[min(28rem,92vw)] max-w-[min(28rem,92vw)] sm:max-w-md [&_[data-slot=button]]:min-h-[44px] [&_[data-slot=button]]:min-w-[44px] sm:[&_[data-slot=button]]:min-h-0 sm:[&_[data-slot=button]]:min-w-0 [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-w-[44px]"
         >
           <DialogHeader>
             <DialogTitle>{msg("settings.privacy.delete.dialog.title")}</DialogTitle>
@@ -348,7 +351,7 @@ export function PrivacyTab() {
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"
                   dir="ltr"
-                  className="h-[44px] sm:h-9 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+                  className={TOUCH_FIELD}
                 />
               </div>
             )}
@@ -366,7 +369,7 @@ export function PrivacyTab() {
                 autoComplete="off"
                 autoFocus
                 dir="ltr"
-                className="h-[44px] sm:h-9 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+                className={TOUCH_FIELD}
               />
             </div>
             <Button
@@ -375,7 +378,12 @@ export function PrivacyTab() {
               disabled={deleting || !canDelete}
               className="w-full gap-2"
             >
-              {deleting && <CircleNotch className="size-4 animate-spin" aria-hidden="true" />}
+              {deleting && (
+                <CircleNotch
+                  className="animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
+              )}
               {msg("settings.privacy.delete.dialog.confirm")}
             </Button>
           </form>

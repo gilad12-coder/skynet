@@ -1,5 +1,6 @@
 "use client";
 
+import { EmptyState } from "@/shared/ui/empty-state";
 import * as React from "react";
 import { toast } from "react-toastify";
 import {
@@ -48,6 +49,8 @@ import {
   type SecurityStatus,
   type TotpSetup,
 } from "@/shared/lib/api";
+import { TOUCH_FIELD, TOUCH_FIELD_SM } from "@/shared/ui/touch";
+import { cn } from "@/shared/lib/utils";
 
 /** Localize a security API failure: semantic backend codes when present. */
 function describeError(err: unknown): string {
@@ -324,15 +327,13 @@ export function SecurityTab() {
       </SettingsRow>
 
       {status.passkeys.length === 0 ? (
-        <p className="px-7 py-2 text-xs text-muted-foreground/80">
-          {msg("settings.security.passkeys.empty")}
-        </p>
+        <EmptyState variant="list" title={msg("settings.security.passkeys.empty")} />
       ) : (
-        <ul className="space-y-1 ps-7">
+        <ul className="flex flex-col gap-2.5 ps-7">
           {status.passkeys.map((passkey) => (
             <li
               key={passkey.credential_id}
-              className="flex flex-col items-stretch gap-3 rounded-lg border border-border/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+              className="flex flex-col items-stretch gap-3 rounded-lg border border-border/50 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="min-w-0 flex-1">
                 {editingPasskey === passkey.credential_id ? (
@@ -349,7 +350,7 @@ export function SecurityTab() {
                       aria-label={msg("settings.security.passkeys.name_label")}
                       maxLength={64}
                       autoFocus
-                      className="h-[44px] min-w-0 flex-1 rounded-lg px-2 text-sm sm:h-8 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+                      className={cn(TOUCH_FIELD_SM, "min-w-0 flex-1 text-sm")}
                     />
                     <Button
                       type="submit"
@@ -357,12 +358,15 @@ export function SecurityTab() {
                       size="icon-sm"
                       aria-label={msg("settings.security.passkeys.rename_save")}
                       disabled={!editingPasskeyName.trim() || renaming === passkey.credential_id}
-                      className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                      className="text-muted-foreground hover:text-foreground"
                     >
                       {renaming === passkey.credential_id ? (
-                        <CircleNotch className="size-3.5 animate-spin" />
+                        <CircleNotch
+                          className="animate-spin motion-reduce:animate-none"
+                          aria-hidden="true"
+                        />
                       ) : (
-                        <Check className="size-3.5" />
+                        <Check className="size-4" />
                       )}
                     </Button>
                     <Button
@@ -372,9 +376,9 @@ export function SecurityTab() {
                       aria-label={msg("settings.security.passkeys.rename_cancel")}
                       disabled={renaming === passkey.credential_id}
                       onClick={cancelPasskeyRename}
-                      className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                      className="text-muted-foreground hover:text-foreground"
                     >
-                      <X className="size-3.5" />
+                      <X className="size-4" />
                     </Button>
                   </form>
                 ) : (
@@ -400,9 +404,9 @@ export function SecurityTab() {
                     aria-label={msg("settings.security.passkeys.rename")}
                     disabled={renaming !== null}
                     onClick={() => beginPasskeyRename(passkey)}
-                    className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                    className="text-muted-foreground hover:text-foreground"
                   >
-                    <PencilSimple className="size-3.5" />
+                    <PencilSimple className="size-4" />
                   </Button>
                 )}
                 <Button
@@ -413,12 +417,15 @@ export function SecurityTab() {
                     deleting === passkey.credential_id || renaming === passkey.credential_id
                   }
                   onClick={() => void removePasskey(passkey.credential_id)}
-                  className="size-[44px] sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                 >
                   {deleting === passkey.credential_id ? (
-                    <CircleNotch className="size-3.5 animate-spin" />
+                    <CircleNotch
+                      className="animate-spin motion-reduce:animate-none"
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <Trash className="size-3.5" />
+                    <Trash className="size-4" />
                   )}
                 </Button>
               </div>
@@ -430,7 +437,7 @@ export function SecurityTab() {
       <Dialog open={totpSetup !== null} onOpenChange={(open) => !open && closeTotpDialog()}>
         <DialogContent
           data-settings-text-buttons
-          className="sm:max-w-md [&_[data-slot=button]]:min-h-[44px] [&_[data-slot=button]]:min-w-[44px] sm:[&_[data-slot=button]]:min-h-0 sm:[&_[data-slot=button]]:min-w-0 [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-w-[44px]"
+          className="w-[min(28rem,92vw)] max-w-[min(28rem,92vw)] sm:max-w-md"
         >
           {recoveryCodes ? (
             <>
@@ -470,13 +477,16 @@ export function SecurityTab() {
                     <QRCodeSVG value={totpSetup.otpauth_url} size={168} />
                   </div>
                   <div
-                    className="flex items-center gap-2 font-mono text-xs text-muted-foreground"
                     dir="ltr"
+                    className="flex items-center gap-2 rounded-lg bg-muted/40 py-1 ps-3 pe-1"
                   >
-                    <span className="break-all">{totpSetup.secret}</span>
+                    <code className="min-w-0 flex-1 break-all font-mono text-xs text-foreground">
+                      {totpSetup.secret}
+                    </code>
                     <CopyButton
                       text={totpSetup.secret}
                       ariaLabel={msg("settings.security.copy_secret_aria")}
+                      className="shrink-0"
                     />
                   </div>
                 </div>
@@ -497,7 +507,7 @@ export function SecurityTab() {
                       autoComplete="one-time-code"
                       inputMode="numeric"
                       dir="ltr"
-                      className="h-[44px] text-left sm:h-9 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+                      className={cn(TOUCH_FIELD, "text-left")}
                     />
                   </div>
                   <Button
@@ -505,7 +515,12 @@ export function SecurityTab() {
                     disabled={busy || !totpCode.trim()}
                     className="w-full gap-2"
                   >
-                    {busy && <CircleNotch className="size-4 animate-spin" />}
+                    {busy && (
+                      <CircleNotch
+                        className="animate-spin motion-reduce:animate-none"
+                        aria-hidden="true"
+                      />
+                    )}
                     {msg("settings.security.totp_dialog.verify")}
                   </Button>
                 </form>
@@ -518,7 +533,7 @@ export function SecurityTab() {
       <Dialog open={disableOpen} onOpenChange={setDisableOpen}>
         <DialogContent
           data-settings-text-buttons
-          className="sm:max-w-md [&_[data-slot=button]]:min-h-[44px] [&_[data-slot=button]]:min-w-[44px] sm:[&_[data-slot=button]]:min-h-0 sm:[&_[data-slot=button]]:min-w-0 [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-w-[44px]"
+          className="w-[min(28rem,92vw)] max-w-[min(28rem,92vw)] sm:max-w-md"
         >
           <DialogHeader>
             <DialogTitle>{msg("settings.security.disable_dialog.title")}</DialogTitle>
@@ -532,7 +547,7 @@ export function SecurityTab() {
               autoFocus
               autoComplete="one-time-code"
               dir="ltr"
-              className="h-[44px] text-left sm:h-9 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+              className={cn(TOUCH_FIELD, "text-left")}
               aria-label={msg("settings.security.totp_dialog.code_label")}
             />
             <Button
@@ -541,7 +556,12 @@ export function SecurityTab() {
               disabled={busy || !disableCode.trim()}
               className="w-full gap-2"
             >
-              {busy && <CircleNotch className="size-4 animate-spin" />}
+              {busy && (
+                <CircleNotch
+                  className="animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
+              )}
               {msg("settings.security.disable")}
             </Button>
           </form>
@@ -551,7 +571,7 @@ export function SecurityTab() {
       <Dialog open={passkeyOpen} onOpenChange={setPasskeyOpen}>
         <DialogContent
           data-settings-text-buttons
-          className="sm:max-w-md [&_[data-slot=button]]:min-h-[44px] [&_[data-slot=button]]:min-w-[44px] sm:[&_[data-slot=button]]:min-h-0 sm:[&_[data-slot=button]]:min-w-0 [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-w-[44px]"
+          className="w-[min(28rem,92vw)] max-w-[min(28rem,92vw)] sm:max-w-md"
         >
           <DialogHeader>
             <DialogTitle>{msg("settings.security.passkeys.add")}</DialogTitle>
@@ -572,11 +592,16 @@ export function SecurityTab() {
                 placeholder={msg("settings.security.passkeys.name_placeholder")}
                 autoFocus
                 maxLength={64}
-                className="h-[44px] sm:h-9 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+                className={TOUCH_FIELD}
               />
             </div>
             <Button type="submit" disabled={busy} className="w-full gap-2">
-              {busy && <CircleNotch className="size-4 animate-spin" />}
+              {busy && (
+                <CircleNotch
+                  className="animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
+              )}
               {msg("settings.security.passkeys.create")}
             </Button>
           </form>

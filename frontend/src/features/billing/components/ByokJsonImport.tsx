@@ -1,7 +1,16 @@
 "use client";
 
+import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import * as React from "react";
-import { CaretDown, CheckCircle, CircleNotch, Eraser, Lightbulb, ShieldCheck, Warning } from "@/shared/ui/icons";
+import {
+  CaretDown,
+  CheckCircle,
+  CircleNotch,
+  Eraser,
+  Lightbulb,
+  ShieldCheck,
+  Warning,
+} from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 import { msg, formatMsg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
@@ -10,6 +19,7 @@ import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { useByokKeys } from "../providers/byok-provider";
 import { BYOK_PROVIDERS } from "../lib/byok";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
+import { Textarea } from "@/shared/ui/primitives/textarea";
 
 /** One connection entry parsed and validated from the pasted JSON. */
 interface ParsedConnection {
@@ -230,7 +240,7 @@ export function ByokJsonImport() {
         setShowResults(false);
         setOpen(false);
       } else {
-        toast.warn(
+        toast.warning(
           formatMsg("settings.keys.json_partial", {
             ok: imported,
             total: imported + failed,
@@ -249,7 +259,7 @@ export function ByokJsonImport() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex min-h-[44px] w-full cursor-pointer items-center justify-between text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="flex w-full cursor-pointer items-center justify-between text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         {msg("settings.keys.json_advanced")}
         <CaretDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
@@ -266,13 +276,13 @@ export function ByokJsonImport() {
             </p>
           </div>
 
-          <textarea
+          <Textarea
             dir="ltr"
             spellCheck={false}
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder={'[\n  { "provider": "openai", "api_key": "sk-…" }\n]'}
-            className="h-36 w-full resize-y rounded-md border border-border/50 bg-background px-2.5 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="h-36 resize-y font-mono text-xs"
           />
 
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -286,7 +296,7 @@ export function ByokJsonImport() {
                   variant="ghost"
                   size="icon-sm"
                   onClick={handleUseExample}
-                  className="size-[44px] text-muted-foreground hover:text-foreground sm:size-8"
+                  className="text-muted-foreground hover:text-foreground"
                   aria-label={msg("settings.keys.json_use_example")}
                 >
                   <Lightbulb className="size-4" aria-hidden="true" />
@@ -298,7 +308,7 @@ export function ByokJsonImport() {
                   size="icon-sm"
                   onClick={handleFormat}
                   disabled={!text.trim()}
-                  className="size-[44px] text-muted-foreground hover:text-foreground sm:size-8"
+                  className="text-muted-foreground hover:text-foreground"
                   aria-label={msg("settings.keys.json_format")}
                 >
                   <Eraser className="size-4" aria-hidden="true" />
@@ -310,7 +320,6 @@ export function ByokJsonImport() {
                   size="icon-sm"
                   onClick={() => setShowResults(true)}
                   disabled={!text.trim()}
-                  className="size-[44px] sm:size-8"
                   aria-label={msg("settings.keys.json_validate")}
                 >
                   <CheckCircle className="size-4" aria-hidden="true" />
@@ -322,28 +331,23 @@ export function ByokJsonImport() {
           {showResults && result && (
             <div className="flex flex-col gap-2.5 animate-in fade-in-0">
               {result.errors.length > 0 ? (
-                <div className="flex flex-col gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5">
-                  <span className="text-xs font-medium text-destructive">
-                    {formatMsg("settings.keys.json_errors_heading", {
-                      count: result.errors.length,
-                    })}
-                  </span>
-                  <ul className="flex flex-col gap-1">
-                    {result.errors.map((err, i) => (
-                      <li
-                        key={i}
-                        className="flex items-start gap-1.5 text-[0.6875rem] text-destructive/90"
-                        dir="auto"
-                      >
-                        <Warning className="mt-px size-3 shrink-0" />
-                        <span>{err}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                <InlineErrorRow
+                  title={formatMsg("settings.keys.json_errors_heading", {
+                    count: result.errors.length,
+                  })}
+                  message={
+                    <ul className="flex flex-col gap-1">
+                      {result.errors.map((err, i) => (
+                        <li key={i} dir="auto">
+                          {err}
+                        </li>
+                      ))}
+                    </ul>
+                  }
+                />
               ) : (
                 <>
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-[#3f7d4f] dark:text-emerald-400">
+                  <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--success)]">
                     <CheckCircle className="size-3.5 shrink-0" />
                     <span>
                       {formatMsg("settings.keys.json_valid", { count: result.connections.length })}
@@ -355,7 +359,7 @@ export function ByokJsonImport() {
                       {result.warnings.map((warn, i) => (
                         <li
                           key={i}
-                          className="flex items-start gap-1.5 text-[0.6875rem] text-amber-700 dark:text-amber-400"
+                          className="flex items-start gap-1.5 text-[0.6875rem] text-[var(--warning)]"
                           dir="auto"
                         >
                           <Warning className="mt-px size-3 shrink-0" />
@@ -378,7 +382,7 @@ export function ByokJsonImport() {
                         className="grid min-w-[480px] grid-cols-[1.4fr_1.3fr_1.5fr_0.9fr] items-center gap-2 px-3 py-2 text-xs [&:not(:last-child)]:border-b [&:not(:last-child)]:border-border/40"
                       >
                         <span className="flex min-w-0 items-center gap-1.5">
-                          <ProviderLogo slug={c.provider} size={18} />
+                          <ProviderLogo slug={c.provider} size={16} />
                           <span className="truncate text-foreground">
                             {providerLabel(c.provider)}
                           </span>
@@ -410,7 +414,10 @@ export function ByokJsonImport() {
                     disabled={busy}
                   >
                     {busy ? (
-                      <CircleNotch className="size-3.5 animate-spin" />
+                      <CircleNotch
+                        className="animate-spin motion-reduce:animate-none"
+                        aria-hidden="true"
+                      />
                     ) : (
                       formatMsg("settings.keys.json_import_count", {
                         count: result.connections.length,

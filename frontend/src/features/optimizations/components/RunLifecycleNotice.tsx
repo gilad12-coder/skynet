@@ -20,6 +20,7 @@ import {
   recoveryEpisode,
   type RecoveryDisplayState,
 } from "../lib/run-lifecycle";
+import { Label } from "@/shared/ui/primitives/label";
 
 const RESULT_COPY = {
   evaluated: "optimization.budget_reached.saved",
@@ -338,9 +339,7 @@ export function RunLifecycleNotice({
           }}
         >
           <div className="space-y-1">
-            <label htmlFor={limitInputId} className="block text-xs text-muted-foreground">
-              {msg("optimization.budget_raise.label")}
-            </label>
+            <Label htmlFor={limitInputId}>{msg("optimization.budget_raise.label")}</Label>
             <NumberInput
               id={limitInputId}
               value={creditsToUsd(requested)}

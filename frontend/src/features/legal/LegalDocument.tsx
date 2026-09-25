@@ -157,7 +157,7 @@ export function LegalDocument({
               autoMorphDuration={10000}
               morphSpeed={250}
             />
-            <span aria-hidden="true" className="h-4 w-px bg-border" />
+            <span aria-hidden="true" className="h-4 w-px bg-border/70" />
             <span className="text-sm font-medium text-muted-foreground">{CHROME.legal}</span>
           </Link>
 

@@ -1,5 +1,8 @@
 "use client";
 
+import { EmptyState } from "@/shared/ui/empty-state";
+import { LoadingState } from "@/shared/ui/loading-state";
+import { Badge } from "@/shared/ui/primitives/badge";
 import * as React from "react";
 import { HuggingFace } from "@lobehub/icons";
 import { toast } from "react-toastify";
@@ -11,7 +14,6 @@ import {
   CircleNotch,
   DownloadSimple,
   Lock,
-  MagnifyingGlass,
   Plug,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -50,6 +52,8 @@ import { useSettingsModal } from "@/features/settings";
 import { DatasetPreviewPanel } from "@/features/datasets";
 import { useConnectors } from "../hooks/use-connectors";
 import { BROWSE_CARET_CLASS, BROWSE_LIST_CLASS, BROWSE_ROW_CLASS } from "./browse-list";
+import { SearchInput } from "@/shared/ui/search-input";
+import { TOUCH_FIELD } from "@/shared/ui/touch";
 
 /** Props for {@link HuggingFaceImportDialog}. */
 export interface HuggingFaceImportDialogProps {
@@ -245,11 +249,11 @@ export function HuggingFaceImportDialog({
           "gap-0 overflow-y-auto p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
           // Same footprint as the dataset detail dialog so the two read as one family.
           previewExpanded
-            ? "max-h-[96dvh] w-[min(72rem,96vw)] max-w-[min(72rem,96vw)] sm:max-w-[min(72rem,96vw)]"
+            ? "max-h-[85vh] w-[96vw] max-w-[96vw] sm:max-w-[96vw]"
             : "max-h-[85vh] w-[min(72rem,94vw)] max-w-[min(72rem,94vw)] sm:max-w-[min(72rem,94vw)]",
         )}
       >
-        <DialogHeader className="px-5 pt-5 text-start">
+        <DialogHeader className="px-5 pt-5">
           <div className="flex items-center gap-2.5">
             <HuggingFace.Avatar size={28} />
             <div className="min-w-0">
@@ -270,7 +274,7 @@ export function HuggingFaceImportDialog({
             <button
               type="button"
               onClick={openConnectors}
-              className="inline-flex cursor-pointer items-center gap-0.5 font-medium underline-offset-2 hover:underline"
+              className="inline-flex cursor-pointer items-center gap-0.5 rounded-sm font-medium text-[#8A6D44] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
             >
               {msg("hf_import.connect_link")}
               <ArrowSquareOut className="size-3" />
@@ -280,27 +284,18 @@ export function HuggingFaceImportDialog({
 
         {repoId === null ? (
           <div className="px-5 pb-5 pt-4">
-            <div className="relative">
-              <Input
-                dir="ltr"
-                autoFocus
-                placeholder={msg("hf_import.search_placeholder")}
-                aria-label={msg("hf_import.search_placeholder")}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && looksLikeRepo) setRepoId(trimmedQuery);
-                }}
-                className="h-[44px] pe-9 sm:h-9 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
-              />
-              <span className="pointer-events-none absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                {searching ? (
-                  <CircleNotch className="size-4 animate-spin" />
-                ) : (
-                  <MagnifyingGlass className="size-4" />
-                )}
-              </span>
-            </div>
+            <SearchInput
+              dir="ltr"
+              autoFocus
+              placeholder={msg("hf_import.search_placeholder")}
+              aria-label={msg("hf_import.search_placeholder")}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && looksLikeRepo) setRepoId(trimmedQuery);
+              }}
+              busy={searching}
+            />
 
             <div className="mt-3 max-h-[min(36rem,60vh)] overflow-y-auto">
               {searchFailed ? (
@@ -308,9 +303,7 @@ export function HuggingFaceImportDialog({
                   {msg("hf_import.search_error")}
                 </p>
               ) : !searching && results.length === 0 && !showOpenRepo ? (
-                <p className="px-1 py-6 text-center text-sm text-muted-foreground">
-                  {msg("hf_import.search_empty")}
-                </p>
+                <EmptyState variant="list" title={msg("hf_import.search_empty")} />
               ) : results.length > 0 || showOpenRepo ? (
                 <ul className={BROWSE_LIST_CLASS}>
                   {showOpenRepo && (
@@ -350,16 +343,16 @@ export function HuggingFaceImportDialog({
                               <span className="font-medium text-foreground">{repoName}</span>
                             </span>
                             {d.gated && (
-                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#C8A882]/15 px-1.5 py-px text-[0.6875rem] font-medium text-[#8a6d44]">
-                                <Lock className="size-3" aria-hidden="true" />
+                              <Badge variant="tint" size="sm">
+                                <Lock aria-hidden="true" />
                                 {msg("hf_import.gated")}
-                              </span>
+                              </Badge>
                             )}
                             {d.private && (
-                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-px text-[0.6875rem] font-medium text-muted-foreground">
-                                <Lock className="size-3" aria-hidden="true" />
+                              <Badge variant="secondary" size="sm">
+                                <Lock aria-hidden="true" />
                                 {msg("hf_import.private")}
-                              </span>
+                              </Badge>
                             )}
                           </span>
                           <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground tabular-nums">
@@ -383,9 +376,9 @@ export function HuggingFaceImportDialog({
                 size="icon-sm"
                 onClick={() => setRepoId(null)}
                 aria-label={msg("hf_import.back")}
-                className="size-[44px] shrink-0 sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                className="shrink-0"
               >
-                <ArrowLeft className="size-4 rtl:-scale-x-100" />
+                <ArrowLeft className="size-4 rtl:rotate-180" />
               </Button>
               <span
                 dir="ltr"
@@ -400,7 +393,7 @@ export function HuggingFaceImportDialog({
                     variant="ghost"
                     size="icon-sm"
                     aria-label={msg("hf_import.view_on_hub")}
-                    className="size-[44px] shrink-0 text-muted-foreground hover:text-foreground sm:size-8 [@media(hover:none)_and_(pointer:coarse)]:size-[44px]"
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
                   >
                     <a
                       href={`https://huggingface.co/datasets/${repoId}`}
@@ -416,9 +409,7 @@ export function HuggingFaceImportDialog({
             </div>
 
             {splitsLoading ? (
-              <div className="flex items-center justify-center py-10">
-                <CircleNotch className="size-5 animate-spin text-primary" />
-              </div>
+              <LoadingState />
             ) : (
               <>
                 <div className="grid gap-3">
@@ -427,11 +418,7 @@ export function HuggingFaceImportDialog({
                       {msg("hf_import.split_label")}
                     </Label>
                     <Select value={splitKey} onValueChange={setSplitKey}>
-                      <SelectTrigger
-                        id="hf-split"
-                        dir="ltr"
-                        className="h-[44px] w-full sm:h-9 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
-                      >
+                      <SelectTrigger id="hf-split" dir="ltr" className={cn(TOUCH_FIELD, "w-full")}>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -467,7 +454,7 @@ export function HuggingFaceImportDialog({
                       dir="ltr"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      className="h-[44px] sm:h-9 [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
+                      className={TOUCH_FIELD}
                     />
                   </div>
                 </div>
@@ -489,25 +476,20 @@ export function HuggingFaceImportDialog({
                     expanded={previewExpanded}
                     onExpandedChange={setPreviewExpanded}
                     className="h-80"
-                    expandedClassName="h-[62dvh] min-h-80"
+                    expandedClassName="h-80"
                   />
                 </div>
 
-                <DialogFooter className="gap-2 sm:gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => onOpenChange(false)}
-                    className="min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
-                  >
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => onOpenChange(false)}>
                     {msg("hf_import.cancel")}
                   </Button>
-                  <Button
-                    onClick={handleImport}
-                    disabled={!selectedSplit || importing}
-                    className="min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]"
-                  >
+                  <Button onClick={handleImport} disabled={!selectedSplit || importing}>
                     {importing ? (
-                      <CircleNotch className="size-4 animate-spin" />
+                      <CircleNotch
+                        className="animate-spin motion-reduce:animate-none"
+                        aria-hidden="true"
+                      />
                     ) : (
                       <DownloadSimple className="size-4" />
                     )}

@@ -7,14 +7,14 @@ import {
   ArrowDown,
   ArrowsDownUp,
   Funnel,
-  MagnifyingGlass,
   ArrowCounterClockwise,
   FunnelX,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
-import { Input } from "@/shared/ui/primitives/input";
+import { CheckboxIndicator } from "@/shared/ui/select-checkbox";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
+import { SearchInput } from "@/shared/ui/search-input";
 
 export type SortDir = "asc" | "desc";
 export type Filters = Record<string, Set<string>>;
@@ -295,6 +295,7 @@ function FilterDropdown({
     allValues.size > 0 &&
     localSelected.size === allValues.size &&
     [...allValues].every((v) => localSelected.has(v));
+  const someSelected = localSelected.size > 0;
 
   const visibleOptions = search.trim()
     ? options.filter((o) => o.label.toLowerCase().includes(search.trim().toLowerCase()))
@@ -332,32 +333,34 @@ function FilterDropdown({
       }
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="relative mb-1.5">
-        <div className="absolute end-2 top-1/2 -translate-y-1/2 text-muted-foreground">
-          <MagnifyingGlass className="size-3" />
-        </div>
-        <Input
+      <div className="mb-1.5">
+        <SearchInput
+          size="sm"
           ref={searchRef}
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-7 text-[0.6875rem] py-1.5 pe-7 ps-2 text-start"
+          className="ps-2 text-start text-[0.6875rem]"
           placeholder={msg("shared.excel_filter.search_placeholder")}
           dir={getActiveDir()}
         />
       </div>
 
-      <label className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] font-semibold text-muted-foreground hover:bg-muted/70">
+      <label className="group flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] font-semibold text-muted-foreground hover:bg-muted/70 lg:min-h-9">
         <input
           type="checkbox"
-          className="accent-[#3D2E22]"
+          className="peer sr-only"
           checked={allSelected}
+          ref={(el) => {
+            if (el) el.indeterminate = someSelected && !allSelected;
+          }}
           onChange={toggleSelectAll}
         />
+        <CheckboxIndicator checked={allSelected} indeterminate={someSelected && !allSelected} />
         {msg("shared.excel_filter.select_all")}
       </label>
 
-      <div className="my-1 border-t border-border/70" />
+      <div role="separator" className="my-1 h-px bg-border/60" />
 
       <div
         className="overflow-y-auto"
@@ -371,15 +374,16 @@ function FilterDropdown({
           visibleOptions.map((opt) => (
             <label
               key={opt.value}
-              className="flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] text-muted-foreground hover:bg-muted/70"
+              className="group flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] text-muted-foreground hover:bg-muted/70 lg:min-h-9"
               title={opt.value}
             >
               <input
                 type="checkbox"
-                className="shrink-0 accent-[#3D2E22]"
+                className="peer sr-only"
                 checked={localSelected.has(opt.value)}
                 onChange={() => toggleValue(opt.value)}
               />
+              <CheckboxIndicator checked={localSelected.has(opt.value)} />
               <span className="truncate" dir={/[\u0590-\u05FF]/.test(opt.label) ? "rtl" : "ltr"}>
                 {opt.label}
               </span>
@@ -388,7 +392,7 @@ function FilterDropdown({
         )}
       </div>
 
-      <div className="my-1 border-t border-border/70" />
+      <div role="separator" className="my-1 h-px bg-border/60" />
 
       <div className="flex items-center gap-2 px-1">
         <Button
@@ -477,7 +481,6 @@ export function ResetColumnsButton({
       size="icon-sm"
       type="button"
       onClick={resize.resetAll}
-      className="max-lg:size-[44px]"
       aria-label={msg("shared.excel_filter.reset_width_title")}
     >
       <ArrowCounterClockwise className="size-4" aria-hidden="true" />
@@ -497,7 +500,6 @@ export function ResetFiltersButton({
       size="icon-sm"
       type="button"
       onClick={filters.clearAll}
-      className="max-lg:size-[44px]"
       aria-label={msg("shared.excel_filter.reset_filters_title")}
     >
       <FunnelX className="size-4" aria-hidden="true" />

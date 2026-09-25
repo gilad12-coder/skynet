@@ -1,5 +1,6 @@
 "use client";
 
+import { Badge } from "@/shared/ui/primitives/badge";
 import { formatBudgetUsd } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
@@ -157,11 +158,11 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
                   {msg("auto.features.agent.panel.lib.tool.meta.literal.70")}
                 </div>
                 {pairIndex != null && (
-                  <span className="inline-flex shrink-0 items-center rounded-full bg-[#3D2E22]/8 px-2 py-0.5 text-[0.625rem] font-medium text-[#3D2E22]">
+                  <Badge variant="secondary" size="sm">
                     {formatMsg("auto.features.agent.panel.components.inferenceformcard.pair", {
                       p1: pairIndex,
                     })}
-                  </span>
+                  </Badge>
                 )}
               </div>
             </div>
@@ -252,14 +253,17 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
                 <Button
                   type="submit"
                   size="icon"
-                  className="shrink-0 rounded-full !size-[44px]"
+                  className="shrink-0 rounded-full"
                   disabled={running || disabled || !optimizationId}
                   aria-label={msg(
                     "auto.features.agent.panel.components.inferenceformcard.literal.2",
                   )}
                 >
                   {running ? (
-                    <CircleNotch className="size-4 animate-spin" />
+                    <CircleNotch
+                      className="animate-spin motion-reduce:animate-none"
+                      aria-hidden="true"
+                    />
                   ) : (
                     <svg viewBox="0 0 24 24" fill="currentColor" className="size-4">
                       <path
@@ -314,7 +318,7 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
                         }}
                         rows={1}
                         disabled={running || disabled}
-                        className="block h-[44px] max-h-[120px] w-full resize-none overflow-hidden rounded-2xl border border-[#DDD4C8] bg-muted/20 px-4 py-[11px] text-sm font-mono leading-[20px] shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/40 focus:border-[#C8A882] focus:outline-none focus-visible:outline-none focus-visible:ring-0 disabled:opacity-60"
+                        className="block h-[44px] max-h-[120px] w-full resize-none overflow-hidden rounded-2xl border border-[#DDD4C8] bg-muted/20 px-4 py-[11px] text-sm font-mono leading-[20px] shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/40 focus:border-[#C8A882] focus:outline-none focus-visible:outline-none focus-visible:ring-0 disabled:opacity-60 sm:h-[42px] [@media(hover:none)_and_(pointer:coarse)]:h-[44px]"
                       />
                     </div>
                   ))}

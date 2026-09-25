@@ -1,7 +1,9 @@
 "use client";
+import { notifyCopied } from "@/shared/lib/notify";
+import { LoadingState } from "@/shared/ui/loading-state";
 import * as React from "react";
 import { toast } from "react-toastify";
-import { CircleNotch, Tray } from "@/shared/ui/icons";
+import { Tray } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/shared/ui/primitives/table";
 import {
@@ -26,11 +28,14 @@ export function DatasetRowsView({
   filename,
   readerIndex,
   setReaderIndex,
+  toolbarLeading,
   toolbarActions,
   emptyTitle,
 }: {
   rows: Pick<ParsedDataset, "columns" | "rows"> | null;
   filename?: string;
+  /** Shown at the start of the toolbar row, opposite the actions. */
+  toolbarLeading?: React.ReactNode;
   toolbarActions?: React.ReactNode;
   /** Replaces the generic "no rows" message when the dataset itself is empty. */
   emptyTitle?: string;
@@ -94,7 +99,7 @@ export function DatasetRowsView({
     if (!text) return;
     navigator.clipboard
       .writeText(text)
-      .then(() => toast.success(msg("clipboard.copied")))
+      .then(notifyCopied)
       .catch(() => toast.error(msg("clipboard.copy_failed")));
   }, []);
 
@@ -147,13 +152,7 @@ export function DatasetRowsView({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6">
           {rows === null ? (
-            <div role="status" className="flex min-h-40 flex-1 items-center justify-center py-10">
-              <CircleNotch
-                className="size-7 animate-spin text-muted-foreground/70 motion-reduce:animate-[spin_1.5s_linear_infinite]"
-                aria-hidden="true"
-              />
-              <span className="sr-only">{msg("datasets.detail.loading")}</span>
-            </div>
+            <LoadingState srLabel={msg("datasets.detail.loading")} className="min-h-40 flex-1" />
           ) : columns.length === 0 || allRows.length === 0 ? (
             <div className="py-8">
               <EmptyState
@@ -165,6 +164,11 @@ export function DatasetRowsView({
           ) : (
             <FadeIn className="flex min-h-0 flex-1 flex-col">
               <div className="mb-2 flex min-h-[44px] items-center justify-end gap-3 max-lg:[&_button]:size-[44px] lg:min-h-0">
+                {toolbarLeading && (
+                  <div className="me-auto min-w-0 truncate text-sm text-muted-foreground">
+                    {toolbarLeading}
+                  </div>
+                )}
                 <div className="flex items-center gap-2 shrink-0">
                   <ResetFiltersButton filters={colFilters} />
                   <ResetColumnsButton resize={colResize} />
@@ -191,7 +195,7 @@ export function DatasetRowsView({
                   />
                 </div>
               ) : (
-                <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border/50">
+                <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-border/40 bg-card/60">
                   {/* Per-column width floor: on narrow viewports the
                             fixed-layout table scrolls sideways (the Table
                             container is overflow-x-auto) instead of crushing
@@ -226,7 +230,7 @@ export function DatasetRowsView({
                       {filtered.slice(0, RENDER_ROW_CAP).map((row, i) => (
                         <TableRow
                           key={i}
-                          className="cursor-pointer transition-colors hover:bg-muted/40"
+                          className="cursor-pointer transition-colors duration-150 hover:bg-muted/50"
                           onClick={() => {
                             if (!window.matchMedia("(any-pointer: coarse)").matches) return;
                             cancelPendingCopy();

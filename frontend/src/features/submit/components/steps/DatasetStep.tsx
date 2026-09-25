@@ -102,7 +102,7 @@ export function DatasetStep({
                 msg("auto.features.submit.components.steps.datasetstep.literal.1")}
             </p>
             {parsedDataset && (
-              <Badge variant="secondary" className="mt-2">
+              <Badge variant="secondary" size="sm" className="mt-2">
                 {parsedDataset.rowCount}
                 {msg("auto.features.submit.components.steps.datasetstep.2")}
                 {parsedDataset.columns.length}
@@ -129,12 +129,7 @@ export function DatasetStep({
                   {msg("auto.features.submit.components.steps.paramsstep.10")}
                 </HelpTip>
               </Label>
-              <Switch
-                id="shuffle"
-                checked={shuffle}
-                onCheckedChange={setShuffle}
-                className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
-              />
+              <Switch id="shuffle" checked={shuffle} onCheckedChange={setShuffle} />
             </div>
           )}
 

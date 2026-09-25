@@ -13,6 +13,7 @@ import { Switch } from "@/shared/ui/primitives/switch";
 import { Separator } from "@/shared/ui/primitives/separator";
 import { NumberInput } from "@/shared/ui/number-input";
 import { HelpTip } from "@/shared/ui/help-tip";
+import { Segmented } from "@/shared/ui/segmented";
 import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
@@ -21,58 +22,9 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import type { SubmitWizardContext } from "../../hooks/use-submit-wizard";
 import { AUTO_METRIC_CALLS } from "../../lib/cost-bracket";
 
-const MOBILE_NUMBER_INPUT_CLASS =
-  "h-[44px] [&_button]:size-[44px] [&_input]:text-base lg:h-9 lg:[&_button]:size-9 lg:[&_input]:text-sm";
-
 // The empty level is the escape hatch: no preset, the user sets the budget.
 const DEPTH_LEVELS = ["light", "medium", "heavy", ""] as const;
 type DepthLevel = (typeof DEPTH_LEVELS)[number];
-
-function SegmentedControl<T extends string>({
-  options,
-  value,
-  onChange,
-  className,
-}: {
-  options: ReadonlyArray<readonly [T, string]>;
-  value: T;
-  onChange: (value: T) => void;
-  className?: string;
-}) {
-  const count = options.length;
-  const idx = Math.max(
-    0,
-    options.findIndex(([v]) => v === value),
-  );
-  // p-1 (4px) around and gap-1 (4px) between segments: the sliding pill has
-  // to subtract both or it drifts off-centre past the second segment.
-  const segmentWidth = `((100% - ${8 + 4 * (count - 1)}px) / ${count})`;
-  return (
-    <div className={cn("relative inline-flex w-full rounded-lg bg-muted p-1 gap-1", className)}>
-      <div
-        className="pointer-events-none absolute top-1 bottom-1 rounded-md bg-background shadow-sm transition-[inset-inline-start] duration-150 ease-out"
-        style={{
-          width: `calc(${segmentWidth})`,
-          insetInlineStart: `calc(4px + ${idx} * (${segmentWidth} + 4px))`,
-        }}
-      />
-      {options.map(([val, label]) => (
-        <button
-          key={val}
-          type="button"
-          onClick={() => onChange(val)}
-          aria-pressed={value === val}
-          className={cn(
-            "relative z-[1] min-h-[44px] min-w-0 flex-1 cursor-pointer truncate rounded-md px-2 py-1.5 text-center text-xs font-medium transition-colors lg:min-h-0",
-            value === val ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 export function ParamsStep({ w }: { w: SubmitWizardContext }) {
   const {
@@ -125,22 +77,35 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
               {msg("auto.features.submit.components.steps.paramsstep.12")}
             </HelpTip>
           </Label>
-          <SegmentedControl
+          <Segmented<DepthLevel>
+            label={msg("auto.features.submit.components.steps.paramsstep.12")}
             options={[
-              ["light", msg("auto.features.submit.components.steps.paramsstep.literal.1")],
-              ["medium", msg("auto.features.submit.components.steps.paramsstep.literal.2")],
-              ["heavy", msg("auto.features.submit.components.steps.paramsstep.literal.3")],
-              ["", msg("submit.depth.custom")],
+              {
+                value: "light",
+                label: msg("auto.features.submit.components.steps.paramsstep.literal.1"),
+              },
+              {
+                value: "medium",
+                label: msg("auto.features.submit.components.steps.paramsstep.literal.2"),
+              },
+              {
+                value: "heavy",
+                label: msg("auto.features.submit.components.steps.paramsstep.literal.3"),
+              },
+              { value: "", label: msg("submit.depth.custom") },
             ]}
             value={depth}
             onChange={setAutoLevel}
           />
           {!depth && (
             <div className="space-y-3 rounded-lg border border-border/50 bg-muted/30 p-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-200">
-              <SegmentedControl
+              <Segmented<"rounds" | "calls">
                 options={[
-                  ["rounds", msg("auto.features.submit.components.steps.paramsstep.14")],
-                  ["calls", msg("submit.metric_calls")],
+                  {
+                    value: "rounds",
+                    label: msg("auto.features.submit.components.steps.paramsstep.14"),
+                  },
+                  { value: "calls", label: msg("submit.metric_calls") },
                 ]}
                 value={budgetUnit}
                 onChange={(unit) =>
@@ -151,7 +116,7 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
               />
               {budgetUnit === "calls" ? (
                 <div className="space-y-1.5">
-                  <Label htmlFor="max-metric-calls" className="text-xs">
+                  <Label htmlFor="max-metric-calls">
                     <HelpTip text={tip("submit.metric_calls")}>
                       {msg("submit.metric_calls")}
                     </HelpTip>
@@ -163,12 +128,12 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                     step={1}
                     value={parseInt(maxMetricCalls, 10)}
                     onChange={(v) => setMaxMetricCalls(String(v))}
-                    className={MOBILE_NUMBER_INPUT_CLASS}
+                    className="max-w-48"
                   />
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  <Label htmlFor="max-full-evals" className="text-xs">
+                  <Label htmlFor="max-full-evals">
                     <HelpTip text={tip("submit.eval_rounds")}>
                       {msg("auto.features.submit.components.steps.paramsstep.14")}
                     </HelpTip>
@@ -180,7 +145,7 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                     step={1}
                     value={maxFullEvals ? parseInt(maxFullEvals, 10) : ""}
                     onChange={(v) => setMaxFullEvals(String(v))}
-                    className={MOBILE_NUMBER_INPUT_CLASS}
+                    className="max-w-48"
                   />
                 </div>
               )}
@@ -225,7 +190,7 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
               data-tutorial="gepa-params"
             >
               <div className="space-y-1.5">
-                <Label htmlFor="reflection-minibatch" className="text-xs">
+                <Label htmlFor="reflection-minibatch">
                   <HelpTip text={tip("submit.reflection_minibatch")}>
                     {msg("auto.features.submit.components.steps.paramsstep.13")}
                   </HelpTip>
@@ -237,26 +202,20 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                   step={1}
                   value={reflectionMinibatchSize ? parseInt(reflectionMinibatchSize, 10) : ""}
                   onChange={(v) => setReflectionMinibatchSize(String(v))}
-                  className={MOBILE_NUMBER_INPUT_CLASS}
                 />
               </div>
               <div className="flex items-center justify-between gap-3 sm:self-end sm:h-9 sm:mb-0">
-                <Label htmlFor="use-merge" className="cursor-pointer text-xs">
+                <Label htmlFor="use-merge" className="cursor-pointer">
                   <HelpTip text={tip("submit.merge")}>
                     {msg("auto.features.submit.components.steps.paramsstep.15")}
                   </HelpTip>
                 </Label>
-                <Switch
-                  id="use-merge"
-                  checked={useMerge}
-                  onCheckedChange={setUseMerge}
-                  className="relative before:absolute before:-inset-3 before:content-[''] lg:before:hidden"
-                />
+                <Switch id="use-merge" checked={useMerge} onCheckedChange={setUseMerge} />
               </div>
               {isGepa && (
                 <>
                   <div className="space-y-1.5">
-                    <Label htmlFor="pxn-parents" className="text-xs">
+                    <Label htmlFor="pxn-parents">
                       <HelpTip text={tip("submit.pxn_parents")}>
                         {msg("submit.pxn.parents")}
                       </HelpTip>
@@ -268,11 +227,10 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                       step={1}
                       value={pxnParents ? parseInt(pxnParents, 10) : ""}
                       onChange={(v) => setPxnParents(String(v))}
-                      className={MOBILE_NUMBER_INPUT_CLASS}
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="pxn-proposals" className="text-xs">
+                    <Label htmlFor="pxn-proposals">
                       <HelpTip text={tip("submit.pxn_proposals")}>
                         {msg("submit.pxn.proposals")}
                       </HelpTip>
@@ -284,7 +242,6 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                       step={1}
                       value={pxnProposals ? parseInt(pxnProposals, 10) : ""}
                       onChange={(v) => setPxnProposals(String(v))}
-                      className={MOBILE_NUMBER_INPUT_CLASS}
                     />
                   </div>
                   {pxnBatch > 1 && (
@@ -293,7 +250,7 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                     </p>
                   )}
                   <div className="col-span-1 space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="target-score" className="text-xs">
+                    <Label htmlFor="target-score">
                       <HelpTip text={tip("submit.target_score")}>
                         {msg("auto.features.submit.components.steps.paramsstep.16")}
                       </HelpTip>
@@ -306,7 +263,7 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                         step={0.1}
                         value={Number.isFinite(targetScoreValue) ? targetScoreValue : ""}
                         onChange={(value) => setTargetScore(String(value))}
-                        className={cn(MOBILE_NUMBER_INPUT_CLASS, "pe-8")}
+                        className="pe-8"
                       />
                       <span className="pointer-events-none absolute inset-y-0 end-3 flex items-center text-xs text-muted-foreground">
                         %

@@ -5,7 +5,8 @@ import { LazyCodeEditor as CodeEditor } from "@/shared/ui/lazy-code-editor";
 import * as React from "react";
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion, useReducedMotion, type Variants } from "framer-motion";
-import { Robot, Brain, Sparkle, FlowArrow, Lightning, Cube, CaretLeft } from "@/shared/ui/icons";
+import { Robot, Brain, Sparkle, FlowArrow, Lightning, Cube } from "@/shared/ui/icons";
+import { BackLink } from "@/shared/ui/back-link";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { Label } from "@/shared/ui/primitives/label";
@@ -223,7 +224,7 @@ export function CodeStep({
       data-tutorial="metric-editor"
     >
       <div className="flex items-center justify-between gap-2">
-        <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <Label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
           <HelpTip text={tip("code.metric")}>
             {msg("auto.features.submit.components.steps.codestep.3")}
           </HelpTip>
@@ -347,7 +348,7 @@ export function CodeStep({
             data-tutorial="signature-editor"
           >
             <div className="flex items-center justify-between gap-2">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <Label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
                 <HelpTip text={tip("code.signature")}>
                   {msg("auto.features.submit.components.steps.codestep.2")}
                 </HelpTip>
@@ -566,8 +567,8 @@ function CompositionCard({
       <Banner />
       <div className="flex flex-1 flex-col gap-1.5 px-4 py-4 sm:px-6 sm:py-5">
         <div className="flex items-center gap-2.5">
-          <span className="flex size-9 items-center justify-center rounded-lg bg-[#F3EDE3] text-[#3D2E22]">
-            <Icon className="size-[1.125rem]" />
+          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-muted-foreground [&_svg]:size-4">
+            <Icon className="size-4" />
           </span>
           <h4
             {...(labelLtr ? { dir: "ltr" } : {})}
@@ -599,14 +600,9 @@ function AtomicModulePicker({
   const currentIndex = ATOMIC_MODULES.findIndex((m) => m.value === current.toLowerCase());
   return (
     <div>
-      <button
-        type="button"
-        onClick={onBack}
-        className="mb-3 inline-flex min-h-[44px] items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground lg:min-h-0"
-      >
-        <CaretLeft className="size-3.5 rtl:-scale-x-100" aria-hidden />
-        {msg("submit.composition.back")}
-      </button>
+      <div className="mb-3">
+        <BackLink onClick={onBack} label={msg("submit.composition.back")} />
+      </div>
       <Carousel
         items={ATOMIC_MODULES}
         itemKey={(m) => m.value}
