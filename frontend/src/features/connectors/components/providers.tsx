@@ -5,21 +5,21 @@ import {
   Aws,
   Azure,
   Github,
+  GoogleCloud,
   HuggingFace,
   Langfuse,
   LangSmith,
-  Microsoft,
   Notion,
   Snowflake,
 } from "@lobehub/icons";
 import {
   BigQuery,
   Braintrust,
-  CloudStorage,
   GoogleDrive,
   GoogleSheets,
   Kaggle,
   MySQL,
+  OneDrive,
   PostgreSQL,
 } from "@/shared/ui/brand-marks";
 import {
@@ -103,6 +103,18 @@ export const BROWSE_PROVIDERS: ConnectorProvider[] = ALL_PROVIDERS.filter(
 /** Translated heading of one section. */
 export function categoryLabel(category: ProviderCategory): string {
   return msg(`connectors.category.${category}`);
+}
+
+// Langfuse and LangSmith paint near-black discs that melt into the dark theme, so they
+// get the same faint ring the black brand-marks avatars use.
+const DARK_DISC_RING = "dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1)]";
+
+function LangfuseAvatar({ size }: { size: number }) {
+  return <Langfuse.Avatar size={size} className={DARK_DISC_RING} />;
+}
+
+function LangSmithAvatar({ size }: { size: number }) {
+  return <LangSmith.Avatar size={size} className={DARK_DISC_RING} />;
 }
 
 const generic = (
@@ -239,8 +251,8 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "files", msg("connectors.gcs.name")),
         blurb: msg("connectors.gcs.blurb"),
-        Avatar: CloudStorage.Avatar,
-        Mark: CloudStorage.Mark,
+        Avatar: GoogleCloud.Avatar,
+        Mark: GoogleCloud.Color,
         oauthButton: msg("connectors.gcs.oauth_button"),
         credentialsHelp: msg("connectors.gcs.credentials_help"),
         fields: [serviceAccountField(), { key: "bucket", label: msg("connectors.field.bucket") }],
@@ -303,8 +315,8 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "files", msg("connectors.onedrive.name")),
         blurb: msg("connectors.onedrive.blurb"),
-        Avatar: Microsoft.Avatar,
-        Mark: Microsoft.Color,
+        Avatar: OneDrive.Avatar,
+        Mark: OneDrive.Mark,
         oauthButton: msg("connectors.onedrive.oauth_button"),
         credentialsHelp: "",
         fields: [],
@@ -397,7 +409,7 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "traces", msg("connectors.langfuse.name")),
         blurb: msg("connectors.langfuse.blurb"),
-        Avatar: Langfuse.Avatar,
+        Avatar: LangfuseAvatar,
         Mark: Langfuse.Color,
         credentialsHelp: msg("connectors.langfuse.credentials_help"),
         fields: [
@@ -423,8 +435,8 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
       return {
         ...generic(id, "traces", msg("connectors.langsmith.name")),
         blurb: msg("connectors.langsmith.blurb"),
-        Avatar: LangSmith.Avatar,
-        Mark: LangSmith.Color,
+        Avatar: LangSmithAvatar,
+        Mark: LangSmith,
         credentialsHelp: msg("connectors.langsmith.credentials_help"),
         helpUrl: "https://smith.langchain.com/settings",
         helpUrlLabel: "smith.langchain.com/settings",
