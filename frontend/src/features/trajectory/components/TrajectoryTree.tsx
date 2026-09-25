@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
+import { animate, motion, useReducedMotion } from "framer-motion";
 import {
   ArrowCounterClockwise,
   ArrowsIn,
@@ -9,9 +9,14 @@ import {
   Minus,
   Plus,
 } from "@/shared/ui/icons";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { TRAJECTORY_LAYOUT, type LayoutResult } from "../lib/layout";
+import {
+  collapseGhosts,
+  interpolateLayout,
+  TRAJECTORY_LAYOUT,
+  type LayoutResult,
+} from "../lib/layout";
 import { displayCandidateId, type RejectedNode, type TrajectoryNode } from "../lib/types";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
@@ -162,6 +167,7 @@ function LayerFade({
       animate={{ opacity: show ? 1 : 0 }}
       transition={reduceMotion ? { duration: 0 } : { duration: 0.25, ease: "easeOut" }}
       style={{ pointerEvents: show ? "auto" : "none" }}
+      aria-hidden={!show}
     >
       {children}
     </motion.g>
@@ -227,6 +233,44 @@ function fitView(size: { w: number; h: number }, layoutW: number, layoutH: numbe
   return { k, tx, ty };
 }
 
+const MORPH_TRANSITION = { duration: 0.45, ease: [0.2, 0.8, 0.2, 1] } as const;
+
+// Toggling rejected proposals swaps layouts; tween between them so the tree
+// slides open and shut instead of jumping. Other layout changes (streamed
+// candidates) apply directly, since new nodes already animate in.
+function useLayoutMorph(
+  target: LayoutResult,
+  morphKey: boolean,
+  reduceMotion: boolean,
+): LayoutResult {
+  const [frame, setFrame] = useState<{ target: LayoutResult; layout: LayoutResult } | null>(null);
+  const shownRef = useRef(target);
+  const keyRef = useRef(morphKey);
+  // A layout effect so the first tween frame replaces the new target before
+  // paint; a passive effect would flash the end state for one frame.
+  useLayoutEffect(() => {
+    const from = shownRef.current;
+    const keyChanged = keyRef.current !== morphKey;
+    keyRef.current = morphKey;
+    if (!keyChanged || reduceMotion) {
+      shownRef.current = target;
+      return;
+    }
+    setFrame({ target, layout: from });
+    const controls = animate(0, 1, {
+      ...MORPH_TRANSITION,
+      onUpdate: (t) => {
+        const layout = interpolateLayout(from, target, t);
+        shownRef.current = layout;
+        setFrame({ target, layout });
+      },
+      onComplete: () => setFrame(null),
+    });
+    return () => controls.stop();
+  }, [target, morphKey, reduceMotion]);
+  return frame !== null && frame.target === target ? frame.layout : target;
+}
+
 export function TrajectoryTree({
   layout: fullLayout,
   layoutWithoutRejected,
@@ -267,8 +311,14 @@ export function TrajectoryTree({
   // freeze their framing. Reset / maximize-toggle release the lock.
   const userInteractedRef = useRef(false);
 
-  const layout =
-    !layers.rejected && layoutWithoutRejected !== undefined ? layoutWithoutRejected : fullLayout;
+  const targetLayout = useMemo(
+    () =>
+      layers.rejected || layoutWithoutRejected === undefined
+        ? fullLayout
+        : collapseGhosts(fullLayout, layoutWithoutRejected),
+    [layers.rejected, fullLayout, layoutWithoutRejected],
+  );
+  const layout = useLayoutMorph(targetLayout, layers.rejected, !!reduceMotion);
   const { nodes, ghosts, edges, width, height } = layout;
   const fitWidth = Math.max(width, previewLayout?.width ?? 0);
   const fitHeight = Math.max(height, previewLayout?.height ?? 0);

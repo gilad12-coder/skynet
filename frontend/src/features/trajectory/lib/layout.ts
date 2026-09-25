@@ -206,6 +206,40 @@ export function layoutTrajectory(
   return { nodes, ghosts, edges, width, height, winnerId, spineIds };
 }
 
+// The rejected-proposals toggle morphs between the full layout and this one:
+// the kept tree closes its gaps while every ghost retracts into its parent.
+export function collapseGhosts(full: LayoutResult, withoutRejected: LayoutResult): LayoutResult {
+  const byId = new Map(withoutRejected.nodes.map((n) => [n.candidate_id, n]));
+  const ghosts = full.ghosts.map((ghost) => {
+    const parent = byId.get(ghost.parent_id);
+    return parent === undefined ? ghost : { ...ghost, x: parent.x, y: parent.y };
+  });
+  return { ...withoutRejected, ghosts };
+}
+
+// Positions and bounds at `t` of the way from `from` to `to`; structure comes
+// from `to`. Anything `from` lacks starts at its final place.
+export function interpolateLayout(from: LayoutResult, to: LayoutResult, t: number): LayoutResult {
+  const lerp = (a: number, b: number) => a + (b - a) * t;
+  const fromNodes = new Map(from.nodes.map((n) => [n.candidate_id, n]));
+  const fromGhosts = new Map(from.ghosts.map((g) => [g.rejection_id, g]));
+  const nodes = to.nodes.map((node) => {
+    const start = fromNodes.get(node.candidate_id) ?? node;
+    return { ...node, x: lerp(start.x, node.x), y: lerp(start.y, node.y) };
+  });
+  const ghosts = to.ghosts.map((ghost) => {
+    const start = fromGhosts.get(ghost.rejection_id) ?? ghost;
+    return { ...ghost, x: lerp(start.x, ghost.x), y: lerp(start.y, ghost.y) };
+  });
+  return {
+    ...to,
+    nodes,
+    ghosts,
+    width: lerp(from.width, to.width),
+    height: lerp(from.height, to.height),
+  };
+}
+
 export const TRAJECTORY_LAYOUT = {
   nodeRadius: NODE_RADIUS,
   gapX: NODE_GAP_X,
