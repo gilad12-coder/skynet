@@ -2125,6 +2125,7 @@
   "settings.keys.json_validate": "Validate",
   "settings.keys.json_warn_dupe": "Item {n}: duplicate {provider} entry — the last one wins.",
   "settings.keys.json_warn_replace": "{provider} already has a saved key — importing replaces it.",
+  "settings.keys.openrouter_oauth": "Continue with OpenRouter",
   "settings.keys.remove": "Remove",
   "settings.keys.remove_failed_toast": "Couldn't remove the key. Try again.",
   "settings.keys.removed_toast": "Key removed.",

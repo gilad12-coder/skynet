@@ -2226,6 +2226,7 @@
   "settings.keys.json_validate": "בדיקה",
   "settings.keys.json_warn_dupe": "פריט {n}: כפילות בערך {provider} — האחרון גובר.",
   "settings.keys.json_warn_replace": "ל-{provider} כבר קיים מפתח שמור — הייבוא יחליף אותו.",
+  "settings.keys.openrouter_oauth": "המשך עם OpenRouter",
   "settings.keys.remove": "הסרה",
   "settings.keys.remove_failed_toast": "לא ניתן היה להסיר את המפתח. נסה/י שוב.",
   "settings.keys.removed_toast": "המפתח הוסר.",

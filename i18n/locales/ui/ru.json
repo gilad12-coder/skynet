@@ -2963,6 +2963,7 @@
   "settings.keys.json_validate": "Проверить",
   "settings.keys.json_warn_dupe": "Элемент {n}: дублирующая запись {provider} — учитывается последняя.",
   "settings.keys.json_warn_replace": "У {provider} уже есть сохранённый ключ — импорт заменит его.",
+  "settings.keys.openrouter_oauth": "Продолжить с OpenRouter",
   "settings.keys.remove": "Удалить",
   "settings.keys.remove_failed_toast": "Не удалось удалить ключ. Попробуйте ещё раз.",
   "settings.keys.removed_toast": "Ключ удалён.",

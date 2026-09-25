@@ -2963,6 +2963,7 @@
   "settings.keys.json_validate": "تحقّق",
   "settings.keys.json_warn_dupe": "العنصر {n}: إدخال {provider} مكرّر — الأخير هو المعتمد.",
   "settings.keys.json_warn_replace": "لدى {provider} مفتاح محفوظ بالفعل — الاستيراد يستبدله.",
+  "settings.keys.openrouter_oauth": "المتابعة باستخدام OpenRouter",
   "settings.keys.remove": "إزالة",
   "settings.keys.remove_failed_toast": "تعذّرت إزالة المفتاح. حاول مرة أخرى.",
   "settings.keys.removed_toast": "أُزيل المفتاح.",

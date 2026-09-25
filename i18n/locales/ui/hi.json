@@ -2963,6 +2963,7 @@
   "settings.keys.json_validate": "मान्य करें",
   "settings.keys.json_warn_dupe": "आइटम {n}: डुप्लिकेट {provider} प्रविष्टि — अंतिम वाली मान्य होगी।",
   "settings.keys.json_warn_replace": "{provider} के पास पहले से एक सहेजी हुई कुंजी है — इम्पोर्ट करने पर वह बदल जाएगी।",
+  "settings.keys.openrouter_oauth": "OpenRouter के साथ जारी रखें",
   "settings.keys.remove": "हटाएँ",
   "settings.keys.remove_failed_toast": "कुंजी हटाई नहीं जा सकी। फिर से प्रयास करें।",
   "settings.keys.removed_toast": "कुंजी हटा दी गई।",

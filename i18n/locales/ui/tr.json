@@ -2963,6 +2963,7 @@
   "settings.keys.json_validate": "Doğrula",
   "settings.keys.json_warn_dupe": "Öğe {n}: yinelenen {provider} girişi — sonuncusu geçerli olur.",
   "settings.keys.json_warn_replace": "{provider} için kayıtlı bir anahtar zaten var — içe aktarmak onu değiştirir.",
+  "settings.keys.openrouter_oauth": "OpenRouter ile devam et",
   "settings.keys.remove": "Kaldır",
   "settings.keys.remove_failed_toast": "Anahtar kaldırılamadı. Tekrar deneyin.",
   "settings.keys.removed_toast": "Anahtar kaldırıldı.",

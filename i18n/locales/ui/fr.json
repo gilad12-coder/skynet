@@ -2963,6 +2963,7 @@
   "settings.keys.json_validate": "Valider",
   "settings.keys.json_warn_dupe": "Élément {n} : entrée {provider} en double — c'est la dernière qui l'emporte.",
   "settings.keys.json_warn_replace": "{provider} possède déjà une clé enregistrée — l'import la remplace.",
+  "settings.keys.openrouter_oauth": "Continuer avec OpenRouter",
   "settings.keys.remove": "Supprimer",
   "settings.keys.remove_failed_toast": "Impossible de supprimer la clé. Réessayez.",
   "settings.keys.removed_toast": "Clé supprimée.",

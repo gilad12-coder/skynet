@@ -2599,6 +2599,7 @@
   "settings.keys.json_validate": "驗證",
   "settings.keys.json_warn_dupe": "項目 {n}：{provider} 項目重複 — 會以最後一個為準。",
   "settings.keys.json_warn_replace": "{provider} 已經有儲存嘅金鑰 — 匯入將會取代佢。",
+  "settings.keys.openrouter_oauth": "用 OpenRouter 繼續",
   "settings.keys.remove": "移除",
   "settings.keys.remove_failed_toast": "未能移除金鑰。請再試一次。",
   "settings.keys.removed_toast": "已移除金鑰。",

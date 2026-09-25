@@ -2963,6 +2963,7 @@
   "settings.keys.json_validate": "検証",
   "settings.keys.json_warn_dupe": "項目{n}: {provider}の重複エントリ — 最後のものが適用されます。",
   "settings.keys.json_warn_replace": "{provider}には保存済みのキーがあります — インポートで置き換えられます。",
+  "settings.keys.openrouter_oauth": "OpenRouter で続行",
   "settings.keys.remove": "削除",
   "settings.keys.remove_failed_toast": "キーを削除できませんでした。もう一度お試しください。",
   "settings.keys.removed_toast": "キーを削除しました。",

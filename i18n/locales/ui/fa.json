@@ -2963,6 +2963,7 @@
   "settings.keys.json_validate": "اعتبارسنجی",
   "settings.keys.json_warn_dupe": "مورد {n}: ورودی تکراری {provider} — آخرین مورد اعمال می‌شود.",
   "settings.keys.json_warn_replace": "{provider} از پیش یک کلید ذخیره‌شده دارد — وارد کردن آن را جایگزین می‌کند.",
+  "settings.keys.openrouter_oauth": "ادامه با OpenRouter",
   "settings.keys.remove": "حذف",
   "settings.keys.remove_failed_toast": "حذف کلید ممکن نشد. دوباره تلاش کنید.",
   "settings.keys.removed_toast": "کلید حذف شد.",

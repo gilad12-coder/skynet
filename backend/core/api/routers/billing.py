@@ -20,13 +20,16 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Lock
 from typing import Annotated, Any, Literal
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from ...billing import ProviderKeyVault, StripeBillingService
+from ...billing import ProviderKeyVault, StripeBillingService, openrouter_oauth
 from ...billing.byok_vault import ProviderKeyView, ResolvedConnection
 from ...billing.service import CUSTOM_CREDITS_MAX, CUSTOM_CREDITS_MIN
+from ...config import settings
 from ...provider_registry import BYOK_TO_LITELLM_PROVIDER
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -387,6 +390,15 @@ class ProviderKeysResponse(BaseModel):
     keys: list[ProviderKeyResponse] = Field(
         default_factory=list, description="Stored keys, one per provider, ordered by provider."
     )
+    openrouter_oauth_available: bool = Field(
+        default=False, description="Whether 'Continue with OpenRouter' can mint and store a key on this deployment."
+    )
+
+
+class OpenRouterOAuthStartResponse(BaseModel):
+    """Where to send the browser to connect an OpenRouter account."""
+
+    authorize_url: str = Field(description="OpenRouter sign-in URL carrying the PKCE challenge and callback.")
 
 
 # Request to save (or rotate) a provider's BYOK connection. The secret is
@@ -701,7 +713,8 @@ def create_billing_router(*, job_store) -> APIRouter:
                     added_at=k.added_at,
                 )
                 for k in snapshot.keys
-            ]
+            ],
+            openrouter_oauth_available=openrouter_oauth.oauth_available(),
         )
 
     @router.get(
@@ -788,6 +801,83 @@ def create_billing_router(*, job_store) -> APIRouter:
             added_at=view.added_at,
         )
 
+    def _openrouter_callback_url(request: Request) -> str:
+        """Resolve the OpenRouter OAuth callback URL for this deployment.
+
+        Args:
+            request: The incoming request, used when no explicit URI is set.
+
+        Returns:
+            The absolute callback URL, before the encrypted state is appended.
+        """
+        return settings.openrouter_oauth_redirect_uri or str(request.url_for("openrouter_oauth_callback"))
+
+    def _providers_redirect(error: str | None = None) -> RedirectResponse:
+        """Send the browser back to the Settings providers tab, optionally with an error.
+
+        Args:
+            error: Domain error code to surface, if connecting failed.
+
+        Returns:
+            A 303 redirect into the frontend.
+        """
+        params = {"settings": "providers"}
+        if error:
+            params["byok_error"] = error
+        return RedirectResponse(f"{settings.app_public_url.rstrip('/')}/?{urlencode(params)}", status_code=303)
+
+    @router.post(
+        "/billing/byok/openrouter/oauth/start",
+        response_model=OpenRouterOAuthStartResponse,
+        summary="Begin 'Continue with OpenRouter', which mints a BYOK key via PKCE",
+    )
+    def start_openrouter_oauth(request: Request, user: AuthenticatedUserDep) -> OpenRouterOAuthStartResponse:
+        """Mint the OpenRouter sign-in URL the browser should visit.
+
+        Args:
+            request: Incoming request, for deriving the callback URL.
+            user: Authenticated caller connecting their account.
+
+        Returns:
+            The authorize URL.
+
+        Raises:
+            DomainError: 503 when the vault is not configured.
+        """
+        return OpenRouterOAuthStartResponse(
+            authorize_url=openrouter_oauth.build_authorize_url(user.username, _openrouter_callback_url(request))
+        )
+
+    @router.get(
+        "/billing/byok/openrouter/oauth/callback",
+        name="openrouter_oauth_callback",
+        include_in_schema=False,
+    )
+    def openrouter_oauth_callback(code: str | None = None, state: str | None = None) -> RedirectResponse:
+        """Trade the code for a key, save it like a pasted one, and return to Settings.
+
+        Unauthenticated: the browser arrives from openrouter.ai without the
+        app's bearer token, so the encrypted ``state`` is what ties the code to
+        the user who started the flow.
+
+        Args:
+            code: Authorization code from OpenRouter.
+            state: The encrypted state minted at start.
+
+        Returns:
+            A redirect to the providers tab, carrying an error code on failure.
+        """
+        if not code or not state:
+            return _providers_redirect("billing.openrouter_oauth_failed")
+        try:
+            payload = openrouter_oauth.parse_state(state)
+            key = openrouter_oauth.exchange_code(code, payload["v"])
+            vault.save_key(payload["u"], openrouter_oauth.PROVIDER, key)
+        except DomainError as exc:
+            return _providers_redirect(str(exc.code))
+        _invalidate_byok_user_catalog(payload["u"])
+        return _providers_redirect()
+
     @router.delete(
         "/billing/byok/keys/{provider}",
         response_model=ProviderKeysResponse,
@@ -821,7 +911,8 @@ def create_billing_router(*, job_store) -> APIRouter:
                     added_at=k.added_at,
                 )
                 for k in snapshot.keys
-            ]
+            ],
+            openrouter_oauth_available=openrouter_oauth.oauth_available(),
         )
 
     return router
