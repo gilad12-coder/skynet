@@ -147,6 +147,7 @@
   "hf_import.more_columns": "+{count} weitere",
   "hf_import.name_label": "Speichern als",
   "hf_import.open_repo": "{repo} öffnen",
+  "hf_import.view_on_hub": "Auf Hugging Face ansehen",
   "hf_import.preview_empty": "Für diesen Split ist keine Vorschau verfügbar.",
   "hf_import.private": "Privat",
   "hf_import.rows_total": "{count} Zeilen",

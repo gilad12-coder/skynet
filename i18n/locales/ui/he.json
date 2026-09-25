@@ -3863,6 +3863,7 @@
   "hf_import.subtitle": "חפשו ב-Hub, בחרו פיצול ושמרו אותו לספרייה שלכם.",
   "hf_import.search_placeholder": "חיפוש מערכי נתונים או הדבקת owner/name",
   "hf_import.open_repo": "פתיחת {repo}",
+  "hf_import.view_on_hub": "צפייה ב־Hugging Face",
   "hf_import.search_empty": "לא נמצאו מערכי נתונים תואמים.",
   "hf_import.search_error": "לא הצלחנו להגיע ל-Hugging Face. נסו שוב.",
   "hf_import.gated": "מוגבל",

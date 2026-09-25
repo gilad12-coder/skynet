@@ -147,6 +147,7 @@
   "hf_import.more_columns": "仲有 {count} 個",
   "hf_import.name_label": "儲存為",
   "hf_import.open_repo": "打開 {repo}",
+  "hf_import.view_on_hub": "喺 Hugging Face 睇",
   "hf_import.preview_empty": "呢個分割冇預覽。",
   "hf_import.private": "私人",
   "hf_import.rows_total": "{count} 行",

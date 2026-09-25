@@ -147,6 +147,7 @@
   "hf_import.more_columns": "외 {count}개",
   "hf_import.name_label": "저장 이름",
   "hf_import.open_repo": "{repo} 열기",
+  "hf_import.view_on_hub": "Hugging Face에서 보기",
   "hf_import.preview_empty": "이 스플릿에는 미리보기가 없습니다.",
   "hf_import.private": "비공개",
   "hf_import.rows_total": "{count}개 행",

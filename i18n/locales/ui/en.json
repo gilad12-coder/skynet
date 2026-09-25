@@ -3863,6 +3863,7 @@
   "hf_import.subtitle": "Search the Hub, pick a split, and save it to your library.",
   "hf_import.search_placeholder": "Search datasets or paste owner/name",
   "hf_import.open_repo": "Open {repo}",
+  "hf_import.view_on_hub": "View on Hugging Face",
   "hf_import.search_empty": "No datasets match.",
   "hf_import.search_error": "Couldn't reach Hugging Face. Try again.",
   "hf_import.gated": "Gated",

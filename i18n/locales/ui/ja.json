@@ -147,6 +147,7 @@
   "hf_import.more_columns": "他 {count} 件",
   "hf_import.name_label": "保存名",
   "hf_import.open_repo": "{repo} を開く",
+  "hf_import.view_on_hub": "Hugging Face で表示",
   "hf_import.preview_empty": "このスプリットにはプレビューがありません。",
   "hf_import.private": "非公開",
   "hf_import.rows_total": "{count} 行",

@@ -147,6 +147,7 @@
   "hf_import.more_columns": "+{count} altre",
   "hf_import.name_label": "Salva come",
   "hf_import.open_repo": "Apri {repo}",
+  "hf_import.view_on_hub": "Visualizza su Hugging Face",
   "hf_import.preview_empty": "Nessuna anteprima disponibile per questo split.",
   "hf_import.private": "Privato",
   "hf_import.rows_total": "{count} righe",

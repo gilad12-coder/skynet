@@ -31,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/primitives/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import {
   getHuggingFaceSplits,
   importHuggingFaceDataset,
@@ -384,16 +385,21 @@ export function HuggingFaceImportDialog({
               >
                 <ArrowLeft className="size-4 rtl:-scale-x-100" />
               </Button>
-              <a
-                href={`https://huggingface.co/datasets/${repoId}`}
-                target="_blank"
-                rel="noreferrer noopener"
-                dir="ltr"
-                className="inline-flex min-w-0 items-center gap-1 truncate text-sm font-medium text-foreground underline-offset-2 hover:underline"
-              >
-                <span className="truncate">{repoId}</span>
-                <ArrowSquareOut className="size-3.5 shrink-0 text-muted-foreground" />
-              </a>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <a
+                    href={`https://huggingface.co/datasets/${repoId}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    dir="ltr"
+                    className="group flex min-w-0 flex-1 items-center justify-between gap-2 text-sm font-medium text-foreground"
+                  >
+                    <span className="truncate">{repoId}</span>
+                    <ArrowSquareOut className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+                  </a>
+                </TooltipTrigger>
+                <TooltipContent>{msg("hf_import.view_on_hub")}</TooltipContent>
+              </Tooltip>
             </div>
 
             {splitsLoading ? (

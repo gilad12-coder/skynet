@@ -147,6 +147,7 @@
   "hf_import.more_columns": "+{count} مورد دیگر",
   "hf_import.name_label": "ذخیره با نام",
   "hf_import.open_repo": "باز کردن {repo}",
+  "hf_import.view_on_hub": "مشاهده در Hugging Face",
   "hf_import.preview_empty": "پیش‌نمایشی برای این بخش در دسترس نیست.",
   "hf_import.private": "خصوصی",
   "hf_import.rows_total": "{count} ردیف",

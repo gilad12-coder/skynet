@@ -147,6 +147,7 @@
   "hf_import.more_columns": "+{count} ещё",
   "hf_import.name_label": "Сохранить как",
   "hf_import.open_repo": "Открыть {repo}",
+  "hf_import.view_on_hub": "Открыть на Hugging Face",
   "hf_import.preview_empty": "Для этого сплита предпросмотр недоступен.",
   "hf_import.private": "Приватный",
   "hf_import.rows_total": "{count} строк",

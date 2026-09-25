@@ -147,6 +147,7 @@
   "hf_import.more_columns": "+{count} ще",
   "hf_import.name_label": "Зберегти як",
   "hf_import.open_repo": "Відкрити {repo}",
+  "hf_import.view_on_hub": "Переглянути на Hugging Face",
   "hf_import.preview_empty": "Для цього спліту попередній перегляд недоступний.",
   "hf_import.private": "Приватний",
   "hf_import.rows_total": "{count} рядків",

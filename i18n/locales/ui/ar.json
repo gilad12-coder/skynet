@@ -147,6 +147,7 @@
   "hf_import.more_columns": "+{count} أخرى",
   "hf_import.name_label": "حفظ باسم",
   "hf_import.open_repo": "فتح {repo}",
+  "hf_import.view_on_hub": "عرض على Hugging Face",
   "hf_import.preview_empty": "لا تتوفر معاينة لهذا التقسيم.",
   "hf_import.private": "خاص",
   "hf_import.rows_total": "{count} صف",

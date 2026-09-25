@@ -147,6 +147,7 @@
   "hf_import.more_columns": "+{count} और",
   "hf_import.name_label": "इस नाम से सहेजें",
   "hf_import.open_repo": "{repo} खोलें",
+  "hf_import.view_on_hub": "Hugging Face पर देखें",
   "hf_import.preview_empty": "इस split के लिए कोई प्रीव्यू उपलब्ध नहीं है।",
   "hf_import.private": "प्राइवेट",
   "hf_import.rows_total": "{count} पंक्तियाँ",

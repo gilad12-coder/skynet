@@ -147,6 +147,7 @@
   "hf_import.more_columns": "+{count} daha",
   "hf_import.name_label": "Şu adla kaydet",
   "hf_import.open_repo": "{repo} deposunu aç",
+  "hf_import.view_on_hub": "Hugging Face'te görüntüle",
   "hf_import.preview_empty": "Bu split için önizleme yok.",
   "hf_import.private": "Özel",
   "hf_import.rows_total": "{count} satır",
