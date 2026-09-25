@@ -26,11 +26,6 @@ const MOBILE_NUMBER_INPUT_CLASS =
 
 // The empty level is the escape hatch: no preset, the user sets the budget.
 const DEPTH_LEVELS = ["light", "medium", "heavy", ""] as const;
-const DEPTH_HINT_KEY = {
-  light: "submit.depth.hint.light",
-  medium: "submit.depth.hint.medium",
-  heavy: "submit.depth.hint.heavy",
-} as const;
 type DepthLevel = (typeof DEPTH_LEVELS)[number];
 
 function SegmentedControl<T extends string>({
@@ -112,10 +107,6 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
   // is actually on (1x1 is GEPA's classic one-candidate default).
   const pxnBatch = (parseInt(pxnParents, 10) || 1) * (parseInt(pxnProposals, 10) || 1);
 
-  const depthHint = depth
-    ? formatMsg(DEPTH_HINT_KEY[depth], { calls: AUTO_METRIC_CALLS[depth] ?? 0 })
-    : msg("submit.depth.hint.custom");
-
   return (
     <Card
       className=" border-border/50 bg-card/80 backdrop-blur-xl shadow-lg"
@@ -144,7 +135,6 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
             value={depth}
             onChange={setAutoLevel}
           />
-          <p className="text-xs text-muted-foreground">{depthHint}</p>
           {!depth && (
             <div className="space-y-3 rounded-lg border border-border/50 bg-muted/30 p-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-200">
               <SegmentedControl
@@ -173,7 +163,7 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                     step={1}
                     value={parseInt(maxMetricCalls, 10)}
                     onChange={(v) => setMaxMetricCalls(String(v))}
-                    className={cn(MOBILE_NUMBER_INPUT_CLASS, "max-w-48")}
+                    className={MOBILE_NUMBER_INPUT_CLASS}
                   />
                 </div>
               ) : (
@@ -190,7 +180,7 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
                     step={1}
                     value={maxFullEvals ? parseInt(maxFullEvals, 10) : ""}
                     onChange={(v) => setMaxFullEvals(String(v))}
-                    className={cn(MOBILE_NUMBER_INPUT_CLASS, "max-w-48")}
+                    className={MOBILE_NUMBER_INPUT_CLASS}
                   />
                 </div>
               )}
