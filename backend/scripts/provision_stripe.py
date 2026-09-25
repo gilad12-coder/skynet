@@ -26,6 +26,10 @@ _PACKS: list[tuple[str, str, int]] = [
     ("skynet_pack_pro", "Skynet Credits — Pro", 5000),
 ]
 
+# The Skynet Pro platform plan: a monthly recurring price. Its limits live in
+# core.config (pro_* settings) and core.billing.plans.
+_PRO_MONTHLY: tuple[str, str, int] = ("skynet_pro_monthly", "Skynet Pro", 900)
+
 
 def _find_price(lookup_key: str) -> str | None:
     """Return an existing active price id for ``lookup_key``, or None.
@@ -40,13 +44,14 @@ def _find_price(lookup_key: str) -> str | None:
     return existing.data[0].id if existing.data else None
 
 
-def _ensure_price(lookup_key: str, name: str, unit_amount: int) -> str:
-    """Return the price id for a credit pack, creating it if absent.
+def _ensure_price(lookup_key: str, name: str, unit_amount: int, *, monthly: bool = False) -> str:
+    """Return the price id for a credit pack or plan, creating it if absent.
 
     Args:
         lookup_key: Stable idempotency key; a re-run reuses the matching price.
         name: Product display name (an inline product is created with it).
         unit_amount: Price in the smallest currency unit (cents).
+        monthly: Create a monthly recurring price instead of a one-time one.
 
     Returns:
         The Stripe price id.
@@ -55,11 +60,13 @@ def _ensure_price(lookup_key: str, name: str, unit_amount: int) -> str:
     if found:
         print(f"  reuse  {lookup_key} -> {found}")
         return found
+    extra: dict[str, object] = {"recurring": {"interval": "month"}} if monthly else {}
     price = stripe.Price.create(
         currency="usd",
         unit_amount=unit_amount,
         lookup_key=lookup_key,
         product_data={"name": name},
+        **extra,
     )
     print(f"  create {lookup_key} -> {price.id}")
     return price.id
@@ -79,10 +86,15 @@ def main() -> int:
     print("Provisioning credit packs ...")
     pack_ids = {key: _ensure_price(key, name, amount) for key, name, amount in _PACKS}
 
+    print("Provisioning the Skynet Pro plan ...")
+    pro_key, pro_name, pro_amount = _PRO_MONTHLY
+    pro_price_id = _ensure_price(pro_key, pro_name, pro_amount, monthly=True)
+
     print("\nDone. Paste these into backend/.env:\n")
     print(f"STRIPE_PRICE_PACK_STARTER={pack_ids['skynet_pack_starter']}")
     print(f"STRIPE_PRICE_PACK_PLUS={pack_ids['skynet_pack_plus']}")
     print(f"STRIPE_PRICE_PACK_PRO={pack_ids['skynet_pack_pro']}")
+    print(f"STRIPE_PRICE_PRO_MONTHLY={pro_price_id}")
     return 0
 
 

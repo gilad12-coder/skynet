@@ -19,6 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, defer, sessionmaker
 
 from ..billing.budgets import BudgetInFlightError, BudgetInsufficientError
+from ..billing.plans import is_pro_status
 from ..billing.recovery_admission import (
     RecoveryAdmissionError,
     headroom_price_snapshot,
@@ -46,6 +47,7 @@ from .models import (
     EMBEDDING_DIM,
     AgentStagedDatasetModel,
     Base,
+    BillingCustomerModel,
     BlackboxAgentRunModel,
     ConversationEmbeddingModel,
     GepaCheckpointModel,
@@ -1888,7 +1890,28 @@ class RemoteDBJobStore:
         has_override, quota = self.get_user_quota_override(username)
         if has_override:
             return quota
+        if self.has_pro_plan(username):
+            return None
         return settings.get_user_quota(username)
+
+    def has_pro_plan(self, username: str) -> bool:
+        """Return whether the account's mirrored subscription grants Skynet Pro.
+
+        Args:
+            username: Account to check, resolved case-insensitively.
+
+        Returns:
+            True when the webhook-mirrored subscription status is entitled.
+        """
+        normalized_username = username.strip().lower()
+        if not normalized_username:
+            return False
+        session = self._get_session()
+        try:
+            row = session.get(BillingCustomerModel, normalized_username)
+            return row is not None and is_pro_status(row.subscription_status)
+        finally:
+            session.close()
 
     def get_effective_user_storage_quota(self, username: str) -> int:
         """Return the unified storage budget in bytes the user is held to.
@@ -1908,6 +1931,8 @@ class RemoteDBJobStore:
         override = self.get_user_storage_quota_override(username)
         if override is not None:
             return override
+        if self.has_pro_plan(username):
+            return settings.pro_storage_quota_bytes
         return settings.user_storage_quota_bytes
 
     def compute_user_storage(self, username: str) -> StorageUsage:

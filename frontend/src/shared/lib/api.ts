@@ -827,10 +827,21 @@ export interface BillingUsageEntry {
 }
 
 /** The caller's wallet as the backend reports it (snake_case mirrors the API). */
+/** The caller's platform plan, mirrored from their Stripe subscription. */
+export interface BillingPlanResponse {
+  plan: "free" | "pro";
+  status: string | null;
+  renews_at: string | null;
+  cancel_at_period_end: boolean;
+  /** Whether this deployment sells Pro at all (a price is configured). */
+  available: boolean;
+}
+
 export interface BillingWalletResponse {
   paid_balance_credits: number;
   free_grant: BillingFreeGrant;
   usage: BillingUsageEntry[];
+  plan: BillingPlanResponse;
 }
 
 /** Fetch the caller's credit wallet. Reads work even without Stripe. */
@@ -958,6 +969,11 @@ export function createCheckoutSession(purchase: { packId: string } | { credits: 
       "packId" in purchase ? { pack_id: purchase.packId } : { credits: purchase.credits },
     ),
   });
+}
+
+/** Start a Stripe Checkout session for the Skynet Pro subscription; redirect to `.url`. */
+export function createSubscriptionCheckout() {
+  return request<{ url: string }>("/billing/subscription/checkout", { method: "POST" });
 }
 
 /** One stored BYOK provider connection as the backend reports it — masked, never the secret. */
