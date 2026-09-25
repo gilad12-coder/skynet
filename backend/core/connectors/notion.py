@@ -1,7 +1,8 @@
 """Notion connector: import a database as a table.
 
-Linking takes an internal-integration token; the integration sees whichever
-pages and databases were shared with it. Browsing searches the workspace's
+Linking takes an internal-integration token, or goes through "Continue with
+Notion" when the deployment registered a public integration; either way the
+integration sees whichever pages and databases were shared with it. Browsing searches the workspace's
 databases, and importing walks one database's pages, flattening each
 property into a column.
 """
@@ -12,7 +13,10 @@ from typing import Any
 from urllib.parse import quote
 
 from ..api.errors import DomainError
+from ..config import settings
 from .base import Credential, Entry
+from .oauth import OAuthApp
+from .oauth import oauth_available as _oauth_available
 from .records import PREVIEW_ROWS, cell, import_payload, preview_payload, row_cap
 from .transport import get_json, post_json
 from .vault import ConnectorSecret
@@ -36,6 +40,65 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Notion-Version": NOTION_VERSION, "Accept": "application/json"}
 
 
+def oauth_app() -> OAuthApp:
+    """Describe the Notion public integration from settings.
+
+    Returns:
+        The app; ``client_id`` is ``None`` when unconfigured.
+    """
+    secret = settings.notion_oauth_client_secret
+    return OAuthApp(
+        provider=PROVIDER,
+        authorize_url=f"{API_URL}/oauth/authorize",
+        token_url=f"{API_URL}/oauth/token",
+        scopes="",
+        client_id=settings.notion_oauth_client_id,
+        client_secret=secret.get_secret_value() if secret is not None else None,
+        extra_authorize_params={"owner": "user"},
+        basic_auth_json=True,
+    )
+
+
+def oauth_available() -> bool:
+    """Report whether "Continue with Notion" can be offered.
+
+    Returns:
+        ``True`` when the client id and the vault key are configured.
+    """
+    return _oauth_available(oauth_app())
+
+
+def _label(me: Any) -> str | None:
+    """Pick the card label from a ``/users/me`` body.
+
+    Args:
+        me: The decoded body.
+
+    Returns:
+        The workspace name, else the bot's name, else ``None``.
+    """
+    if not isinstance(me, dict):
+        return None
+    bot = me.get("bot")
+    label = (bot.get("workspace_name") if isinstance(bot, dict) else None) or me.get("name")
+    return label if isinstance(label, str) else None
+
+
+def fetch_account_label(token: str) -> str | None:
+    """Look up the workspace an OAuth token belongs to.
+
+    Args:
+        token: A Notion access token.
+
+    Returns:
+        The workspace name, or ``None`` when unavailable.
+    """
+    try:
+        return _label(get_json(f"{API_URL}/users/me", provider=PROVIDER, headers=_headers(token)))
+    except DomainError:
+        return None
+
+
 def verify_credentials(fields: dict[str, str]) -> Credential:
     """Validate an integration token against ``/users/me``.
 
@@ -57,10 +120,7 @@ def verify_credentials(fields: dict[str, str]) -> Credential:
         if exc.code == "connectors.rejected":
             raise DomainError("connectors.invalid_credentials", status=400) from exc
         raise
-    bot = me.get("bot") if isinstance(me, dict) else None
-    workspace = bot.get("workspace_name") if isinstance(bot, dict) else None
-    label = workspace or (me.get("name") if isinstance(me, dict) else None)
-    return Credential(secret=token, auth_method="token", account_label=label if isinstance(label, str) else None)
+    return Credential(secret=token, auth_method="token", account_label=_label(me))
 
 
 def _plain_text(parts: Any) -> str:

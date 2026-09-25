@@ -26,13 +26,15 @@ import {
   XAI,
   ZAI,
 } from "@lobehub/icons";
+import { GmiCloud } from "@/shared/ui/brand-marks";
 import { Plug } from "@/shared/ui/icons";
 
 /**
  * Full-color brand avatar for a BYOK provider slug.
  *
  * Maps a provider slug onto its @lobehub/icons brand mark (the `.Avatar`
- * variant — a colored, rounded tile). An unknown slug (a custom endpoint, or a
+ * variant — a colored, rounded tile), or onto a local brand mark for providers
+ * the icon set lacks. An unknown slug (a custom endpoint, or a
  * provider without a bundled mark) falls back to a neutral plug tile so the row
  * still reads as a connection. `dir="ltr"` keeps the mark upright under RTL.
  */
@@ -106,6 +108,8 @@ function renderBrand(slug: string, size: number): React.ReactNode {
       return <Morph.Avatar size={size} />;
     case "openrouter":
       return <OpenRouter.Avatar size={size} />;
+    case "gmi":
+      return <GmiCloud.Avatar size={size} />;
     default:
       return null;
   }
