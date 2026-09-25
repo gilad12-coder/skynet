@@ -108,17 +108,23 @@ def test_pricing_policy_no_subsidy_packs_at_par() -> None:
     assert PACK_CREDITS == {"starter": 500, "plus": 2000, "pro": 5000}
 
 
-def test_purchase_fee_cents_matches_openrouter() -> None:
-    """The card fee is 5.5% of the credit value with an $0.80 floor, rounded up to the cent."""
-    # OpenRouter's worked example: a $5 (500-credit) buy costs ~$5.80, i.e. an
-    # $0.80 fee where 5.5% (27.5c) is below the floor.
-    assert purchase_fee_cents(500) == 80
-    assert purchase_fee_cents(CUSTOM_CREDITS_MIN) == 80
-    # Above the floor the percentage governs and is rounded up to the next cent.
-    assert purchase_fee_cents(2000) == 110
-    assert purchase_fee_cents(5000) == 275
-    # 1637 * 5.5% = 90.035c, so the fee rounds up to 91c (over the $0.80 floor).
-    assert purchase_fee_cents(1637) == 91
+def test_purchase_fee_cents_covers_card_and_provider_costs() -> None:
+    """The service fee is 12.5% of the credit value, rounded up to the cent, plus 35 cents."""
+    assert purchase_fee_cents(CUSTOM_CREDITS_MIN) == 42
+    assert purchase_fee_cents(500) == 98
+    assert purchase_fee_cents(2000) == 285
+    assert purchase_fee_cents(5000) == 660
+    # 1637 * 12.5% = 204.625c, so the percentage rounds up to 205c.
+    assert purchase_fee_cents(1637) == 240
+
+
+def test_purchase_fee_cents_keeps_a_margin_on_non_us_cards() -> None:
+    """After Stripe's non-US card cut and OpenRouter's top-up fee, every purchase nets a gain."""
+    for credits in (CUSTOM_CREDITS_MIN, 500, 1000, 1637, 2000, 5000, CUSTOM_CREDITS_MAX):
+        fee = purchase_fee_cents(credits)
+        stripe_cut = (credits + fee) * 0.044 + 30
+        openrouter_cut = credits * 0.055
+        assert fee - stripe_cut - openrouter_cut > 0, credits
 
 
 def test_wallet_reports_empty_grant_for_new_account(engine: object) -> None:
@@ -734,11 +740,12 @@ def test_custom_checkout_builds_ad_hoc_price_and_metadata(engine: object, config
     price_data = line_items[0]["price_data"]
     assert price_data["unit_amount"] == 1234
     assert price_data["currency"] == "usd"
-    # A second line carries the OpenRouter-style card fee; the credits line stays
+    # A second line carries the OpenRouter-style service fee; the credits line stays
     # at par and the granted credits (metadata) are unchanged by the fee.
     fee_data = line_items[1]["price_data"]
     assert fee_data["unit_amount"] == purchase_fee_cents(1234)
     assert fee_data["currency"] == "usd"
+    assert line_items[1]["price_data"]["product_data"]["name"] == "Service fee"
     metadata = captured["metadata"]
     assert isinstance(metadata, dict)
     assert metadata["credits"] == "1234"
