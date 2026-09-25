@@ -1572,16 +1572,23 @@ const SETTINGS_RAIL_ITEM_CLASS =
 
 // Tabs dense enough (ledgers, connection lists, admin tables) to earn a
 // toggle that grows the modal to fill the screen.
-const EXPANDABLE_SETTINGS_TABS: ReadonlySet<SettingsTab> = new Set(["usage", "connectors", "admin"]);
+const EXPANDABLE_SETTINGS_TABS: ReadonlySet<SettingsTab> = new Set([
+  "usage",
+  "connectors",
+  "admin",
+]);
 
-function SettingsPanelHeader({ tab }: { tab: SettingsTab }) {
+function SettingsPanelHeader({ tab, action }: { tab: SettingsTab; action?: React.ReactNode }) {
   const { icon: Icon, labelKey } = SETTINGS_TAB_META[tab];
   return (
     <div className="mb-4 flex items-center gap-3 border-b border-border/50 pb-3">
       <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-muted-foreground [&_svg]:size-4">
         <Icon className="size-4" aria-hidden="true" />
       </span>
-      <h2 className="text-base font-semibold tracking-tight text-foreground">{msg(labelKey)}</h2>
+      <h2 className="flex-1 text-base font-semibold tracking-tight text-foreground">
+        {msg(labelKey)}
+      </h2>
+      {action}
     </div>
   );
 }
@@ -1645,21 +1652,13 @@ export function SettingsModal() {
           "[&_[data-slot=button]]:min-h-[44px] [&_[data-slot=button]]:min-w-[44px] [&_[data-slot=select-trigger]]:min-h-[44px] sm:[&_[data-slot=button]]:min-h-0 sm:[&_[data-slot=button]]:min-w-0 sm:[&_[data-slot=select-trigger]]:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-w-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=select-trigger]]:min-h-[44px]",
         )}
       >
-        <DialogHeader className="flex-row items-center gap-2 border-b border-border/40 px-4 py-3 pe-12 sm:px-5 sm:py-4">
-          <div className="min-w-0 flex-1">
+        <DialogHeader className="border-b border-border/40 px-4 py-3 pe-12 sm:px-5 sm:py-4">
+          <div className="min-w-0">
             <DialogTitle>{msg("settings.title")}</DialogTitle>
             <DialogDescription className="mt-1 text-xs">
               {msg("settings.subtitle")}
             </DialogDescription>
           </div>
-          {canExpand && (
-            <ExpandToggleButton
-              ref={expandButton}
-              expanded={expanded}
-              controls={settingsTabsId}
-              onToggle={() => setExpanded(!expanded)}
-            />
-          )}
         </DialogHeader>
 
         <Tabs
@@ -1721,7 +1720,19 @@ export function SettingsModal() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: prefersReduced ? 0 : 0.18, ease: [0.2, 0.8, 0.2, 1] }}
             >
-              <SettingsPanelHeader tab={activeTab} />
+              <SettingsPanelHeader
+                tab={activeTab}
+                action={
+                  canExpand && (
+                    <ExpandToggleButton
+                      ref={expandButton}
+                      expanded={expanded}
+                      controls={settingsTabsId}
+                      onToggle={() => setExpanded(!expanded)}
+                    />
+                  )
+                }
+              />
               <TabsContent value="wizard">
                 <WizardTab />
               </TabsContent>
