@@ -60,14 +60,15 @@ PACK_CREDITS: dict[str, int] = {"starter": 500, "plus": 2000, "pro": 5000}
 CUSTOM_CREDITS_MIN = 50
 CUSTOM_CREDITS_MAX = 100_000
 
-# Card fee on a credit purchase, mirroring OpenRouter: 5.5% of the credit value
-# with an $0.80 floor, charged on top of par credits. The buyer pays base + fee;
+# Card fee on a credit purchase, charged on top of par credits: 12.5% of the
+# credit value plus a flat 35 cents. It covers Stripe's card processing (up to
+# 4.4% + 30c for a non-US card), OpenRouter's 5.5% fee when the platform buys
+# the matching credits, and leaves roughly 2% margin. The buyer pays base + fee;
 # the account is granted only the base credits. One credit is one cent, so the
 # credit count doubles as the base value in cents. Mirrored by the frontend's
-# purchaseFeeCents. A $5 (500-credit) top-up owes the floor: max(28, 80) = $0.80,
-# for a $5.80 charge.
-CREDIT_PURCHASE_FEE_RATE = 0.055
-CREDIT_PURCHASE_FEE_MINIMUM_CENTS = 80
+# purchaseFeeUsd. A $20 (2000-credit) top-up owes 250 + 35 = $2.85.
+CREDIT_PURCHASE_FEE_RATE = 0.125
+CREDIT_PURCHASE_FEE_FIXED_CENTS = 35
 
 
 def purchase_fee_cents(credits: int) -> int:
@@ -77,10 +78,11 @@ def purchase_fee_cents(credits: int) -> int:
         credits: Credit amount being purchased, which is also its value in cents.
 
     Returns:
-        The fee to add to the charge, in cents, rounded up and never below the
-        $0.80 floor.
+        The fee to add to the charge, in cents: the percentage rounded up to
+        the cent, plus the flat part.
     """
-    return max(math.ceil(credits * CREDIT_PURCHASE_FEE_RATE), CREDIT_PURCHASE_FEE_MINIMUM_CENTS)
+    return math.ceil(credits * CREDIT_PURCHASE_FEE_RATE) + CREDIT_PURCHASE_FEE_FIXED_CENTS
+
 
 # One-time allowance a new account gets. 0 = no free credits: every credit
 # spent was paid for, so the platform never subsidizes tokens or compute.

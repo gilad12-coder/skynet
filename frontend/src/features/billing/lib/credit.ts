@@ -40,21 +40,24 @@ export const CUSTOM_CREDITS_MAX = 100_000;
 export const LOW_BALANCE_USD = 0.5;
 
 /**
- * Card fee on a credit purchase, mirroring backend `purchase_fee_cents` and
- * OpenRouter: 5.5% of the credit value with a $0.80 floor, charged on top of par
- * credits. The buyer pays the credit value plus this fee; only the base credits
- * are granted.
+ * Card fee on a credit purchase, mirroring backend `purchase_fee_cents`: 12.5%
+ * of the credit value plus a flat 35 cents, charged on top of par credits. It
+ * covers card processing and the provider's own top-up fee with a small margin.
+ * The buyer pays the credit value plus this fee; only the base credits are
+ * granted.
  */
-export const CREDIT_PURCHASE_FEE_RATE = 0.055;
-export const CREDIT_PURCHASE_FEE_MINIMUM_USD = 0.8;
+export const CREDIT_PURCHASE_FEE_RATE = 0.125;
+export const CREDIT_PURCHASE_FEE_FIXED_USD = 0.35;
 
 /**
- * The card fee for buying `credits`, in USD — 5.5% of the credit value (one
- * credit is one cent) floored at $0.80 and rounded up to the cent. Mirrors
- * backend `purchase_fee_cents`.
+ * The card fee for buying `credits`, in USD: 12.5% of the credit value (one
+ * credit is one cent) rounded up to the cent, plus 35 cents. Mirrors backend
+ * `purchase_fee_cents`.
  */
 export function purchaseFeeUsd(credits: number): number {
-  return Math.max(Math.ceil(credits * CREDIT_PURCHASE_FEE_RATE), 80) / 100;
+  return (
+    (Math.ceil(credits * CREDIT_PURCHASE_FEE_RATE) + CREDIT_PURCHASE_FEE_FIXED_USD * 100) / 100
+  );
 }
 
 /** What the buyer actually pays for `credits`: the par credit value plus the card fee. */
