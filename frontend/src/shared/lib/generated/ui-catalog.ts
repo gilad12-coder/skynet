@@ -1743,6 +1743,7 @@ export type MessageKey =
   | "connector_import.empty"
   | "connector_import.import"
   | "connector_import.importing"
+  | "connector_import.more_folders"
   | "connector_import.name_label"
   | "connector_import.not_connected"
   | "connector_import.preview_empty"
@@ -1753,6 +1754,7 @@ export type MessageKey =
   | "connector_import.toast.deduplicated"
   | "connector_import.toast.failed"
   | "connector_import.toast.imported"
+  | "connector_import.up"
   | "connectors.azure_blob.blurb"
   | "connectors.azure_blob.credentials_help"
   | "connectors.azure_blob.name"
@@ -5658,6 +5660,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "connector_import.empty": "אין כאן שום דבר שאפשר לייבא.",
   "connector_import.import": "ייבוא",
   "connector_import.importing": "מייבא…",
+  "connector_import.more_folders": "תיקיות קודמות",
   "connector_import.name_label": "שמירה בשם",
   "connector_import.not_connected": "חברו את חשבון {provider} שלכם כדי לעיין בו.",
   "connector_import.preview_empty": "אין תצוגה מקדימה זמינה לקובץ הזה.",
@@ -5668,6 +5671,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "connector_import.toast.deduplicated": "מערך הנתונים הזה כבר היה בספרייה שלכם",
   "connector_import.toast.failed": "הייבוא נכשל. נסו שוב.",
   "connector_import.toast.imported": "מערך הנתונים יובא לספרייה שלכם",
+  "connector_import.up": "תיקייה אחת למעלה",
   "connectors.azure_blob.blurb": "ייבוא קבצים מהמכולות בחשבון האחסון שלכם.",
   "connectors.azure_blob.credentials_help": "הדביקו מחרוזת חיבור, או כתובת SAS של מכולה עם הרשאות רשימה וקריאה.",
   "connectors.azure_blob.name": "Azure Blob Storage",
@@ -17435,6 +17439,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "connector_import.empty": "Nothing importable here.",
   "connector_import.import": "Import",
   "connector_import.importing": "Importing…",
+  "connector_import.more_folders": "Earlier folders",
   "connector_import.name_label": "Save as",
   "connector_import.not_connected": "Connect your {provider} account to browse it.",
   "connector_import.preview_empty": "No preview available for this file.",
@@ -17445,6 +17450,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "connector_import.toast.deduplicated": "This dataset was already in your library",
   "connector_import.toast.failed": "Import failed. Try again.",
   "connector_import.toast.imported": "Dataset imported to your library",
+  "connector_import.up": "Up one folder",
   "connectors.azure_blob.blurb": "Import files from your storage account's containers.",
   "connectors.azure_blob.credentials_help": "Paste a connection string, or a container SAS URL with list and read permissions.",
   "connectors.azure_blob.name": "Azure Blob Storage",

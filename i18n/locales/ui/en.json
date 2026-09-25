@@ -3903,6 +3903,8 @@
   "connector_import.empty": "Nothing importable here.",
   "connector_import.browse_error": "Couldn't load this location.",
   "connector_import.back": "Back",
+  "connector_import.up": "Up one folder",
+  "connector_import.more_folders": "Earlier folders",
   "connector_import.name_label": "Save as",
   "connector_import.preview_empty": "No preview available for this file.",
   "connector_import.import": "Import",
