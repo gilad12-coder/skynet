@@ -191,6 +191,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "submission.validation_failed": "Payload validation failed. Check the optimizer, module, and column mapping.",
     "submission.vision_required": "Dataset contains image columns ({fields}) but the selected model ('{model}') does not support image inputs. Pick a vision-capable model.",
     "submit.no_models_available": "No models available in the catalog — configure a provider API key first.",
+    "transcription.budget_exhausted": "Dictation is paused for the rest of the month. Type your message instead.",
     "transcription.failed": "Transcription failed on every configured provider.",
     "transcription.too_large": "Audio clip exceeds the {max_mb}MB transcription limit.",
     "transcription.unconfigured": (
