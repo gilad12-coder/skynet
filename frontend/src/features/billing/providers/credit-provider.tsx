@@ -65,12 +65,14 @@ function applyWalletResponse(prev: CreditWallet, r: BillingWalletResponse): Cred
       cancelAtPeriodEnd: r.plan.cancel_at_period_end,
       available: r.plan.available,
     },
-    pricing: {
-      usageMarkup: r.pricing.usage_markup,
-      byokFeeFraction: r.pricing.byok_fee_fraction,
-      purchaseFeeRate: r.pricing.purchase_fee_rate,
-      purchaseFeeFixedCents: r.pricing.purchase_fee_fixed_cents,
-    },
+    pricing: r.pricing
+      ? {
+          usageMarkup: r.pricing.usage_markup,
+          byokFeeFraction: r.pricing.byok_fee_fraction,
+          purchaseFeeRate: r.pricing.purchase_fee_rate,
+          purchaseFeeFixedCents: r.pricing.purchase_fee_fixed_cents,
+        }
+      : prev.pricing,
   };
 }
 

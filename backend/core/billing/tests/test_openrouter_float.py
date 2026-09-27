@@ -70,6 +70,7 @@ def notify_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "openrouter_float_alert_cooldown_seconds", 3600.0)
     monkeypatch.setattr(settings, "openrouter_float_alert_email", "ops@example.com")
     monkeypatch.setattr(settings, "alert_webhook_url", "https://hooks.example.com/x")
+    monkeypatch.setattr(settings, "alert_email", "")
     monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
 
 
@@ -287,6 +288,22 @@ def test_notify_low_float_skips_email_when_unconfigured(notify_ready: None, monk
     """No recipient (or no SMTP host) means no email thread; the webhook still fires."""
     status = FloatStatus(balance_credits=500, floor_credits=1500, liability_credits=0)
     monkeypatch.setattr(settings, "openrouter_float_alert_email", "")
+    with (
+        patch.object(openrouter_float, "send_alert") as alert,
+        patch.object(openrouter_float, "send_email") as email,
+    ):
+        assert notify_low_float(status) is True
+        time.sleep(0.05)
+    alert.assert_called_once()
+    email.assert_not_called()
+
+
+def test_notify_low_float_skips_email_already_sent_as_alert(
+    notify_ready: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When ALERT_EMAIL is the same inbox, send_alert's email is the only one sent."""
+    status = FloatStatus(balance_credits=500, floor_credits=1500, liability_credits=0)
+    monkeypatch.setattr(settings, "alert_email", "OPS@example.com")
     with (
         patch.object(openrouter_float, "send_alert") as alert,
         patch.object(openrouter_float, "send_email") as email,

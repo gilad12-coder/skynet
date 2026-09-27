@@ -340,7 +340,9 @@ def _notify(subject: str, body: str, *, now: float | None = None) -> bool:
             return False
         send_alert(subject, body=body, level="WARNING")
         recipient = settings.openrouter_float_alert_email.strip()
-        if recipient and email_configured():
+        # send_alert already mails ALERT_EMAIL; mailing the same inbox again would duplicate it.
+        already_mailed = recipient.lower() == settings.alert_email.strip().lower()
+        if recipient and not already_mailed and email_configured():
             threading.Thread(
                 target=_deliver_email,
                 args=(recipient, subject, body),
