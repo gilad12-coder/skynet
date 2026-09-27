@@ -46,7 +46,12 @@ except ImportError:  # Optional dep: tests/CI can run without the Scalar docs UI
     DocumentDownloadType = None  # type: ignore[assignment, misc]
     get_scalar_api_reference = None  # type: ignore[assignment]
 
-from ..billing import StripeBillingService, start_issuing_funding_sweeper, start_openrouter_float_sweeper
+from ..billing import (
+    StripeBillingService,
+    start_issuing_funding_sweeper,
+    start_openrouter_float_sweeper,
+    warn_if_local_key_uncapped,
+)
 from ..billing.budgets import BudgetService
 from ..config import settings
 from ..connectors.registry import oauth_config_problems
@@ -768,6 +773,7 @@ def create_app(
         # Keeps the Issuing balance behind the provider card funded, so upstream
         # top-ups charged to that card don't decline.
         issuing_funding_sweeper = start_issuing_funding_sweeper(job_store.engine)
+        warn_if_local_key_uncapped()
         if settings.event_loop_lag_monitor_enabled:
             loop_lag_monitor = start_event_loop_lag_monitor()
             logger.info("Event-loop lag monitor enabled (threshold %.0fms)", settings.event_loop_lag_threshold_ms)
