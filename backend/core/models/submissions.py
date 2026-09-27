@@ -112,7 +112,7 @@ class _OptimizationRequestBase(BaseModel):
         description=(
             "How model calls are billed: 'managed' charges the marked-up provider cost to Skynet credits; "
             "'byok' sends calls through the user's provider key and charges only Skynet's platform fee to "
-            "credits. Billable sandbox usage is charged at cost in both modes."
+            "credits. Billable sandbox usage is charged at marked-up provider cost in both modes."
         ),
     )
     execution_runtime: Literal["vercel"] = "vercel"

@@ -354,6 +354,7 @@ def create_dashboard_router(*, job_store: Any) -> APIRouter:
             size=request.size,
             owner_username=owner_username,
             shared_with_username=shared_with_username,
+            embedding_user=owner_username or shared_with_username or _session_username(http_request, authorization),
         )
         return SearchResponse(
             results=[SearchResult(**r) for r in data["results"]],
@@ -432,3 +433,24 @@ def _resolve_owner_username(
     if normalized != user.username:
         raise HTTPException(status_code=403, detail="auth.owner_mismatch")
     return normalized
+
+
+def _session_username(request: Request, authorization: str | None) -> str | None:
+    """Return the signed-in caller's username, or None for an anonymous or invalid session.
+
+    Used only to attribute query-embedding tokens to a per-user cap; the
+    public search itself never requires a session.
+
+    Args:
+        request: Incoming request, forwarded to ``get_authenticated_user``.
+        authorization: Raw ``Authorization`` header.
+
+    Returns:
+        The authenticated username, or None.
+    """
+    if not authorization:
+        return None
+    try:
+        return get_authenticated_user(request, authorization=authorization).username
+    except HTTPException:
+        return None

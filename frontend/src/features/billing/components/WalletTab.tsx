@@ -84,6 +84,7 @@ function AddCreditsControls() {
   );
   const [customDraft, setCustomDraft] = React.useState("");
   const [buying, setBuying] = React.useState(false);
+  const { wallet } = useCredits();
 
   const pack: CreditPack | undefined = CREDIT_PACKS.find((p) => p.id === selection);
   // The custom field is typed in whole dollars; credits are the par ×100 value
@@ -91,8 +92,8 @@ function AddCreditsControls() {
   const customCredits = Number(customDraft || "0") * 100;
   const customValid = customCredits >= CUSTOM_CREDITS_MIN && customCredits <= CUSTOM_CREDITS_MAX;
   // The buy button quotes what the buyer is charged: par credit value plus the
-  // service fee (12.5% plus 35 cents), itemized as its own line on Stripe checkout.
-  const usd = purchaseTotalUsd(pack ? pack.credits : customCredits);
+  // backend's service fee, itemized as its own line on Stripe checkout.
+  const usd = purchaseTotalUsd(pack ? pack.credits : customCredits, wallet.pricing);
   const priceLabel = Number.isInteger(usd) ? formatUsdWhole(usd, locale) : formatUsd(usd, locale);
 
   const onBuy = async () => {

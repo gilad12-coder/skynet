@@ -6,9 +6,6 @@ import {
   ArrowsClockwise,
   ChartBar,
   Coins,
-  Gift,
-  Minus,
-  Plus,
   Sparkle,
   type Icon,
 } from "@/shared/ui/icons";
@@ -50,14 +47,6 @@ const RANGE_LABEL: Record<RangeKey, MessageKey> = {
 const GROUP_LABEL: Record<GroupBy, MessageKey> = {
   day: "usage.group.day",
   week: "usage.group.week",
-};
-
-// Run rows lead with a spark; top-ups/grants with their own glyph. Keyed loosely
-// so an unrecognized backend kind still resolves to a sensible default.
-const KIND_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
-  run: Sparkle,
-  topup: Plus,
-  grant: Gift,
 };
 
 // Warm monochrome ramp (matches --chart-1..5): billed spend anchors to the
@@ -380,9 +369,6 @@ function RunBreakdown({ entries, locale }: { entries: BillingUsageEntry[]; local
           key={run.id}
           className="flex items-center gap-3 border-b border-border/40 py-3 last:border-b-0"
         >
-          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-            <Sparkle className="size-4" aria-hidden="true" />
-          </span>
           <span className="flex min-w-0 flex-1 flex-col">
             <span dir="auto" className="truncate text-sm font-medium text-foreground">
               {run.label}
@@ -404,18 +390,10 @@ function RunBreakdown({ entries, locale }: { entries: BillingUsageEntry[]; local
 
 /** One activity-list row. Numerals and model ids stay LTR-islanded. */
 function LedgerRow({ entry, locale }: { entry: BillingUsageEntry; locale: string }) {
-  const Icon = KIND_ICON[entry.kind] ?? Sparkle;
   const credited = entry.credits > 0;
   const free = entry.credits === 0;
   return (
     <li className="flex items-center gap-3 border-b border-border/40 py-3 last:border-b-0">
-      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-        {credited ? (
-          <Icon className="size-4" aria-hidden="true" />
-        ) : (
-          <Minus className="size-4" aria-hidden="true" />
-        )}
-      </span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span dir="auto" className="truncate text-sm font-medium text-foreground">
           {entry.label}

@@ -51,6 +51,12 @@ CATALOG = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _at_cost_markup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the usage markup to 1.0 so these tests check settlement arithmetic, not pricing policy."""
+    monkeypatch.setattr(settings, "usage_markup", 1.0)
+
+
 @pytest.fixture
 def gateway(tmp_path: Path) -> Iterator[ModelGateway]:
     """Start the real parent protocol against a private funded wallet and fake provider."""

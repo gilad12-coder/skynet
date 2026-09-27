@@ -63,7 +63,7 @@ def runtime_cost_profile(settings: Settings, workflow: str, runtime: str) -> dic
         runtime: Managed sandbox identity.
 
     Returns:
-        Machine-readable at-cost session bounds.
+        Machine-readable session bounds, including the usage markup.
     """
     image = protected_image(settings, workflow)
     if runtime != "vercel" or image is None:

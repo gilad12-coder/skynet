@@ -37,6 +37,7 @@ from ..billing import (
     payload_uses_token_source,
 )
 from ..billing.budgets import BudgetService
+from ..billing.metering import debit_at_fallback_price
 from ..billing.model_gateway import ModelGateway
 from ..billing.pricing import ModelUsage
 from ..billing.protected_credentials import (
@@ -115,6 +116,29 @@ GRID_ENVELOPE_PAIR_INDEX = -1
 _PAIR_TERMINAL_STATUSES = ("success", "failed", "cancelled", "stopped")
 
 
+# Optional per-row pricing evidence written by newer workers; older results lack it.
+_USAGE_DETAIL_FIELDS = (
+    "reported_cost_usd",
+    "reported_input_tokens",
+    "reported_output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
+)
+
+
+def _is_amount(value: Any) -> bool:
+    """Return whether a result field is a usable non-negative number.
+
+    Args:
+        value: A raw field from a serialized usage row.
+
+    Returns:
+        ``True`` for a non-negative int or float that is not a bool.
+    """
+    return isinstance(value, int | float) and not isinstance(value, bool) and value >= 0
+
+
 def _usages_from_result(result_dict: dict[str, Any] | None, fallback_model: str | None) -> list[ModelUsage]:
     """Build per-model :class:`ModelUsage` from a serialized run/grid result.
 
@@ -146,13 +170,40 @@ def _usages_from_result(result_dict: dict[str, Any] | None, fallback_model: str 
             if not isinstance(model, str) or not isinstance(in_tokens, int) or not isinstance(out_tokens, int):
                 continue
             if in_tokens > 0 or out_tokens > 0:
-                usages.append(ModelUsage(model=model, input_tokens=in_tokens, output_tokens=out_tokens))
+                usages.append(
+                    ModelUsage(
+                        model=model,
+                        input_tokens=in_tokens,
+                        output_tokens=out_tokens,
+                        **{key: row[key] for key in _USAGE_DETAIL_FIELDS if _is_amount(row.get(key))},
+                    )
+                )
     if usages:
         return usages
     total_tokens = result_dict.get("total_tokens")
     if isinstance(total_tokens, int) and total_tokens > 0:
         return [ModelUsage(model=fallback_model or "unknown", input_tokens=total_tokens, output_tokens=0)]
     return []
+
+
+def _legacy_settlement_key(optimization_id: str, generation: int | None) -> str | None:
+    """Return the idempotency key for one legacy execution leg's debit.
+
+    Every claim bumps the job's execution generation, so the key is unique per
+    leg: a resumed or re-run leg bills its own usage, while a redelivered
+    settlement of the same leg collides and charges nothing.
+
+    Args:
+        optimization_id: The job being billed.
+        generation: The leg's execution generation, or ``None`` on a store
+            without generations.
+
+    Returns:
+        The ledger ``settlement_key``, or ``None`` when there is no generation.
+    """
+    if generation is None:
+        return None
+    return f"legacy:{optimization_id}:g{generation}"
 
 
 class CancellationError(Exception):
@@ -660,6 +711,13 @@ class BackgroundWorker:
         execution_generation: int | None = None
         execution_budget_snapshot: dict[str, Any] | None = None
         recovery_attempts = 0
+        # Legacy (unprotected) runs are billed from the worker, not a budget
+        # gateway; the exception handler reads these to bill a leg that ended
+        # without a successful completion.
+        bill_legacy_usage = False
+        result_dict: dict[str, Any] | None = None
+        usage_tracker: dict[str, Any] = {}
+        pair_outcome_recorded = False
 
         with self._queue_lock:
             cancel_event = self._cancel_events.get(optimization_id)
@@ -745,6 +803,7 @@ class BackgroundWorker:
                 raise ValueError(
                     "This stored job predates protected execution. Submit it again to create a funded Vercel run."
                 )
+            bill_legacy_usage = not protected_execution
             service = self._get_service()
             # Current preflight evidence already proves semantic validity inside
             # this job's selected sandbox. The legacy validators exec authored
@@ -777,7 +836,7 @@ class BackgroundWorker:
             budget_gateway: ModelGateway | None = None
             run_process: mp.process.BaseProcess | None = None
             event_queue: Any | None = None
-            result_dict: dict[str, Any] | None = None
+            result_dict = None
             subprocess_error: dict[str, Any] | None = None
 
             # Resume support: the worker owns a per-job base directory it seeds
@@ -1016,6 +1075,7 @@ class BackgroundWorker:
                         source_optimization_id=optimization_id,
                         generation=execution_generation,
                         checkpoint_tracker=checkpoint_tracker,
+                        usage_tracker=usage_tracker,
                     )
                     if drained_result is not None:
                         result_dict = drained_result
@@ -1043,6 +1103,7 @@ class BackgroundWorker:
                     source_optimization_id=optimization_id,
                     generation=execution_generation,
                     checkpoint_tracker=checkpoint_tracker,
+                    usage_tracker=usage_tracker,
                 )
                 if drained_result is not None:
                     result_dict = drained_result
@@ -1124,6 +1185,7 @@ class BackgroundWorker:
                 # dies right after the status lands.
                 if pair_parent_id is not None and isinstance(result_dict, dict):
                     self._record_pair_outcome(pair_parent_id, result_dict)
+                    pair_outcome_recorded = True
 
                 try:
                     if self._persisted_status(optimization_id) in ("cancelled", "paused"):
@@ -1188,7 +1250,8 @@ class BackgroundWorker:
                     _username = overview.get(PAYLOAD_OVERVIEW_USERNAME, "")
                     _baseline = result_dict.get("baseline_test_metric") if isinstance(result_dict, dict) else None
                     _optimized = result_dict.get("optimized_test_metric") if isinstance(result_dict, dict) else None
-                    if self._job_store.claim_completion_notification(optimization_id):
+                    claimed = self._job_store.claim_completion_notification(optimization_id)
+                    if claimed:
                         notify_job_completed(
                             optimization_id=optimization_id,
                             username=_username,
@@ -1198,23 +1261,24 @@ class BackgroundWorker:
                             optimized_score=_optimized,
                         )
                         self._record_run_outcome(optimization_id, _username, final_status, overview)
-                        # The credit debit shares the once-only completion claim so
-                        # a redelivered/re-run job is never double-billed. Success
-                        # only — a failed (e.g. all-pairs-failed) run is not billed.
-                        if final_status == "success" and not job_data.get("execution_budget_id"):
-                            billed = self._debit_run_credits(
-                                _username,
-                                result_dict,
-                                optimization_id=optimization_id,
-                                run_name=overview.get(PAYLOAD_OVERVIEW_NAME) or "",
-                                model=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
-                                token_source=overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE) or TOKEN_SOURCE_MANAGED,
-                                token_sources_by_model=overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL),
-                            )
-                            # Stamp the billing outcome onto the persisted result so
-                            # the result screen can show what the run cost.
-                            # Re-persisted because the debit runs after the first
-                            # completion write.
+                    # Every terminal status is billed for the tokens it spent — a
+                    # failed or budget-stopped run still consumed them. The
+                    # per-generation settlement key keeps a redelivered leg from
+                    # double-billing; a store without generations falls back to
+                    # the once-only completion claim.
+                    if bill_legacy_usage and (claimed or execution_generation is not None):
+                        billed = self._bill_legacy_leg(
+                            optimization_id,
+                            overview,
+                            result_dict,
+                            usage_tracker,
+                            generation=execution_generation,
+                        )
+                        # Stamp the billing outcome onto the persisted result so
+                        # the result screen can show what the run cost.
+                        # Re-persisted because the debit runs after the first
+                        # completion write.
+                        if isinstance(result_dict, dict):
                             self._stamp_billing_outcome(
                                 optimization_id,
                                 result_dict,
@@ -1269,6 +1333,26 @@ class BackgroundWorker:
             is_cancelled = isinstance(exc, CancellationError)
             is_temporary = isinstance(exc, InfrastructureInterruptionError) or is_shutdown
             recovery_unavailable_reason = ""
+            # A legacy leg that failed, was cancelled/paused, or stalled is billed
+            # for the tokens it already spent. Interruptions the platform caused
+            # (host pressure, provider transport drop, shutdown) are not billed.
+            # A pair child whose outcome already reached the parent is billed by
+            # the grid finalizer instead.
+            if (
+                bill_legacy_usage
+                and execution_generation is not None
+                and (not is_temporary or isinstance(exc, JobStalledError))
+                and not pair_outcome_recorded
+            ):
+                with contextlib.suppress(Exception):
+                    self._bill_legacy_leg(
+                        optimization_id,
+                        overview if isinstance(overview, dict) else {},
+                        result_dict,
+                        usage_tracker,
+                        generation=execution_generation,
+                        commitment_job_id=pair_parent_id,
+                    )
             if is_temporary and not is_cancelled:
                 recovered, recovery_unavailable_reason = self._recover_temporary_interruption(
                     optimization_id,
@@ -1743,6 +1827,7 @@ class BackgroundWorker:
         optimization_id: str | None = None,
         token_source: str = TOKEN_SOURCE_MANAGED,
         token_sources_by_model: dict[str, str] | None = None,
+        settlement_key: str | None = None,
     ) -> int:
         """Debit a finished run's credit cost from the account's local ledger.
 
@@ -1755,7 +1840,9 @@ class BackgroundWorker:
         charged only Skynet's platform fee (the provider tokens were paid on the
         user's own key), so credits still meter a BYOK run without double-charging
         for inference. A no-op when the store exposes no SQL engine (legacy/in-memory),
-        the caller is anonymous, or the run reported no token usage.
+        the caller is anonymous, or the run reported no token usage. A failed debit
+        is logged at ``ERROR`` (forwarded as an alert) and retried at the fallback
+        frontier price, so a metering fault never gives the tokens away.
 
         Args:
             username: Account the run is billed to.
@@ -1767,6 +1854,8 @@ class BackgroundWorker:
             token_source: ``"managed"`` (full cost) or ``"byok"`` (platform fee
                 only); defaults to managed.
             token_sources_by_model: Optional model-to-source map for mixed jobs.
+            settlement_key: Idempotency key for this leg's debit, so a retried
+                or re-claimed leg is never charged twice.
 
         Returns:
             The credits charged (``0`` when nothing was billed or the debit was
@@ -1778,24 +1867,73 @@ class BackgroundWorker:
         usages = _usages_from_result(result_dict, model)
         if not usages:
             return 0
+        service = StripeBillingService(engine=engine)
+        billing_kwargs: dict[str, Any] = {
+            "model": model,
+            "description": run_name or "Run",
+            "token_source": token_source,
+        }
+        if token_sources_by_model is not None:
+            billing_kwargs["token_sources_by_model"] = token_sources_by_model
+        if optimization_id is not None:
+            billing_kwargs["optimization_id"] = optimization_id
+        if settlement_key is not None:
+            billing_kwargs["settlement_key"] = settlement_key
         try:
-            billing_kwargs: dict[str, Any] = {
-                "model": model,
-                "description": run_name or "Run",
-                "token_source": token_source,
-            }
-            if token_sources_by_model is not None:
-                billing_kwargs["token_sources_by_model"] = token_sources_by_model
-            if optimization_id is not None:
-                billing_kwargs["optimization_id"] = optimization_id
-            return StripeBillingService(engine=engine).debit_run(
+            return service.debit_run(username, usages, **billing_kwargs)
+        except Exception:  # isolation boundary: a debit failure must never impact job status
+            logger.exception(
+                "Credit debit failed for %s (job %s, %s); charging at fallback price: %s",
                 username,
-                usages,
-                **billing_kwargs,
+                optimization_id,
+                run_name or "Run",
+                ", ".join(f"{u.model}={u.input_tokens}/{u.output_tokens}" for u in usages),
             )
-        except Exception as exc:  # isolation boundary: a debit failure must never impact job status
-            logger.debug("Credit debit for %s failed: %s", username, exc)
+            return debit_at_fallback_price(service, username, usages, **billing_kwargs)
+
+    def _bill_legacy_leg(
+        self,
+        optimization_id: str,
+        overview: dict[str, Any],
+        result_dict: dict[str, Any] | None,
+        usage_tracker: dict[str, Any],
+        *,
+        generation: int | None,
+        commitment_job_id: str | None = None,
+    ) -> int:
+        """Bill one execution leg of a legacy (unprotected) job, whatever its outcome.
+
+        Prices the result's usage when the leg delivered one, otherwise the last
+        cumulative usage snapshot the child reported before it failed or was
+        stopped. Usage the child spent after its last event is not visible here.
+
+        Args:
+            optimization_id: The job whose leg is billed.
+            overview: The job's payload overview (username, model, token source).
+            result_dict: The leg's result payload, when one arrived.
+            usage_tracker: Latest ``usage_by_model`` snapshot from the child's events.
+            generation: The leg's execution generation; keys the idempotent debit.
+            commitment_job_id: Job holding the wallet commitment this debit may
+                consume; defaults to ``optimization_id``.
+
+        Returns:
+            The credits charged.
+        """
+        source: dict[str, Any] | None = result_dict if _usages_from_result(result_dict, None) else None
+        if source is None and usage_tracker.get("usage_by_model"):
+            source = {"usage_by_model": usage_tracker["usage_by_model"]}
+        if source is None:
             return 0
+        return self._debit_run_credits(
+            overview.get(PAYLOAD_OVERVIEW_USERNAME, ""),
+            source,
+            optimization_id=commitment_job_id or optimization_id,
+            run_name=overview.get(PAYLOAD_OVERVIEW_NAME) or "",
+            model=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
+            token_source=overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE) or TOKEN_SOURCE_MANAGED,
+            token_sources_by_model=overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL),
+            settlement_key=_legacy_settlement_key(optimization_id, generation),
+        )
 
     def _stamp_billing_outcome(
         self,
@@ -1905,6 +2043,7 @@ class BackgroundWorker:
         source_optimization_id: str | None = None,
         generation: int | None = None,
         checkpoint_tracker: dict[str, Any] | None = None,
+        usage_tracker: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, int]:
         """Drain all pending events from the subprocess queue, routing each by type.
 
@@ -1927,6 +2066,9 @@ class BackgroundWorker:
             generation: Source worker publication epoch.
             checkpoint_tracker: Mutable checkpoint cursor that receives the best
                 completed candidate for each GEPA pair.
+            usage_tracker: Mutable dict that receives the latest cumulative
+                ``usage_by_model`` snapshot a progress or error event carried,
+                so a run that ends without a result can still be billed.
 
         Returns:
             ``(result_dict, error_dict, drained_count)`` — the first two may be
@@ -1948,6 +2090,9 @@ class BackgroundWorker:
 
             drained_count += 1
             event_type = event.get("type")
+            usage_rows = event.get("usage_by_model")
+            if usage_tracker is not None and isinstance(usage_rows, list) and usage_rows:
+                usage_tracker["usage_by_model"] = usage_rows
             if event_type == EVENT_PROGRESS:
                 try:
                     metrics = event.get("metrics") or {}
@@ -2519,7 +2664,9 @@ class BackgroundWorker:
                 message=final_message,
             )
             self._record_run_outcome(parent_optimization_id, _username, final_status, overview)
-            if final_status == "success" and isinstance(result_dict, dict) and not parent.get("execution_budget_id"):
+            # Billed whatever the grid's outcome: failed and stopped pairs still
+            # spent the tokens their recorded results carry.
+            if isinstance(result_dict, dict) and not parent.get("execution_budget_id"):
                 billed = self._debit_run_credits(
                     _username,
                     result_dict,
@@ -2528,6 +2675,7 @@ class BackgroundWorker:
                     model=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
                     token_source=overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCE) or TOKEN_SOURCE_MANAGED,
                     token_sources_by_model=overview.get(PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL),
+                    settlement_key=_legacy_settlement_key(parent_optimization_id, parent.get("execution_generation")),
                 )
                 self._stamp_billing_outcome(
                     parent_optimization_id,

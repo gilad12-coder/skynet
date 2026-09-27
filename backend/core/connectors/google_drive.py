@@ -10,6 +10,7 @@ files import directly and a Google Sheet is exported as CSV (first tab).
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import quote
 
@@ -19,7 +20,7 @@ from .base import Credential, Entry, import_file, preview_file, range_header
 from .google_auth import parse_service_account, service_account_token
 from .oauth import OAuthApp
 from .oauth import oauth_available as _oauth_available
-from .tabular import check_size, is_supported
+from .tabular import SUPPORTED_EXTENSIONS, check_size, is_supported
 from .transport import download, get_json
 from .vault import ConnectorSecret
 
@@ -32,6 +33,18 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet"
 FIELDS = "files(id,name,mimeType,size,modifiedTime)"
 DRIVE_PARAMS = {"supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
+INDEX_PAGE_SIZE = 1000
+INDEX_MAX_PAGES = 30
+# Drive can't query by extension, so candidates are matched by MIME type or by a
+# name token and then checked with ``is_supported``; the match only has to be a superset.
+IMPORTABLE_QUERY = " or ".join(
+    [
+        f"mimeType = '{SPREADSHEET_MIME}'",
+        *(f"mimeType = '{m}'" for m in ("text/csv", "text/tab-separated-values", "application/json")),
+        *(f"name contains '{ext.lstrip('.')}'" for ext in sorted(SUPPORTED_EXTENSIONS)),
+    ]
+)
+WEB_URL = "https://drive.google.com/drive"
 
 
 def oauth_app() -> OAuthApp:
@@ -181,6 +194,90 @@ def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
     )
     entries = [e for f in (body.get("files") if isinstance(body, dict) else None) or [] if (e := _entry(f))]
     return [e for e in entries if e.kind == "folder"] + [e for e in entries if e.kind == "file"]
+
+
+def _list_all(token: str, query: str, fields: str) -> list[dict[str, Any]] | None:
+    """Page through every file matching a query, up to the index cap.
+
+    Args:
+        token: Bearer token.
+        query: Drive query.
+        fields: Per-file fields to return.
+
+    Returns:
+        The files, or ``None`` when the drive is too large to index or Drive
+        reports the search as incomplete.
+    """
+    files: list[dict[str, Any]] = []
+    page_token: str | None = None
+    for _ in range(INDEX_MAX_PAGES):
+        params = {
+            "q": f"({query}) and trashed = false",
+            "fields": f"nextPageToken,incompleteSearch,files({fields})",
+            "pageSize": INDEX_PAGE_SIZE,
+            "corpora": "allDrives",
+            **DRIVE_PARAMS,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        body = get_json(DRIVE_URL, provider=PROVIDER, headers=_headers(token), params=params)
+        if not isinstance(body, dict) or body.get("incompleteSearch"):
+            return None
+        files.extend(f for f in body.get("files") or [] if isinstance(f, dict))
+        page_token = body.get("nextPageToken")
+        if not page_token:
+            return files
+    return None
+
+
+def importable_folders(secret: ConnectorSecret) -> set[str] | None:
+    """Find every folder whose subtree holds an importable file, in two queries.
+
+    One query lists the importable files, one lists every folder with its
+    parents; walking up from each file marks its ancestors. That settles every
+    folder at once, where probing folder by folder runs out of time on a big drive.
+
+    Args:
+        secret: The stored connector.
+
+    Returns:
+        Folder ids with importable descendants, or ``None`` when the drive is
+        too large to index.
+    """
+    token = _bearer(secret)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        files_job = pool.submit(_list_all, token, IMPORTABLE_QUERY, "name,mimeType,parents")
+        folders_job = pool.submit(_list_all, token, f"mimeType = '{FOLDER_MIME}'", "id,parents")
+        files, folders = files_job.result(), folders_job.result()
+    if files is None or folders is None:
+        return None
+    parents_of = {f["id"]: f.get("parents") or [] for f in folders if isinstance(f.get("id"), str)}
+    found: set[str] = set()
+    stack = [
+        p
+        for f in files
+        if f.get("mimeType") == SPREADSHEET_MIME or is_supported(f.get("name") or "")
+        for p in f.get("parents") or []
+    ]
+    while stack:
+        folder = stack.pop()
+        if folder not in found:
+            found.add(folder)
+            stack.extend(parents_of.get(folder, []))
+    return found
+
+
+def web_url(secret: ConnectorSecret, location: str) -> str | None:
+    """Link to a browse location in Google Drive.
+
+    Args:
+        secret: The stored connector.
+        location: Empty for the top level, else a folder id.
+
+    Returns:
+        The Drive URL.
+    """
+    return f"{WEB_URL}/folders/{quote(location, safe='')}" if location else f"{WEB_URL}/my-drive"
 
 
 def _metadata(token: str, file_id: str) -> dict[str, Any]:

@@ -22,6 +22,7 @@ import type {
 import type {
   DashboardAnalytics,
   DashboardAnalyticsJob,
+  DatasetSummary,
   PublicDashboardPoint,
 } from "@/shared/lib/api";
 import { layoutTrajectory, type CandidateMetrics } from "@/features/trajectory";
@@ -332,7 +333,7 @@ function buildOptimizing(start: Date, trialsDone: number): OptimizationStatusRes
     {
       timestamp: ts(start, 4200),
       event: "baseline_evaluated",
-      metrics: { baseline_test_metric: 0.62 },
+      metrics: { baseline_test_metric: 62 },
     },
   ];
   if (trialsDone > 0) {
@@ -426,7 +427,7 @@ function buildOptimizing(start: Date, trialsDone: number): OptimizationStatusRes
     status: "running",
     elapsed_seconds: elapsed,
     elapsed: fmtElapsed(elapsed),
-    baseline_test_metric: 0.62,
+    baseline_test_metric: 62,
     progress_events: events,
     logs,
     latest_metrics: {
@@ -453,13 +454,13 @@ function buildDone(start: Date): OptimizationStatusResponse {
     {
       timestamp: ts(start, 4200),
       event: "baseline_evaluated",
-      metrics: { baseline_test_metric: 0.62 },
+      metrics: { baseline_test_metric: 62 },
     },
     { timestamp: ts(start, 5000), event: "optimizer_progress", metrics: {} },
     {
       timestamp: ts(start, 9500),
       event: "optimized_evaluated",
-      metrics: { optimized_test_metric: 0.84 },
+      metrics: { optimized_test_metric: 84 },
     },
   ];
 
@@ -583,9 +584,9 @@ function buildDone(start: Date): OptimizationStatusResponse {
     elapsed_seconds: elapsed,
     elapsed: fmtElapsed(elapsed),
     completed_at: new Date().toISOString(),
-    baseline_test_metric: 0.62,
-    optimized_test_metric: 0.84,
-    metric_improvement: 0.22,
+    baseline_test_metric: 62,
+    optimized_test_metric: 84,
+    metric_improvement: 22,
     progress_events: events,
     logs,
     latest_metrics: {
@@ -599,9 +600,9 @@ function buildDone(start: Date): OptimizationStatusResponse {
     result: {
       module_name: "Predict",
       optimizer_name: "GEPA",
-      baseline_test_metric: 0.62,
-      optimized_test_metric: 0.84,
-      metric_improvement: 0.22,
+      baseline_test_metric: 62,
+      optimized_test_metric: 84,
+      metric_improvement: 22,
       runtime_seconds: elapsed,
       num_lm_calls: 156,
       split_counts: { train: 120, val: 40, test: 40 },
@@ -634,7 +635,7 @@ function buildDone(start: Date): OptimizationStatusResponse {
             },
           ],
           formatted_prompt:
-            "Classify each email as spam, important, or promotional.\n\nInput: {email_text}\nOutput: {category}",
+            "Classify each email as spam, important, or promotional. Use the message's intent, urgency, and requested action; do not classify from isolated keywords alone.\n\nInput: {email_text}\nOutput: {category}",
         },
       },
     },
@@ -672,6 +673,13 @@ let _simulationCompleted = false;
 /** Reset the completed flag so the next visit re-runs the simulation. */
 export function resetDemoSimulation() {
   _simulationCompleted = false;
+}
+
+/** Mark the demo run finished; returns false when it already was. */
+export function finishDemoSimulation(): boolean {
+  if (_simulationCompleted) return false;
+  _simulationCompleted = true;
+  return true;
 }
 
 export interface StartDemoSimulationOptions {
@@ -769,6 +777,27 @@ function daysAgo(n: number): string {
   return d.toISOString();
 }
 
+export const DEMO_DATASET_ID = "tutorial-dataset-001";
+
+/** One owned dataset for the data guide, so the library has a card to select. */
+export function getDemoDatasets(): DatasetSummary[] {
+  return [
+    {
+      id: DEMO_DATASET_ID,
+      name: "customer_reviews",
+      source: "upload",
+      row_count: 1200,
+      column_count: 3,
+      byte_size: 184_320,
+      content_hash: "tutorial-demo",
+      owner_username: "you",
+      role: "owner",
+      created_at: daysAgo(6),
+      updated_at: daysAgo(1),
+    },
+  ];
+}
+
 const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
   {
     optimization_id: "demo-001",
@@ -784,9 +813,9 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     optimizer_name: "GEPA",
     model_name: "gpt-4o-mini",
     dataset_rows: 200,
-    baseline_test_metric: 0.62,
-    optimized_test_metric: 0.84,
-    metric_improvement: 0.22,
+    baseline_test_metric: 62,
+    optimized_test_metric: 84,
+    metric_improvement: 22,
     username: "demo",
   },
   {
@@ -803,9 +832,9 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     optimizer_name: "GEPA",
     model_name: "gpt-4o",
     dataset_rows: 350,
-    baseline_test_metric: 0.71,
-    optimized_test_metric: 0.89,
-    metric_improvement: 0.18,
+    baseline_test_metric: 71,
+    optimized_test_metric: 89,
+    metric_improvement: 18,
     username: "demo",
   },
   {
@@ -828,9 +857,9 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     optimizer_name: "GEPA",
     model_name: "gpt-4o-mini",
     dataset_rows: 150,
-    baseline_test_metric: 0.48,
-    optimized_test_metric: 0.86,
-    metric_improvement: 0.38,
+    baseline_test_metric: 48,
+    optimized_test_metric: 86,
+    metric_improvement: 38,
     username: "demo",
     total_pairs: 4,
     completed_pairs: 4,
@@ -864,7 +893,7 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     optimizer_name: "GEPA",
     model_name: "gpt-4o-mini",
     dataset_rows: 120,
-    baseline_test_metric: 0.48,
+    baseline_test_metric: 48,
     username: "demo",
     latest_metrics: { tqdm_percent: 45, tqdm_n: 4, tqdm_total: 9 },
   },
@@ -882,9 +911,9 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     optimizer_name: "MIPROv2",
     model_name: "claude-sonnet-4",
     dataset_rows: 280,
-    baseline_test_metric: 0.66,
-    optimized_test_metric: 0.83,
-    metric_improvement: 0.17,
+    baseline_test_metric: 66,
+    optimized_test_metric: 83,
+    metric_improvement: 17,
     username: "demo",
   },
   {
@@ -901,9 +930,9 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     optimizer_name: "BootstrapFewShot",
     model_name: "claude-haiku-4",
     dataset_rows: 180,
-    baseline_test_metric: 0.51,
-    optimized_test_metric: 0.74,
-    metric_improvement: 0.23,
+    baseline_test_metric: 51,
+    optimized_test_metric: 74,
+    metric_improvement: 23,
     username: "demo",
   },
   {
@@ -920,9 +949,9 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     optimizer_name: "MIPROv2",
     model_name: "gemini-2.0-pro",
     dataset_rows: 220,
-    baseline_test_metric: 0.58,
-    optimized_test_metric: 0.79,
-    metric_improvement: 0.21,
+    baseline_test_metric: 58,
+    optimized_test_metric: 79,
+    metric_improvement: 21,
     username: "demo",
   },
   {
@@ -939,9 +968,9 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     optimizer_name: "BootstrapFewShot",
     model_name: "claude-sonnet-4",
     dataset_rows: 250,
-    baseline_test_metric: 0.6,
-    optimized_test_metric: 0.78,
-    metric_improvement: 0.18,
+    baseline_test_metric: 60,
+    optimized_test_metric: 78,
+    metric_improvement: 18,
     username: "demo",
   },
 ]);
@@ -1204,8 +1233,8 @@ export function buildGridDemoJob(): OptimizationStatusResponse {
     gridPair(0, {
       genModel: "openai/gpt-4o-mini",
       refModel: "openai/gpt-4o-mini",
-      baseline: 0.48,
-      optimized: 0.74,
+      baseline: 48,
+      optimized: 74,
       runtime: 180,
       numLmCalls: 82,
       avgMs: 260,
@@ -1213,8 +1242,8 @@ export function buildGridDemoJob(): OptimizationStatusResponse {
     gridPair(1, {
       genModel: "openai/gpt-4o-mini",
       refModel: "openai/gpt-4o",
-      baseline: 0.48,
-      optimized: 0.82,
+      baseline: 48,
+      optimized: 82,
       runtime: 245,
       numLmCalls: 96,
       avgMs: 320,
@@ -1222,8 +1251,8 @@ export function buildGridDemoJob(): OptimizationStatusResponse {
     gridPair(2, {
       genModel: "openai/gpt-4o",
       refModel: "openai/gpt-4o-mini",
-      baseline: 0.48,
-      optimized: 0.77,
+      baseline: 48,
+      optimized: 77,
       runtime: 230,
       numLmCalls: 94,
       avgMs: 420,
@@ -1231,8 +1260,8 @@ export function buildGridDemoJob(): OptimizationStatusResponse {
     gridPair(3, {
       genModel: "openai/gpt-4o",
       refModel: "openai/gpt-4o",
-      baseline: 0.48,
-      optimized: 0.86,
+      baseline: 48,
+      optimized: 86,
       runtime: 380,
       numLmCalls: 118,
       avgMs: 650,

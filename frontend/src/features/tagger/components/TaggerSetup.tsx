@@ -27,7 +27,7 @@ import { Separator } from "@/shared/ui/primitives/separator";
 import { cn } from "@/shared/lib/utils";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { tip } from "@/shared/lib/tooltips";
-import { parseDatasetFile } from "@/shared/lib/parse-dataset";
+import { DATASET_UPLOAD_ACCEPT, parseDatasetFile } from "@/shared/lib/parse-dataset";
 import { getDatasetRows } from "@/shared/lib/api";
 import { cachedCatalog, getModelCatalog } from "@/shared/lib/model-catalog";
 import type { CatalogModel, ModelConfig } from "@/shared/types/api";
@@ -242,6 +242,23 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
     () => registerTutorialQuery("hasTaggerData", () => parsedRows.length > 0),
     [parsedRows],
   );
+  useEffect(
+    () => registerTutorialQuery("taggerAssistAvailable", () => assistAvailable),
+    [assistAvailable],
+  );
+  // Finishing or leaving the guide must not strand its fake rows in a real
+  // setup, one click from starting a (possibly paid) run on them.
+  useEffect(() => {
+    const onExit = () => {
+      if (file?.name !== "demo_dataset.csv") return;
+      setFile(null);
+      setParsedRows([]);
+      setParsedCols([]);
+      setInputCols([]);
+    };
+    window.addEventListener("tutorial-exited", onExit);
+    return () => window.removeEventListener("tutorial-exited", onExit);
+  }, [file]);
 
   const handleFile = useCallback(async (f: File) => {
     setError(null);
@@ -440,7 +457,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
   };
 
   const steps = [
-    <Card key="data">
+    <Card key="data" data-tutorial="tagger-data">
       <CardHeader>
         <CardTitle className="text-lg">
           <HelpTip text={tip("tagger.upload_file")}>
@@ -491,7 +508,7 @@ export function TaggerSetup({ onStart }: TaggerSetupProps) {
           )}
           <input
             type="file"
-            accept=".json,.csv,.xlsx,.xls"
+            accept={DATASET_UPLOAD_ACCEPT}
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];

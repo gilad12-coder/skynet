@@ -31,7 +31,7 @@ class _FakeEmbedder:
         """Return whether this embedder is configured as available."""
         return self._available
 
-    def encode(self, text: str, *, task: str | None = None) -> list[float] | None:
+    def encode(self, text: str, *, task: str | None = None, user: str | None = None) -> list[float] | None:
         """Record the call and return the canned vector (or ``None`` for blanks)."""
         self.encode_calls.append((text, task))
         if not text or not text.strip():
@@ -578,3 +578,60 @@ def test_embed_finished_job_blackbox_uses_blackbox_summariser() -> None:
     assert row.optimized_metric == 0.5075
     assert row.summary_text == "Improves a unicorn model."
     assert row.signature_code is None
+
+
+def _summary_session() -> MagicMock:
+    """Return a Session double that finds no existing embedding row."""
+    session = MagicMock(name="session")
+    session.__enter__ = MagicMock(return_value=session)
+    session.__exit__ = MagicMock(return_value=False)
+    session.query.return_value.filter.return_value.first.return_value = None
+    return session
+
+
+def test_embed_finished_job_meters_the_summary_to_the_owner() -> None:
+    """An owner with credits gets the LLM summary and is billed for it as managed usage."""
+    store = _FakeJobStore({"job-1": _success_job()})
+    lm = object()
+
+    def _summarize(**kwargs: Any) -> str:
+        """Stand in for the summariser: record the LM like the real one does."""
+        assert kwargs["use_llm"] is True
+        kwargs["usage_sink"].append(lm)
+        return "A summary."
+
+    billing = MagicMock()
+    billing.return_value.spendable_credits.return_value = 12
+    with (
+        patch.object(pipeline.settings, "embeddings_enabled", True),
+        patch.object(pipeline, "get_embedder", return_value=_FakeEmbedder()),
+        patch.object(pipeline, "StripeBillingService", billing),
+        patch.object(pipeline, "summarize_task", side_effect=_summarize),
+        patch.object(pipeline, "meter_llm_run") as meter,
+        patch.object(pipeline, "Session", return_value=_summary_session()),
+    ):
+        assert pipeline.embed_finished_job("job-1", job_store=store) is True
+
+    billing.return_value.spendable_credits.assert_called_once_with("alice")
+    meter.assert_called_once_with(
+        store.engine, "alice", [lm], description="Job summary", token_source="managed"
+    )
+
+
+def test_embed_finished_job_uses_free_summary_when_owner_has_no_credits() -> None:
+    """A broke owner still gets indexed, via the heuristic summary, and is not billed."""
+    store = _FakeJobStore({"job-1": _success_job()})
+    billing = MagicMock()
+    billing.return_value.spendable_credits.return_value = 0
+    with (
+        patch.object(pipeline.settings, "embeddings_enabled", True),
+        patch.object(pipeline, "get_embedder", return_value=_FakeEmbedder()),
+        patch.object(pipeline, "StripeBillingService", billing),
+        patch.object(pipeline, "summarize_task", return_value="Sentiment task") as summarize,
+        patch.object(pipeline, "meter_llm_run") as meter,
+        patch.object(pipeline, "Session", return_value=_summary_session()),
+    ):
+        assert pipeline.embed_finished_job("job-1", job_store=store) is True
+
+    assert summarize.call_args.kwargs["use_llm"] is False
+    meter.assert_not_called()

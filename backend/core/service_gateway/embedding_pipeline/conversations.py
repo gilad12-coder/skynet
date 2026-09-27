@@ -134,7 +134,7 @@ def embed_conversation(conversation_id: str, *, engine: Engine) -> bool:
             username, haystack = _load_conversation_text(session, conversation_id)
             if not username or not haystack:
                 return False
-            vector = embedder.encode(haystack, task="retrieval.passage")
+            vector = embedder.encode(haystack, task="retrieval.passage", user=username)
             if vector is None:
                 return False
             existing = session.get(ConversationEmbeddingModel, conversation_id)

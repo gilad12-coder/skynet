@@ -60,6 +60,15 @@ def test_only_gepa_accepts_separate_named_parts() -> None:
     assert request.seed_candidate == {"prompt": "candidate"}
 
 
+def test_autosaddler_accepts_separate_named_parts() -> None:
+    """Accept a multipart seed for AutoSaddler, which the engine catalog advertises."""
+    request = BlackboxRunRequest.model_validate(
+        _payload(seed_candidate={"prompt": "x"}, strategy={"mode": "single", "engine": "autosaddler"})
+    )
+
+    assert request.seed_candidate == {"prompt": "x"}
+
+
 @pytest.mark.parametrize(
     "strategy",
     [

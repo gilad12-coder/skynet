@@ -18,6 +18,7 @@ from sqlalchemy.pool import StaticPool
 from ...billing.credential_safety import scrub_model_config
 from ...billing.model_gateway import ROUTE_KEY
 from ...billing.service import committed_spend_credits, cost_ceiling_budget
+from ...config import Settings
 from ...constants import (
     COMPOSITION_SINGLE,
     COMPOSITION_WORKFLOW,
@@ -39,14 +40,16 @@ from ...constants import (
 from ...i18n_keys import I18nKey
 from ...models import BlackboxRunRequest, GridSearchRequest, RunRequest
 from ...models.blackbox import BLACKBOX_MODULE_NAME, ScorerDryRunResponse
+from ...models.results import ModelTokenUsage
 from ...registry import RegistryError
 from ...service_gateway import ServiceError
 from ...service_gateway.optimization.blackbox import service as _bb_service
-from ...storage.models import Base, BillingCustomerModel, BillingProviderKeyModel
+from ...storage.models import Base, BillingCustomerModel, BillingProviderKeyModel, CreditLedgerModel
 from ...storage.preflights import WizardPreflightModel
 from ...storage.remote import RemoteDBJobStore
 from ...storage.usage import StorageUsage
 from .. import preflight_execution
+from ..errors import DomainError
 from ..model_catalog import CatalogModel, ModelCatalogResponse
 from ..routers import submissions as _sub_mod
 from ..routers.submissions import create_submissions_router
@@ -2394,7 +2397,7 @@ def test_blackbox_scorer_dry_run_preserves_authoritative_receipt(monkeypatch: py
     resp = client.post("/blackbox/scorer/dry-run", json=_JUDGE_DRY_RUN_BODY)
 
     assert resp.status_code == 200
-    assert resp.json()["usage_by_model"] == usage
+    assert resp.json()["usage_by_model"] == [ModelTokenUsage(**row).model_dump() for row in usage]
     assert resp.json()["credits_charged"] == 1
     assert metered == []
 
@@ -2452,3 +2455,44 @@ def test_submit_blackbox_run_rejects_unknown_staged_dataset_id(monkeypatch: pyte
 
     assert resp.status_code == 400
     assert store._jobs == {}
+
+
+class _EngineStore:
+    """Job-store double exposing only the SQL engine the spend ceiling reads."""
+
+    def __init__(self, engine: object) -> None:
+        """Store the engine."""
+        self.engine = engine
+
+
+def _ledger_engine(spent_credits: int) -> object:
+    """Build an in-memory billing DB whose trailing 24h holds one run charge of ``spent_credits``."""
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(CreditLedgerModel(username="u@x.io", delta_credits=-spent_credits, kind="run", description="r"))
+        session.commit()
+    return engine
+
+
+def test_global_daily_spend_ceiling_defaults_on() -> None:
+    """The platform spend backstop ships enabled at 5000 credits rather than disabled."""
+    assert Settings.model_fields["global_daily_spend_ceiling_credits"].default == 5000
+
+
+def test_global_daily_spend_ceiling_refuses_loudly_when_reached(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Hitting the ceiling refuses with a 503 and logs at ERROR so operators are alerted."""
+    monkeypatch.setattr(_sub_mod.settings, "global_daily_spend_ceiling_credits", 100)
+    with pytest.raises(DomainError) as err:
+        _sub_mod._enforce_global_daily_spend_ceiling(_EngineStore(_ledger_engine(100)))
+    assert err.value.status_code == 503
+    assert err.value.code == "submission.capacity_reached"
+    assert any(r.levelname == "ERROR" and "spend ceiling" in r.getMessage() for r in caplog.records)
+
+
+def test_global_daily_spend_ceiling_admits_below_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Spend under the ceiling passes the gate."""
+    monkeypatch.setattr(_sub_mod.settings, "global_daily_spend_ceiling_credits", 100)
+    _sub_mod._enforce_global_daily_spend_ceiling(_EngineStore(_ledger_engine(99)))

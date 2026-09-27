@@ -146,6 +146,18 @@ export const TOOL_META: Record<string, ToolMetaDef> = {
     severity: "info",
     icon: Code,
   },
+  // The generalist's only code-writing tool; the edit_code entry above stays
+  // for older transcripts that still carry it.
+  request_code_authoring: {
+    title: () => msg("auto.features.agent.panel.lib.tool.meta.literal.18"),
+    description: () => formatMsg("auto.features.agent.panel.lib.tool.meta.template.14", {
+      p1: TERMS.signature,
+      p2: TERMS.metric,
+    }),
+    confirmLabel: () => msg("auto.features.agent.panel.lib.tool.meta.literal.19"),
+    severity: "info",
+    icon: Code,
+  },
   validate_code_validate_code_post: {
     title: () => msg("auto.features.agent.panel.lib.tool.meta.literal.20"),
     description: () => msg("auto.features.agent.panel.lib.tool.meta.literal.21"),

@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from core.billing.metering import estimate_run_credits, meter_llm_run, meter_llm_usage
+from core.billing.pricing import ModelUsage, credits_for_usage, fallback_priced_usages
+from core.billing.service import StripeBillingService
 from core.storage.models import Base, BillingCustomerModel, CreditLedgerModel
 
 
@@ -194,3 +197,43 @@ def test_meter_llm_usage_skips_empty_or_unbound(engine: object) -> None:
     assert meter_llm_usage(None, "alice@x.io", {"m": (1, 1)}, description="Scorer dry run") == 0
     assert meter_llm_usage(engine, "", {"m": (1, 1)}, description="Scorer dry run") == 0
     assert _ledger_rows(engine) == []
+
+
+def _fallback_cost(model: str, input_tokens: int, output_tokens: int) -> int:
+    """Credits a single-model usage costs at the conservative fallback rates."""
+    return credits_for_usage(fallback_priced_usages([ModelUsage(model, input_tokens, output_tokens)]))
+
+
+def test_meter_llm_run_charges_fallback_price_when_harvest_fails(
+    engine: object, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A metering fault logs at ERROR and still bills the raw tokens at the fallback rate."""
+    _fund(engine, "alice@x.io")
+    lm = _FakeLm([{"usage": {"prompt_tokens": 100_000, "completion_tokens": 40_000}}])
+    with patch("core.billing.metering._harvest_usages", side_effect=RuntimeError("boom")):
+        credits = meter_llm_run(engine, "alice@x.io", [lm], description="Agent chat")
+    assert credits == _fallback_cost("openrouter/test/unpriced", 100_000, 40_000)
+    (row,) = _ledger_rows(engine)
+    assert row.delta_credits == -credits
+    assert (row.input_tokens, row.output_tokens) == (100_000, 40_000)
+    assert any(r.levelname == "ERROR" and "fallback price" in r.getMessage() for r in caplog.records)
+
+
+def test_meter_llm_usage_charges_fallback_price_when_debit_fails(engine: object) -> None:
+    """A failed exact debit is retried once at the fallback rate rather than billing zero."""
+    _fund(engine, "alice@x.io")
+    real_debit = StripeBillingService.debit_run
+    calls: list[int] = []
+
+    def flaky(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("price lookup failed")
+        return real_debit(self, *args, **kwargs)
+
+    with patch.object(StripeBillingService, "debit_run", flaky):
+        credits = meter_llm_usage(engine, "alice@x.io", {"test/unpriced": (100_000, 40_000)}, description="Scorer")
+    assert len(calls) == 2
+    assert credits == _fallback_cost("test/unpriced", 100_000, 40_000)
+    (row,) = _ledger_rows(engine)
+    assert row.delta_credits == -credits

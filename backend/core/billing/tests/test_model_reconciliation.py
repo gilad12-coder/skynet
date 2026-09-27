@@ -16,9 +16,16 @@ from core.billing.operation_pricing import ChargePolicy
 from core.billing.runtime import PaidResult, UsagePendingError
 from core.billing.tests.test_protected_dispatch import CATALOG, REQUEST, _runtime
 from core.billing.tests.test_protected_dispatch import database as _database_fixture
+from core.config import settings
 from core.storage.models import ExecutionOperationModel, ExecutionUsageEvidenceModel
 
 database = _database_fixture
+
+
+@pytest.fixture(autouse=True)
+def _at_cost_markup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the usage markup to 1.0 so these tests check settlement arithmetic, not pricing policy."""
+    monkeypatch.setattr(settings, "usage_markup", 1.0)
 
 
 def test_truncated_stream_retains_charge_until_original_generation_settles(database) -> None:

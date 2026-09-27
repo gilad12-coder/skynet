@@ -21,7 +21,8 @@
  */
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { PaginatedJobsResponse } from "@/shared/types/api";
-import type { DashboardAnalytics, PublicDashboardPoint } from "@/shared/lib/api";
+import type { DashboardAnalytics, DatasetSummary, PublicDashboardPoint } from "@/shared/lib/api";
+import type { TutorialTrack } from "./steps";
 
 /**
  * The set of hooks the tutorial system can invoke. Every hook is a
@@ -75,6 +76,11 @@ export interface TutorialHooks {
   setCodeAssistMode: (mode: "auto" | "manual") => void;
   /** Open or close the generation model's config dialog. */
   setModelConfigOpen: (open: boolean) => void;
+  /**
+   * Fill the wizard's task and optimization models with the catalog's default,
+   * so the model step and the review summary show real picks and a real cost.
+   */
+  setDemoModels: () => void;
   /** Seed the wizard's signature code editor. */
   setSignatureCode: (code: string) => void;
   /** Seed the wizard's metric code editor. */
@@ -89,6 +95,10 @@ export interface TutorialHooks {
   setDemoAnalytics: (data: DashboardAnalytics) => void;
   /** Inject demo points into the explore scatter canvas when empty. */
   setDemoExplorePoints: (points: PublicDashboardPoint[]) => void;
+  /** Replace the dataset library's cards with demo datasets, or restore them with null. */
+  setDemoDatasets: (datasets: DatasetSummary[] | null) => void;
+  /** Select dataset cards by id, so the selection bar and its actions show. */
+  setSelectedDatasetIds: (ids: string[]) => void;
   /** Jump the tagger setup wizard to a specific step. */
   setTaggerStep: (step: number) => void;
   /** Inject demo rows into the tagger setup. */
@@ -122,6 +132,11 @@ export interface TutorialHooks {
    * instead of jumping to the completed state.
    */
   replayDemoSimulation: () => void;
+  /**
+   * Jump the demo optimization straight to its finished state, cancelling a
+   * replay in progress, so tabs that need the final result show at once.
+   */
+  finishDemoSimulation: () => void;
 }
 
 /**
@@ -133,6 +148,10 @@ export interface TutorialQueries {
   hasDashboardData: () => boolean;
   /** Check if the tagger setup has data loaded. */
   hasTaggerData: () => boolean;
+  /** Whether tagger setup offers the AI-assisted modes (flag and user setting both on). */
+  taggerAssistAvailable: () => boolean;
+  /** The guide that is running, or null when none is. */
+  activeTutorialTrack: () => TutorialTrack | null;
 }
 
 const registry: Partial<TutorialHooks> = {};

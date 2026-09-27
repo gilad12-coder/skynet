@@ -18,6 +18,7 @@ from core.billing.budgets import BudgetInsufficientError, BudgetService
 from core.billing.operation_pricing import UnpricedOperationError
 from core.billing.runtime import BudgetRuntime, UsagePendingError
 from core.billing.vercel_usage import quote_vercel_sandbox, vercel_actual_usd, vercel_sandbox_credit_range
+from core.config import settings
 from core.service_gateway.optimization.blackbox import sandbox as sandbox_module
 from core.service_gateway.optimization.blackbox.sandbox import SandboxSpec, VercelCredentials, VercelSandboxRuntime
 from core.storage.models import Base, BillingCustomerModel, ExecutionOperationModel, ExecutionUsageEvidenceModel
@@ -46,6 +47,12 @@ RECEIPT = {
     "activeCpuDurationMs": 5_000,
     "networkTransfer": {"ingress": 0, "egress": 0},
 }
+
+
+@pytest.fixture(autouse=True)
+def _at_cost_markup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the usage markup to 1.0 so these tests check settlement arithmetic, not pricing policy."""
+    monkeypatch.setattr(settings, "usage_markup", 1.0)
 
 
 @pytest.fixture

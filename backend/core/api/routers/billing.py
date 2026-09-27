@@ -28,7 +28,13 @@ from pydantic import BaseModel, Field
 
 from ...billing import ProviderKeyVault, StripeBillingService, openrouter_oauth
 from ...billing.byok_vault import ProviderKeyView, ResolvedConnection
-from ...billing.service import CUSTOM_CREDITS_MAX, CUSTOM_CREDITS_MIN
+from ...billing.pricing import PLATFORM_FEE_FRACTION, usage_markup
+from ...billing.service import (
+    CREDIT_PURCHASE_FEE_FIXED_CENTS,
+    CREDIT_PURCHASE_FEE_RATE,
+    CUSTOM_CREDITS_MAX,
+    CUSTOM_CREDITS_MIN,
+)
 from ...config import settings
 from ...provider_registry import BYOK_TO_LITELLM_PROVIDER
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -267,6 +273,31 @@ class PlanResponse(BaseModel):
     available: bool = Field(default=False, description="Whether Pro can be purchased on this deployment.")
 
 
+class PricingTermsResponse(BaseModel):
+    """The platform's live pricing terms, so client estimates never hardcode them."""
+
+    usage_markup: float = Field(description="Multiplier on provider cost for platform-paid tokens and sandbox compute.")
+    byok_fee_fraction: float = Field(
+        description="Platform fee on a BYOK run, as a fraction of its at-cost model price."
+    )
+    purchase_fee_rate: float = Field(description="Top-up service fee, as a fraction of the credit value.")
+    purchase_fee_fixed_cents: int = Field(description="Flat top-up service fee, in cents.")
+
+
+def _pricing_terms() -> PricingTermsResponse:
+    """Snapshot the current pricing terms from the billing modules.
+
+    Returns:
+        The markup, BYOK fee and top-up fee the backend charges right now.
+    """
+    return PricingTermsResponse(
+        usage_markup=usage_markup(),
+        byok_fee_fraction=PLATFORM_FEE_FRACTION,
+        purchase_fee_rate=CREDIT_PURCHASE_FEE_RATE,
+        purchase_fee_fixed_cents=CREDIT_PURCHASE_FEE_FIXED_CENTS,
+    )
+
+
 class WalletResponse(BaseModel):
     """The caller's wallet: purchased balance, free grant, recent ledger."""
 
@@ -274,6 +305,7 @@ class WalletResponse(BaseModel):
     free_grant: FreeGrantResponse
     usage: list[UsageEntryResponse] = Field(default_factory=list, description="Most-recent-first ledger rows.")
     plan: PlanResponse = Field(default_factory=lambda: PlanResponse(plan="free"))
+    pricing: PricingTermsResponse = Field(default_factory=_pricing_terms)
 
 
 class UsageDayResponse(BaseModel):

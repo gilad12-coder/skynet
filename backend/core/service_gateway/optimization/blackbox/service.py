@@ -17,6 +17,7 @@ import tempfile
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, replace
 from typing import Any
 
 import dspy
@@ -26,11 +27,12 @@ from ....billing.model_gateway import ROUTE_KEY
 from ....billing.operation_pricing import UnpricedOperationError
 from ....billing.pricing import (
     CREDIT_USD_VALUE,
-    MARKUP,
     PLATFORM_FEE_FRACTION,
+    ModelUsage,
+    combine_usages,
     credits_for_usage,
     raw_cost_usd,
-    usages_from_breakdown,
+    usage_markup,
 )
 from ....billing.protected_execution import runtime_cost_profile
 from ....billing.runtime import UsagePendingError
@@ -74,8 +76,8 @@ from ...language_models import (
     build_language_model,
     canonical_model_id,
     lm_call_count,
+    model_usages_from_history,
     total_tokens_from_history,
-    usage_by_model_from_history,
 )
 from ...safe_exec import validate_scorer_code
 from ..budget_stop import BudgetReached
@@ -516,7 +518,7 @@ def _reflection_caller(lm: dspy.LM) -> tuple[Callable[[str | list[dict[str, Any]
         @property
         def total_cost(self) -> float:
             """Return the provider cost represented by the model's usage history."""
-            return raw_cost_usd(usages_from_breakdown(usage_by_model_from_history(lm) or {}))
+            return raw_cost_usd(model_usages_from_history(lm) or [])
 
         def __call__(self, prompt: str | list[dict[str, Any]]) -> str:
             """Call the selected optimization model and record its duration.
@@ -621,7 +623,7 @@ def run_blackbox_optimization(
             logger.info("Scorer sandbox final usage is pending reconciliation")
 
 
-def _combined_usage(lms: list[Any], native: NativeOptions | None) -> dict[str, tuple[int, int]]:
+def _combined_usage(lms: list[Any], native: NativeOptions | None) -> list[ModelUsage]:
     """Preserve each native model's identity when combining token accounting.
 
     Args:
@@ -629,19 +631,22 @@ def _combined_usage(lms: list[Any], native: NativeOptions | None) -> dict[str, t
         native: Shared native usage collector, if the recipe uses one.
 
     Returns:
-        Model-specific input/output counts across both transports.
+        One usage row per model across both transports, with any reported cost
+        the DSPy lane recorded.
     """
-    usage = dict(usage_by_model_from_history(*lms) or {})
+    usages = list(model_usages_from_history(*lms) or [])
     if native is not None:
         with native.usage_lock:
             snapshot = {model: dict(counts) for model, counts in native.usage_by_model.items()}
-        for model, counts in snapshot.items():
-            previous = usage.get(model, (0, 0))
-            usage[model] = (
-                previous[0] + counts.get("prompt_tokens", 0),
-                previous[1] + counts.get("completion_tokens", 0),
+        usages.extend(
+            ModelUsage(
+                model=model,
+                input_tokens=counts.get("prompt_tokens", 0),
+                output_tokens=counts.get("completion_tokens", 0),
             )
-    return usage
+            for model, counts in snapshot.items()
+        )
+    return combine_usages(usages)
 
 
 def _run_job(
@@ -727,8 +732,10 @@ def _run_job(
     reflection_lm, reflection_durations_ms = _reflection_caller(lm)
     token_budget = None
     if payload.max_cost_credits is not None:
-        source_fraction = PLATFORM_FEE_FRACTION if payload.reflection_model_settings.token_source == "byok" else 1.0
-        token_budget = payload.max_cost_credits * CREDIT_USD_VALUE / (MARKUP * source_fraction)
+        cost_multiplier = (
+            PLATFORM_FEE_FRACTION if payload.reflection_model_settings.token_source == "byok" else usage_markup()
+        )
+        token_budget = payload.max_cost_credits * CREDIT_USD_VALUE / cost_multiplier
     needs_native = payload.strategy.mode != "single" or payload.strategy.engine in NATIVE_ENGINES
     native_options = None
     if needs_native:
@@ -788,15 +795,14 @@ def _run_job(
 
         def check_budget() -> None:
             """Stop engine boundaries even when DSPy has caught a callback exception."""
-            usage = usages_from_breakdown(_combined_usage(lms, native_options))
-            if credits_for_usage(usage) >= payload.max_cost_credits:
+            if credits_for_usage(_combined_usage(lms, native_options)) >= payload.max_cost_credits:
                 raise BudgetReached("The run's total credit budget has been reached.")
 
         ctx.check_budget = check_budget
 
         def remaining_cost_usd() -> float:
             """Return the run allowance after measured model usage across every lane."""
-            spent = raw_cost_usd(usages_from_breakdown(_combined_usage(lms, native_options)))
+            spent = raw_cost_usd(_combined_usage(lms, native_options))
             return max(0.0, float(token_budget) - spent)
 
         ctx.remaining_cost_usd = remaining_cost_usd
@@ -858,11 +864,9 @@ def _run_job(
 
     # The reflection LM reports the gateway transport id (``litellm_proxy/…``)
     # while the scorer ledger keys by catalog id; fold them so one model is one row.
-    usage: dict[str, tuple[int, int]] = {}
-    for model, in_out in _combined_usage(lms, native_options).items():
-        key = canonical_model_id(model)
-        prior = usage.get(key, (0, 0))
-        usage[key] = (prior[0] + in_out[0], prior[1] + in_out[1])
+    usage = combine_usages(
+        replace(row, model=canonical_model_id(row.model)) for row in _combined_usage(lms, native_options)
+    )
     engine_used = str(result.metadata.get("engine") or payload.strategy.engine or BLACKBOX_STRATEGY_AUTO)
     candidate_tree = [BlackboxCandidateNode(**node) for node in result.metadata.pop("candidate_tree", [])]
     response = BlackboxRunResponse(
@@ -893,11 +897,8 @@ def _run_job(
         runtime_seconds=time.perf_counter() - started,
         num_lm_calls=sum(lm_call_count(model) or 0 for model in lms),
         lm_activity=_reflection_activity(reflection_durations_ms),
-        total_tokens=sum(sum(in_out) for in_out in usage.values()) or total_tokens_from_history(*lms),
-        usage_by_model=[
-            ModelTokenUsage(model=model, input_tokens=in_out[0], output_tokens=in_out[1])
-            for model, in_out in usage.items()
-        ],
+        total_tokens=sum(row.input_tokens + row.output_tokens for row in usage) or total_tokens_from_history(*lms),
+        usage_by_model=[ModelTokenUsage(**asdict(row)) for row in usage],
         optimization_metadata={
             "strategy": payload.strategy.model_dump(),
             "budget": payload.budget.model_dump(),

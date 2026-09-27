@@ -21,6 +21,7 @@ import {
   MySQL,
   OneDrive,
   PostgreSQL,
+  Supabase,
 } from "@/shared/ui/brand-marks";
 import {
   removeConnector,
@@ -88,7 +89,7 @@ export const PROVIDER_GROUPS: Array<{
     providers: ["google_drive", "onedrive", "github", "s3", "gcs", "azure_blob"],
   },
   { category: "docs", providers: ["google_sheets", "notion"] },
-  { category: "databases", providers: ["postgres", "mysql", "bigquery", "snowflake"] },
+  { category: "databases", providers: ["postgres", "mysql", "supabase", "bigquery", "snowflake"] },
   { category: "traces", providers: ["langfuse", "langsmith", "braintrust"] },
 ];
 
@@ -366,6 +367,24 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
             "url",
             msg("connectors.field.database_url"),
             msg("connectors.field.mysql_url_placeholder"),
+          ),
+        ],
+      };
+    case "supabase":
+      return {
+        ...generic(id, "databases", msg("connectors.supabase.name")),
+        blurb: msg("connectors.supabase.blurb"),
+        Avatar: Supabase.Avatar,
+        Mark: Supabase.Mark,
+        oauthButton: msg("connectors.supabase.oauth_button"),
+        credentialsHelp: msg("connectors.supabase.credentials_help"),
+        helpUrl: "https://supabase.com/dashboard",
+        helpUrlLabel: "supabase.com/dashboard",
+        fields: [
+          secretField(
+            "url",
+            msg("connectors.field.database_url"),
+            msg("connectors.field.supabase_url_placeholder"),
           ),
         ],
       };

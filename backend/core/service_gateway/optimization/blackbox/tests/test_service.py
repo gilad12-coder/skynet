@@ -691,7 +691,7 @@ def test_combined_usage_preserves_distinct_native_model_keys() -> None:
         },
     )
 
-    assert service_mod._combined_usage([lm], native) == {
+    assert {row.model: (row.input_tokens, row.output_tokens) for row in service_mod._combined_usage([lm], native)} == {
         "fake/model": (13, 6),
         "native/other-model": (7, 2),
     }

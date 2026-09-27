@@ -21,7 +21,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header
@@ -29,7 +29,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
-from ...models import ModelConfig
 from ...service_gateway.agents.generalist import (
     TrustMode,
     WizardState,
@@ -42,8 +41,8 @@ from ...storage.models import AgentConversationModel, AgentMessageModel
 from ..agent_memory import wake_document
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
-from ..model_catalog import require_known_model
-from ..model_router import resolve_auto_tier, route_auto_model
+from ..model_catalog import ReasoningEffort
+from ..model_router import effective_reasoning_effort, route_agent_model
 from ._helpers import enforce_llm_credits, sse_from_events, stream_with_llm_metering
 
 logger = logging.getLogger(__name__)
@@ -151,12 +150,11 @@ class GeneralistAgentRequest(BaseModel):
         default=None,
         description=(
             "LiteLLM id of the catalog model to run this turn on (the "
-            "composer's model menu). Absent routes automatically per turn "
-            "(balanced tier); the sentinel 'auto:intelligent' routes to a "
-            "frontier model on every turn."
+            "composer's model menu). Absent runs the catalog's best-value "
+            "default model."
         ),
     )
-    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = Field(
+    reasoning_effort: ReasoningEffort | None = Field(
         default=None,
         description=(
             "Explicit reasoning-effort level for the chosen model; absent "
@@ -404,6 +402,7 @@ async def _wrap_with_persistence(
     tool_order: list[str] = []
     model_used: str | None = None
     served_model_used: str | None = None
+    turn_stats: dict[str, Any] | None = None
     allowed_tools: list[str] | None = None
     tool_schema_hashes: dict[str, str] | None = None
     wizard_state_after: dict[str, Any] = dict(wizard_state_before) if wizard_state_before else {}
@@ -434,7 +433,12 @@ async def _wrap_with_persistence(
                 wizard_state_after=wizard_state_after or None,
                 allowed_tools=allowed_tools,
                 tool_schema_hashes=tool_schema_hashes,
-                router_metadata={"served_model": served_model_used} if served_model_used else None,
+                router_metadata={
+                    key: value
+                    for key, value in (("served_model", served_model_used), ("stats", turn_stats))
+                    if value
+                }
+                or None,
             )
         except Exception:
             logger.exception("Failed to persist assistant turn")
@@ -492,6 +496,8 @@ async def _wrap_with_persistence(
                 model_used = raw_model if isinstance(raw_model, str) and raw_model else None
                 raw_served = data.get("served_model")
                 served_model_used = raw_served if isinstance(raw_served, str) and raw_served else None
+                raw_stats = data.get("stats")
+                turn_stats = raw_stats if isinstance(raw_stats, dict) else None
                 await _do_persist(content)
             yield event
     finally:
@@ -627,16 +633,10 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
         memory_context = await asyncio.to_thread(_wake_memory)
 
         wizard_state: WizardState = {**req.wizard_state}  # type: ignore[typeddict-item]
-        requested_model, auto_tier = resolve_auto_tier(req.model)
-        require_known_model(requested_model)
-        model_config = (
-            ModelConfig(
-                name=requested_model,
-                extra=({"reasoning_effort": req.reasoning_effort} if req.reasoning_effort else {}),
-            )
-            if requested_model
-            else route_auto_model(auto_tier or "balanced", conversation_id)
-        )
+        model_config = route_agent_model(req.model)
+        effort = effective_reasoning_effort(model_config.name, req.reasoning_effort)
+        if effort:
+            model_config = model_config.model_copy(update={"extra": {**model_config.extra, "reasoning_effort": effort}})
         usage_sink: list = []
         source = run_generalist_agent(
             wizard_state=wizard_state,

@@ -24,8 +24,8 @@ artifacts' events — ``signature_*`` for the starting point, ``metric_*``
 for the scorer — so the editor wiring is shared.
 
 The agent runs on whatever LiteLLM-compatible model is configured via
-``settings.code_agent_model`` (default: ``openrouter/openrouter/auto-beta``,
-OpenRouter's Auto Router). Users can point it at an internal gateway via
+``settings.code_agent_model`` (default: the model catalog's best-value
+pick). Users can point it at an internal gateway via
 ``CODE_AGENT_BASE_URL``.
 """
 
@@ -44,6 +44,7 @@ import dspy
 import jiter
 from pydantic import ValidationError
 
+from ...api.model_catalog import agent_model_id
 from ...config import settings
 from ...exceptions import ServiceError
 from ...models import ModelConfig, WorkflowSpec
@@ -1676,16 +1677,21 @@ class ReactReplyStream:
     then feed every non-reasoning ``StreamResponse`` through ``reply_delta``.
     """
 
-    def __init__(self, program: dspy.Module, reply_field: str):
+    def __init__(self, program: dspy.Module, reply_field: str, lm: dspy.LM | None = None):
         """Bind to a constructed ReActV2 program and the signature's reply field.
 
         Args:
             program: The constructed ReActV2 program (or subclass).
             reply_field: Output field carrying the user-visible reply, a
                 ``submit`` argument.
+            lm: The LM the loop runs on; defaults to the active ``dspy.settings.lm``.
         """
         self._program = program
-        self._native = native_tool_calling_active()
+        lm = lm or getattr(dspy.settings, "lm", None)
+        # The adapter only sends native tools when the LM also claims support;
+        # otherwise it silently falls back to the text protocol, and a native
+        # listener would never see the reply.
+        self._native = native_tool_calling_active() and (lm is None or bool(lm.supports_function_calling))
         self._stream_field = "tool_calls"
         if self._native:
             self._extractor: _NativeSubmitArgExtractor | _SubmitArgExtractor = _NativeSubmitArgExtractor(reply_field)
@@ -1751,7 +1757,6 @@ class ReactReplyStream:
 def _build_agent_lm(
     model_name_override: str | None = None,
     reasoning_effort: str | None = None,
-    lm_extra_body: dict[str, Any] | None = None,
 ) -> dspy.LM:
     """Construct the LM used by the code agent from global settings.
 
@@ -1761,8 +1766,6 @@ def _build_agent_lm(
             code-agent model.
         reasoning_effort: Explicit effort level for the chosen model; ``None``
             keeps the model's default.
-        lm_extra_body: Extra request-body fields merged into the provider
-            call (the auto router's plugin dial rides here).
 
     Reasoning knobs we send, by provider:
 
@@ -1779,7 +1782,7 @@ def _build_agent_lm(
     Returns:
         A configured :class:`dspy.LM` instance for the code agent.
     """
-    model_name = model_name_override or settings.code_agent_model
+    model_name = model_name_override or agent_model_id(settings.code_agent_model)
     lower = model_name.lower()
     extra: dict = {}
     is_native_minimax = lower.startswith("minimax/") or (
@@ -1787,8 +1790,6 @@ def _build_agent_lm(
     )
     if is_native_minimax:
         extra["extra_body"] = {"reasoning_split": True}
-    if lm_extra_body:
-        extra["extra_body"] = {**extra.get("extra_body", {}), **lm_extra_body}
     config = ModelConfig(
         name=model_name,
         base_url=settings.code_agent_base_url or None,
@@ -2985,7 +2986,7 @@ async def _run_agent(
     )
     # The user's ``reply`` rides a ``submit`` tool call; ``ReactReplyStream``
     # wires the listeners and decodes it into reply deltas.
-    reply_stream = ReactReplyStream(react, "reply")
+    reply_stream = ReactReplyStream(react, "reply", lm)
     program = dspy.streamify(
         react,
         stream_listeners=reply_stream.listeners(),
@@ -3256,7 +3257,7 @@ async def _run_workflow_agent(
         ],
         max_iters=8,
     )
-    reply_stream = ReactReplyStream(react, "reply")
+    reply_stream = ReactReplyStream(react, "reply", lm)
     program = dspy.streamify(
         react,
         stream_listeners=reply_stream.listeners(),
@@ -3514,7 +3515,7 @@ async def _run_blackbox_agent(
     # Same iteration budget as ``_run_agent``: both artifacts edited with one
     # validator-driven retry each, plus the submit carrying the reply.
     react = dspy.ReActV2(BlackboxAssistant, tools=[session.edit_seed, session.edit_scorer], max_iters=5)
-    reply_stream = ReactReplyStream(react, "reply")
+    reply_stream = ReactReplyStream(react, "reply", lm)
     program = dspy.streamify(react, stream_listeners=reply_stream.listeners(), async_streaming=True)
 
     inputs = {
@@ -3726,7 +3727,6 @@ async def run_code_agent(
     locale: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
-    lm_extra_body: dict[str, Any] | None = None,
     usage_sink: list | None = None,
     blackbox: dict[str, Any] | None = None,
 ) -> AsyncGenerator[dict, None]:
@@ -3795,8 +3795,6 @@ async def run_code_agent(
             (``settings.code_agent_model``).
         reasoning_effort: Explicit reasoning-effort level for ``model``;
             ``None`` keeps the model's default.
-        lm_extra_body: Provider ``extra_body`` (e.g. the auto-router plugin
-            dial) merged into the LM's request payload.
         usage_sink: Optional list the built LM is appended to, so the caller
             can meter the turn's token usage on any exit path.
         blackbox: The black-box wizard's authoring context (``recipe``,
@@ -3806,8 +3804,8 @@ async def run_code_agent(
     Yields:
         SSE event dicts of shape ``{"event": str, "data": dict}``.
     """
-    lm = _build_agent_lm(model, reasoning_effort, lm_extra_body)
-    model_name = model or settings.code_agent_model
+    lm = _build_agent_lm(model, reasoning_effort)
+    model_name = model or agent_model_id(settings.code_agent_model)
     if usage_sink is not None:
         usage_sink.append(lm)
     column_roles_json = json.dumps(column_roles, ensure_ascii=False)

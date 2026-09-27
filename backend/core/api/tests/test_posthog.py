@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +13,10 @@ from pydantic import SecretStr
 
 from ...config import settings
 from .. import posthog
+
+_FRONTEND_EVENTS_TS = (
+    Path(__file__).resolve().parents[4] / "frontend" / "src" / "shared" / "lib" / "telemetry" / "events.ts"
+)
 
 
 def _events() -> list[dict[str, object]]:
@@ -148,3 +154,19 @@ def test_export_falls_back_to_user_hash_without_browser_id(monkeypatch: pytest.M
     assert properties["pack_id"] == "starter"
     assert properties["credits"] == 500
     assert "card" not in properties
+
+
+def test_allowlist_covers_every_frontend_telemetry_event() -> None:
+    """Every name in the frontend ``TelemetryEvent`` registry is exported."""
+    source = _FRONTEND_EVENTS_TS.read_text(encoding="utf-8")
+    body = source[source.index("export const TelemetryEvent") :]
+    body = body[body.index("{") + 1 : body.index("}")]
+    names = set(re.findall(r'"([a-z0-9_]+)"', body))
+    assert names
+    assert names <= posthog._EVENT_NAMES
+
+
+def test_allowlist_covers_server_emitted_events() -> None:
+    """The worker's run outcomes and the Stripe purchase milestone are exported."""
+    server_events = {"run_completed", "run_failed", "run_cancelled", "run_stopped", "purchase_completed"}
+    assert server_events <= posthog._EVENT_NAMES

@@ -118,6 +118,27 @@ def _entry(item: dict[str, Any]) -> Entry | None:
     return None
 
 
+def web_url(secret: ConnectorSecret, location: str) -> str | None:
+    """Link to a browse location in OneDrive.
+
+    Args:
+        secret: The stored connector.
+        location: Empty for the drive root, else an item id.
+
+    Returns:
+        The item's web URL, or ``None`` when Graph withholds it.
+    """
+    item = f"items/{quote(location, safe='')}" if location else "root"
+    body = get_json(
+        f"{GRAPH_URL}/me/drive/{item}",
+        provider=PROVIDER,
+        headers=_headers(secret.access_token),
+        params={"$select": "webUrl"},
+    )
+    url = body.get("webUrl") if isinstance(body, dict) else None
+    return url if isinstance(url, str) else None
+
+
 def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
     """List a folder, or search the drive by name.
 

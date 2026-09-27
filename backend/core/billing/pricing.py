@@ -1,149 +1,299 @@
 """Per-model, per-token run pricing — the shared basis for estimate and charge.
 
-A run's credit cost is the real provider cost of its tokens (LiteLLM's
-``model_cost`` registry, input and output priced separately), converted to
-credits at :data:`CREDIT_USD_VALUE` — one credit per cent, **at par with the
-dollar**. Runs are sold at true provider cost: :data:`MARKUP` is ``1.0``. The
-platform earns its margin the way OpenRouter does — on the credit-purchase
-(deposit) fee, not a per-token markup — so a credit is simply a US cent that can
-only be spent inside Skynet, never a separate inflated unit. The *same* function
-prices a projected token volume (the pre-run estimate) and a measured token
-volume (the post-run charge), so the two reconcile by construction — only their
-inputs differ.
+A run's credit cost is the provider cost of its tokens times the configured
+usage markup (``settings.usage_markup``, env ``USAGE_MARKUP``), converted to
+credits at :data:`CREDIT_USD_VALUE` — one credit per cent. The markup applies to
+every platform-paid metered charge; a BYOK run pays only
+:data:`PLATFORM_FEE_FRACTION` of the at-cost model price instead.
 
-Model choice moves a run's price. :data:`MARKUP` stays a single re-priceable
-lever (mirrored by the frontend estimate) should a per-run margin ever be
-reintroduced, but at ``1.0`` it is a no-op and runs bill exactly what the tokens
-cost. The module is a leaf — it depends only on LiteLLM's static price table —
-so both the billing service and any estimator can import it without cycles.
+Provider cost comes, in order of preference, from:
+
+1. the ``usage.cost`` OpenRouter reported on the response itself;
+2. OpenRouter's live per-model prices (:mod:`.openrouter_prices`), splitting
+   prompt, cache-read, cache-write, completion and reasoning tokens;
+3. LiteLLM's static ``model_cost`` table;
+4. a deliberately high fallback rate, logged as a warning, so an unpriced model
+   is over- rather than under-charged.
+
+The *same* function prices a projected token volume (the pre-run estimate) and a
+measured one (the post-run charge), so the two reconcile by construction.
 """
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, replace
 
 import litellm
 
-# One credit is worth one US cent, at par with the dollar: a credit is just a
-# cent that can only be spent inside Skynet. Buying credits carries a purchase
-# fee (see the credit module), which is where the platform's margin comes from —
-# not from the credit's spending value, which stays 1:1 with USD.
+from ..config import settings
+from .openrouter_prices import TokenPrices, live_prices
+
+logger = logging.getLogger(__name__)
+
+# One credit is worth one US cent: a credit is just a cent that can only be
+# spent inside Skynet. The markup is applied to the cost, never to the credit.
 CREDIT_USD_VALUE = 0.01
 
-# Multiplier applied to raw provider cost before converting to credits. Runs are
-# sold at true provider cost, so this is 1.0 (a no-op): the platform earns on the
-# credit-purchase fee, OpenRouter-style, not a per-token markup. It stays a named
-# lever, mirrored by the frontend estimate, so a per-run margin could be
-# reintroduced in one place if the model ever changes — keep the two in step.
-MARKUP = 1.0
-
 # The platform fee charged on a run whose provider tokens are paid directly
-# through the user's own key (BYOK): a small share of the equivalent model cost,
-# mirroring OpenRouter's 5% BYOK fee. The tokens are on the user's key, so this
-# is the only amount a BYOK run spends. Mirrored by the frontend estimate.
+# through the user's own key (BYOK): a small share of the equivalent at-cost
+# model price, mirroring OpenRouter's 5% BYOK fee. The usage markup never
+# applies on top of it.
 PLATFORM_FEE_FRACTION = 0.05
 
-# Fallback per-token cost (USD) for a model LiteLLM does not price — a mid-tier
-# standard rate so an unknown model estimates and charges sanely rather than at
-# zero (which would give it away) or at a frontier rate (which would scare).
-DEFAULT_INPUT_COST_PER_TOKEN = 1e-6
-DEFAULT_OUTPUT_COST_PER_TOKEN = 3e-6
+# Rates for a model neither OpenRouter nor LiteLLM prices, set at a frontier
+# model's list price so an unknown model can only be over-charged, never given
+# away below cost.
+FALLBACK_INPUT_COST_PER_TOKEN = 15e-6
+FALLBACK_OUTPUT_COST_PER_TOKEN = 75e-6
+
+_warned_unpriced: set[str] = set()
+
+
+def usage_markup() -> float:
+    """Return the multiplier applied to platform-paid provider cost.
+
+    Returns:
+        ``settings.usage_markup`` (``1.15`` unless ``USAGE_MARKUP`` overrides it).
+    """
+    return settings.usage_markup
 
 
 @dataclass(frozen=True)
 class ModelUsage:
     """Token usage attributed to one model in a run — measured or projected.
 
-    ``input_tokens`` and ``output_tokens`` are priced separately because output
-    typically costs several times input. For a projected (estimate) usage these
-    are forecasts; for a charge they are the measured prompt/completion totals.
+    ``input_tokens`` and ``output_tokens`` are the full totals. When some calls
+    reported their own provider cost, ``reported_cost_usd`` is that cost and the
+    ``reported_*_tokens`` fields are the tokens it already covers; only the
+    remainder is priced per token. ``cache_read_tokens``, ``cache_write_tokens``
+    (subsets of the unreported input) and ``reasoning_tokens`` (a subset of the
+    unreported output) are priced at their own rates when the model has them.
     """
 
     model: str
     input_tokens: int
     output_tokens: int
+    reported_cost_usd: float = 0.0
+    reported_input_tokens: int = 0
+    reported_output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    reasoning_tokens: int = 0
 
 
-def model_token_costs(model_id: str) -> tuple[float, float]:
-    """Return a model's ``(input, output)`` per-token cost in USD.
+def _positive(value: object) -> float | None:
+    """Return a strictly positive numeric rate, else ``None``.
 
-    Looks the id up in LiteLLM's ``model_cost`` table, retrying without the
-    provider prefix (``openai/gpt-4o-mini`` → ``gpt-4o-mini``) since the table
-    keys both shapes inconsistently. A model the table doesn't price — or prices
-    with a missing/zero field — falls back to the module defaults so it is never
-    silently free.
+    Args:
+        value: A raw price-table value.
+
+    Returns:
+        The rate as a float, or ``None`` when missing, non-numeric or not positive.
+    """
+    return float(value) if isinstance(value, (int, float)) and value > 0 else None
+
+
+def _static_prices(model_id: str) -> TokenPrices | None:
+    """Look a model up in LiteLLM's static ``model_cost`` table.
+
+    Retries without the provider prefix (``openai/gpt-4o-mini`` →
+    ``gpt-4o-mini``) since the table keys both shapes inconsistently.
 
     Args:
         model_id: Fully-qualified or bare model id.
 
     Returns:
-        The ``(input_cost_per_token, output_cost_per_token)`` pair in USD.
+        The model's prices, or ``None`` when the table lacks an input or output rate.
     """
     meta = litellm.model_cost.get(model_id)
     if meta is None and "/" in model_id:
         meta = litellm.model_cost.get(model_id.split("/", 1)[1])
     if not isinstance(meta, Mapping):
-        return DEFAULT_INPUT_COST_PER_TOKEN, DEFAULT_OUTPUT_COST_PER_TOKEN
-    in_cost = meta.get("input_cost_per_token")
-    out_cost = meta.get("output_cost_per_token")
-    return (
-        float(in_cost) if isinstance(in_cost, (int, float)) and in_cost > 0 else DEFAULT_INPUT_COST_PER_TOKEN,
-        float(out_cost) if isinstance(out_cost, (int, float)) and out_cost > 0 else DEFAULT_OUTPUT_COST_PER_TOKEN,
+        return None
+    prompt = _positive(meta.get("input_cost_per_token"))
+    completion = _positive(meta.get("output_cost_per_token"))
+    if prompt is None or completion is None:
+        return None
+    return TokenPrices(
+        prompt=prompt,
+        completion=completion,
+        cache_read=_positive(meta.get("cache_read_input_token_cost")),
+        cache_write=_positive(meta.get("cache_creation_input_token_cost")),
+        reasoning=_positive(meta.get("output_cost_per_reasoning_token")),
     )
 
 
+def model_token_prices(model_id: str) -> TokenPrices:
+    """Return a model's per-token USD prices, never zero.
+
+    Args:
+        model_id: The model id as billed.
+
+    Returns:
+        Live OpenRouter prices, else LiteLLM's static prices, else the high
+        fallback rates (logged once per model as a warning).
+    """
+    prices = live_prices(model_id) or _static_prices(model_id)
+    if prices is not None:
+        return prices
+    if model_id not in _warned_unpriced:
+        _warned_unpriced.add(model_id)
+        logger.warning(
+            "No price known for model %r; billing at the fallback rate of $%.2f/$%.2f per M tokens",
+            model_id,
+            FALLBACK_INPUT_COST_PER_TOKEN * 1e6,
+            FALLBACK_OUTPUT_COST_PER_TOKEN * 1e6,
+        )
+    return TokenPrices(prompt=FALLBACK_INPUT_COST_PER_TOKEN, completion=FALLBACK_OUTPUT_COST_PER_TOKEN)
+
+
+def model_token_costs(model_id: str) -> tuple[float, float]:
+    """Return a model's ``(input, output)`` per-token cost in USD, at cost.
+
+    Args:
+        model_id: Fully-qualified or bare model id.
+
+    Returns:
+        The ``(prompt, completion)`` pair from :func:`model_token_prices`.
+    """
+    prices = model_token_prices(model_id)
+    return prices.prompt, prices.completion
+
+
+def usage_cost_usd(usage: ModelUsage) -> float:
+    """Price one model's usage at provider cost (USD, before markup).
+
+    Args:
+        usage: The model's token usage and any cost the provider reported.
+
+    Returns:
+        The reported cost plus the per-token price of the tokens it does not cover.
+    """
+    unreported_in = max(0, usage.input_tokens - usage.reported_input_tokens)
+    unreported_out = max(0, usage.output_tokens - usage.reported_output_tokens)
+    cost = max(0.0, usage.reported_cost_usd)
+    if unreported_in == 0 and unreported_out == 0:
+        return cost
+    prices = model_token_prices(usage.model)
+    cache_read = min(max(0, usage.cache_read_tokens), unreported_in)
+    cache_write = min(max(0, usage.cache_write_tokens), unreported_in - cache_read)
+    reasoning = min(max(0, usage.reasoning_tokens), unreported_out)
+    cost += (unreported_in - cache_read - cache_write) * prices.prompt
+    cost += cache_read * (prices.cache_read if prices.cache_read is not None else prices.prompt)
+    cost += cache_write * (prices.cache_write if prices.cache_write is not None else prices.prompt)
+    cost += reasoning * (prices.reasoning if prices.reasoning is not None else prices.completion)
+    cost += (unreported_out - reasoning) * prices.completion
+    return cost
+
+
 def raw_cost_usd(usages: Iterable[ModelUsage]) -> float:
-    """Sum the raw provider cost (USD, pre-markup) of per-model token usage.
+    """Sum the provider cost (USD, before markup) of per-model usage.
 
     Args:
-        usages: Per-model input/output token counts.
+        usages: Per-model usage rows.
 
     Returns:
-        The total un-marked-up provider cost in USD.
+        The total at-cost provider spend in USD.
     """
-    total = 0.0
-    for usage in usages:
-        in_cost, out_cost = model_token_costs(usage.model)
-        total += usage.input_tokens * in_cost + usage.output_tokens * out_cost
-    return total
+    return sum(usage_cost_usd(usage) for usage in usages)
 
 
-def credits_for_usage(usages: Iterable[ModelUsage]) -> int:
-    """Convert per-model token usage to the credits it costs, rounding up.
-
-    Divides the raw provider cost (times :data:`MARKUP`, which is ``1.0`` — runs
-    bill at cost) by :data:`CREDIT_USD_VALUE`, so a run costs the true dollar
-    value of its tokens in par credits. Any non-zero usage costs at least one
-    credit (a partial credit rounds up), so a run that consumed tokens is never
-    billed zero; zero usage costs zero.
+def credits_for_cost_usd(cost_usd: float) -> int:
+    """Convert a USD amount to credits, rounding any non-zero amount up.
 
     Args:
-        usages: Per-model input/output token counts (measured or projected).
+        cost_usd: The amount to bill, already marked up (or fee-scaled).
 
     Returns:
-        The non-negative credit cost.
+        The non-negative credit cost; a positive amount costs at least one credit.
     """
-    cost = raw_cost_usd(usages) * MARKUP
-    if cost <= 0:
+    if cost_usd <= 0:
         return 0
-    return max(1, math.ceil(cost / CREDIT_USD_VALUE))
+    return max(1, math.ceil(cost_usd / CREDIT_USD_VALUE))
+
+
+def credits_for_usage(usages: Iterable[ModelUsage], *, markup: float | None = None) -> int:
+    """Convert per-model usage to the credits a platform-paid run costs.
+
+    Args:
+        usages: Per-model usage (measured or projected).
+        markup: Multiplier on provider cost; ``None`` uses :func:`usage_markup`.
+            Pass ``1.0`` for the at-cost value a BYOK fee is computed from.
+
+    Returns:
+        The non-negative credit cost; any non-zero usage costs at least one credit.
+    """
+    factor = usage_markup() if markup is None else markup
+    return credits_for_cost_usd(raw_cost_usd(usages) * factor)
 
 
 def usages_from_breakdown(breakdown: Mapping[str, tuple[int, int]]) -> list[ModelUsage]:
     """Build :class:`ModelUsage` rows from a ``model → (input, output)`` mapping.
 
-    Adapts the billing-agnostic breakdown that
-    :func:`core.service_gateway.language_models.usage_by_model_from_history`
-    returns into the priced unit this module consumes.
-
     Args:
         breakdown: Per-model ``(input_tokens, output_tokens)`` pairs.
 
     Returns:
-        One :class:`ModelUsage` per model.
+        One :class:`ModelUsage` per model, priced wholly per token.
     """
     return [
         ModelUsage(model=model, input_tokens=in_out[0], output_tokens=in_out[1]) for model, in_out in breakdown.items()
     ]
+
+
+def fallback_priced_usages(usages: Iterable[ModelUsage]) -> list[ModelUsage]:
+    """Reprice usage rows wholly at the fallback frontier rates.
+
+    Used when exact pricing failed: the tokens are known but the charge could
+    not be computed, so it is recomputed at :data:`FALLBACK_INPUT_COST_PER_TOKEN`
+    / :data:`FALLBACK_OUTPUT_COST_PER_TOKEN` — conservative, so a metering fault
+    over-charges rather than giving the run away. The cost is carried as a
+    reported cost covering every token, so pricing it needs no price lookup
+    (the step most likely to have failed).
+
+    Args:
+        usages: Per-model usage whose token counts are trusted.
+
+    Returns:
+        One row per input row, priced entirely at the fallback rates.
+    """
+    return [
+        ModelUsage(
+            model=usage.model,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            reported_cost_usd=usage.input_tokens * FALLBACK_INPUT_COST_PER_TOKEN
+            + usage.output_tokens * FALLBACK_OUTPUT_COST_PER_TOKEN,
+            reported_input_tokens=usage.input_tokens,
+            reported_output_tokens=usage.output_tokens,
+        )
+        for usage in usages
+        if usage.input_tokens > 0 or usage.output_tokens > 0
+    ]
+
+
+def combine_usages(usages: Iterable[ModelUsage]) -> list[ModelUsage]:
+    """Sum usage rows that share a model id into one row per model.
+
+    Args:
+        usages: Rows that may repeat a model (e.g. after rekeying ids).
+
+    Returns:
+        One row per distinct model, every counter and reported cost summed.
+    """
+    merged: dict[str, ModelUsage] = {}
+    for usage in usages:
+        prior = merged.get(usage.model)
+        if prior is None:
+            merged[usage.model] = usage
+            continue
+        merged[usage.model] = replace(
+            prior,
+            **{
+                f.name: getattr(prior, f.name) + getattr(usage, f.name) for f in fields(ModelUsage) if f.name != "model"
+            },
+        )
+    return list(merged.values())

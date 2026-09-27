@@ -310,10 +310,9 @@ def test_apply_reasoning_config_native_minimax_sets_extra_and_floor() -> None:
 
 
 def test_apply_reasoning_config_shipped_default_floors_without_extra() -> None:
-    """The shipped auto-router default gets max_tokens>=4000 and no extra."""
-    out = apply_model_reasoning_config(ModelConfig(name=settings.generalist_agent_model))
+    """OpenRouter's auto router gets max_tokens>=4000 and no extra."""
+    out = apply_model_reasoning_config(ModelConfig(name="openrouter/openrouter/auto-beta"))
 
-    assert settings.generalist_agent_model == "openrouter/openrouter/auto-beta"
     assert out.max_tokens == 4000
     assert out.extra == {}
 
@@ -439,15 +438,15 @@ def test_gateway_reasoning_translates_effort_to_native_param() -> None:
     assert kwargs["extra_body"] == {"reasoning": {"effort": "low", "summary": "auto"}}
 
 
-def test_gateway_reasoning_maps_max_to_openrouter_ceiling() -> None:
-    """Anthropic's ``max`` maps to ``xhigh`` on both wire forms, kept in agreement."""
+def test_gateway_reasoning_passes_anthropic_max_through() -> None:
+    """Claude's ``max`` reaches OpenRouter unchanged on both wire forms."""
     kwargs: dict[str, object] = {
-        "model": "openrouter/anthropic/claude-fable-5",
+        "model": "openrouter/anthropic/claude-opus-5.5",
         "reasoning_effort": "max",
     }
     _translate_gateway_reasoning(kwargs)
-    assert kwargs["reasoning_effort"] == "xhigh"
-    assert kwargs["extra_body"] == {"reasoning": {"effort": "xhigh", "summary": "auto"}}
+    assert kwargs["reasoning_effort"] == "max"
+    assert kwargs["extra_body"] == {"reasoning": {"effort": "max", "summary": "auto"}}
 
 
 def test_gateway_reasoning_preserves_glm_max_effort() -> None:
@@ -499,7 +498,7 @@ def test_gateway_reasoning_aligns_kwarg_to_caller_supplied_body() -> None:
 def test_gateway_reasoning_preserves_caller_summary_choice() -> None:
     """A caller-selected summary verbosity is not replaced by the default."""
     kwargs: dict[str, object] = {
-        "model": "openrouter/openai/gpt-5.6-terra",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
         "reasoning_effort": "high",
         "extra_body": {"reasoning": {"summary": "detailed"}},
     }
@@ -564,8 +563,8 @@ def test_served_model_from_reads_metered_lm_attributes() -> None:
     assert served_model_from(lm) == "deepseek/deepseek-v4-flash"
 
     echo = MagicMock(spec=[])
-    echo.last_request_model = "openrouter/openai/gpt-5.6-terra"
-    echo.last_response_model = "openai/gpt-5.6-terra"
+    echo.last_request_model = "openrouter/deepseek/deepseek-v4.1-flash"
+    echo.last_response_model = "deepseek/deepseek-v4.1-flash"
     assert served_model_from(echo) is None
 
 
@@ -593,8 +592,8 @@ def test_served_model_from_suppresses_non_news() -> None:
     same = {"model": "openai/gpt-4o-mini", "response_model": "openai/gpt-4o-mini"}
     assert served_model_from(_FakeLm([same])) is None
     stripped = {
-        "model": "openrouter/openai/gpt-5.6-terra",
-        "response_model": "openai/gpt-5.6-terra",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "response_model": "deepseek/deepseek-v4.1-flash",
     }
     assert served_model_from(_FakeLm([stripped])) is None
     assert served_model_from(_FakeLm([{"model": "x", "response_model": None}])) is None
@@ -634,3 +633,14 @@ def test_canonical_model_id_strips_only_the_gateway_prefix() -> None:
     assert canonical_model_id("litellm_proxy/google/gemini-3-flash-preview") == "google/gemini-3-flash-preview"
     assert canonical_model_id("google/gemini-3-flash-preview") == "google/gemini-3-flash-preview"
     assert canonical_model_id("openrouter/anthropic/claude-sonnet-4") == "openrouter/anthropic/claude-sonnet-4"
+
+
+@pytest.mark.parametrize(
+    ("proxied", "supported"),
+    [("anthropic/claude-sonnet-4.5", True), ("fake-vendor/no-such-model", False)],
+)
+def test_metered_lm_judges_function_calling_on_the_proxied_model(proxied: str, supported: bool) -> None:
+    """A ``litellm_proxy/`` id reports the tool-calling support of the OpenRouter model behind it."""
+    lm = MeteredLM(model=f"litellm_proxy/{proxied}", api_key="k", api_base="http://proxy")
+
+    assert lm.supports_function_calling is supported

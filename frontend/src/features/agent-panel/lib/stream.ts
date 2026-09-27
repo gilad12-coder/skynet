@@ -50,6 +50,8 @@ export interface GeneralistAgentHandlers {
     assistant_message: string;
     model: string | null;
     served_model: string | null;
+    /** Raw `stats` block; read it with `parseTurnStats`. */
+    stats: unknown;
   }) => void;
   onError: (message: string, code?: string) => void;
   signal?: AbortSignal;

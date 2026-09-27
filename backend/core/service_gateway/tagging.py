@@ -23,6 +23,7 @@ from typing import Any
 
 import dspy
 
+from ..api.model_catalog import REASONING_EFFORTS, agent_model_id
 from ..billing.pricing import ModelUsage
 from ..billing.service import run_cost_credits
 from ..config import settings
@@ -62,13 +63,10 @@ OUTPUT_TOKENS_PER_ROW = 30
 
 def assist_model_name() -> str:
     """Return the LiteLLM model id the tagging assist runs on."""
-    return settings.tagger_assist_model or settings.generalist_agent_model
+    return settings.tagger_assist_model or agent_model_id(settings.generalist_agent_model)
 
 
-# Union of the per-provider effort vocabularies the composer offers ("none"
-# and "xhigh" are OpenAI's floor/ceiling-adjacent tiers, "max" tops out
-# Anthropic and GPT-5.6 Sol; "ultra" is a separate mode, not an effort).
-_REASONING_EFFORT_LEVELS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max"})
+_REASONING_EFFORT_LEVELS = frozenset(REASONING_EFFORTS)
 
 
 def _sanitize_model_params(params: Any) -> dict[str, Any]:
@@ -126,7 +124,6 @@ def _build_assist_lm(
     model_name: str | None = None,
     params: dict[str, Any] | None = None,
     reasoning_effort: str | None = None,
-    lm_extra_body: dict[str, Any] | None = None,
     model_config: ModelConfig | None = None,
 ) -> dspy.LM:
     """Build the assist LM from settings, mirroring the generalist agent.
@@ -138,8 +135,6 @@ def _build_assist_lm(
             (``assist.modelParams``); sanitized before use.
         reasoning_effort: Explicit ``reasoning_effort`` level chosen in the
             composer's model menu; ``None`` keeps the model's default.
-        lm_extra_body: Extra request-body fields merged into the provider
-            call (the auto router's plugin dial rides here).
         model_config: Optional fully resolved config. Interactive and worker
             BYOK callers pass a vault-backed copy here so the secret remains
             outside persisted session state.
@@ -148,10 +143,6 @@ def _build_assist_lm(
         A cache-disabled ``dspy.LM`` on the requested model.
     """
     kwargs = _sanitize_model_params(params)
-    if lm_extra_body:
-        extra = dict(kwargs.get("extra") or {})
-        extra["extra_body"] = {**dict(extra.get("extra_body") or {}), **lm_extra_body}
-        kwargs["extra"] = extra
     if model_config is not None:
         config = model_config
         if config.token_source != TOKEN_SOURCE_BYOK and not config.base_url:
@@ -914,7 +905,6 @@ def interview_turn(
     locale: str | None,
     model: str | None = None,
     reasoning_effort: str | None = None,
-    lm_extra_body: dict[str, Any] | None = None,
     usage_sink: list | None = None,
 ) -> dict[str, Any]:
     """Run one interview turn and return the assistant's reply (non-streaming).
@@ -928,8 +918,6 @@ def interview_turn(
         model: LiteLLM id conducting the interview; ``None`` runs the default.
         reasoning_effort: Explicit effort level for ``model``; ``None`` keeps
             the model's default.
-        lm_extra_body: Extra request-body fields for the LM call (the auto
-            router's plugin dial when the composer picked an Auto tier).
         usage_sink: Optional list the built LM is appended to, so the caller
             can meter the turn's token usage on any exit path.
 
@@ -938,7 +926,7 @@ def interview_turn(
         until ``done`` is true.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
-    lm = _build_assist_lm(model, reasoning_effort=reasoning_effort, lm_extra_body=lm_extra_body)
+    lm = _build_assist_lm(model, reasoning_effort=reasoning_effort)
     if usage_sink is not None:
         usage_sink.append(lm)
     with dspy.context(lm=lm):
@@ -1061,7 +1049,6 @@ async def interview_turn_stream(
     locale: str | None,
     model: str | None = None,
     reasoning_effort: str | None = None,
-    lm_extra_body: dict[str, Any] | None = None,
     usage_sink: list | None = None,
 ) -> Any:
     """Run one interview turn, streaming it the way the generalist agent does.
@@ -1094,14 +1081,12 @@ async def interview_turn_stream(
         model: LiteLLM id conducting the interview; ``None`` runs the default.
         reasoning_effort: Explicit effort level for ``model``; ``None`` keeps
             the model's default.
-        lm_extra_body: Extra request-body fields for the LM call (the auto
-            router's plugin dial when the composer picked an Auto tier).
         usage_sink: Optional list the built LM is appended to, so the caller
             can meter the turn's token usage on any exit path.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
     predict = dspy.Predict(InterviewTurnSig)
-    lm = _build_assist_lm(model, reasoning_effort=reasoning_effort, lm_extra_body=lm_extra_body)
+    lm = _build_assist_lm(model, reasoning_effort=reasoning_effort)
     if usage_sink is not None:
         usage_sink.append(lm)
     inputs = _interview_inputs(config, columns, data, turns, locale)

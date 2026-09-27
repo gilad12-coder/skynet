@@ -146,30 +146,56 @@ export function ModelConfigModal({
   }, [open, config]);
 
   // The effort ladder is model-specific (providers reject levels outside
-  // their documented set). "none" is expressed by the switch itself, and an
-  // empty ladder (always-on thinkers like MiniMax M3) leaves nothing to
-  // configure, so the whole section disappears.
+  // their documented set). "none" is expressed by the switch itself. An
+  // unset effort means "the provider's default", which is thinking for
+  // default-on models (GPT-5, Claude Sonnet 5) and always for mandatory ones,
+  // so switching those off must send "none" rather than drop the key.
   const effortLadder = React.useMemo(
-    () => effortsFor(draft.name).filter((level) => level !== "none"),
-    [draft.name],
+    () => effortsFor(draft.name, detectionModels).filter((level) => level !== "none"),
+    [draft.name, detectionModels],
   );
-  const defaultEffort = (ladder: readonly string[]) =>
-    ladder.includes("medium") ? "medium" : (ladder[Math.floor(ladder.length / 2)] ?? "medium");
-  const canThink = modelSupportsThinking(draft.name, detectionModels) && effortLadder.length > 0;
-  const thinkingEnabled = !!draft.extra?.reasoning_effort;
-  const reasoningEffort = (draft.extra?.reasoning_effort as string) ?? "medium";
+  // Switching thinking on starts at the provider's own default when the
+  // catalog knows it, else medium, else the middle of the ladder. A model
+  // with no ladder takes any level as "on", and medium is OpenRouter's own.
+  const defaultEffort = (model: string, ladder: readonly string[]) => {
+    const providerDefault = detectionModels?.find((m) => m.value === model)?.default_reasoning_effort;
+    if (providerDefault && ladder.includes(providerDefault)) return providerDefault;
+    return ladder.includes("medium") ? "medium" : (ladder[Math.floor(ladder.length / 2)] ?? "medium");
+  };
+  const thinkingInfo = (model: string) => {
+    const hit = detectionModels?.find((m) => m.value === model);
+    const mandatory = !!hit?.reasoning_mandatory;
+    return { mandatory, defaultOn: mandatory || !!hit?.reasoning_default_enabled };
+  };
+  const { mandatory: thinkingMandatory, defaultOn: thinkingDefaultOn } = thinkingInfo(draft.name);
+  const canThink = modelSupportsThinking(draft.name, detectionModels);
+  const storedEffort = draft.extra?.reasoning_effort as string | undefined;
+  const thinkingEnabled =
+    thinkingMandatory || (storedEffort ? storedEffort !== "none" : thinkingDefaultOn);
+  const reasoningEffort =
+    storedEffort && effortLadder.includes(storedEffort)
+      ? storedEffort
+      : defaultEffort(draft.name, effortLadder);
+
+  const withEffort = (extra: ModelConfig["extra"], effort: string | null) => {
+    const rest = { ...extra };
+    if (effort) rest.reasoning_effort = effort;
+    else delete rest.reasoning_effort;
+    return Object.keys(rest).length ? rest : undefined;
+  };
 
   const setThinking = (on: boolean) => {
-    setDraft((p) => ({
-      ...p,
-      extra: on
-        ? { ...p.extra, reasoning_effort: defaultEffort(effortLadder) }
-        : (() => {
-            const rest = { ...p.extra };
-            delete rest.reasoning_effort;
-            return Object.keys(rest).length ? rest : undefined;
-          })(),
-    }));
+    setDraft((p) => {
+      const { defaultOn } = thinkingInfo(p.name);
+      const effort = on
+        ? defaultOn
+          ? null
+          : defaultEffort(p.name, effortLadder)
+        : defaultOn
+          ? "none"
+          : null;
+      return { ...p, extra: withEffort(p.extra, effort) };
+    });
   };
 
   const setEffort = (level: string) => {
@@ -326,15 +352,18 @@ export function ModelConfigModal({
               selectedByokProvider={draft.byok_provider}
               onChange={(next) => {
                 setDraft((p) => {
-                  const ladder = effortsFor(next).filter((level) => level !== "none");
-                  const rest = { ...p.extra };
-                  const effort = rest.reasoning_effort as string | undefined;
-                  if (!modelSupportsThinking(next, detectionModels) || ladder.length === 0) {
-                    delete rest.reasoning_effort;
-                  } else if (effort && !ladder.includes(effort)) {
-                    rest.reasoning_effort = defaultEffort(ladder);
-                  }
-                  return { ...p, name: next, extra: Object.keys(rest).length ? rest : undefined };
+                  // Carry the thinking choice across, translated into what the
+                  // new model accepts: "off" becomes the default when the new
+                  // model can't turn off (or is off anyway), and a level
+                  // outside its ladder moves to its default level.
+                  const ladder = effortsFor(next, detectionModels).filter((level) => level !== "none");
+                  const { mandatory, defaultOn } = thinkingInfo(next);
+                  let effort = (p.extra?.reasoning_effort as string | undefined) ?? null;
+                  if (!modelSupportsThinking(next, detectionModels)) effort = null;
+                  else if (effort === "none") effort = mandatory || !defaultOn ? null : "none";
+                  else if (effort && ladder.length === 0) effort = defaultOn ? null : "medium";
+                  else if (effort && !ladder.includes(effort)) effort = defaultEffort(next, ladder);
+                  return { ...p, name: next, extra: withEffort(p.extra, effort) };
                 });
               }}
               onSelect={(model) =>
@@ -404,9 +433,18 @@ export function ModelConfigModal({
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
                           <Label>{msg("auto.features.submit.components.modelconfigmodal.8")}</Label>
-                          <Switch checked={thinkingEnabled} onCheckedChange={setThinking} />
+                          <Switch
+                            checked={thinkingEnabled}
+                            onCheckedChange={setThinking}
+                            disabled={thinkingMandatory}
+                          />
                         </div>
-                        {thinkingEnabled && (
+                        {thinkingMandatory && (
+                          <p className="text-xs text-muted-foreground">
+                            {msg("submit.model_config.thinking_always_on")}
+                          </p>
+                        )}
+                        {thinkingEnabled && effortLadder.length > 0 && (
                           <div className="space-y-2 p-3 border rounded-lg bg-muted/30">
                             <Label>
                               {msg("auto.features.submit.components.modelconfigmodal.9")}

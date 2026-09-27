@@ -68,6 +68,7 @@ export function dispatchGeneralistEvent(
         assistant_message: String(data.assistant_message ?? ""),
         model: typeof rawModel === "string" && rawModel.length > 0 ? rawModel : null,
         served_model: typeof rawServed === "string" && rawServed.length > 0 ? rawServed : null,
+        stats: data.stats ?? null,
       });
       break;
     }

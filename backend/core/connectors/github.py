@@ -8,6 +8,9 @@ API; CSV, TSV, JSON, JSONL and Parquet files are importable.
 
 from __future__ import annotations
 
+import hashlib
+import threading
+import time
 from typing import Any
 from urllib.parse import quote
 
@@ -24,6 +27,11 @@ PROVIDER = "github"
 API_URL = "https://api.github.com"
 SCOPES = "repo read:user"
 REPO_LIMIT = 100
+TREE_TTL_SECONDS = 300.0
+
+_trees: dict[tuple[str, str, str], tuple[float, list[str] | None]] = {}
+_tree_locks: dict[tuple[str, str, str], threading.Lock] = {}
+_trees_lock = threading.Lock()
 
 
 def oauth_app() -> OAuthApp:
@@ -196,6 +204,81 @@ def _list_tree(token: str, owner: str, repo: str, path: str) -> list[Entry]:
         if item.get("type") == "file" and isinstance(item.get("path"), str) and is_supported(item["name"])
     ]
     return folders + files
+
+
+def web_url(secret: ConnectorSecret, location: str) -> str | None:
+    """Link to a browse location on GitHub.
+
+    Args:
+        secret: The stored connector.
+        location: Empty for the repositories, else ``owner/repo[/path]``.
+
+    Returns:
+        The URL.
+    """
+    if not location:
+        return "https://github.com"
+    owner, repo, path = _split_location(location)
+    base = f"https://github.com/{quote(owner, safe='')}/{quote(repo, safe='')}"
+    return f"{base}/tree/HEAD/{quote(path)}" if path else base
+
+
+def _repo_files(token: str, owner: str, repo: str) -> list[str] | None:
+    """List every file path in a repository in one call, cached briefly.
+
+    Probes of sibling folders run in parallel against the same repository, so
+    each repository's tree is fetched once under its own lock.
+
+    Args:
+        token: Bearer token.
+        owner: Repository owner.
+        repo: Repository name.
+
+    Returns:
+        The file paths, or ``None`` when GitHub truncated the tree.
+    """
+    key = (hashlib.sha256(token.encode()).hexdigest(), owner, repo)
+    with _trees_lock:
+        lock = _tree_locks.setdefault(key, threading.Lock())
+    with lock:
+        cached = _trees.get(key)
+        if cached is not None and cached[0] > time.monotonic():
+            return cached[1]
+        body = get_json(
+            f"{API_URL}/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/git/trees/HEAD",
+            provider=PROVIDER,
+            headers=_headers(token),
+            params={"recursive": "1"},
+        )
+        files = (
+            None
+            if not isinstance(body, dict) or body.get("truncated")
+            else [
+                item["path"]
+                for item in body.get("tree") or []
+                if item.get("type") == "blob" and isinstance(item.get("path"), str)
+            ]
+        )
+        _trees[key] = (time.monotonic() + TREE_TTL_SECONDS, files)
+        return files
+
+
+def has_importable(secret: ConnectorSecret, ref: str) -> bool | None:
+    """Settle whether a repository or directory holds an importable file, from the repository tree.
+
+    Args:
+        secret: The stored connector.
+        ref: ``owner/repo[/dir]``.
+
+    Returns:
+        ``True``, ``False``, or ``None`` when the tree is too big to tell.
+    """
+    owner, repo, path = _split_location(ref)
+    files = _repo_files(secret.access_token, owner, repo)
+    if files is None:
+        return None
+    prefix = f"{path}/" if path else ""
+    return any(f.startswith(prefix) and is_supported(f) for f in files)
 
 
 def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:

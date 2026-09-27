@@ -2,6 +2,7 @@
 import { notifyCopied } from "@/shared/lib/notify";
 import { LoadingState } from "@/shared/ui/loading-state";
 import * as React from "react";
+import { useTableSort } from "@/shared/hooks/use-table-sort";
 import { toast } from "react-toastify";
 import { Tray } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
@@ -12,13 +13,13 @@ import {
   ResetFiltersButton,
   useColumnFilters,
   useColumnResize,
-  type SortDir,
 } from "@/shared/ui/excel-filter";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { FadeIn } from "@/shared/ui/motion";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { DatasetRowReader } from "./DatasetRowReader";
 import { cellText, isImageDataUri } from "./dataset-cells";
 const RENDER_ROW_CAP = 200;
@@ -44,28 +45,19 @@ export function DatasetRowsView({
 }) {
   const colFilters = useColumnFilters();
   const colResize = useColumnResize();
-  const [sortKey, setSortKey] = React.useState("");
-  const [sortDir, setSortDir] = React.useState<SortDir>("asc");
+  const { sortKey, sortDir, toggleSort, resetSort } = useTableSort<string>("");
   const { clearAll: clearFilters } = colFilters;
   const { resetAll: resetWidths } = colResize;
 
   React.useEffect(() => {
     setReaderIndex(null);
-    setSortKey("");
-    setSortDir("asc");
+    resetSort();
     clearFilters();
     resetWidths();
-  }, [rows, setReaderIndex, clearFilters, resetWidths]);
+  }, [rows, setReaderIndex, resetSort, clearFilters, resetWidths]);
   const columns = rows?.columns ?? [];
   const allRows = React.useMemo(() => rows?.rows ?? [], [rows]);
 
-  const toggleSort = (key: string) => {
-    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
-  };
 
   const filtered = React.useMemo(() => {
     let result = allRows.filter((r) => {
@@ -76,8 +68,9 @@ export function DatasetRowsView({
       return true;
     });
     if (sortKey) {
+      const collLocale = getActiveIntlLocale();
       result = [...result].sort((a, b) => {
-        const cmp = cellText(a[sortKey]).localeCompare(cellText(b[sortKey]), "he", {
+        const cmp = cellText(a[sortKey]).localeCompare(cellText(b[sortKey]), collLocale, {
           numeric: true,
         });
         return sortDir === "asc" ? cmp : -cmp;

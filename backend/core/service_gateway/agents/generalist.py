@@ -51,6 +51,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from ...api.model_catalog import agent_model_id
 from ...config import settings
 from ...exceptions import ServiceError
 from ...i18n import t
@@ -92,7 +93,7 @@ def _build_generalist_lm() -> dspy.LM:
     """
     config = apply_model_reasoning_config(
         ModelConfig(
-            name=settings.generalist_agent_model,
+            name=agent_model_id(settings.generalist_agent_model),
             base_url=settings.generalist_agent_base_url or None,
         )
     )
@@ -2231,7 +2232,7 @@ async def _drive_generalist_agent(
         # it is built, and the loop only installs its native-tool-call adapter
         # inside ``forward``; without this it would decode the text protocol.
         with dspy.context(adapter=AppendOnlyChatAdapter()):
-            reply_stream = ReactReplyStream(react, "assistant_message")
+            reply_stream = ReactReplyStream(react, "assistant_message", lm)
         # ``is_async_program`` stays False so ``streamify`` wraps the sync
         # ``forward`` via ``asyncify``; ReActV2 defines no ``aforward``.
         program = dspy.streamify(
@@ -2333,7 +2334,7 @@ async def run_generalist_agent(
     """
     url = mcp_url or settings.generalist_agent_mcp_url
     registry = approval_registry or get_approval_registry()
-    model_name = model_config.name if model_config else settings.generalist_agent_model
+    model_name = model_config.name if model_config else agent_model_id(settings.generalist_agent_model)
     try:
         if model_config:
             override = model_config.model_copy(

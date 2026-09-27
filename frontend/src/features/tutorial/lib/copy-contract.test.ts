@@ -9,7 +9,7 @@ const TITLE_KEYS = [
   "auto.features.tutorial.lib.steps.template.24",
   "auto.features.tutorial.lib.steps.template.27",
 ] as const;
-const USED_TITLE_KEYS = [TITLE_KEYS[0]] as const;
+const USED_TITLE_KEYS = TITLE_KEYS;
 
 test("tutorial titles are complete localized phrases", () => {
   const localeDir = path.join(process.cwd(), "..", "i18n", "locales", "ui");

@@ -18,17 +18,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _ENV_FILE = Path(__file__).parent.parent / ".env"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Both agents (submit-wizard code agent + Cmd/Ctrl+J generalist) default
-# to this one model id, so a single swap covers both; override per agent
-# via CODE_AGENT_MODEL / GENERALIST_AGENT_MODEL.
+# With CODE_AGENT_MODEL / GENERALIST_AGENT_MODEL unset, both agents follow
+# the model catalog's best-value default (see
+# ``model_catalog.agent_model_id``). This id only runs until the boot-time
+# catalog build lands, or when the catalog flags no default.
 #
-# TODO: On-prem / air-gap — set this to whatever LiteLLM identifier your
-# internal gateway exposes (e.g. "openai/<model>") and point
-# CODE_AGENT_BASE_URL / GENERALIST_AGENT_BASE_URL at the gateway via env.
-# The shipped default is OpenRouter's Auto Router Beta: OpenRouter is the
-# platform's sole LLM provider, and the router picks a concrete model
-# per request. Requires OPENROUTER_API_KEY in the env.
-DEFAULT_AGENT_MODEL_ID = "openrouter/openrouter/auto-beta"
+# TODO: On-prem / air-gap — set CODE_AGENT_MODEL / GENERALIST_AGENT_MODEL to
+# whatever LiteLLM identifier your internal gateway exposes (e.g.
+# "openai/<model>") and point CODE_AGENT_BASE_URL / GENERALIST_AGENT_BASE_URL
+# at the gateway via env. Requires OPENROUTER_API_KEY otherwise.
+DEFAULT_AGENT_MODEL_ID = "openrouter/z-ai/glm-5.3-flash"
 
 # Vercel's API refuses any sandbox timeout above five hours (``timeout`` should
 # be <= 18000000), whatever a plan allows below that, so a larger configured
@@ -222,6 +221,21 @@ class Settings(BaseSettings):
         alias="NOTION_OAUTH_REDIRECT_URI",
         description="Absolute URL of this backend's /connectors/notion/oauth/callback as registered on the Notion integration. Unset derives it from the incoming request.",
     )
+    supabase_oauth_client_id: str | None = Field(
+        default=None,
+        alias="SUPABASE_OAUTH_CLIENT_ID",
+        description="OAuth client id of the Supabase OAuth app used by the Supabase connector. Unset hides 'Continue with Supabase'; users can still paste a database connection URL.",
+    )
+    supabase_oauth_client_secret: SecretStr | None = Field(
+        default=None,
+        alias="SUPABASE_OAUTH_CLIENT_SECRET",
+        description="OAuth client secret of the Supabase OAuth app. Supabase requires it for the code exchange.",
+    )
+    supabase_oauth_redirect_uri: str | None = Field(
+        default=None,
+        alias="SUPABASE_OAUTH_REDIRECT_URI",
+        description="Absolute URL of this backend's /connectors/supabase/oauth/callback as registered on the Supabase OAuth app. Unset derives it from the incoming request.",
+    )
     openrouter_oauth_redirect_uri: str | None = Field(
         default=None,
         alias="OPENROUTER_OAUTH_REDIRECT_URI",
@@ -281,6 +295,12 @@ class Settings(BaseSettings):
         default=None,
         alias="OPENROUTER_PROVISIONING_KEY",
         description="OpenRouter key-management (provisioning) API key. When set, managed runs authenticate with a per-user OpenRouter runtime key whose spend limit is synced to the account's credit balance before each dispatch, capping upstream spend at the provider itself. Unset (the default) sends managed runs through the shared gateway key. Requires BYOK_VAULT_KEY to encrypt the minted secrets at rest.",
+    )
+    usage_markup: float = Field(
+        default=1.15,
+        ge=1.0,
+        alias="USAGE_MARKUP",
+        description="Multiplier applied to the provider cost of every platform-paid metered charge (managed LLM tokens and Vercel sandbox compute) before converting to credits. 1.15 bills cost plus 15%. BYOK runs are unaffected: they pay only the 5% platform fee on model cost. Holds, pre-run estimates and displayed model prices include it.",
     )
     openrouter_api_key: SecretStr | None = Field(
         default=None,
@@ -792,11 +812,11 @@ class Settings(BaseSettings):
         return name
 
     code_agent_model: str = Field(
-        default=DEFAULT_AGENT_MODEL_ID,
+        default="",
         description=(
-            "LiteLLM model id used by the submit-wizard code agent. "
-            "Defaults to DEFAULT_AGENT_MODEL_ID (OpenRouter's Auto Router); "
-            "override via CODE_AGENT_MODEL for on-prem deployments."
+            "LiteLLM model id used by the submit-wizard code agent. Empty "
+            "follows the model catalog's best-value default; override via "
+            "CODE_AGENT_MODEL for on-prem deployments."
         ),
     )
     # TODO: On-prem / air-gap — set CODE_AGENT_BASE_URL to your internal
@@ -816,11 +836,10 @@ class Settings(BaseSettings):
         ),
     )
     generalist_agent_model: str = Field(
-        default=DEFAULT_AGENT_MODEL_ID,
+        default="",
         description=(
             "LiteLLM model id used by the generalist agent (Cmd/Ctrl+J "
-            "panel). Defaults to DEFAULT_AGENT_MODEL_ID (OpenRouter's Auto "
-            "Router, which picks a concrete model per request)."
+            "panel). Empty follows the model catalog's best-value default."
         ),
     )
     # TODO: On-prem / air-gap — set GENERALIST_AGENT_BASE_URL to your internal
@@ -985,6 +1004,11 @@ class Settings(BaseSettings):
         return self
 
     max_jobs_per_user: int = Field(default=100, ge=1, description="Default per-user job cap")
+    pro_max_jobs_per_user: int = Field(
+        default=1000,
+        ge=1,
+        description="Saved-job cap for an account on the Skynet Pro plan (admin overrides still win)",
+    )
     max_total_users: int = Field(
         default=0,
         ge=0,
@@ -1015,12 +1039,31 @@ class Settings(BaseSettings):
         ge=0,
         description="Concurrent active-run cap for an account on the Skynet Pro plan. 0 disables the cap.",
     )
-    global_daily_spend_ceiling_credits: int = Field(
-        default=0,
+    pro_past_due_grace_days: int = Field(
+        default=7,
         ge=0,
         description=(
-            "Platform-wide credit-spend backstop over a trailing 24h; new submissions are "
-            "refused once reached. 0 disables the kill-switch (per-user credit gate still applies)."
+            "Days a Pro subscription keeps its limits after Stripe marks it past_due (a failed renewal). "
+            "Past the grace the account falls back to the free limits until payment succeeds."
+        ),
+    )
+    global_daily_spend_ceiling_credits: int = Field(
+        default=5000,
+        ge=0,
+        description=(
+            "Platform-wide credit-spend backstop over a trailing 24h ($50 at the default); new "
+            "submissions are refused with a 503 and an ERROR alert once reached. 0 disables the "
+            "kill-switch (per-user credit gate still applies)."
+        ),
+    )
+    interactive_min_balance_credits: int = Field(
+        default=5,
+        ge=0,
+        description=(
+            "Minimum spendable credits an account must hold before an interactive LLM turn "
+            "(agent chat, interview, tagging) starts. A turn is billed after it finishes, so a "
+            "1-credit balance would otherwise buy an arbitrarily expensive turn. Values below 1 "
+            "still require a positive balance."
         ),
     )
     submissions_paused: bool = Field(
@@ -1068,6 +1111,25 @@ class Settings(BaseSettings):
         description=(
             "Platform-wide monthly cap on embedding API tokens, counted in Redis. Once reached, new "
             "embeddings are skipped and search falls back as if the embedder were down. 0 disables the cap."
+        ),
+    )
+    embeddings_user_monthly_token_cap: int = Field(
+        default=2_000_000,
+        ge=0,
+        description=(
+            "Per-account monthly cap on embedding API tokens (job summaries, conversation indexing, search "
+            "queries), counted in Redis. Anonymous explore searches share one bucket. Past it that account's "
+            "embeddings are skipped exactly like the platform cap. 0 disables the cap."
+        ),
+    )
+    platform_budget_fallback_fraction: float = Field(
+        default=0.1,
+        ge=0,
+        le=1,
+        description=(
+            "Share of each platform budget (Groq dictation, embeddings, per-account embeddings) a single "
+            "process may spend per month when Redis is unset or unreachable, counted in memory. 0 refuses "
+            "every budgeted call without Redis."
         ),
     )
     rate_limit_account_requests_per_hour: int = Field(

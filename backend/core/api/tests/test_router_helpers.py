@@ -28,6 +28,7 @@ from ..routers._helpers import (
     _stable_hash,
     build_summary,
     clear_program_cache,
+    enforce_job_quota,
     enforce_storage_quota,
     load_pair_program,
     load_program,
@@ -769,3 +770,51 @@ def test_load_program_react_cache_key_includes_roster_identity(
     assert isinstance(program, dspy.ReActV2)
     assert expected_key in _helpers_mod._program_cache
     assert "react-job" not in _helpers_mod._program_cache
+
+
+class _QuotaStore:
+    """Job-store double exposing a job count and a resolved per-user quota."""
+
+    def __init__(self, count: int, quota: int | None) -> None:
+        """Seed the current job count and the quota the store resolves.
+
+        Args:
+            count: Jobs the user already owns.
+            quota: What ``get_effective_user_quota`` returns.
+        """
+        self._count = count
+        self._quota = quota
+
+    def count_jobs(self, *, username: str) -> int:
+        """Return the seeded job count."""
+        return self._count
+
+    def get_effective_user_quota(self, username: str) -> int | None:
+        """Return the seeded quota."""
+        return self._quota
+
+
+def test_enforce_job_quota_allows_up_to_the_cap() -> None:
+    """Creating the last allowed job passes."""
+    enforce_job_quota(_QuotaStore(count=9, quota=10), "alice")
+
+
+def test_enforce_job_quota_rejects_past_the_cap() -> None:
+    """A create that would exceed the cap is a 409 naming the quota."""
+    with pytest.raises(DomainError) as exc:
+        enforce_job_quota(_QuotaStore(count=10, quota=10), "alice")
+    assert exc.value.status_code == 409
+    assert exc.value.code == "quota.reached"
+    assert exc.value.params == {"quota": 10}
+
+
+def test_enforce_job_quota_counts_every_incoming_job() -> None:
+    """A multi-copy clone is checked against the cap as a whole."""
+    with pytest.raises(DomainError):
+        enforce_job_quota(_QuotaStore(count=8, quota=10), "alice", incoming_jobs=3)
+
+
+def test_enforce_job_quota_skips_an_unlimited_override() -> None:
+    """An admin override of ``None`` means no cap."""
+    enforce_job_quota(_QuotaStore(count=10_000, quota=None), "alice")
+

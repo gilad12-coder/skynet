@@ -292,6 +292,10 @@ class BillingCustomerModel(Base):
             "grant_remaining IS NULL OR grant_remaining >= 0",
             name="ck_billing_customers_grant_remaining_non_negative",
         ),
+        CheckConstraint(
+            "debt_credits >= 0",
+            name="ck_billing_customers_debt_credits_non_negative",
+        ),
     )
 
     username: Mapped[str] = mapped_column(String(255), primary_key=True)
@@ -316,6 +320,19 @@ class BillingCustomerModel(Base):
     subscription_current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     subscription_cancel_at_period_end: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
+    )
+    # When the subscription entered ``past_due``; anchors the bounded Pro grace
+    # period and is cleared once the status moves on.
+    subscription_past_due_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Credits a refund or chargeback reversed after they were already spent.
+    # The platform paid for those tokens, so the account owes them back: while
+    # this is positive the balance and grant are held at zero (nothing is
+    # spendable) and the next top-up repays it before crediting anything.
+    debt_credits: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        nullable=False,
+        default=0,
+        server_default="0",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
@@ -354,6 +371,13 @@ class CreditLedgerModel(Base):
     # rows written before token metering landed.
     input_tokens: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
+    # Cost the account could not cover when the row was written: a run charge
+    # clamped to the balance, or a clawback beyond the balance (carried as
+    # debt). Kept so revenue lost to the balance floor is queryable instead of
+    # only living in a log line. None/0 when the full amount was collected.
+    uncollected_credits: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"), nullable=True
+    )
     stripe_event_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # The PaymentIntent behind a top-up (``pi_…``), the join key a refund or
     # dispute webhook uses to find the account and the credits to claw back —

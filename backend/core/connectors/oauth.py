@@ -1,6 +1,6 @@
 """Provider-agnostic OAuth 2.0 authorization-code flow with PKCE.
 
-Google, Microsoft, GitHub and Notion share one flow: mint an authorize URL
+Google, Microsoft, GitHub, Notion and Supabase share one flow: mint an authorize URL
 whose encrypted ``state`` carries the initiating user and the PKCE verifier,
 trade the code for tokens, and refresh when a token lapses. Each provider
 describes itself with an :class:`OAuthApp`; the Hugging Face connector
@@ -47,6 +47,8 @@ class OAuthApp:
     extra_authorize_params: dict[str, str]
     # Notion's token endpoint only takes a JSON body with the client in HTTP Basic auth, and no PKCE verifier.
     basic_auth_json: bool = False
+    # Supabase takes the usual form body, but only accepts the client in HTTP Basic auth.
+    basic_auth_form: bool = False
 
 
 @dataclass(frozen=True)
@@ -161,7 +163,8 @@ def _token_request(app: OAuthApp, form: dict[str, str]) -> TokenSet:
     Args:
         app: The provider's OAuth app.
         form: Grant parameters; the client id/secret are added here, or sent
-            as HTTP Basic auth for :attr:`OAuthApp.basic_auth_json` apps.
+            as HTTP Basic auth for :attr:`OAuthApp.basic_auth_json` and
+            :attr:`OAuthApp.basic_auth_form` apps.
 
     Returns:
         The issued tokens.
@@ -176,6 +179,14 @@ def _token_request(app: OAuthApp, form: dict[str, str]) -> TokenSet:
             response = httpx.post(
                 app.token_url,
                 json={k: v for k, v in form.items() if k != "code_verifier"},
+                auth=(client_id, app.client_secret or ""),
+                headers={"Accept": "application/json"},
+                timeout=API_TIMEOUT,
+            )
+        elif app.basic_auth_form:
+            response = httpx.post(
+                app.token_url,
+                data=form,
                 auth=(client_id, app.client_secret or ""),
                 headers={"Accept": "application/json"},
                 timeout=API_TIMEOUT,

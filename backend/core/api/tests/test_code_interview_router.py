@@ -68,7 +68,7 @@ def test_interview_streams_events_and_forwards_args(monkeypatch) -> None:
     monkeypatch.setattr(
         model_catalog,
         "get_catalog_cached",
-        lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test")]),
+        lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test", is_default=False)]),
     )
     resp = _client().post(
         "/optimizations/code-interview",
@@ -87,11 +87,10 @@ def test_interview_streams_events_and_forwards_args(monkeypatch) -> None:
     assert len(seen["sample_rows"]) == 5
     assert seen["model"] == "openai/gpt-test"
     assert seen["reasoning_effort"] == "high"
-    assert seen["lm_extra_body"] is None
 
 
-def test_interview_auto_tiers_ride_the_auto_router(monkeypatch) -> None:
-    """An absent model runs the pinned default; 'auto:intelligent' rides the router."""
+def test_interview_without_model_runs_catalog_default(monkeypatch) -> None:
+    """An absent model and the retired 'auto:intelligent' both run the catalog default."""
     seen: list[dict[str, Any]] = []
 
     async def fake_stream(**kwargs: Any) -> Any:
@@ -106,7 +105,7 @@ def test_interview_auto_tiers_ride_the_auto_router(monkeypatch) -> None:
     monkeypatch.setattr(
         model_router,
         "get_catalog_cached",
-        lambda: SimpleNamespace(models=[SimpleNamespace(value="openrouter/anthropic/claude-sonnet-5")]),
+        lambda: SimpleNamespace(models=[SimpleNamespace(value="openrouter/anthropic/claude-sonnet-5", is_default=True, reasoning_efforts=None, reasoning_default_enabled=None)]),
     )
     client = _client()
     assert client.post("/optimizations/code-interview", json=_INTERVIEW_BODY).status_code == 200
@@ -117,14 +116,7 @@ def test_interview_auto_tiers_ride_the_auto_router(monkeypatch) -> None:
         ).status_code
         == 200
     )
-    assert [k["model"] for k in seen] == [
-        model_router.BALANCED_PINNED_MODEL_ID,
-        model_router.OPENROUTER_AUTO_ID,
-    ]
-    assert [k["lm_extra_body"] for k in seen] == [
-        None,
-        {"plugins": [{"id": "auto-router", "cost_quality_tradeoff": 0}]},
-    ]
+    assert [k["model"] for k in seen] == ["openrouter/anthropic/claude-sonnet-5"] * 2
 
 
 def test_interview_rejects_unknown_model(monkeypatch) -> None:
@@ -132,7 +124,7 @@ def test_interview_rejects_unknown_model(monkeypatch) -> None:
     monkeypatch.setattr(
         model_catalog,
         "get_catalog_cached",
-        lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test")]),
+        lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test", is_default=False)]),
     )
     resp = _client().post(
         "/optimizations/code-interview", json={**_INTERVIEW_BODY, "model": "openai/not-a-model"}
@@ -155,7 +147,7 @@ def test_interview_translates_engine_failure_to_error_event(monkeypatch) -> None
     monkeypatch.setattr(
         model_router,
         "get_catalog_cached",
-        lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test")]),
+        lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test", is_default=False)]),
     )
     resp = _client().post("/optimizations/code-interview", json=_INTERVIEW_BODY)
     assert resp.status_code == 200
@@ -219,7 +211,7 @@ def test_seed_endpoint_forwards_model_and_effort(monkeypatch) -> None:
     monkeypatch.setattr(
         model_catalog,
         "get_catalog_cached",
-        lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test")]),
+        lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test", is_default=False)]),
     )
     resp = _client().post(
         "/optimizations/ai-generate-code",
@@ -228,11 +220,10 @@ def test_seed_endpoint_forwards_model_and_effort(monkeypatch) -> None:
     assert resp.status_code == 200
     assert seen["model"] == "openai/gpt-test"
     assert seen["reasoning_effort"] == "high"
-    assert seen["lm_extra_body"] is None
 
 
-def test_seed_endpoint_auto_tiers_ride_the_auto_router(monkeypatch) -> None:
-    """The code author runs the pinned default, or the router when 'auto:intelligent'."""
+def test_seed_endpoint_without_model_runs_catalog_default(monkeypatch) -> None:
+    """An absent model and the retired 'auto:intelligent' both run the catalog default."""
     seen: list[dict[str, Any]] = []
 
     def fake_run(**kwargs: Any) -> Any:
@@ -248,7 +239,7 @@ def test_seed_endpoint_auto_tiers_ride_the_auto_router(monkeypatch) -> None:
     monkeypatch.setattr(
         model_router,
         "get_catalog_cached",
-        lambda: SimpleNamespace(models=[SimpleNamespace(value="openrouter/anthropic/claude-sonnet-5")]),
+        lambda: SimpleNamespace(models=[SimpleNamespace(value="openrouter/anthropic/claude-sonnet-5", is_default=True, reasoning_efforts=None, reasoning_default_enabled=None)]),
     )
     client = _client()
     assert client.post("/optimizations/ai-generate-code", json=_SEED_BODY).status_code == 200
@@ -259,14 +250,7 @@ def test_seed_endpoint_auto_tiers_ride_the_auto_router(monkeypatch) -> None:
         ).status_code
         == 200
     )
-    assert [k["model"] for k in seen] == [
-        model_router.BALANCED_PINNED_MODEL_ID,
-        model_router.OPENROUTER_AUTO_ID,
-    ]
-    assert [k["lm_extra_body"] for k in seen] == [
-        None,
-        {"plugins": [{"id": "auto-router", "cost_quality_tradeoff": 0}]},
-    ]
+    assert [k["model"] for k in seen] == ["openrouter/anthropic/claude-sonnet-5"] * 2
 
 
 def test_seed_endpoint_rejects_unknown_model(monkeypatch) -> None:
@@ -274,7 +258,7 @@ def test_seed_endpoint_rejects_unknown_model(monkeypatch) -> None:
     monkeypatch.setattr(
         model_catalog,
         "get_catalog_cached",
-        lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test")]),
+        lambda: SimpleNamespace(models=[SimpleNamespace(value="openai/gpt-test", is_default=False)]),
     )
     resp = _client().post(
         "/optimizations/ai-generate-code", json={**_SEED_BODY, "model": "openai/not-a-model"}

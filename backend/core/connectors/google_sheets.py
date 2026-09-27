@@ -183,6 +183,20 @@ def _list_tabs(token: str, spreadsheet_id: str) -> list[Entry]:
     return entries
 
 
+def web_url(secret: ConnectorSecret, location: str) -> str | None:
+    """Link to a browse location in Google Sheets.
+
+    Args:
+        secret: The stored connector.
+        location: Empty for the spreadsheets, else a spreadsheet id.
+
+    Returns:
+        The URL.
+    """
+    base = "https://docs.google.com/spreadsheets"
+    return f"{base}/d/{quote(location, safe='')}" if location else base
+
+
 def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
     """List spreadsheets at the root, or one spreadsheet's tabs.
 

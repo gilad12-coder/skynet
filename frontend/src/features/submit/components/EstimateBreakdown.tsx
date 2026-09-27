@@ -4,7 +4,6 @@ import { useId } from "react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
 import {
-  PLATFORM_FEE_FRACTION,
   creditsToUsd,
   formatBudgetUsd,
   formatUsd,
@@ -221,6 +220,13 @@ export function buildEstimateSections(
     formatMsg("submit.budget.calc.credits_conversion", {
       cost: usdRange(low, high),
     });
+  // A markup of 1.15 reads as "15%": the share added on top of provider cost.
+  const markupShare = percent(bracket.usageMarkup - 1);
+  const markedUpConversion = (low: number, high: number) =>
+    formatMsg("submit.budget.calc.credits_conversion_markup", {
+      cost: usdRange(low, high),
+      markup: markupShare,
+    });
   const sumOf = (terms: Operand[]) =>
     terms.flatMap((term, index) => (index === 0 ? [term] : [plus, term]));
   // A subtotal over a single role is that role's line restated, so only a
@@ -295,8 +301,11 @@ export function buildEstimateSections(
             {
               label: msg("submit.budget.calc.managed_total"),
               equation: roleAddends("managed"),
-              formula: conversion(roleUsd("managed", "lowUsd"), roleUsd("managed", "highUsd")),
-              why: msg("submit.budget.calc.managed_why"),
+              formula: markedUpConversion(
+                roleUsd("managed", "lowUsd"),
+                roleUsd("managed", "highUsd"),
+              ),
+              why: formatMsg("submit.budget.calc.managed_why", { markup: markupShare }),
               value: creditRange(charge.managedLow, charge.managedHigh),
               result: true,
             },
@@ -314,7 +323,7 @@ export function buildEstimateSections(
               label: msg("submit.budget.calc.byok_fee"),
               equation: [
                 {
-                  value: percent(PLATFORM_FEE_FRACTION),
+                  value: percent(bracket.byokFeeFraction),
                   caption: msg("submit.budget.calc.term.fee_rate"),
                 },
                 times,

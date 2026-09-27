@@ -12,13 +12,18 @@ import time
 from types import SimpleNamespace
 
 import dspy
+import pytest
 from dspy.clients.base_lm import GLOBAL_HISTORY
 
+from core.service_gateway import language_models
 from core.service_gateway.language_models import (
     LmUsageTotals,
     MeteredLM,
     activate_job_lm_budget,
+    activate_job_usage_registry,
+    job_usage_snapshot,
     lm_call_count,
+    model_usages_from_history,
     total_tokens_from_history,
     usage_by_model_from_history,
 )
@@ -184,3 +189,79 @@ def test_job_lm_budget_zero_disables_the_gate(monkeypatch):
         t.join(timeout=5)
 
     assert state["max"] == 2
+
+
+def test_reported_cost_covers_its_tokens():
+    """A call with ``usage.cost`` bills that cost; BYOK adds the upstream inference cost."""
+    lm = _metered()
+    lm.update_history({"usage": {"prompt_tokens": 100, "completion_tokens": 50, "cost": 0.002}})
+    lm.update_history(
+        {
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "cost": 0.0001,
+                "is_byok": True,
+                "cost_details": {"upstream_inference_cost": 0.001},
+            }
+        }
+    )
+    lm.update_history({"usage": {"prompt_tokens": 7, "completion_tokens": 3}})
+
+    [row] = model_usages_from_history(lm)
+    assert row.model == "openai/gpt-4o-mini"
+    assert row.input_tokens == 117
+    assert row.output_tokens == 58
+    assert abs(row.reported_cost_usd - 0.0031) < 1e-12
+    assert row.reported_input_tokens == 110
+    assert row.reported_output_tokens == 55
+
+
+def test_unreported_calls_keep_cache_and_reasoning_counts():
+    """Without a reported cost, cache and reasoning tokens are kept for their own rates."""
+    lm = _metered()
+    lm.update_history(
+        {
+            "usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 200,
+                "prompt_tokens_details": {"cached_tokens": 600, "cache_write_tokens": 100},
+                "completion_tokens_details": {"reasoning_tokens": 150},
+            }
+        }
+    )
+    lm.update_history({"usage": {"prompt_tokens": 50, "completion_tokens": 10, "cache_read_input_tokens": 20}})
+
+    [row] = model_usages_from_history(lm)
+    assert row.reported_cost_usd == 0
+    assert row.cache_read_tokens == 620
+    assert row.cache_write_tokens == 100
+    assert row.reasoning_tokens == 150
+
+
+def test_job_usage_snapshot_reports_every_lm_built_after_activation(monkeypatch: pytest.MonkeyPatch):
+    """A job child's snapshot sums all tracked LMs in result-row shape, so a failed run can be billed."""
+    monkeypatch.setattr(language_models, "_job_lm_registry", None)
+    untracked = _metered()
+    untracked.update_history(_entry(prompt=999, completion=999))
+    assert job_usage_snapshot() == []
+
+    activate_job_usage_registry()
+    first, second = _metered(), _metered()
+    first.update_history(_entry(prompt=100, completion=40))
+    second.update_history(_entry(prompt=10, completion=5))
+
+    (row,) = job_usage_snapshot()
+    assert row["model"] == "openai/gpt-4o-mini"
+    assert (row["input_tokens"], row["output_tokens"]) == (110, 45)
+
+
+def test_job_usage_snapshot_never_raises(monkeypatch: pytest.MonkeyPatch):
+    """A snapshot failure yields no rows instead of breaking the progress event it rides on."""
+    monkeypatch.setattr(language_models, "_job_lm_registry", [object()])
+
+    def boom(*_lms):
+        raise RuntimeError("bad history")
+
+    monkeypatch.setattr(language_models, "model_usages_from_history", boom)
+    assert job_usage_snapshot() == []

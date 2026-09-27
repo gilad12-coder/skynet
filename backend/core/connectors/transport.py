@@ -33,9 +33,14 @@ PROVIDER_LABELS = {
     "langsmith": "LangSmith",
     "braintrust": "Braintrust",
     "notion": "Notion",
+    "supabase": "Supabase",
 }
 API_TIMEOUT = httpx.Timeout(30.0)
 DOWNLOAD_TIMEOUT = httpx.Timeout(30.0, read=300.0)
+# One pooled client for every provider: a browse fans out into many calls to
+# the same host (probes, pages), and reusing the TLS connection saves a
+# handshake on each of them.
+CLIENT = httpx.Client(follow_redirects=True, limits=httpx.Limits(max_connections=64, max_keepalive_connections=32))
 
 
 def label(provider: str) -> str:
@@ -100,7 +105,7 @@ def request(
             :func:`raise_for_status` maps the status to.
     """
     try:
-        response = httpx.request(
+        response = CLIENT.request(
             method,
             url,
             headers=headers,
@@ -108,7 +113,6 @@ def request(
             data=data,
             json=json,
             timeout=API_TIMEOUT,
-            follow_redirects=True,
         )
     except httpx.HTTPError as exc:
         raise DomainError("connectors.unreachable", status=502, provider=label(provider)) from exc
@@ -193,9 +197,7 @@ def download(
     received = 0
     truncated = False
     try:
-        with httpx.stream(
-            "GET", url, headers=headers, params=params, timeout=DOWNLOAD_TIMEOUT, follow_redirects=True
-        ) as response:
+        with CLIENT.stream("GET", url, headers=headers, params=params, timeout=DOWNLOAD_TIMEOUT) as response:
             raise_for_status(response, provider)
             for chunk in response.iter_bytes():
                 chunks.append(chunk)

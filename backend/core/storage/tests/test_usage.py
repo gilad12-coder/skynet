@@ -378,13 +378,19 @@ def test_delete_storage_quota_override_restores_default(store: _SQLiteJobStore) 
     assert store.delete_user_storage_quota_override("alice") is False
 
 
-def _set_subscription_status(store: _SQLiteJobStore, username: str, status: str | None) -> None:
+def _set_subscription_status(
+    store: _SQLiteJobStore,
+    username: str,
+    status: str | None,
+    past_due_since: datetime | None = None,
+) -> None:
     """Seed a billing row whose mirrored subscription has ``status``.
 
     Args:
         store: SQLite-backed store.
         username: Account to seed.
         status: Mirrored Stripe subscription status.
+        past_due_since: When the subscription went past due, if it did.
     """
     with store._get_session() as session:
         session.add(
@@ -393,17 +399,34 @@ def _set_subscription_status(store: _SQLiteJobStore, username: str, status: str 
                 stripe_customer_id=f"cus_{username}",
                 credit_balance=0,
                 subscription_status=status,
+                subscription_past_due_since=past_due_since,
             )
         )
         session.commit()
 
 
 def test_pro_plan_lifts_storage_and_job_quota(store: _SQLiteJobStore) -> None:
-    """An entitled Pro account gets the Pro storage budget and no job cap."""
+    """An entitled Pro account gets the Pro storage budget and the Pro job cap."""
     _set_subscription_status(store, "alice", "active")
     assert store.has_pro_plan("Alice") is True
     assert store.get_effective_user_storage_quota("alice") == settings.pro_storage_quota_bytes
-    assert store.get_effective_user_quota("alice") is None
+    assert store.get_effective_user_quota("alice") == settings.pro_max_jobs_per_user
+
+
+def test_past_due_pro_plan_keeps_limits_inside_the_grace_period(store: _SQLiteJobStore) -> None:
+    """A subscription that just went past due still grants Pro limits."""
+    _set_subscription_status(store, "alice", "past_due", past_due_since=datetime.now(UTC) - timedelta(days=1))
+    assert store.has_pro_plan("alice") is True
+    assert store.get_effective_user_quota("alice") == settings.pro_max_jobs_per_user
+
+
+def test_past_due_pro_plan_lapses_after_the_grace_period(store: _SQLiteJobStore) -> None:
+    """Past the grace period a past-due subscription falls back to free limits."""
+    since = datetime.now(UTC) - timedelta(days=settings.pro_past_due_grace_days + 1)
+    _set_subscription_status(store, "alice", "past_due", past_due_since=since)
+    assert store.has_pro_plan("alice") is False
+    assert store.get_effective_user_storage_quota("alice") == settings.user_storage_quota_bytes
+    assert store.get_effective_user_quota("alice") == settings.max_jobs_per_user
 
 
 def test_lapsed_pro_plan_falls_back_to_defaults(store: _SQLiteJobStore) -> None:

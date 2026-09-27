@@ -256,3 +256,16 @@ def test_callback_surfaces_exchange_failures(
         )
     assert _location(response)["byok_error"] == [code]
     assert _stored_keys(engine) == []
+
+
+def test_wallet_serves_the_current_pricing_terms(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wallet carries the live markup and fees so the client never hardcodes them."""
+    monkeypatch.setattr(settings, "usage_markup", 1.3)
+    response = client.get("/billing/wallet")
+    assert response.status_code == 200
+    assert response.json()["pricing"] == {
+        "usage_markup": 1.3,
+        "byok_fee_fraction": 0.05,
+        "purchase_fee_rate": 0.125,
+        "purchase_fee_fixed_cents": 35,
+    }

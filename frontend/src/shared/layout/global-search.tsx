@@ -3,27 +3,18 @@
 import { Kbd } from "@/shared/ui/kbd";
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
-import {
-  ArrowUpRight,
-  ChartBar,
-  Compass,
-  Database,
-  GearSix,
-  HardDrive,
-  MagnifyingGlass,
-  Robot,
-  Sparkle,
-  SquaresFour,
-  Tag,
-} from "@/shared/ui/icons";
+import { signOut, useSession } from "next-auth/react";
+import { ArrowUpRight, GraduationCap, MagnifyingGlass, Robot, SignOut } from "@/shared/ui/icons";
 import type { Icon } from "@/shared/ui/icons";
 
-import { useSettingsModal } from "@/features/settings";
+import { useGeneralistPanelStateOptional } from "@/features/agent-panel";
+import { SETTINGS_TABS, useSettingsModal, visibleSettingsTabs } from "@/features/settings";
+import { useTutorialContext } from "@/features/tutorial";
+import { APP_PAGES, matchesQuery, splitKeywords } from "@/shared/lib/app-pages";
+import { APP_PAGE_ICONS, appPageDescription, appPageKeywords, appPageLabel } from "@/shared/lib/app-pages-ui";
 import { useLocale } from "@/shared/providers";
 import { dirForLocale } from "@/shared/lib/locale";
 import { msg } from "@/shared/lib/messages";
-import { TERMS } from "@/shared/lib/terms";
 import { cn } from "@/shared/lib/utils";
 import {
   Dialog,
@@ -33,7 +24,7 @@ import {
   DialogTitle,
 } from "@/shared/ui/primitives/dialog";
 
-type SearchGroup = "quick" | "navigate" | "settings";
+type SearchGroup = "quick" | "navigate" | "actions" | "settings";
 
 type SearchItem = {
   id: string;
@@ -42,101 +33,10 @@ type SearchItem = {
   description?: string;
   keywords: string[];
   icon: Icon;
-  href?: string;
-  settingsTab?: string;
+  run: () => void;
 };
 
-const SETTINGS_ITEMS: Array<{
-  id: string;
-  label: string;
-  kwKey: string;
-  icon: Icon;
-  settingsTab: string;
-}> = [
-  {
-    id: "settings-wizard",
-    label: "settings.tab.wizard",
-    kwKey: "app.shell.search.kw.wizard",
-    icon: Sparkle,
-    settingsTab: "wizard",
-  },
-  {
-    id: "settings-tagging",
-    label: "settings.tab.tagging",
-    kwKey: "app.shell.search.kw.tagging",
-    icon: Tag,
-    settingsTab: "tagging",
-  },
-  {
-    id: "settings-agent",
-    label: "settings.tab.agent",
-    kwKey: "app.shell.search.kw.agent",
-    icon: Robot,
-    settingsTab: "agent",
-  },
-  {
-    id: "settings-account",
-    label: "settings.tab.account",
-    kwKey: "app.shell.search.kw.account",
-    icon: GearSix,
-    settingsTab: "account",
-  },
-  {
-    id: "settings-security",
-    label: "settings.tab.security",
-    kwKey: "app.shell.search.kw.security",
-    icon: GearSix,
-    settingsTab: "security",
-  },
-  {
-    id: "settings-privacy",
-    label: "settings.tab.privacy",
-    kwKey: "app.shell.search.kw.privacy",
-    icon: GearSix,
-    settingsTab: "privacy",
-  },
-  {
-    id: "settings-billing",
-    label: "settings.tab.billing",
-    kwKey: "app.shell.search.kw.billing",
-    icon: GearSix,
-    settingsTab: "billing",
-  },
-  {
-    id: "settings-usage",
-    label: "settings.tab.usage",
-    kwKey: "app.shell.search.kw.usage",
-    icon: ChartBar,
-    settingsTab: "usage",
-  },
-  {
-    id: "settings-providers",
-    label: "settings.tab.providers",
-    kwKey: "app.shell.search.kw.providers",
-    icon: GearSix,
-    settingsTab: "providers",
-  },
-  {
-    id: "settings-api",
-    label: "settings.tab.api",
-    kwKey: "app.shell.search.kw.api",
-    icon: GearSix,
-    settingsTab: "api",
-  },
-  {
-    id: "settings-about",
-    label: "settings.tab.about",
-    kwKey: "app.shell.search.kw.about",
-    icon: GearSix,
-    settingsTab: "about",
-  },
-];
-
-const GROUP_ORDER: SearchGroup[] = ["quick", "navigate", "settings"];
-
-function keyLabel(value: string): string {
-  return value.startsWith("settings.") ? msg(value as Parameters<typeof msg>[0]) : value;
-}
+const GROUP_ORDER: SearchGroup[] = ["quick", "navigate", "actions", "settings"];
 
 /** Render the global navigation/search trigger and its command palette. */
 export function GlobalSearch() {
@@ -144,129 +44,73 @@ export function GlobalSearch() {
   const { locale } = useLocale();
   const dir = dirForLocale(locale);
   const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "admin";
   const { open: settingsOpen, openTo } = useSettingsModal();
+  const agentPanel = useGeneralistPanelStateOptional();
+  const { startTrack } = useTutorialContext();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [activeIndex, setActiveIndex] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
 
+  // Built from the same registries the sidebar and Settings rail render from,
+  // so new pages and settings tabs become searchable without touching this file.
   const items = React.useMemo<SearchItem[]>(() => {
-    const quickActions: SearchItem[] = [
-      {
-        id: "new-optimization",
-        group: "quick",
-        label: TERMS.notificationNewOpt,
-        description: msg("app.shell.search.new_optimization_description"),
-        keywords: msg("app.shell.search.kw.new_optimization")
-          .split(/[\s,]+/)
-          .filter(Boolean),
-        icon: Sparkle,
-        href: "/submit",
-      },
-      {
-        id: "tagging",
-        group: "quick",
-        label: msg("data.tabs.sessions"),
-        description: msg("app.shell.search.tagging_description"),
-        keywords: msg("app.shell.search.kw.tagging")
-          .split(/[\s,]+/)
-          .filter(Boolean),
-        icon: Tag,
-        href: "/tagger",
-      },
-      {
-        id: "settings",
-        group: "quick",
-        label: msg("app.shell.account.settings"),
-        description: msg("settings.subtitle"),
-        keywords: msg("app.shell.search.kw.account")
-          .split(/[\s,]+/)
-          .filter(Boolean),
-        icon: GearSix,
-        settingsTab: "account",
-      },
-    ];
-    const navigation: SearchItem[] = [
-      {
-        id: "dashboard",
-        group: "navigate",
-        label: msg("app.shell.search.dashboard"),
-        keywords: msg("app.shell.search.kw.dashboard")
-          .split(/[\s,]+/)
-          .filter(Boolean),
-        icon: SquaresFour,
-        href: "/",
-      },
-      {
-        id: "data",
-        group: "navigate",
-        label: msg("sidebar.nav.data"),
-        keywords: msg("app.shell.search.kw.data")
-          .split(/[\s,]+/)
-          .filter(Boolean),
-        icon: Database,
-        href: "/datasets",
-      },
-      {
-        id: "explore",
-        group: "navigate",
-        label: msg("sidebar.nav.explore"),
-        keywords: msg("app.shell.search.kw.explore")
-          .split(/[\s,]+/)
-          .filter(Boolean),
-        icon: Compass,
-        href: "/explore",
-      },
-      {
-        id: "storage",
-        group: "navigate",
-        label: msg("app.shell.search.storage"),
-        keywords: msg("app.shell.search.kw.storage")
-          .split(/[\s,]+/)
-          .filter(Boolean),
-        icon: HardDrive,
-        href: "/storage",
-      },
-    ];
-    const settings = (
-      session?.user?.role === "admin"
-        ? [
-            ...SETTINGS_ITEMS,
-            {
-              id: "settings-admin",
-              label: "settings.tab.admin",
-              // i18n-driven like the other settings items
-              kwKey: "app.shell.search.kw.admin",
-              icon: HardDrive,
-              settingsTab: "admin",
-            } as unknown as (typeof SETTINGS_ITEMS)[number],
-          ]
-        : SETTINGS_ITEMS
-    ).map((item) => ({
-      ...item,
-      group: "settings" as const,
-      label: keyLabel(item.label),
-      keywords:
-        "kwKey" in item && typeof (item as { kwKey?: unknown }).kwKey === "string"
-          ? msg((item as { kwKey: string }).kwKey as Parameters<typeof msg>[0])
-              .split(/[\s,]+/)
-              .filter(Boolean)
-          : ((item as unknown as SearchItem).keywords ?? []),
-      description: msg("app.shell.search.settings_description"),
+    const pages: SearchItem[] = APP_PAGES.map((page) => ({
+      id: `page-${page.id}`,
+      group: page.group,
+      label: appPageLabel(page),
+      description: appPageDescription(page),
+      keywords: appPageKeywords(page),
+      icon: APP_PAGE_ICONS[page.id],
+      run: () => router.push(page.href),
     }));
-    const all: SearchItem[] = [...quickActions, ...navigation, ...settings];
-    return all;
-  }, [session?.user?.role]);
+    const actions: SearchItem[] = [
+      ...(agentPanel
+        ? [
+            {
+              id: "action-agent",
+              group: "actions" as const,
+              label: msg("auto.features.agent.panel.components.minimizedpill.literal.1"),
+              keywords: splitKeywords(msg("app.shell.search.kw.open_agent")),
+              icon: Robot,
+              run: () => agentPanel.setOpen(true),
+            },
+          ]
+        : []),
+      {
+        id: "action-tour",
+        group: "actions",
+        label: msg("app.shell.search.action.tour"),
+        keywords: splitKeywords(msg("app.shell.search.kw.tour")),
+        icon: GraduationCap,
+        run: () => startTrack("quick"),
+      },
+      {
+        id: "action-sign-out",
+        group: "actions",
+        label: msg("app.shell.logout"),
+        keywords: splitKeywords(msg("app.shell.search.kw.sign_out")),
+        icon: SignOut,
+        run: () => void signOut({ callbackUrl: "/login" }),
+      },
+    ];
+    const settings: SearchItem[] = visibleSettingsTabs(isAdmin).map((tab) => ({
+      id: `settings-${tab}`,
+      group: "settings",
+      label: msg(SETTINGS_TABS[tab].labelKey),
+      description: msg("app.shell.search.settings_description"),
+      keywords: splitKeywords(msg(SETTINGS_TABS[tab].keywordsKey)),
+      icon: SETTINGS_TABS[tab].icon,
+      run: () => openTo(tab),
+    }));
+    return [...pages, ...actions, ...settings];
+  }, [agentPanel, isAdmin, openTo, router, startTrack, locale]);
 
   const filteredItems = React.useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase();
-    if (!normalized) return items.filter((item) => item.group !== "settings");
+    if (!query.trim()) return items.filter((item) => item.group !== "settings");
     return items.filter((item) =>
-      [item.label, item.description, ...item.keywords]
-        .filter(Boolean)
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(normalized),
+      matchesQuery([item.label, item.description, ...item.keywords], query),
     );
   }, [items, query]);
 
@@ -297,11 +141,7 @@ export function GlobalSearch() {
 
   const selectItem = (item: SearchItem) => {
     setOpen(false);
-    if (item.settingsTab) {
-      openTo(item.settingsTab);
-      return;
-    }
-    if (item.href) router.push(item.href);
+    item.run();
   };
 
   const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -323,6 +163,7 @@ export function GlobalSearch() {
   const groupLabels: Record<SearchGroup, string> = {
     quick: msg("app.shell.search.quick_actions"),
     navigate: msg("app.shell.search.navigate"),
+    actions: msg("app.shell.search.actions"),
     settings: msg("app.shell.search.settings"),
   };
 

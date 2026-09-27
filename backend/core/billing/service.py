@@ -26,6 +26,7 @@ import stripe
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..api.alerts import send_alert
 from ..api.errors import DomainError
 from ..config import settings
 from ..constants import (
@@ -42,8 +43,8 @@ from ..storage.models import (
 from ..telemetry import record_server_event
 from .budget_amounts import wallet_reserved_credits
 from .openrouter_float import check_float
-from .plans import PLAN_FREE, PLAN_PRO, is_pro_status
-from .pricing import PLATFORM_FEE_FRACTION, ModelUsage, credits_for_usage
+from .plans import PAST_DUE_STATUS, PLAN_FREE, PLAN_PRO, is_pro_status
+from .pricing import PLATFORM_FEE_FRACTION, ModelUsage, credits_for_cost_usd, credits_for_usage, raw_cost_usd
 
 logger = logging.getLogger("skynet.billing.service")
 
@@ -356,10 +357,10 @@ def _stripe_id(value: Any) -> str | None:
 def platform_fee_credits_for_usage(usages: Iterable[ModelUsage]) -> int:
     """Return the platform-fee portion of a run's per-model credit cost, rounding up.
 
-    The :data:`PLATFORM_FEE_FRACTION` share of the run's full per-model cost
-    (:func:`core.billing.pricing.credits_for_usage`). The only amount a **BYOK**
-    run is charged, since the provider tokens were paid on the user's own key.
-    At least one credit when the run cost anything.
+    The :data:`PLATFORM_FEE_FRACTION` share of the run's at-cost per-model price
+    (:func:`core.billing.pricing.raw_cost_usd`, without the usage markup). The
+    only amount a **BYOK** run is charged, since the provider tokens were paid on
+    the user's own key. At least one credit when the run cost anything.
 
     Args:
         usages: Per-model token usage for the run.
@@ -367,11 +368,7 @@ def platform_fee_credits_for_usage(usages: Iterable[ModelUsage]) -> int:
     Returns:
         The non-negative platform-fee credits (``0`` when the run cost nothing).
     """
-    full = credits_for_usage(usages)
-    fee = full * PLATFORM_FEE_FRACTION
-    if fee <= 0:
-        return 0
-    return max(1, math.ceil(fee))
+    return credits_for_cost_usd(raw_cost_usd(usages) * PLATFORM_FEE_FRACTION)
 
 
 def run_cost_credits(
@@ -381,7 +378,7 @@ def run_cost_credits(
 ) -> int:
     """Return the credits a run costs: full per-model cost, or the BYOK platform fee.
 
-    A managed run is charged its full per-model token cost
+    A managed run is charged its marked-up per-model token cost
     (:func:`core.billing.pricing.credits_for_usage`); a BYOK run is charged only
     Skynet's platform fee (:func:`platform_fee_credits_for_usage`), since the
     provider tokens were paid on the user's own key.
@@ -526,6 +523,37 @@ def account_committed_credits(session: Session, username: str, *, exclude_job_id
     """
     return wallet_reserved_credits(session, username) + legacy_job_committed_credits(
         session, username, exclude_job_id=exclude_job_id
+    )
+
+
+def _report_uncollected_run(username: str, *, cost: int, charged: int, description: str) -> None:
+    """Log and alert on a run charge the account's balance could not cover.
+
+    The balance floor keeps the account at zero, so the difference is revenue
+    the platform already paid OpenRouter for and will not recover. It logs at
+    ``WARNING`` (below the alert handler's default threshold), so the alert is
+    sent explicitly; the title stays constant so the webhook throttle can
+    collapse a burst while the body carries the per-run figures.
+
+    Args:
+        username: Account the run was billed to.
+        cost: Full credit cost of the run.
+        charged: Credits actually collected.
+        description: The ledger row's label, for context.
+    """
+    uncollected = cost - charged
+    logger.warning(
+        "debit for %s clamped to balance: cost=%d charged=%d uncollected=%d (%s)",
+        username,
+        cost,
+        charged,
+        uncollected,
+        description,
+    )
+    send_alert(
+        "Billing: run cost exceeded the account balance",
+        body=f"account={username} cost={cost} charged={charged} uncollected={uncollected} run={description}",
+        level="WARNING",
     )
 
 
@@ -1168,9 +1196,9 @@ class StripeBillingService:
     def credits_spent_since(self, since: datetime) -> int:
         """Return platform-wide credits spent on runs since a timestamp.
 
-        Sums the magnitude of the negative ledger deltas (run charges written by
-        :meth:`debit_run`) posted at or after ``since``; positive rows (top-ups,
-        grants, refunds) are excluded. Backs the global daily spend kill-switch,
+        Sums the magnitude of the negative ``run`` ledger deltas (run charges)
+        posted at or after ``since``; top-ups, refund/dispute clawbacks and debt
+        repayments are money movements, not token spend, and are excluded. Backs the global daily spend kill-switch,
         which refuses new submissions once a trailing-window total is reached.
 
         Args:
@@ -1184,6 +1212,7 @@ class StripeBillingService:
             spent = (
                 session.query(func.coalesce(func.sum(-CreditLedgerModel.delta_credits), 0))
                 .filter(
+                    CreditLedgerModel.kind == "run",
                     CreditLedgerModel.delta_credits < 0,
                     CreditLedgerModel.created_at >= since,
                 )
@@ -1201,6 +1230,7 @@ class StripeBillingService:
         token_source: str = TOKEN_SOURCE_MANAGED,
         token_sources_by_model: Mapping[str, str] | None = None,
         optimization_id: str | None = None,
+        settlement_key: str | None = None,
     ) -> int:
         """Charge a finished run's per-model credit cost to the account, grant first.
 
@@ -1212,19 +1242,20 @@ class StripeBillingService:
         were already paid on the user's own key — so credits still meter the
         platform on a BYOK run without double-charging for inference. The grant is
         resolved first (seeding a new account's one-time free grant) so the
-        debit lands against a current grant. Idempotency is the caller's
-        responsibility: the worker debits inside its once-only completion claim, so
-        a redelivered/re-run job never double-charges. A run costing zero credits
-        writes nothing.
+        debit lands against a current grant. A caller that may retry passes a
+        ``settlement_key``: a second debit with the same key charges nothing and
+        returns the first charge, so a redelivered or re-run leg never
+        double-charges. A run costing zero credits writes nothing.
 
         The debit can never drive the account negative: the customer row is read
         under ``FOR UPDATE`` so concurrent debits serialize, and the charge is
         clamped to what the account actually holds — a run that cost more than
-        the remaining balance drains it to exactly zero, the shortfall is logged
-        as absorbed, and the ledger row records the clamped (actually charged)
-        amount. The DB backs this up with ``CHECK`` constraints on the balance
-        columns, so a bug here fails the transaction instead of persisting a
-        negative.
+        the remaining balance drains it to exactly zero. The shortfall is not
+        dropped silently: it is stored as ``uncollected_credits`` on the ledger
+        row (a zero-delta row when nothing could be collected), logged, and sent
+        as an operator alert. The DB backs the floor up with ``CHECK``
+        constraints on the balance columns, so a bug here fails the transaction
+        instead of persisting a negative.
 
         Args:
             username: Account the run is billed to.
@@ -1236,11 +1267,14 @@ class StripeBillingService:
                 only); defaults to managed.
             token_sources_by_model: Optional per-model source map for a mixed job.
             optimization_id: Finishing legacy root job, whose own held ceiling may be consumed.
+            settlement_key: Optional idempotency key stored on the ledger row;
+                a debit whose key is already recorded is a no-op.
 
         Returns:
             The credit cost actually charged (``0`` when nothing was billed) —
             at most the account's spendable balance, so it can undershoot the
-            run's full cost on a depleted account.
+            run's full cost on a depleted account. A repeated ``settlement_key``
+            returns the credits its first debit charged.
         """
         usage_rows = list(usages)
         cost = run_cost_credits(usage_rows, token_source, token_sources_by_model)
@@ -1254,6 +1288,14 @@ class StripeBillingService:
         now = datetime.now(UTC)
         with Session(self._engine) as session:
             customer = session.get(BillingCustomerModel, username, with_for_update=True)
+            if settlement_key is not None:
+                # Checked under the customer lock so two workers settling the
+                # same leg serialize here and the second sees the first's row.
+                prior = session.scalar(
+                    select(CreditLedgerModel.delta_credits).where(CreditLedgerModel.settlement_key == settlement_key)
+                )
+                if prior is not None:
+                    return max(-int(prior), 0)
             if customer is None:
                 # A run can finish for an account that never touched Stripe; seed a
                 # customer-less billing row so the debit lands and the grant tracks.
@@ -1275,32 +1317,27 @@ class StripeBillingService:
                 cost,
                 max(0, grant + paid - account_committed_credits(session, username, exclude_job_id=optimization_id)),
             )
-            if charged < cost:
-                logger.warning(
-                    "debit for %s clamped to balance: cost=%d charged=%d absorbed=%d (%s)",
-                    username,
-                    cost,
-                    charged,
-                    cost - charged,
-                    description or "Run",
-                )
+            uncollected = cost - charged
             from_grant = min(grant, charged)
             customer.grant_remaining = grant - from_grant
             customer.credit_balance = paid - (charged - from_grant)
             customer.updated_at = now
-            if charged > 0:
-                session.add(
-                    CreditLedgerModel(
-                        username=username,
-                        delta_credits=-charged,
-                        kind="run",
-                        description=description or "Run",
-                        model=model,
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
-                    )
+            session.add(
+                CreditLedgerModel(
+                    username=username,
+                    delta_credits=-charged,
+                    kind="run",
+                    description=description or "Run",
+                    model=model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    settlement_key=settlement_key,
+                    uncollected_credits=uncollected or None,
                 )
+            )
             session.commit()
+        if uncollected > 0:
+            _report_uncollected_run(username, cost=cost, charged=charged, description=description or "Run")
         return charged
 
     def handle_webhook(self, payload: bytes, sig_header: str | None) -> None:
@@ -1446,13 +1483,18 @@ class StripeBillingService:
             and not is_pro_status(status)
         ):
             return
+        now = datetime.now(UTC)
+        if status != PAST_DUE_STATUS:
+            customer.subscription_past_due_since = None
+        elif customer.subscription_status != PAST_DUE_STATUS or customer.subscription_past_due_since is None:
+            customer.subscription_past_due_since = now
         customer.stripe_subscription_id = subscription_id
         customer.subscription_status = status
         customer.subscription_current_period_end = _subscription_period_end(subscription)
         customer.subscription_cancel_at_period_end = bool(
             _stripe_value(subscription, "cancel_at_period_end", False) or _stripe_value(subscription, "cancel_at")
         )
-        customer.updated_at = datetime.now(UTC)
+        customer.updated_at = now
         logger.info(
             "Subscription synced: user=%s status=%s subscription=%s",
             customer.username,
@@ -1481,6 +1523,9 @@ class StripeBillingService:
     def _on_checkout_completed(self, session: Session, event_id: str, obj: Any) -> tuple[str, int, str] | None:
         """Credit a completed one-time pack purchase to the buyer's balance.
 
+        An account carrying refund/chargeback debt repays it from the purchase
+        first; only the remainder becomes spendable.
+
         Args:
             session: Open session (caller commits).
             event_id: Stripe event id, recorded on the ledger row for traceability.
@@ -1507,7 +1552,9 @@ class StripeBillingService:
                 credit_balance=0,
             )
             session.add(customer)
-        customer.credit_balance = int(customer.credit_balance) + credits
+        repaid = min(int(customer.debt_credits or 0), credits)
+        customer.debt_credits = int(customer.debt_credits or 0) - repaid
+        customer.credit_balance = int(customer.credit_balance) + credits - repaid
         customer.updated_at = datetime.now(UTC)
         session.add(
             CreditLedgerModel(
@@ -1519,6 +1566,18 @@ class StripeBillingService:
                 stripe_payment_intent_id=payment_intent,
             )
         )
+        if repaid > 0:
+            # A separate row (no payment intent) so the top-up row keeps the
+            # full granted amount a later refund of this purchase caps against.
+            session.add(
+                CreditLedgerModel(
+                    username=username,
+                    delta_credits=-repaid,
+                    kind="debt_repayment",
+                    description="Refund/chargeback debt repaid",
+                    stripe_event_id=event_id,
+                )
+            )
         return username, credits, pack_id
 
     def _pi_clawback_context(self, session: Session, payment_intent: str) -> tuple[str | None, int, int]:
@@ -1538,13 +1597,15 @@ class StripeBillingService:
         Returns:
             ``(username, granted, clawed)`` — the account the PaymentIntent's
             top-up credited (``None`` when no top-up row matches), the credits that
-            top-up granted, and the credits already reversed by refunds/disputes.
+            top-up granted, and the credits already reversed by refunds/disputes
+            (collected plus any carried as debt).
         """
         rows = (
             session.query(
                 CreditLedgerModel.username,
                 CreditLedgerModel.kind,
                 CreditLedgerModel.delta_credits,
+                CreditLedgerModel.uncollected_credits,
             )
             .filter(CreditLedgerModel.stripe_payment_intent_id == payment_intent)
             .all()
@@ -1558,7 +1619,7 @@ class StripeBillingService:
                 granted += int(row.delta_credits)
             elif row.kind in ("refund", "dispute"):
                 username = username or row.username
-                clawed += -int(row.delta_credits)
+                clawed += -int(row.delta_credits) + int(row.uncollected_credits or 0)
         return username, granted, clawed
 
     def _on_charge_refunded(self, session: Session, event_id: str, obj: Any) -> None:
@@ -1650,15 +1711,20 @@ class StripeBillingService:
         kind: str,
         description: str,
     ) -> None:
-        """Remove up to ``credits`` from the account's purchased balance, flooring at zero.
+        """Remove ``credits`` from the account, carrying what it no longer holds as debt.
 
-        A refund or dispute returns money that only ever bought the purchased
-        balance, so the clawback draws from ``credit_balance`` alone — never the free
-        grant — under ``FOR UPDATE`` so it serializes with concurrent debits. The
-        balance may already be spent below what is owed; the charge is clamped to what
-        remains (the DB ``CHECK`` forbids going negative) and the uncollectable
-        shortfall is logged rather than carried as user debt. A clawback that can
-        collect nothing writes no ledger row, mirroring a zero-credit debit.
+        A refund or dispute returns money that bought purchased credits, so the
+        clawback draws from ``credit_balance`` first, under ``FOR UPDATE`` so it
+        serializes with concurrent debits. When those credits were already spent,
+        the platform is out of pocket for the tokens they bought: the remainder
+        is taken from the free grant (which then cannot be spent on top of the
+        reversed money) and whatever is still owed becomes ``debt_credits``.
+        Both balances are then zero, so every spend gate refuses until a top-up
+        repays the debt (:meth:`_on_checkout_completed`). The ledger row records
+        the collected delta and the debt as ``uncollected_credits`` — a zero-delta
+        row when nothing was collected — so :meth:`_pi_clawback_context` counts the
+        full reversal and a later event cannot claw it twice. A debt is logged and
+        sent as an operator alert.
 
         Args:
             session: Open session (caller commits).
@@ -1672,29 +1738,51 @@ class StripeBillingService:
         """
         now = datetime.now(UTC)
         customer = session.get(BillingCustomerModel, username, with_for_update=True)
-        paid = max(int(customer.credit_balance), 0) if customer is not None else 0
-        charged = min(credits, paid)
-        if charged < credits:
-            logger.warning(
-                "%s clawback for %s clamped to balance: owed=%d collected=%d uncollectable=%d (pi %s)",
-                kind,
-                username,
-                credits,
-                charged,
-                credits - charged,
-                payment_intent,
+        if customer is None:
+            customer = BillingCustomerModel(
+                username=username,
+                stripe_customer_id=f"{LOCAL_CUSTOMER_PREFIX}{username}",
+                credit_balance=0,
+                debt_credits=0,
+                created_at=now,
+                updated_at=now,
             )
-        if charged <= 0:
-            return
-        customer.credit_balance = paid - charged
+            session.add(customer)
+        paid = max(int(customer.credit_balance), 0)
+        from_paid = min(credits, paid)
+        grant = max(self._resolve_grant(customer, now), 0)
+        from_grant = min(credits - from_paid, grant)
+        debt = credits - from_paid - from_grant
+        customer.credit_balance = paid - from_paid
+        customer.grant_remaining = grant - from_grant
+        customer.debt_credits = int(customer.debt_credits or 0) + debt
         customer.updated_at = now
         session.add(
             CreditLedgerModel(
                 username=username,
-                delta_credits=-charged,
+                delta_credits=-(from_paid + from_grant),
                 kind=kind,
                 description=description,
                 stripe_event_id=event_id,
                 stripe_payment_intent_id=payment_intent,
+                uncollected_credits=debt or None,
             )
         )
+        if debt > 0:
+            logger.warning(
+                "%s clawback for %s exceeded the balance: owed=%d collected=%d debt=%d (pi %s)",
+                kind,
+                username,
+                credits,
+                from_paid + from_grant,
+                debt,
+                payment_intent,
+            )
+            send_alert(
+                "Billing: refund/dispute left an account in debt",
+                body=(
+                    f"account={username} kind={kind} owed={credits} collected={from_paid + from_grant} "
+                    f"debt={debt} total_debt={customer.debt_credits} payment_intent={payment_intent}"
+                ),
+                level="WARNING",
+            )

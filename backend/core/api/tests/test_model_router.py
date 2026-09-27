@@ -1,114 +1,77 @@
-"""Unit tests for the generalist agent's auto-mode model routing."""
+"""Unit tests for the agent composers' model routing."""
 
 from __future__ import annotations
 
 import pytest
 
-from ...config import settings
+from ...config import DEFAULT_AGENT_MODEL_ID
 from .. import model_catalog
 from .. import model_router as mr
 from ..errors import DomainError
 from ..model_catalog import CatalogModel, ModelCatalogResponse
-from ..model_router import (
-    AUTO_INTELLIGENT_ID,
-    BALANCED_PINNED_MODEL_ID,
-    OPENROUTER_AUTO_ID,
-    resolve_auto_tier,
-    route_auto_model,
-    route_menu_model,
-)
+from ..model_router import effective_reasoning_effort, route_agent_model, route_menu_model
+
+_DEFAULT_ID = "openrouter/z-ai/glm-5.3-flash"
 
 
-def _catalog_with(*model_ids: str) -> ModelCatalogResponse:
-    """Build a minimal catalog response listing the given model ids."""
+def _catalog_with(*model_ids: str, default: str | None = None) -> ModelCatalogResponse:
+    """Build a minimal catalog response listing the given model ids plus the default."""
+    ids = [*model_ids, default] if default else list(model_ids)
     return ModelCatalogResponse(
         providers=[],
         models=[
-            CatalogModel(value=mid, label=mid, provider="test", available=True)
-            for mid in model_ids
+            CatalogModel(value=mid, label=mid, provider="test", available=True, is_default=mid == default)
+            for mid in ids
         ],
     )
 
 
-@pytest.mark.parametrize(
-    ("model", "expected"),
-    [
-        (None, (None, "balanced")),
-        ("", (None, "balanced")),
-        ("  ", (None, "balanced")),
-        (AUTO_INTELLIGENT_ID, (None, "intelligent")),
-        ("openai/gpt-5.5", ("openai/gpt-5.5", None)),
-    ],
-    ids=["none", "empty", "whitespace", "intelligent_sentinel", "explicit_id"],
-)
-def test_resolve_auto_tier(model: str | None, expected: tuple[str | None, str | None]) -> None:
-    """Auto tiers come from absent/sentinel values; real ids pass through."""
-    assert resolve_auto_tier(model) == expected
-
-
-def test_balanced_runs_pinned_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Balanced Auto runs the eval-pinned default model with no extras."""
+@pytest.mark.parametrize("model", [None, "", "  ", "auto:intelligent"], ids=["none", "empty", "whitespace", "retired_sentinel"])
+def test_no_pick_runs_catalog_default(monkeypatch: pytest.MonkeyPatch, model: str | None) -> None:
+    """No pick, and the retired Auto sentinel, run the catalog's flagged default."""
     monkeypatch.setattr(
         mr,
         "get_catalog_cached",
-        lambda: _catalog_with("openrouter/anthropic/claude-sonnet-5", "openai/gpt-5.5"),
+        lambda: _catalog_with("openrouter/anthropic/claude-sonnet-5", "openai/gpt-5.5", default=_DEFAULT_ID),
     )
-    config = route_auto_model("balanced")
-    assert config.name == BALANCED_PINNED_MODEL_ID
-    assert config.extra == {}
+    assert route_menu_model(model) == _DEFAULT_ID
+    assert route_agent_model(model).name == _DEFAULT_ID
 
 
-def test_intelligent_runs_auto_router_pure_quality(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The intelligent tier pins the router's dial to pure quality (0)."""
-    monkeypatch.setattr(
-        mr,
-        "get_catalog_cached",
-        lambda: _catalog_with("openrouter/anthropic/claude-sonnet-5"),
-    )
-    config = route_auto_model("intelligent")
-    assert config.name == OPENROUTER_AUTO_ID
-    assert config.extra == {
-        "extra_body": {"plugins": [{"id": "auto-router", "cost_quality_tradeoff": 0}]}
-    }
-
-
-def test_conversation_id_becomes_sticky_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A known conversation id rides along as the router's session_id."""
-    monkeypatch.setattr(
-        mr,
-        "get_catalog_cached",
-        lambda: _catalog_with("openrouter/anthropic/claude-sonnet-5"),
-    )
-    config = route_auto_model("intelligent", "conv-123")
-    assert config.extra["extra_body"]["session_id"] == "conv-123"
-
-
-def test_without_openrouter_uses_server_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An air-gapped catalog (no openrouter/ ids) degrades to the default."""
+def test_without_catalog_default_degrades(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no flagged default, the engine's configured default runs."""
+    monkeypatch.setattr(model_catalog, "_cached_response", None)
     monkeypatch.setattr(mr, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5"))
-    for tier in ("balanced", "intelligent"):
-        config = route_auto_model(tier)
-        assert config.name == settings.generalist_agent_model
-        assert config.extra == {}
+    assert route_menu_model(None) is None
+    assert route_agent_model(None).name == DEFAULT_AGENT_MODEL_ID
 
 
 def test_route_survives_catalog_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """A gateway outage routes to the server default instead of raising."""
+    monkeypatch.setattr(model_catalog, "_cached_response", None)
 
     def _boom() -> ModelCatalogResponse:
         raise RuntimeError("gateway down")
 
     monkeypatch.setattr(mr, "get_catalog_cached", _boom)
-    assert route_auto_model("balanced").name == settings.generalist_agent_model
-    assert route_auto_model("intelligent").name == settings.generalist_agent_model
+    assert route_menu_model(None) is None
+    assert route_agent_model(None).name == DEFAULT_AGENT_MODEL_ID
 
 
 def test_route_menu_model_passes_catalog_id_through(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An explicit catalog id is validated and returned with no extras."""
+    """An explicit catalog id is validated and returned as-is."""
     monkeypatch.setattr(
         model_catalog, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5")
     )
-    assert route_menu_model("openai/gpt-5.5") == ("openai/gpt-5.5", None)
+    assert route_menu_model("openai/gpt-5.5") == "openai/gpt-5.5"
+    assert route_agent_model("openai/gpt-5.5").name == "openai/gpt-5.5"
+
+
+def test_route_menu_model_routes_removed_model_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A withdrawn model id from a stale pref runs the default instead of raising."""
+    monkeypatch.setattr(mr, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5", default=_DEFAULT_ID))
+    monkeypatch.setattr(model_catalog, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5", default=_DEFAULT_ID))
+    assert route_menu_model("openrouter/x-ai/grok-build") == _DEFAULT_ID
 
 
 def test_route_menu_model_rejects_unknown_id(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,23 +84,50 @@ def test_route_menu_model_rejects_unknown_id(monkeypatch: pytest.MonkeyPatch) ->
     assert err.value.status_code == 422
 
 
-def test_route_menu_model_routes_auto_tiers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Absent values run the pinned default; the sentinel rides the router."""
-    monkeypatch.setattr(
-        mr,
-        "get_catalog_cached",
-        lambda: _catalog_with("openrouter/anthropic/claude-sonnet-5"),
-    )
-    assert route_menu_model(None) == (BALANCED_PINNED_MODEL_ID, None)
-    model, body = route_menu_model(AUTO_INTELLIGENT_ID, session_id="sess-1")
-    assert model == OPENROUTER_AUTO_ID
-    assert body == {
-        "plugins": [{"id": "auto-router", "cost_quality_tradeoff": 0}],
-        "session_id": "sess-1",
-    }
+def _effort_catalog() -> ModelCatalogResponse:
+    """Build a catalog with one default-on thinker and one opt-in thinker."""
+    return ModelCatalogResponse(
+        providers=[],
+        models=[
+            CatalogModel(
+                value="deepseek/flash", label="flash", provider="test", available=True,
+                reasoning_efforts=["low", "high", "max"], default_reasoning_effort="high",
+                reasoning_default_enabled=True,
+            ),
+            CatalogModel(
+                value="deepseek/pro", label="pro", provider="test", available=True,
+                reasoning_efforts=["low", "high", "max"], default_reasoning_effort="high",
+                reasoning_default_enabled=False,
+            ),
+        ],
+    )  # fmt: skip
 
 
-def test_route_menu_model_degrades_without_openrouter(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No OpenRouter connectivity → the engine's configured default runs."""
-    monkeypatch.setattr(mr, "get_catalog_cached", lambda: _catalog_with("openai/gpt-5.5"))
-    assert route_menu_model(None) == (None, None)
+@pytest.mark.parametrize(
+    ("model", "requested", "expected"),
+    [
+        ("deepseek/flash", None, "high"),
+        ("deepseek/pro", None, None),
+        ("deepseek/flash", "max", "max"),
+        ("deepseek/flash", "medium", "high"),
+        ("deepseek/flash", "minimal", "low"),
+        ("deepseek/flash", "xhigh", "max"),
+        ("unknown/model", "medium", "medium"),
+        (None, "medium", "medium"),
+    ],
+)
+def test_effective_reasoning_effort(
+    monkeypatch: pytest.MonkeyPatch, model: str | None, requested: str | None, expected: str | None
+) -> None:
+    """Default resolves to the catalog default; explicit picks snap onto the model's ladder."""
+    monkeypatch.setattr(mr, "get_catalog_cached", _effort_catalog)
+    assert effective_reasoning_effort(model, requested) == expected
+
+
+def test_agent_model_id_prefers_configured_then_cached_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An operator id wins; else the built catalog's default; else the static fallback."""
+    monkeypatch.setattr(model_catalog, "_cached_response", None)
+    assert model_catalog.agent_model_id("") == DEFAULT_AGENT_MODEL_ID
+    monkeypatch.setattr(model_catalog, "_cached_response", _catalog_with("openai/gpt-5.5", default="openai/o-best"))
+    assert model_catalog.agent_model_id("") == "openai/o-best"
+    assert model_catalog.agent_model_id(" openai/gpt-5.5 ") == "openai/gpt-5.5"

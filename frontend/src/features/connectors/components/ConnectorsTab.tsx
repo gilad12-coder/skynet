@@ -14,6 +14,7 @@ import type { ConnectorProvider, ConnectorStatus } from "@/shared/lib/api";
 import { tI18n } from "@/shared/lib/i18n";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
+import { useSettingsModal } from "@/features/settings";
 import { useConnectors } from "../hooks/use-connectors";
 import {
   PROVIDER_GROUPS,
@@ -122,11 +123,15 @@ function ProviderCard({
   meta,
   status,
   onChange,
+  focused = false,
 }: {
   meta: ProviderMeta;
   status: ConnectorStatus | null;
   onChange: (connectors: ConnectorStatus[]) => void;
+  /** Deep-linked from an import of this provider: scroll here and open its link form. */
+  focused?: boolean;
 }) {
+  const cardRef = React.useRef<HTMLDivElement>(null);
   const [formOpen, setFormOpen] = React.useState(false);
   // The same form collects pasted credentials, or the names a provider needs before its OAuth redirect.
   const [formMode, setFormMode] = React.useState<"credentials" | "oauth">("credentials");
@@ -155,6 +160,19 @@ function ProviderCard({
     setFormMode(mode);
     setFormOpen(true);
   };
+
+  React.useEffect(() => {
+    if (!focused) return;
+    cardRef.current?.scrollIntoView({ block: "center" });
+    if (connected) return;
+    // A bare OAuth provider has nothing to fill in; its sign-in button is the next step.
+    if (status?.oauth_available && meta.oauthButton) {
+      if (meta.oauthFields) openForm("oauth");
+    } else if (meta.fields.length > 0) {
+      openForm("credentials");
+    }
+    // Runs once per deep link; the form state it sets must not re-trigger it.
+  }, [focused]);
 
   const handleOAuth = async (oauthValues?: Record<string, string>) => {
     setStarting(true);
@@ -201,7 +219,13 @@ function ProviderCard({
   };
 
   return (
-    <div className="rounded-lg border border-border/50 px-3 py-2.5">
+    <div
+      ref={cardRef}
+      className={cn(
+        "rounded-lg border border-border/50 px-3 py-2.5",
+        focused && "border-[#C8A882] ring-[3px] ring-[#C8A882]/25",
+      )}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <meta.Avatar size={28} />
@@ -370,6 +394,13 @@ function ProviderCard({
  */
 export function ConnectorsTab() {
   const { byProvider, loading, error, setConnectors, refetch } = useConnectors();
+  const { targetFocus, clearFocus } = useSettingsModal();
+  // Held locally so the highlight outlives the context value, which is cleared
+  // right away so a later manual open of Settings doesn't re-focus it.
+  const [focusProvider] = React.useState(targetFocus);
+  React.useEffect(() => {
+    if (targetFocus) clearFocus();
+  }, [targetFocus, clearFocus]);
   useConnectorErrorParam();
 
   return (
@@ -396,6 +427,7 @@ export function ConnectorsTab() {
                   meta={providerMeta(id)}
                   status={byProvider(id)}
                   onChange={setConnectors}
+                  focused={id === focusProvider}
                 />
               ))}
             </section>

@@ -10,7 +10,9 @@ whole Google SDK.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
+import threading
 import time
 from typing import Any
 
@@ -24,6 +26,10 @@ from .transport import label
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 API_TIMEOUT = httpx.Timeout(30.0)
 ASSERTION_TTL_SECONDS = 3600
+TOKEN_REFRESH_MARGIN_SECONDS = 300
+
+_tokens: dict[tuple[str, str], tuple[float, str]] = {}
+_tokens_lock = threading.Lock()
 
 
 def _b64url(data: bytes) -> str:
@@ -66,6 +72,34 @@ def parse_service_account(raw: str) -> dict[str, Any]:
 
 
 def service_account_token(key: dict[str, Any], scope: str, provider: str) -> str:
+    """Return an access token for a service account, reusing one until it nears expiry.
+
+    Minting signs an assertion and calls Google, and a single browse makes a
+    dozen provider calls, so the token is cached per key and scope.
+
+    Args:
+        key: The parsed service-account key.
+        scope: Space-separated OAuth scopes.
+        provider: Connector name for error reporting.
+
+    Returns:
+        A bearer token.
+
+    Raises:
+        DomainError: 502 when Google is unreachable; 400 when the key is refused.
+    """
+    cache_key = (hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest(), scope)
+    with _tokens_lock:
+        cached = _tokens.get(cache_key)
+    if cached is not None and cached[0] > time.monotonic():
+        return cached[1]
+    token, expires_in = _mint_token(key, scope, provider)
+    with _tokens_lock:
+        _tokens[cache_key] = (time.monotonic() + expires_in - TOKEN_REFRESH_MARGIN_SECONDS, token)
+    return token
+
+
+def _mint_token(key: dict[str, Any], scope: str, provider: str) -> tuple[str, int]:
     """Mint an access token for a service account.
 
     Args:
@@ -74,7 +108,7 @@ def service_account_token(key: dict[str, Any], scope: str, provider: str) -> str
         provider: Connector name for error reporting.
 
     Returns:
-        A bearer token good for about an hour.
+        ``(token, lifetime in seconds)``.
 
     Raises:
         DomainError: 502 when Google is unreachable; 400 when the key is refused.
@@ -108,7 +142,9 @@ def service_account_token(key: dict[str, Any], scope: str, provider: str) -> str
         raise DomainError("connectors.unreachable", status=502, provider=label(provider)) from exc
     if response.status_code >= 400:
         raise DomainError("connectors.invalid_credentials", status=400)
-    token = response.json().get("access_token")
+    body = response.json()
+    token = body.get("access_token")
     if not isinstance(token, str) or not token:
         raise DomainError("connectors.invalid_credentials", status=400)
-    return token
+    expires_in = body.get("expires_in")
+    return token, expires_in if isinstance(expires_in, int) else ASSERTION_TTL_SECONDS

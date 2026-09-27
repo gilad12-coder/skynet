@@ -6,9 +6,10 @@
  * Credits are spendable on any model. A credit is simply a US cent, at par with
  * the dollar — the same model OpenRouter uses: the balance operates in dollars
  * and is called credits because, once bought, it can only be spent inside
- * Skynet. Runs bill at true provider cost (no per-token markup); the platform's
- * margin is the credit-purchase fee (`CREDIT_PURCHASE_FEE_*`), so it never
- * subsidizes a run. A BYOK run is charged only a small platform fee.
+ * Skynet. Platform-paid usage (model tokens and sandbox compute) bills at
+ * provider cost times the backend's usage markup; a BYOK run is charged only a
+ * small platform fee on the at-cost model price; a top-up adds a service fee.
+ * Those rates come from the backend (`PricingTerms` on the wallet response).
  *
  * Everything here is framework-agnostic (no React / `next/*`) so it imports from
  * server components, client components, and the provider alike. Wallet values
@@ -40,30 +41,45 @@ export const CUSTOM_CREDITS_MAX = 100_000;
 export const LOW_BALANCE_USD = 0.5;
 
 /**
- * Service fee on a credit purchase, mirroring backend `purchase_fee_cents`:
- * 12.5% of the credit value plus a flat 35 cents, charged on top of par
- * credits. A platform fee that never varies by payment method, so it is not a
- * card surcharge; it absorbs processing and the provider's own top-up fee.
- * The buyer pays the credit value plus this fee; only the base credits are
- * granted.
+ * The backend's live pricing terms, served on the wallet response so estimates
+ * and fee previews never hardcode them.
  */
-export const CREDIT_PURCHASE_FEE_RATE = 0.125;
-export const CREDIT_PURCHASE_FEE_FIXED_USD = 0.35;
+export interface PricingTerms {
+  /** Multiplier on provider cost for platform-paid model tokens and sandbox compute. */
+  usageMarkup: number;
+  /** BYOK platform fee, as a fraction of the at-cost model price. */
+  byokFeeFraction: number;
+  /** Top-up service fee, as a fraction of the credit value. */
+  purchaseFeeRate: number;
+  /** Flat top-up service fee, in cents. */
+  purchaseFeeFixedCents: number;
+}
 
 /**
- * The service fee for buying `credits`, in USD: 12.5% of the credit value (one
- * credit is one cent) rounded up to the cent, plus 35 cents. Mirrors backend
- * `purchase_fee_cents`.
+ * Seed terms used only until the wallet response arrives (the wallet itself
+ * seeds from `EMPTY_WALLET`); they match the backend defaults so a first-paint
+ * estimate is not off by the markup.
  */
-export function purchaseFeeUsd(credits: number): number {
-  return (
-    (Math.ceil(credits * CREDIT_PURCHASE_FEE_RATE) + CREDIT_PURCHASE_FEE_FIXED_USD * 100) / 100
-  );
+export const DEFAULT_PRICING_TERMS: PricingTerms = {
+  usageMarkup: 1.15,
+  byokFeeFraction: 0.05,
+  purchaseFeeRate: 0.125,
+  purchaseFeeFixedCents: 35,
+};
+
+/**
+ * The service fee for buying `credits`, in USD: the fee rate of the credit value
+ * (one credit is one cent) rounded up to the cent, plus the flat fee. Mirrors
+ * backend `purchase_fee_cents`. The buyer pays the credit value plus this fee;
+ * only the base credits are granted.
+ */
+export function purchaseFeeUsd(credits: number, terms: PricingTerms = DEFAULT_PRICING_TERMS): number {
+  return (Math.ceil(credits * terms.purchaseFeeRate) + terms.purchaseFeeFixedCents) / 100;
 }
 
 /** What the buyer actually pays for `credits`: the par credit value plus the service fee. */
-export function purchaseTotalUsd(credits: number): number {
-  return creditsToUsd(credits) + purchaseFeeUsd(credits);
+export function purchaseTotalUsd(credits: number, terms: PricingTerms = DEFAULT_PRICING_TERMS): number {
+  return creditsToUsd(credits) + purchaseFeeUsd(credits, terms);
 }
 
 /** The one-time free grant that lets a new account try the platform. */
@@ -117,6 +133,7 @@ export interface CreditWallet {
   /** Most-recent-first ledger rows. */
   usage: UsageEntry[];
   plan: PlanState;
+  pricing: PricingTerms;
 }
 
 /** Convert a credit count to its USD platform value. */
@@ -199,4 +216,5 @@ export const EMPTY_WALLET: CreditWallet = {
   freeGrant: { creditsRemaining: 0, creditsTotal: 0 },
   usage: [],
   plan: { plan: "free", renewsAt: null, cancelAtPeriodEnd: false, available: false },
+  pricing: DEFAULT_PRICING_TERMS,
 };

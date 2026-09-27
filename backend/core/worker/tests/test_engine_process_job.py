@@ -816,3 +816,78 @@ def test_process_job_blackbox_validation_failure_marks_job_failed(
 
     assert store._jobs["opt-bb-bad"]["status"] == "failed"
     proc.start.assert_not_called()
+
+
+_USAGE_SNAPSHOT = [{"model": "openai/gpt-4o-mini", "input_tokens": 4000, "output_tokens": 300}]
+
+
+def _run_failing_leg(worker: BackgroundWorker, store: FakeJobStore, job_id: str, error_event: dict) -> MagicMock:
+    """Run one legacy leg that reports usage and then fails, capturing its debit calls.
+
+    Args:
+        worker: The worker under test.
+        store: The in-memory store the job is seeded in.
+        job_id: Job to seed and process.
+        error_event: The child's terminal error event.
+
+    Returns:
+        The patched ``_debit_run_credits`` mock.
+    """
+    store.seed_job(job_id, payload=REAL_RUN_PAYLOAD, attempts=0, execution_generation=3)
+    store.engine = MagicMock()
+    worker.enqueue_job(job_id)
+    progress = {**make_progress_event(), "usage_by_model": _USAGE_SNAPSHOT}
+    ctx, _proc = make_mp_context(exitcode=1, result_events=[progress, error_event])
+    worker._mp_ctx = ctx
+    worker._mp_start_method = "spawn"
+    with (
+        patch("core.worker.engine.notify_job_completed"),
+        patch.object(worker, "_get_service") as mock_svc,
+        patch.object(worker, "_debit_run_credits", return_value=7) as debit,
+    ):
+        mock_svc.return_value.validate_payload = MagicMock()
+        worker._process_job(job_id, 0)
+    return debit
+
+
+def test_process_job_bills_failed_legacy_leg_for_reported_usage(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A legacy run that fails after spending tokens is billed once, keyed to its execution leg."""
+    debit = _run_failing_leg(
+        worker,
+        store,
+        "opt-bill-fail",
+        {
+            "type": EVENT_ERROR,
+            "error": "provider rejected the request with 400",
+            "error_type": "ValueError",
+            "failure_kind": DETERMINISTIC_FAILURE,
+            "usage_by_model": _USAGE_SNAPSHOT,
+        },
+    )
+    assert store._jobs["opt-bill-fail"]["status"] == "failed"
+    debit.assert_called_once()
+    assert debit.call_args.args[1] == {"usage_by_model": _USAGE_SNAPSHOT}
+    assert debit.call_args.kwargs["settlement_key"] == "legacy:opt-bill-fail:g3"
+
+
+def test_process_job_does_not_bill_platform_infrastructure_interruption(
+    worker: BackgroundWorker,
+    store: FakeJobStore,
+) -> None:
+    """A leg lost to a platform-side interruption is recovered without charging the user."""
+    debit = _run_failing_leg(
+        worker,
+        store,
+        "opt-bill-infra",
+        {
+            "type": EVENT_ERROR,
+            "error": "sandbox transport interrupted",
+            "error_type": "InfrastructureInterruptionError",
+            "failure_kind": INFRASTRUCTURE_INTERRUPTION,
+        },
+    )
+    assert store._jobs["opt-bill-infra"]["status"] == "pending"
+    debit.assert_not_called()

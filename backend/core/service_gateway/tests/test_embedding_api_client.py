@@ -88,3 +88,28 @@ def test_embedding_api_client_stops_at_the_monthly_token_cap(monkeypatch: pytest
 
     assert results == [[0.6, 0.8], [0.6, 0.8], None]
     assert post.call_count == 2
+
+
+def test_embedding_api_client_stops_one_user_at_their_monthly_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A user past their own token cap is refused while other users still embed."""
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    monkeypatch.setattr(platform_budget, "shared_redis_client", lambda: redis)
+    with (
+        patch.object(embeddings.settings, "embeddings_base_url", "https://llm.internal/v1"),
+        patch.object(embeddings.settings, "embeddings_model", "embed-model"),
+        patch.object(embeddings.settings, "embeddings_dim", 2),
+        patch.object(embeddings.settings, "embeddings_monthly_token_cap", 10_000),
+        patch.object(embeddings.settings, "embeddings_user_monthly_token_cap", 100),
+        patch.object(embeddings.requests, "post") as post,
+    ):
+        response = Mock()
+        response.json.return_value = {"data": [{"embedding": [3.0, 4.0]}], "usage": {"total_tokens": 60}}
+        post.return_value = response
+
+        client = embeddings._EmbeddingApiClient()
+        alice = [client.encode("hello", user="Alice") for _ in range(3)]
+        bob = client.encode("hello", user="bob")
+
+    assert alice == [[0.6, 0.8], [0.6, 0.8], None]
+    assert bob == [0.6, 0.8]
+    assert post.call_count == 3

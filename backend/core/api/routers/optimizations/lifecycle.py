@@ -46,6 +46,7 @@ from ...converters import parse_overview, status_to_job_status
 from ...errors import DomainError
 from ...sharing_access import ShareRole
 from .._helpers import (
+    enforce_job_quota,
     enforce_storage_quota,
     filter_ids_at_least,
     is_budget_stop,
@@ -426,6 +427,7 @@ def register_lifecycle_routes(
         source_name = overview.get(PAYLOAD_OVERVIEW_NAME) or optimization_id[:8]
         cloned_payload_seed: dict[str, Any] = {**source_payload, "username": current_user.username}
 
+        enforce_job_quota(job_store, current_user.username, incoming_jobs=req.count)
         enforce_storage_quota(
             job_store,
             current_user.username,
@@ -493,6 +495,7 @@ def register_lifecycle_routes(
         source_name = overview.get(PAYLOAD_OVERVIEW_NAME) or optimization_id[:8]
         retry_name = f"{RETRY_NAME_PREFIX} {source_name}".strip()
         retry_payload_seed: dict[str, Any] = {**source_payload, "username": current_user.username}
+        enforce_job_quota(job_store, current_user.username)
         enforce_storage_quota(
             job_store,
             current_user.username,

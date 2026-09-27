@@ -24,7 +24,7 @@ from ..models import BlackboxRunRequest, GridSearchRequest, RunRequest
 from ..models.results import TerminalOutcome
 from ..registry import ServiceRegistry
 from ..service_gateway import DspyService
-from ..service_gateway.language_models import activate_job_lm_budget
+from ..service_gateway.language_models import activate_job_lm_budget, activate_job_usage_registry, job_usage_snapshot
 from ..service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
 from ..service_gateway.optimization.blackbox.sandbox import sandbox_runtime_context
 from ..service_gateway.optimization.blackbox.service import run_blackbox_optimization
@@ -79,8 +79,10 @@ def _emit_progress_event(event_queue: Any, message: str, metrics: dict[str, Any]
     """Forward one optimizer progress event to the parent process.
 
     Shape expected by the parent's ``_drain_subprocess_events``: an
-    ``EVENT_PROGRESS`` dict carrying the human-readable ``event`` label and
-    a ``metrics`` mapping (empty if the caller passed ``None``).
+    ``EVENT_PROGRESS`` dict carrying the human-readable ``event`` label, a
+    ``metrics`` mapping (empty if the caller passed ``None``), and the run's
+    ``usage_by_model`` so far — the parent bills that snapshot if the run
+    never delivers a result (failure, cancellation, timeout).
 
     Args:
         event_queue: The shared queue used to talk to the parent.
@@ -93,6 +95,7 @@ def _emit_progress_event(event_queue: Any, message: str, metrics: dict[str, Any]
             "type": EVENT_PROGRESS,
             "event": message,
             "metrics": metrics or {},
+            "usage_by_model": job_usage_snapshot(),
         },
     )
 
@@ -192,6 +195,7 @@ def run_service_in_subprocess(
     # threads multiply, and without a ceiling a single job can spray the
     # provider hard enough to trip rate limits and fail the run.
     activate_job_lm_budget(settings.job_lm_max_concurrency)
+    activate_job_usage_registry()
     service = _FORK_SERVICE if start_method == "fork" and _FORK_SERVICE is not None else DspyService(ServiceRegistry())
     log_handler = SubprocessLogHandler(event_queue)
     log_handler.setLevel(logging.DEBUG)
@@ -303,6 +307,7 @@ def run_service_in_subprocess(
     except BaseException as exc:
         event = failure_event(exc, traceback_text=traceback.format_exc())
         event["error"] = enrich_error_message(str(exc))
+        event["usage_by_model"] = job_usage_snapshot()
         safe_queue_put(event_queue, event)
     finally:
         runtime_scope.close()

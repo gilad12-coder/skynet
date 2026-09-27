@@ -1,4 +1,4 @@
-export { CreditProvider, useCredits } from "./providers/credit-provider";
+export { CreditProvider, useCredits, usePricingTerms } from "./providers/credit-provider";
 export { ByokKeysProvider, useByokKeys } from "./providers/byok-provider";
 export { CreditBalanceChip } from "./components/CreditBalanceChip";
 export { WalletTab } from "./components/WalletTab";
@@ -15,10 +15,11 @@ export {
   type TokenSourceMode,
 } from "./lib/credit";
 export {
-  PLATFORM_FEE_FRACTION,
+  DEFAULT_PRICING_TERMS,
   creditsForUsage,
   modelTokenCosts,
   platformFeeCredits,
   rawCostUsd,
   type ModelTokenUsage,
+  type PricingTerms,
 } from "./lib/pricing";

@@ -8,13 +8,11 @@ import { HuggingFace } from "@lobehub/icons";
 import { toast } from "react-toastify";
 import {
   ArrowLeft,
-  ArrowSquareOut,
   ArrowUpRight,
   CaretRight,
   CircleNotch,
   DownloadSimple,
   Lock,
-  Plug,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import {
@@ -80,7 +78,8 @@ function formatCount(n: number) {
  * Two-step picker: search the Hugging Face Hub, then choose a split, glance at
  * the first rows, name it and import. Search works anonymously; the second
  * step uses the caller's linked account so gated and private datasets resolve
- * when they are entitled to them.
+ * when they are entitled to them. Without a link, reaching for one of those
+ * hands off to Settings → Connectors with Hugging Face's form open.
  */
 export function HuggingFaceImportDialog({
   open,
@@ -180,6 +179,12 @@ export function HuggingFaceImportDialog({
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        // The Hub answers "not found" for private and gated repos alike, so an
+        // unlinked caller is sent to link an account rather than shown a dead end.
+        if (!connectorsLoading && !connected) {
+          openConnectors();
+          return;
+        }
         toast.error(err instanceof Error ? err.message : msg("hf_import.splits_error"));
         setRepoId(null);
       })
@@ -189,6 +194,7 @@ export function HuggingFaceImportDialog({
     return () => {
       cancelled = true;
     };
+    // Link state is read at failure time; it must not refetch the splits.
   }, [repoId]);
 
   React.useEffect(() => {
@@ -235,9 +241,14 @@ export function HuggingFaceImportDialog({
     }
   };
 
-  const openConnectors = () => {
+  function openConnectors() {
     onOpenChange(false);
-    settingsModal.openTo("connectors");
+    settingsModal.openTo("connectors", "huggingface");
+  }
+
+  const pickRepo = (dataset: HubDataset) => {
+    if (dataset.gated && !connectorsLoading && !connected) openConnectors();
+    else setRepoId(dataset.id);
   };
 
   const rowTotal = selectedSplit?.num_rows ?? preview?.num_rows_total ?? null;
@@ -264,23 +275,6 @@ export function HuggingFaceImportDialog({
             </div>
           </div>
         </DialogHeader>
-
-        {!connectorsLoading && !connected && (
-          <div className="mx-5 mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#C8A882]/40 bg-[#C8A882]/10 px-3 py-2 text-xs text-[#6b5232]">
-            <span className="flex items-center gap-1.5">
-              <Plug className="size-3.5 shrink-0" />
-              {msg("hf_import.anonymous")}
-            </span>
-            <button
-              type="button"
-              onClick={openConnectors}
-              className="inline-flex cursor-pointer items-center gap-0.5 rounded-sm font-medium text-[#8A6D44] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45"
-            >
-              {msg("hf_import.connect_link")}
-              <ArrowSquareOut className="size-3" />
-            </button>
-          </div>
-        )}
 
         {repoId === null ? (
           <div className="px-5 pb-5 pt-4">
@@ -331,7 +325,7 @@ export function HuggingFaceImportDialog({
                       <li key={d.id}>
                         <button
                           type="button"
-                          onClick={() => setRepoId(d.id)}
+                          onClick={() => pickRepo(d)}
                           className={BROWSE_ROW_CLASS}
                         >
                           <span

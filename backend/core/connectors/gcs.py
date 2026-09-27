@@ -34,6 +34,7 @@ SCOPE = "https://www.googleapis.com/auth/devstorage.read_only"
 OAUTH_SCOPES = f"openid email {SCOPE} https://www.googleapis.com/auth/cloud-platform.read-only"
 PROJECT_PREFIX = "project:"
 LIST_LIMIT = 1000
+PROJECT_PROBE_BUCKETS = 3
 
 
 def oauth_app() -> OAuthApp:
@@ -243,6 +244,66 @@ def verify_credentials(fields: dict[str, str]) -> Credential:
         raise
     label = f"{key['client_email']} · {bucket}" if bucket else key["client_email"]
     return Credential(secret=json.dumps(config), auth_method="service_account", account_label=label)
+
+
+def web_url(secret: ConnectorSecret, location: str) -> str | None:
+    """Link to a browse location in the Cloud console.
+
+    Args:
+        secret: The stored connector.
+        location: Empty for the top level, ``project:<id>`` or ``bucket/prefix``.
+
+    Returns:
+        The URL.
+    """
+    base = "https://console.cloud.google.com/storage/browser"
+    if not location:
+        return base
+    if location.startswith(PROJECT_PREFIX):
+        return f"{base}?project={quote(location.removeprefix(PROJECT_PREFIX), safe='')}"
+    return f"{base}/{quote(location.lstrip('/'))}"
+
+
+def _bucket_has_importable(headers: dict[str, str], bucket: str, prefix: str) -> bool | None:
+    """Settle whether a bucket prefix holds an importable object, in one flat listing.
+
+    Args:
+        headers: Bearer headers.
+        bucket: Bucket name.
+        prefix: Object-name prefix, empty for the whole bucket.
+
+    Returns:
+        ``True``, ``False``, or ``None`` when the prefix is too big to tell.
+    """
+    body = get_json(
+        f"{API_URL}/b/{quote(bucket, safe='')}/o",
+        provider=PROVIDER,
+        headers=headers,
+        params={"prefix": prefix, "fields": "items(name),nextPageToken", "maxResults": LIST_LIMIT},
+    )
+    if any(isinstance(i.get("name"), str) and is_supported(i["name"]) for i in body.get("items") or []):
+        return True
+    return None if body.get("nextPageToken") else False
+
+
+def has_importable(secret: ConnectorSecret, ref: str) -> bool | None:
+    """Settle whether a project, bucket or prefix holds an importable object.
+
+    Args:
+        secret: The stored connector.
+        ref: ``project:<id>``, ``bucket`` or ``bucket/prefix/``.
+
+    Returns:
+        ``True``, ``False``, or ``None`` when it is too big to tell.
+    """
+    headers = _secret_headers(secret)
+    if not ref.startswith(PROJECT_PREFIX):
+        return _bucket_has_importable(headers, *split_location(ref))
+    buckets = _list_buckets(headers, ref.removeprefix(PROJECT_PREFIX))
+    verdicts = [_bucket_has_importable(headers, b.ref, "") for b in buckets[:PROJECT_PROBE_BUCKETS]]
+    if any(verdicts):
+        return True
+    return False if len(buckets) <= PROJECT_PROBE_BUCKETS and None not in verdicts else None
 
 
 def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:

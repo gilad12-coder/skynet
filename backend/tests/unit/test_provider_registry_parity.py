@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from core.api.model_catalog import _BYOK_CATALOG_PROVIDERS
+from core.api.model_catalog import _BYOK_CATALOG_PROVIDERS, _PROVIDER_META
 from core.billing.byok_vault import _PROVIDER_PROBES
 from core.provider_registry import (
     BYOK_CATALOG_PREFIXES,
@@ -66,3 +66,10 @@ def test_frontend_bridge_matches_the_registry() -> None:
     body = body[body.index("{") + 1 : body.index("}")]
     bridge = dict(re.findall(r'(\w+):\s*"([^"]+)"', body))
     assert bridge == BYOK_TO_LITELLM_PROVIDER
+
+
+def test_frontend_labels_match_the_catalog_provider_labels() -> None:
+    """Each frontend BYOK label equals the catalog's label for that provider."""
+    labels = dict(re.findall(r'slug:\s*"([^"]+)",\s*label:\s*"([^"]+)"', _frontend_byok_source()))
+    for slug, litellm_prefix in BYOK_PROVIDER_SLUGS:
+        assert labels[slug] == _PROVIDER_META[litellm_prefix][0], slug

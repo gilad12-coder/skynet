@@ -18,11 +18,13 @@
 
 import type { CatalogModel, ModelConfig, RuntimeCostProfile } from "@/shared/types/api";
 import {
+  DEFAULT_PRICING_TERMS,
   creditsForUsage,
   modelTokenCosts,
   platformFeeCredits,
   rawCostUsd,
   type ModelTokenUsage,
+  type PricingTerms,
   type TokenSourceMode,
 } from "@/features/billing";
 
@@ -79,6 +81,8 @@ export interface CostBracketInput {
   modelRoles?: ProjectedModelRole[];
   /** Incremental runtime cost for the selected isolated execution environment. */
   runtime?: RuntimeCostProjection | null;
+  /** The backend's markup and BYOK fee; the seed defaults until the wallet loads. */
+  pricing?: Pick<PricingTerms, "usageMarkup" | "byokFeeFraction">;
 }
 
 export interface ProjectedModelRole {
@@ -162,10 +166,16 @@ export interface CostBracket {
   lowCredits: number;
   /** High end of the projected credit range. */
   highCredits: number;
+  /** Managed-role model credits, including the usage markup. */
   managedModelLowCredits: number;
   managedModelHighCredits: number;
+  /** BYOK-role model credits at cost (no markup) — the base the BYOK fee is taken from. */
   byokModelLowCredits: number;
   byokModelHighCredits: number;
+  /** The usage markup applied to the managed credits. */
+  usageMarkup: number;
+  /** The BYOK platform fee fraction `chargeableBracket` applies. */
+  byokFeeFraction: number;
   runtimeLowCredits: number;
   runtimeHighCredits: number;
   runtimeSessionLowCredits: number;
@@ -264,6 +274,7 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     reflectionModel = null,
     modelRoles,
     runtime,
+    pricing = DEFAULT_PRICING_TERMS,
   } = input;
   const budget = resolveMetricCalls(autoLevel, maxFullEvals, maxMetricCalls);
   const calls = budget.calls;
@@ -300,10 +311,11 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     calls * TOKENS_PER_CALL_HIGH * rowFactor * (hasReflection ? REFLECTION_HIGH_MULTIPLIER : 1);
   const managed = roles.filter((role) => role.tokenSource !== "byok");
   const byok = roles.filter((role) => role.tokenSource === "byok");
-  const managedModelLowCredits = creditsForUsage(roleUsage(lowTokens, managed));
-  const managedModelHighCredits = creditsForUsage(roleUsage(highTokens, managed));
-  const byokModelLowCredits = creditsForUsage(roleUsage(lowTokens, byok));
-  const byokModelHighCredits = creditsForUsage(roleUsage(highTokens, byok));
+  const { usageMarkup, byokFeeFraction } = pricing;
+  const managedModelLowCredits = creditsForUsage(roleUsage(lowTokens, managed), usageMarkup);
+  const managedModelHighCredits = creditsForUsage(roleUsage(highTokens, managed), usageMarkup);
+  const byokModelLowCredits = creditsForUsage(roleUsage(lowTokens, byok), 1);
+  const byokModelHighCredits = creditsForUsage(roleUsage(highTokens, byok), 1);
   const runtimeEstimate = runtimeCredits(runtime);
   const lowCredits = Math.max(
     1,
@@ -342,6 +354,8 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     managedModelHighCredits,
     byokModelLowCredits,
     byokModelHighCredits,
+    usageMarkup,
+    byokFeeFraction,
     runtimeLowCredits: runtimeEstimate.low,
     runtimeHighCredits: runtimeEstimate.high,
     runtimeSessionLowCredits: Math.max(0, runtime?.minimumSessionCredits ?? 0),
@@ -372,9 +386,9 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
  * The credit bracket the user is actually charged, given the token source.
  *
  * Managed roles are charged at full per-model cost; BYOK roles pay only
- * Skynet's platform fee because provider tokens use the user's key. At-cost
- * sandbox usage is added after that model calculation so it is never marked up
- * or discounted as a BYOK fee. Centralised so every estimate surface derives
+ * Skynet's platform fee because provider tokens use the user's key. Sandbox
+ * usage (already marked up by the backend quote) is added after that model
+ * calculation so it is never discounted as a BYOK fee. Centralised so every estimate surface derives
  * the charge the same way and cannot drift apart.
  */
 export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): ChargedBracket {
@@ -403,8 +417,8 @@ export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): 
   const byokHigh = hasRoleSources
     ? bracket.byokModelHighCredits
     : bracket.highCredits - bracket.runtimeHighCredits;
-  const byokFeeLow = platformFeeCredits(byokLow);
-  const byokFeeHigh = platformFeeCredits(byokHigh);
+  const byokFeeLow = platformFeeCredits(byokLow, bracket.byokFeeFraction);
+  const byokFeeHigh = platformFeeCredits(byokHigh, bracket.byokFeeFraction);
   const lowCredits = Math.max(1, managedLow + byokFeeLow + bracket.runtimeLowCredits);
   const highCredits = Math.max(lowCredits, managedHigh + byokFeeHigh + bracket.runtimeHighCredits);
   return {
