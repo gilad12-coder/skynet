@@ -852,7 +852,8 @@ export interface BillingWalletResponse {
   free_grant: BillingFreeGrant;
   usage: BillingUsageEntry[];
   plan: BillingPlanResponse;
-  pricing: BillingPricingTerms;
+  /** Absent from a backend older than the frontend (e.g. mid-deploy). */
+  pricing?: BillingPricingTerms;
 }
 
 /** Fetch the caller's credit wallet. Reads work even without Stripe. */
