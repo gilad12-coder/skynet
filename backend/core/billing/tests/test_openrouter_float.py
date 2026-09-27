@@ -128,6 +128,14 @@ def test_float_status_covered_boundary() -> None:
     assert not FloatStatus(balance_credits=999, floor_credits=1000, liability_credits=0).covered
 
 
+def test_float_status_requires_liability_coverage() -> None:
+    """A balance above the floor but below the unspent liability is not covered."""
+    status = FloatStatus(balance_credits=1400, floor_credits=1000, liability_credits=4129)
+    assert status.required_credits == 4129
+    assert not status.covered
+    assert FloatStatus(balance_credits=4129, floor_credits=1000, liability_credits=4129).covered
+
+
 def test_read_balance_converts_dollars_to_credits(monitor_on: None) -> None:
     """A healthy read returns ``(total_credits - total_usage)`` in credits."""
     with patch("httpx.get", return_value=_credits_response(20.0, 5.5)):
@@ -205,11 +213,25 @@ def test_check_float_quiet_when_covered(monitor_on: None, caplog: pytest.LogCapt
         caplog.at_level(logging.WARNING, logger=_MONITOR_LOGGER),
         patch("httpx.get", return_value=_credits_response(15.0, 0.0)),
     ):
-        status = check_float(outstanding_credits=3000)
+        status = check_float(outstanding_credits=1200)
     assert status is not None
     assert status.covered
     assert status.balance_credits == 1500
     assert "OpenRouter float low" not in caplog.text
+
+
+def test_check_float_warns_below_liability(monitor_on: None, caplog: pytest.LogCaptureFixture) -> None:
+    """A balance over the floor but short of the unspent liability still warns."""
+    with (
+        caplog.at_level(logging.WARNING, logger=_MONITOR_LOGGER),
+        patch("httpx.get", return_value=_credits_response(20.0, 0.0)),
+        patch.object(openrouter_float, "notify_low_float") as notify,
+    ):
+        status = check_float(outstanding_credits=4129)
+    assert status is not None
+    assert not status.covered
+    assert "OpenRouter float low" in caplog.text
+    notify.assert_called_once_with(status)
 
 
 def test_check_float_notifies_below_floor(monitor_on: None) -> None:
@@ -224,7 +246,7 @@ def test_check_float_notifies_below_floor(monitor_on: None) -> None:
         patch.object(openrouter_float, "notify_low_float") as notify,
         patch("httpx.get", return_value=_credits_response(15.0, 0.0)),
     ):
-        check_float(outstanding_credits=3000)
+        check_float(outstanding_credits=1200)
     notify.assert_not_called()
 
 
@@ -252,7 +274,7 @@ def test_notify_low_float_fans_out_to_webhook_and_email(notify_ready: None) -> N
     alert.assert_called_once()
     assert alert.call_args.kwargs["level"] == "WARNING"
     assert "$5.00" in alert.call_args.args[0]
-    assert "$15.00" in alert.call_args.args[0]
+    assert "$30.00" in alert.call_args.args[0]
     email.assert_called_once()
     to, subject, body = email.call_args.args
     assert to == "ops@example.com"
@@ -364,8 +386,12 @@ def test_total_outstanding_credits_sums_balances_and_grants(engine: object) -> N
     with Session(engine) as session:
         session.add_all(
             [
-                BillingCustomerModel(username="a@x.com", stripe_customer_id="cus_a", credit_balance=500, grant_remaining=100),
-                BillingCustomerModel(username="b@x.com", stripe_customer_id="cus_b", credit_balance=2000, grant_remaining=None),
+                BillingCustomerModel(
+                    username="a@x.com", stripe_customer_id="cus_a", credit_balance=500, grant_remaining=100
+                ),
+                BillingCustomerModel(
+                    username="b@x.com", stripe_customer_id="cus_b", credit_balance=2000, grant_remaining=None
+                ),
             ]
         )
         session.commit()

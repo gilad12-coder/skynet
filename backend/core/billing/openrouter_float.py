@@ -70,13 +70,23 @@ class FloatStatus:
     liability_credits: int
 
     @property
-    def covered(self) -> bool:
-        """Return whether the balance is at or above the floor.
+    def required_credits(self) -> int:
+        """Return the balance the float must hold: the floor or the liability, whichever is larger.
 
         Returns:
-            True when the float still clears its low-water mark.
+            The larger of the floor and the outstanding liability, in credits.
         """
-        return self.balance_credits >= self.floor_credits
+        return max(self.floor_credits, self.liability_credits)
+
+    @property
+    def covered(self) -> bool:
+        """Return whether the balance clears both the floor and the outstanding liability.
+
+        Returns:
+            True when the float could pay out every unspent credit and still
+            sit at or above its low-water mark.
+        """
+        return self.balance_credits >= self.required_credits
 
 
 def read_account_balance_credits() -> int | None:
@@ -119,15 +129,16 @@ def check_float(outstanding_credits: int) -> FloatStatus | None:
 
     Reads the master-account balance and builds a :class:`FloatStatus` against
     the configured floor (``settings.openrouter_balance_floor_credits``). Below
-    the floor it logs a WARNING carrying balance, floor, and outstanding
-    liability and notifies the operator (alert webhook + email, cooldown-gated);
-    stays quiet otherwise. Fails open — a disabled monitor or an unreadable
+    the floor, or below the outstanding liability, it logs a WARNING carrying
+    balance, floor, and outstanding liability and notifies the operator (alert
+    webhook + email, cooldown-gated); stays quiet otherwise. Fails open — a disabled monitor or an unreadable
     balance simply yields ``None``.
 
     Args:
         outstanding_credits: Credits users have bought (or been granted) but not
-            yet spent — the liability the shared float ultimately backs. Logged
-            for context; does not affect whether the warning fires.
+            yet spent — the liability the shared float ultimately backs. A
+            balance below it fires the warning just as a balance below the
+            floor does.
 
     Returns:
         The float status, or ``None`` when the monitor is disabled (floor ``<=
@@ -146,9 +157,10 @@ def check_float(outstanding_credits: int) -> FloatStatus | None:
     )
     if not status.covered:
         logger.warning(
-            "OpenRouter float low: balance $%.2f below floor $%.2f "
-            "(outstanding liability $%.2f). Check Auto Top-Up and the saved card.",
+            "OpenRouter float low: balance $%.2f below required $%.2f "
+            "(floor $%.2f, outstanding liability $%.2f). Check Auto Top-Up and the saved card.",
             balance / _CREDITS_PER_DOLLAR,
+            status.required_credits / _CREDITS_PER_DOLLAR,
             floor / _CREDITS_PER_DOLLAR,
             outstanding_credits / _CREDITS_PER_DOLLAR,
         )
@@ -198,14 +210,15 @@ def _format_low_float(status: FloatStatus) -> tuple[str, str]:
     """
     subject = (
         f"OpenRouter float low: ${status.balance_credits / _CREDITS_PER_DOLLAR:.2f} "
-        f"below floor ${status.floor_credits / _CREDITS_PER_DOLLAR:.2f}"
+        f"below required ${status.required_credits / _CREDITS_PER_DOLLAR:.2f}"
     )
     body = (
         f"OpenRouter master-account balance: ${status.balance_credits / _CREDITS_PER_DOLLAR:.2f}\n"
         f"Configured floor: ${status.floor_credits / _CREDITS_PER_DOLLAR:.2f}\n"
         f"Outstanding credit liability: ${status.liability_credits / _CREDITS_PER_DOLLAR:.2f}\n\n"
-        "Auto Top-Up has likely failed (declined or expired card) or demand is "
-        "outrunning refills. Check the saved card and Auto Top-Up settings at "
+        "The balance must cover both the floor and every unspent user credit. "
+        "Auto Top-Up has likely failed (declined or expired card), demand is "
+        "outrunning refills, or the Auto Top-Up threshold sits below the liability. Check the saved card and Auto Top-Up settings at "
         "https://openrouter.ai/settings/credits — managed runs return 402 once "
         "the balance hits zero."
     )
