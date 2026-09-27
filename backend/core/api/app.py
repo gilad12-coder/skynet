@@ -46,7 +46,7 @@ except ImportError:  # Optional dep: tests/CI can run without the Scalar docs UI
     DocumentDownloadType = None  # type: ignore[assignment, misc]
     get_scalar_api_reference = None  # type: ignore[assignment]
 
-from ..billing import StripeBillingService, start_openrouter_float_sweeper
+from ..billing import StripeBillingService, start_issuing_funding_sweeper, start_openrouter_float_sweeper
 from ..billing.budgets import BudgetService
 from ..config import settings
 from ..connectors.registry import oauth_config_problems
@@ -707,6 +707,7 @@ def create_app(
     stale_conversation_sweeper = None
     staged_dataset_sweeper = None
     openrouter_float_sweeper = None
+    issuing_funding_sweeper = None
     embedding_sweeper = None
     loop_lag_monitor = None
 
@@ -727,6 +728,7 @@ def create_app(
             staged_dataset_sweeper, \
             stale_conversation_sweeper, \
             openrouter_float_sweeper, \
+            issuing_funding_sweeper, \
             embedding_sweeper, \
             worker
         # Reclaim jobs whose worker lease has expired. Under multi-pod scaling
@@ -763,6 +765,9 @@ def create_app(
         openrouter_float_sweeper = start_openrouter_float_sweeper(
             job_store.engine, StripeBillingService(engine=job_store.engine).total_outstanding_credits
         )
+        # Keeps the Issuing balance behind the provider card funded, so upstream
+        # top-ups charged to that card don't decline.
+        issuing_funding_sweeper = start_issuing_funding_sweeper(job_store.engine)
         if settings.event_loop_lag_monitor_enabled:
             loop_lag_monitor = start_event_loop_lag_monitor()
             logger.info("Event-loop lag monitor enabled (threshold %.0fms)", settings.event_loop_lag_threshold_ms)
@@ -850,6 +855,8 @@ def create_app(
                 staged_dataset_sweeper.stop()
             if openrouter_float_sweeper:
                 openrouter_float_sweeper.stop()
+            if issuing_funding_sweeper:
+                issuing_funding_sweeper.stop()
             if embedding_sweeper:
                 embedding_sweeper.stop()
             if loop_lag_monitor:

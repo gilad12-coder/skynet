@@ -152,3 +152,35 @@ Watch events live in Dashboard → **Developers → Events**, or in the
    endpoint (step 5) and use its live signing secret.
 4. Swap `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_*` in the
    production environment. Done.
+
+## Paying providers from the Stripe balance (Issuing)
+
+Upstream providers such as OpenRouter are paid with a Stripe Issuing virtual
+card. That card spends only from the account's **Issuing balance**, which the
+API pods keep funded on their own (`backend/core/billing/issuing_float.py`).
+When the Issuing balance plus pending Skynet top-ups drops below
+`ISSUING_BALANCE_FLOOR_CREDITS`, the loop refills it to
+`ISSUING_BALANCE_TARGET_CREDITS`:
+
+1. From the Stripe payments balance, meaning what customers paid for credits.
+   This is instant, but it needs the Balance Transfers beta. Until Stripe
+   enables it, the loop skips this step.
+2. From the bank account that receives your payouts, as a top-up. This takes up
+   to five business days, so set the target at about a week of provider spend
+   above the floor.
+
+A failure goes to `ALERT_WEBHOOK_URL` and `OPENROUTER_FLOAT_ALERT_EMAIL`.
+
+One-time setup, all in the dashboard:
+
+1. **Issuing → Get started.** Apply for Issuing and wait for approval.
+2. **Issuing → Cardholders → Create.** Type *Company*, named Skynet.
+3. **Issuing → Cards → Create a virtual card** for that cardholder. Set a
+   monthly spending limit a little above expected provider spend, as the
+   backstop if the card leaks.
+4. Add the card to **OpenRouter → Settings → Credits** and turn on Auto Top-Up.
+   Do the same for any other provider that bills a card.
+5. Optionally, ask Stripe support to enable the **Balance Transfers** beta so
+   step 1 of the loop works.
+6. Set `ISSUING_BALANCE_FLOOR_CREDITS` and `ISSUING_BALANCE_TARGET_CREDITS` and
+   redeploy.

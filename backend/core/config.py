@@ -304,6 +304,22 @@ class Settings(BaseSettings):
         alias="OPENROUTER_FLOAT_ALERT_COOLDOWN_SECONDS",
         description="Minimum seconds between two low-float notifications (email + webhook). Shared across replicas through Redis when REDIS_URL is set, per-process otherwise, so a 15-minute check loop can't page every tick. 0 sends on every breach.",
     )
+    issuing_balance_floor_credits: int = Field(
+        default=0,
+        alias="ISSUING_BALANCE_FLOOR_CREDITS",
+        description="Low-water mark for the Stripe Issuing balance that funds the provider card, in credits (1 credit = 1 cent). When the Issuing balance plus pending Skynet top-ups falls below it, the funding loop refills to ISSUING_BALANCE_TARGET_CREDITS: first from the Stripe payments balance, then from the linked bank. 0 (the default) disables the loop.",
+    )
+    issuing_balance_target_credits: int = Field(
+        default=0,
+        alias="ISSUING_BALANCE_TARGET_CREDITS",
+        description="Level the funding loop refills the Stripe Issuing balance to, in credits. Must sit above ISSUING_BALANCE_FLOOR_CREDITS or the loop stays off. Bank top-ups take up to five business days, so size the gap to cover about a week of provider spend.",
+    )
+    issuing_funding_check_interval_seconds: float = Field(
+        default=900.0,
+        ge=0.0,
+        alias="ISSUING_FUNDING_CHECK_INTERVAL_SECONDS",
+        description="Seconds between Issuing balance checks on the API pods (advisory-lock-gated, one replica per tick). Failures alert through ALERT_WEBHOOK_URL and OPENROUTER_FLOAT_ALERT_EMAIL. 0 disables the loop; values below 60 are raised to 60.",
+    )
     worker_enabled: bool = Field(
         default=True,
         alias="WORKER_ENABLED",
