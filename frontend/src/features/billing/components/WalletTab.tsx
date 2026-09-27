@@ -88,7 +88,7 @@ function AddCreditsControls() {
   const customCredits = Number(customDraft || "0") * 100;
   const customValid = customCredits >= CUSTOM_CREDITS_MIN && customCredits <= CUSTOM_CREDITS_MAX;
   // The buy button quotes what the buyer is charged: par credit value plus the
-  // card fee (5.5%, $0.80 floor), itemized as its own line on Stripe checkout.
+  // service fee (12.5% plus 35 cents), itemized as its own line on Stripe checkout.
   const usd = purchaseTotalUsd(pack ? pack.credits : customCredits);
   const priceLabel = Number.isInteger(usd) ? formatUsdWhole(usd, locale) : formatUsd(usd, locale);
 
