@@ -521,7 +521,9 @@ class UserConnectorModel(Base):
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     auth_method: Mapped[str] = mapped_column(String(16), nullable=False)
     account_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    scopes: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Google echoes every scope the user ever granted the client (include_granted_scopes),
+    # so the list grows with each linked Google connector and outruns any fixed width.
+    scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
     secret_ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     refresh_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

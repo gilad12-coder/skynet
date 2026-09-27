@@ -1285,3 +1285,9 @@ def test_oauth_config_problems_names_half_configured_providers(
     assert "azure_blob: client secret is set but the client id is missing" in problems
     monkeypatch.setattr(settings, "notion_oauth_client_secret", SecretStr("notion-secret"))
     assert not any(p.startswith("notion:") for p in oauth_config_problems())
+
+
+def test_connector_scopes_column_is_unbounded() -> None:
+    """Google's accumulated scope list outgrows 255 characters, so the column has no width cap."""
+    column_type = UserConnectorModel.__table__.c.scopes.type
+    assert getattr(column_type, "length", None) is None
