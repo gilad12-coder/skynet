@@ -65,6 +65,7 @@ import {
 import { Switch } from "@/shared/ui/primitives/switch";
 import { Button } from "@/shared/ui/primitives/button";
 import { CopyButton } from "@/shared/ui/copy-button";
+import { ExpandToggleButton } from "@/shared/ui/expand-toggle-button";
 import { WalletTab, UsageTab, ByokKeysSection } from "@/features/billing";
 import { ConnectorsTab } from "@/features/connectors";
 import { Input } from "@/shared/ui/primitives/input";
@@ -1544,14 +1545,21 @@ const SETTINGS_GROUPS = [
 const SETTINGS_RAIL_ITEM_CLASS =
   "min-h-[44px] w-full flex-none justify-start gap-2.5 rounded-lg px-3 py-2 font-medium text-sidebar-foreground/60 data-[state=inactive]:hover:bg-sidebar-accent/40 data-[state=inactive]:hover:text-sidebar-foreground data-[state=active]:bg-transparent data-[state=active]:border-transparent data-[state=active]:font-medium data-[state=active]:text-primary data-[state=active]:hover:text-primary max-md:w-auto! md:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]";
 
-function SettingsPanelHeader({ tab }: { tab: SettingsTab }) {
+// Tabs dense enough (ledgers, connection lists, admin tables) to earn a
+// toggle that grows the modal to fill the screen.
+const EXPANDABLE_SETTINGS_TABS: ReadonlySet<SettingsTab> = new Set(["usage", "admin"]);
+
+function SettingsPanelHeader({ tab, action }: { tab: SettingsTab; action?: React.ReactNode }) {
   const { icon: Icon, labelKey } = SETTINGS_TAB_META[tab];
   return (
     <div className="mb-4 flex items-center gap-3 border-b border-border/50 pb-3">
       <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-muted-foreground [&_svg]:size-4">
         <Icon className="size-4" aria-hidden="true" />
       </span>
-      <h2 className="text-base font-semibold tracking-tight text-foreground">{msg(labelKey)}</h2>
+      <h2 className="flex-1 text-base font-semibold tracking-tight text-foreground">
+        {msg(labelKey)}
+      </h2>
+      {action}
     </div>
   );
 }
@@ -1564,6 +1572,11 @@ export function SettingsModal() {
   const isPhone = useIsPhone();
   const prefersReduced = useReducedMotion();
   const [activeTab, setActiveTab] = React.useState<SettingsTab>(isPhone ? "account" : "wizard");
+  const [expandedState, setExpanded] = React.useState(false);
+  const expandButton = React.useRef<HTMLButtonElement>(null);
+  const canExpand = !isPhone && EXPANDABLE_SETTINGS_TABS.has(activeTab);
+  const expanded = canExpand && expandedState;
+  const settingsTabsId = React.useId();
   const selectTab = React.useCallback((tab: SettingsTab) => {
     setActiveTab(tab);
     track(TelemetryEvent.SettingsTabChanged, { tab });
@@ -1596,7 +1609,19 @@ export function SettingsModal() {
     <Dialog open={open} onOpenChange={setOpen} modal={!tutorialState.isVisible}>
       <DialogContent
         data-settings-text-buttons
-        className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0 sm:max-w-4xl [&_[data-slot=button]]:min-h-[44px] [&_[data-slot=button]]:min-w-[44px] [&_[data-slot=select-trigger]]:min-h-[44px] sm:[&_[data-slot=button]]:min-h-0 sm:[&_[data-slot=button]]:min-w-0 sm:[&_[data-slot=select-trigger]]:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-w-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=select-trigger]]:min-h-[44px]"
+        onEscapeKeyDown={(e) => {
+          // Escape leaves full screen before it closes settings.
+          if (expanded) {
+            e.preventDefault();
+            setExpanded(false);
+            expandButton.current?.focus();
+          }
+        }}
+        className={cn(
+          "max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] gap-0 overflow-hidden p-0 transition-[max-width] duration-200 ease-out motion-reduce:transition-none",
+          expanded ? "sm:max-w-[96vw]" : "sm:max-w-4xl",
+          "[&_[data-slot=button]]:min-h-[44px] [&_[data-slot=button]]:min-w-[44px] [&_[data-slot=select-trigger]]:min-h-[44px] sm:[&_[data-slot=button]]:min-h-0 sm:[&_[data-slot=button]]:min-w-0 sm:[&_[data-slot=select-trigger]]:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-h-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=button]]:min-w-[44px] [@media(hover:none)_and_(pointer:coarse)]:[&_[data-slot=select-trigger]]:min-h-[44px]",
+        )}
       >
         <DialogHeader className="border-b border-border/40 px-4 py-3 pe-12 sm:px-5 sm:py-4">
           <div className="min-w-0">
@@ -1611,7 +1636,11 @@ export function SettingsModal() {
           orientation="vertical"
           value={activeTab}
           onValueChange={(v) => selectTab(v as SettingsTab)}
-          className="flex h-[calc(100dvh-5.75rem)] max-h-[680px] min-h-0 flex-col gap-0 sm:h-[min(72vh,680px)] md:flex-row"
+          id={settingsTabsId}
+          className={cn(
+            "flex h-[calc(100dvh-5.75rem)] min-h-0 flex-col gap-0 transition-[height] duration-200 ease-out motion-reduce:transition-none md:flex-row",
+            expanded ? "sm:h-[calc(94dvh-5.75rem)]" : "max-h-[680px] sm:h-[min(72vh,680px)]",
+          )}
         >
           <TabsList
             aria-label={msg("settings.title")}
@@ -1662,7 +1691,19 @@ export function SettingsModal() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: prefersReduced ? 0 : 0.18, ease: [0.2, 0.8, 0.2, 1] }}
             >
-              <SettingsPanelHeader tab={activeTab} />
+              <SettingsPanelHeader
+                tab={activeTab}
+                action={
+                  canExpand && (
+                    <ExpandToggleButton
+                      ref={expandButton}
+                      expanded={expanded}
+                      controls={settingsTabsId}
+                      onToggle={() => setExpanded(!expanded)}
+                    />
+                  )
+                }
+              />
               <TabsContent value="wizard">
                 <WizardTab />
               </TabsContent>
