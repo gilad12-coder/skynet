@@ -16,6 +16,7 @@ storage quota apply exactly as they do to an upload.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
@@ -27,6 +28,7 @@ from ...config import settings
 from ...connectors import huggingface as hf
 from ...connectors import oauth as generic_oauth
 from ...connectors import registry
+from ...connectors.pruning import browse_importable
 from ...connectors.transport import label
 from ...connectors.vault import ConnectorSecret, ConnectorVault
 from ...storage.dataset_library import DatasetLibraryStore, PostgresDatasetBlobStore
@@ -36,6 +38,10 @@ from ..errors import DomainError
 from .dataset_library import SaveDatasetResponse, _summary, save_rows_gated
 
 SEARCH_LIMIT_MAX = 100
+
+# Some providers resolve a folder's web link with its own API call (OneDrive),
+# so it runs beside the listing instead of after it.
+_web_links = ThreadPoolExecutor(max_workers=8, thread_name_prefix="connector-web-url")
 
 
 class ConnectorStatus(BaseModel):
@@ -145,6 +151,9 @@ class BrowseResponse(BaseModel):
     """Envelope for ``GET /connectors/{provider}/browse``."""
 
     entries: list[BrowseEntry]
+    location_url: str | None = Field(
+        default=None, description="Where this location opens on the provider's own site, when it has one."
+    )
 
 
 class RefImportRequest(BaseModel):
@@ -483,6 +492,7 @@ def create_connectors_router(*, job_store) -> APIRouter:
                 "onedrive": microsoft,
                 "github": settings.github_oauth_redirect_uri,
                 "notion": settings.notion_oauth_redirect_uri,
+                "supabase": settings.supabase_oauth_redirect_uri,
             }.get(provider)
         return configured or str(request.url_for("connector_oauth_callback", provider=provider))
 
@@ -682,8 +692,17 @@ def create_connectors_router(*, job_store) -> APIRouter:
             Folders first, then importable files.
         """
         module = registry.get_provider(provider)
-        entries = module.browse(_secret(user.username, provider), location, search)
-        return BrowseResponse(entries=[BrowseEntry(**vars(e)) for e in entries])
+        secret = _secret(user.username, provider)
+        link = _web_links.submit(module.web_url, secret, location) if hasattr(module, "web_url") else None
+        entries = browse_importable(module, secret, location, search)
+        location_url = None
+        if link is not None:
+            try:
+                location_url = link.result()
+            # The link is a convenience; a provider hiccup must not fail the listing.
+            except DomainError:
+                location_url = None
+        return BrowseResponse(entries=[BrowseEntry(**vars(e)) for e in entries], location_url=location_url)
 
     @router.get(
         "/connectors/{provider}/preview",

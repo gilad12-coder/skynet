@@ -21,7 +21,7 @@ import {
 } from "@/shared/ui/primitives/dropdown-menu";
 
 interface ComposerModelMenuProps {
-  /** LiteLLM id of the chosen model; ``null`` runs the server default. */
+  /** LiteLLM id of the chosen model; ``null`` runs the catalog's default. */
   value: string | null;
   onChange: (model: string | null) => void;
   /** Reasoning-effort level for the chosen model; ``null`` runs its default. */
@@ -35,96 +35,13 @@ function shortName(id: string): string {
   return id.split("/").pop() || id;
 }
 
-// Sentinel sent instead of a catalog id: the backend's per-turn router in
-// its frontier-quality tier (Cursor-style "Intelligence"). Plain null stays
-// the balanced router tier.
-const AUTO_INTELLIGENT_MODEL = "auto:intelligent";
+// The retired "Auto · Intelligent" entry; saved prefs and conversations may
+// still carry it, and the backend runs the default for it like for null.
+const RETIRED_AUTO_MODEL = "auto:intelligent";
 
-/** Menu/chip label for the current choice, including the auto tiers. */
-function displayName(value: string | null): string {
-  if (!value) return msg("agent.model_menu.auto");
-  if (value === AUTO_INTELLIGENT_MODEL) return msg("agent.model_menu.auto_intelligent");
-  return shortName(value);
-}
-
-/** Leading icon for the current choice: both auto tiers run OpenRouter's
- * Auto Router, so they wear the OpenRouter mark; explicit picks wear the
- * model company's mark. */
-function choiceIcon(value: string | null, size: number): React.ReactNode {
-  if (!value || value === AUTO_INTELLIGENT_MODEL) {
-    return <ProviderLogo slug="openrouter" size={size} />;
-  }
-  return <ProviderLogo slug={modelProviderSlug(value)} size={size} />;
-}
-
-// Display curation only. The composer picks a conversation partner, not a
-// training target — the full gateway catalog (500+ ids, embeddings and TTS
-// included) belongs to the submit wizard, not here. Ids that leave the
-// catalog drop out silently. Kept deliberately short: the auto-router rows
-// cover "just pick well for me", so the list is a few current picks per
-// major lab.
-const FEATURED_MODELS = [
-  "openrouter/openai/gpt-5.6-sol",
-  "openrouter/openai/gpt-5.6-terra",
-  "openrouter/openai/gpt-5.6-luna",
-  "openrouter/anthropic/claude-fable-5",
-  "openrouter/anthropic/claude-opus-5",
-  "openrouter/anthropic/claude-sonnet-5",
-  "openrouter/anthropic/claude-haiku-4.5",
-  "openrouter/google/gemini-3.1-pro-preview",
-  "openrouter/google/gemini-3.7-flash",
-  "openrouter/meta/muse-spark-1.1",
-  "openrouter/x-ai/grok-4.6",
-  "openrouter/deepseek/deepseek-v4-pro",
-  "openrouter/z-ai/glm-5.3",
-  "openrouter/z-ai/glm-5.3-flash",
-  "openrouter/moonshotai/kimi-k3",
-  "openrouter/minimax/minimax-m3",
-];
-
-// Caps the fallback list when none of the featured ids exist in a deployment.
+// Caps the fallback list when the catalog flags no featured models (an
+// on-prem gateway whose listing carries no release dates or benchmarks).
 const FALLBACK_LIST_CAP = 50;
-
-// One-liners distilled from each provider's own launch copy, kept short
-// enough to never truncate in the submenu row. Non-featured ids get none.
-function modelDescription(id: string): string | undefined {
-  switch (id) {
-    case "openrouter/openai/gpt-5.6-sol":
-      return msg("agent.model_menu.desc_gpt_5_6_sol");
-    case "openrouter/openai/gpt-5.6-terra":
-      return msg("agent.model_menu.desc_gpt_5_6_terra");
-    case "openrouter/openai/gpt-5.6-luna":
-      return msg("agent.model_menu.desc_gpt_5_6_luna");
-    case "openrouter/anthropic/claude-fable-5":
-      return msg("agent.model_menu.desc_claude_fable_5");
-    case "openrouter/anthropic/claude-opus-5":
-      return msg("agent.model_menu.desc_claude_opus_4_8");
-    case "openrouter/anthropic/claude-sonnet-5":
-      return msg("agent.model_menu.desc_claude_sonnet_5");
-    case "openrouter/anthropic/claude-haiku-4.5":
-      return msg("agent.model_menu.desc_claude_haiku_4_5");
-    case "openrouter/google/gemini-3.1-pro-preview":
-      return msg("agent.model_menu.desc_gemini_3_1_pro");
-    case "openrouter/google/gemini-3.7-flash":
-      return msg("agent.model_menu.desc_gemini_3_6_flash");
-    case "openrouter/meta/muse-spark-1.1":
-      return msg("agent.model_menu.desc_muse_spark_1_1");
-    case "openrouter/moonshotai/kimi-k3":
-      return msg("agent.model_menu.desc_kimi_k3");
-    case "openrouter/x-ai/grok-4.6":
-      return msg("agent.model_menu.desc_grok_4_5");
-    case "openrouter/deepseek/deepseek-v4-pro":
-      return msg("agent.model_menu.desc_deepseek_v4_pro");
-    case "openrouter/z-ai/glm-5.3":
-      return msg("agent.model_menu.desc_glm_5_3");
-    case "openrouter/z-ai/glm-5.3-flash":
-      return msg("agent.model_menu.desc_glm_5_3_flash");
-    case "openrouter/minimax/minimax-m3":
-      return msg("agent.model_menu.desc_minimax_m3");
-    default:
-      return undefined;
-  }
-}
 
 function effortHint(level: string | null): string {
   switch (level) {
@@ -154,16 +71,17 @@ function effortHint(level: string | null): string {
  * side submenu with the checkmarked options. Picking anything closes the
  * whole menu; the choice applies from the next turn of the surrounding
  * conversation. The thinking row is visible but inert on models without
- * reasoning support. The model submenu shows only the curated featured
- * shortlist.
+ * reasoning support. The model submenu shows only the featured shortlist
+ * the catalog derives from provider metadata.
  */
 export function ComposerModelMenu({
-  value,
+  value: rawValue,
   onChange,
   effort,
   onEffortChange,
   disabled,
 }: ComposerModelMenuProps) {
+  const savedValue = rawValue === RETIRED_AUTO_MODEL ? null : rawValue;
   const [open, setOpen] = React.useState(false);
   const [catalog, setCatalog] = React.useState<ModelCatalogResponse | null>(
     cachedCatalog() ?? null,
@@ -186,12 +104,27 @@ export function ComposerModelMenu({
     () => (catalog?.models ?? []).filter((m) => m.available),
     [catalog],
   );
+  // A saved pick the live catalog no longer lists (a withdrawn model) would
+  // name a dead id on the chip. Only judged against a loaded, non-empty
+  // catalog so a gateway outage never wipes a valid pick.
+  const stale =
+    !!savedValue &&
+    !!catalog &&
+    catalog.models.length > 0 &&
+    !catalog.models.some((m) => m.value === savedValue);
+  const value = savedValue && !stale ? savedValue : null;
+  React.useEffect(() => {
+    if (stale) {
+      onChange(null);
+      onEffortChange(null);
+    }
+  }, [stale, onChange, onEffortChange]);
 
-  // Small deployments (an on-prem gateway with a handful of models) may miss
-  // every featured id — fall back to the whole list rather than an empty menu.
+  // The backend flags each leading lab's newest models from provider
+  // metadata. A gateway that flags none falls back to the plain list rather
+  // than an empty menu.
   const featured = React.useMemo(() => {
-    const byId = new Map(available.map((m) => [m.value, m]));
-    const rows = FEATURED_MODELS.flatMap((id) => byId.get(id) ?? []);
+    const rows = available.filter((m) => m.featured);
     return rows.length ? rows : available.slice(0, FALLBACK_LIST_CAP);
   }, [available]);
   // A previously chosen model outside the shortlist keeps its checkmarked
@@ -201,18 +134,30 @@ export function ComposerModelMenu({
       ? (available.find((m) => m.value === value) ?? null)
       : null;
 
-  const canThink = !!available.find((m) => m.value === value)?.supports_thinking;
-  const efforts = effortsFor(value);
+  // No pick runs the catalog's flagged default, so the chip names it and its
+  // efforts apply.
+  const catalogDefault = available.find((m) => m.is_default) ?? null;
+  const effective = value ?? catalogDefault?.value ?? null;
+  const displayName = effective ? shortName(effective) : msg("agent.model_menu.effort_default");
+  const current = available.find((m) => m.value === effective);
+  const canThink = !!current?.supports_thinking;
+  const efforts = effortsFor(effective, available);
+  // An off-by-default thinker runs "Default" with no reasoning at all, so it
+  // has no default level to name.
+  const defaultEffort = current?.reasoning_default_enabled
+    ? (current.default_reasoning_effort ?? null)
+    : null;
 
   const pick = (model: string | null) => {
     onChange(model);
     // Effort only means something on a reasoning-capable model, and each
     // provider speaks its own vocabulary — carrying a level the new model
     // doesn't support would send a dead or rejected parameter.
+    const target = model ?? catalogDefault?.value ?? null;
     if (
-      !model ||
-      !available.find((m) => m.value === model)?.supports_thinking ||
-      (effort !== null && !effortsFor(model).includes(effort))
+      !target ||
+      !available.find((m) => m.value === target)?.supports_thinking ||
+      (effort !== null && !effortsFor(target, available).includes(effort))
     ) {
       onEffortChange(null);
     }
@@ -233,13 +178,13 @@ export function ComposerModelMenu({
             open && "bg-accent/60",
           )}
         >
-          {choiceIcon(value, 16)}
+          {effective && <ProviderLogo slug={modelProviderSlug(effective)} size={16} />}
           <span className="min-w-0 max-w-20 truncate font-medium sm:max-w-40" dir="ltr">
-            {displayName(value)}
+            {displayName}
           </span>
           {/* Codex-style chip: the effort reads as a lighter suffix after the
               model name ("gpt-5 High"), not a separated fragment. */}
-          {value && effort && (
+          {effective && effort && (
             <span className="shrink-0 text-muted-foreground">{effortLabel(effort)}</span>
           )}
           <CaretDown className="size-3 shrink-0 text-muted-foreground" />
@@ -250,31 +195,16 @@ export function ComposerModelMenu({
           <DropdownMenuSubTrigger className="py-2.5">
             <span className="shrink-0">{msg("agent.model_menu.model")}</span>
             <span className="ms-auto truncate text-muted-foreground" dir="ltr">
-              {displayName(value)}
+              {displayName}
             </span>
             <CaretRight className="size-3.5 shrink-0 text-muted-foreground rtl:rotate-180" />
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="w-72 overflow-hidden p-0">
             <div className="max-h-72 overflow-y-auto py-1">
-              <MenuItem
-                selected={value === null}
-                label={msg("agent.model_menu.auto")}
-                description={msg("agent.model_menu.auto_hint")}
-                icon={<ProviderLogo slug="openrouter" size={16} />}
-                onSelect={() => pick(null)}
-              />
-              <MenuItem
-                selected={value === AUTO_INTELLIGENT_MODEL}
-                label={msg("agent.model_menu.auto_intelligent")}
-                description={msg("agent.model_menu.auto_intelligent_hint")}
-                icon={<ProviderLogo slug="openrouter" size={16} />}
-                onSelect={() => pick(AUTO_INTELLIGENT_MODEL)}
-              />
               {currentExtra && (
                 <MenuItem
                   selected
                   label={shortName(currentExtra.value)}
-                  description={modelDescription(currentExtra.value)}
                   icon={<ProviderLogo slug={modelProviderSlug(currentExtra.value)} size={16} />}
                   onSelect={() => pick(currentExtra.value)}
                 />
@@ -282,9 +212,8 @@ export function ComposerModelMenu({
               {featured.map((m) => (
                 <MenuItem
                   key={m.value}
-                  selected={value === m.value}
+                  selected={effective === m.value}
                   label={shortName(m.value)}
-                  description={modelDescription(m.value)}
                   icon={<ProviderLogo slug={modelProviderSlug(m.value)} size={16} />}
                   onSelect={() => pick(m.value)}
                 />
@@ -306,7 +235,13 @@ export function ComposerModelMenu({
                 key={level ?? "default"}
                 selected={effort === level}
                 label={level ? effortLabel(level) : msg("agent.model_menu.effort_default")}
-                description={effortHint(level)}
+                description={
+                  level === null && defaultEffort
+                    ? msg("agent.model_menu.effort_default_level", {
+                        level: effortLabel(defaultEffort),
+                      })
+                    : effortHint(level)
+                }
                 dir="auto"
                 onSelect={() => onEffortChange(level)}
               />

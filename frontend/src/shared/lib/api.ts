@@ -32,6 +32,8 @@ import type {
   WorkflowSpec,
 } from "@/shared/types/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import type { TurnStats } from "@/shared/ui/agent/types";
+import { parseTurnStats } from "@/shared/ui/agent/turn-stats";
 import { I18N_KEY, tI18n } from "@/shared/lib/i18n";
 import { reportHandledError } from "@/shared/lib/report-error";
 import type { ExecutionBudget } from "@/shared/types/execution-budget";
@@ -837,11 +839,20 @@ export interface BillingPlanResponse {
   available: boolean;
 }
 
+/** The backend's live pricing terms (markup, BYOK fee, top-up fee). */
+export interface BillingPricingTerms {
+  usage_markup: number;
+  byok_fee_fraction: number;
+  purchase_fee_rate: number;
+  purchase_fee_fixed_cents: number;
+}
+
 export interface BillingWalletResponse {
   paid_balance_credits: number;
   free_grant: BillingFreeGrant;
   usage: BillingUsageEntry[];
   plan: BillingPlanResponse;
+  pricing: BillingPricingTerms;
 }
 
 /** Fetch the caller's credit wallet. Reads work even without Stripe. */
@@ -1165,6 +1176,7 @@ export type ConnectorProvider =
   | "azure_blob"
   | "postgres"
   | "mysql"
+  | "supabase"
   | "bigquery"
   | "snowflake"
   | "langfuse"
@@ -1215,7 +1227,9 @@ export function startConnectorOAuth(provider: ConnectorProvider, fields?: Record
 /** List what the linked account can see at ``location`` (empty for the root). */
 export function browseConnector(provider: ConnectorProvider, location: string, search: string) {
   const params = new URLSearchParams({ location, search });
-  return request<{ entries: ConnectorEntry[] }>(`/connectors/${provider}/browse?${params}`);
+  return request<{ entries: ConnectorEntry[]; location_url?: string | null }>(
+    `/connectors/${provider}/browse?${params}`,
+  );
 }
 
 /** Decode the first rows of one browse entry. */
@@ -2761,7 +2775,7 @@ export interface CodeAgentRequest {
   // the seed authors honor every directive. Empty when no interview ran.
   interview_brief?: string[];
   // Catalog model id that authors the code (the composer's model menu).
-  // Absent routes automatically; "auto:intelligent" picks a frontier model.
+  // Absent runs the catalog's best-value default.
   model?: string;
   // Explicit reasoning-effort level for the chosen model; absent keeps its default.
   reasoning_effort?: string;
@@ -2824,6 +2838,7 @@ export interface CodeAgentHandlers {
     model: string | null;
     /** Concrete model selected by Auto Router, when the route was automatic. */
     served_model: string | null;
+    stats: TurnStats | null;
     workflow?: WorkflowSpec | null;
     workflowValid?: boolean;
     /**
@@ -2916,6 +2931,7 @@ export async function streamCodeAgent(
         model: typeof rawModel === "string" && rawModel.length > 0 ? rawModel : null,
         served_model:
           typeof rawServedModel === "string" && rawServedModel.length > 0 ? rawServedModel : null,
+        stats: parseTurnStats(data.stats),
         workflow:
           data.workflow && typeof data.workflow === "object"
             ? (data.workflow as WorkflowSpec)

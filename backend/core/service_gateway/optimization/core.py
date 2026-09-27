@@ -13,7 +13,7 @@ import logging
 import threading
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,7 @@ from typing import Any
 import dspy
 from dspy.teleprompt.gepa.gepa_utils import DspyAdapter
 
+from ...billing.pricing import ModelUsage, combine_usages
 from ...config import settings as app_settings
 from ...constants import (
     DETAIL_BASELINE,
@@ -71,8 +72,8 @@ from ..language_models import (
     apply_model_reasoning_config,
     build_language_model,
     lm_call_count,
+    model_usages_from_history,
     total_tokens_from_history,
-    usage_by_model_from_history,
 )
 from ..safe_exec import validate_metric_code, validate_signature_code
 from .artifacts import persist_program
@@ -128,8 +129,8 @@ logger = logging.getLogger(__name__)
 def _usage_by_model_rows(*language_models: object) -> list[ModelTokenUsage]:
     """Build a result's per-model usage rows from the run's LM histories.
 
-    Wraps :func:`usage_by_model_from_history`, turning its ``model → (input,
-    output)`` breakdown into the :class:`ModelTokenUsage` rows the billing worker
+    Wraps :func:`model_usages_from_history`, turning its per-model usage (tokens
+    plus any provider-reported cost) into the :class:`ModelTokenUsage` rows the billing worker
     charges from and the UI reconciles against. Returns an empty list when usage
     is untracked (e.g. mocked LMs), mirroring the ``total_tokens`` companion.
 
@@ -139,13 +140,10 @@ def _usage_by_model_rows(*language_models: object) -> list[ModelTokenUsage]:
     Returns:
         One row per distinct model that recorded usage.
     """
-    breakdown = usage_by_model_from_history(*language_models)
-    if not breakdown:
+    usages = model_usages_from_history(*language_models)
+    if not usages:
         return []
-    return [
-        ModelTokenUsage(model=model, input_tokens=in_out[0], output_tokens=in_out[1])
-        for model, in_out in breakdown.items()
-    ]
+    return [ModelTokenUsage(**asdict(usage)) for usage in usages]
 
 
 def _merge_usage_rows(rows: list[ModelTokenUsage]) -> list[ModelTokenUsage]:
@@ -160,15 +158,8 @@ def _merge_usage_rows(rows: list[ModelTokenUsage]) -> list[ModelTokenUsage]:
     Returns:
         One :class:`ModelTokenUsage` per distinct model, token counts summed.
     """
-    merged: dict[str, list[int]] = {}
-    for row in rows:
-        accumulator = merged.setdefault(row.model, [0, 0])
-        accumulator[0] += row.input_tokens
-        accumulator[1] += row.output_tokens
-    return [
-        ModelTokenUsage(model=model, input_tokens=in_out[0], output_tokens=in_out[1])
-        for model, in_out in merged.items()
-    ]
+    merged = combine_usages(ModelUsage(**row.model_dump()) for row in rows)
+    return [ModelTokenUsage(**asdict(usage)) for usage in merged]
 
 
 def _resolve_max_metric_calls(optimizer_kwargs: dict[str, Any]) -> int:

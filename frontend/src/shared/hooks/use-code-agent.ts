@@ -15,6 +15,7 @@ import { LOCALE_RELOAD_EVENT } from "@/shared/lib/locale";
 import { TERMS } from "@/shared/lib/terms";
 import type { ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidateCodeResponse, WorkflowSpec } from "@/shared/types/api";
+import type { TurnStats } from "@/shared/ui/agent/types";
 
 type AgentStatus = "idle" | "streaming" | "done" | "error";
 type AgentMode = "seed" | "chat";
@@ -117,6 +118,7 @@ interface AgentMessage {
   model?: string | null;
   /** Concrete model selected by Auto Router, when the route was automatic. */
   servedModel?: string | null;
+  stats?: TurnStats | null;
 }
 
 interface ArtifactVersion {
@@ -806,6 +808,7 @@ export function useCodeAgent(args: UseCodeAgentArgs): CodeAgentState {
                 content: finalContent,
                 model: result.model,
                 servedModel: result.served_model,
+                stats: result.stats,
               };
               return next;
             });

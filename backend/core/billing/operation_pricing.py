@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from typing import Any, Literal
 
-from .pricing import CREDIT_USD_VALUE, MARKUP, PLATFORM_FEE_FRACTION
+from .pricing import CREDIT_USD_VALUE, PLATFORM_FEE_FRACTION, usage_markup
 
 _CREDIT_QUANTUM = Decimal("0.000000001")
 _BYOK_FEE = Decimal(str(PLATFORM_FEE_FRACTION))
@@ -61,7 +61,8 @@ class ChargePolicy:
 
     kind: Literal["managed_model", "byok_model", "sandbox"]
     credit_usd: Decimal = Decimal(str(CREDIT_USD_VALUE))
-    model_markup: Decimal = Decimal(str(MARKUP))
+    # Read at construction, not import, so a policy snapshots the markup in force when it was quoted.
+    model_markup: Decimal = field(default_factory=lambda: Decimal(str(usage_markup())))
     byok_fee_fraction: Decimal = _BYOK_FEE
 
     def convert(self, provider_usd: Decimal) -> CreditCharge:
@@ -74,12 +75,11 @@ class ChargePolicy:
             Exact scope and wallet amounts rounded only to ledger precision.
         """
         raw = exact_nonnegative(provider_usd) / self.credit_usd
-        if self.kind == "sandbox":
-            wallet = total = raw
-        elif self.kind == "managed_model":
-            wallet = total = raw * self.model_markup
+        if self.kind == "byok_model":
+            # BYOK pays only the platform fee on the at-cost model price; the markup is for platform-paid spend.
+            wallet = total = raw * self.byok_fee_fraction
         else:
-            wallet = total = raw * self.model_markup * self.byok_fee_fraction
+            wallet = total = raw * self.model_markup
         return CreditCharge(
             total.quantize(_CREDIT_QUANTUM, rounding=ROUND_CEILING),
             wallet.quantize(_CREDIT_QUANTUM, rounding=ROUND_CEILING),

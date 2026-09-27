@@ -1,8 +1,8 @@
 """Unit tests for the monthly platform budget counters.
 
 Runs against an in-memory ``fakeredis`` double. Covers counting up to the cap,
-the once-per-month alert, month rollover, the disabled cap, and the fail-open
-behaviour without Redis or when Redis errors.
+the once-per-month alert, month rollover and the disabled cap. The Redis-outage
+fallback is covered in ``core/api/tests/test_platform_budget.py``.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from datetime import UTC, datetime
 
 import fakeredis
 import pytest
-from redis.exceptions import RedisError
 
 from core.api import platform_budget
 from core.api.platform_budget import budget_open, record_spend
@@ -54,29 +53,3 @@ def test_zero_cap_disables_counting(fake_redis: fakeredis.FakeStrictRedis) -> No
     assert budget_open("groq", 0, now=_JAN)
     assert fake_redis.keys("*") == []
 
-
-def test_fails_open_without_redis(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No Redis configured means every call is allowed."""
-    monkeypatch.setattr(platform_budget, "shared_redis_client", lambda: None)
-    record_spend("groq", 99.0, 1.0, now=_JAN)
-    assert budget_open("groq", 1.0, now=_JAN)
-
-
-def test_fails_open_when_redis_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A Redis outage allows the call instead of raising."""
-
-    class _Broken:
-        """Redis stub whose every command raises."""
-
-        def __getattr__(self, _name: str):
-            """Return a callable that raises ``RedisError``."""
-
-            def _raise(*_args: object, **_kwargs: object) -> None:
-                """Raise the outage error."""
-                raise RedisError("down")
-
-            return _raise
-
-    monkeypatch.setattr(platform_budget, "shared_redis_client", _Broken)
-    record_spend("groq", 1.0, 1.0, now=_JAN)
-    assert budget_open("groq", 1.0, now=_JAN)

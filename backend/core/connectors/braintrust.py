@@ -21,6 +21,8 @@ PROVIDER = "braintrust"
 API_URL = "https://api.braintrust.dev/v1"
 PAGE_SIZE = 100
 LIST_LIMIT = 100
+# Every project lists its Logs, so probing projects for importable files is wasted calls.
+PRUNE_EMPTY_FOLDERS = False
 EVENT_FIELDS = ("id", "created", "input", "output", "expected", "scores", "metadata", "error", "metrics", "tags")
 
 

@@ -131,7 +131,7 @@ export function RecipeChip({ recipe, onChange }: { recipe: Recipe; onChange: () 
     <button
       type="button"
       onClick={onChange}
-      data-tutorial="submit-recipe"
+      data-tutorial="submit-recipe-chip"
       className="group inline-flex min-h-[44px] w-full min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1 text-xs shadow-xs transition-colors hover:border-[#C8A882] sm:w-auto lg:min-h-0"
     >
       <Icon className="size-3.5 shrink-0 text-[#3D2E22]" aria-hidden />

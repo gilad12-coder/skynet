@@ -195,6 +195,7 @@ ENGLISH_MESSAGES: dict[str, str] = {
     "submit.no_models_available": "No models available in the catalog — configure a provider API key first.",
     "transcription.budget_exhausted": "Dictation is paused for the rest of the month. Type your message instead.",
     "transcription.failed": "Transcription failed on every configured provider.",
+    "transcription.not_eligible": "Dictation needs a credit top-up, Skynet Pro, or your own provider key.",
     "transcription.too_large": "Audio clip exceeds the {max_mb}MB transcription limit.",
     "transcription.unconfigured": (
         "No transcription provider configured. Set SONIOX_API_KEY, ELEVENLABS_API_KEY, or OPENAI_API_KEY."

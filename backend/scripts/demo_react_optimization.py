@@ -27,6 +27,7 @@ from unittest.mock import patch
 from dspy.utils import DummyLM
 from sqlalchemy import create_engine
 
+from core.api.model_catalog import agent_model_id
 from core.config import settings
 from core.models import ColumnMapping, ReplayMapping, Reward, ToolSource
 from core.models.common import ModelConfig
@@ -101,7 +102,7 @@ def _build_payload(
         # gets truncated mid-output. Give the rollout room to finish.
         model_settings=apply_model_reasoning_config(
             ModelConfig(
-                name=settings.generalist_agent_model,
+                name=agent_model_id(settings.generalist_agent_model),
                 base_url=settings.generalist_agent_base_url or None,
             )
         ).model_copy(update={"max_tokens": 32000}),

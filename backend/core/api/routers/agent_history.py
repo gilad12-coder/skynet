@@ -73,6 +73,8 @@ class ConversationMessage(BaseModel):
     model: str | None = None
     # The concrete model behind an auto-routed turn, from router_metadata.
     served_model: str | None = None
+    # Token usage, cost and timing of the turn, from router_metadata.
+    stats: dict[str, Any] | None = None
     created_at: datetime
 
 
@@ -259,6 +261,7 @@ def create_agent_history_router(*, job_store) -> APIRouter:
                         served_model=(m.router_metadata or {}).get("served_model")
                         if isinstance(m.router_metadata, dict)
                         else None,
+                        stats=(m.router_metadata or {}).get("stats") if isinstance(m.router_metadata, dict) else None,
                         created_at=cast(datetime, m.created_at),
                     )
                     for m in msgs
@@ -489,7 +492,7 @@ def _semantic_conversation_ids(
     embedder = get_embedder()
     if not embedder.available():
         return None
-    vector = embedder.encode(query, task="retrieval.query")
+    vector = embedder.encode(query, task="retrieval.query", user=username)
     if vector is None:
         return None
     params: dict[str, Any] = {

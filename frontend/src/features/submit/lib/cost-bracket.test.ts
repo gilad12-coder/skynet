@@ -25,7 +25,9 @@ const {
   runtimeCostProjection,
   runtimeStartHold,
 } = await import("./cost-bracket.ts");
-const { platformFeeCredits, MARKUP } = await import(billingUrl);
+const { platformFeeCredits, DEFAULT_PRICING_TERMS } = await import(billingUrl);
+const MARKUP = DEFAULT_PRICING_TERMS.usageMarkup;
+const FEE = DEFAULT_PRICING_TERMS.byokFeeFraction;
 
 function model(value: string, input: number, output: number) {
   return {
@@ -109,8 +111,8 @@ test("adds Vercel at cost after applying the BYOK model fee", () => {
   assert.equal(charged.runtimeHighCredits, 36);
   assert.equal(charged.runtimeSessionLowCredits, 1);
   assert.equal(charged.runtimeSessionHighCredits, 12);
-  assert.equal(charged.lowCredits, platformFeeCredits(full.byokModelLowCredits) + 12);
-  assert.equal(charged.highCredits, platformFeeCredits(full.byokModelHighCredits) + 36);
+  assert.equal(charged.lowCredits, platformFeeCredits(full.byokModelLowCredits, FEE) + 12);
+  assert.equal(charged.highCredits, platformFeeCredits(full.byokModelHighCredits, FEE) + 36);
 });
 
 test("the runtime low end starts at one session's full hold", () => {
@@ -188,7 +190,8 @@ test("traces the inputs and intermediate values behind the bracket", () => {
     Math.ceil((usd("managed", "lowUsd") * MARKUP) / 0.01),
     bracket.managedModelLowCredits,
   );
-  assert.equal(Math.ceil((usd("byok", "highUsd") * MARKUP) / 0.01), bracket.byokModelHighCredits);
+  // BYOK credits stay at cost: they are the base the platform fee is taken from.
+  assert.equal(Math.ceil(usd("byok", "highUsd") / 0.01), bracket.byokModelHighCredits);
 });
 
 test("explains a full-evals budget and an unpriced model", () => {
@@ -233,7 +236,7 @@ test("charge trace adds up to the charged bracket", () => {
   );
   const { charge } = charged;
 
-  assert.equal(charge.byokFeeLow, platformFeeCredits(charge.byokFullLow));
+  assert.equal(charge.byokFeeLow, platformFeeCredits(charge.byokFullLow, FEE));
   assert.equal(charge.managedLow + charge.byokFeeLow + charge.runtimeLow, charged.lowCredits);
   assert.equal(charge.managedHigh + charge.byokFeeHigh + charge.runtimeHigh, charged.highCredits);
 });
@@ -288,4 +291,27 @@ test("the ceiling trace shows the working behind the default cap", () => {
   }
   assert.equal(defaultCeilingTrace(small).stepCredits, 10);
   assert.equal(defaultCeilingTrace(large).stepCredits, 50);
+});
+
+test("applies the backend's markup to managed roles and its fee fraction to BYOK", () => {
+  const roles = [
+    { role: "task", model: expensive, tokenSource: "managed", tokenShare: 1 },
+    { role: "judge", model: expensive, tokenSource: "byok", tokenShare: 1 },
+  ];
+  const atCost = projectCostBracket({
+    ...base,
+    modelRoles: roles,
+    pricing: { usageMarkup: 1, byokFeeFraction: 0.05 },
+  });
+  const markedUp = projectCostBracket({
+    ...base,
+    modelRoles: roles,
+    pricing: { usageMarkup: 2, byokFeeFraction: 0.1 },
+  });
+
+  assert.equal(markedUp.usageMarkup, 2);
+  assert.ok(markedUp.managedModelHighCredits >= 2 * atCost.managedModelHighCredits - 1);
+  assert.equal(markedUp.byokModelHighCredits, atCost.byokModelHighCredits);
+  const charged = chargeableBracket(markedUp, "managed");
+  assert.equal(charged.charge.byokFeeHigh, platformFeeCredits(markedUp.byokModelHighCredits, 0.1));
 });

@@ -26,6 +26,7 @@ import {
 } from "@/shared/lib/api";
 import type {
   ExecutionRuntime,
+  ModelCatalogResponse,
   ModelConfig,
   SplitFractions,
   ValidateCodeResponse,
@@ -39,6 +40,7 @@ import type {
 import { parseDatasetFile, type ParsedDataset } from "@/shared/lib/parse-dataset";
 import type { ValidationResult as EditorValidationResult } from "@/shared/ui/code-editor";
 import { registerTutorialHook } from "@/features/tutorial";
+import { getModelCatalog } from "@/shared/lib/model-catalog";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { useWizardStateOptional } from "@/features/agent-panel";
 import { readPref, useUserPrefs } from "@/features/settings";
@@ -81,7 +83,7 @@ import {
 import { useWizardDrafts } from "./use-wizard-drafts";
 import { useExecutionBudget } from "./use-execution-budget";
 import { useWizardPreflight } from "./use-wizard-preflight";
-import { formatBudgetUsd } from "@/features/billing";
+import { formatBudgetUsd, usePricingTerms } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import type {
   ExecutionRuntimeCatalog,
@@ -115,6 +117,13 @@ const DEFAULT_TARGET_SCORE = "100";
 // 1x1 is GEPA's classic single-mutation sampling. Left at the default the
 // wizard sends nothing, so the server-wide GEPA_PXN_* settings still apply.
 const DEFAULT_PXN = "1";
+
+// The tour's model pick: the catalog's flagged default, else its first managed
+// model. BYOK-only models are skipped because the demo user may hold no key.
+function demoModelName(catalog: ModelCatalogResponse): string | null {
+  const managed = catalog.models.filter((m) => m.available && !m.byok_provider);
+  return (managed.find((m) => m.is_default) ?? managed[0])?.value ?? null;
+}
 
 export function prepareModelConfig(config: ModelConfig): ModelConfig {
   const { base_url: _baseUrl, ...fields } = config;
@@ -504,6 +513,14 @@ export function useSubmitWizard() {
             : null,
         );
       }),
+      registerTutorialHook("setDemoModels", () => {
+        void getModelCatalog().then((c) => {
+          const name = demoModelName(c);
+          if (!name) return;
+          setModelConfig({ ...emptyModelConfig(), name });
+          setSecondModelConfig({ ...emptyModelConfig(), name });
+        });
+      }),
       registerTutorialHook("setSignatureCode", (code) => {
         setSignatureCode(code);
         setSignatureManuallyEdited(true);
@@ -891,6 +908,7 @@ export function useSubmitWizard() {
   // so we show a range rather than a false-precision single number and seed the
   // Max Cost Ceiling from its high end. For a grid, count the (gen × refl) pairs
   // so the bracket reflects the whole sweep.
+  const pricing = usePricingTerms();
   const costBracket: CostBracket = useMemo(() => {
     const findModel = (config: ModelConfig) =>
       config.name.trim()
@@ -949,6 +967,7 @@ export function useSubmitWizard() {
       datasetRows: parsedDataset?.rowCount ?? 0,
       modelRoles,
       runtime: runtimeCostProjection(selectedRuntime?.cost, 2),
+      pricing,
     });
   }, [
     autoLevel,
@@ -964,6 +983,7 @@ export function useSubmitWizard() {
     catalog,
     optimizerName,
     runtimeCatalog,
+    pricing,
   ]);
 
   // Default the cap to the bracket's high end (with headroom) the first time a

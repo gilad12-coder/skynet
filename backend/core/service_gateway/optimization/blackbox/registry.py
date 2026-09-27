@@ -16,6 +16,7 @@ from ....models.blackbox import (
     BLACKBOX_ENGINE_BEST_OF_N,
     BLACKBOX_ENGINE_GEPA,
     BLACKBOX_ENGINE_META_HARNESS,
+    BLACKBOX_MULTI_PART_ENGINES,
 )
 from .autoresearch import AutoResearchEngine
 from .autosaddler import AutoSaddlerEngine
@@ -58,9 +59,20 @@ class EngineSpec:
     unavailable_reason: str | None = None
     requires_sandbox: bool = False
     requires_agent_target: bool = False
-    supports_parts: bool = False
     requires_proposer: bool = False
     checkpoint_recovery_supported: bool = False
+
+    @property
+    def supports_parts(self) -> bool:
+        """Return whether the engine accepts a multi-part starting point.
+
+        Derived from ``BLACKBOX_MULTI_PART_ENGINES`` so the catalog the UI reads
+        can never advertise parts the submit validator rejects.
+
+        Returns:
+            ``True`` when the engine is in the validator's multi-part set.
+        """
+        return self.id in BLACKBOX_MULTI_PART_ENGINES
 
     def unavailable_reason_for(self, caps: EngineCapabilities) -> str | None:
         """Explain why the engine cannot run for ``caps``, or return ``None`` when it can.
@@ -99,7 +111,6 @@ ENGINES: dict[str, EngineSpec] = {
         label="GEPA",
         description="Reflective evolution with a Pareto front of versions.",
         factory=GepaEngine,
-        supports_parts=True,
         checkpoint_recovery_supported=True,
     ),
     BLACKBOX_ENGINE_BEST_OF_N: EngineSpec(
@@ -130,7 +141,6 @@ ENGINES: dict[str, EngineSpec] = {
             "only patches confirmed on held-out development cases are kept."
         ),
         factory=AutoSaddlerEngine,
-        supports_parts=True,
         requires_proposer=True,
     ),
 }

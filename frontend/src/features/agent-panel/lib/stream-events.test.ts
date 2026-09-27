@@ -104,8 +104,8 @@ test("done reports the requested and the served model, blank ones as null", () =
     ["done", { assistant_message: "hi", model: "", served_model: 7 }],
   ]);
   assert.deepEqual(calls, [
-    ["done", { assistant_message: "hi", model: "openrouter/auto", served_model: "vendor/m" }],
-    ["done", { assistant_message: "hi", model: null, served_model: null }],
+    ["done", { assistant_message: "hi", model: "openrouter/auto", served_model: "vendor/m", stats: null }],
+    ["done", { assistant_message: "hi", model: null, served_model: null, stats: null }],
   ]);
 });
 

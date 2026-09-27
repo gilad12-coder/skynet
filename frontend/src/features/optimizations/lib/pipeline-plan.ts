@@ -15,6 +15,7 @@ import type {
 } from "@/shared/types/api";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { engineDisplayName } from "@/features/explore";
 import type { PipelineStage } from "../constants";
 
 export interface PlannedStage {
@@ -24,19 +25,7 @@ export interface PlannedStage {
   detail?: string;
 }
 
-const ENGINE_LABELS: Record<string, string> = {
-  gepa: "GEPA",
-  best_of_n: "Best-of-N",
-  autoresearch: "AutoResearch",
-  meta_harness: "Meta-Harness",
-  autosaddler: "AutoSaddler",
-};
-
 const HILL_CLIMBING_ENGINES = new Set(["autoresearch", "meta_harness", "autosaddler"]);
-
-function engineLabel(engine: string): string {
-  return ENGINE_LABELS[engine.toLowerCase()] ?? engine;
-}
 
 // Optimizer names arrive as dotted DSPy paths ("dspy.teleprompt.MIPROv2") or
 // the bare "gepa" alias; the tracker wants the class name alone.
@@ -85,7 +74,7 @@ function middleStages(
           : HILL_CLIMBING_ENGINES.has(id)
             ? msg("pipeline.stage.hillClimbing")
             : TERMS.optimization;
-    return [{ key: "optimizing", label, detail: engineLabel(singleEngine) }];
+    return [{ key: "optimizing", label, detail: engineDisplayName(singleEngine) }];
   }
 
   // The auto strategy (the default) races explore lanes, then hands the best

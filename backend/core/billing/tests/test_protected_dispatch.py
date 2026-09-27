@@ -23,6 +23,7 @@ from core.billing.model_dispatch import (
 from core.billing.openrouter_quotes import price_text_request
 from core.billing.operation_pricing import ChargePolicy, UnpricedOperationError
 from core.billing.runtime import BudgetRuntime, OperationCompletedError, UsagePendingError
+from core.config import settings
 from core.storage.models import Base, BillingCustomerModel, ExecutionOperationModel
 
 CATALOG = {
@@ -38,6 +39,12 @@ CATALOG = {
     ],
 }
 REQUEST = {"model": "fixture/text", "max_tokens": 100, "messages": [{"role": "user", "content": "hello"}]}
+
+
+@pytest.fixture(autouse=True)
+def _at_cost_markup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the usage markup to 1.0 so these tests check settlement arithmetic, not pricing policy."""
+    monkeypatch.setattr(settings, "usage_markup", 1.0)
 
 
 @pytest.fixture
@@ -237,14 +244,22 @@ def test_anthropic_stream_merges_final_cost_without_inventing_zero() -> None:
     assert usage == {"input_tokens": 8, "output_tokens": 2, "cost": 0.001}
 
 
-def test_sandbox_cost_has_no_model_markup() -> None:
-    """Pass sandbox and managed dollars through at cost; charge BYOK only the platform fee."""
-    assert ChargePolicy("sandbox").convert(Decimal("0.01")).total == 1
-    # MARKUP is 1.0 (runs at cost), so a managed model bills its par credit value.
-    assert ChargePolicy("managed_model").convert(Decimal("0.01")).total == 1
+def test_usage_markup_applies_to_platform_paid_costs_but_not_byok(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mark up sandbox and managed dollars; charge BYOK only the platform fee on raw cost."""
+    monkeypatch.setattr(settings, "usage_markup", 1.15)
+    assert ChargePolicy("sandbox").convert(Decimal("0.01")).total == Decimal("1.15")
+    assert ChargePolicy("managed_model").convert(Decimal("0.01")).total == Decimal("1.15")
     byok = ChargePolicy("byok_model").convert(Decimal("0.01"))
-    # PLATFORM_FEE_FRACTION 0.05 of the par cost — OpenRouter's BYOK fee.
     assert byok.total == byok.wallet == Decimal("0.05")
+
+
+def test_protected_hold_includes_the_usage_markup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reserve the marked-up worst case, and freeze the markup into the policy snapshot."""
+    monkeypatch.setattr(settings, "usage_markup", 1.15)
+    policy = ChargePolicy("managed_model")
+    priced = price_text_request(json.loads(json.dumps(REQUEST)), CATALOG, policy)
+    assert priced.quote.maximum.total == Decimal("1.785") * Decimal("1.15")
+    assert policy.snapshot()["model_markup"] == "1.15"
 
 
 def test_responses_dispatch_reserves_the_actual_protocol_body(database: Engine) -> None:

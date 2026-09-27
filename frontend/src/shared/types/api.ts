@@ -911,6 +911,18 @@ export interface CatalogModel {
   byok_provider?: string | null;
   data_center?: string | null;
   supports_thinking: boolean;
+  // Effort levels the provider accepts for this model, weakest first; empty
+  // when it reasons without an effort control, absent/null when unknown.
+  reasoning_efforts?: string[] | null;
+  default_reasoning_effort?: string | null;
+  // Always reasons (rejects effort "none"), and reasons when no effort is
+  // sent; null when the provider did not say.
+  reasoning_mandatory?: boolean | null;
+  reasoning_default_enabled?: boolean | null;
+  // Newest headline model of a leading lab, derived from provider metadata.
+  featured?: boolean;
+  // The best-value default thinker that the composer's Auto mode runs.
+  is_default?: boolean;
   supports_vision: boolean;
   available: boolean;
   max_input_tokens?: number | null;

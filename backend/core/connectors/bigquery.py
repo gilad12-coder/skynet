@@ -197,6 +197,27 @@ def _split_ref(ref: str) -> tuple[str, str]:
     return dataset, table
 
 
+def web_url(secret: ConnectorSecret, location: str) -> str | None:
+    """Link to a browse location in the BigQuery console.
+
+    Args:
+        secret: The stored connector.
+        location: Empty for the top level, else ``[project/]dataset``; OAuth links lead with the project.
+
+    Returns:
+        The URL.
+    """
+    base = "https://console.cloud.google.com/bigquery"
+    if secret.auth_method == "oauth":
+        project, _, dataset = location.partition("/")
+    else:
+        project, dataset = json.loads(secret.access_token)["project"], location
+    if not project:
+        return base
+    url = f"{base}?project={quote(project, safe='')}"
+    return f"{url}&p={quote(project, safe='')}&d={quote(dataset, safe='')}&page=dataset" if dataset else url
+
+
 def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
     """List datasets at the root, or the tables and views of one dataset.
 

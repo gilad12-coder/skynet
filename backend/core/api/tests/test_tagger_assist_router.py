@@ -219,7 +219,7 @@ def test_interview_returns_turn(monkeypatch) -> None:
     seen: dict = {}
 
     def fake_turn(
-        config, columns, data, turns, locale, model=None, reasoning_effort=None, lm_extra_body=None, usage_sink=None
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None
     ):
         """Capture the forwarded arguments and return a canned turn."""
         seen.update(
@@ -230,7 +230,6 @@ def test_interview_returns_turn(monkeypatch) -> None:
                 "config": config,
                 "model": model,
                 "reasoning_effort": reasoning_effort,
-                "lm_extra_body": lm_extra_body,
             }
         )
         return {
@@ -269,7 +268,6 @@ def test_interview_returns_turn(monkeypatch) -> None:
     assert seen["config"]["_assist_mode"] == "copilot"
     assert seen["model"] == "openai/gpt-test"
     assert seen["reasoning_effort"] == "high"
-    assert seen["lm_extra_body"] is None
 
 
 def test_interview_rejects_unknown_model(monkeypatch) -> None:
@@ -290,7 +288,7 @@ def test_interview_stream_forwards_model(monkeypatch) -> None:
     seen: dict = {}
 
     async def fake_stream(
-        config, columns, data, turns, locale, model=None, reasoning_effort=None, lm_extra_body=None, usage_sink=None
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None
     ):
         """Capture the forwarded kwargs and finish immediately."""
         seen.update(
@@ -298,7 +296,6 @@ def test_interview_stream_forwards_model(monkeypatch) -> None:
                 "turns": turns,
                 "model": model,
                 "reasoning_effort": reasoning_effort,
-                "lm_extra_body": lm_extra_body,
             }
         )
         yield {"event": "interview_done", "data": {"message": "hi", "done": False}}
@@ -315,7 +312,6 @@ def test_interview_stream_forwards_model(monkeypatch) -> None:
     assert "event: interview_done" in resp.text
     assert seen["model"] == "openai/gpt-test"
     assert seen["reasoning_effort"] == "low"
-    assert seen["lm_extra_body"] is None
 
 
 def test_interview_stream_tolerates_turn_bookkeeping_fields(monkeypatch) -> None:
@@ -323,7 +319,7 @@ def test_interview_stream_tolerates_turn_bookkeeping_fields(monkeypatch) -> None
     seen: dict = {}
 
     async def fake_stream(
-        config, columns, data, turns, locale, model=None, reasoning_effort=None, lm_extra_body=None, usage_sink=None
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None
     ):
         """Capture the forwarded turns and finish immediately."""
         seen["turns"] = turns
@@ -355,22 +351,22 @@ def test_interview_stream_tolerates_turn_bookkeeping_fields(monkeypatch) -> None
     ]
 
 
-def test_interview_stream_auto_runs_pinned_default(monkeypatch) -> None:
-    """No chosen model runs the pinned default with no router extras."""
+def test_interview_stream_auto_runs_catalog_default(monkeypatch) -> None:
+    """No chosen model runs the catalog default with no router extras."""
     seen: dict = {}
 
     async def fake_stream(
-        config, columns, data, turns, locale, model=None, reasoning_effort=None, lm_extra_body=None, usage_sink=None
+        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None
     ):
         """Capture the forwarded kwargs and finish immediately."""
-        seen.update({"model": model, "lm_extra_body": lm_extra_body})
+        seen.update({"model": model})
         yield {"event": "interview_done", "data": {"message": "hi", "done": False}}
 
     monkeypatch.setattr(tagging, "interview_turn_stream", fake_stream)
     monkeypatch.setattr(
         model_router,
         "get_catalog_cached",
-        lambda: _catalog_with("openrouter/anthropic/claude-sonnet-5"),
+        lambda: _catalog_with("openrouter/anthropic/claude-sonnet-5", default="openrouter/anthropic/claude-sonnet-5"),
     )
     client, _ = _client(_ALICE)
     session_id = _create(client)
@@ -379,8 +375,7 @@ def test_interview_stream_auto_runs_pinned_default(monkeypatch) -> None:
         json={"turns": []},
     )
     assert resp.status_code == 200
-    assert seen["model"] == model_router.BALANCED_PINNED_MODEL_ID
-    assert seen["lm_extra_body"] is None
+    assert seen["model"] == "openrouter/anthropic/claude-sonnet-5"
 
 
 def test_predict_excludes_requested_rows_from_examples(monkeypatch) -> None:
@@ -469,9 +464,9 @@ def test_estimate_counts_untagged_rows() -> None:
     assert body["credits_high"] >= body["credits_low"] >= 0
 
 
-def _catalog_with(*values: str) -> SimpleNamespace:
+def _catalog_with(*values: str, default: str | None = None) -> SimpleNamespace:
     """Build a stand-in model catalog carrying just the given model ids."""
-    return SimpleNamespace(models=[SimpleNamespace(value=v) for v in values])
+    return SimpleNamespace(models=[SimpleNamespace(value=v, is_default=v == default, reasoning_efforts=None, reasoning_default_enabled=None) for v in values])
 
 
 def test_estimate_runs_on_chosen_model(monkeypatch) -> None:

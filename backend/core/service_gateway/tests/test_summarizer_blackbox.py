@@ -41,3 +41,33 @@ def test_summarize_blackbox_task_skips_lm_when_nothing_to_describe() -> None:
             cases_sample=None,
         )
     assert text == ""
+
+
+def test_summarize_task_skips_lm_when_not_allowed() -> None:
+    """``use_llm=False`` (owner cannot pay) returns the heuristic without building an LM."""
+    sink: list[object] = []
+    with patch.object(summarizer, "_build_lm", side_effect=AssertionError("LM built")):
+        text = summarizer.summarize_task(
+            title="Sentiment",
+            description="Label reviews.",
+            dataset_sample=None,
+            use_llm=False,
+            usage_sink=sink,
+        )
+    assert text == "Sentiment Label reviews."
+    assert sink == []
+
+
+def test_summarize_blackbox_task_hands_the_lm_to_the_usage_sink() -> None:
+    """The LM reaches the sink before it runs, so even a failed call can be metered."""
+    lm = object()
+    sink: list[object] = []
+    with patch.object(summarizer, "_build_lm", return_value=lm):
+        text = summarizer.summarize_blackbox_task(
+            title="Shorter answers",
+            description="Answer briefly.",
+            cases_sample=None,
+            usage_sink=sink,
+        )
+    assert text == "Shorter answers Answer briefly."
+    assert sink == [lm]

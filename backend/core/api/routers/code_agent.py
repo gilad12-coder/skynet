@@ -21,7 +21,8 @@ from ...service_gateway.agents.code import run_code_agent
 from ...service_gateway.agents.code_interview import interview_turn_stream
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
-from ..model_router import route_menu_model
+from ..model_catalog import ReasoningEffort
+from ..model_router import effective_reasoning_effort, route_menu_model
 from ._helpers import enforce_llm_credits, sse_from_events, stream_with_llm_metering
 
 logger = logging.getLogger(__name__)
@@ -157,12 +158,11 @@ class CodeAgentRequest(BaseModel):
         default=None,
         description=(
             "LiteLLM id of the catalog model that authors the code (the "
-            "composer's model menu). Absent routes automatically (balanced "
-            "tier); the sentinel 'auto:intelligent' routes to a frontier-"
-            "quality model."
+            "composer's model menu). Absent runs the catalog's best-value "
+            "default model."
         ),
     )
-    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = Field(
+    reasoning_effort: ReasoningEffort | None = Field(
         default=None,
         description=(
             "Explicit reasoning-effort level for the chosen model; absent "
@@ -230,12 +230,11 @@ class CodeInterviewRequest(BaseModel):
         default=None,
         description=(
             "LiteLLM id of the catalog model conducting the interview (the "
-            "composer's model menu). Absent routes automatically (balanced "
-            "tier); the sentinel 'auto:intelligent' routes to a frontier-"
-            "quality model."
+            "composer's model menu). Absent runs the catalog's best-value "
+            "default model."
         ),
     )
-    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = Field(
+    reasoning_effort: ReasoningEffort | None = Field(
         default=None,
         description=(
             "Explicit reasoning-effort level for the chosen model; absent "
@@ -363,7 +362,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             A :class:`StreamingResponse` of Server-Sent Events.
         """
         await asyncio.to_thread(enforce_llm_credits, job_store, current_user.username)
-        model, lm_extra_body = route_menu_model(req.model)
+        model = route_menu_model(req.model)
         usage_sink: list = []
         source = run_code_agent(
             dataset_columns=req.dataset_columns,
@@ -383,8 +382,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             interview_brief=req.interview_brief,
             locale=req.locale,
             model=model,
-            reasoning_effort=req.reasoning_effort,
-            lm_extra_body=lm_extra_body,
+            reasoning_effort=effective_reasoning_effort(model, req.reasoning_effort),
             usage_sink=usage_sink,
             blackbox=req.blackbox.model_dump() if req.blackbox else None,
         )
@@ -438,7 +436,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
             A :class:`StreamingResponse` of Server-Sent Events.
         """
         await asyncio.to_thread(enforce_llm_credits, job_store, current_user.username)
-        model, lm_extra_body = route_menu_model(req.model)
+        model = route_menu_model(req.model)
         usage_sink: list = []
 
         async def source() -> AsyncIterator[dict]:
@@ -453,8 +451,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
                     turns=[t.model_dump() for t in req.turns],
                     locale=req.locale,
                     model=model,
-                    reasoning_effort=req.reasoning_effort,
-                    lm_extra_body=lm_extra_body,
+                    reasoning_effort=effective_reasoning_effort(model, req.reasoning_effort),
                     usage_sink=usage_sink,
                     blackbox=req.blackbox.model_dump() if req.blackbox else None,
                 ):

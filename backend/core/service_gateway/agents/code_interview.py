@@ -23,6 +23,7 @@ from typing import Any
 
 import dspy
 
+from ...api.model_catalog import agent_model_id
 from ...config import settings
 from ..language_models import served_model_from
 from .code import ReasoningStreamListener, _build_agent_lm, _reply_language
@@ -336,7 +337,7 @@ def _parse_interview_prediction(pred: Any, asked: int) -> dict[str, Any]:
         "brief": brief if done else [],
         "done": done,
         "objective": str(getattr(pred, "captured_objective", "") or "").strip(),
-        "model": settings.code_agent_model,
+        "model": agent_model_id(settings.code_agent_model),
     }
 
 
@@ -446,7 +447,6 @@ async def interview_turn_stream(
     locale: str | None,
     model: str | None = None,
     reasoning_effort: str | None = None,
-    lm_extra_body: dict[str, Any] | None = None,
     usage_sink: list | None = None,
     blackbox: dict[str, Any] | None = None,
 ) -> Any:
@@ -477,8 +477,6 @@ async def interview_turn_stream(
         model: LiteLLM id conducting the interview; ``None`` runs the default.
         reasoning_effort: Explicit effort level for ``model``; ``None`` keeps
             the model's default.
-        lm_extra_body: Extra request-body fields for the LM call (the auto
-            router's plugin dial when the composer picked an Auto tier).
         usage_sink: Optional list the built LM is appended to, so the caller
             can meter the turn's token usage on any exit path.
         blackbox: The black-box wizard's authoring context; set, the turn
@@ -486,7 +484,7 @@ async def interview_turn_stream(
             / ``sample_rows`` read as the case columns / sample cases.
     """
     asked = sum(1 for t in turns if t.get("role") == "assistant")
-    lm = _build_agent_lm(model, reasoning_effort, lm_extra_body)
+    lm = _build_agent_lm(model, reasoning_effort)
     if usage_sink is not None:
         usage_sink.append(lm)
     if blackbox is not None:

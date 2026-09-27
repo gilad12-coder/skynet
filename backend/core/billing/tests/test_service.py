@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import litellm
 import pytest
 import stripe
 from pydantic import SecretStr
@@ -57,14 +58,25 @@ def engine() -> Iterator[object]:
     Base.metadata.drop_all(eng)
 
 
-def _usages(input_tokens: int, output_tokens: int = 0) -> list[ModelUsage]:
-    """Single-model usage on an unpriced model so default per-token costs apply.
+_TEST_MODEL = "test/priced"
 
-    Pricing is then deterministic (the module default 1e-6 input / 3e-6 output ×
-    MARKUP) regardless of LiteLLM's live table, so a debit's credit cost is stable
-    across versions. ``_usages(100_000)`` ≈ 10 credits; ``_usages(200_000)`` ≈ 20.
+
+@pytest.fixture(autouse=True)
+def _stable_prices(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Price the test model at $1/$3 per M tokens with a 1.15 markup, whatever LiteLLM ships."""
+    monkeypatch.setattr(settings, "usage_markup", 1.15)
+    with patch.dict(
+        litellm.model_cost, {_TEST_MODEL: {"input_cost_per_token": 1e-6, "output_cost_per_token": 3e-6}}, clear=False
+    ):
+        yield
+
+
+def _usages(input_tokens: int, output_tokens: int = 0) -> list[ModelUsage]:
+    """Single-model usage on a model with a fixed test price.
+
+    ``_usages(100_000)`` costs $0.10, 12 credits with markup; ``_usages(200_000)`` 23.
     """
-    return [ModelUsage(model="test/unpriced", input_tokens=input_tokens, output_tokens=output_tokens)]
+    return [ModelUsage(model=_TEST_MODEL, input_tokens=input_tokens, output_tokens=output_tokens)]
 
 
 @pytest.fixture
@@ -203,7 +215,8 @@ def test_debit_run_creates_local_row_for_customerless_account(engine: object) ->
 
     Credits are prepaid, so with no free allowance and no purchased balance
     there is nothing to draw from: the charge clamps to zero (the shortfall is
-    absorbed, never lent) and the balance stays at exactly zero.
+    absorbed, never lent) and the balance stays at exactly zero. The absorbed
+    cost is still recorded on a zero-delta ledger row.
     """
     service = StripeBillingService(engine=engine)
     usages = _usages(20_000)
@@ -211,12 +224,12 @@ def test_debit_run_creates_local_row_for_customerless_account(engine: object) ->
     assert charged == 0
     with Session(engine) as session:
         customer = session.get(BillingCustomerModel, "free@x.com")
-        ledger_rows = session.query(CreditLedgerModel).filter_by(username="free@x.com").count()
+        ledger_rows = session.query(CreditLedgerModel).filter_by(username="free@x.com").all()
     assert customer is not None
     assert customer.stripe_customer_id.startswith("local:")
     assert customer.grant_remaining == 0
     assert customer.credit_balance == 0
-    assert ledger_rows == 0
+    assert [(row.delta_credits, row.uncollected_credits) for row in ledger_rows] == [(0, credits_for_usage(usages))]
 
 
 def test_debit_run_clamps_charge_to_available_balance(engine: object) -> None:
@@ -268,8 +281,65 @@ def test_debit_run_repeated_overdraw_floors_at_zero(engine: object) -> None:
     with Session(engine) as session:
         customer = session.get(BillingCustomerModel, "u@x.com")
         ledger_rows = session.query(CreditLedgerModel).filter_by(username="u@x.com").all()
+    cost = credits_for_usage(usages)
     assert customer.credit_balance == 0
-    assert [row.delta_credits for row in ledger_rows] == [-2]
+    assert [(row.delta_credits, row.uncollected_credits) for row in ledger_rows] == [(-2, cost - 2), (0, cost)]
+
+
+def test_debit_run_settlement_key_charges_once(engine: object) -> None:
+    """A retried debit with the same settlement key returns the first charge and debits nothing more."""
+    with Session(engine) as session:
+        session.add(BillingCustomerModel(username="u@x.com", stripe_customer_id="cus_u", credit_balance=100))
+        session.commit()
+    service = StripeBillingService(engine=engine)
+    usages = _usages(100_000)
+    first = service.debit_run("u@x.com", usages, model=None, description="r", settlement_key="legacy:j:g1")
+    again = service.debit_run("u@x.com", usages, model=None, description="r", settlement_key="legacy:j:g1")
+    other = service.debit_run("u@x.com", usages, model=None, description="r", settlement_key="legacy:j:g2")
+    assert first == again == other == credits_for_usage(usages)
+    assert _balance(engine, "u@x.com") == 100 - 2 * first
+    assert len(_ledger_rows(engine, "u@x.com", "run")) == 2
+
+
+def test_debit_run_records_and_alerts_uncollected_overrun(engine: object) -> None:
+    """A clamped charge stores the shortfall on the ledger row and alerts operators."""
+    with Session(engine) as session:
+        session.add(BillingCustomerModel(username="u@x.com", stripe_customer_id="cus_u", credit_balance=3))
+        session.commit()
+    service = StripeBillingService(engine=engine)
+    usages = _usages(200_000)
+    cost = credits_for_usage(usages)
+    with patch("core.billing.service.send_alert") as alert:
+        assert service.debit_run("u@x.com", usages, model=None, description="big") == 3
+    (row,) = _ledger_rows(engine, "u@x.com", "run")
+    assert row.uncollected_credits == cost - 3
+    alert.assert_called_once()
+    assert f"uncollected={cost - 3}" in alert.call_args.kwargs["body"]
+
+
+def test_debit_run_fully_collected_sends_no_alert(engine: object) -> None:
+    """A run the balance covers records no shortfall and sends no alert."""
+    with Session(engine) as session:
+        session.add(BillingCustomerModel(username="u@x.com", stripe_customer_id="cus_u", credit_balance=100))
+        session.commit()
+    service = StripeBillingService(engine=engine)
+    with patch("core.billing.service.send_alert") as alert:
+        service.debit_run("u@x.com", _usages(100_000), model=None, description="r")
+    (row,) = _ledger_rows(engine, "u@x.com", "run")
+    assert row.uncollected_credits is None
+    alert.assert_not_called()
+
+
+def test_credits_spent_since_counts_only_run_charges(engine: object) -> None:
+    """The spend ceiling sums run debits; refunds, disputes and debt repayments are money movements."""
+    now = datetime.now(UTC)
+    _add_ledger(engine, "u@x.com", delta=-40, kind="run", model="m", when=now)
+    _add_ledger(engine, "u@x.com", delta=-500, kind="refund", model=None, when=now)
+    _add_ledger(engine, "u@x.com", delta=-300, kind="dispute", model=None, when=now)
+    _add_ledger(engine, "u@x.com", delta=-100, kind="debt_repayment", model=None, when=now)
+    _add_ledger(engine, "u@x.com", delta=-7, kind="run", model="m", when=now - timedelta(days=2))
+    service = StripeBillingService(engine=engine)
+    assert service.credits_spent_since(now - timedelta(hours=24)) == 40
 
 
 def test_debit_run_zero_cost_writes_nothing(engine: object) -> None:
@@ -949,6 +1019,93 @@ def test_webhook_refund_clamps_to_spent_balance(engine: object, webhook_ready: N
     rows = _ledger_rows(engine, "u@x.com", "refund")
     assert len(rows) == 1
     assert rows[0].delta_credits == -200
+    assert rows[0].uncollected_credits == 300
+    assert _debt(engine, "u@x.com") == 300
+
+
+def _debt(engine: object, username: str) -> int:
+    """Read the persisted refund/chargeback debt for an account (0 when it has no row)."""
+    with Session(engine) as session:
+        customer = session.get(BillingCustomerModel, username)
+        return 0 if customer is None else int(customer.debt_credits)
+
+
+def _spend_all_but(engine: object, username: str, remaining: int) -> None:
+    """Simulate spending a buyer's purchased credits down to ``remaining``."""
+    with Session(engine) as session:
+        session.get(BillingCustomerModel, username).credit_balance = remaining
+        session.commit()
+
+
+def test_webhook_refund_of_spent_credits_records_debt_and_blocks_spending(engine: object, webhook_ready: None) -> None:
+    """Refunding spent credits leaves debt that blocks every spend gate, and alerts."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    _deliver(service, _checkout_event("evt_pay", "u@x.com", 500, payment_intent="pi_1"))
+    _spend_all_but(engine, "u@x.com", 0)
+
+    with patch("core.billing.service.send_alert") as alert:
+        _deliver(service, _refund_event("evt_ref", "pi_1", 500))
+
+    assert _debt(engine, "u@x.com") == 500
+    assert service.spendable_credits("u@x.com") == 0
+    (row,) = _ledger_rows(engine, "u@x.com", "refund")
+    assert (row.delta_credits, row.uncollected_credits) == (0, 500)
+    alert.assert_called_once()
+    assert service.debit_run("u@x.com", _usages(100_000), model=None, description="r") == 0
+
+
+def test_webhook_clawback_drains_free_grant_before_recording_debt(engine: object, webhook_ready: None) -> None:
+    """A clawback exceeding the paid balance takes the grant next so it cannot be spent on top of the reversal."""
+    with Session(engine) as session:
+        session.add(
+            BillingCustomerModel(username="u@x.com", stripe_customer_id="cus_u", credit_balance=0, grant_remaining=50)
+        )
+        session.commit()
+    service = StripeBillingService(engine=engine)
+    _deliver(service, _checkout_event("evt_pay", "u@x.com", 500, payment_intent="pi_1"))
+    _spend_all_but(engine, "u@x.com", 100)
+
+    _deliver(service, _dispute_event("evt_dis", "pi_1", 500))
+
+    assert _balance(engine, "u@x.com") == 0
+    assert _grant_remaining(engine, "u@x.com") == 0
+    assert _debt(engine, "u@x.com") == 350
+    (row,) = _ledger_rows(engine, "u@x.com", "dispute")
+    assert (row.delta_credits, row.uncollected_credits) == (-150, 350)
+
+
+def test_webhook_topup_repays_debt_before_crediting(engine: object, webhook_ready: None) -> None:
+    """A top-up clears outstanding debt first; only the remainder becomes spendable."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    _deliver(service, _checkout_event("evt_pay", "u@x.com", 500, payment_intent="pi_1"))
+    _spend_all_but(engine, "u@x.com", 0)
+    _deliver(service, _refund_event("evt_ref", "pi_1", 500))
+
+    _deliver(service, _checkout_event("evt_pay2", "u@x.com", 200, payment_intent="pi_2"))
+    assert (_debt(engine, "u@x.com"), _balance(engine, "u@x.com")) == (300, 0)
+    assert service.spendable_credits("u@x.com") == 0
+
+    _deliver(service, _checkout_event("evt_pay3", "u@x.com", 1000, payment_intent="pi_3"))
+    assert (_debt(engine, "u@x.com"), _balance(engine, "u@x.com")) == (0, 700)
+    repayments = _ledger_rows(engine, "u@x.com", "debt_repayment")
+    assert [row.delta_credits for row in repayments] == [-200, -300]
+    assert all(row.stripe_payment_intent_id is None for row in repayments)
+
+
+def test_webhook_dispute_after_debt_refund_does_not_double_claw(engine: object, webhook_ready: None) -> None:
+    """A dispute on an already-refunded charge counts the earlier debt as reversed and adds none."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    _deliver(service, _checkout_event("evt_pay", "u@x.com", 500, payment_intent="pi_1"))
+    _spend_all_but(engine, "u@x.com", 0)
+    _deliver(service, _refund_event("evt_ref", "pi_1", 500))
+
+    _deliver(service, _dispute_event("evt_dis", "pi_1", 500))
+
+    assert _debt(engine, "u@x.com") == 500
+    assert _ledger_rows(engine, "u@x.com", "dispute") == []
 
 
 def test_webhook_refund_is_idempotent_on_redelivery(engine: object, webhook_ready: None) -> None:
@@ -1227,3 +1384,47 @@ def test_wallet_plan_reports_availability(engine: object, configured: None, pro_
     plan = StripeBillingService(engine=engine).get_wallet("new@x.com").plan
     assert plan.plan == "free"
     assert plan.available is True
+
+
+def test_byok_platform_fee_ignores_the_usage_markup() -> None:
+    """BYOK pays 5% of the at-cost model price; only managed spend is marked up."""
+    usages = _usages(2_000_000)
+    assert platform_fee_credits_for_usage(usages) == 10
+    assert credits_for_usage(usages) == 230
+
+
+def _send_subscription(service: StripeBillingService, event_id: str, subscription: dict) -> None:
+    """Deliver one ``customer.subscription.updated`` webhook for ``subscription``.
+
+    Args:
+        service: Billing service under test.
+        event_id: Unique Stripe event id.
+        subscription: The subscription object to deliver.
+    """
+    with (
+        patch(
+            "stripe.Webhook.construct_event",
+            return_value=_subscription_event(event_id, "customer.subscription.updated", subscription),
+        ),
+        patch("stripe.Subscription.retrieve", return_value=subscription),
+    ):
+        service.handle_webhook(b"{}", "sig")
+
+
+def _past_due_since(engine: object, username: str) -> datetime | None:
+    """Read the mirrored past-due start for an account."""
+    with Session(engine) as session:
+        return session.get(BillingCustomerModel, username).subscription_past_due_since
+
+
+def test_webhook_stamps_past_due_start_once_and_clears_it_on_recovery(engine: object, webhook_ready: None) -> None:
+    """The grace clock starts on the first past_due event, survives repeats, and resets on payment."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    _send_subscription(service, "evt_pd1", _subscription("sub_1", "u@x.com", "past_due"))
+    first = _past_due_since(engine, "u@x.com")
+    assert first is not None
+    _send_subscription(service, "evt_pd2", _subscription("sub_1", "u@x.com", "past_due", period_end=1_900_000_000))
+    assert _past_due_since(engine, "u@x.com") == first
+    _send_subscription(service, "evt_ok", _subscription("sub_1", "u@x.com", "active"))
+    assert _past_due_since(engine, "u@x.com") is None

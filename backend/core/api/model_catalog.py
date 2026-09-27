@@ -20,11 +20,13 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock, Thread
+from typing import Any, Literal, get_args
 
 import litellm
 from pydantic import BaseModel, Field
 
-from ..config import settings
+from ..billing import openrouter_prices
+from ..config import DEFAULT_AGENT_MODEL_ID, settings
 from ..provider_registry import BYOK_CATALOG_PREFIXES
 from .errors import DomainError
 
@@ -63,6 +65,41 @@ class CatalogModel(BaseModel):
         ),
     )
     supports_thinking: bool = Field(default=False, description="Model supports reasoning_effort.")
+    reasoning_efforts: list[str] | None = Field(
+        default=None,
+        description=(
+            "Reasoning-effort levels this model accepts, weakest first (e.g. "
+            "['none', 'low', 'medium', 'high', 'xhigh', 'max']). Empty when the "
+            "model reasons with no effort control or does not reason; None when "
+            "the provider did not say, so clients fall back to a per-family ladder."
+        ),
+    )
+    default_reasoning_effort: str | None = Field(
+        default=None,
+        description="Effort the provider applies when none is sent, or None when unknown.",
+    )
+    reasoning_mandatory: bool | None = Field(
+        default=None,
+        description="Model always reasons and rejects effort 'none'; None when unknown.",
+    )
+    reasoning_default_enabled: bool | None = Field(
+        default=None,
+        description="Model reasons when no effort is sent; None when unknown.",
+    )
+    featured: bool = Field(
+        default=False,
+        description=(
+            "One of the newest models of a leading lab, picked from the provider's "
+            "own release dates and benchmarks; model pickers list these first."
+        ),
+    )
+    is_default: bool = Field(
+        default=False,
+        description=(
+            "The featured model that thinks by default with the best benchmark "
+            "score per dollar; runs the composer's Auto mode. At most one per catalog."
+        ),
+    )
     supports_vision: bool = Field(
         default=False,
         description="Model accepts image inputs (required when the dataset has a dspy.Image column).",
@@ -72,8 +109,9 @@ class CatalogModel(BaseModel):
     input_cost_per_token: float | None = Field(
         default=None,
         description=(
-            "Provider input (prompt) cost per token in USD, from LiteLLM's price "
-            "table. None when unpriced; the client falls back to a default rate. "
+            "Provider input (prompt) cost per token in USD, before the usage markup: "
+            "the provider's live listing when probed, else LiteLLM's price table. "
+            "None when unpriced; the client falls back to a conservative rate. "
             "Drives the per-model pre-run credit estimate."
         ),
     )
@@ -359,7 +397,55 @@ _ON_PREM_DC_LABEL = "On-prem gateway"
 # the BYOK catalog still needs the other providers' labels.
 _PLATFORM_PROVIDERS: frozenset[str] = frozenset({"openrouter"})
 
+# Weakest first; the order the effort menus list levels in.
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+REASONING_EFFORTS: tuple[str, ...] = get_args(ReasoningEffort)
+
 _DATE_SUFFIX_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$")
+
+# Snapshot suffixes across naming schemes: ``-2025-08-07`` (OpenAI),
+# ``-20251101`` (Anthropic) and ``-0813`` / ``-2512`` (OpenRouter, Mistral).
+_ANY_DATE_SUFFIX_RE = re.compile(r"-(\d{8}|\d{4}-\d{2}-\d{2}|\d{4})$")
+# Open-weight size tags ("-27b", "-2.4t-a95b") mark checkpoints of a family,
+# not the lab's headline models.
+_PARAM_SIZE_RE = re.compile(r"\d+(\.\d+)?[bt]\b")
+_VERSION_RE = re.compile(r"\d+(\.\d+)*")
+_FAMILY_NOISE_RE = re.compile(r"-(preview|latest|exp)\b")
+# Models withdrawn from the product: never offered, whatever the probe lists.
+# OpenRouter's own routers (auto, free, bodybuilder) and third-party routers
+# pick a model per request, which the menu's Auto modes already do.
+_REMOVED_MODEL_RE = re.compile(
+    r"gpt-5\.6-terra|gpt-terra-latest|grok-build"
+    r"|^openrouter/(openrouter/|auto$)|-router$"
+)
+
+
+def is_removed_model(name: str) -> bool:
+    """Return whether a model id was withdrawn from the product.
+
+    Args:
+        name: Catalog model id, e.g. ``openrouter/x-ai/grok-build``.
+
+    Returns:
+        ``True`` when the id matches the removed-model pattern.
+    """
+    return bool(_REMOVED_MODEL_RE.search(name))
+
+
+# Featured-model selection over the OpenRouter listing: the agent panels'
+# shortlist. Each model line contributes its newest release, which must reach
+# a share of the best benchmark and not be beaten on both score and price by
+# another model of its lab; each lab then offers its strongest few.
+_FEATURED_WINDOW_SECONDS = 365 * 24 * 3600
+_FEATURED_SCORE_RATIO = 0.6
+_FEATURED_PER_LAB = 3
+# The full menus offer a lab's releases from the last two years.
+_PRACTICAL_WINDOW_SECONDS = 2 * 365 * 24 * 3600
+
+# Real OpenRouter models the last catalog build left out as impractical. Menus
+# never offer them, but a session or saved pick made before they dropped out
+# keeps running rather than failing validation.
+_hidden_model_values: frozenset[str] = frozenset()
 
 # LiteLLM provider prefixes offered for bring-your-own-key. The BYOK catalog
 # lists these providers' registry models regardless of platform API keys, since
@@ -506,6 +592,46 @@ def _probe_item_supports_thinking(item: dict) -> bool:
     return bool(item.get("supports_reasoning"))
 
 
+def _probe_item_reasoning(item: dict) -> dict[str, Any]:
+    """Read the reasoning controls a probe item declares.
+
+    OpenRouter publishes ``reasoning.supported_efforts``, ``default_effort``,
+    ``mandatory`` and ``default_enabled`` per model, and the sets differ
+    widely (GLM offers ``max/high/low`` with no ``medium``; Gemini stops at
+    ``high``; GPT-5 reasons unless sent ``none``), so a single global effort
+    list would offer levels the provider rejects. Levels the backend does not
+    accept are dropped.
+
+    Args:
+        item: The raw provider item dict (empty when the probe did not list it).
+
+    Returns:
+        ``CatalogModel`` keyword arguments: the accepted effort levels weakest
+        first (empty for a model with no effort control), the default effort,
+        and the mandatory / default-enabled flags. Every value is ``None``
+        when the item carries no probe data at all.
+    """
+    if not item:
+        return {
+            "reasoning_efforts": None,
+            "default_reasoning_effort": None,
+            "reasoning_mandatory": None,
+            "reasoning_default_enabled": None,
+        }
+    reasoning = item.get("reasoning")
+    reasoning = reasoning if isinstance(reasoning, dict) else {}
+    raw = reasoning.get("supported_efforts")
+    declared = set(raw) if isinstance(raw, list) else set()
+    efforts = [e for e in REASONING_EFFORTS if e in declared]
+    default = reasoning.get("default_effort")
+    return {
+        "reasoning_efforts": efforts,
+        "default_reasoning_effort": default if default in efforts else None,
+        "reasoning_mandatory": bool(reasoning.get("mandatory")),
+        "reasoning_default_enabled": bool(reasoning.get("mandatory") or reasoning.get("default_enabled")),
+    }
+
+
 def _probe_item_max_input_tokens(item: dict) -> int | None:
     """Extract a context-window size from a probe item, if present.
 
@@ -521,6 +647,308 @@ def _probe_item_max_input_tokens(item: dict) -> int | None:
         if isinstance(val, int):
             return val
     return None
+
+
+def _probe_item_cost(item: dict, key: str) -> float | None:
+    """Read a positive per-token price (USD) from a probe item's ``pricing``.
+
+    Args:
+        item: The raw provider item dict.
+        key: OpenRouter pricing key, ``"prompt"`` or ``"completion"``.
+
+    Returns:
+        The price as a float when present and positive, else ``None``.
+    """
+    pricing = item.get("pricing")
+    if not isinstance(pricing, dict):
+        return None
+    try:
+        value = float(pricing.get(key) or 0)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _probe_item_intelligence(item: dict) -> float | None:
+    """Read the Artificial Analysis intelligence index OpenRouter attaches.
+
+    Args:
+        item: The raw provider item dict.
+
+    Returns:
+        The index as a float, or ``None`` when the model is unbenchmarked.
+    """
+    benchmarks = item.get("benchmarks")
+    if not isinstance(benchmarks, dict):
+        return None
+    analysis = benchmarks.get("artificial_analysis")
+    if not isinstance(analysis, dict):
+        return None
+    value = analysis.get("intelligence_index")
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _model_family(model_id: str) -> str:
+    """Collapse a model name to its product line, dropping versions and dates.
+
+    ``claude-opus-5.5`` and ``claude-opus-4.8`` share the line
+    ``claude-opus``; ``gemini-3.8-flash`` and ``gemini-3.5-flash-lite`` do
+    not, so each line keeps its own newest release.
+
+    Args:
+        model_id: Model name without the vendor prefix.
+
+    Returns:
+        The version-free family key.
+    """
+    name = _FAMILY_NOISE_RE.sub("", _ANY_DATE_SUFFIX_RE.sub("", model_id.lower()))
+    return re.sub(r"-?#+-?", "-", _VERSION_RE.sub("#", name)).strip("-")
+
+
+def _practical_candidates(deployed: dict[str, dict]) -> dict[str, dict[str, dict]]:
+    """Group the listing's usable chat models by lab.
+
+    Usable means a dated, priced, non-expiring ``vendor/model`` that outputs
+    only text and calls tools. Free twins (``:free``), aliases (``~latest``),
+    withdrawn ids and media generators that also emit text drop out.
+
+    Args:
+        deployed: Probe index of ``vendor/model`` id to raw item.
+
+    Returns:
+        ``{vendor: {model id: item}}``.
+    """
+    candidates: dict[str, dict[str, dict]] = {}
+    for model_id, item in deployed.items():
+        if "/" not in model_id or ":" in model_id or model_id.startswith("~"):
+            continue
+        if _REMOVED_MODEL_RE.search(f"openrouter/{model_id}"):
+            continue
+        if not isinstance(item.get("created"), int) or item.get("expiration_date"):
+            continue
+        params = item.get("supported_parameters")
+        if not isinstance(params, list) or "tools" not in params:
+            continue
+        arch = item.get("architecture")
+        outputs = arch.get("output_modalities") if isinstance(arch, dict) else None
+        # Image or audio generators list text output too, but aren't chat partners.
+        if outputs != ["text"] or _probe_item_cost(item, "prompt") is None:
+            continue
+        candidates.setdefault(model_id.split("/", 1)[0], {})[model_id] = item
+    return candidates
+
+
+def _scored_lines(items: dict[str, dict]) -> dict[str, tuple[str, dict, float | None]]:
+    """Map each of one lab's model lines to its newest release and score.
+
+    A release OpenRouter has not benchmarked yet stands on its line's previous
+    score, so it replaces its predecessor on release day. A variant id that
+    extends another listed id (``-pro`` twins, contributor tiers) counts only
+    when it carries its own benchmark.
+
+    Args:
+        items: One lab's candidates, model id to raw item.
+
+    Returns:
+        ``{family: (model id, item, score or None)}``.
+    """
+    latest_by_family: dict[str, tuple[str, dict, float | None]] = {}
+    for model_id, item in sorted(items.items(), key=lambda kv: kv[1]["created"]):
+        score = _probe_item_intelligence(item)
+        is_variant = any(model_id.startswith(f"{other}-") for other in items if other != model_id)
+        if is_variant and score is None:
+            continue
+        family = _model_family(model_id.split("/", 1)[1])
+        if score is None and family in latest_by_family:
+            score = latest_by_family[family][2]
+        latest_by_family[family] = (model_id, item, score)
+    return latest_by_family
+
+
+def _practical_probe_ids(deployed: dict[str, dict]) -> set[str] | None:
+    """Pick the models worth offering in a menu from a listing.
+
+    A model qualifies when it is a usable chat model (see
+    :func:`_practical_candidates`), was released in the last two years, and
+    either carries a benchmark or is the newest release of a benchmarked line.
+    That keeps every lab's real lineup and drops the long tail of hobby
+    fine-tunes, retired snapshots and music or image generators.
+
+    Args:
+        deployed: Probe index of ``vendor/model`` id to raw item.
+
+    Returns:
+        The probe ids to offer, or ``None`` when the listing carries no
+        benchmarks to judge by (non-OpenRouter gateways), meaning keep all.
+    """
+    candidates = _practical_candidates(deployed)
+    dated = [item["created"] for items in candidates.values() for item in items.values()]
+    if not dated:
+        return None
+    oldest_allowed = max(dated) - _PRACTICAL_WINDOW_SECONDS
+    practical: set[str] = set()
+    for items in candidates.values():
+        practical.update(m for m, item in items.items() if _probe_item_intelligence(item) is not None)
+        practical.update(m for m, _item, score in _scored_lines(items).values() if score is not None)
+    kept = {m for m in practical if deployed[m]["created"] >= oldest_allowed}
+    return kept or None
+
+
+def _featured_probe_ids(deployed: dict[str, dict]) -> set[str]:
+    """Pick the best current models of each lab from a listing.
+
+    Works purely from the metadata OpenRouter publishes (release time,
+    pricing, tool support, benchmarks), so new releases surface and old ones
+    retire without a hand-kept list. Variants (``:free``, ``-pro`` twins,
+    contributor tiers) drop out: a model whose id extends another listed id
+    counts only when it carries its own benchmark. A new release OpenRouter
+    has not benchmarked yet stands on its line's previous score, so it
+    replaces its predecessor on release day instead of vanishing.
+
+    Args:
+        deployed: Probe index of ``vendor/model`` id to raw item.
+
+    Returns:
+        The probe ids to feature; empty when the listing carries no release
+        dates or benchmarks (non-OpenRouter gateways).
+    """
+    candidates = _practical_candidates(deployed)
+    for items in candidates.values():
+        for model_id in [m for m in items if _PARAM_SIZE_RE.search(m.split("/", 1)[1])]:
+            del items[model_id]
+    if not any(candidates.values()):
+        return set()
+
+    newest = max(item["created"] for items in candidates.values() for item in items.values())
+    lines_by_lab: dict[str, list[tuple[str, dict, float]]] = {}
+    for vendor, items in candidates.items():
+        lines_by_lab[vendor] = [
+            (model_id, item, score)
+            for model_id, item, score in _scored_lines(items).values()
+            if score is not None and newest - item["created"] <= _FEATURED_WINDOW_SECONDS
+        ]
+    scores = [score for lines in lines_by_lab.values() for _, _, score in lines]
+    if not scores:
+        return set()
+    bar = max(scores) * _FEATURED_SCORE_RATIO
+
+    featured: set[str] = set()
+    for lines in lines_by_lab.values():
+        strong = [line for line in lines if line[2] >= bar]
+        frontier = [line for line in strong if not any(_dominates(other, line) for other in strong)]
+        frontier.sort(key=lambda line: (line[2], line[1]["created"]), reverse=True)
+        featured.update(model_id for model_id, _, _ in frontier[:_FEATURED_PER_LAB])
+    return featured
+
+
+def _best_value_probe_id(deployed: dict[str, dict], featured: set[str]) -> tuple[str, float] | None:
+    """Pick the featured model with the best benchmark score per input dollar.
+
+    Only models that reason without being asked qualify: Auto sends no
+    effort, and a non-thinker would answer hard turns off the cuff.
+
+    Args:
+        deployed: Probe index of ``vendor/model`` id to raw item.
+        featured: Probe ids already chosen by :func:`_featured_probe_ids`.
+
+    Returns:
+        ``(probe id, score per dollar)`` of the winner, or ``None`` when no
+        featured model thinks by default with a benchmark and a price.
+    """
+    best: tuple[str, float] | None = None
+    for probe_id in sorted(featured):
+        item = deployed.get(probe_id)
+        if not item or not _probe_item_reasoning(item).get("reasoning_default_enabled"):
+            continue
+        score = _probe_item_intelligence(item)
+        price = _probe_item_cost(item, "prompt")
+        if score is None or not price:
+            continue
+        value = score / price
+        if best is None or value > best[1]:
+            best = (probe_id, value)
+    return best
+
+
+def _dominates(a: tuple[str, dict, float], b: tuple[str, dict, float]) -> bool:
+    """Report whether model ``a`` makes ``b`` redundant: as good or better and no pricier, strictly on one.
+
+    Args:
+        a: ``(probe id, item, score)`` of the challenger.
+        b: ``(probe id, item, score)`` of the model under test.
+
+    Returns:
+        ``True`` when ``a`` scores at least as high and costs at most as much
+        per input token as ``b``, and beats it on one of the two.
+    """
+    price_a = _probe_item_cost(a[1], "prompt") or 0.0
+    price_b = _probe_item_cost(b[1], "prompt") or 0.0
+    return a[2] >= b[2] and price_a <= price_b and (a[2] > b[2] or price_a < price_b)
+
+
+def _reasoning_match_key(model_value: str) -> str:
+    """Normalize a model id so one model matches across providers' spellings.
+
+    LiteLLM writes ``anthropic/claude-opus-4-5-20251101`` where OpenRouter
+    writes ``openrouter/anthropic/claude-opus-4.5``; both reduce to
+    ``claude-opus-4-5``.
+
+    Args:
+        model_value: A catalog ``value`` or bare model id.
+
+    Returns:
+        The lowercase last path segment with the date dropped and dots as
+        dashes.
+    """
+    name = model_value.rsplit("/", 1)[-1].lower()
+    return _ANY_DATE_SUFFIX_RE.sub("", name).replace(".", "-")
+
+
+def with_platform_reasoning(models: list[CatalogModel]) -> list[CatalogModel]:
+    """Fill unknown reasoning controls from the platform's OpenRouter snapshot.
+
+    The BYOK catalog comes from LiteLLM's static registry, which knows only
+    whether a model reasons, not its effort ladder or defaults. OpenRouter
+    publishes those per model, so a direct-provider model borrows them from
+    its OpenRouter twin. Models already carrying a ladder, and every model
+    when no platform snapshot exists yet, pass through unchanged.
+
+    Args:
+        models: Catalog entries to enrich.
+
+    Returns:
+        The entries, with reasoning fields copied from a matching platform
+        model where the entry had none.
+    """
+    snapshot = _cached_response
+    if snapshot is None:
+        return models
+    by_key: dict[str, CatalogModel] = {}
+    for model in snapshot.models:
+        if model.reasoning_efforts is None:
+            continue
+        key = _reasoning_match_key(model.value)
+        exact = model.value.rsplit("/", 1)[-1].lower().replace(".", "-") == key
+        if exact or key not in by_key:
+            by_key[key] = model
+    enriched: list[CatalogModel] = []
+    for model in models:
+        twin = by_key.get(_reasoning_match_key(model.value)) if model.reasoning_efforts is None else None
+        if twin is None:
+            enriched.append(model)
+            continue
+        enriched.append(
+            model.model_copy(
+                update={
+                    "supports_thinking": twin.supports_thinking,
+                    "reasoning_efforts": twin.reasoning_efforts,
+                    "default_reasoning_effort": twin.default_reasoning_effort,
+                    "reasoning_mandatory": twin.reasoning_mandatory,
+                    "reasoning_default_enabled": twin.reasoning_default_enabled,
+                }
+            )
+        )
+    return enriched
 
 
 def _probe_item_is_chat(item: dict) -> bool:
@@ -574,6 +1002,30 @@ def _probe_deployed_models(provider_slug: str, data_center: _DataCenter) -> dict
     return _fetch_models_index(provider_slug, url, api_key)
 
 
+def _fetch_json(provider_slug: str, url: str, headers: dict[str, str]) -> Any:
+    """GET a provider listing and decode its JSON body.
+
+    Args:
+        provider_slug: LiteLLM provider key, used only for log context.
+        url: The listing endpoint.
+        headers: Request headers, credential included.
+
+    Returns:
+        The decoded body, or ``None`` when the request or decoding fails.
+    """
+    # Fireworks (and some other providers) reject the default
+    # ``Python-urllib/3.x`` UA with 403 — set an explicit one.
+    headers = {"Accept": "application/json", "User-Agent": "skynet-catalog/0.1", **headers}
+    try:
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+        return json.loads(body)
+    except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("model-list probe for %s failed: %s", provider_slug, exc)
+        return None
+
+
 def _fetch_models_index(provider_slug: str, url: str, api_key: str) -> dict[str, dict] | None:
     """Fetch an OpenAI-compatible ``/models`` listing with an explicit key.
 
@@ -587,22 +1039,7 @@ def _fetch_models_index(provider_slug: str, url: str, api_key: str) -> dict[str,
         bare-string entries), or ``None`` when the request fails or the
         response shape is unexpected.
     """
-    # Fireworks (and some other providers) reject the default
-    # ``Python-urllib/3.x`` UA with 403 — set an explicit one.
-    headers = {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {api_key}",
-        "User-Agent": "skynet-catalog/0.1",
-    }
-    try:
-        req = urllib.request.Request(url, headers=headers, method="GET")
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-        data = json.loads(body)
-    except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
-        logger.warning("model-list probe for %s failed: %s", provider_slug, exc)
-        return None
-
+    data = _fetch_json(provider_slug, url, {"Authorization": f"Bearer {api_key}"})
     raw = data.get("data") if isinstance(data, dict) else data
     if not isinstance(raw, list):
         return None
@@ -616,6 +1053,79 @@ def _fetch_models_index(provider_slug: str, url: str, api_key: str) -> dict[str,
         elif isinstance(item, str):
             items[item] = {}
     return items
+
+
+# Gemini lists image, speech, embedding and video generators beside its chat
+# models, all under ``generateContent``; only the names tell them apart.
+_GEMINI_NON_CHAT_RE = re.compile(r"image|tts|audio|embed|aqa|imagen|veo|robotics|computer-use")
+
+
+def _fetch_native_models_index(provider_slug: str, api_key: str) -> dict[str, dict] | None:
+    """List a key's models from a provider whose listing isn't OpenAI-compatible.
+
+    Every returned item is stamped ``type: chat`` so a model the static
+    registry has never heard of still reaches the picker.
+
+    Args:
+        provider_slug: ``"anthropic"``, ``"gemini"`` or ``"cohere_chat"``.
+        api_key: The user's provider secret, sent only in a request header.
+
+    Returns:
+        The chat models keyed by bare model ID, or ``None`` for any other
+        provider or when the request fails.
+    """
+    items: dict[str, dict] = {}
+    if provider_slug == "anthropic":
+        data = _fetch_json(
+            provider_slug,
+            "https://api.anthropic.com/v1/models?limit=1000",
+            {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+        )
+        raw = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(raw, list):
+            return None
+        for item in raw:
+            if isinstance(item, dict) and isinstance(item.get("id"), str):
+                items[item["id"]] = {"type": "chat"}
+        return items
+    if provider_slug == "gemini":
+        data = _fetch_json(
+            provider_slug,
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+            {"x-goog-api-key": api_key},
+        )
+        raw = data.get("models") if isinstance(data, dict) else None
+        if not isinstance(raw, list):
+            return None
+        for item in raw:
+            if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+                continue
+            model_id = item["name"].removeprefix("models/")
+            methods = item.get("supportedGenerationMethods")
+            if not isinstance(methods, list) or "generateContent" not in methods:
+                continue
+            if _GEMINI_NON_CHAT_RE.search(model_id):
+                continue
+            items[model_id] = {
+                "type": "chat",
+                "supports_reasoning": bool(item.get("thinking")),
+                "context_length": item.get("inputTokenLimit"),
+            }
+        return items
+    if provider_slug == "cohere_chat":
+        data = _fetch_json(
+            provider_slug,
+            "https://api.cohere.com/v1/models?endpoint=chat&page_size=1000",
+            {"Authorization": f"Bearer {api_key}"},
+        )
+        raw = data.get("models") if isinstance(data, dict) else None
+        if not isinstance(raw, list):
+            return None
+        for item in raw:
+            if isinstance(item, dict) and isinstance(item.get("name"), str):
+                items[item["name"]] = {"type": "chat", "context_length": item.get("context_length")}
+        return items
+    return None
 
 
 def _probe_all_providers() -> dict[tuple[str, str | None], dict[str, dict] | None]:
@@ -667,6 +1177,9 @@ def get_catalog() -> ModelCatalogResponse:
         valid_set = set()
 
     deployed_by_dc = _probe_all_providers()
+    for (probe_slug, _dc_label), deployed in deployed_by_dc.items():
+        if probe_slug == "openrouter" and deployed:
+            openrouter_prices.remember(deployed.values())
 
     seen_providers: dict[tuple[str, str | None], CatalogProvider] = {}
     models: list[CatalogModel] = []
@@ -723,18 +1236,31 @@ def get_catalog() -> ModelCatalogResponse:
                 )
 
             emitted.add((prefixed_id, dc.label))
+            probe_item = (deployed or {}).get(canonical_id) or (deployed or {}).get(model_id) or {}
+            reasoning = _probe_item_reasoning(probe_item)
+            # The live probe is what the provider actually accepts; LiteLLM's
+            # static flag only decides for models the probe did not list.
+            if probe_item:
+                thinks = _probe_item_supports_thinking(probe_item) or bool(reasoning["reasoning_efforts"])
+            else:
+                thinks = bool(meta.get("supports_reasoning"))
             models.append(
                 CatalogModel(
                     value=prefixed_id,
                     label=_make_label(model_id),
                     provider=provider_slug,
                     data_center=dc.label,
-                    supports_thinking=bool(meta.get("supports_reasoning")),
+                    supports_thinking=thinks,
+                    **reasoning,
                     supports_vision=bool(meta.get("supports_vision")),
                     available=available,
                     max_input_tokens=meta.get("max_input_tokens"),
-                    input_cost_per_token=_positive_cost(meta, "input_cost_per_token"),
-                    output_cost_per_token=_positive_cost(meta, "output_cost_per_token"),
+                    # The live listing is what the provider bills today; LiteLLM's
+                    # static table lags it and only fills in unprobed models.
+                    input_cost_per_token=_probe_item_cost(probe_item, "prompt")
+                    or _positive_cost(meta, "input_cost_per_token"),
+                    output_cost_per_token=_probe_item_cost(probe_item, "completion")
+                    or _positive_cost(meta, "output_cost_per_token"),
                 )
             )
 
@@ -772,6 +1298,7 @@ def get_catalog() -> ModelCatalogResponse:
                     has_env_key=has_key,
                 )
 
+            reasoning = _probe_item_reasoning(item)
             models.append(
                 CatalogModel(
                     value=value,
@@ -779,13 +1306,49 @@ def get_catalog() -> ModelCatalogResponse:
                     provider=probe_slug,
                     data_center=dc_label,
                     supports_thinking=_probe_item_supports_thinking(item),
+                    **reasoning,
                     supports_vision=_probe_item_supports_vision(item),
                     available=True,
                     max_input_tokens=_probe_item_max_input_tokens(item),
+                    input_cost_per_token=_probe_item_cost(item, "prompt"),
+                    output_cost_per_token=_probe_item_cost(item, "completion"),
                 )
             )
 
-    models = [m for m in models if m.available]
+    global _hidden_model_values
+    featured_values: set[str] = set()
+    practical_by_dc: dict[tuple[str, str | None], set[str]] = {}
+    best_value: tuple[str, float] | None = None
+    for (probe_slug, dc_label), deployed in deployed_by_dc.items():
+        if not deployed:
+            continue
+        practical_ids = _practical_probe_ids(deployed)
+        if practical_ids is not None:
+            practical_by_dc[(probe_slug, dc_label)] = {
+                _probe_prefixed_id(probe_slug, probe_id) for probe_id in practical_ids
+            }
+        featured_ids = _featured_probe_ids(deployed)
+        featured_values.update(_probe_prefixed_id(probe_slug, probe_id) for probe_id in featured_ids)
+        winner = _best_value_probe_id(deployed, featured_ids)
+        if winner and (best_value is None or winner[1] > best_value[1]):
+            best_value = (_probe_prefixed_id(probe_slug, winner[0]), winner[1])
+    default_value = best_value[0] if best_value else None
+
+    def _practical(m: CatalogModel) -> bool:
+        allowed = practical_by_dc.get((m.provider, m.data_center))
+        return allowed is None or m.value in allowed
+
+    _hidden_model_values = frozenset(
+        m.value for m in models if m.available and not _REMOVED_MODEL_RE.search(m.value) and not _practical(m)
+    )
+    models = [m for m in models if _practical(m)]
+    models = [
+        m.model_copy(update={"featured": True, "is_default": m.value == default_value})
+        if m.value in featured_values
+        else m
+        for m in models
+        if m.available and not _REMOVED_MODEL_RE.search(m.value)
+    ]
 
     models.sort(key=lambda m: (m.provider, m.data_center or "", m.value))
 
@@ -802,6 +1365,28 @@ _cached_response: ModelCatalogResponse | None = None
 _cached_at_monotonic: float = 0.0
 _cache_lock = Lock()
 _refresh_in_flight = False
+
+
+def agent_model_id(configured: str = "") -> str:
+    """Return the model a server-side agent or background job runs on.
+
+    Reads only the already-built catalog: background jobs and engines must
+    never block on a cold catalog build, so before the boot prewarm lands
+    they run the static fallback.
+
+    Args:
+        configured: An operator-set model id (e.g. ``CODE_AGENT_MODEL``);
+            it wins whenever non-empty.
+
+    Returns:
+        The configured id, else the catalog's flagged best-value default,
+        else :data:`DEFAULT_AGENT_MODEL_ID`.
+    """
+    if configured.strip():
+        return configured.strip()
+    snapshot = _cached_response
+    default = next((m.value for m in snapshot.models if m.is_default), None) if snapshot else None
+    return default or DEFAULT_AGENT_MODEL_ID
 
 
 def _refresh_catalog_in_background() -> None:
@@ -968,12 +1553,16 @@ def get_byok_catalog() -> ModelCatalogResponse:
             )
         )
 
+    models = [m for m in models if not _REMOVED_MODEL_RE.search(m.value)]
     models.sort(key=lambda m: (m.provider, m.value))
     providers = sorted(seen_providers.values(), key=lambda p: p.slug)
     return ModelCatalogResponse(providers=providers, models=models)
 
 
 _byok_cached: ModelCatalogResponse | None = None
+# The enriched view, tagged with the platform snapshot it borrowed from so a
+# catalog refresh re-derives it.
+_byok_enriched: tuple[ModelCatalogResponse, ModelCatalogResponse] | None = None
 
 
 def get_byok_catalog_cached() -> ModelCatalogResponse:
@@ -981,15 +1570,23 @@ def get_byok_catalog_cached() -> ModelCatalogResponse:
 
     The bundled registry is static for a process's lifetime, so a single lazy
     build (no TTL, no background refresh) is enough — unlike the platform catalog
-    whose availability depends on live provider probes.
+    whose availability depends on live provider probes. Reasoning controls
+    are layered on from the current platform snapshot, re-derived whenever
+    that snapshot refreshes.
 
     Returns:
         The cached BYOK :class:`ModelCatalogResponse`.
     """
-    global _byok_cached
+    global _byok_cached, _byok_enriched
     if _byok_cached is None:
         _byok_cached = get_byok_catalog()
-    return _byok_cached
+    snapshot = _cached_response
+    if snapshot is None:
+        return _byok_cached
+    if _byok_enriched is None or _byok_enriched[0] is not snapshot:
+        enriched = _byok_cached.model_copy(update={"models": with_platform_reasoning(_byok_cached.models)})
+        _byok_enriched = (snapshot, enriched)
+    return _byok_enriched[1]
 
 
 def probe_byok_provider_models(provider_slug: str, api_key: str) -> dict[str, dict] | None:
@@ -1000,16 +1597,16 @@ def probe_byok_provider_models(provider_slug: str, api_key: str) -> dict[str, di
         api_key: The user's decrypted provider secret.
 
     Returns:
-        The provider's ``/models`` index keyed by model ID, or ``None`` when the
-        provider exposes no OpenAI-compatible listing (Anthropic, Gemini,
-        Cohere) or the request fails — the caller then keeps the static list.
+        The provider's model index keyed by model ID, or ``None`` for an
+        unknown provider or a failed request — the caller then keeps the
+        static list.
     """
     meta = _PROVIDER_META.get(provider_slug)
     if meta is None:
         return None
     url = next((dc.models_url for dc in meta[1] if dc.label is None and dc.models_url), None)
     if not url:
-        return None
+        return _fetch_native_models_index(provider_slug, api_key)
     return _fetch_models_index(provider_slug, url, api_key)
 
 
@@ -1085,7 +1682,20 @@ def narrow_models_to_served(
             )
         )
     kept.sort(key=lambda m: m.value)
-    return kept
+    return with_platform_reasoning(kept)
+
+
+def is_hidden_model(name: str) -> bool:
+    """Return whether a model id is real but left out of the menus as impractical.
+
+    Args:
+        name: Catalog model id.
+
+    Returns:
+        ``True`` when the last catalog build dropped it, so picks made before
+        it dropped out keep working.
+    """
+    return name in _hidden_model_values
 
 
 def require_known_model(model: str | None) -> None:
@@ -1101,5 +1711,5 @@ def require_known_model(model: str | None) -> None:
         DomainError: 422 when the id is not a catalog model.
     """
     name = str(model or "").strip()
-    if name and all(entry.value != name for entry in get_catalog_cached().models):
+    if name and not is_hidden_model(name) and all(entry.value != name for entry in get_catalog_cached().models):
         raise DomainError("models.unknown_model", status=422)

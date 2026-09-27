@@ -1,37 +1,29 @@
 /**
  * Per-model credit pricing — the frontend mirror of backend `core.billing.pricing`.
  *
- * A run's credit cost is the real provider cost of its tokens (per-model
- * input/output rates from the catalog), converted to credits at
- * `CREDIT_USD_VALUE` — one credit per cent, at par with the dollar. Runs bill at
- * true provider cost (`MARKUP` is `1.0`); the platform earns on the
- * credit-purchase fee, OpenRouter-style, not a per-token markup. The same
- * function prices a *projected* token volume here (the pre-run estimate) that the
- * backend prices on *measured* tokens (the charge), so the estimate and the bill
- * reconcile by construction.
+ * A run's credit cost is the provider cost of its tokens (per-model input/output
+ * rates from the catalog) times the backend's usage markup, converted to credits
+ * at `CREDIT_USD_VALUE` — one credit per cent. A BYOK run pays only the platform
+ * fee on the at-cost price. The same function prices a *projected* token volume
+ * here (the pre-run estimate) that the backend prices on *measured* tokens (the
+ * charge), so the estimate and the bill reconcile by construction.
  *
- * Keep `MARKUP`, `PLATFORM_FEE_FRACTION`, and the default rates in step with the
- * backend module — they must not drift between the estimate and the charge.
+ * The markup and BYOK fee are not constants here: callers pass the backend's
+ * `PricingTerms` (served on the wallet response) so they cannot drift.
  */
 
 import type { CatalogModel } from "@/shared/types/api";
 import { CREDIT_USD_VALUE } from "./credit";
 
-/** Multiplier on raw provider cost — mirrors backend `pricing.MARKUP`. Runs are
- * sold at true provider cost, so this is `1.0` (a no-op); the platform's margin
- * comes from the credit-purchase fee, not a per-token markup. Kept as a lever so
- * a per-run margin could be reintroduced in one place. */
-export const MARKUP = 1.0;
+// Re-exported so estimate code (and its tests, which resolve the billing barrel
+// to this module) reach the pricing terms through one import.
+export { DEFAULT_PRICING_TERMS, type PricingTerms } from "./credit";
 
-/** Fallback per-token costs (USD) for a model the catalog doesn't price. */
-export const DEFAULT_INPUT_COST_PER_TOKEN = 1e-6;
-export const DEFAULT_OUTPUT_COST_PER_TOKEN = 3e-6;
-
-/** The platform fee charged on a BYOK run — a share of the equivalent model
- * cost, mirroring backend `PLATFORM_FEE_FRACTION` and OpenRouter's 5% BYOK fee.
- * The provider tokens are on the user's own key, so this is all a BYOK run
- * spends. */
-export const PLATFORM_FEE_FRACTION = 0.05;
+/** Fallback per-token costs (USD) for a model the catalog doesn't price —
+ * deliberately high, mirroring the backend's `FALLBACK_*_COST_PER_TOKEN`, so an
+ * unpriced model is never under-estimated. */
+export const DEFAULT_INPUT_COST_PER_TOKEN = 15e-6;
+export const DEFAULT_OUTPUT_COST_PER_TOKEN = 75e-6;
 
 /** Projected or measured token usage attributed to one model. */
 export interface ModelTokenUsage {
@@ -65,22 +57,23 @@ export function rawCostUsd(usages: ModelTokenUsage[]): number {
 }
 
 /**
- * Convert per-model token usage to the credits it costs, rounding up. Mirrors
- * backend `credits_for_usage`: any non-zero usage costs at least one credit.
+ * Convert per-model token usage to the credits it costs at `markup`, rounding
+ * up. Mirrors backend `credits_for_usage`: any non-zero usage costs at least one
+ * credit. Pass `1` for the at-cost value a BYOK fee is taken from.
  */
-export function creditsForUsage(usages: ModelTokenUsage[]): number {
-  const cost = rawCostUsd(usages) * MARKUP;
+export function creditsForUsage(usages: ModelTokenUsage[], markup: number): number {
+  const cost = rawCostUsd(usages) * markup;
   if (cost <= 0) return 0;
   return Math.max(1, Math.ceil(cost / CREDIT_USD_VALUE));
 }
 
 /**
- * The BYOK platform fee for a run's full credit cost, rounding up — mirrors
+ * The BYOK platform fee on a run's at-cost credit value, rounding up — mirrors
  * backend `platform_fee_credits_for_usage`. On a BYOK run the provider tokens are
  * paid on the user's own key, so only this fraction is charged in credits.
  */
-export function platformFeeCredits(fullCredits: number): number {
-  const fee = fullCredits * PLATFORM_FEE_FRACTION;
+export function platformFeeCredits(atCostCredits: number, feeFraction: number): number {
+  const fee = atCostCredits * feeFraction;
   if (fee <= 0) return 0;
   return Math.max(1, Math.ceil(fee));
 }

@@ -9,13 +9,15 @@ import logging
 import os
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import dspy
 import httpx
+import litellm
 
 from ..billing.model_gateway import ROUTE_KEY, raise_gateway_stop
+from ..billing.pricing import ModelUsage
 from ..billing.runtime import UsagePendingError
 from ..billing.signals import BudgetReached
 from ..config import settings
@@ -301,13 +303,13 @@ def _translate_gateway_reasoning(lm_kwargs: dict[str, object]) -> None:
     ``reasoning_effort`` kwarg: LiteLLM doesn't map it onto OpenRouter's
     ``reasoning`` request param — so a user-picked effort was a no-op and
     opt-in thinking models (Anthropic, Gemini) never streamed reasoning.
-    Anthropic's ``max`` maps down to OpenRouter's ``xhigh`` ceiling for that
-    provider; models with a distinct ``max`` level (such as GLM-5.3) keep it.
+    The effort passes through verbatim: OpenRouter now lists ``max`` for
+    Claude as well, and the catalog tells clients each model's exact levels.
     ``summary="auto"`` explicitly opts into streamed reasoning summaries for
     models such as OpenAI's GPT-5 family, which do not expose raw chain-of-thought
     tokens.
 
-    The kwarg is kept (aligned to the mapped value) rather than popped: dspy's
+    The kwarg is kept (aligned to the native value) rather than popped: dspy's
     ``Reasoning`` signature field injects ``reasoning_effort="low"`` at call
     time whenever the LM carries no effort of its own, and OpenRouter rejects
     requests whose ``reasoning_effort`` and ``reasoning.effort`` disagree.
@@ -321,7 +323,7 @@ def _translate_gateway_reasoning(lm_kwargs: dict[str, object]) -> None:
     effort = lm_kwargs.get("reasoning_effort")
     if not isinstance(effort, str) or not effort:
         return
-    mapped = "xhigh" if effort == "max" and "/anthropic/" in model else effort
+    mapped = effort
     body = lm_kwargs.get("extra_body")
     merged = dict(body) if isinstance(body, dict) else {}
     native = merged.setdefault("reasoning", {})
@@ -355,6 +357,58 @@ class LmUsageTotals:
     output_tokens: int = 0
     total_found: bool = False
     split_found: bool = False
+    reported_cost_usd: float = 0.0
+    reported_input_tokens: int = 0
+    reported_output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    reasoning_tokens: int = 0
+
+    def add_split(self, usage: object, split: tuple[int, int]) -> None:
+        """Fold one call's input/output split and its cost evidence into the totals.
+
+        A call whose provider reported its own cost adds that cost and marks its
+        tokens as covered; otherwise its cache and reasoning counts are kept so
+        the charge can price them at their own rates.
+
+        Args:
+            usage: The call's ``usage`` block.
+            split: The call's ``(input_tokens, output_tokens)``.
+        """
+        self.input_tokens += split[0]
+        self.output_tokens += split[1]
+        self.split_found = True
+        cost = _usage_reported_cost(usage)
+        if cost is not None:
+            self.reported_cost_usd += cost
+            self.reported_input_tokens += split[0]
+            self.reported_output_tokens += split[1]
+            return
+        cache_read, cache_write, reasoning = _usage_token_details(usage)
+        self.cache_read_tokens += cache_read
+        self.cache_write_tokens += cache_write
+        self.reasoning_tokens += reasoning
+
+    def model_usage(self, model: str) -> ModelUsage:
+        """Return these totals as a priced-usage row for ``model``.
+
+        Args:
+            model: The model id the totals belong to.
+
+        Returns:
+            The :class:`ModelUsage` carrying tokens and any reported cost.
+        """
+        return ModelUsage(
+            model=model,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            reported_cost_usd=self.reported_cost_usd,
+            reported_input_tokens=self.reported_input_tokens,
+            reported_output_tokens=self.reported_output_tokens,
+            cache_read_tokens=self.cache_read_tokens,
+            cache_write_tokens=self.cache_write_tokens,
+            reasoning_tokens=self.reasoning_tokens,
+        )
 
 
 # None (the default everywhere, including the API process) means unmetered —
@@ -382,6 +436,46 @@ def activate_job_lm_budget(max_concurrency: int) -> None:
     _job_lm_gate = threading.BoundedSemaphore(max_concurrency) if max_concurrency > 0 else None
 
 
+# None outside a job child: the API process builds LMs for every interactive
+# turn and must not pin them. A job child activates it so a failed or killed
+# run can still report what it spent (see job_usage_snapshot).
+_job_lm_registry: "list[MeteredLM] | None" = None
+
+
+def activate_job_usage_registry() -> None:
+    """Start tracking every ``MeteredLM`` built in this process from now on.
+
+    Called once per job child, next to :func:`activate_job_lm_budget`. The
+    optimizer only reports usage in its final result; a run that fails, is
+    cancelled, or times out never produces one, so the child reports this
+    registry's running totals with each progress and error event instead.
+    """
+    global _job_lm_registry
+    _job_lm_registry = []
+
+
+def job_usage_snapshot() -> list[dict[str, Any]]:
+    """Return the usage every tracked LM has accrued so far, as result-style rows.
+
+    Rows have the shape of a run result's ``usage_by_model`` entries, so the
+    worker prices a partial run exactly like a finished one. Never raises: a
+    snapshot is best-effort telemetry riding on an event.
+
+    Returns:
+        One row per model with tracked usage, or ``[]`` when no registry is
+        active or nothing was tracked.
+    """
+    registry = _job_lm_registry
+    if not registry:
+        return []
+    try:
+        usages = model_usages_from_history(*list(registry)) or []
+    except Exception:
+        logger.debug("job usage snapshot failed", exc_info=True)
+        return []
+    return [asdict(usage) for usage in usages]
+
+
 class MeteredLM(dspy.LM):
     """``dspy.LM`` that aggregates usage instead of retaining call history.
 
@@ -404,6 +498,25 @@ class MeteredLM(dspy.LM):
         self.usage_totals = LmUsageTotals()
         self.last_request_model: str | None = None
         self.last_response_model: str | None = None
+        registry = _job_lm_registry
+        if registry is not None:
+            with _USAGE_LOCK:
+                registry.append(self)
+
+    @property
+    def supports_function_calling(self) -> bool:
+        """Report native tool-call support, judged on the model behind the proxy.
+
+        LiteLLM's capability map has no ``litellm_proxy/`` entries, so a managed
+        LM would report no support and DSPy would drop native tools for every
+        managed model. The proxy fronts OpenRouter, so ask about that id.
+
+        Returns:
+            Whether the underlying model supports native function calling.
+        """
+        if isinstance(self.model, str) and self.model.startswith("litellm_proxy/"):
+            return bool(litellm.supports_function_calling(model=f"openrouter/{canonical_model_id(self.model)}"))
+        return super().supports_function_calling
 
     def forward(self, *args: object, **kwargs: object) -> object:
         """Run the LM call, honouring the job-child LM concurrency budget.
@@ -460,9 +573,7 @@ class MeteredLM(dspy.LM):
                 totals.total_tokens += total
                 totals.total_found = True
             if split is not None:
-                totals.input_tokens += split[0]
-                totals.output_tokens += split[1]
-                totals.split_found = True
+                totals.add_split(usage, split)
 
 
 def lm_call_count(language_model: object) -> int | None:
@@ -655,6 +766,138 @@ def _usage_in_out_tokens(usage: object) -> tuple[int, int] | None:
     if isinstance(total, int | float) and total > 0:
         return int(total), 0
     return None
+
+
+def _field(container: object, key: str) -> object:
+    """Read ``key`` from a usage mapping or provider usage object.
+
+    Args:
+        container: A dict, a LiteLLM usage object, or ``None``.
+        key: The field name.
+
+    Returns:
+        The field's value, or ``None`` when absent.
+    """
+    if isinstance(container, Mapping):
+        return container.get(key)
+    return getattr(container, key, None)
+
+
+def _count(value: object) -> int:
+    """Coerce a token counter to a non-negative int, treating junk as zero.
+
+    Args:
+        value: A raw usage counter.
+
+    Returns:
+        The count, or ``0`` when missing, non-numeric or negative.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+        return 0
+    return int(value)
+
+
+def _usage_reported_cost(usage: object) -> float | None:
+    """Return the provider cost OpenRouter reported for one call, in USD.
+
+    For a BYOK call ``cost`` is only OpenRouter's fee, so the upstream model
+    cost is added to recover the full price (as the protected dispatcher does).
+
+    Args:
+        usage: The call's ``usage`` block.
+
+    Returns:
+        The call's full provider cost, or ``None`` when it was not reported.
+    """
+    cost = _field(usage, "cost")
+    if isinstance(cost, bool) or not isinstance(cost, int | float) or cost < 0:
+        return None
+    if _field(usage, "is_byok"):
+        upstream = _field(_field(usage, "cost_details"), "upstream_inference_cost")
+        if isinstance(upstream, bool) or not isinstance(upstream, int | float) or upstream < 0:
+            return None
+        return float(cost) + float(upstream)
+    return float(cost)
+
+
+def _usage_token_details(usage: object) -> tuple[int, int, int]:
+    """Extract the cache-read, cache-write and reasoning token counts of one call.
+
+    Reads the OpenAI-shaped ``*_tokens_details`` blocks OpenRouter returns, and
+    the top-level Anthropic-style cache fields LiteLLM sets for native providers.
+
+    Args:
+        usage: The call's ``usage`` block.
+
+    Returns:
+        ``(cache_read_tokens, cache_write_tokens, reasoning_tokens)``.
+    """
+    prompt_details = _field(usage, "prompt_tokens_details")
+    cache_read = _count(_field(prompt_details, "cached_tokens")) or _count(_field(usage, "cache_read_input_tokens"))
+    cache_write = (
+        _count(_field(prompt_details, "cache_write_tokens"))
+        or _count(_field(prompt_details, "cache_creation_tokens"))
+        or _count(_field(usage, "cache_creation_input_tokens"))
+    )
+    reasoning = _count(_field(_field(usage, "completion_tokens_details"), "reasoning_tokens"))
+    return cache_read, cache_write, reasoning
+
+
+_SUMMED_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "reported_cost_usd",
+    "reported_input_tokens",
+    "reported_output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
+)
+
+
+def model_usages_from_history(*language_models: object) -> list[ModelUsage] | None:
+    """Aggregate priced-usage rows per model across LMs, with reported costs.
+
+    Like :func:`usage_by_model_from_history`, but keeps the provider-reported
+    cost and the cache and reasoning token counts that exact pricing needs.
+
+    Args:
+        *language_models: LMs whose usage to total; ``None`` entries and LMs
+            tracking neither form are skipped.
+
+    Returns:
+        One :class:`ModelUsage` per model, or ``None`` when no usage
+        information is present anywhere.
+    """
+    by_model: dict[str, LmUsageTotals] = {}
+    found = False
+    for language_model in language_models:
+        model = getattr(language_model, "model", None) or "unknown"
+        totals = getattr(language_model, "usage_totals", None)
+        if isinstance(totals, LmUsageTotals):
+            if totals.split_found:
+                accumulator = by_model.setdefault(model, LmUsageTotals())
+                with _USAGE_LOCK:
+                    for name in _SUMMED_FIELDS:
+                        setattr(accumulator, name, getattr(accumulator, name) + getattr(totals, name))
+                accumulator.split_found = True
+                found = True
+            # Same skip rationale as total_tokens_from_history.
+            if totals.calls:
+                continue
+        history = getattr(language_model, "history", None)
+        if not isinstance(history, list):
+            continue
+        for entry in history:
+            usage = entry.get("usage") if isinstance(entry, dict) else None
+            split = _usage_in_out_tokens(usage)
+            if split is None:
+                continue
+            by_model.setdefault(model, LmUsageTotals()).add_split(usage, split)
+            found = True
+    if not found:
+        return None
+    return [totals.model_usage(model) for model, totals in by_model.items()]
 
 
 def usage_by_model_from_history(*language_models: object) -> dict[str, tuple[int, int]] | None:

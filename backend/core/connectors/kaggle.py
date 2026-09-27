@@ -199,6 +199,20 @@ def _split_ref(ref: str) -> tuple[str, str, str]:
     return parts[0], parts[1], parts[2]
 
 
+def web_url(secret: ConnectorSecret, location: str) -> str | None:
+    """Link to a browse location on Kaggle.
+
+    Args:
+        secret: The stored connector.
+        location: Empty for the datasets, else ``owner/slug``.
+
+    Returns:
+        The URL.
+    """
+    base = "https://www.kaggle.com/datasets"
+    return f"{base}/{quote(location.strip('/'))}" if location else base
+
+
 def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
     """List datasets at the root, or the files of one dataset.
 

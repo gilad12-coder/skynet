@@ -5,11 +5,13 @@ import { toast } from "react-toastify";
 import { msg } from "@/shared/lib/messages";
 import { getWallet, type BillingWalletResponse } from "@/shared/lib/api";
 import {
+  DEFAULT_PRICING_TERMS,
   EMPTY_WALLET,
   totalCredits,
   walletStatus,
   type CreditWallet,
   type LedgerKind,
+  type PricingTerms,
   type WalletStatus,
 } from "../lib/credit";
 
@@ -63,6 +65,12 @@ function applyWalletResponse(prev: CreditWallet, r: BillingWalletResponse): Cred
       cancelAtPeriodEnd: r.plan.cancel_at_period_end,
       available: r.plan.available,
     },
+    pricing: {
+      usageMarkup: r.pricing.usage_markup,
+      byokFeeFraction: r.pricing.byok_fee_fraction,
+      purchaseFeeRate: r.pricing.purchase_fee_rate,
+      purchaseFeeFixedCents: r.pricing.purchase_fee_fixed_cents,
+    },
   };
 }
 
@@ -75,6 +83,14 @@ export function useCredits(): CreditContextValue {
     throw new Error("useCredits must be used within a CreditProvider");
   }
   return ctx;
+}
+
+/**
+ * The backend's pricing terms, or the seed defaults outside a CreditProvider
+ * (e.g. an isolated hook), so estimate code never needs its own constants.
+ */
+export function usePricingTerms(): PricingTerms {
+  return React.useContext(CreditContext)?.wallet.pricing ?? DEFAULT_PRICING_TERMS;
 }
 
 /**

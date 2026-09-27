@@ -288,6 +288,47 @@ def verify_credentials(fields: dict[str, str]) -> Credential:
     return Credential(secret=json.dumps(config), auth_method="credentials", account_label=label)
 
 
+def web_url(secret: ConnectorSecret, location: str) -> str | None:
+    """Link to a browse location in the AWS console.
+
+    Args:
+        secret: The stored connector.
+        location: Empty for the buckets, else ``bucket/prefix``.
+
+    Returns:
+        The URL, or ``None`` for an S3-compatible endpoint the console can't show.
+    """
+    config = _config(secret)
+    if config.get("endpoint_url"):
+        return None
+    region = quote(config["region"], safe="")
+    if not location:
+        return f"https://s3.console.aws.amazon.com/s3/buckets?region={region}"
+    bucket, prefix = split_location(location)
+    return f"https://s3.console.aws.amazon.com/s3/buckets/{quote(bucket, safe='')}?region={region}&prefix={quote(prefix, safe='')}"
+
+
+def has_importable(secret: ConnectorSecret, ref: str) -> bool | None:
+    """Settle whether a bucket or prefix holds an importable object, in one flat listing.
+
+    Args:
+        secret: The stored connector.
+        ref: ``bucket`` or ``bucket/prefix/``.
+
+    Returns:
+        ``True`` when an importable key is under ``ref``, ``False`` when the
+        whole subtree was listed without one, ``None`` when it is too big to tell.
+    """
+    config = _config(secret)
+    bucket, prefix = split_location(ref)
+    query = f"list-type=2&max-keys={LIST_LIMIT}&prefix={_quote(prefix)}"
+    root = _xml(_get(config, f"{_base_url(config, bucket)}/?{query}"))
+    contents = [e for e in root.iter() if e.tag.removeprefix(S3_NS) == "Contents"]
+    if any(is_supported(_text(e, "Key") or "") for e in contents):
+        return True
+    return None if _text(root, "IsTruncated") == "true" else False
+
+
 def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
     """List buckets at the root, or one prefix of a bucket.
 

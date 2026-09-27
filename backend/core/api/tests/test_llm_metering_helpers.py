@@ -17,6 +17,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from ...config import settings
 from ...storage.models import Base, BillingCustomerModel, CreditLedgerModel
 from ..errors import DomainError
 from ..routers._helpers import enforce_llm_credits, stream_with_llm_metering
@@ -110,6 +111,47 @@ def test_enforce_llm_credits_rejects_depleted_account(engine: Engine) -> None:
     assert err.value.status_code == 402
 
 
+def test_enforce_llm_credits_requires_the_minimum_turn_balance(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A turn is billed after it runs, so a balance below the per-turn floor is refused up front."""
+    monkeypatch.setattr(settings, "interactive_min_balance_credits", 5)
+    _fund(engine, "low@x.io", credits=4)
+    _fund(engine, "ok@x.io", credits=5)
+    with pytest.raises(DomainError) as err:
+        enforce_llm_credits(_StubStore(engine), "low@x.io")
+    assert err.value.status_code == 402
+    enforce_llm_credits(_StubStore(engine), "ok@x.io")
+
+
+def test_enforce_llm_credits_zero_floor_still_requires_a_positive_balance(
+    engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Disabling the floor falls back to the old one-credit minimum, never a free turn."""
+    monkeypatch.setattr(settings, "interactive_min_balance_credits", 0)
+    _deplete(engine, "broke@x.io")
+    _fund(engine, "one@x.io", credits=1)
+    with pytest.raises(DomainError):
+        enforce_llm_credits(_StubStore(engine), "broke@x.io")
+    enforce_llm_credits(_StubStore(engine), "one@x.io")
+
+
+def test_enforce_llm_credits_rejects_account_in_refund_debt(engine: Engine) -> None:
+    """An account carrying refund/chargeback debt has zero balances and is refused."""
+    with Session(engine) as session:
+        session.add(
+            BillingCustomerModel(
+                username="debt@x.io",
+                stripe_customer_id="cus_debt",
+                credit_balance=0,
+                grant_remaining=0,
+                debt_credits=300,
+            )
+        )
+        session.commit()
+    with pytest.raises(DomainError) as err:
+        enforce_llm_credits(_StubStore(engine), "debt@x.io")
+    assert err.value.code == "billing.insufficient_credits"
+
+
 def test_enforce_llm_credits_skips_engineless_store(engine: Engine) -> None:
     """A store without a SQL engine streams ungated, matching the submit path."""
     enforce_llm_credits(_StubStore(None), "anyone@x.io")
@@ -142,6 +184,33 @@ async def test_stream_with_llm_metering_bills_on_completion(engine: Engine) -> N
     assert row.description == "Agent chat"
     assert row.delta_credits < 0
     assert row.input_tokens == 100_000
+
+
+async def test_stream_with_llm_metering_adds_stats_to_done(engine: Engine) -> None:
+    """The done event carries the turn's token split and timing for the reply footer."""
+    _fund(engine, "alice@x.io")
+    sink = [_FakeLm([{"usage": {"prompt_tokens": 1_200, "completion_tokens": 300}}])]
+
+    async def source() -> AsyncIterator[dict[str, Any]]:
+        """Yield one reply token and a done event."""
+        yield {"event": "message_patch", "data": {"chunk": "hi"}}
+        yield {"event": "done", "data": {"model": "m"}}
+
+    events = [
+        event
+        async for event in stream_with_llm_metering(
+            source(),
+            job_store=_StubStore(engine),
+            username="alice@x.io",
+            description="Agent chat",
+            usage_sink=sink,
+        )
+    ]
+    done = events[-1]["data"]
+    assert done["model"] == "m"
+    stats = done["stats"]
+    assert (stats["input_tokens"], stats["output_tokens"]) == (1_200, 300)
+    assert stats["duration_ms"] >= stats["ttft_ms"] >= 0
 
 
 async def test_stream_with_llm_metering_bills_on_early_teardown(engine: Engine) -> None:

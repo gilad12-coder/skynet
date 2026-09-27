@@ -80,7 +80,7 @@ import {
 } from "../lib/validation-evidence";
 import type { PreflightScope, WizardPreflightResponse } from "@/shared/types/wizard-preflight";
 import { useWizardPreflight } from "./use-wizard-preflight";
-import { formatBudgetUsd } from "@/features/billing";
+import { formatBudgetUsd, usePricingTerms } from "@/features/billing";
 import { namedSeedParts, seedPartsIssue } from "../lib/seed-parts";
 import { beginValidationToast, type ValidationToast } from "../lib/validation-toast";
 import {
@@ -860,6 +860,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     ],
   );
 
+  const pricing = usePricingTerms();
+
   const costBracket: CostBracket = useMemo(() => {
     const findModel = (config: ModelConfig) =>
       config.name.trim()
@@ -894,6 +896,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       datasetRows: Math.max(1, parsedCases?.rowCount ?? 0),
       modelRoles,
       runtime: runtimeCostProjection(selectedRuntime?.cost, scorerKind === "python" ? 4 : 3),
+      pricing,
     });
   }, [
     effectiveReflectionModel,
@@ -904,6 +907,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     maxScorerRuns,
     scorerKind,
     parsedCases?.rowCount,
+    pricing,
   ]);
   const tokenSource = aggregateTokenSource([
     effectiveReflectionModel,

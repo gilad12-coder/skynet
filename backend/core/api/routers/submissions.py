@@ -112,6 +112,7 @@ from ..rate_limit import enforce_submission_rate
 from ..submission_idempotency import resolve_submission_replay_keys
 from ._helpers import (
     compute_task_fingerprint,
+    enforce_job_quota,
     enforce_storage_quota,
     stable_seed,
     strip_api_key,
@@ -594,7 +595,9 @@ def _enforce_global_daily_spend_ceiling(job_store) -> None:
     A cost backstop that sits above the per-user credit gate: it caps the whole
     platform's trailing-24h run spend, so a spike in traffic (or an abusive
     fleet of funded accounts) cannot run the shared provider float dry. No-op
-    when the ceiling is unset (``0``) or the store has no SQL engine.
+    when the ceiling is unset (``0``) or the store has no SQL engine. Tripping
+    it logs at ERROR, which the alert log handler forwards to operators, so the
+    refusal is never silent.
 
     Args:
         job_store: Job-store instance whose ORM engine backs the billing tables.
@@ -611,7 +614,15 @@ def _enforce_global_daily_spend_ceiling(job_store) -> None:
     if engine is None:
         return
     service = StripeBillingService(engine=engine)
-    if service.credits_spent_since(datetime.now(UTC) - timedelta(hours=24)) >= ceiling:
+    spent = service.credits_spent_since(datetime.now(UTC) - timedelta(hours=24))
+    if spent >= ceiling:
+        # ERROR (not WARNING) so AlertLogHandler pages an operator: every new
+        # submission is refused until spend ages out or the ceiling is raised.
+        logger.error(
+            "Global daily spend ceiling reached: %d credits spent in 24h (ceiling %d); refusing new submissions",
+            spent,
+            ceiling,
+        )
         raise DomainError("submission.capacity_reached", status=503)
 
 
@@ -886,6 +897,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         # the last payload mutations (cost-ceiling cap, seed) so the counted
         # bytes are exactly the persisted bytes.
         payload_dump = _persistable_payload(payload, job_store)
+        enforce_job_quota(job_store, payload.username)
         enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
 
         composition = (
@@ -1067,6 +1079,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
 
         # Same single-serialization pattern as /run — see the note there.
         payload_dump = _persistable_payload(payload, job_store)
+        enforce_job_quota(job_store, payload.username)
         enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
 
         _create_submission_job(job_store, optimization_id, payload, normalized_key, verified)
@@ -1244,6 +1257,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
 
         # Same single-serialization pattern as /run — see the note there.
         payload_dump = _persistable_payload(payload, job_store)
+        enforce_job_quota(job_store, payload.username)
         enforce_storage_quota(job_store, payload.username, incoming_bytes=json_byte_size(payload_dump))
 
         _create_submission_job(job_store, optimization_id, payload, normalized_key, verified)

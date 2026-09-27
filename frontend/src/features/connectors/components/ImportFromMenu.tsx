@@ -13,6 +13,8 @@ import {
 } from "@/shared/ui/primitives/dropdown-menu";
 import type { ConnectorProvider, DatasetSummary } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
+import { useSettingsModal } from "@/features/settings";
+import { useConnectors } from "../hooks/use-connectors";
 import { ConnectorImportDialog } from "./ConnectorImportDialog";
 import { HuggingFaceImportDialog } from "./HuggingFaceImportDialog";
 import { PROVIDER_GROUPS, categoryLabel, providerMeta } from "./providers";
@@ -42,15 +44,33 @@ export function ImportFromMenu({
   const [active, setActive] = React.useState<ConnectorProvider | null>(null);
   // Kept across closes so the generic dialog keeps its provider while it animates out.
   const [browseProvider, setBrowseProvider] = React.useState<ConnectorProvider>("github");
+  // Link state is fetched the first time the menu opens, so picking an unlinked
+  // provider can go straight to its connect form instead of an empty browser.
+  const [menuOpened, setMenuOpened] = React.useState(false);
+  const { byProvider, loading, refetch } = useConnectors(menuOpened);
+  const settingsModal = useSettingsModal();
 
   const choose = (provider: ConnectorProvider) => {
-    if (provider !== "huggingface") setBrowseProvider(provider);
+    if (provider !== "huggingface") {
+      // While a refetch is in flight the dialog does its own check instead.
+      if (!loading && byProvider(provider)?.connected === false) {
+        settingsModal.openTo("connectors", provider);
+        return;
+      }
+      setBrowseProvider(provider);
+    }
     setActive(provider);
   };
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (!open) return;
+          setMenuOpened(true);
+          refetch();
+        }}
+      >
         <DropdownMenuTrigger asChild>
           <Button variant={variant} size={size} className={className} data-telemetry={telemetry}>
             <DownloadSimple className="size-4" />

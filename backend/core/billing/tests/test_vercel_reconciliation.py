@@ -20,9 +20,16 @@ from core.billing.operation_pricing import ChargePolicy
 from core.billing.runtime import UsagePendingError
 from core.billing.vercel_reconciliation import VercelSessionUsageClient, VercelUsageReconciler
 from core.billing.vercel_usage import quote_vercel_sandbox, vercel_actual_usd
+from core.config import settings
 from core.storage.models import Base, BillingCustomerModel
 
 from .test_vercel_usage import CREATE, RECEIPT
+
+
+@pytest.fixture(autouse=True)
+def _at_cost_markup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the usage markup to 1.0 so these tests check settlement arithmetic, not pricing policy."""
+    monkeypatch.setattr(settings, "usage_markup", 1.0)
 
 
 @pytest.fixture
@@ -101,7 +108,7 @@ def test_durable_receipt_settles_after_fencing_at_original_prices(
     ledger.fence_generation(operation.budget_id, "alice", expected_generation=0)
     expected = ChargePolicy("sandbox").convert(vercel_actual_usd(RECEIPT, session_id="session-one", vcpus=2)).total
     monkeypatch.setattr(vercel_usage, "_REGIONAL_RATES", {"iad1": (Decimal(9), Decimal(9))})
-    monkeypatch.setattr(vercel_usage, "_SANDBOX_POLICY", ChargePolicy("sandbox", credit_usd=Decimal(9)))
+    monkeypatch.setattr(settings, "usage_markup", 9.0)
     reconcile = VercelUsageReconciler(ledger, _unavailable)
     first = reconcile.reconcile(operation.id, "alice")
     replay = reconcile.reconcile(operation.id, "alice")

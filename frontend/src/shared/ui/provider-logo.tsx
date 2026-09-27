@@ -21,6 +21,7 @@ import {
   Novita,
   OpenAI,
   OpenRouter,
+  Qwen,
   SambaNova,
   Together,
   XAI,
@@ -79,6 +80,8 @@ function renderBrand(slug: string, size: number): React.ReactNode {
       return <Minimax.Avatar size={size} />;
     case "mistral":
       return <Mistral.Avatar size={size} />;
+    case "qwen":
+      return <Qwen.Avatar size={size} />;
     case "groq":
       return <Groq.Avatar size={size} />;
     case "moonshot":

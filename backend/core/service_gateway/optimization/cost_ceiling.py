@@ -23,9 +23,9 @@ from typing import Any
 
 from dspy.utils.callback import BaseCallback
 
-from ...billing.pricing import credits_for_usage, usages_from_breakdown
+from ...billing.pricing import credits_for_usage
 from ...billing.signals import BudgetReached
-from ..language_models import usage_by_model_from_history
+from ..language_models import model_usages_from_history
 
 
 class CostCeilingExceededError(BudgetReached):
@@ -76,10 +76,10 @@ class CostCeilingCallback(BaseCallback):
         with self._lock:
             if self._tripped:
                 raise CostCeilingExceededError("The run has reached its cost ceiling.")
-        breakdown = usage_by_model_from_history(*self._language_models)
-        if breakdown is None:
+        usages = model_usages_from_history(*self._language_models)
+        if usages is None:
             return
-        used = credits_for_usage(usages_from_breakdown(breakdown))
+        used = credits_for_usage(usages)
         if used <= self._max_credits:
             return
         with self._lock:

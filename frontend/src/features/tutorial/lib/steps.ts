@@ -11,16 +11,19 @@ import {
   DEMO_BLACKBOX_OPTIMIZATION_ID,
   DEMO_BLACKBOX_SCORER_CODE,
   DEMO_BLACKBOX_SEED_TEXT,
+  DEMO_DATASET_ID,
   DEMO_METRIC_CODE,
   DEMO_OPTIMIZATION_ID,
   DEMO_SIGNATURE_CODE,
   getCachedDemoDashboardAnalytics,
   getCachedDemoDashboardJobs,
   getCachedDemoExplorePoints,
+  getDemoDatasets,
 } from "./demo-data";
 import { TERMS } from "@/shared/lib/terms";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { perLocale } from "@/shared/lib/per-locale";
+import { PHONE_MEDIA_QUERY } from "@/shared/lib/device-class";
 import { TUTORIAL_SUBMIT_SPLASH_MS } from "./tutorial-timing";
 
 /**
@@ -33,6 +36,7 @@ import { TUTORIAL_SUBMIT_SPLASH_MS } from "./tutorial-timing";
 export type TutorialTrack = "quick" | "anything" | "data" | "results" | "workspace";
 
 const QUICK_ONLY: readonly TutorialTrack[] = ["quick"];
+const QUICK_AND_RESULTS: readonly TutorialTrack[] = ["quick", "results"];
 const QUICK_AND_ANYTHING: readonly TutorialTrack[] = ["quick", "anything"];
 const ANYTHING_ONLY: readonly TutorialTrack[] = ["anything"];
 const DATA_ONLY: readonly TutorialTrack[] = ["data"];
@@ -126,6 +130,34 @@ function waitForElement(selector: string, timeoutMs = 5000): Promise<boolean> {
         resolve(false);
         return;
       }
+      requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  });
+}
+
+/**
+ * Wait until an element's rect is unchanged across two consecutive frames, so
+ * a spring-in (e.g. the selection bar) is measured at its resting position.
+ */
+function waitForStableRect(selector: string, timeoutMs = 2000): Promise<void> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    let prev: DOMRect | null = null;
+    const check = () => {
+      const rect = document.querySelector(selector)?.getBoundingClientRect() ?? null;
+      const stable =
+        !!rect &&
+        !!prev &&
+        rect.x === prev.x &&
+        rect.y === prev.y &&
+        rect.width === prev.width &&
+        rect.height === prev.height;
+      if (stable || Date.now() - start > timeoutMs) {
+        resolve();
+        return;
+      }
+      prev = rect;
       requestAnimationFrame(check);
     };
     requestAnimationFrame(check);
@@ -231,7 +263,8 @@ function injectBlackboxDemo() {
 }
 
 async function ensureTagger() {
-  if (!window.location.pathname.startsWith("/tagger")) {
+  // A saved session (/tagger/[id]) never shows setup, so leave it for the plain page.
+  if (window.location.pathname !== "/tagger") {
     navigateTo("/tagger");
     await waitForHook("setTaggerStartingNew");
     // Force the sessions chooser into setup; no-op if already in setup
@@ -255,14 +288,22 @@ async function ensureExplore() {
   callTutorialHook("setDemoExplorePoints", getCachedDemoExplorePoints());
 }
 
+/** Open /datasets with a demo card, so a new account's empty library still shows the controls. */
 async function ensureDatasets() {
   if (window.location.pathname !== "/datasets") {
     navigateTo("/datasets");
     await waitForElement("[data-tutorial='datasets-library']");
   }
+  await waitForHook("setDemoDatasets");
+  callTutorialHook("setDemoDatasets", getDemoDatasets());
+  await waitForElement("[data-tutorial='datasets-add']");
 }
 
+/** Bumped whenever a settings step starts, so a leaving step can tell. */
+let settingsOpenRequests = 0;
+
 async function openSettingsTab(tab: string) {
+  settingsOpenRequests += 1;
   await ensureDashboard();
   await waitForHook("setSettingsTab");
   callTutorialHook("setSettingsTab", tab);
@@ -272,6 +313,21 @@ async function openSettingsTab(tab: string) {
 function closeSettings() {
   callTutorialHook("setSettingsTab", null);
 }
+
+/**
+ * Close Settings unless the next step reopens it. The overlay runs the next
+ * step's beforeShow right after this step's afterHide, so waiting one task
+ * shows whether that happened; closing anyway would flicker the modal.
+ */
+function closeSettingsUnlessReopened() {
+  const requests = settingsOpenRequests;
+  setTimeout(() => {
+    if (settingsOpenRequests === requests) closeSettings();
+  }, 0);
+}
+
+/** Whether the agent panel was already open before the tour showed it. */
+let agentPanelWasOpen = false;
 
 function setGeneralistPanelOpen(open: boolean) {
   callTutorialHook("setGeneralistPanelOpen", open);
@@ -322,32 +378,66 @@ function injectSampleDataset() {
 
 const tutorialSteps: TutorialStep[] = perLocale(() => [
   {
-    id: "dd-dataset-library",
-    title: msg("tutorial.step.dataset_library.title"),
-    description: msg("tutorial.step.dataset_library.body"),
-    target: "[data-tutorial='datasets-library']",
+    id: "dd-dataset-add",
+    title: msg("tutorial.step.dataset_add.title"),
+    description: msg("tutorial.step.dataset_add.body"),
+    target: "[data-tutorial='datasets-add']",
     placement: "bottom",
     beforeShow: ensureDatasets,
     tracks: DATA_ONLY,
-    readingTimeSec: 10,
+    readingTimeSec: 9,
+  },
+  {
+    id: "dd-dataset-actions",
+    title: msg("tutorial.step.dataset_actions.title"),
+    description: msg("tutorial.step.dataset_actions.body"),
+    target: "[data-tutorial='datasets-selection']",
+    placement: "top",
+    beforeShow: async () => {
+      await ensureDatasets();
+      await waitForHook("setSelectedDatasetIds");
+      callTutorialHook("setSelectedDatasetIds", [DEMO_DATASET_ID]);
+      await waitForElement("[data-tutorial='datasets-selection']");
+      await waitForStableRect("[data-tutorial='datasets-selection']");
+    },
+    afterHide: () => {
+      callTutorialHook("setSelectedDatasetIds", []);
+    },
+    tracks: DATA_ONLY,
+    readingTimeSec: 9,
   },
   {
     id: "dd-tagger-setup",
     title: msg("auto.features.tutorial.lib.steps.literal.29"),
-    description: msg("auto.features.tutorial.lib.steps.literal.30"),
-    target: "[data-tutorial='tagger-setup']",
+    // The synthetic-dataset button only renders with AI assist on.
+    get description() {
+      return queryTutorialHook("taggerAssistAvailable") === false
+        ? msg("tutorial.step.tagger_data.body")
+        : msg("auto.features.tutorial.lib.steps.literal.30");
+    },
+    target: "[data-tutorial='tagger-data']",
     placement: "auto",
     beforeShow: async () => {
       await ensureTagger();
       injectDemoTaggerData(0);
     },
     tracks: DATA_ONLY,
-    readingTimeSec: 8,
+    readingTimeSec: 10,
   },
   {
     id: "dd-tagger-modes",
-    title: msg("auto.features.tutorial.lib.steps.literal.31"),
-    description: msg("auto.features.tutorial.lib.steps.literal.32"),
+    // With AI assist off, the same anchor sits on the task card instead of the
+    // mode picker, so the copy is chosen once setup has mounted.
+    get title() {
+      return queryTutorialHook("taggerAssistAvailable") === false
+        ? msg("tutorial.step.tagger_task.title")
+        : msg("auto.features.tutorial.lib.steps.literal.31");
+    },
+    get description() {
+      return queryTutorialHook("taggerAssistAvailable") === false
+        ? msg("tutorial.step.tagger_task.body")
+        : msg("auto.features.tutorial.lib.steps.literal.32");
+    },
     target: "[data-tutorial='tagger-modes']",
     placement: "auto",
     beforeShow: async () => {
@@ -356,7 +446,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='tagger-modes']");
     },
     tracks: DATA_ONLY,
-    readingTimeSec: 9,
+    readingTimeSec: 12,
   },
   {
     id: "dd-recipe-picker",
@@ -364,18 +454,16 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     description: msg("tutorial.step.recipe_picker.body"),
     target: "[data-tutorial='submit-recipe']",
     placement: "bottom",
+    offsetY: 24,
     beforeShow: ensureRecipePicker,
     tracks: QUICK_AND_ANYTHING,
-    readingTimeSec: 9,
+    readingTimeSec: 13,
   },
   {
     id: "dd-data-upload",
     title: formatMsg("auto.features.tutorial.lib.steps.template.16", { p1: TERMS.dataset }),
-    description: `${formatMsg("auto.features.tutorial.lib.steps.template.17", {
-      p1: TERMS.examplePlural,
-      p2: TERMS.optimization,
-    })} ${formatMsg("auto.features.tutorial.lib.steps.template.18", { p1: TERMS.model })}`,
-    target: "[data-tutorial='dataset-upload']",
+    description: `${msg("auto.features.tutorial.lib.steps.template.17")} ${msg("auto.features.tutorial.lib.steps.template.18")}`,
+    target: "[data-tutorial='wizard-step-2']",
     placement: "left",
     beforeShow: async () => {
       await ensureSubmit("program");
@@ -384,19 +472,13 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='dataset-upload']");
     },
     tracks: QUICK_ONLY,
-    readingTimeSec: 7,
+    readingTimeSec: 14,
   },
   {
     id: "dd-code-setup",
     title: `${msg("auto.features.tutorial.lib.steps.literal.20")} + ${TERMS.metric}`,
-    description: `${formatMsg("auto.features.tutorial.lib.steps.template.22", {
-      p1: TERMS.model,
-    })} ${formatMsg("auto.features.tutorial.lib.steps.template.23", {
-      p1: TERMS.score,
-      p2: TERMS.optimizer,
-      p3: TERMS.score,
-    })}`,
-    target: "[data-tutorial='signature-editor']",
+    description: msg("auto.features.tutorial.lib.steps.template.22"),
+    target: "[data-tutorial='code-editors']",
     placement: "top",
     beforeShow: async () => {
       await ensureSubmit("program");
@@ -406,47 +488,41 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       callTutorialHook("chooseModule", "predict");
       callTutorialHook("setSignatureCode", DEMO_SIGNATURE_CODE);
       callTutorialHook("setMetricCode", DEMO_METRIC_CODE);
-      await waitForElement("[data-tutorial='signature-editor']");
+      await waitForElement("[data-tutorial='code-editors']");
     },
     tracks: QUICK_ONLY,
-    readingTimeSec: 12,
+    readingTimeSec: 13,
   },
 
   {
     id: "dd-models",
     title: msg("auto.features.tutorial.lib.steps.template.24"),
-    description: formatMsg("auto.features.tutorial.lib.steps.template.25", {
-      p1: TERMS.generationModel,
-      p2: TERMS.reflectionModel,
-      p3: TERMS.modelPlural,
-    }),
+    description: msg("auto.features.tutorial.lib.steps.template.25"),
     target: "[data-tutorial='model-catalog']",
     placement: "bottom",
     beforeShow: async () => {
       await ensureSubmit("program");
+      callTutorialHook("setDemoModels");
       showWizardSubstep("optimization", "model-catalog");
       await waitForElement("[data-tutorial='model-catalog']");
     },
     tracks: QUICK_ONLY,
-    readingTimeSec: 7,
+    readingTimeSec: 8,
   },
   {
     id: "dd-review",
-    title: msg("auto.features.tutorial.lib.steps.literal.21"),
-    description: formatMsg("auto.features.tutorial.lib.steps.template.26", {
-      p1: TERMS.dataset,
-      p2: TERMS.modelPlural,
-      p3: TERMS.optimizer,
-    }),
+    title: msg("auto.features.tutorial.lib.steps.template.27"),
+    description: msg("auto.features.tutorial.lib.steps.template.26"),
     target: "[data-tutorial='wizard-stage-review']",
     placement: "bottom",
     beforeShow: async () => {
       await ensureSubmit("program");
       setOptimizerName("gepa");
+      callTutorialHook("setDemoModels");
       setWizardStep(WIZARD_STAGE.review);
     },
     tracks: QUICK_ONLY,
-    readingTimeSec: 5,
+    readingTimeSec: 12,
   },
   {
     id: "bb-start",
@@ -461,7 +537,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='wizard-stage-goal']");
     },
     tracks: ANYTHING_ONLY,
-    readingTimeSec: 10,
+    readingTimeSec: 12,
   },
   {
     id: "bb-budget",
@@ -491,7 +567,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("#bb-scorer-code");
     },
     tracks: ANYTHING_ONLY,
-    readingTimeSec: 12,
+    readingTimeSec: 15,
   },
   {
     id: "bb-engines",
@@ -503,10 +579,10 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await ensureSubmit("anything");
       injectBlackboxDemo();
       showWizardSubstep("optimization", "bb-engines");
-      await waitForElement("#bb-engines");
+      await waitForElement("[data-tutorial='wizard-stage-optimization']");
     },
     tracks: ANYTHING_ONLY,
-    readingTimeSec: 12,
+    readingTimeSec: 9,
   },
   {
     id: "bb-scores",
@@ -523,7 +599,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='score-cards']");
     },
     tracks: ANYTHING_ONLY,
-    readingTimeSec: 9,
+    readingTimeSec: 10,
   },
   {
     id: "bb-best-version",
@@ -540,40 +616,8 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     readingTimeSec: 10,
   },
   {
-    id: "dd-result-actions",
-    title: msg("tutorial.step.result_actions.title"),
-    description: msg("tutorial.step.result_actions.body"),
-    target: "[data-tutorial='result-actions']",
-    placement: "left",
-    beforeShow: async () => {
-      await ensureDemoDetail();
-      setDetailTab("overview");
-      await waitForElement("[data-tutorial='result-actions']");
-    },
-    tracks: RESULTS_ONLY,
-    readingTimeSec: 9,
-  },
-  {
-    id: "dd-pipeline",
-    title: msg("auto.features.tutorial.lib.steps.literal.23"),
-    description: formatMsg("auto.features.tutorial.lib.steps.template.30", {
-      p1: TERMS.optimization,
-      p2: TERMS.baselineScore,
-      p3: TERMS.optimization,
-      p4: TERMS.optimization,
-    }),
-    target: "[data-tutorial='pipeline-stages']",
-    placement: "bottom",
-    beforeShow: async () => {
-      await ensureDemoDetail();
-      setDetailTab("overview");
-    },
-    tracks: RESULTS_ONLY,
-    readingTimeSec: 8,
-  },
-  {
     id: "dd-scores",
-    title: formatMsg("auto.features.tutorial.lib.steps.template.31", { p1: TERMS.scorePlural }),
+    title: msg("tutorial.step.scores.title"),
     description: formatMsg("auto.features.tutorial.lib.steps.template.32", {
       p1: TERMS.baselineScore,
       p2: TERMS.optimization,
@@ -582,16 +626,24 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     target: "[data-tutorial='score-cards']",
     placement: "bottom",
     beforeShow: async () => {
+      // Only the quick start just "submitted" the demo run; the results guide
+      // opens on the finished run instead of replaying a submission.
       const onDetail = window.location.pathname === `/optimizations/${DEMO_OPTIMIZATION_ID}`;
-      if (!onDetail) {
+      if (!onDetail && queryTutorialHook("activeTutorialTrack") === "quick") {
         resetDemoSimulation();
         await showSubmitSplash();
       }
       await ensureDemoDetail();
+      // Other guides describe a finished run; without this the page replays
+      // the run live and the Optimized card shows a dash.
+      if (queryTutorialHook("activeTutorialTrack") !== "quick") {
+        callTutorialHook("finishDemoSimulation");
+      }
       setDetailTab("overview");
+      await waitForElement("[data-tutorial='score-cards']");
     },
-    tracks: QUICK_ONLY,
-    readingTimeSec: 5,
+    tracks: QUICK_AND_RESULTS,
+    readingTimeSec: 7,
   },
   {
     id: "dd-trajectory",
@@ -607,13 +659,17 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       callTutorialHook("replayDemoSimulation");
       await waitForElement("[data-tutorial='trajectory-panel']");
     },
+    // The replay hides the Artifact tab until it ends, so skip to the result.
+    afterHide: () => {
+      callTutorialHook("finishDemoSimulation");
+    },
     tracks: RESULTS_ONLY,
     readingTimeSec: 12,
   },
   {
     id: "dd-playground",
     title: msg("auto.features.tutorial.lib.steps.literal.25"),
-    description: `${formatMsg("auto.features.tutorial.lib.steps.template.36", { p1: TERMS.model })} ${msg("auto.features.tutorial.lib.steps.literal.41")}`,
+    description: `${msg("auto.features.tutorial.lib.steps.template.36")} ${msg("auto.features.tutorial.lib.steps.literal.41")}`,
     target: "[data-tutorial='serve-playground']",
     placement: "bottom",
     offsetY: 0,
@@ -622,8 +678,8 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       setDetailTab("playground");
       await waitForElement("[data-tutorial='serve-playground']");
     },
-    tracks: QUICK_ONLY,
-    readingTimeSec: 12,
+    tracks: QUICK_AND_RESULTS,
+    readingTimeSec: 9,
   },
   {
     id: "dd-code",
@@ -637,7 +693,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='code-sources']");
     },
     tracks: RESULTS_ONLY,
-    readingTimeSec: 9,
+    readingTimeSec: 11,
   },
   {
     id: "dd-artifact",
@@ -656,17 +712,9 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   {
     id: "dd-data-tab",
     title: msg("auto.features.tutorial.lib.steps.literal.24"),
-    description: formatMsg("auto.features.tutorial.lib.steps.template.35", {
-      p1: TERMS.dataset,
-      p2: TERMS.score,
-      p3: TERMS.model,
-      p4: TERMS.splitTrain,
-      p5: TERMS.splitVal,
-      p6: TERMS.splitTest,
-      p7: TERMS.score,
-    }),
+    description: msg("auto.features.tutorial.lib.steps.template.35"),
     target: "[data-tutorial='data-table']",
-    placement: "top",
+    placement: "bottom",
     offsetY: 0,
     beforeShow: async () => {
       await ensureDemoDetail();
@@ -674,12 +722,12 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='data-table']");
     },
     tracks: RESULTS_ONLY,
-    readingTimeSec: 9,
+    readingTimeSec: 13,
   },
   {
     id: "dd-logs",
     title: msg("auto.features.tutorial.lib.steps.literal.26"),
-    description: formatMsg("auto.features.tutorial.lib.steps.template.37", { p1: TERMS.optimizer }),
+    description: msg("auto.features.tutorial.lib.steps.template.37"),
     target: "[data-tutorial='live-logs']",
     placement: "top",
     beforeShow: async () => {
@@ -688,30 +736,44 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='live-logs']");
     },
     tracks: RESULTS_ONLY,
+    readingTimeSec: 9,
+  },
+  {
+    id: "dd-result-actions",
+    title: msg("tutorial.step.result_actions.title"),
+    description: msg("tutorial.step.result_actions.body"),
+    target: "[data-tutorial='result-actions']",
+    placement: "left",
+    beforeShow: async () => {
+      await ensureDemoDetail();
+      setDetailTab("overview");
+      await waitForElement("[data-tutorial='result-actions']");
+    },
+    tracks: RESULTS_ONLY,
+    readingTimeSec: 9,
+  },
+  {
+    id: "dd-sidebar-nav",
+    title: msg("tutorial.step.sidebar_nav.title"),
+    description: msg("tutorial.step.sidebar_nav.body"),
+    target: "[data-tutorial='sidebar-nav']",
+    placement: "right",
+    beforeShow: async () => {
+      await ensureDashboard();
+      // Below md the sidebar is an off-canvas drawer; slide it in.
+      if (window.innerWidth < 768) callTutorialHook("setSidebarOpen", true);
+      await waitForElement("[data-tutorial='sidebar-nav']");
+    },
+    afterHide: () => {
+      if (window.innerWidth < 768) callTutorialHook("setSidebarOpen", false);
+    },
+    tracks: WORKSPACE_ONLY,
     readingTimeSec: 6,
   },
   {
-    id: "dd-kpis",
-    title: msg("auto.features.tutorial.lib.steps.literal.6"),
-    description: msg("auto.features.tutorial.lib.steps.literal.7"),
-    target: "[data-tutorial='dashboard-kpis']",
-    placement: "bottom",
-    beforeShow: async () => {
-      await ensureDashboard();
-      injectDemoDashboardData();
-      setTab("jobs");
-    },
-    tracks: WORKSPACE_ONLY,
-    readingTimeSec: 4,
-  },
-  {
     id: "dd-table",
-    title: formatMsg("auto.features.tutorial.lib.steps.template.1", {
-      p1: TERMS.optimizationPlural,
-    }),
-    description: formatMsg("auto.features.tutorial.lib.steps.template.2", {
-      p1: TERMS.optimization,
-    }),
+    title: msg("tutorial.step.table.title"),
+    description: msg("auto.features.tutorial.lib.steps.template.2"),
     target: "[data-tutorial='dashboard-table']",
     placement: "top",
     offsetY: 0,
@@ -722,27 +784,23 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='dashboard-table']");
     },
     tracks: WORKSPACE_ONLY,
-    readingTimeSec: 6,
+    readingTimeSec: 11,
   },
   {
     id: "dd-analytics",
     title: msg("auto.features.tutorial.lib.steps.literal.9"),
-    description: formatMsg("auto.features.tutorial.lib.steps.template.47", {
-      p1: TERMS.scorePlural,
-      p2: TERMS.optimization,
-      p3: TERMS.optimization,
-    }),
-    target: "[data-tutorial='dashboard-stats']",
+    description: msg("auto.features.tutorial.lib.steps.template.47"),
+    target: "[data-tutorial='analytics-content']",
     placement: "bottom",
     beforeShow: async () => {
       await ensureDashboard();
       injectDemoDashboardData();
       setTab("analytics");
-      await waitForElement("[data-tutorial='dashboard-stats']");
+      await waitForElement("[data-tutorial='analytics-content']");
       await new Promise((r) => setTimeout(r, 250));
     },
     tracks: WORKSPACE_ONLY,
-    readingTimeSec: 5,
+    readingTimeSec: 9,
   },
   {
     id: "dd-explore",
@@ -754,7 +812,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await ensureExplore();
     },
     tracks: WORKSPACE_ONLY,
-    readingTimeSec: 14,
+    readingTimeSec: 11,
   },
   {
     id: "dd-agent-panel",
@@ -763,12 +821,12 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     target: "[data-tutorial='agent-panel']",
     placement: "left",
     beforeShow: async () => {
-      await ensureDashboard();
+      agentPanelWasOpen = isElementVisible("[data-tutorial='agent-panel']");
       setGeneralistPanelOpen(true);
       await waitForElement("[data-tutorial='agent-panel']");
     },
     afterHide: () => {
-      setGeneralistPanelOpen(false);
+      if (!agentPanelWasOpen) setGeneralistPanelOpen(false);
     },
     tracks: WORKSPACE_ONLY,
     readingTimeSec: 10,
@@ -780,9 +838,9 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     target: "[data-tutorial='settings-billing']",
     placement: "left",
     beforeShow: () => openSettingsTab("billing"),
-    afterHide: closeSettings,
+    afterHide: closeSettingsUnlessReopened,
     tracks: WORKSPACE_ONLY,
-    readingTimeSec: 11,
+    readingTimeSec: 8,
   },
   {
     id: "dd-settings-providers",
@@ -793,16 +851,26 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     beforeShow: () => openSettingsTab("providers"),
     afterHide: closeSettings,
     tracks: WORKSPACE_ONLY,
-    readingTimeSec: 9,
+    readingTimeSec: 12,
   },
 ]);
 
 const AGENT_PANEL_STEP_IDS = new Set(["dd-agent-panel"]);
+// Phones render neither these detail tabs, the dashboard table nor the
+// sidebar (they get bottom tabs), so the steps would only stall on a
+// missing target before being skipped.
+const DESKTOP_ONLY_STEP_IDS = new Set(["dd-code", "dd-data-tab", "dd-table", "dd-sidebar-nav"]);
+
+function isPhoneViewport(): boolean {
+  return typeof window !== "undefined" && window.matchMedia(PHONE_MEDIA_QUERY).matches;
+}
 
 function getVisibleSteps(): TutorialStep[] {
   const generalist = isGeneralistAgentEnabled();
+  const phone = isPhoneViewport();
   return tutorialSteps.filter((s) => {
     if (!generalist && AGENT_PANEL_STEP_IDS.has(s.id)) return false;
+    if (phone && DESKTOP_ONLY_STEP_IDS.has(s.id)) return false;
     return true;
   });
 }

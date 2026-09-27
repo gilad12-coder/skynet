@@ -31,6 +31,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from ...billing.metering import meter_llm_run
+from ...billing.service import StripeBillingService
 from ...config import settings
 from ...constants import (
     OPTIMIZATION_TYPE_BLACKBOX,
@@ -42,6 +44,7 @@ from ...constants import (
     PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE,
     PAYLOAD_OVERVIEW_OPTIMIZER_NAME,
     PAYLOAD_OVERVIEW_USERNAME,
+    TOKEN_SOURCE_MANAGED,
 )
 from ...storage.models import JobEmbeddingModel
 from .embeddings import get_embedder
@@ -214,6 +217,28 @@ def embed_finished_job(optimization_id: str, *, job_store: Any) -> bool:
         _release_embedding(optimization_id)
 
 
+def _owner_can_fund_summary(engine: Any, owner: str | None) -> bool:
+    """Return whether the job owner can pay for the LLM task summary.
+
+    An owner with no spendable credits gets the free heuristic summary
+    instead: the job still lands in explore, just with a weaker description.
+
+    Args:
+        engine: SQLAlchemy engine backing the billing tables, or ``None``.
+        owner: Username the job belongs to, or ``None`` for legacy rows.
+
+    Returns:
+        True only when there is an owner to bill and their balance is positive.
+    """
+    if engine is None or not owner:
+        return False
+    try:
+        return StripeBillingService(engine).spendable_credits(owner) > 0
+    except Exception as exc:
+        logger.warning("Summary balance check failed for %s: %s", owner, exc)
+        return False
+
+
 def _embed_finished_job_once(optimization_id: str, *, job_store: Any) -> bool:
     """Compute and upsert the summary embedding for a finished job.
 
@@ -256,20 +281,32 @@ def _embed_finished_job_once(optimization_id: str, *, job_store: Any) -> bool:
     signature_code = payload.get("signature_code")
     task_title = overview.get("name") or payload.get("name")
     task_description = overview.get(PAYLOAD_OVERVIEW_DESCRIPTION) or payload.get("description")
+    owner = overview.get(PAYLOAD_OVERVIEW_USERNAME)
+    engine = getattr(job_store, "engine", None)
+    use_llm = _owner_can_fund_summary(engine, owner)
+    summary_lms: list[Any] = []
     if overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE) == OPTIMIZATION_TYPE_BLACKBOX:
         summary_text = summarize_blackbox_task(
             title=task_title,
             description=task_description,
             cases_sample=payload.get("cases") or [],
+            use_llm=use_llm,
+            usage_sink=summary_lms,
         )
     else:
         summary_text = summarize_task(
             title=task_title,
             description=task_description,
             dataset_sample=payload.get("dataset") or [],
+            use_llm=use_llm,
+            usage_sink=summary_lms,
         )
+    if summary_lms:
+        # The summariser always runs on the platform model, never a BYOK key, so it bills as managed.
+        meter_llm_run(engine, owner, summary_lms, description="Job summary", token_source=TOKEN_SOURCE_MANAGED)
 
-    emb_summary = embedder.encode(summary_text, task="retrieval.passage") if summary_text else None
+    emb_summary = embedder.encode(summary_text, task="retrieval.passage", user=owner) if summary_text else None
+
     if emb_summary is None:
         logger.debug("embed_finished_job: no usable summary for %s, skipping", optimization_id)
         return False

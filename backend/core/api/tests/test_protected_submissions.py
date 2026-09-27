@@ -174,6 +174,8 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Harnes
     monkeypatch.setattr(preflight_execution, "_verify_anything", verify_anything)
     monkeypatch.setattr(preflight_execution, "_verify_dspy", verify_dspy)
     monkeypatch.setattr(submissions, "notify_job_started", lambda **kwargs: None)
+    # Holds here are sized against tight budgets in raw provider cost; the markup is pricing policy, tested in core/billing.
+    monkeypatch.setattr(submissions.settings, "usage_markup", 1.0)
     monkeypatch.setattr(submissions.settings, "worker_enabled", False)
     monkeypatch.setattr(submissions.settings, "submissions_paused", False)
     monkeypatch.setattr(submissions.settings, "max_concurrent_jobs_per_user", 0)

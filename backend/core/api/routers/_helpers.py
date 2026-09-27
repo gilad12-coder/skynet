@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import pickle
+import time
 from collections import OrderedDict
 from collections.abc import AsyncIterable, AsyncIterator
 from datetime import UTC, datetime
@@ -22,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from ...billing import StripeBillingService
 from ...billing.credential_safety import scrub_model_config
-from ...billing.metering import meter_llm_run
+from ...billing.metering import estimate_run_credits, meter_llm_run
 from ...config import settings
 from ...constants import (
     OPTIMIZATION_TYPE_BLACKBOX,
@@ -55,6 +56,7 @@ from ...models import (
 )
 from ...models.serve import WorkflowNodeTrace
 from ...registry import ResolverError, resolve_module_factory
+from ...service_gateway.language_models import usage_by_model_from_history
 from ...service_gateway.optimization.data import load_signature_from_code
 from ...service_gateway.optimization.retrying_react import RetryingReActV2
 from ...service_gateway.optimization.tool_overlay import (
@@ -165,25 +167,29 @@ def clear_program_cache() -> None:
 
 
 def enforce_llm_credits(job_store, username: str) -> None:
-    """Refuse an interactive LLM turn for an account with no spendable credits.
+    """Refuse an interactive LLM turn for an account below the minimum turn balance.
 
     The turn-surface twin of the submit gate: agent chats, interview turns and
-    tagging predictions spend managed tokens, so a depleted account is stopped
-    before the LLM call rather than billed into the negative. The free grant
-    means a brand-new account always passes. A store with no SQL engine
-    (legacy/in-memory) skips the gate, matching the submit path.
+    tagging predictions spend managed tokens and are billed only after the
+    turn, so the account must hold at least
+    ``settings.interactive_min_balance_credits`` (never less than one credit)
+    before the LLM call. Otherwise a 1-credit balance could buy a turn costing
+    far more, with the overrun absorbed at the balance floor. A store with no
+    SQL engine (legacy/in-memory) skips the gate, matching the submit path.
 
     Args:
         job_store: Job-store instance whose ORM engine backs the billing tables.
         username: Account attempting the turn.
 
     Raises:
-        DomainError: 402 when the account has no spendable credits.
+        DomainError: 402 when the account's spendable credits are below the
+            minimum turn balance (including accounts carrying refund debt).
     """
     engine = getattr(job_store, "engine", None)
     if engine is None or not username:
         return
-    if StripeBillingService(engine=engine).spendable_credits(username) > 0:
+    floor = max(1, settings.interactive_min_balance_credits)
+    if StripeBillingService(engine=engine).spendable_credits(username) >= floor:
         return
     raise DomainError("billing.insufficient_credits", status=402)
 
@@ -217,10 +223,19 @@ async def stream_with_llm_metering(
         token_source: Billing source for this interactive model call.
 
     Yields:
-        The upstream events, unchanged.
+        The upstream events; a ``done`` event gains a ``stats`` block with the
+        turn's token usage, cost and timing.
     """
+    started = time.monotonic()
+    first_token_at: float | None = None
     try:
         async for event in source:
+            name = event.get("event")
+            if name == "message_patch" and first_token_at is None:
+                first_token_at = time.monotonic()
+            elif name == "done" and isinstance(event.get("data"), dict):
+                stats = _turn_stats(usage_sink, token_source, started, first_token_at)
+                event = {**event, "data": {**event["data"], "stats": stats}}
             yield event
     finally:
         engine = getattr(job_store, "engine", None)
@@ -236,6 +251,36 @@ async def stream_with_llm_metering(
                 )
             except Exception:
                 logger.exception("LLM turn metering failed for %s", username)
+
+
+def _turn_stats(
+    usage_sink: list,
+    token_source: str,
+    started: float,
+    first_token_at: float | None,
+) -> dict[str, Any]:
+    """Summarize a finished turn for the reply's info popover.
+
+    Args:
+        usage_sink: The turn's LM objects.
+        token_source: Billing source, so the cost matches what gets debited.
+        started: ``time.monotonic()`` when the stream opened.
+        first_token_at: ``time.monotonic()`` of the first reply token, if any.
+
+    Returns:
+        Token counts (``None`` when untracked), credits and millisecond timings.
+    """
+    now = time.monotonic()
+    breakdown = usage_by_model_from_history(*usage_sink) if usage_sink else None
+    input_tokens = sum(pair[0] for pair in breakdown.values()) if breakdown else None
+    output_tokens = sum(pair[1] for pair in breakdown.values()) if breakdown else None
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "credits": estimate_run_credits(usage_sink, token_source) if breakdown else None,
+        "duration_ms": round((now - started) * 1000),
+        "ttft_ms": round((first_token_at - started) * 1000) if first_token_at is not None else None,
+    }
 
 
 # Idle gap after which the SSE serializer emits a comment line to keep the
@@ -590,6 +635,31 @@ def filter_ids_at_least(
 def _mb(num_bytes: int) -> float:
     """Return ``num_bytes`` as megabytes rounded to one decimal for messages."""
     return round(num_bytes / (1024 * 1024), 1)
+
+
+def enforce_job_quota(job_store, username: str, incoming_jobs: int = 1) -> None:
+    """Raise if creating ``incoming_jobs`` would put the user over their saved-job cap.
+
+    The cap resolves through the store's live admin override, then the Skynet
+    Pro cap, then ``max_jobs_per_user``; an override of ``None`` means
+    unlimited. Runs beside :func:`enforce_storage_quota`, which bounds bytes
+    rather than rows.
+
+    Args:
+        job_store: Store exposing ``count_jobs`` and, when it has a database,
+            ``get_effective_user_quota``.
+        username: The user creating the jobs.
+        incoming_jobs: How many jobs the request creates (a clone may make several).
+
+    Raises:
+        DomainError: ``quota.reached`` (HTTP 409) when the user would exceed the cap.
+    """
+    resolver = getattr(job_store, "get_effective_user_quota", None)
+    quota = resolver(username) if callable(resolver) else settings.get_user_quota(username)
+    if quota is None:
+        return
+    if job_store.count_jobs(username=username) + incoming_jobs > quota:
+        raise DomainError("quota.reached", status=409, quota=quota)
 
 
 def enforce_storage_quota(job_store, username: str, incoming_bytes: int) -> None:

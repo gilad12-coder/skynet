@@ -460,6 +460,94 @@ def test_get_catalog_adds_probe_only_models_with_metadata(monkeypatch: pytest.Mo
     assert any(p.slug == "openrouter" for p in result.providers)
 
 
+def test_get_catalog_surfaces_per_model_reasoning_efforts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each model carries the effort levels and default its probe item declares.
+
+    Levels come back weakest first whatever order the provider lists them in,
+    unknown levels are dropped, a reasoning model with no effort control gets
+    an empty list, and a registry model the probe lists inherits its levels.
+    """
+    fake_cost: dict = {
+        "openrouter/z-ai/glm-5.3": {
+            "mode": "chat",
+            "litellm_provider": "openrouter",
+            "supports_reasoning": False,
+        }
+    }
+    monkeypatch.setattr(litellm, "model_cost", fake_cost)
+    monkeypatch.setattr(litellm, "get_valid_models", list)
+
+    probe = {
+        ("openrouter", None): {
+            "z-ai/glm-5.3": {
+                "id": "z-ai/glm-5.3",
+                "reasoning": {"supported_efforts": ["max", "high", "low"], "default_effort": "max"},
+            },
+            "anthropic/claude-haiku-4.5": {
+                "id": "anthropic/claude-haiku-4.5",
+                "supported_parameters": ["reasoning"],
+                "reasoning": {"mandatory": True},
+            },
+            "openai/gpt-6-sol": {
+                "id": "openai/gpt-6-sol",
+                "supported_parameters": ["reasoning", "reasoning_effort"],
+                "reasoning": {
+                    "supported_efforts": ["max", "xhigh", "high", "medium", "low", "none", "ultra"],
+                    "default_effort": "medium",
+                    "default_enabled": True,
+                },
+            },
+            "minimax/minimax-m3": {"id": "minimax/minimax-m3", "supported_parameters": ["reasoning"]},
+        }
+    }
+    monkeypatch.setattr(mc, "_probe_all_providers", lambda: probe)
+
+    by_value = {m.value: m for m in get_catalog().models}
+
+    glm = by_value["openrouter/z-ai/glm-5.3"]
+    assert glm.reasoning_efforts == ["low", "high", "max"]
+    assert glm.default_reasoning_effort == "max"
+    assert glm.supports_thinking is True
+
+    sol = by_value["openrouter/openai/gpt-6-sol"]
+    assert sol.reasoning_efforts == ["none", "low", "medium", "high", "xhigh", "max"]
+    assert sol.default_reasoning_effort == "medium"
+    assert sol.reasoning_mandatory is False
+    assert sol.reasoning_default_enabled is True
+
+    minimax = by_value["openrouter/minimax/minimax-m3"]
+    assert minimax.supports_thinking is True
+    assert minimax.reasoning_efforts == []
+    assert minimax.default_reasoning_effort is None
+    assert minimax.reasoning_mandatory is False
+    assert minimax.reasoning_default_enabled is False
+
+    haiku = by_value["openrouter/anthropic/claude-haiku-4.5"]
+    assert haiku.reasoning_efforts == []
+    assert haiku.reasoning_mandatory is True
+    assert haiku.reasoning_default_enabled is True
+
+
+def test_probe_item_reasoning_is_unknown_without_probe_data() -> None:
+    """A model the probe never described reports unknown controls, not an empty ladder."""
+    assert set(mc._probe_item_reasoning({}).values()) == {None}
+
+
+def test_get_catalog_trusts_the_probe_over_the_registry_reasoning_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A registry model the probe lists without reasoning is not offered thinking."""
+    fake_cost: dict = {
+        "openrouter/acme/chat-1": {"mode": "chat", "litellm_provider": "openrouter", "supports_reasoning": True}
+    }
+    monkeypatch.setattr(litellm, "model_cost", fake_cost)
+    monkeypatch.setattr(litellm, "get_valid_models", list)
+    probe = {("openrouter", None): {"acme/chat-1": {"id": "acme/chat-1", "supported_parameters": ["tools"]}}}
+    monkeypatch.setattr(mc, "_probe_all_providers", lambda: probe)
+
+    model = next(m for m in get_catalog().models if m.value == "openrouter/acme/chat-1")
+    assert model.supports_thinking is False
+    assert model.reasoning_efforts == []
+
+
 def test_get_catalog_skips_non_text_probe_models(monkeypatch: pytest.MonkeyPatch) -> None:
     """A probe item whose output modalities lack ``"text"`` is skipped.
 
@@ -558,9 +646,259 @@ def test_probe_byok_provider_models_uses_native_listing_with_user_key() -> None:
     fetch.assert_called_once_with("openai", "https://api.openai.com/v1/models", "sk-user")
 
 
-def test_probe_byok_provider_models_skips_providers_without_a_listing() -> None:
-    """Providers with no OpenAI-compatible listing return ``None`` so the static list stands."""
-    with patch.object(mc, "_fetch_models_index") as fetch:
-        assert mc.probe_byok_provider_models("anthropic", "sk-user") is None
+def test_probe_byok_provider_models_skips_unknown_providers() -> None:
+    """An unknown provider returns ``None`` so the static list stands."""
+    with patch.object(mc, "_fetch_json") as fetch:
         assert mc.probe_byok_provider_models("not-a-provider", "sk-user") is None
     fetch.assert_not_called()
+
+
+def test_probe_byok_anthropic_uses_native_listing() -> None:
+    """Anthropic's own listing is read with its key header and every model counts as chat."""
+    body = {"data": [{"id": "claude-opus-5-5", "type": "model"}]}
+    with patch.object(mc, "_fetch_json", return_value=body) as fetch:
+        assert mc.probe_byok_provider_models("anthropic", "sk-ant") == {"claude-opus-5-5": {"type": "chat"}}
+    assert fetch.call_args.args[2]["x-api-key"] == "sk-ant"
+
+
+def test_probe_byok_gemini_keeps_only_chat_models() -> None:
+    """Gemini's listing drops embedders, image and speech models, and strips the ``models/`` prefix."""
+    body = {
+        "models": [
+            {"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"], "thinking": True},
+            {"name": "models/gemini-3.8-flash-image", "supportedGenerationMethods": ["generateContent"]},
+            {"name": "models/gemini-embedding-2", "supportedGenerationMethods": ["embedContent"]},
+        ]
+    }
+    with patch.object(mc, "_fetch_json", return_value=body):
+        index = mc.probe_byok_provider_models("gemini", "g-key")
+    assert index is not None
+    assert list(index) == ["gemini-3.8-flash"]
+    assert index["gemini-3.8-flash"]["supports_reasoning"] is True
+
+
+def test_probe_byok_native_listing_failure_returns_none() -> None:
+    """A failed native listing falls back to the static registry."""
+    with patch.object(mc, "_fetch_json", return_value=None):
+        assert mc.probe_byok_provider_models("cohere_chat", "co-key") is None
+
+
+_DAY = 24 * 3600
+_NOW = 1_800_000_000
+
+
+def _listed(created: int, *, score: float | None = None, **extra: object) -> dict:
+    """Build an OpenRouter-shaped listing item for the featured heuristic.
+
+    Args:
+        created: Release time as a unix timestamp.
+        score: Artificial Analysis intelligence index, when benchmarked.
+        **extra: Fields that override the defaults.
+
+    Returns:
+        A probe item that passes every featured filter unless overridden.
+    """
+    item: dict = {
+        "created": created,
+        "architecture": {"output_modalities": ["text"]},
+        "supported_parameters": ["tools", "reasoning"],
+        "pricing": {"prompt": "0.000001", "completion": "0.000004"},
+    }
+    if score is not None:
+        item["benchmarks"] = {"artificial_analysis": {"intelligence_index": score}}
+    item.update(extra)
+    return item
+
+
+def test_featured_picks_newest_release_of_each_model_line() -> None:
+    """Each line contributes its newest release; older versions and variants drop."""
+    listing = {
+        "acme/opus-5.5": _listed(_NOW, score=60),
+        "acme/opus-5": _listed(_NOW - 60 * _DAY, score=55),
+        "acme/haiku-4.5": _listed(_NOW - 300 * _DAY, score=40, pricing={"prompt": "0.0000002"}),
+        "acme/opus-5.5-pro": _listed(_NOW),
+        "acme/opus-5.5:free": _listed(_NOW, score=60),
+        "acme/relic-1": _listed(_NOW - 400 * _DAY, score=30),
+        "acme/painter-2": _listed(_NOW, score=50, architecture={"output_modalities": ["image", "text"]}),
+        "acme/open-27b": _listed(_NOW, score=45),
+    }
+    assert mc._featured_probe_ids(listing) == {"acme/opus-5.5", "acme/haiku-4.5"}
+
+
+def test_featured_skips_models_far_behind_the_frontier() -> None:
+    """A model scoring under the bar's share of the best benchmark is not featured."""
+    listing = {
+        "lead/big-2": _listed(_NOW, score=60),
+        "tail/small-1": _listed(_NOW, score=20),
+    }
+    assert mc._featured_probe_ids(listing) == {"lead/big-2"}
+
+
+def test_featured_is_empty_without_benchmarks() -> None:
+    """A listing without release dates or benchmarks features nothing."""
+    assert mc._featured_probe_ids({"gw/model": {"id": "gw/model"}}) == set()
+
+
+def test_featured_caps_each_lab() -> None:
+    """A lab with many live lines contributes at most the cap, newest first."""
+    listing = {f"acme/line{chr(97 + i)}-1": _listed(_NOW - i * _DAY, score=50) for i in range(6)}
+    assert mc._featured_probe_ids(listing) == {f"acme/line{chr(97 + i)}-1" for i in range(mc._FEATURED_PER_LAB)}
+
+
+def test_get_catalog_flags_featured_and_prices_probe_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Probe-only models carry the featured flag and their listed prices."""
+    monkeypatch.setattr(litellm, "model_cost", {})
+    monkeypatch.setattr(litellm, "get_valid_models", list)
+    probe = {
+        ("openrouter", None): {
+            "acme/opus-5.5": _listed(_NOW, score=60),
+            "acme/haiku-4": _listed(_NOW - _DAY, score=20),
+        }
+    }
+    monkeypatch.setattr(mc, "_probe_all_providers", lambda: probe)
+
+    by_value = {m.value: m for m in get_catalog().models}
+    assert by_value["openrouter/acme/opus-5.5"].featured is True
+    assert by_value["openrouter/acme/haiku-4"].featured is False
+    assert by_value["openrouter/acme/opus-5.5"].input_cost_per_token == pytest.approx(1e-6)
+    assert by_value["openrouter/acme/opus-5.5"].output_cost_per_token == pytest.approx(4e-6)
+
+
+def test_byok_models_borrow_reasoning_from_their_openrouter_twin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A registry id with dashes and a date matches the dotted OpenRouter id."""
+    twin = CatalogModel(
+        value="openrouter/anthropic/claude-opus-4.5",
+        label="anthropic/claude-opus-4.5",
+        provider="openrouter",
+        supports_thinking=True,
+        reasoning_efforts=["low", "medium", "high"],
+        default_reasoning_effort="high",
+        reasoning_mandatory=True,
+        reasoning_default_enabled=True,
+        available=True,
+    )
+    monkeypatch.setattr(mc, "_cached_response", ModelCatalogResponse(providers=[], models=[twin]))
+    byok = CatalogModel(
+        value="anthropic/claude-opus-4-5-20251101",
+        label="claude-opus-4-5-20251101",
+        provider="anthropic",
+        available=True,
+    )
+    unknown = CatalogModel(value="anthropic/claude-mystery", label="claude-mystery", provider="anthropic")
+
+    enriched, untouched = mc.with_platform_reasoning([byok, unknown])
+    assert enriched.supports_thinking is True
+    assert enriched.reasoning_efforts == ["low", "medium", "high"]
+    assert enriched.default_reasoning_effort == "high"
+    assert enriched.reasoning_mandatory is True
+    assert untouched is unknown
+
+
+def test_get_catalog_hides_removed_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Withdrawn models and OpenRouter routers never reach the menu, even when OpenRouter lists them."""
+    entry = {
+        "mode": "chat",
+        "litellm_provider": "openrouter",
+        "supports_reasoning": True,
+        "max_input_tokens": 4096,
+        "input_cost_per_token": 0,
+        "output_cost_per_token": 0,
+    }
+    ids = [
+        "openrouter/openai/gpt-5.6-terra",
+        "openrouter/~openai/gpt-terra-latest",
+        "openrouter/x-ai/grok-build-0.1",
+        "openrouter/auto",
+        "openrouter/openrouter/free",
+        "openrouter/typesafe/jev-router",
+        "openrouter/fake/kept-model",
+    ]
+    monkeypatch.setattr(litellm, "model_cost", {mid: dict(entry) for mid in ids})
+    monkeypatch.setattr(litellm, "get_valid_models", lambda: list(ids))
+    monkeypatch.setattr(mc, "_probe_all_providers", dict)
+
+    values = [m.value for m in get_catalog().models]
+
+    assert values == ["openrouter/fake/kept-model"]
+
+
+def test_featured_drops_models_beaten_on_score_and_price() -> None:
+    """A lab's model that another of its models beats on score and price is redundant."""
+    listing = {
+        "acme/ultra-2": _listed(_NOW, score=60, pricing={"prompt": "0.000004"}),
+        "acme/max-1": _listed(_NOW, score=55, pricing={"prompt": "0.00001"}),
+        "acme/flash-3": _listed(_NOW, score=45, pricing={"prompt": "0.0000003"}),
+    }
+    assert mc._featured_probe_ids(listing) == {"acme/ultra-2", "acme/flash-3"}
+
+
+def test_featured_new_release_inherits_its_lines_score() -> None:
+    """An unbenchmarked new release replaces its benchmarked predecessor on release day."""
+    listing = {
+        "acme/spark-1.2": _listed(_NOW - 30 * _DAY, score=50),
+        "acme/spark-1.3": _listed(_NOW),
+        "acme/novel-1": _listed(_NOW),
+    }
+    assert mc._featured_probe_ids(listing) == {"acme/spark-1.3"}
+
+
+def test_best_value_default_prefers_score_per_dollar_among_default_thinkers() -> None:
+    """The default is the featured default-on thinker with the best score per input dollar."""
+    thinks = {"reasoning": {"default_enabled": True}}
+    listing = {
+        "acme/ultra-2": _listed(_NOW, score=60, pricing={"prompt": "0.000004"}, **thinks),
+        "acme/flash-3": _listed(_NOW, score=45, pricing={"prompt": "0.0000003"}, **thinks),
+        "beta/cheap-1": _listed(_NOW, score=44, pricing={"prompt": "0.0000001"}),
+        "beta/mid-2": _listed(_NOW, score=50, pricing={"prompt": "0.000001"}, **thinks),
+    }
+    featured = mc._featured_probe_ids(listing)
+    assert "beta/cheap-1" in featured
+    winner = mc._best_value_probe_id(listing, featured)
+    assert winner is not None
+    assert winner[0] == "acme/flash-3"
+
+
+def test_best_value_default_is_none_without_default_thinkers() -> None:
+    """No featured model reasons by default, so no default is flagged."""
+    listing = {"acme/ultra-2": _listed(_NOW, score=60)}
+    assert mc._best_value_probe_id(listing, mc._featured_probe_ids(listing)) is None
+
+
+def test_practical_keeps_benchmarked_models_and_newest_of_each_line() -> None:
+    """Benchmarked models and a line's unbenchmarked newest release stay; the tail drops."""
+    listing = {
+        "acme/opus-5.5": _listed(_NOW, score=60),
+        "acme/opus-5.6": _listed(_NOW),
+        "acme/opus-5": _listed(_NOW - 60 * _DAY),
+        "hobby/finetune-7": _listed(_NOW),
+        "acme/lyria-3": _listed(_NOW, architecture={"output_modalities": ["text", "audio"]}),
+        "acme/notools-1": _listed(_NOW, score=50, supported_parameters=["reasoning"]),
+        "acme/ancient-1": _listed(_NOW - 800 * _DAY, score=40),
+        "acme/opus-5.5:free": _listed(_NOW, score=60),
+    }
+    assert mc._practical_probe_ids(listing) == {"acme/opus-5.5", "acme/opus-5.6"}
+
+
+def test_practical_keeps_everything_without_benchmarks() -> None:
+    """A gateway listing that carries no benchmarks is not filtered at all."""
+    assert mc._practical_probe_ids({"gw/model": _listed(_NOW)}) is None
+
+
+def test_get_catalog_hides_impractical_models_but_still_accepts_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dropped model leaves the menu, yet a pick made before it dropped still validates."""
+    monkeypatch.setattr(litellm, "model_cost", {})
+    monkeypatch.setattr(litellm, "get_valid_models", list)
+    probe = {
+        ("openrouter", None): {
+            "acme/opus-5.5": _listed(_NOW, score=60),
+            "hobby/finetune-7": _listed(_NOW),
+        }
+    }
+    monkeypatch.setattr(mc, "_probe_all_providers", lambda: probe)
+
+    catalog = get_catalog()
+    monkeypatch.setattr(mc, "get_catalog_cached", lambda: catalog)
+
+    assert [m.value for m in catalog.models] == ["openrouter/acme/opus-5.5"]
+    assert mc.is_hidden_model("openrouter/hobby/finetune-7")
+    mc.require_known_model("openrouter/hobby/finetune-7")

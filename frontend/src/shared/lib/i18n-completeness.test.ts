@@ -21,6 +21,7 @@ const cantoneseEnglishAllowlist = new Set([
   "connectors.field.postgres_url_placeholder",
   "connectors.field.project_placeholder",
   "connectors.field.service_account_json_placeholder",
+  "connectors.field.supabase_url_placeholder",
   "connectors.gcs.name",
   "auto.features.tutorial.components.concepts.guide.literal.312",
   "auto.features.tutorial.components.concepts.guide.literal.314",

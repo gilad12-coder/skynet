@@ -759,6 +759,7 @@ def search_optimizations(
     size: int = SEARCH_PAGE_SIZE_DEFAULT,
     owner_username: str | None = None,
     shared_with_username: str | None = None,
+    embedding_user: str | None = None,
 ) -> dict[str, Any]:
     """Search the optimization corpus, semantic when possible, lexical otherwise.
 
@@ -799,6 +800,8 @@ def search_optimizations(
             search to jobs shared with this user via a member grant — runs they
             were invited to but do not own, including private ones the grant
             authorizes. The caller verifies the requested user is the session.
+        embedding_user: Account the query embedding's tokens count against for
+            the per-user embeddings cap; ``None`` uses the shared anonymous bucket.
 
     Returns:
         ``{"results": [...], "total": int, "matched_ids": [...], "search_type": str}``,
@@ -836,7 +839,7 @@ def search_optimizations(
         ):
             use_lexical = True
         elif query_clean:
-            query_vector = get_embedder().encode(query_clean, task="retrieval.query")
+            query_vector = get_embedder().encode(query_clean, task="retrieval.query", user=embedding_user)
             if query_vector is None:
                 logger.info("search_optimizations: query embedding unavailable, using lexical")
                 use_lexical = True

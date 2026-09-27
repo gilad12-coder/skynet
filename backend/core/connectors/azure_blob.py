@@ -361,6 +361,28 @@ def verify_credentials(fields: dict[str, str]) -> Credential:
     return Credential(secret=json.dumps(config), auth_method="credentials", account_label=label)
 
 
+def has_importable(secret: ConnectorSecret, ref: str) -> bool | None:
+    """Settle whether a container or prefix holds an importable blob, in one flat listing.
+
+    Args:
+        secret: The stored connector.
+        ref: ``container`` or ``container/prefix/``.
+
+    Returns:
+        ``True``, ``False``, or ``None`` when it is too big to tell.
+    """
+    config = _config(secret)
+    container, prefix = split_location(ref)
+    query = {"restype": "container", "comp": "list", "maxresults": str(LIST_LIMIT)}
+    if prefix:
+        query["prefix"] = prefix
+    url, headers = _prepare(config, "GET", f"/{quote(container, safe='')}", query)
+    root = _xml(request("GET", url, provider=PROVIDER, headers=headers).content)
+    if any(is_supported(blob.findtext("Name") or "") for blob in root.iter("Blob")):
+        return True
+    return None if root.findtext("NextMarker") else False
+
+
 def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
     """List containers at the root, or one prefix of a container.
 

@@ -20,6 +20,10 @@ The summariser is cheap to stub: ``settings.embeddings_summary_model`` (or
 wrapped in ``dspy.Predict``. If it fails for any reason (no key, network
 error, quota) we fall back to a heuristic text composed from the title and
 description — the pipeline keeps working, just with weaker signal.
+
+The LLM call is billed to the job's owner: callers pass ``use_llm=False`` when
+the owner has no credits (the free heuristic still indexes the job) and a
+``usage_sink`` that collects the LM so they can meter it afterwards.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from typing import Any
 
 import dspy
 
+from ...api.model_catalog import agent_model_id
 from ...config import settings
 from ...models import ModelConfig
 from ..language_models import build_language_model
@@ -139,7 +144,7 @@ def _build_lm() -> dspy.LM | None:
         ``embeddings_summary_model`` (or ``code_agent_model`` as fallback),
         or ``None`` when no model id is set or instantiation fails.
     """
-    model_id = (settings.embeddings_summary_model or settings.code_agent_model).strip()
+    model_id = (settings.embeddings_summary_model or agent_model_id(settings.code_agent_model)).strip()
     if not model_id:
         return None
     try:
@@ -156,6 +161,8 @@ def summarize_task(
     title: str | None,
     description: str | None,
     dataset_sample: list[dict[str, Any]] | None,
+    use_llm: bool = True,
+    usage_sink: list[Any] | None = None,
 ) -> str:
     """Return a short natural-language description of a DSPy task.
 
@@ -168,16 +175,21 @@ def summarize_task(
         description: The user's description of the task.
         dataset_sample: Optional list of sample rows; the first ten
             are forwarded to the summariser LM.
+        use_llm: False skips the LLM and returns the heuristic fallback.
+        usage_sink: Optional list the summariser LM is appended to before it
+            runs, so the caller can meter its token usage.
 
     Returns:
         A 2-3 sentence task description from the LLM, or the heuristic
-        fallback (title + description) when the LLM is unavailable or its
-        call fails.
+        fallback (title + description) when the LLM is unavailable, not
+        allowed, or its call fails.
     """
     fallback = _heuristic_summary(title, description)
-    lm = _build_lm()
+    lm = _build_lm() if use_llm else None
     if lm is None:
         return fallback
+    if usage_sink is not None:
+        usage_sink.append(lm)
     try:
         sample_rows = dataset_sample[:10] if dataset_sample else []
         predictor = dspy.Predict(_TaskSummary)
@@ -201,6 +213,8 @@ def summarize_blackbox_task(
     title: str | None,
     description: str | None,
     cases_sample: list[dict[str, Any]] | None,
+    use_llm: bool = True,
+    usage_sink: list[Any] | None = None,
 ) -> str:
     """Return a short natural-language description of a black-box task.
 
@@ -212,18 +226,23 @@ def summarize_blackbox_task(
         title: The task's name.
         description: The user's description of what they want improved.
         cases_sample: Optional evaluation cases; the first ten are forwarded.
+        use_llm: False skips the LLM and returns the heuristic fallback.
+        usage_sink: Optional list the summariser LM is appended to before it
+            runs, so the caller can meter its token usage.
 
     Returns:
         A 2-3 sentence task description from the LLM, or the heuristic
-        fallback (title + description) when the LLM is unavailable or its
-        call fails.
+        fallback (title + description) when the LLM is unavailable, not
+        allowed, or its call fails.
     """
     fallback = _heuristic_summary(title, description)
     if not fallback:
         return ""
-    lm = _build_lm()
+    lm = _build_lm() if use_llm else None
     if lm is None:
         return fallback
+    if usage_sink is not None:
+        usage_sink.append(lm)
     try:
         sample_rows = cases_sample[:10] if cases_sample else []
         predictor = dspy.Predict(_BlackboxTaskSummary)

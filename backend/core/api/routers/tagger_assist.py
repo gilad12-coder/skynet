@@ -26,7 +26,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal, cast
+from typing import Annotated, Any, cast
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
@@ -50,8 +50,8 @@ from ...storage.models import TaggingSessionModel
 from ...worker.tagging_job import TaggingAutotagPayload, untagged_rows
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
-from ..model_catalog import get_catalog_cached
-from ..model_router import route_menu_model
+from ..model_catalog import ReasoningEffort, get_catalog_cached, is_hidden_model
+from ..model_router import effective_reasoning_effort, route_menu_model
 from ..sharing_access import ShareRole
 from ..tagging_session_access import require_role
 from ._helpers import enforce_llm_credits, sse_from_events, stream_with_llm_metering
@@ -88,12 +88,11 @@ class InterviewRequest(BaseModel):
         default=None,
         description=(
             "LiteLLM id of the catalog model conducting the interview (the "
-            "composer's model menu). Absent routes automatically (balanced "
-            "tier); the sentinel 'auto:intelligent' routes to a frontier-"
-            "quality model."
+            "composer's model menu). Absent runs the catalog's best-value "
+            "default model."
         ),
     )
-    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = Field(
+    reasoning_effort: ReasoningEffort | None = Field(
         default=None,
         description=(
             "Explicit reasoning-effort level for the chosen model; absent "
@@ -252,7 +251,7 @@ def _require_known_model(assist: dict[str, Any]) -> None:
     model = str((assist or {}).get("model") or "").strip()
     if not model:
         return
-    if all(entry.value != model for entry in get_catalog_cached().models):
+    if not is_hidden_model(model) and all(entry.value != model for entry in get_catalog_cached().models):
         raise DomainError("tagger.assist.unknown_model", status=422)
 
 
@@ -359,7 +358,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             config = _interview_config(row)
             columns = cast("list[str]", row.columns)
             data = cast("list[dict[str, Any]]", row.data)
-        model, lm_extra_body = route_menu_model(req.model, session_id=session_id)
+        model = route_menu_model(req.model)
         usage_sink: list = []
         try:
             turn = tagging.interview_turn(
@@ -369,8 +368,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                 [t.model_dump() for t in req.turns],
                 req.locale,
                 model=model,
-                reasoning_effort=req.reasoning_effort,
-                lm_extra_body=lm_extra_body,
+                reasoning_effort=effective_reasoning_effort(model, req.reasoning_effort),
                 usage_sink=usage_sink,
             )
         except Exception as exc:
@@ -413,7 +411,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             config = _interview_config(row)
             columns = cast("list[str]", row.columns)
             data = cast("list[dict[str, Any]]", row.data)
-        model, lm_extra_body = route_menu_model(req.model, session_id=session_id)
+        model = route_menu_model(req.model)
         usage_sink: list = []
 
         async def source() -> Any:
@@ -426,8 +424,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                     [t.model_dump() for t in req.turns],
                     req.locale,
                     model=model,
-                    reasoning_effort=req.reasoning_effort,
-                    lm_extra_body=lm_extra_body,
+                    reasoning_effort=effective_reasoning_effort(model, req.reasoning_effort),
                     usage_sink=usage_sink,
                 ):
                     yield event

@@ -71,6 +71,7 @@ import {
   buildGridDemoJob,
   buildBlackboxDemoJob,
   buildBlackboxDemoPayload,
+  finishDemoSimulation,
   resetDemoSimulation,
   startDemoSimulation,
 } from "@/features/tutorial/lib/demo-data";
@@ -115,7 +116,7 @@ import { useStreamWithPollFallback } from "@/shared/hooks/use-stream-with-poll-f
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 
 const BLACKBOX_LOG_FETCH_DELAY_MS = 3000;
-const PHONE_DETAIL_TABS = new Set(["overview", "playground", "artifact", "logs", "budget"]);
+const PHONE_DETAIL_TABS = new Set(["overview", "playground", "best", "artifact", "logs", "budget"]);
 
 // Treat naive ISO timestamps (no trailing tz marker) as UTC — that matches the
 // backend, which stores UTC datetimes that Pydantic emits without a suffix.
@@ -322,6 +323,15 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       registerTutorialHook("replayDemoSimulation", () => {
         resetDemoSimulation();
         setDemoReplayKey((k) => k + 1);
+      }),
+    [],
+  );
+  // Re-running the simulation effect clears the pending replay timers, and a
+  // completed simulation starts straight at the finished run.
+  useEffect(
+    () =>
+      registerTutorialHook("finishDemoSimulation", () => {
+        if (finishDemoSimulation()) setDemoReplayKey((k) => k + 1);
       }),
     [],
   );

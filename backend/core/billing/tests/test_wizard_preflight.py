@@ -28,6 +28,7 @@ from core.billing.protected_credentials import (
     protect_execution_credentials,
 )
 from core.billing.runtime import PaidResult, UsagePendingError
+from core.config import settings
 from core.models import BlackboxRunRequest
 from core.storage.models import Base, BillingCustomerModel, BillingProviderKeyModel
 from core.storage.preflights import PreflightStore, setup_seed
@@ -54,6 +55,12 @@ class _Gateway:
 
     def close(self) -> None:
         """Complete the deterministic test transport."""
+
+
+@pytest.fixture(autouse=True)
+def _at_cost_markup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the usage markup to 1.0 so these tests check settlement arithmetic, not pricing policy."""
+    monkeypatch.setattr(settings, "usage_markup", 1.0)
 
 
 @pytest.fixture

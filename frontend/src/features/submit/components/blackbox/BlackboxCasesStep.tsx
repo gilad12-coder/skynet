@@ -10,6 +10,7 @@ import { DatasetPickerDialog } from "@/features/datasets";
 import { ImportFromMenu } from "@/features/connectors";
 import { cn } from "@/shared/lib/utils";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { DATASET_UPLOAD_ACCEPT } from "@/shared/lib/parse-dataset";
 
 import type { BlackboxWizardContext } from "../../hooks/use-blackbox-wizard";
 import { StepCard } from "./shared";
@@ -80,7 +81,7 @@ export function BlackboxCasesStep({
           )}
           <input
             type="file"
-            accept=".csv,.json,.xlsx,.xls"
+            accept={DATASET_UPLOAD_ACCEPT}
             className="sr-only"
             onChange={handleFileUpload}
           />

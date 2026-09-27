@@ -65,12 +65,6 @@ const PURPOSE_LABEL_KEYS: Record<ModelPurpose, MessageKey> = {
   onprem: "submit.modelpicker.purpose.onprem",
 };
 
-function formatCtx(tokens?: number): string {
-  if (!tokens) return "";
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  return `${Math.round(tokens / 1000)}K`;
-}
-
 /** Searchable combobox for managed or account-scoped BYOK model IDs. */
 export function ModelPicker({
   value,
@@ -327,11 +321,6 @@ export function ModelPicker({
                 >
                   <span className="flex min-w-0 flex-1 items-center gap-1.5" dir="ltr">
                     <span className="truncate text-[0.8125rem]">{m.label}</span>
-                    {m.max_input_tokens && (
-                      <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground">
-                        {formatCtx(m.max_input_tokens)}
-                      </span>
-                    )}
                     {m.supports_vision && (
                       <MicroPill tone="primary" title={msg("shared.model_chip.vision_badge")}>
                         <Eye className="size-2.5" />

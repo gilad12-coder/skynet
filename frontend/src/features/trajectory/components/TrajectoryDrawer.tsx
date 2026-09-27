@@ -754,11 +754,11 @@ function MinibatchEntryCard({
                 })}
               </span>
             ) : null
-          ) : (
+          ) : entry.example_id !== "?" ? (
             <span className="font-mono text-[10px] text-muted-foreground" dir="ltr">
               #{entry.example_id}
             </span>
-          )}
+          ) : null}
         </div>
         <HelpTip
           text={msg(
@@ -1932,7 +1932,8 @@ function PromptKindHeader({
         <KindIcon className="size-3" />
         {kindText}
       </span>
-      {!decomposed && label.length > 0 ? (
+      {/* "self" is the name DSPy gives a lone predictor, not a useful label. */}
+      {!decomposed && label.length > 0 && label !== "self" ? (
         <span className="truncate font-mono text-[0.625rem] text-muted-foreground/70" dir="ltr">
           {label}
         </span>

@@ -6,10 +6,12 @@ OpenAI-compatible embeddings endpoint and model id; this adapter sends text
 to that endpoint, truncates the returned vector to the configured schema
 dimension, and L2-normalizes it before storage.
 
-Embedding calls run on the platform's key and are not billed to user credits,
-so their tokens count against a platform-wide monthly cap
-(``EMBEDDINGS_MONTHLY_TOKEN_CAP``). Past it, ``encode`` returns ``None`` exactly
-as it does when the API is down, and callers already degrade on that.
+Embedding calls run on the platform's key and are not billed to user credits
+(a call costs a small fraction of a credit), so their tokens count against a
+platform-wide monthly cap (``EMBEDDINGS_MONTHLY_TOKEN_CAP``) and a per-user one
+(``EMBEDDINGS_USER_MONTHLY_TOKEN_CAP``) so a single account cannot drain the
+shared budget. Past either, ``encode`` returns ``None`` exactly as it does when
+the API is down, and callers already degrade on that.
 """
 
 from __future__ import annotations
@@ -29,6 +31,9 @@ logger = logging.getLogger(__name__)
 _EMBEDDER_LOCK = threading.Lock()
 _EMBEDDER_INSTANCE: _EmbeddingApiClient | None = None
 _BUDGET_SERVICE = "embeddings"
+_USER_BUDGET_PREFIX = "embeddings-user"
+# Unauthenticated public searches share one bucket so they cannot dodge the per-user cap.
+_ANONYMOUS_BUDGET_USER = "anonymous"
 # Rough English tokens-per-character ratio, used only when a provider omits usage.
 _CHARS_PER_TOKEN = 4
 
@@ -56,7 +61,7 @@ class _EmbeddingApiClient:
             return False
         return True
 
-    def encode(self, text: str, *, task: str | None = None) -> list[float] | None:
+    def encode(self, text: str, *, task: str | None = None, user: str | None = None) -> list[float] | None:
         """Return a truncated, L2-normalized embedding from the configured API.
 
         Args:
@@ -66,21 +71,27 @@ class _EmbeddingApiClient:
                 for indexed documents so the asymmetric LoRA adapters score
                 each side correctly. Providers that don't recognize the field
                 ignore it.
+            user: Account the tokens are counted against for the per-user
+                monthly cap; ``None`` counts them in the shared anonymous bucket.
 
         Returns:
             A normalized list of floats of length ``settings.embeddings_dim``,
             or ``None`` when the input is empty, the API is unavailable, the
-            month's token cap is spent, the vector is too short, or the
-            request/response is invalid.
+            platform's or the user's monthly token cap is spent, the vector is
+            too short, or the request/response is invalid.
         """
         if not text or not text.strip() or not self.available():
             return None
         cap = settings.embeddings_monthly_token_cap
-        if not budget_open(_BUDGET_SERVICE, cap):
+        user_cap = settings.embeddings_user_monthly_token_cap
+        user_service = f"{_USER_BUDGET_PREFIX}:{(user or _ANONYMOUS_BUDGET_USER).lower()}"
+        if not budget_open(_BUDGET_SERVICE, cap) or not budget_open(user_service, user_cap):
             return None
         try:
             raw, tokens = self._request_embedding(text, task=task)
-            record_spend(_BUDGET_SERVICE, tokens or len(text) / _CHARS_PER_TOKEN, cap)
+            spent = tokens or len(text) / _CHARS_PER_TOKEN
+            record_spend(_BUDGET_SERVICE, spent, cap)
+            record_spend(user_service, spent, user_cap, alert=False)
             if len(raw) < self._dim:
                 logger.warning(
                     "Embedding model %s returned %d dimensions; schema requires %d.",

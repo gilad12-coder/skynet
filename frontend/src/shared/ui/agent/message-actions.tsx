@@ -1,21 +1,22 @@
 "use client";
 
 import * as React from "react";
-import { Cpu, ArrowsClockwise } from "@/shared/ui/icons";
+import { ArrowsClockwise, Info } from "@/shared/ui/icons";
 
-import { Badge } from "@/shared/ui/primitives/badge";
 import { Button } from "@/shared/ui/primitives/button";
 import { CopyGlyph, useCopyToClipboard } from "@/shared/ui/copy-button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
-import { msg } from "@/shared/lib/messages";
+import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
-import { getActiveDir } from "@/shared/lib/runtime-locale";
+import { getActiveDir, getActiveIntlLocale } from "@/shared/lib/runtime-locale";
+import type { TurnStats } from "./types";
 
 interface MessageActionsProps {
   text: string;
   model?: string | null;
   /** Concrete model the Auto Router picked for this turn, when known. */
   servedModel?: string | null;
+  stats?: TurnStats | null;
   onRegenerate?: () => void;
   className?: string;
 }
@@ -41,28 +42,81 @@ function ActionButton({ label, onClick, children }: ActionButtonProps) {
   );
 }
 
+function formatSeconds(ms: number, locale: string): string {
+  const seconds = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(ms / 1000);
+  return `${seconds}${msg("shared.agent.seconds_short")}`;
+}
+
+function formatCost(credits: number, locale: string): string {
+  const usd = new Intl.NumberFormat(locale, { style: "currency", currency: "USD" });
+  // One credit is one cent, so a cheap turn prices to zero whole credits.
+  return credits > 0 ? usd.format(credits / 100) : `< ${usd.format(0.01)}`;
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <>
+      <dt className="text-background/60">{label}</dt>
+      <dd dir="ltr" className="text-end font-mono tabular-nums">
+        {value}
+      </dd>
+    </>
+  );
+}
+
 export function MessageActions({
   text,
   model,
   servedModel,
+  stats,
   onRegenerate,
   className,
 }: MessageActionsProps) {
   const { copied, copy } = useCopyToClipboard();
 
   // Turns routed by OpenRouter's Auto Router (the composer's Auto tiers)
-  // report the router's own id — read it back as "Auto", and when the
-  // backend resolved the concrete pick, reveal it: "Auto · gemini-3.6-flash".
+  // report the router's own id; read it back as "Auto" and name the pick.
   const isAutoRouted = !!model && model.startsWith("openrouter/openrouter/auto");
-  const served = servedModel ? (servedModel.split("/").pop() ?? servedModel) : null;
-  const shortModel = isAutoRouted
-    ? served
-      ? `${msg("agent.model_menu.auto")} · ${served}`
-      : msg("agent.model_menu.auto")
-    : model
-      ? (model.split("/").pop() ?? model)
-      : null;
-  const fullModel = isAutoRouted && servedModel ? servedModel : model;
+  const locale = getActiveIntlLocale();
+  const count = new Intl.NumberFormat(locale);
+  const rows: Array<{ label: string; value: string }> = [];
+  if (model) {
+    rows.push({
+      label: msg("shared.agent.info.model"),
+      value: isAutoRouted ? msg("agent.model_menu.auto") : model,
+    });
+  }
+  if (isAutoRouted && servedModel) {
+    rows.push({ label: msg("shared.agent.info.routed_to"), value: servedModel });
+  }
+  if (stats?.inputTokens != null) {
+    rows.push({ label: msg("shared.agent.info.input_tokens"), value: count.format(stats.inputTokens) });
+  }
+  if (stats?.outputTokens != null) {
+    rows.push({ label: msg("shared.agent.info.output_tokens"), value: count.format(stats.outputTokens) });
+  }
+  // Generation time excludes the wait for the first token, so the rate
+  // reflects how fast the model wrote rather than how long it queued.
+  const generationMs =
+    stats?.durationMs != null ? stats.durationMs - (stats.ttftMs ?? 0) : null;
+  if (stats?.outputTokens && generationMs && generationMs > 0) {
+    const perSecond = stats.outputTokens / (generationMs / 1000);
+    rows.push({
+      label: msg("shared.agent.info.speed"),
+      value: formatMsg("shared.agent.info.tokens_per_second", {
+        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(perSecond),
+      }),
+    });
+  }
+  if (stats?.ttftMs != null) {
+    rows.push({ label: msg("shared.agent.info.first_token"), value: formatSeconds(stats.ttftMs, locale) });
+  }
+  if (stats?.durationMs != null) {
+    rows.push({ label: msg("shared.agent.info.total_time"), value: formatSeconds(stats.durationMs, locale) });
+  }
+  if (stats?.credits != null) {
+    rows.push({ label: msg("shared.agent.info.cost"), value: formatCost(stats.credits, locale) });
+  }
 
   return (
     <div className={cn("flex items-center gap-1 -ms-1.5", className)}>
@@ -82,24 +136,19 @@ export function MessageActions({
       <span className="sr-only" role="status" aria-live="polite">
         {copied ? msg("shared.agent.copied") : ""}
       </span>
-      {model && shortModel && (
+      {rows.length > 0 && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <Badge
-              variant="ghost"
-              size="sm"
-              dir="ltr"
-              className={cn(
-                "ms-1.5 h-[26px] rounded-md px-2 font-mono cursor-default",
-                "shadow-none text-muted-foreground/80",
-              )}
-            >
-              <Cpu aria-hidden="true" />
-              <span className="truncate max-w-[180px]">{shortModel}</span>
-            </Badge>
+            <Button variant="ghost" size="icon-xs" aria-label={msg("shared.agent.info.label")}>
+              <Info className="size-3.5" />
+            </Button>
           </TooltipTrigger>
-          <TooltipContent side="top" dir="ltr" className="font-mono">
-            {fullModel}
+          <TooltipContent side="top" dir={getActiveDir()} className="text-start text-pretty">
+            <dl className="grid grid-cols-[auto_auto] gap-x-4 gap-y-1">
+              {rows.map((row) => (
+                <InfoRow key={row.label} label={row.label} value={row.value} />
+              ))}
+            </dl>
           </TooltipContent>
         </Tooltip>
       )}

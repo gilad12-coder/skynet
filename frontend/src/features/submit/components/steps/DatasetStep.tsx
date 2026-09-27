@@ -19,6 +19,7 @@ import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { TERMS } from "@/shared/lib/terms";
 import { msg } from "@/shared/lib/messages";
+import { DATASET_UPLOAD_ACCEPT } from "@/shared/lib/parse-dataset";
 import { DatasetPreviewLayout } from "../DatasetPreviewLayout";
 import { DatasetPickerDialog } from "@/features/datasets";
 import { ImportFromMenu } from "@/features/connectors";
@@ -117,7 +118,7 @@ export function DatasetStep({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.json,.xlsx,.xls"
+              accept={DATASET_UPLOAD_ACCEPT}
               className="sr-only"
               onChange={handleFileUpload}
             />

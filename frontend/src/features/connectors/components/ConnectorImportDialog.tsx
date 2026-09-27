@@ -13,7 +13,6 @@ import {
   DownloadSimple,
   FileText,
   Folder,
-  Plug,
 } from "@/shared/ui/icons";
 import { Button } from "@/shared/ui/primitives/button";
 import {
@@ -34,6 +33,7 @@ import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import {
   browseConnector,
+  getConnectors,
   importConnectorRef,
   isStorageQuotaError,
   previewConnectorRef,
@@ -46,7 +46,6 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import { useSettingsModal } from "@/features/settings";
 import { DatasetPreviewPanel } from "@/features/datasets";
-import { useConnectors } from "../hooks/use-connectors";
 import { BROWSE_CARET_CLASS, BROWSE_LIST_CLASS, BROWSE_ROW_CLASS } from "./browse-list";
 import { providerMeta } from "./providers";
 import { SearchInput } from "@/shared/ui/search-input";
@@ -63,8 +62,10 @@ export interface ConnectorImportDialogProps {
 }
 
 const SEARCH_DEBOUNCE_MS = 300;
-const TOUCH_BUTTON =
-  "min-h-[44px] sm:min-h-0 [@media(hover:none)_and_(pointer:coarse)]:min-h-[44px]";
+/** A listing seen this recently is shown as is, without asking the server again. */
+const LISTING_FRESH_MS = 30_000;
+/** Hover this long on a folder before its listing is fetched ahead of the click. */
+const PREFETCH_DELAY_MS = 120;
 
 // Deeper paths keep the root and the last two folders visible and fold the
 // middle into a menu, so the trail stays on one line.
@@ -72,6 +73,18 @@ const MAX_VISIBLE_CRUMBS = 3;
 const CRUMB_CLASS =
   "max-w-[12rem] cursor-pointer truncate rounded-md px-1.5 py-1 hover:bg-accent hover:text-foreground";
 const CURRENT_CRUMB_CLASS = "cursor-default font-medium text-foreground hover:bg-transparent";
+
+type Listing = Awaited<ReturnType<typeof browseConnector>>;
+
+interface CachedListing {
+  listing: Listing;
+  at: number;
+}
+
+/** Cache key for one listing: a provider's folder plus the root search it was asked with. */
+function listingKey(provider: ConnectorProvider, location: string, search: string): string {
+  return [provider, location, search].join("\u0000");
+}
 
 interface Crumb {
   ref: string;
@@ -107,7 +120,8 @@ function entryDetail(provider: ConnectorProvider, entry: ConnectorEntry) {
  * Two-step picker for the browse-style connectors: walk the account's
  * buckets, repositories or spreadsheets down to one file, then glance at its
  * first rows, name it and import it. Everything goes through the caller's
- * linked account, so the dialog asks for one when none is linked yet.
+ * linked account, so when none is linked the dialog hands off to Settings →
+ * Connectors with this provider's form open.
  */
 export function ConnectorImportDialog({
   provider,
@@ -116,12 +130,41 @@ export function ConnectorImportDialog({
   onImported,
 }: ConnectorImportDialogProps) {
   const meta = providerMeta(provider);
-  const { byProvider, loading: connectorsLoading } = useConnectors(open);
-  const settingsModal = useSettingsModal();
-  const connected = byProvider(provider)?.connected ?? false;
+  const { openTo } = useSettingsModal();
+  // Checked fresh on every open (null until then), so a link made in Settings
+  // since the last open is seen and a stale "unlinked" never bounces the user.
+  const [connected, setConnected] = React.useState<boolean | null>(null);
+
+  React.useEffect(() => {
+    if (!open) {
+      setConnected(null);
+      return;
+    }
+    let cancelled = false;
+    getConnectors()
+      .then((res) => {
+        if (cancelled) return;
+        if (res.connectors.find((c) => c.provider === provider)?.connected) {
+          setConnected(true);
+        } else {
+          // Nothing to browse without a link: go straight to its connect form.
+          onOpenChange(false);
+          openTo("connectors", provider);
+        }
+      })
+      .catch(() => {
+        // Let the browse call try and surface its own error.
+        if (!cancelled) setConnected(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // onOpenChange is often an inline arrow; re-checking on each parent render would refetch.
+  }, [open, provider, openTo]);
 
   const [path, setPath] = React.useState<Crumb[]>([]);
   const [entries, setEntries] = React.useState<ConnectorEntry[]>([]);
+  const [locationUrl, setLocationUrl] = React.useState<string | null>(null);
   const [browsing, setBrowsing] = React.useState(false);
   const [browseFailed, setBrowseFailed] = React.useState(false);
   const [query, setQuery] = React.useState("");
@@ -144,10 +187,59 @@ export function ConnectorImportDialog({
   const location = path.at(-1)?.ref ?? "";
   const trimmedQuery = query.trim();
 
+  // Listings are kept for the life of the dialog so going back, or into a
+  // folder already hovered, shows its contents without waiting on the server.
+  const listings = React.useRef(new Map<string, CachedListing>());
+  const inflight = React.useRef(new Map<string, Promise<Listing>>());
+  const prefetchTimer = React.useRef<number | undefined>(undefined);
+
+  const loadListing = React.useCallback(
+    (at: string, search: string): Promise<Listing> => {
+      const key = listingKey(provider, at, search);
+      const pending = inflight.current.get(key);
+      if (pending) return pending;
+      const request = browseConnector(provider, at, search)
+        .then((listing) => {
+          listings.current.set(key, { listing, at: Date.now() });
+          return listing;
+        })
+        .finally(() => inflight.current.delete(key));
+      inflight.current.set(key, request);
+      return request;
+    },
+    [provider],
+  );
+
+  const prefetchFolder = (entry: ConnectorEntry) => {
+    if (entry.kind !== "folder" || listings.current.has(listingKey(provider, entry.ref, ""))) return;
+    window.clearTimeout(prefetchTimer.current);
+    prefetchTimer.current = window.setTimeout(() => {
+      // A failed prefetch is retried, visibly, when the folder is opened.
+      loadListing(entry.ref, "").catch(() => undefined);
+    }, PREFETCH_DELAY_MS);
+  };
+
+  const cancelPrefetch = () => window.clearTimeout(prefetchTimer.current);
+
+  /** Show a folder's cached listing at once; clear the list when there is none. */
+  const showCached = (at: string) => {
+    const cached = listings.current.get(listingKey(provider, at, ""));
+    setEntries(cached?.listing.entries ?? []);
+    setLocationUrl(cached?.listing.location_url ?? null);
+  };
+
+  React.useEffect(() => {
+    listings.current.clear();
+    inflight.current.clear();
+  }, [open, provider]);
+
+  React.useEffect(() => () => window.clearTimeout(prefetchTimer.current), []);
+
   React.useEffect(() => {
     if (!open) {
       setPath([]);
       setEntries([]);
+      setLocationUrl(null);
       setBrowseFailed(false);
       setQuery("");
       setSelected(null);
@@ -163,16 +255,28 @@ export function ConnectorImportDialog({
   React.useEffect(() => {
     if (!open || !connected || selected) return;
     let cancelled = false;
-    setBrowsing(true);
+    const search = location ? "" : trimmedQuery;
+    const cached = listings.current.get(listingKey(provider, location, search));
     setBrowseFailed(false);
-    const delay = location ? 0 : SEARCH_DEBOUNCE_MS;
+    if (cached) {
+      setEntries(cached.listing.entries);
+      setLocationUrl(cached.listing.location_url ?? null);
+      setBrowsing(false);
+      if (attempt === 0 && Date.now() - cached.at < LISTING_FRESH_MS) return;
+    } else {
+      setBrowsing(true);
+    }
+    const delay = location || cached ? 0 : SEARCH_DEBOUNCE_MS;
     const handle = window.setTimeout(() => {
-      browseConnector(provider, location, location ? "" : trimmedQuery)
+      loadListing(location, search)
         .then((res) => {
-          if (!cancelled) setEntries(res.entries);
+          if (cancelled) return;
+          setEntries(res.entries);
+          setLocationUrl(res.location_url ?? null);
         })
         .catch(() => {
-          if (!cancelled) setBrowseFailed(true);
+          // A stale listing on screen beats an error for a background refresh.
+          if (!cancelled && !cached) setBrowseFailed(true);
         })
         .finally(() => {
           if (!cancelled) setBrowsing(false);
@@ -182,7 +286,7 @@ export function ConnectorImportDialog({
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [open, connected, selected, provider, location, trimmedQuery, attempt]);
+  }, [open, connected, selected, provider, location, trimmedQuery, attempt, loadListing]);
 
   React.useEffect(() => {
     if (!selected) return;
@@ -218,9 +322,10 @@ export function ConnectorImportDialog({
 
   const openEntry = (entry: ConnectorEntry) => {
     if (entry.kind === "folder") {
+      cancelPrefetch();
       setPath((prev) => [...prev, { ref: entry.ref, name: entry.name }]);
       setQuery("");
-      setEntries([]);
+      showCached(entry.ref);
     } else {
       setSelected(entry);
     }
@@ -229,7 +334,7 @@ export function ConnectorImportDialog({
   const jumpTo = (index: number) => {
     setPath((prev) => prev.slice(0, index));
     setQuery("");
-    setEntries([]);
+    showCached(path[index - 1]?.ref ?? "");
   };
 
   const goUp = () => {
@@ -262,10 +367,6 @@ export function ConnectorImportDialog({
     }
   };
 
-  const openConnectors = () => {
-    onOpenChange(false);
-    settingsModal.openTo("connectors");
-  };
 
   const rowTotal = preview?.num_rows_total ?? null;
 
@@ -293,19 +394,8 @@ export function ConnectorImportDialog({
           </div>
         </DialogHeader>
 
-        {connectorsLoading ? (
+        {!connected ? (
           <LoadingState className="py-14" />
-        ) : !connected ? (
-          <div className="px-5 pb-5 pt-4">
-            <div className="flex flex-col items-center gap-3 rounded-lg border border-[#C8A882]/40 bg-[#C8A882]/10 px-4 py-8 text-center text-sm text-[#6b5232]">
-              <Plug className="size-5" />
-              <p>{formatMsg("connector_import.not_connected", { provider: meta.name })}</p>
-              <Button size="sm" onClick={openConnectors} className={TOUCH_BUTTON}>
-                {formatMsg("connector_import.connect_link", { provider: meta.name })}
-                <ArrowSquareOut className="size-3.5" />
-              </Button>
-            </div>
-          </div>
         ) : selected === null ? (
           <div className="px-5 pb-5 pt-4">
             <div className="mb-3 flex min-w-0 items-center gap-1.5">
@@ -385,6 +475,25 @@ export function ConnectorImportDialog({
                   );
                 })}
               </nav>
+              {locationUrl && (
+                <TooltipButton
+                  tooltip={formatMsg("connector_import.open_location", { provider: meta.name })}
+                >
+                  <Button
+                    asChild
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={formatMsg("connector_import.open_location", {
+                      provider: meta.name,
+                    })}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                  >
+                    <a href={locationUrl} target="_blank" rel="noopener noreferrer">
+                      <ArrowSquareOut className="size-4" />
+                    </a>
+                  </Button>
+                </TooltipButton>
+              )}
             </div>
 
             <SearchInput
@@ -424,6 +533,9 @@ export function ConnectorImportDialog({
                         <button
                           type="button"
                           onClick={() => openEntry(entry)}
+                          onPointerEnter={() => prefetchFolder(entry)}
+                          onPointerLeave={cancelPrefetch}
+                          onFocus={() => prefetchFolder(entry)}
                           className={BROWSE_ROW_CLASS}
                         >
                           <EntryIcon

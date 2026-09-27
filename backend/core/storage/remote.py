@@ -19,7 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, defer, sessionmaker
 
 from ..billing.budgets import BudgetInFlightError, BudgetInsufficientError
-from ..billing.plans import is_pro_status
+from ..billing.plans import has_pro_entitlement
 from ..billing.recovery_admission import (
     RecoveryAdmissionError,
     headroom_price_snapshot,
@@ -1891,7 +1891,7 @@ class RemoteDBJobStore:
         if has_override:
             return quota
         if self.has_pro_plan(username):
-            return None
+            return settings.pro_max_jobs_per_user
         return settings.get_user_quota(username)
 
     def has_pro_plan(self, username: str) -> bool:
@@ -1901,7 +1901,8 @@ class RemoteDBJobStore:
             username: Account to check, resolved case-insensitively.
 
         Returns:
-            True when the webhook-mirrored subscription status is entitled.
+            True when the webhook-mirrored subscription currently grants Pro
+            limits (a ``past_due`` one only inside its grace period).
         """
         normalized_username = username.strip().lower()
         if not normalized_username:
@@ -1909,7 +1910,7 @@ class RemoteDBJobStore:
         session = self._get_session()
         try:
             row = session.get(BillingCustomerModel, normalized_username)
-            return row is not None and is_pro_status(row.subscription_status)
+            return row is not None and has_pro_entitlement(row.subscription_status, row.subscription_past_due_since)
         finally:
             session.close()
 

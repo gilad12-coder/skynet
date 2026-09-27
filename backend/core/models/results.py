@@ -45,6 +45,15 @@ class ModelTokenUsage(BaseModel):
     model: str
     input_tokens: int = 0
     output_tokens: int = 0
+    # Provider-reported cost of the calls that returned one, and the tokens it
+    # covers; the rest is priced per token, with cache and reasoning tokens at
+    # their own rates.
+    reported_cost_usd: float = 0.0
+    reported_input_tokens: int = 0
+    reported_output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    reasoning_tokens: int = 0
 
 
 class RunResponse(BaseModel):

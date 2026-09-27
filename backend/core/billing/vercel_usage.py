@@ -34,7 +34,6 @@ _REGIONAL_RATES = {
 _CREATION_USD = Decimal("0.0000006")
 _MS_PER_HOUR = Decimal(3_600_000)
 _IMMUTABLE_IMAGE = re.compile(r".+@sha256:[0-9a-f]{64}\Z")
-_SANDBOX_POLICY = ChargePolicy("sandbox")
 _SESSION_FIELDS = (
     "id",
     "status",
@@ -50,7 +49,7 @@ _SESSION_FIELDS = (
 
 
 def vercel_sandbox_credit_range(request: Mapping[str, Any]) -> tuple[Decimal, Decimal]:
-    """Return the current at-cost session floor and enforceable request bound.
+    """Return the current marked-up session floor and enforceable request bound.
 
     Args:
         request: Final immutable sandbox resource request accepted by
@@ -58,7 +57,7 @@ def vercel_sandbox_credit_range(request: Mapping[str, Any]) -> tuple[Decimal, De
 
     Returns:
         The smallest published creation-plus-memory charge and the request's
-        maximum covered credit amount, both without model markup.
+        maximum covered credit amount, both including the usage markup.
 
     Raises:
         UnpricedOperationError: When the request cannot be bounded.
@@ -67,7 +66,7 @@ def vercel_sandbox_credit_range(request: Mapping[str, Any]) -> tuple[Decimal, De
     vcpus = request["vcpus"]
     minimum_memory_rate = min(memory for _cpu, memory in _REGIONAL_RATES.values())
     minimum_usd = _CREATION_USD + Decimal(vcpus * 2) * minimum_memory_rate / Decimal(60)
-    minimum = _SANDBOX_POLICY.convert(minimum_usd).total
+    minimum = ChargePolicy("sandbox").convert(minimum_usd).total
     return minimum, maximum
 
 
@@ -137,7 +136,7 @@ def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
     return operation_quote(
         request,
         maximum,
-        _SANDBOX_POLICY,
+        ChargePolicy("sandbox"),
         {
             "provider": "vercel",
             "price_version": _PRICE_VERSION,
@@ -403,7 +402,10 @@ class VercelUsageReservation:
 
 
 def vercel_charge_policy(price_snapshot: Mapping[str, Any]) -> ChargePolicy:
-    """Recover the admitted at-cost credit conversion without applying newer defaults.
+    """Recover the admitted credit conversion without applying newer defaults.
+
+    Snapshots recorded before the usage markup existed carry a markup of 1.0 and
+    keep settling at cost.
 
     Args:
         price_snapshot: Original immutable sandbox quote.
@@ -420,11 +422,12 @@ def vercel_charge_policy(price_snapshot: Mapping[str, Any]) -> ChargePolicy:
         or policy.get("kind") != "sandbox"
         or policy.get("version") != "skynet-operation-pricing-v1"
     ):
-        raise UsagePendingError("The Vercel operation has no supported at-cost conversion policy.")
+        raise UsagePendingError("The Vercel operation has no supported credit conversion policy.")
     try:
         credit_usd = exact_nonnegative(policy.get("credit_usd"))
         if credit_usd <= 0:
             raise ValueError("Missing positive credit conversion")
-        return ChargePolicy("sandbox", credit_usd=credit_usd)
+        markup = exact_nonnegative(policy.get("model_markup", "1"))
+        return ChargePolicy("sandbox", credit_usd=credit_usd, model_markup=markup)
     except ValueError as error:
         raise UsagePendingError("The Vercel operation has no usable historical credit conversion.") from error

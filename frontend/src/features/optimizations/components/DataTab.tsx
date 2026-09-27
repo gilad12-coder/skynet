@@ -4,6 +4,7 @@ import { notifyCopied } from "@/shared/lib/notify";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import { ProgressBar } from "@/shared/ui/progress-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTableSort } from "@/shared/hooks/use-table-sort";
 import { toast } from "react-toastify";
 import { CircleNotch, ClockCounterClockwise, MagicWand, Tray } from "@/shared/ui/icons";
 import { Card, CardContent } from "@/shared/ui/primitives/card";
@@ -15,7 +16,6 @@ import {
   useColumnResize,
   ResetColumnsButton,
   ResetFiltersButton,
-  type SortDir,
 } from "@/shared/ui/excel-filter";
 import { DataTabSkeleton } from "./DataTabSkeleton";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
@@ -27,6 +27,7 @@ import { cn } from "@/shared/lib/utils";
 import { DatasetRowReader, ExpandTableButton } from "@/features/datasets";
 import { tip } from "@/shared/lib/tooltips";
 import { getOptimizationDataset, getTestResults, getPairTestResults } from "@/shared/lib/api";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import type {
   OptimizationDatasetResponse,
   OptimizationStatusResponse,
@@ -99,15 +100,7 @@ export function DataTab({
   const [testResultsLoading, setTestResultsLoading] = useState(false);
 
   const colFilters = useColumnFilters();
-  const [sortKey, setSortKey] = useState<string>("");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const toggleSort = (key: string) => {
-    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
-  };
+  const { sortKey, sortDir, toggleSort } = useTableSort<string>("");
   const colResize = useColumnResize();
 
   const isDemoMode = job.optimization_id === DEMO_OPTIMIZATION_ID;
@@ -186,10 +179,10 @@ export function DataTab({
       });
       setTestResults({
         optimized: {
-          7: { index: 7, outputs: { category: "spam" }, score: 0.0, pass: false },
+          7: { index: 7, outputs: { category: "promotional" }, score: 0.0, pass: false },
           8: { index: 8, outputs: { category: "important" }, score: 1.0, pass: true },
           9: { index: 9, outputs: { category: "promotional" }, score: 1.0, pass: true },
-          10: { index: 10, outputs: { category: "important" }, score: 0.0, pass: false },
+          10: { index: 10, outputs: { category: "promotional" }, score: 0.0, pass: false },
           11: { index: 11, outputs: { category: "spam" }, score: 1.0, pass: true },
         },
         baseline: {
@@ -289,10 +282,11 @@ export function DataTab({
       return true;
     });
     if (sortKey) {
+      const collLocale = getActiveIntlLocale();
       result = [...result].sort((a, b) => {
         const av = formatCellValue(a.row[sortKey]);
         const bv = formatCellValue(b.row[sortKey]);
-        const cmp = av.localeCompare(bv, "he", { numeric: true });
+        const cmp = av.localeCompare(bv, collLocale, { numeric: true });
         return sortDir === "asc" ? cmp : -cmp;
       });
     }

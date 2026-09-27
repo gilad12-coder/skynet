@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from core.config import DEFAULT_AGENT_MODEL_ID, Settings
+from core.config import Settings
 
 _SETTINGS_ENV_VARS = (
     "REMOTE_DB_URL",
@@ -609,20 +609,21 @@ def test_quota_overrides_property_parses_once(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_settings_default_agent_models_use_shared_constant() -> None:
-    """Both agents default to ``DEFAULT_AGENT_MODEL_ID`` so a single swap covers both."""
+    """Both agents default to empty, so both follow the catalog's default."""
     s = Settings(_env_file=None)
 
-    assert s.code_agent_model == DEFAULT_AGENT_MODEL_ID
+    assert s.code_agent_model == ""
 
 
 def test_settings_defaults_cost_guardrails() -> None:
-    """Hosted population/spend caps are opt-in while per-user concurrency is safe by default."""
+    """Population caps are opt-in; per-user concurrency, platform spend and turn balance are guarded by default."""
     s = Settings(_env_file=None)
 
     assert s.max_total_users == 0
     assert s.max_monthly_active_users == 0
     assert s.max_concurrent_jobs_per_user == 5
-    assert s.global_daily_spend_ceiling_credits == 0
+    assert s.global_daily_spend_ceiling_credits == 5000
+    assert s.interactive_min_balance_credits == 5
     assert s.submissions_paused is False
 
 
@@ -676,4 +677,4 @@ def test_settings_cost_guardrails_disable_values(monkeypatch: pytest.MonkeyPatch
     assert s.max_total_users == 0
     assert s.max_monthly_active_users == 0
     assert s.max_concurrent_jobs_per_user == 0
-    assert s.generalist_agent_model == DEFAULT_AGENT_MODEL_ID
+    assert s.generalist_agent_model == ""
