@@ -23,6 +23,7 @@ from core.storage.models import (
     EMBEDDING_DIM,
     AgentStagedDatasetModel,
     Base,
+    BillingCustomerModel,
     DatasetModel,
     JobEmbeddingModel,
     LogEntryModel,
@@ -375,3 +376,46 @@ def test_delete_storage_quota_override_restores_default(store: _SQLiteJobStore) 
     assert store.get_user_storage_quota_override("alice") is None
     assert store.get_effective_user_storage_quota("alice") == settings.user_storage_quota_bytes
     assert store.delete_user_storage_quota_override("alice") is False
+
+
+def _set_subscription_status(store: _SQLiteJobStore, username: str, status: str | None) -> None:
+    """Seed a billing row whose mirrored subscription has ``status``.
+
+    Args:
+        store: SQLite-backed store.
+        username: Account to seed.
+        status: Mirrored Stripe subscription status.
+    """
+    with store._get_session() as session:
+        session.add(
+            BillingCustomerModel(
+                username=username,
+                stripe_customer_id=f"cus_{username}",
+                credit_balance=0,
+                subscription_status=status,
+            )
+        )
+        session.commit()
+
+
+def test_pro_plan_lifts_storage_and_job_quota(store: _SQLiteJobStore) -> None:
+    """An entitled Pro account gets the Pro storage budget and no job cap."""
+    _set_subscription_status(store, "alice", "active")
+    assert store.has_pro_plan("Alice") is True
+    assert store.get_effective_user_storage_quota("alice") == settings.pro_storage_quota_bytes
+    assert store.get_effective_user_quota("alice") is None
+
+
+def test_lapsed_pro_plan_falls_back_to_defaults(store: _SQLiteJobStore) -> None:
+    """A canceled subscription returns the account to the free limits."""
+    _set_subscription_status(store, "alice", "canceled")
+    assert store.has_pro_plan("alice") is False
+    assert store.get_effective_user_storage_quota("alice") == settings.user_storage_quota_bytes
+    assert store.get_effective_user_quota("alice") == settings.max_jobs_per_user
+
+
+def test_admin_storage_override_beats_pro_plan(store: _SQLiteJobStore) -> None:
+    """An admin override still decides the budget for a Pro account."""
+    _set_subscription_status(store, "alice", "active")
+    store.set_user_storage_quota_override("alice", 4096)
+    assert store.get_effective_user_storage_quota("alice") == 4096
