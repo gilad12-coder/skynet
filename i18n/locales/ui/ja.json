@@ -3913,5 +3913,7 @@
   "tutorial.step.tagger_task.title": "タスクを定義",
   "tutorial.step.tagger_task.body": "各行の答え方を選びます：はい/いいえの質問、カテゴリのいずれか、または記述式の回答。",
   "tutorial.step.sidebar_nav.title": "アプリ内の移動",
-  "tutorial.step.sidebar_nav.body": "サイドバーでページを切り替えます。どこからでも ⌘K または Ctrl+K を押すと、任意のページや設定に移動できます。"
+  "tutorial.step.sidebar_nav.body": "サイドバーでページを切り替えます。どこからでも ⌘K または Ctrl+K を押すと、任意のページや設定に移動できます。",
+  "billing.plans.credits.fee_note": "価格には {p1} のプラットフォーム手数料が含まれます。支払い方法による違いはありません。",
+  "billing.plans.credits.custom_range": "{p1}〜{p2} の金額を入力してください。"
 }

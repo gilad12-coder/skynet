@@ -165,6 +165,7 @@ export const TERMS_OF_SERVICE: LegalDocument = {
           kind: "list",
           items: [
             "The Service uses a prepaid credit model. You purchase credit packs, and credits are consumed as you run jobs. Prices and the credit cost of features are shown in the Service and may change.",
+            "Each credit purchase includes a platform fee on top of the credits you buy. The fee is shown in the price before you pay, is the same for every payment method, and is not converted into credits.",
             "Payments are processed by our payment processor, Stripe. We do not receive or store your full card details. Your purchases are also subject to Stripe's terms.",
             "Except where required by law or expressly stated otherwise, credit purchases are final and non-refundable. If a charge is refunded, reversed, or disputed (including chargebacks), we may deduct the corresponding credits from your balance and may suspend access while the matter is resolved.",
             "You are responsible for any taxes associated with your purchases, other than taxes based on our net income.",

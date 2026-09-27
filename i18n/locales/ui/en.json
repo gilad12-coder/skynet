@@ -3913,5 +3913,7 @@
   "tutorial.step.tagger_task.title": "Define the task",
   "tutorial.step.tagger_task.body": "Pick how each row is answered: a yes/no question, one of your categories, or a written answer.",
   "tutorial.step.sidebar_nav.title": "Find your way around",
-  "tutorial.step.sidebar_nav.body": "Use the sidebar to move between pages. Press ⌘K or Ctrl+K anywhere to jump to any page or setting."
+  "tutorial.step.sidebar_nav.body": "Use the sidebar to move between pages. Press ⌘K or Ctrl+K anywhere to jump to any page or setting.",
+  "billing.plans.credits.fee_note": "Price includes a {p1} platform fee, the same for every payment method.",
+  "billing.plans.credits.custom_range": "Enter an amount from {p1} to {p2}."
 }

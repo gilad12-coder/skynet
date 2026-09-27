@@ -3913,5 +3913,7 @@
   "tutorial.step.tagger_task.title": "定義任務",
   "tutorial.step.tagger_task.body": "揀每一行點樣作答：是非題、你嘅其中一個類別，或者書面答案。",
   "tutorial.step.sidebar_nav.title": "點樣周圍行",
-  "tutorial.step.sidebar_nav.body": "用側邊欄喺唔同頁面之間切換。喺任何地方撳 ⌘K 或 Ctrl+K，就可以跳去任何頁面或設定。"
+  "tutorial.step.sidebar_nav.body": "用側邊欄喺唔同頁面之間切換。喺任何地方撳 ⌘K 或 Ctrl+K，就可以跳去任何頁面或設定。",
+  "billing.plans.credits.fee_note": "價錢已包括 {p1} 平台費，所有付款方式都一樣。",
+  "billing.plans.credits.custom_range": "請輸入 {p1} 至 {p2} 之間嘅金額。"
 }

@@ -3913,5 +3913,7 @@
   "tutorial.step.tagger_task.title": "حدّد المهمة",
   "tutorial.step.tagger_task.body": "اختر طريقة الإجابة عن كل صف: سؤال بنعم/لا، أو إحدى فئاتك، أو إجابة مكتوبة.",
   "tutorial.step.sidebar_nav.title": "التنقّل في التطبيق",
-  "tutorial.step.sidebar_nav.body": "استخدم الشريط الجانبي للتنقّل بين الصفحات. اضغط ⌘K أو Ctrl+K من أي مكان للانتقال إلى أي صفحة أو إعداد."
+  "tutorial.step.sidebar_nav.body": "استخدم الشريط الجانبي للتنقّل بين الصفحات. اضغط ⌘K أو Ctrl+K من أي مكان للانتقال إلى أي صفحة أو إعداد.",
+  "billing.plans.credits.fee_note": "يشمل السعر رسوم منصة قدرها {p1}، وهي نفسها لكل طرق الدفع.",
+  "billing.plans.credits.custom_range": "أدخل مبلغًا من {p1} إلى {p2}."
 }

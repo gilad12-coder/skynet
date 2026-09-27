@@ -3913,5 +3913,7 @@
   "tutorial.step.tagger_task.title": "Görevi tanımlayın",
   "tutorial.step.tagger_task.body": "Her satırın nasıl yanıtlanacağını seçin: evet/hayır sorusu, kategorilerinizden biri ya da yazılı bir yanıt.",
   "tutorial.step.sidebar_nav.title": "Uygulamada gezinme",
-  "tutorial.step.sidebar_nav.body": "Sayfalar arasında geçmek için kenar çubuğunu kullanın. Herhangi bir sayfaya veya ayara atlamak için her yerde ⌘K ya da Ctrl+K'ye basın."
+  "tutorial.step.sidebar_nav.body": "Sayfalar arasında geçmek için kenar çubuğunu kullanın. Herhangi bir sayfaya veya ayara atlamak için her yerde ⌘K ya da Ctrl+K'ye basın.",
+  "billing.plans.credits.fee_note": "Fiyata {p1} platform ücreti dahildir; her ödeme yönteminde aynıdır.",
+  "billing.plans.credits.custom_range": "{p1} ile {p2} arasında bir tutar girin."
 }

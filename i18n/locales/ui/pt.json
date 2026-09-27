@@ -3913,5 +3913,7 @@
   "tutorial.step.tagger_task.title": "Definir a tarefa",
   "tutorial.step.tagger_task.body": "Escolha como cada linha é respondida: uma pergunta de sim/não, uma das suas categorias ou uma resposta escrita.",
   "tutorial.step.sidebar_nav.title": "Orientar-se na aplicação",
-  "tutorial.step.sidebar_nav.body": "Use a barra lateral para mudar de página. Prima ⌘K ou Ctrl+K em qualquer lado para saltar para qualquer página ou definição."
+  "tutorial.step.sidebar_nav.body": "Use a barra lateral para mudar de página. Prima ⌘K ou Ctrl+K em qualquer lado para saltar para qualquer página ou definição.",
+  "billing.plans.credits.fee_note": "O preço inclui uma taxa de plataforma de {p1}, igual para qualquer forma de pagamento.",
+  "billing.plans.credits.custom_range": "Insira um valor de {p1} a {p2}."
 }
