@@ -15,7 +15,7 @@ export const LEGAL_CONFIG = {
 
   // Dates shown on both documents. Update lastUpdated whenever the text changes.
   effectiveDate: "August 11, 2026",
-  lastUpdated: "August 14, 2026",
+  lastUpdated: "September 26, 2026",
 
   // Skynet is operated by an individual (sole proprietor); this legal name is
   // the operating party and, for the Privacy Policy, the data controller.
