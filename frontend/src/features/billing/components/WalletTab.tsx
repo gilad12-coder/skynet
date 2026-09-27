@@ -45,6 +45,7 @@ import {
   formatResetDate,
   formatUsd,
   PRO_MONTHLY_USD,
+  purchaseFeeUsd,
   purchaseTotalUsd,
   type CreditPack,
 } from "../lib/credit";
@@ -92,8 +93,10 @@ function AddCreditsControls() {
   const customCredits = Number(customDraft || "0") * 100;
   const customValid = customCredits >= CUSTOM_CREDITS_MIN && customCredits <= CUSTOM_CREDITS_MAX;
   // The buy button quotes what the buyer is charged: par credit value plus the
-  // backend's service fee, itemized as its own line on Stripe checkout.
-  const usd = purchaseTotalUsd(pack ? pack.credits : customCredits, wallet.pricing);
+  // backend's platform fee, itemized as its own line on Stripe checkout. The
+  // row description names the fee up front, so the first price shown is all-in.
+  const credits = pack ? pack.credits : customCredits;
+  const usd = purchaseTotalUsd(credits, wallet.pricing);
   const priceLabel = Number.isInteger(usd) ? formatUsdWhole(usd, locale) : formatUsd(usd, locale);
 
   const onBuy = async () => {
@@ -114,88 +117,102 @@ function AddCreditsControls() {
   };
 
   const customActive = pack === undefined;
+  const description =
+    customActive && !customValid
+      ? formatMsg("billing.plans.credits.custom_range", {
+          p1: formatUsdWhole(CUSTOM_CREDITS_MIN / 100, locale),
+          p2: formatUsdWhole(CUSTOM_CREDITS_MAX / 100, locale),
+        })
+      : formatMsg("billing.plans.credits.fee_note", {
+          p1: formatUsd(purchaseFeeUsd(credits, wallet.pricing), locale),
+        });
   return (
-    <div
-      role="group"
-      aria-label={msg("billing.plans.credits.pack_aria")}
-      className="relative flex w-full max-w-full flex-wrap items-center gap-0.5 rounded-lg bg-muted p-0.5 sm:w-auto sm:flex-nowrap"
-    >
-      {CREDIT_PACKS.map((p) => {
-        const active = p.id === selection;
-        return (
-          <button
-            key={p.id}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => setSelection(p.id)}
-            className={cn(
-              "relative rounded-md px-2.5 py-1 text-xs font-medium tabular-nums transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45",
-              active ? "text-foreground" : "text-foreground/60 hover:text-foreground",
-            )}
-          >
-            {/* Shared-layout pill slides between segments instead of the selected
-                background snapping — mirrors the runs-source segmented control. */}
-            {active && (
-              <motion.span
-                layoutId="credit-pack-pill"
-                className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
-                transition={PILL_TRANSITION}
-                aria-hidden="true"
-              />
-            )}
-            <span dir="ltr" className="relative z-10">
-              {formatUsdWhole(p.usd, locale)}
-            </span>
-          </button>
-        );
-      })}
-      {/* Custom amount is a fourth, free-type segment: focusing or typing makes
-          it the active selection and the pill slides behind it. */}
-      <span className="relative">
-        {customActive && (
-          <motion.span
-            layoutId="credit-pack-pill"
-            className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
-            transition={PILL_TRANSITION}
-            aria-hidden="true"
-          />
-        )}
-        <input
-          value={customDraft}
-          onChange={(event) => {
-            setCustomDraft(event.target.value.replace(/\D/g, ""));
-            setSelection("custom");
-          }}
-          onFocus={() => setSelection("custom")}
-          inputMode="numeric"
-          maxLength={4}
-          dir="ltr"
-          placeholder={msg("billing.plans.credits.custom")}
-          aria-label={msg("billing.plans.credits.custom_amount_aria")}
-          className={cn(
-            "relative z-10 h-[44px] w-16 rounded-md bg-transparent px-2.5 py-1 text-center text-xs font-medium tabular-nums outline-none transition-colors duration-200 placeholder:font-normal placeholder:text-muted-foreground/90 lg:h-auto [@media(hover:none)_and_(pointer:coarse)]:h-[44px]",
-            customActive ? "text-foreground" : "text-foreground/60",
-          )}
-        />
-      </span>
-      <span aria-hidden="true" className="mx-0.5 hidden h-4 w-px shrink-0 bg-border/70 sm:block" />
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={onBuy}
-        data-telemetry="wallet-buy-credits"
-        disabled={buying || (!pack && !customValid)}
-        className="h-[44px] rounded-full px-2.5 text-[0.6875rem] font-semibold border-[#C8A882]/70 text-[#8a6d44] hover:bg-[#C8A882]/10 hover:text-[#8a6d44] sm:h-6 [@media(hover:none)_and_(pointer:coarse)]:h-[44px] [&_svg:not([class*='size-'])]:size-3"
+    <SettingsRow icon={Sparkle} label={msg("billing.action.add_credits")} description={description}>
+      <div
+        role="group"
+        aria-label={msg("billing.plans.credits.pack_aria")}
+        className="relative flex w-full max-w-full flex-wrap items-center gap-0.5 rounded-lg bg-muted p-0.5 sm:w-auto sm:flex-nowrap"
       >
-        {buying ? (
-          <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-        ) : (
-          <Sparkle aria-hidden="true" />
-        )}
-        {formatMsg("billing.upgrade.buy", { p1: priceLabel })}
-      </Button>
-    </div>
+        {CREDIT_PACKS.map((p) => {
+          const active = p.id === selection;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              onClick={() => setSelection(p.id)}
+              className={cn(
+                "relative rounded-md px-2.5 py-1 text-xs font-medium tabular-nums transition-colors duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C8A882]/45",
+                active ? "text-foreground" : "text-foreground/60 hover:text-foreground",
+              )}
+            >
+              {/* Shared-layout pill slides between segments instead of the selected
+                background snapping — mirrors the runs-source segmented control. */}
+              {active && (
+                <motion.span
+                  layoutId="credit-pack-pill"
+                  className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
+                  transition={PILL_TRANSITION}
+                  aria-hidden="true"
+                />
+              )}
+              <span dir="ltr" className="relative z-10">
+                {formatUsdWhole(p.usd, locale)}
+              </span>
+            </button>
+          );
+        })}
+        {/* Custom amount is a fourth, free-type segment: focusing or typing makes
+          it the active selection and the pill slides behind it. */}
+        <span className="relative">
+          {customActive && (
+            <motion.span
+              layoutId="credit-pack-pill"
+              className="absolute inset-0 rounded-md bg-background shadow-[0_1px_2px_oklch(0.25_0.04_45/.12)]"
+              transition={PILL_TRANSITION}
+              aria-hidden="true"
+            />
+          )}
+          <input
+            value={customDraft}
+            onChange={(event) => {
+              setCustomDraft(event.target.value.replace(/\D/g, ""));
+              setSelection("custom");
+            }}
+            onFocus={() => setSelection("custom")}
+            inputMode="numeric"
+            maxLength={4}
+            dir="ltr"
+            placeholder={msg("billing.plans.credits.custom")}
+            aria-label={msg("billing.plans.credits.custom_amount_aria")}
+            className={cn(
+              "relative z-10 h-[44px] w-16 rounded-md bg-transparent px-2.5 py-1 text-center text-xs font-medium tabular-nums outline-none transition-colors duration-200 placeholder:font-normal placeholder:text-muted-foreground/90 lg:h-auto [@media(hover:none)_and_(pointer:coarse)]:h-[44px]",
+              customActive ? "text-foreground" : "text-foreground/60",
+            )}
+          />
+        </span>
+        <span
+          aria-hidden="true"
+          className="mx-0.5 hidden h-4 w-px shrink-0 bg-border/70 sm:block"
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onBuy}
+          data-telemetry="wallet-buy-credits"
+          disabled={buying || (!pack && !customValid)}
+          className="h-[44px] rounded-full px-2.5 text-[0.6875rem] font-semibold border-[#C8A882]/70 text-[#8a6d44] hover:bg-[#C8A882]/10 hover:text-[#8a6d44] sm:h-6 [@media(hover:none)_and_(pointer:coarse)]:h-[44px] [&_svg:not([class*='size-'])]:size-3"
+        >
+          {buying ? (
+            <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          ) : (
+            <Sparkle aria-hidden="true" />
+          )}
+          {formatMsg("billing.upgrade.buy", { p1: priceLabel })}
+        </Button>
+      </div>
+    </SettingsRow>
   );
 }
 
@@ -267,8 +284,7 @@ function ProPlanRow() {
         data-telemetry={isPro ? "wallet-manage-pro" : "wallet-upgrade-pro"}
         className={cn(
           "h-[44px] rounded-full px-2.5 text-[0.6875rem] font-semibold sm:h-6 [@media(hover:none)_and_(pointer:coarse)]:h-[44px] [&_svg:not([class*='size-'])]:size-3",
-          !isPro &&
-            "border-[#C8A882]/70 text-[#8a6d44] hover:bg-[#C8A882]/10 hover:text-[#8a6d44]",
+          !isPro && "border-[#C8A882]/70 text-[#8a6d44] hover:bg-[#C8A882]/10 hover:text-[#8a6d44]",
         )}
       >
         {pending ? (
@@ -664,9 +680,7 @@ export function WalletTab() {
         </div>
 
         <div>
-          <SettingsRow icon={Sparkle} label={msg("billing.action.add_credits")}>
-            <AddCreditsControls />
-          </SettingsRow>
+          <AddCreditsControls />
           <ProPlanRow />
         </div>
       </section>

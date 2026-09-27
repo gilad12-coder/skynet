@@ -3913,5 +3913,7 @@
   "tutorial.step.tagger_task.title": "Définir la tâche",
   "tutorial.step.tagger_task.body": "Choisissez comment répondre pour chaque ligne : une question oui/non, une de vos catégories, ou une réponse écrite.",
   "tutorial.step.sidebar_nav.title": "Se repérer dans l'app",
-  "tutorial.step.sidebar_nav.body": "Utilisez la barre latérale pour passer d'une page à l'autre. Appuyez sur ⌘K ou Ctrl+K n'importe où pour accéder à une page ou un réglage."
+  "tutorial.step.sidebar_nav.body": "Utilisez la barre latérale pour passer d'une page à l'autre. Appuyez sur ⌘K ou Ctrl+K n'importe où pour accéder à une page ou un réglage.",
+  "billing.plans.credits.fee_note": "Le prix inclut des frais de plateforme de {p1}, identiques pour tous les moyens de paiement.",
+  "billing.plans.credits.custom_range": "Saisissez un montant de {p1} à {p2}."
 }

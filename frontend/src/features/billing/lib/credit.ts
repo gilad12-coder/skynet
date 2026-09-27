@@ -31,10 +31,11 @@ export const CREDIT_USD_VALUE = 0.01;
 
 /**
  * Bounds for a custom (user-chosen) top-up, mirroring the backend's
- * CUSTOM_CREDITS_MIN/MAX. The floor clears Stripe's $0.50 charge minimum;
- * the ceiling keeps a typo'd amount from becoming a four-figure charge.
+ * CUSTOM_CREDITS_MIN/MAX. The floor matches the smallest pack so the flat
+ * part of the platform fee never dominates a tiny purchase; the ceiling keeps
+ * a typo'd amount from becoming a four-figure charge.
  */
-export const CUSTOM_CREDITS_MIN = 50;
+export const CUSTOM_CREDITS_MIN = 500;
 export const CUSTOM_CREDITS_MAX = 100_000;
 
 /** Below this much spendable value the wallet reads as "running low" (calm, not alarming). */
@@ -68,17 +69,23 @@ export const DEFAULT_PRICING_TERMS: PricingTerms = {
 };
 
 /**
- * The service fee for buying `credits`, in USD: the fee rate of the credit value
+ * The platform fee for buying `credits`, in USD: the fee rate of the credit value
  * (one credit is one cent) rounded up to the cent, plus the flat fee. Mirrors
  * backend `purchase_fee_cents`. The buyer pays the credit value plus this fee;
  * only the base credits are granted.
  */
-export function purchaseFeeUsd(credits: number, terms: PricingTerms = DEFAULT_PRICING_TERMS): number {
+export function purchaseFeeUsd(
+  credits: number,
+  terms: PricingTerms = DEFAULT_PRICING_TERMS,
+): number {
   return (Math.ceil(credits * terms.purchaseFeeRate) + terms.purchaseFeeFixedCents) / 100;
 }
 
-/** What the buyer actually pays for `credits`: the par credit value plus the service fee. */
-export function purchaseTotalUsd(credits: number, terms: PricingTerms = DEFAULT_PRICING_TERMS): number {
+/** What the buyer actually pays for `credits`: the par credit value plus the platform fee. */
+export function purchaseTotalUsd(
+  credits: number,
+  terms: PricingTerms = DEFAULT_PRICING_TERMS,
+): number {
   return creditsToUsd(credits) + purchaseFeeUsd(credits, terms);
 }
 

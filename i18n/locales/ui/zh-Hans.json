@@ -3913,5 +3913,7 @@
   "tutorial.step.tagger_task.title": "定义任务",
   "tutorial.step.tagger_task.body": "选择每一行的回答方式：是/否问题、你的某个类别，或书面回答。",
   "tutorial.step.sidebar_nav.title": "快速上手导航",
-  "tutorial.step.sidebar_nav.body": "使用侧边栏在页面间切换。在任意位置按 ⌘K 或 Ctrl+K，即可跳转到任意页面或设置。"
+  "tutorial.step.sidebar_nav.body": "使用侧边栏在页面间切换。在任意位置按 ⌘K 或 Ctrl+K，即可跳转到任意页面或设置。",
+  "billing.plans.credits.fee_note": "价格包含 {p1} 平台费，所有付款方式相同。",
+  "billing.plans.credits.custom_range": "请输入 {p1} 至 {p2} 之间的金额。"
 }

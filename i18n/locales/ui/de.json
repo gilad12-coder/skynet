@@ -3913,5 +3913,7 @@
   "tutorial.step.tagger_task.title": "Aufgabe definieren",
   "tutorial.step.tagger_task.body": "Wählen Sie, wie jede Zeile beantwortet wird: eine Ja/Nein-Frage, eine Ihrer Kategorien oder eine schriftliche Antwort.",
   "tutorial.step.sidebar_nav.title": "Zurechtfinden",
-  "tutorial.step.sidebar_nav.body": "Über die Seitenleiste wechselst du zwischen Seiten. Drücke überall ⌘K oder Strg+K, um zu jeder Seite oder Einstellung zu springen."
+  "tutorial.step.sidebar_nav.body": "Über die Seitenleiste wechselst du zwischen Seiten. Drücke überall ⌘K oder Strg+K, um zu jeder Seite oder Einstellung zu springen.",
+  "billing.plans.credits.fee_note": "Der Preis enthält eine Plattformgebühr von {p1}, gleich für jede Zahlungsart.",
+  "billing.plans.credits.custom_range": "Gib einen Betrag von {p1} bis {p2} ein."
 }

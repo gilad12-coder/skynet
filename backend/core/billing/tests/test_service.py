@@ -121,8 +121,8 @@ def test_pricing_policy_no_subsidy_packs_at_par() -> None:
 
 
 def test_purchase_fee_cents_covers_card_and_provider_costs() -> None:
-    """The service fee is 12.5% of the credit value, rounded up to the cent, plus 35 cents."""
-    assert purchase_fee_cents(CUSTOM_CREDITS_MIN) == 42
+    """The platform fee is 12.5% of the credit value, rounded up to the cent, plus 35 cents."""
+    assert purchase_fee_cents(50) == 42
     assert purchase_fee_cents(500) == 98
     assert purchase_fee_cents(2000) == 285
     assert purchase_fee_cents(5000) == 660
@@ -815,7 +815,7 @@ def test_custom_checkout_builds_ad_hoc_price_and_metadata(engine: object, config
     fee_data = line_items[1]["price_data"]
     assert fee_data["unit_amount"] == purchase_fee_cents(1234)
     assert fee_data["currency"] == "usd"
-    assert line_items[1]["price_data"]["product_data"]["name"] == "Service fee"
+    assert line_items[1]["price_data"]["product_data"]["name"] == "Platform fee"
     metadata = captured["metadata"]
     assert isinstance(metadata, dict)
     assert metadata["credits"] == "1234"

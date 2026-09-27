@@ -3913,5 +3913,7 @@
   "tutorial.step.tagger_task.title": "הגדרת המשימה",
   "tutorial.step.tagger_task.body": "בוחרים איך עונים על כל שורה: שאלת כן/לא, אחת מהקטגוריות שלך, או תשובה כתובה.",
   "tutorial.step.sidebar_nav.title": "התמצאות באפליקציה",
-  "tutorial.step.sidebar_nav.body": "בסרגל הצד עוברים בין הדפים. לחיצה על ‎⌘K או Ctrl+K מכל מקום קופצת לכל דף או הגדרה."
+  "tutorial.step.sidebar_nav.body": "בסרגל הצד עוברים בין הדפים. לחיצה על ‎⌘K או Ctrl+K מכל מקום קופצת לכל דף או הגדרה.",
+  "billing.plans.credits.fee_note": "המחיר כולל עמלת פלטפורמה של {p1}, זהה לכל אמצעי תשלום.",
+  "billing.plans.credits.custom_range": "יש להזין סכום בין {p1} ל-{p2}."
 }

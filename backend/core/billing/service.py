@@ -55,17 +55,20 @@ logger = logging.getLogger("skynet.billing.service")
 PACK_CREDITS: dict[str, int] = {"starter": 500, "plus": 2000, "pro": 5000}
 
 # Bounds for a custom (user-chosen) top-up. One credit is worth exactly one
-# cent, so a credit count doubles as a Stripe ``unit_amount``; the floor keeps
-# the charge above Stripe's $0.50 minimum and the ceiling keeps a typo'd
-# amount from becoming a four-figure charge. Mirrored by the frontend's
-# CUSTOM_CREDITS_MIN/MAX.
-CUSTOM_CREDITS_MIN = 50
+# cent, so a credit count doubles as a Stripe ``unit_amount``. The floor matches
+# the smallest pack: below $5 the flat part of the fee dominates the charge
+# (a $0.50 top-up paid $0.92), and every tiny purchase is one more $15 dispute
+# exposure. The ceiling keeps a typo'd amount from becoming a four-figure
+# charge. Mirrored by the frontend's CUSTOM_CREDITS_MIN/MAX.
+CUSTOM_CREDITS_MIN = 500
 CUSTOM_CREDITS_MAX = 100_000
 
-# Service fee on a credit purchase, charged on top of par credits: 12.5% of the
+# Platform fee on a credit purchase, charged on top of par credits: 12.5% of the
 # credit value plus a flat 35 cents. It is a platform fee on every purchase,
-# not a card surcharge: it never varies by payment method, because card-network
-# rules cap surcharges (Visa 3%, Mastercard 4%) and ban them on debit. Sized to
+# not a card surcharge: it never varies by payment method and is never called a
+# card or processing fee, because card-network rules cap surcharges (Visa 3%,
+# Mastercard 4%) and ban them on debit. The wallet shows it before checkout so
+# the first price a buyer sees is all-in (California SB 478). Sized to
 # absorb Stripe processing (up to 4.4% + 30c for a non-US card) and OpenRouter's
 # 5.5% fee when the platform buys the matching credits, leaving roughly 2%. The buyer pays base + fee;
 # the account is granted only the base credits. One credit is one cent, so the
@@ -957,7 +960,7 @@ class StripeBillingService:
         """Create the Stripe Checkout Session shared by pack and custom top-ups.
 
         The credits line stays at par; a second line carries the OpenRouter-style
-        service fee (:func:`purchase_fee_cents`) so the buyer pays base + fee while
+        platform fee (:func:`purchase_fee_cents`) so the buyer pays base + fee while
         the webhook still grants only the base ``credits`` from metadata.
 
         Args:
@@ -979,7 +982,7 @@ class StripeBillingService:
             "price_data": {
                 "currency": "usd",
                 "unit_amount": purchase_fee_cents(credits),
-                "product_data": {"name": "Service fee"},
+                "product_data": {"name": "Platform fee"},
             },
             "quantity": 1,
         }

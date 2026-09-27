@@ -3913,5 +3913,7 @@
   "tutorial.step.tagger_task.title": "कार्य परिभाषित करें",
   "tutorial.step.tagger_task.body": "चुनें कि हर पंक्ति का उत्तर कैसे दिया जाए: हाँ/नहीं प्रश्न, आपकी कोई श्रेणी, या लिखित उत्तर।",
   "tutorial.step.sidebar_nav.title": "ऐप में रास्ता ढूँढें",
-  "tutorial.step.sidebar_nav.body": "पेजों के बीच जाने के लिए साइडबार का इस्तेमाल करें। कहीं भी ⌘K या Ctrl+K दबाकर किसी भी पेज या सेटिंग पर जाएँ।"
+  "tutorial.step.sidebar_nav.body": "पेजों के बीच जाने के लिए साइडबार का इस्तेमाल करें। कहीं भी ⌘K या Ctrl+K दबाकर किसी भी पेज या सेटिंग पर जाएँ।",
+  "billing.plans.credits.fee_note": "कीमत में {p1} का प्लेटफ़ॉर्म शुल्क शामिल है, जो हर भुगतान तरीके के लिए समान है।",
+  "billing.plans.credits.custom_range": "{p1} से {p2} तक की राशि दर्ज करें।"
 }
