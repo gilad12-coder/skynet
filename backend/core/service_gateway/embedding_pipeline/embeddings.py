@@ -5,6 +5,11 @@ model itself is not bundled with the backend. Operators provide an internal
 OpenAI-compatible embeddings endpoint and model id; this adapter sends text
 to that endpoint, truncates the returned vector to the configured schema
 dimension, and L2-normalizes it before storage.
+
+Embedding calls run on the platform's key and are not billed to user credits,
+so their tokens count against a platform-wide monthly cap
+(``EMBEDDINGS_MONTHLY_TOKEN_CAP``). Past it, ``encode`` returns ``None`` exactly
+as it does when the API is down, and callers already degrade on that.
 """
 
 from __future__ import annotations
@@ -16,12 +21,16 @@ from typing import Any
 
 import requests
 
+from ...api.platform_budget import budget_open, record_spend
 from ...config import settings
 
 logger = logging.getLogger(__name__)
 
 _EMBEDDER_LOCK = threading.Lock()
 _EMBEDDER_INSTANCE: _EmbeddingApiClient | None = None
+_BUDGET_SERVICE = "embeddings"
+# Rough English tokens-per-character ratio, used only when a provider omits usage.
+_CHARS_PER_TOKEN = 4
 
 
 class _EmbeddingApiClient:
@@ -61,12 +70,17 @@ class _EmbeddingApiClient:
         Returns:
             A normalized list of floats of length ``settings.embeddings_dim``,
             or ``None`` when the input is empty, the API is unavailable, the
-            vector is too short, or the request/response is invalid.
+            month's token cap is spent, the vector is too short, or the
+            request/response is invalid.
         """
         if not text or not text.strip() or not self.available():
             return None
+        cap = settings.embeddings_monthly_token_cap
+        if not budget_open(_BUDGET_SERVICE, cap):
+            return None
         try:
-            raw = self._request_embedding(text, task=task)
+            raw, tokens = self._request_embedding(text, task=task)
+            record_spend(_BUDGET_SERVICE, tokens or len(text) / _CHARS_PER_TOKEN, cap)
             if len(raw) < self._dim:
                 logger.warning(
                     "Embedding model %s returned %d dimensions; schema requires %d.",
@@ -84,8 +98,8 @@ class _EmbeddingApiClient:
             logger.warning("Embedding API encode failed: %s", exc)
             return None
 
-    def _request_embedding(self, text: str, *, task: str | None = None) -> list[float]:
-        """Call the embedding API and return the first embedding vector.
+    def _request_embedding(self, text: str, *, task: str | None = None) -> tuple[list[float], int]:
+        """Call the embedding API and return the first embedding vector and its token count.
 
         Args:
             text: The input string sent as the OpenAI-compatible ``input``.
@@ -93,7 +107,8 @@ class _EmbeddingApiClient:
                 interprets this to pick a LoRA head; OpenAI ignores it.
 
         Returns:
-            The first embedding vector returned by the API.
+            The first embedding vector returned by the API, and the
+            ``usage.total_tokens`` it reported (0 when absent).
 
         Raises:
             TypeError: When the API response shape uses invalid types.
@@ -120,7 +135,9 @@ class _EmbeddingApiClient:
         embedding = first.get("embedding")
         if not isinstance(embedding, list) or not embedding:
             raise ValueError("embedding response missing data[0].embedding")
-        return embedding
+        usage = payload.get("usage")
+        tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
+        return embedding, tokens if isinstance(tokens, int) else 0
 
     def _headers(self) -> dict[str, str]:
         """Build HTTP headers for the embedding request."""

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
+import fakeredis
+import pytest
 from pydantic import SecretStr
 
+from ...api import platform_budget
 from ..embedding_pipeline import embeddings
 
 
@@ -63,3 +66,25 @@ def test_embedding_api_client_rejects_short_vectors() -> None:
         client = embeddings._EmbeddingApiClient()
 
     assert client.encode("hello") is None
+
+
+def test_embedding_api_client_stops_at_the_monthly_token_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reported tokens count toward the cap; past it ``encode`` skips the API."""
+    redis = fakeredis.FakeStrictRedis(decode_responses=True)
+    monkeypatch.setattr(platform_budget, "shared_redis_client", lambda: redis)
+    with (
+        patch.object(embeddings.settings, "embeddings_base_url", "https://llm.internal/v1"),
+        patch.object(embeddings.settings, "embeddings_model", "embed-model"),
+        patch.object(embeddings.settings, "embeddings_dim", 2),
+        patch.object(embeddings.settings, "embeddings_monthly_token_cap", 100),
+        patch.object(embeddings.requests, "post") as post,
+    ):
+        response = Mock()
+        response.json.return_value = {"data": [{"embedding": [3.0, 4.0]}], "usage": {"total_tokens": 60}}
+        post.return_value = response
+
+        client = embeddings._EmbeddingApiClient()
+        results = [client.encode("hello") for _ in range(3)]
+
+    assert results == [[0.6, 0.8], [0.6, 0.8], None]
+    assert post.call_count == 2
