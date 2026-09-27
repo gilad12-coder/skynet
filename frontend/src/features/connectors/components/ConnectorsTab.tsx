@@ -23,6 +23,7 @@ import {
   type ProviderMeta,
 } from "./providers";
 import { TOUCH_FIELD_SM } from "@/shared/ui/touch";
+import { KeyFormActions } from "@/shared/ui/key-form-actions";
 import { Textarea } from "@/shared/ui/primitives/textarea";
 
 /** The status pill next to a linked account. Green when healthy, failed when it needs a reconnect. */
@@ -304,7 +305,6 @@ function ProviderCard({
         <div className="mt-2.5 flex flex-col gap-2 animate-in fade-in-0 slide-in-from-top-1">
           {fields.map((field, index) => {
             const id = `connector-${meta.id}-${field.key}`;
-            const last = index === fields.length - 1;
             const input = (
               <CredentialInput
                 field={field}
@@ -321,50 +321,7 @@ function ProviderCard({
                 <Label htmlFor={id} className="text-xs">
                   {field.label}
                 </Label>
-                {last ? (
-                  <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-                    <div className="min-w-0 flex-1">{input}</div>
-                    <div className="flex items-center justify-end gap-2">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            size="icon-sm"
-                            onClick={handleSave}
-                            disabled={!complete || saving || starting}
-                            aria-label={submitLabel}
-                          >
-                            {saving || starting ? (
-                              <CircleNotch
-                                className="animate-spin motion-reduce:animate-none"
-                                aria-hidden="true"
-                              />
-                            ) : oauthMode ? (
-                              <SignIn className="size-4" />
-                            ) : (
-                              <FloppyDisk className="size-4" />
-                            )}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>{submitLabel}</TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onClick={closeForm}
-                            aria-label={msg("settings.keys.cancel")}
-                          >
-                            <X className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>{msg("settings.keys.cancel")}</TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </div>
-                ) : (
-                  input
-                )}
+                {input}
               </div>
             );
           })}
@@ -385,6 +342,20 @@ function ProviderCard({
               </>
             )}
           </p>
+          <KeyFormActions
+            submitLabel={submitLabel}
+            submitIcon={
+              oauthMode ? (
+                <SignIn className="size-4" aria-hidden="true" />
+              ) : (
+                <FloppyDisk className="size-4" aria-hidden="true" />
+              )
+            }
+            busy={saving || starting}
+            disabled={!complete || saving || starting}
+            onSubmit={() => void handleSave()}
+            onCancel={closeForm}
+          />
         </div>
       )}
     </div>
