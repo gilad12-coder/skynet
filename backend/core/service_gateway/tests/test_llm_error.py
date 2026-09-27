@@ -47,6 +47,14 @@ def test_classify_known_and_unknown() -> None:
     assert llm_error.classify_llm_error("some unrelated failure") is None
 
 
+def test_classify_names_whose_funds_ran_out() -> None:
+    """A relay funds refusal says whether the platform, the user's key, or a busy hold stopped it."""
+    managed = 'litellm.APIError: {"error": {"type": "managed_funds_exhausted", "message": "..."}}'
+    assert llm_error.classify_llm_error(managed).startswith("Provider funds:")
+    assert llm_error.classify_llm_error("byok_funds_exhausted").startswith("OpenRouter credits:")
+    assert llm_error.classify_llm_error("provider_budget_busy").startswith("Provider busy:")
+
+
 def test_classify_leaves_sandbox_failures_alone() -> None:
     """A sandbox that timed out is not a provider timeout, so no provider explanation is prepended."""
     raw = "scorer failed on the baseline: agent sandbox failed twice (ReadTimeout): The read operation timed out"

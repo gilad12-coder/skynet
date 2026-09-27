@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from decimal import Decimal
@@ -11,12 +13,24 @@ from uuid import uuid4
 
 import httpx
 
+from .openrouter_float import notify_managed_refusal
 from .openrouter_quotes import PricedRequest, fetch_endpoint_prices, price_text_request
 from .operation_pricing import ChargePolicy, OperationQuote, UnpricedOperationError, exact_nonnegative, json_fingerprint
 from .responses_adapter import price_responses_request, responses_receipt
 from .runtime import BudgetRuntime, PaidResult
 
 MODEL_ATTEMPT_HEADER = "x-skynet-model-attempt-id"
+
+logger = logging.getLogger(__name__)
+
+# How long a route answers a funds refusal locally instead of asking OpenRouter
+# again. The SDK retries every failure, and a drained account refuses each
+# retry the same way, so the retries are cut off here rather than re-sent.
+FUNDS_REFUSAL_HOLD_SECONDS = 60.0
+
+FUNDS_BUSY = "provider_budget_busy"
+MANAGED_FUNDS_EXHAUSTED = "managed_funds_exhausted"
+BYOK_FUNDS_EXHAUSTED = "byok_funds_exhausted"
 
 
 @dataclass(frozen=True)
@@ -26,6 +40,47 @@ class ModelHTTPResult:
     status: int
     content_type: str
     body: bytes
+
+
+def funds_refusal(managed: bool, retry_after: str | None) -> tuple[bytes, float]:
+    """Explain an OpenRouter 402 and say how long to hold it.
+
+    OpenRouter answers 402 for three different causes: an account out of
+    credits, a key at its spend limit, and a request held back while in-flight
+    spend settles. Only the last carries ``Retry-After``, and only that one
+    clears on its own.
+
+    Args:
+        managed: Whether the platform's key made the call, rather than the
+            user's own OpenRouter key.
+        retry_after: The response's ``Retry-After`` header, if any.
+
+    Returns:
+        The relay error body and the seconds to answer it locally.
+    """
+    wait = None
+    if retry_after is not None:
+        try:
+            wait = max(1.0, min(float(retry_after), FUNDS_REFUSAL_HOLD_SECONDS))
+        except ValueError:
+            wait = None
+    if wait is not None:
+        code = FUNDS_BUSY
+        message = f"The model provider is holding spend while earlier requests settle. Retry in {wait:.0f} seconds."
+    elif managed:
+        code = MANAGED_FUNDS_EXHAUSTED
+        message = (
+            "The managed model provider refused this request for lack of funds. It was not charged, and "
+            "your credits are untouched. The team has been alerted; try again shortly."
+        )
+    else:
+        code = BYOK_FUNDS_EXHAUSTED
+        message = (
+            "Your OpenRouter account or key has run out of credits. Add credits on OpenRouter or raise "
+            "the key's limit, then retry."
+        )
+    body = json.dumps({"error": {"type": code, "message": message}}).encode()
+    return body, wait if wait is not None else FUNDS_REFUSAL_HOLD_SECONDS
 
 
 def response_usage(body: bytes, content_type: str) -> tuple[str | None, dict[str, Any] | None]:
@@ -155,6 +210,7 @@ class OpenRouterDispatcher:
         self._client = client
         self._quote_observer = quote_observer
         self._attempt_quotes: dict[tuple[str, str, int], tuple[str, PricedRequest]] = {}
+        self._refusal: tuple[bytes, float] | None = None
 
     def dispatch(
         self,
@@ -179,6 +235,11 @@ class OpenRouterDispatcher:
         """
         if path not in {"/chat/completions", "/messages", "/responses"} or request.get("model") != self.model:
             raise UnpricedOperationError("This scoped route cannot dispatch a different model or API operation.")
+        if self._refusal is not None:
+            body, until = self._refusal
+            if time.monotonic() < until:
+                return ModelHTTPResult(402, "application/json", body)
+            self._refusal = None
         request_identity = json_fingerprint({"body": dict(request), "headers": dict(protocol_headers or {})})
         attempt_key = (path, operation_key, attempt) if operation_key is not None else None
         cached = self._attempt_quotes.get(attempt_key) if attempt_key is not None else None
@@ -237,6 +298,7 @@ class OpenRouterDispatcher:
                     interrupted = True
                 content = b"".join(chunks)
                 status = response.status_code
+                retry_after = response.headers.get("retry-after")
             if path == "/responses":
                 identity, usage, complete = responses_receipt(content, content_type)
                 interrupted = interrupted or not complete
@@ -264,6 +326,18 @@ class OpenRouterDispatcher:
             # malformed bodies); holding its coverage would wait on a receipt never written.
             refused = status >= 400 and identity is None and usage is None and not interrupted
             result = ModelHTTPResult(status, content_type, content)
+            if status == 402 and not interrupted:
+                managed = self.policy.kind == "managed_model"
+                body, hold = funds_refusal(managed, retry_after)
+                self._refusal = (body, time.monotonic() + hold)
+                result = ModelHTTPResult(402, "application/json", body)
+                if managed and retry_after is None:
+                    logger.error(
+                        "OpenRouter refused a managed %s call with 402: the account or the key is out of "
+                        "funds. Check the balance and Auto Top-Up.",
+                        self.model,
+                    )
+                    notify_managed_refusal(self.model)
             if interrupted:
                 result = ModelHTTPResult(
                     502,
