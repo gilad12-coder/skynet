@@ -1,0 +1,77 @@
+# External production monitor. It runs on GitHub, not Railway, so it still
+# fires when the whole Railway project (and every in-app alert with it) is down.
+# A failed run is the alert: GitHub emails the workflow's owner, and when the
+# ALERT_WEBHOOK_URL secret is set the same message goes to that Slack-style hook.
+#
+# Optional configuration (Settings > Secrets and variables > Actions):
+#   vars.MONITOR_APP_URL            default https://skynetml.com
+#   vars.MONITOR_API_URL            default https://api.skynetml.com
+#   vars.OPENROUTER_FLOOR_USD       default 15
+#   secrets.OPENROUTER_MONITOR_KEY  a separate OpenRouter key with a $0.01
+#                                   limit; it can read the account balance but
+#                                   cannot spend. Unset skips the float check.
+#   secrets.ALERT_WEBHOOK_URL       same hook the backend alerts to.
+name: uptime
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"
+
+concurrency:
+  group: uptime
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      APP_URL: ${{ vars.MONITOR_APP_URL || 'https://skynetml.com' }}
+      API_URL: ${{ vars.MONITOR_API_URL || 'https://api.skynetml.com' }}
+      FLOOR_USD: ${{ vars.OPENROUTER_FLOOR_USD || '15' }}
+      OPENROUTER_MONITOR_KEY: ${{ secrets.OPENROUTER_MONITOR_KEY }}
+      ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+    steps:
+      - name: Probe app, API and OpenRouter float
+        run: |
+          problems=()
+          # Retries ride out a deploy restart so a redeploy does not page anyone.
+          fetch() { curl -sS -L --max-time 20 --retry 3 --retry-delay 20 --retry-all-errors "$@"; }
+
+          health=$(fetch -f "$API_URL/health") || health=""
+          if [ "$(jq -r '.status // empty' <<<"$health" 2>/dev/null)" != "ok" ]; then
+            problems+=("API $API_URL/health is not ok: ${health:-no response}")
+          fi
+
+          code=$(fetch -o /dev/null -w '%{http_code}' "$APP_URL/") || true
+          if [ "$code" != "200" ]; then
+            problems+=("App $APP_URL answered HTTP ${code:-none}")
+          fi
+
+          if [ -n "$OPENROUTER_MONITOR_KEY" ]; then
+            credits=$(fetch -f -H "Authorization: Bearer $OPENROUTER_MONITOR_KEY" https://openrouter.ai/api/v1/credits) || credits=""
+            left=$(jq -r '(.data.total_credits - .data.total_usage) * 100 | round / 100' <<<"$credits" 2>/dev/null) || left=""
+            if [ -z "$left" ]; then
+              problems+=("Could not read the OpenRouter balance")
+            elif awk -v l="$left" -v f="$FLOOR_USD" 'BEGIN { exit !(l < f) }'; then
+              problems+=("OpenRouter float \$$left is below the \$$FLOOR_USD floor; check Auto Top-Up")
+            else
+              echo "OpenRouter float \$$left (floor \$$FLOOR_USD)"
+            fi
+          fi
+
+          if [ ${#problems[@]} -eq 0 ]; then
+            echo "All checks passed"
+            exit 0
+          fi
+          message=$(printf 'Skynet uptime: %s\n' "${problems[@]}")
+          echo "::error::$message"
+          if [ -n "$ALERT_WEBHOOK_URL" ]; then
+            jq -n --arg text "$message ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" '{text: $text}' \
+              | curl -sS --max-time 10 -H 'Content-Type: application/json' -d @- "$ALERT_WEBHOOK_URL" >/dev/null || true
+          fi
+          exit 1
