@@ -130,7 +130,7 @@ app = create_app(registry=registry)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, the test-suite layout, i18n rules, and the migration discipline. PRs welcome.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, the test-suite layout, i18n rules, and the migration discipline. PRs welcome. [MAINTENANCE.md](MAINTENANCE.md) covers what support to expect and how quickly issues and PRs get a response; report vulnerabilities through [SECURITY.md](SECURITY.md).
 
 ## License
 
