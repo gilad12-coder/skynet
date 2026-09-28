@@ -32,6 +32,12 @@ FUNDS_BUSY = "provider_budget_busy"
 MANAGED_FUNDS_EXHAUSTED = "managed_funds_exhausted"
 BYOK_FUNDS_EXHAUSTED = "byok_funds_exhausted"
 
+# Anthropic caches a prompt prefix only up to an explicit breakpoint; OpenAI,
+# Gemini and DeepSeek cache on their own. Optimizers resend the same system
+# prompt and demos for every example, so marking them turns repeats into reads
+# at a tenth of the input price.
+_EPHEMERAL = {"type": "ephemeral"}
+
 
 @dataclass(frozen=True)
 class ModelHTTPResult:
@@ -176,6 +182,58 @@ def response_complete(body: bytes, content_type: str) -> bool:
     return False
 
 
+def mark_prompt_cache(path: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Mark the shared prefix of an Anthropic chat request as cacheable.
+
+    Places a breakpoint on the last system message and on the message just
+    before the final turn, which covers the instructions and few-shot demos an
+    optimizer repeats across examples. Prefixes below the provider minimum are
+    silently not cached and cost nothing extra.
+
+    Args:
+        path: Protocol path of the request.
+        body: Final request body; left untouched unless it is eligible.
+
+    Returns:
+        The body, or a copy carrying ``cache_control`` breakpoints.
+    """
+    messages = body.get("messages")
+    if (
+        path != "/chat/completions"
+        or not str(body.get("model", "")).startswith("anthropic/")
+        or not isinstance(messages, list)
+        or any(
+            isinstance(part, dict) and "cache_control" in part
+            for message in messages
+            if isinstance(message, dict) and isinstance(message.get("content"), list)
+            for part in message["content"]
+        )
+    ):
+        return body
+    marked = [dict(message) if isinstance(message, dict) else message for message in messages]
+    targets = {
+        index for index, message in enumerate(marked) if isinstance(message, dict) and message.get("role") == "system"
+    }
+    targets = {max(targets)} if targets else set()
+    if len(marked) >= 3:
+        targets.add(len(marked) - 2)
+    for index in targets:
+        message = marked[index]
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and content:
+            message["content"] = [{"type": "text", "text": content, "cache_control": _EPHEMERAL}]
+        elif (
+            isinstance(content, list)
+            and content
+            and isinstance(content[-1], dict)
+            and content[-1].get("type") == "text"
+        ):
+            message["content"] = [*content[:-1], {**content[-1], "cache_control": _EPHEMERAL}]
+    return {**body, "messages": marked}
+
+
 class OpenRouterDispatcher:
     """Keep credentials and the spending ledger outside optimizer-controlled code."""
 
@@ -250,7 +308,7 @@ class OpenRouterDispatcher:
         else:
             catalog = fetch_endpoint_prices(self.model, client=self._client)
             priced = (price_responses_request if path == "/responses" else price_text_request)(
-                request, catalog, self.policy
+                mark_prompt_cache(path, dict(request)), catalog, self.policy
             )
             priced = replace(
                 priced,

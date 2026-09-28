@@ -18,6 +18,7 @@ from core.billing.model_dispatch import (
     FUNDS_BUSY,
     MANAGED_FUNDS_EXHAUSTED,
     OpenRouterDispatcher,
+    mark_prompt_cache,
     response_usage,
 )
 from core.billing.openrouter_quotes import price_text_request
@@ -374,3 +375,78 @@ def test_funds_refusal_hold_expires(database: Engine, monkeypatch: pytest.Monkey
         clock[0] += 6
         dispatcher.dispatch("/chat/completions", REQUEST, attempt=1)
     assert len(calls) == 2
+
+
+def test_anthropic_chat_prefix_is_marked_cacheable() -> None:
+    """Break the cache after the system prompt and after the demos before the final turn."""
+    body = {
+        "model": "anthropic/claude-sonnet-5",
+        "messages": [
+            {"role": "system", "content": "instructions"},
+            {"role": "user", "content": "demo question"},
+            {"role": "assistant", "content": [{"type": "text", "text": "demo answer"}]},
+            {"role": "user", "content": "real question"},
+        ],
+    }
+    marked = mark_prompt_cache("/chat/completions", body)["messages"]
+    assert marked[0]["content"] == [{"type": "text", "text": "instructions", "cache_control": {"type": "ephemeral"}}]
+    assert marked[1]["content"] == "demo question"
+    assert marked[2]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert marked[3]["content"] == "real question"
+    assert body["messages"][0]["content"] == "instructions"
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/chat/completions", {"model": "openai/gpt-5", "messages": [{"role": "system", "content": "x"}]}),
+        ("/messages", {"model": "anthropic/claude-sonnet-5", "messages": [{"role": "user", "content": "x"}]}),
+        (
+            "/chat/completions",
+            {
+                "model": "anthropic/claude-sonnet-5",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": [{"type": "text", "text": "x", "cache_control": {"type": "ephemeral"}}],
+                    }
+                ],
+            },
+        ),
+    ],
+)
+def test_prompt_cache_leaves_other_requests_alone(path: str, body: dict) -> None:
+    """Skip providers that cache on their own, other protocols, and callers that placed breakpoints."""
+    assert mark_prompt_cache(path, body) is body
+
+
+def test_dispatch_sends_and_reserves_the_marked_body(database: Engine) -> None:
+    """Price and send the cacheable body so the reservation covers exactly what the provider saw."""
+    runtime = _runtime(database)
+    catalog = {**CATALOG, "id": "anthropic/claude-sonnet-5"}
+    sent = []
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        """Record the final body the relay sends."""
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": catalog})
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": "gen-cache", "usage": {"cost": "0.001"}})
+
+    request = {
+        "model": "anthropic/claude-sonnet-5",
+        "max_tokens": 100,
+        "messages": [{"role": "system", "content": "instructions"}, {"role": "user", "content": "hello"}],
+    }
+    with httpx.Client(transport=httpx.MockTransport(provider)) as client:
+        dispatcher = OpenRouterDispatcher(
+            runtime,
+            api_key="private",
+            model="anthropic/claude-sonnet-5",
+            role="task",
+            policy=ChargePolicy("managed_model"),
+            client=client,
+        )
+        result = dispatcher.dispatch("/chat/completions", request)
+    assert result.status == 200
+    assert sent[0]["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
