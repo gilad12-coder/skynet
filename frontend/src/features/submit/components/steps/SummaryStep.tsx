@@ -107,6 +107,7 @@ export function SummaryStep({
     maxMetricCalls,
     useMerge,
     targetScore,
+    economyMode,
     signatureCode,
     metricCode,
     isWorkflow,
@@ -535,6 +536,17 @@ export function SummaryStep({
                           : autoLevel === "heavy"
                             ? msg("auto.features.submit.components.steps.summarystep.literal.13")
                             : msg("submit.depth.custom")}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-2.5 border-b border-border/40">
+                    <HelpTip text={tip("submit.economy")}>
+                      <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Coins className="size-3.5" />
+                        {msg("submit.economy.summary_label")}
+                      </span>
+                    </HelpTip>
+                    <span className="text-sm font-medium">
+                      {economyMode ? msg("submit.economy.label") : msg("submit.economy.summary_off")}
                     </span>
                   </div>
                   <div className="flex items-center justify-between py-2.5 border-b border-border/40">

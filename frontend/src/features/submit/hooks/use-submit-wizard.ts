@@ -448,6 +448,7 @@ export function useSubmitWizard() {
     if (optimizerSettingsCustomized) setOptimizerSettingsOpen(true);
   }, [optimizerSettingsCustomized]);
   const [shuffle, setShuffle] = useState(true);
+  const [economyMode, setEconomyMode] = useState(false);
   // One shared total follows both workflow forms; the server owns spending and reservations.
   const {
     maxCostCents,
@@ -635,6 +636,7 @@ export function useSubmitWizard() {
       pxnParents,
       pxnProposals,
       shuffle,
+      economyMode,
       maxCostCents,
     };
     // A submit that has left is not re-parked while its splash plays out.
@@ -724,6 +726,7 @@ export function useSubmitWizard() {
     setPxnParents(d.pxnParents ?? DEFAULT_PXN);
     setPxnProposals(d.pxnProposals ?? DEFAULT_PXN);
     setShuffle(d.shuffle);
+    setEconomyMode(d.economyMode ?? false);
     hydratedRef.current = true;
   }, []);
 
@@ -968,6 +971,7 @@ export function useSubmitWizard() {
       modelRoles,
       runtime: runtimeCostProjection(selectedRuntime?.cost, 2),
       pricing,
+      economyMode,
     });
   }, [
     autoLevel,
@@ -984,6 +988,7 @@ export function useSubmitWizard() {
     optimizerName,
     runtimeCatalog,
     pricing,
+    economyMode,
   ]);
 
   // Default the cap to the bracket's high end (with headroom) the first time a
@@ -1568,6 +1573,7 @@ export function useSubmitWizard() {
       } else {
         setTargetScore("");
       }
+      setEconomyMode(payload.economy_mode === true);
 
       // React run config — hydrate tool source from the wire model. Scoring is
       // owned by metric_code (hydrated above), so there is no reward to restore.
@@ -1691,6 +1697,7 @@ export function useSubmitWizard() {
       estimated_cents_high: estimate.highCents,
       ...(!budgetUncapped && maxCostCents != null && { max_cost_cents: maxCostCents }),
       ...(parsedTargetScore != null && { target_score: parsedTargetScore }),
+      ...(economyMode && { economy_mode: true }),
       ...(seed != null && { seed }),
       ...(Object.keys(optKw).length > 0 && { optimizer_kwargs: optKw }),
     };
@@ -2654,6 +2661,8 @@ export function useSubmitWizard() {
     seed,
     shuffle,
     setShuffle,
+    economyMode,
+    setEconomyMode,
     autoLevel,
     setAutoLevel,
     reflectionMinibatchSize,

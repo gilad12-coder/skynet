@@ -30,7 +30,7 @@ from core.billing.protected_credentials import (
 )
 from core.billing.recovery_admission import model_call_bound
 from core.billing.runtime import BudgetRuntime
-from core.config import settings
+from core.config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, settings
 from core.service_gateway.optimization.blackbox.remote_sandbox import RemoteSandboxRuntime
 from core.service_gateway.optimization.blackbox.sandbox import CommandResult, LocalSubprocessRuntime, SandboxSpec
 from core.service_gateway.optimization.blackbox.sandbox_broker import SandboxBroker
@@ -196,6 +196,33 @@ def test_guest_controls_and_dataset_routes_cannot_replace_parent_authority(gatew
     assert _verify_model_routes(gateway, native=False) == [
         {"key": "model.task", "status": "succeeded", "field": "task"}
     ]
+
+
+@pytest.mark.parametrize("economy", [True, False])
+def test_economy_mode_batches_only_managed_roles(gateway: ModelGateway, economy: bool) -> None:
+    """Give managed roles a batch collector and a long guest timeout; leave BYOK and default runs alone."""
+    protected = gateway.protect_payload(
+        {
+            "economy_mode": economy,
+            "model_config": {"name": "fixture/text"},
+            "reflection_model_config": {
+                "name": "openrouter/fixture/text",
+                "token_source": "byok",
+                "byok_provider": "openrouter",
+                "base_url": "https://openrouter.ai/api/v1",
+                "extra": {"api_key": "account-owned-key"},
+            },
+        },
+        managed_key="provider-secret",
+    )
+    managed = gateway._routes[protected["model_config"]["extra"][ROUTE_KEY]["token"]]
+    byok = gateway._routes[protected["reflection_model_config"]["extra"][ROUTE_KEY]["token"]]
+    assert (managed._batch is not None) is economy
+    assert byok._batch is None
+    assert protected["model_config"]["extra"].get("timeout") == (
+        VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS if economy else None
+    )
+    assert "timeout" not in protected["reflection_model_config"]["extra"]
 
 
 def test_byok_agent_task_uses_its_scoped_fee_metered_route(gateway: ModelGateway) -> None:

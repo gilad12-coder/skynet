@@ -3166,6 +3166,10 @@ export type MessageKey =
   | "submit.draft.restore.retry"
   | "submit.draft.restore.start_new"
   | "submit.draft.restore.title"
+  | "submit.economy.hint"
+  | "submit.economy.label"
+  | "submit.economy.summary_label"
+  | "submit.economy.summary_off"
   | "submit.metric_calls"
   | "submit.model_config.thinking_always_on"
   | "submit.modelpicker.purpose.all"
@@ -3639,6 +3643,7 @@ export type MessageKey =
   | "tooltip.submit.dataset_size"
   | "tooltip.submit.depth"
   | "tooltip.submit.description"
+  | "tooltip.submit.economy"
   | "tooltip.submit.estimate"
   | "tooltip.submit.eval_rounds"
   | "tooltip.submit.generation_models"
@@ -7099,6 +7104,10 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "submit.draft.restore.retry": "לנסות שוב",
   "submit.draft.restore.start_new": "להתחיל מחדש",
   "submit.draft.restore.title": "להמשיך מההגדרה הקודמת שלך?",
+  "submit.economy.hint": "קריאות מודל מנוהלות עוברות בתור אצוות אצל הספק בחצי מחיר. כל סבב יכול לקחת בין דקות לשעות.",
+  "submit.economy.label": "חצי מחיר, איטי יותר",
+  "submit.economy.summary_label": "מצב חסכוני",
+  "submit.economy.summary_off": "מהירות רגילה",
   "submit.metric_calls": "תקציב קריאות מדד",
   "submit.model_config.thinking_always_on": "תמיד פעיל במודל הזה",
   "submit.modelpicker.purpose.all": "הכל",
@@ -7572,6 +7581,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "tooltip.submit.dataset_size": "כמה שורות ועמודות זוהו בקובץ; השורות מתחלקות בין אימון, ולידציה ובדיקה",
   "tooltip.submit.depth": "כמה רחב החיפוש של GEPA: קל רץ מהר עם פחות ניסיונות; מעמיק בודק יותר אפשרויות ולוקח יותר זמן",
   "tooltip.submit.description": "הערות חופשיות על מה הריצה מנסה להשיג; מוצג בפרטי הריצה כדי שההקשר לא ילך לאיבוד",
+  "tooltip.submit.economy": "שולח את קריאות המודל המנוהלות של הריצה באצוות בחצי מחיר. אצווה יכולה לקחת עד יממה, ולכן הריצה איטית בהרבה. קריאות עם המפתח שלך רצות במהירות רגילה.",
   "tooltip.submit.estimate": "טווח העלות הצפוי לריצה לפי המודלים שנבחרו וגודל ה{term.dataset}; החיוב בפועל תלוי בכמה קריאות ה{term.optimizer} מבצע. עם מפתח ספק משלכם מוצגת רק עמלת הפלטפורמה",
   "tooltip.submit.eval_rounds": "כמה פעמים להריץ הערכה מלאה כדי לבדוק מועמדים לפרומפט",
   "tooltip.submit.generation_models": "כל {term.generationModel} שנבחר כאן מוצמד לכל {term.reflectionModel} — מספר הריצות הוא מכפלת שתי הרשימות",
@@ -18929,6 +18939,10 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "submit.draft.restore.retry": "Try again",
   "submit.draft.restore.start_new": "Start new",
   "submit.draft.restore.title": "Continue from your previous configuration?",
+  "submit.economy.hint": "Managed model calls go through the provider's batch queue at half price. Each round can take minutes to hours.",
+  "submit.economy.label": "Half price, slower",
+  "submit.economy.summary_label": "Economy mode",
+  "submit.economy.summary_off": "Standard speed",
   "submit.metric_calls": "Metric-call budget",
   "submit.model_config.thinking_always_on": "Always on for this model",
   "submit.modelpicker.purpose.all": "All",
@@ -19402,6 +19416,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "tooltip.submit.dataset_size": "How many rows and columns were detected in the file; the rows are shared out between train, validation and test",
   "tooltip.submit.depth": "How wide GEPA's search is: light runs fast with fewer attempts; deeper checks more options and takes more time",
   "tooltip.submit.description": "Free-text notes on what this run is trying to achieve; shown in the run details so the context isn't lost",
+  "tooltip.submit.economy": "Sends your run's managed model calls in batches at half the price. Batches can take up to a day, so the run is much slower. Calls on your own key run at normal speed.",
   "tooltip.submit.estimate": "The expected cost range for this run based on the chosen models and {term.dataset} size; the actual charge depends on how many calls the {term.optimizer} makes. With your own provider key only the platform fee is shown",
   "tooltip.submit.eval_rounds": "How many times to run a full evaluation to check prompt candidates",
   "tooltip.submit.generation_models": "Every generation model picked here is paired with every feedback model — the number of runs is the product of the two lists",

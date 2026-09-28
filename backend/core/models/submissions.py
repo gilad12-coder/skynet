@@ -144,6 +144,14 @@ class _OptimizationRequestBase(BaseModel):
             "budget remains a safety ceiling."
         ),
     )
+    economy_mode: bool = Field(
+        default=False,
+        description=(
+            "Send the run's managed model calls through OpenRouter's Batch API at half the token "
+            "price. Each round of calls waits for its batch, typically minutes and at most a day, "
+            "so the run finishes much later. Calls on the user's own OpenRouter key run normally."
+        ),
+    )
     estimated_cents_low: int | None = Field(
         validation_alias=AliasChoices("estimated_cents_low", "estimated_credits_low"),
         default=None,

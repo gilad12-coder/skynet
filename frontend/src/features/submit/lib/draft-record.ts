@@ -66,6 +66,7 @@ export interface WizardDraftData {
   pxnParents?: string;
   pxnProposals?: string;
   shuffle: boolean;
+  economyMode?: boolean;
   maxCostCents: number | null;
 }
 
