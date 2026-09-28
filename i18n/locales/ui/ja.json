@@ -3929,5 +3929,10 @@
   "tutorial.step.sidebar_nav.title": "アプリ内の移動",
   "tutorial.step.sidebar_nav.body": "サイドバーでページを切り替えます。どこからでも ⌘K または Ctrl+K を押すと、任意のページや設定に移動できます。",
   "billing.plans.topup.fee_note": "価格には {p1} のプラットフォーム手数料が含まれます。支払い方法による違いはありません。",
-  "billing.plans.topup.custom_range": "{p1}〜{p2} の金額を入力してください。"
+  "billing.plans.topup.custom_range": "{p1}〜{p2} の金額を入力してください。",
+  "submit.economy.label": "半額・低速",
+  "submit.economy.hint": "マネージドモデルの呼び出しを、プロバイダーのバッチキュー経由で半額で実行します。各ラウンドに数分から数時間かかることがあります。",
+  "submit.economy.summary_off": "通常速度",
+  "submit.economy.summary_label": "エコノミーモード",
+  "tooltip.submit.economy": "実行中のマネージドモデル呼び出しを半額でバッチ送信します。バッチには最大1日かかることがあるため、実行はかなり遅くなります。ご自身のキーでの呼び出しは通常の速度で実行されます。"
 }

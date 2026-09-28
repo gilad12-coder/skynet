@@ -3929,5 +3929,10 @@
   "tutorial.step.sidebar_nav.title": "點樣周圍行",
   "tutorial.step.sidebar_nav.body": "用側邊欄喺唔同頁面之間切換。喺任何地方撳 ⌘K 或 Ctrl+K，就可以跳去任何頁面或設定。",
   "billing.plans.topup.fee_note": "價錢已包括 {p1} 平台費，所有付款方式都一樣。",
-  "billing.plans.topup.custom_range": "請輸入 {p1} 至 {p2} 之間嘅金額。"
+  "billing.plans.topup.custom_range": "請輸入 {p1} 至 {p2} 之間嘅金額。",
+  "submit.economy.label": "半價，較慢",
+  "submit.economy.hint": "託管模型嘅調用會以半價經供應商嘅批次隊列處理。每一輪可能要幾分鐘到幾個鐘。",
+  "submit.economy.summary_off": "正常速度",
+  "submit.economy.summary_label": "慳錢模式",
+  "tooltip.submit.economy": "將今次運行嘅託管模型調用以半價分批送出。一個批次最長可能要一日，所以運行會慢好多。用你自己金鑰嘅調用會以正常速度運行。"
 }

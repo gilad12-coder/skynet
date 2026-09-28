@@ -3929,5 +3929,10 @@
   "tutorial.step.sidebar_nav.title": "앱 둘러보기",
   "tutorial.step.sidebar_nav.body": "사이드바로 페이지를 이동하세요. 어디서든 ⌘K 또는 Ctrl+K를 누르면 원하는 페이지나 설정으로 바로 이동합니다.",
   "billing.plans.topup.fee_note": "가격에 {p1}의 플랫폼 수수료가 포함되어 있으며, 결제 수단과 관계없이 동일합니다.",
-  "billing.plans.topup.custom_range": "{p1}~{p2} 사이의 금액을 입력하세요."
+  "billing.plans.topup.custom_range": "{p1}~{p2} 사이의 금액을 입력하세요.",
+  "submit.economy.label": "반값, 더 느림",
+  "submit.economy.hint": "관리형 모델 호출이 공급자의 배치 대기열을 통해 반값으로 처리됩니다. 각 라운드에 몇 분에서 몇 시간이 걸릴 수 있습니다.",
+  "submit.economy.summary_off": "일반 속도",
+  "submit.economy.summary_label": "절약 모드",
+  "tooltip.submit.economy": "실행의 관리형 모델 호출을 반값에 배치로 보냅니다. 배치는 최대 하루가 걸릴 수 있어 실행이 훨씬 느려집니다. 본인 키를 사용하는 호출은 일반 속도로 실행됩니다."
 }
