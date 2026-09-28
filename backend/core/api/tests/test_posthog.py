@@ -139,7 +139,7 @@ def test_export_falls_back_to_user_hash_without_browser_id(monkeypatch: pytest.M
             {
                 "name": "purchase_completed",
                 "timestamp": "2026-08-13T12:00:00+00:00",
-                "properties": {"pack_id": "starter", "credits": 500, "card": "4242"},
+                "properties": {"pack_id": "starter", "cents": 500, "card": "4242"},
                 "context": {"source": "server"},
             }
         ],
@@ -152,7 +152,7 @@ def test_export_falls_back_to_user_hash_without_browser_id(monkeypatch: pytest.M
     assert properties["distinct_id"] == f"user-{expected_hash}"
     assert properties["user_hash"] == f"user-{expected_hash}"
     assert properties["pack_id"] == "starter"
-    assert properties["credits"] == 500
+    assert properties["cents"] == 500
     assert "card" not in properties
 
 

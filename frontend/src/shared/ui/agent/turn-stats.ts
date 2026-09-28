@@ -11,7 +11,7 @@ export function parseTurnStats(raw: unknown): TurnStats | null {
   return {
     inputTokens: num(r.input_tokens),
     outputTokens: num(r.output_tokens),
-    credits: num(r.credits),
+    cents: num(r.cents),
     durationMs: num(r.duration_ms),
     ttftMs: num(r.ttft_ms),
   };

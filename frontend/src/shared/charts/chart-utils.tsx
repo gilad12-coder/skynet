@@ -24,7 +24,7 @@ export function ChartTooltip({
   active?: boolean;
   payload?: Array<{ value: number; name: string; color?: string }>;
   label?: string;
-  /** Optional per-value formatter (e.g. render a credit count as dollars). Defaults to the raw value. */
+  /** Optional per-value formatter (e.g. render a cent amount as dollars). Defaults to the raw value. */
   formatValue?: (value: number) => string;
 }) {
   if (!active || !payload?.length) return null;

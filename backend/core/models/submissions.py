@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from .common import ColumnMapping, ModelConfig, OptimizationStatus, OptimizationType, SplitFractions
 from .results import ModelTokenUsage
@@ -110,9 +110,9 @@ class _OptimizationRequestBase(BaseModel):
     token_source: Literal["managed", "byok"] = Field(
         default="managed",
         description=(
-            "How model calls are billed: 'managed' charges the marked-up provider cost to Skynet credits; "
+            "How model calls are billed: 'managed' charges the marked-up provider cost to the Skynet balance; "
             "'byok' sends calls through the user's provider key and charges only Skynet's platform fee to "
-            "credits. Billable sandbox usage is charged at marked-up provider cost in both modes."
+            "the balance. Billable sandbox usage is charged at marked-up provider cost in both modes."
         ),
     )
     execution_runtime: Literal["vercel"] = "vercel"
@@ -121,14 +121,15 @@ class _OptimizationRequestBase(BaseModel):
     execution_budget_id: str | None = Field(default=None, min_length=1, max_length=64)
     execution_budget_revision: int | None = Field(default=None, ge=1)
     execution_budget_generation: int | None = Field(default=None, ge=0)
-    max_cost_credits: int | None = Field(
+    max_cost_cents: int | None = Field(
+        validation_alias=AliasChoices("max_cost_cents", "max_cost_credits"),
         default=None,
         ge=1,
         description=(
-            "User-set per-job spend ceiling, in credits. A DSPy optimizer's token use is not "
+            "User-set per-job spend ceiling, in cents. A DSPy optimizer's token use is not "
             "linear (bootstrapping, compile steps, validation loops), so the wizard shows a "
             "projected bracket rather than a tight estimate and lets the user cap the run here. "
-            "The run is hard-stopped server-side once its accumulated credit cost reaches this "
+            "The run is hard-stopped server-side once its accumulated cost reaches this "
             "cap; consumed work remains billed and the run preserves any evaluated result. "
             "Omit (null) for no ceiling."
         ),
@@ -143,22 +144,24 @@ class _OptimizationRequestBase(BaseModel):
             "budget remains a safety ceiling."
         ),
     )
-    estimated_credits_low: int | None = Field(
+    estimated_cents_low: int | None = Field(
+        validation_alias=AliasChoices("estimated_cents_low", "estimated_credits_low"),
         default=None,
         ge=0,
         description=(
-            "Low end of the projected credit bracket the wizard showed at submit. Persisted so "
+            "Low end of the projected cost bracket (cents) the wizard showed at submit. Persisted so "
             "the post-run proof moment can reconcile the estimate against the actual charge. "
             "Carries the chargeable bracket for the run's token_source (managed: full per-model "
             "cost; byok: platform fee). Advisory only — never gates or bills. Omit (null) when "
             "no estimate was computed."
         ),
     )
-    estimated_credits_high: int | None = Field(
+    estimated_cents_high: int | None = Field(
+        validation_alias=AliasChoices("estimated_cents_high", "estimated_credits_high"),
         default=None,
         ge=0,
         description=(
-            "High end of the projected credit bracket (see estimated_credits_low). Seeds the "
+            "High end of the projected cost bracket (see estimated_cents_low). Seeds the "
             "post-run estimate-vs-actual reconciliation. Advisory only."
         ),
     )
@@ -382,7 +385,7 @@ class WorkflowDryRunResponse(BaseModel):
     error: str | None = None
     failed_node_id: str | None = None
     usage_by_model: list[ModelTokenUsage] = Field(default_factory=list)
-    credits_charged: int = 0
+    cents_charged: int = 0
     budget: dict[str, Any] | None = None
     preview_status: Literal["succeeded", "failed", "pending"] | None = None
     preflight_id: str | None = None

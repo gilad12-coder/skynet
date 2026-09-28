@@ -104,7 +104,7 @@ import { OverviewTab } from "./OverviewTab";
 import { BudgetTab } from "./BudgetTab";
 import { RunLifecycleNotice } from "./RunLifecycleNotice";
 import { isBudgetPause } from "../lib/run-lifecycle";
-import { RunCreditsChip } from "./RunCreditsChip";
+import { RunCostChip } from "./RunCostChip";
 import { BestVersionTab } from "./BestVersionTab";
 import { GridServeTab } from "./GridServeTab";
 import { BlackboxLMActivityTab, LMActivityTab } from "./LMActivityTab";
@@ -377,7 +377,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
       model: string;
       ts: number;
       nodeTraces?: WorkflowNodeTrace[] | null;
-      creditsCharged?: string | null;
+      centsCharged?: string | null;
     }>
   >([]);
   const [streamingRun, setStreamingRun] = useState<{
@@ -789,17 +789,17 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               outputs: res.outputs,
               model: res.model_used,
               ts: Date.now(),
-              creditsCharged: res.credits_charged,
+              centsCharged: res.cents_charged,
             },
             ...prev,
           ];
           return next.length > 50 ? next.slice(0, 50) : next;
         });
         setStreamingRun(null);
-        if (res.credits_charged != null) {
+        if (res.cents_charged != null) {
           toast.success(
             formatMsg("optimizations.serve.request_spent", {
-              credits: formatBudgetUsd(String(res.credits_charged), getActiveIntlLocale()),
+              cents: formatBudgetUsd(String(res.cents_charged), getActiveIntlLocale()),
             }),
           );
         }
@@ -827,17 +827,17 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               model: res.model_used,
               ts: Date.now(),
               nodeTraces: res.node_traces ?? null,
-              creditsCharged: res.credits_charged,
+              centsCharged: res.cents_charged,
             },
             ...prev,
           ];
           return next.length > 50 ? next.slice(0, 50) : next;
         });
         setStreamingRun(null);
-        if (res.credits_charged != null) {
+        if (res.cents_charged != null) {
           toast.success(
             formatMsg("optimizations.serve.request_spent", {
-              credits: formatBudgetUsd(String(res.credits_charged), getActiveIntlLocale()),
+              cents: formatBudgetUsd(String(res.cents_charged), getActiveIntlLocale()),
             }),
           );
         }
@@ -879,17 +879,17 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
               outputs: res.outputs,
               model: res.model_used,
               ts: Date.now(),
-              creditsCharged: res.credits_charged,
+              centsCharged: res.cents_charged,
             },
             ...prev,
           ];
           return next.length > 50 ? next.slice(0, 50) : next;
         });
         setStreamingRun(null);
-        if (res.credits_charged != null) {
+        if (res.cents_charged != null) {
           toast.success(
             formatMsg("optimizations.serve.request_spent", {
-              credits: formatBudgetUsd(String(res.credits_charged), getActiveIntlLocale()),
+              cents: formatBudgetUsd(String(res.cents_charged), getActiveIntlLocale()),
             }),
           );
         }
@@ -1214,7 +1214,7 @@ export function OptimizationDetailView({ shareData }: { shareData?: SharedOptimi
                   </Link>
                 )}
                 {!isPairContext && (
-                  <RunCreditsChip details={job.result?.details ?? job.blackbox_result?.details} />
+                  <RunCostChip details={job.result?.details ?? job.blackbox_result?.details} />
                 )}
               </div>
             </div>

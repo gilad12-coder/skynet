@@ -4,12 +4,12 @@
   "app.shell.search.kw.admin": "Admin Verwaltung Speicher Kontingent Budgets Benutzer admin storage quota users",
   "app.shell.search.kw.agent": "Agent Bereich Assistent Standardmodell Sprache Diktat Vertrauensstufe Gedächtnis agent assistant model voice dictation trust yolo memory",
   "app.shell.search.kw.api": "API Token Entwickler Integration erstellen widerrufen Dokumentation API token developer documentation",
-  "app.shell.search.kw.billing": "Abrechnung Guthaben Credits aufladen Abonnement Tarif Zahlungsmethoden Karte Rechnungen Belege Transaktionen billing credits Skynet Pro subscription payment receipts",
+  "app.shell.search.kw.billing": "Abrechnung Guthaben Geld hinzufügen aufladen Abonnement Tarif Zahlungsmethoden Karte Rechnungen Belege Transaktionen billing balance Skynet Pro subscription payment receipts",
   "app.shell.search.kw.privacy": "Datenschutz Daten Benachrichtigungen E-Mail Analysen Cache leeren Daten exportieren Konto löschen privacy notifications analytics cache export delete account",
   "app.shell.search.kw.providers": "Anbieter API-Schlüssel eigener Schlüssel Basis-URL providers keys BYOK OpenAI Anthropic Gemini Google Groq Mistral Together DeepSeek xAI OpenRouter",
   "app.shell.search.kw.security": "Sicherheit Zwei-Faktor Authentifikator Wiederherstellungscodes Passkeys E-Mail-Codes Anmeldung security 2FA TOTP recovery passkey login",
   "app.shell.search.kw.tagging": "Tagging Labeling KI-gestützt automatisches Taggen Standard-Tagging-Modell tagging labels autotag model",
-  "app.shell.search.kw.usage": "Nutzung Ausgaben Kosten Guthaben verbraucht Tokens Läufe nach Modell Aktivität usage spend cost tokens",
+  "app.shell.search.kw.usage": "Nutzung Ausgaben Kosten Dollar ausgegeben Tokens Läufe nach Modell Aktivität usage spend cost tokens",
   "app.shell.search.kw.wizard": "Optimierung Assistent Codegenerierung Datensatz Aufteilung Paketregister Modelle optimization wizard split package registry pip models",
   "auto.features.agent.panel.components.generalistpanel.1": "Grüß Sie, wie kann ich helfen?",
   "common.empty": "—",
@@ -23,5 +23,5 @@
   "optimizations.serve.field_separator": ": ",
   "tooltip.submit.blackbox.scorer_install": "Wird einmal in der netzwerkisolierten Vercel Sandbox ausgeführt. Verwenden Sie Pakete aus dem festgeschriebenen Image oder bereitstellungseigene Paketartefakte; öffentliche apt- und Paketquellen sind nicht verfügbar.",
   "submit.budget.byok_note": "Ihr Anbieter rechnet Modell-Token direkt über Ihren Schlüssel ab. Der Gesamtbetrag enthält nur die Skynet-Plattformgebühr und die Nutzung der Vercel Sandbox.",
-  "submit.blackbox.roles.optimization.managed_hint": "Verwendet die Standard-Sampling-Einstellungen des Modells; die Abrechnung kann über Skynet-Credits oder Ihren OpenRouter-Schlüssel erfolgen."
+  "submit.blackbox.roles.optimization.managed_hint": "Verwendet die Standard-Sampling-Einstellungen des Modells; die Abrechnung kann über Ihr Skynet-Guthaben oder Ihren OpenRouter-Schlüssel erfolgen."
 }

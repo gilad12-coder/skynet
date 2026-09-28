@@ -2,7 +2,7 @@
 
 Powers the tagger's assist modes: the dataset interview that distills a
 labeling rubric, silent per-row predictions during calibration, batched
-review/auto-tagging, and the pre-run credit estimate. Pure functions over the
+review/auto-tagging, and the pre-run cost estimate. Pure functions over the
 session payload — persistence stays in the router; nothing here touches the
 database.
 
@@ -25,7 +25,7 @@ import dspy
 
 from ..api.model_catalog import REASONING_EFFORTS, agent_model_id
 from ..billing.pricing import ModelUsage
-from ..billing.service import run_cost_credits
+from ..billing.service import run_cost_cents
 from ..config import settings
 from ..constants import TOKEN_SOURCE_BYOK, TOKEN_SOURCE_MANAGED
 from ..models import ModelConfig
@@ -440,9 +440,7 @@ def task_description(config: dict[str, Any]) -> str:
     if mode == "binary":
         question = str(config.get("question") or "").strip()
         if question:
-            return (
-                f'Binary labeling. For each row answer the question: "{question}". The label is exactly "1" (yes) or "0" (no).'
-            )
+            return f'Binary labeling. For each row answer the question: "{question}". The label is exactly "1" (yes) or "0" (no).'
         if config.get("_assist_mode"):
             return (
                 "Binary labeling, but the yes/no classification criterion has not been defined. "
@@ -994,17 +992,13 @@ async def _drive_interview_turn(
                     async for chunk in program(**inputs):
                         if isinstance(chunk, dspy.streaming.StreamResponse):
                             if chunk.signature_field_name == REASONING_FIELD:
-                                await queue.put(
-                                    {"event": "reasoning_patch", "data": {"chunk": chunk.chunk}}
-                                )
+                                await queue.put({"event": "reasoning_patch", "data": {"chunk": chunk.chunk}})
                             elif chunk.signature_field_name == "message":
                                 text, reset = guard.feed(chunk.chunk)
                                 if reset:
                                     await queue.put({"event": "message_reset", "data": {}})
                                 if text:
-                                    await queue.put(
-                                        {"event": "message_patch", "data": {"chunk": text}}
-                                    )
+                                    await queue.put({"event": "message_patch", "data": {"chunk": text}})
                                 if chunk.is_last_chunk:
                                     await queue.put({"event": "message_end", "data": {}})
                             elif chunk.signature_field_name == "done":
@@ -1220,7 +1214,7 @@ def predict_rows(
     usage_sink: list | None = None,
     model_config: ModelConfig | None = None,
 ) -> tuple[dict[str, dict[str, Any]], int]:
-    """Label rows in concurrent batches and report the credit cost.
+    """Label rows in concurrent batches and report the cost in cents.
 
     Args:
         config: The session's effective config; when it carries the user's
@@ -1237,8 +1231,8 @@ def predict_rows(
             BYOK vault connection when that source was selected.
 
     Returns:
-        ``(predictions, credits)`` — the merged ``{row_id: prediction}`` map
-        and the credit cost of the LM calls actually made.
+        ``(predictions, cents)`` — the merged ``{row_id: prediction}`` map
+        and the cost in cents of the LM calls actually made.
     """
     selected = model_config or assist_model_config(
         {"model": config.get("model"), "modelParams": config.get("modelParams")}
@@ -1263,11 +1257,11 @@ def predict_rows(
         for result in pool.map(work, batches):
             merged.update(result)
     usage = usage_by_model_from_history(lm)
-    credits = run_cost_credits(
+    cents = run_cost_cents(
         (ModelUsage(model=model, input_tokens=tokens[0], output_tokens=tokens[1]) for model, tokens in usage.items()),
         selected.token_source or TOKEN_SOURCE_MANAGED,
     )
-    return merged, credits
+    return merged, cents
 
 
 class _StreamedArrayItems:
@@ -1418,7 +1412,7 @@ async def predict_rows_stream(
 
     Yields ``{"event": "prediction", "data": {"id", "prediction"}}`` per row,
     then a terminal ``{"event": "predict_done", "data": {"predictions",
-    "credits"}}`` with the merged map and the credit cost of the calls made.
+    "cents"}}`` with the merged map and the cost in cents of the calls made.
 
     Args:
         config: The session's effective config; when it carries the user's
@@ -1475,20 +1469,20 @@ async def predict_rows_stream(
         task.cancel()
         raise
     usage = usage_by_model_from_history(lm)
-    credits = run_cost_credits(
+    cents = run_cost_cents(
         (ModelUsage(model=model, input_tokens=tokens[0], output_tokens=tokens[1]) for model, tokens in usage.items()),
         selected.token_source or TOKEN_SOURCE_MANAGED,
     )
-    yield {"event": "predict_done", "data": {"predictions": merged, "credits": credits}}
+    yield {"event": "predict_done", "data": {"predictions": merged, "cents": cents}}
 
 
-def estimate_credits_for_rows(
+def estimate_cents_for_rows(
     instructions: str,
     rows: list[dict[str, Any]],
     model: str | None = None,
     token_source: str = TOKEN_SOURCE_MANAGED,
 ) -> dict[str, Any]:
-    """Estimate the credit cost of auto-tagging the given rows.
+    """Estimate the cost in cents of auto-tagging the given rows.
 
     A chars/4 token heuristic over the compiled instructions (repeated once
     per batch) plus the row texts, with a fixed per-row output allowance.
@@ -1502,24 +1496,24 @@ def estimate_credits_for_rows(
             platform-fee portion only.
 
     Returns:
-        ``{"rows", "model", "credits_low", "credits_high"}``.
+        ``{"rows", "model", "cents_low", "cents_high"}``.
     """
     model = (model or "").strip() or assist_model_name()
     if not rows:
-        return {"rows": 0, "model": model, "credits_low": 0, "credits_high": 0}
+        return {"rows": 0, "model": model, "cents_low": 0, "cents_high": 0}
     batch_count = max(1, (len(rows) + BATCH_SIZE - 1) // BATCH_SIZE)
     row_chars = sum(len(_row_text(r)) for r in rows)
     input_tokens = (len(instructions) * batch_count + row_chars) // CHARS_PER_TOKEN
     output_tokens = OUTPUT_TOKENS_PER_ROW * len(rows)
-    base = run_cost_credits(
+    base = run_cost_cents(
         [ModelUsage(model=model, input_tokens=input_tokens, output_tokens=output_tokens)],
         token_source,
     )
     return {
         "rows": len(rows),
         "model": model,
-        "credits_low": base,
-        "credits_high": max(base, int(base * 1.8)),
+        "cents_low": base,
+        "cents_high": max(base, int(base * 1.8)),
     }
 
 
@@ -1643,8 +1637,8 @@ def synthesize_rows(
             BYOK vault connection when that source was selected.
 
     Returns:
-        ``(columns, rows, credits)`` — the settled columns, at most ``count``
-        rows keyed by them, and the credit cost of the calls made.
+        ``(columns, rows, cents)`` — the settled columns, at most ``count``
+        rows keyed by them, and the cost in cents of the calls made.
 
     Raises:
         RuntimeError: When no slice produced a usable row.
@@ -1687,11 +1681,11 @@ def synthesize_rows(
     if not rows:
         raise RuntimeError("synthetic dataset generation produced no rows")
     usage = usage_by_model_from_history(lm)
-    credits = run_cost_credits(
+    cents = run_cost_cents(
         (ModelUsage(model=model, input_tokens=tokens[0], output_tokens=tokens[1]) for model, tokens in usage.items()),
         selected.token_source or TOKEN_SOURCE_MANAGED,
     )
-    return settled, rows[:count], credits
+    return settled, rows[:count], cents
 
 
 def build_data_rows(columns: list[str], rows: list[dict[str, str]]) -> list[dict[str, Any]]:
@@ -1713,8 +1707,7 @@ def build_data_rows(columns: list[str], rows: list[dict[str, str]]) -> list[dict
     for index, row in enumerate(rows, start=1):
         fields = [{"column": col, "value": row.get(col, "")} for col in columns]
         text = "\n".join(
-            f"{field['column']}: {field['value']}" if len(columns) > 1 else str(field["value"])
-            for field in fields
+            f"{field['column']}: {field['value']}" if len(columns) > 1 else str(field["value"]) for field in fields
         )
         built.append({**row, "id": index, "text": text, "fields": fields})
     return built

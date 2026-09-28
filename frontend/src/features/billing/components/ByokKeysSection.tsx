@@ -20,7 +20,7 @@ import { Button } from "@/shared/ui/primitives/button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/primitives/tooltip";
 import { useByokKeys } from "../providers/byok-provider";
-import { formatResetDate } from "../lib/credit";
+import { formatResetDate } from "../lib/wallet";
 import { BYOK_PROVIDERS, type ByokProviderInfo, type KeyStatus } from "../lib/byok";
 import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { StatusPill, type StatusTone } from "@/shared/ui/status-badge";

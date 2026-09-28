@@ -54,7 +54,7 @@ type RunEntry = {
   outputs: Record<string, unknown>;
   model: string;
   ts: number;
-  creditsCharged?: string | null;
+  centsCharged?: string | null;
 };
 
 export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
@@ -207,14 +207,14 @@ export function GridServeTab({ job }: { job: OptimizationStatusResponse }) {
             outputs: res.outputs,
             model: res.model_used,
             ts: Date.now(),
-            creditsCharged: res.credits_charged,
+            centsCharged: res.cents_charged,
           },
           ...prev,
         ]);
-        if (res.credits_charged != null) {
+        if (res.cents_charged != null) {
           toast.success(
             formatMsg("optimizations.serve.request_spent", {
-              credits: formatBudgetUsd(String(res.credits_charged), getActiveIntlLocale()),
+              cents: formatBudgetUsd(String(res.cents_charged), getActiveIntlLocale()),
             }),
           );
         }

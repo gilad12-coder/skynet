@@ -319,7 +319,7 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
     const stageIssue = evaluate(variable(hook, "stageIssue"), {
       WIZARD_STAGE,
       stageAt,
-      maxCostCredits: null,
+      maxCostCents: null,
       budgetUncapped: false,
       msg: (key: string) => key,
     });
@@ -350,7 +350,7 @@ for (const path of ["../hooks/use-submit-wizard.ts"]) {
     const stageIssue = evaluate(variable(hook, "stageIssue"), {
       WIZARD_STAGE,
       stageAt,
-      maxCostCredits: null,
+      maxCostCents: null,
       budgetUncapped: true,
       targetScoreIssue: () => "target",
       msg: (key: string) => key,
@@ -649,7 +649,7 @@ test("Anything missing budget blocks Evaluation before execution", () => {
   const stageIssue = evaluate(variable(wizard, "stageIssue"), {
     WIZARD_STAGE,
     stageAt,
-    maxCostCredits: null,
+    maxCostCents: null,
     budgetUncapped: false,
     msg: (key: string) => key,
   });
@@ -667,7 +667,7 @@ test("Anything without a spending limit skips the budget amount check", () => {
   const stageIssue = evaluate(variable(wizard, "stageIssue"), {
     WIZARD_STAGE,
     stageAt,
-    maxCostCredits: null,
+    maxCostCents: null,
     budgetUncapped: true,
     targetKind: "text",
     scorerKind: "python",
@@ -683,7 +683,7 @@ test("Anything missing evaluator model blocks Continue even without an explicit 
   const stageIssue = evaluate(variable(wizard, "stageIssue"), {
     WIZARD_STAGE,
     stageAt,
-    maxCostCredits: 120,
+    maxCostCents: 120,
     budgetUncapped: false,
     targetKind: "text",
     scorerKind: "python",

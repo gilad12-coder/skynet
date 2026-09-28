@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import { ValidationFrame, ValidationGate, ValidationPlan } from "./ValidationFrame";
 import { msg } from "@/shared/lib/messages";
-import { useCredits } from "@/features/billing";
+import { useBalance } from "@/features/billing";
 import { registerTutorialHook } from "@/features/tutorial";
 
 import { TotalBudgetCard } from "./TotalBudgetCard";
@@ -44,7 +44,7 @@ function evaluationPartFor(field?: string): number | null {
 
 export function SubmitWizard({ header }: { header?: ReactNode }) {
   const w = useSubmitWizard();
-  const wallet = useCredits();
+  const wallet = useBalance();
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
@@ -130,8 +130,8 @@ export function SubmitWizard({ header }: { header?: ReactNode }) {
 
   const shortfall = budgetShortfall(w.costBracket, budgetMode, {
     uncapped: w.budgetUncapped,
-    limit: w.maxCostCredits,
-    balance: wallet.available ? wallet.totalCredits : null,
+    limit: w.maxCostCents,
+    balance: wallet.available ? wallet.totalCents : null,
   });
   const handleOptimizationNext = async () => {
     if (OPTIMIZATION_STEPS[optimizationPart] === "budget" && shortfall) {

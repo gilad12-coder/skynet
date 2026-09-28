@@ -26,11 +26,11 @@ from ....billing.budgets import BudgetError
 from ....billing.model_gateway import ROUTE_KEY
 from ....billing.operation_pricing import UnpricedOperationError
 from ....billing.pricing import (
-    CREDIT_USD_VALUE,
+    CENT_USD_VALUE,
     PLATFORM_FEE_FRACTION,
     ModelUsage,
+    cents_for_usage,
     combine_usages,
-    credits_for_usage,
     raw_cost_usd,
     usage_markup,
 )
@@ -222,8 +222,8 @@ def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: boo
         # and is metered by the gateway route; the parent hands its guest the
         # ceiling the proposer plans against, so only a budget-less run must
         # state one here.
-        if payload.max_cost_credits is None and payload.execution_budget_id is None:
-            raise ServiceError("Set a total credit budget before starting an upstream agent proposer.")
+        if payload.max_cost_cents is None and payload.execution_budget_id is None:
+            raise ServiceError("Set a total spending budget before starting an upstream agent proposer.")
         includes_meta_harness = payload.strategy.mode != "single" or payload.strategy.engine == "meta_harness"
         if includes_meta_harness and payload.cases:
             splits = split_examples(
@@ -731,11 +731,11 @@ def _run_job(
     lm = build_language_model(payload.reflection_model_settings, disable_cache=True)
     reflection_lm, reflection_durations_ms = _reflection_caller(lm)
     token_budget = None
-    if payload.max_cost_credits is not None:
+    if payload.max_cost_cents is not None:
         cost_multiplier = (
             PLATFORM_FEE_FRACTION if payload.reflection_model_settings.token_source == "byok" else usage_markup()
         )
-        token_budget = payload.max_cost_credits * CREDIT_USD_VALUE / cost_multiplier
+        token_budget = payload.max_cost_cents * CENT_USD_VALUE / cost_multiplier
     needs_native = payload.strategy.mode != "single" or payload.strategy.engine in NATIVE_ENGINES
     native_options = None
     if needs_native:
@@ -747,7 +747,7 @@ def _run_job(
             else gateway_from_settings(settings)
         )
         if gateway is None or token_budget is None:
-            raise ServiceError("The upstream proposer needs a gateway and a total credit budget.")
+            raise ServiceError("The upstream proposer needs a gateway and a total spending budget.")
         active_runtime = current_sandbox_runtime()
         native_options = NativeOptions(
             runtime=payload.proposer_runtime,
@@ -784,19 +784,19 @@ def _run_job(
         progress_callback=progress_callback,
     )
     # The scorer's own model calls are part of the run: they count toward
-    # the credit ceiling and the usage the worker bills.
+    # the cost ceiling and the usage the worker bills.
     lms = [lm] if base_scorer.usage is None else [lm, base_scorer.usage]
     callbacks = (
-        [CostCeilingCallback(payload.max_cost_credits, *lms)]
-        if payload.max_cost_credits is not None and payload.execution_budget_id is None
+        [CostCeilingCallback(payload.max_cost_cents, *lms)]
+        if payload.max_cost_cents is not None and payload.execution_budget_id is None
         else []
     )
     if callbacks:
 
         def check_budget() -> None:
             """Stop engine boundaries even when DSPy has caught a callback exception."""
-            if credits_for_usage(_combined_usage(lms, native_options)) >= payload.max_cost_credits:
-                raise BudgetReached("The run's total credit budget has been reached.")
+            if cents_for_usage(_combined_usage(lms, native_options)) >= payload.max_cost_cents:
+                raise BudgetReached("The run's total spending budget has been reached.")
 
         ctx.check_budget = check_budget
 

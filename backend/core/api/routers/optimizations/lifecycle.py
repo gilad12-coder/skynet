@@ -573,13 +573,13 @@ def register_lifecycle_routes(
             and getattr(job_store, "engine", None) is not None
         ):
             projection = (job_data.get("terminal_evidence") or {}).get("budget_projection") or {}
-            projected = int(projection.get("projected_credits") or 0)
+            projected = int(projection.get("projected_cents") or 0)
             budget = BudgetService(engine=job_store.engine).get(job_data["execution_budget_id"], job_data["username"])
-            if budget.total_credits <= projected:
+            if budget.total_cents <= projected:
                 raise DomainError(
                     "optimization.resume_budget_projected",
                     status=409,
-                    params={"projected": projected, "limit": budget.total_credits},
+                    params={"projected": f"${projected / 100:.2f}", "limit": f"${budget.total_cents / 100:.2f}"},
                 )
 
         # A manual pause/resume or a continuation past the spending limit is

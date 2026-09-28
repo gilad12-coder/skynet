@@ -9,19 +9,19 @@ import { cn } from "@/shared/lib/utils";
 import { useLocale } from "@/shared/providers";
 import { useSettingsModal } from "@/features/settings";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
-import { useCredits } from "../providers/credit-provider";
-import { formatCreditsUsd } from "../lib/credit";
+import { useBalance } from "../providers/balance-provider";
+import { formatCentsUsd } from "../lib/wallet";
 
 /**
- * Header credit-balance chip — the spine of the billing UI.
+ * Header balance chip — the spine of the billing UI.
  *
- * Sits inline-end beside the language switcher. Shows total spendable credits
+ * Sits inline-end beside the language switcher. Shows the total spendable balance
  * (free grant + purchased). Theming is calm by design: gold `#C8A882` marks a healthy balance and the
- * primary "Add credits" affordance only; a low balance reads as quiet taupe, not
+ * primary "Add funds" affordance only; a low balance reads as quiet taupe, not
  * an alarm.
  */
-export function CreditBalanceChip({ className }: { className?: string }) {
-  const { wallet, status, totalCredits, loading, syncing, available } = useCredits();
+export function BalanceChip({ className }: { className?: string }) {
+  const { wallet, status, totalCents, loading, syncing, available } = useBalance();
   const { locale } = useLocale();
   const { openTo } = useSettingsModal();
   const [open, setOpen] = React.useState(false);
@@ -39,7 +39,7 @@ export function CreditBalanceChip({ className }: { className?: string }) {
 
   // One trigger, three visual registers. Healthy spends the gold accent; low and
   // empty stay in the warm neutrals so the chip never shouts. Empty reframes the
-  // chip itself as the "add credits" call to action.
+  // chip itself as the "add funds" call to action.
   const triggerTone = !available
     ? "border-border/70 text-muted-foreground hover:bg-accent"
     : status === "healthy"
@@ -54,9 +54,7 @@ export function CreditBalanceChip({ className }: { className?: string }) {
         <button
           type="button"
           aria-label={formatMsg("billing.chip.aria", {
-            p1: !available
-              ? msg("billing.chip.unavailable")
-              : formatCreditsUsd(totalCredits, locale),
+            p1: !available ? msg("billing.chip.unavailable") : formatCentsUsd(totalCents, locale),
           })}
           aria-busy={syncing || undefined}
           className={cn(
@@ -90,7 +88,7 @@ export function CreditBalanceChip({ className }: { className?: string }) {
                 dir="ltr"
                 className={cn("tabular-nums", syncing && "animate-pulse text-muted-foreground")}
               >
-                {formatCreditsUsd(totalCredits, locale)}
+                {formatCentsUsd(totalCents, locale)}
               </span>
             </>
           )}
@@ -120,27 +118,27 @@ export function CreditBalanceChip({ className }: { className?: string }) {
                   dir="ltr"
                   className="inline-block text-2xl font-semibold text-foreground tabular-nums"
                 >
-                  {formatCreditsUsd(totalCredits, locale)}
+                  {formatCentsUsd(totalCents, locale)}
                 </span>
               </div>
               <dl className="flex flex-col gap-2 border-t border-border/40 px-4 py-3 text-xs">
                 <div className="flex items-center justify-between gap-3">
                   <dt className="text-muted-foreground">{msg("billing.popover.paid")}</dt>
                   <dd dir="ltr" className="font-medium text-foreground tabular-nums">
-                    {formatCreditsUsd(wallet.paidBalanceCredits, locale)}
+                    {formatCentsUsd(wallet.paidBalanceCents, locale)}
                   </dd>
                 </div>
                 {/* Only legacy accounts still hold a grant — new accounts have
                     none, so an empty 0/0 row would advertise a perk that no
                     longer exists. */}
-                {wallet.freeGrant.creditsTotal > 0 && (
+                {wallet.freeGrant.centsTotal > 0 && (
                   <div className="flex items-center justify-between gap-3">
                     <dt className="text-muted-foreground">{msg("billing.popover.free_grant")}</dt>
                     <dd dir="ltr" className="font-medium text-foreground tabular-nums">
-                      {formatCreditsUsd(wallet.freeGrant.creditsRemaining, locale)}
+                      {formatCentsUsd(wallet.freeGrant.centsRemaining, locale)}
                       <span className="text-muted-foreground">
                         {" / "}
-                        {formatCreditsUsd(wallet.freeGrant.creditsTotal, locale)}
+                        {formatCentsUsd(wallet.freeGrant.centsTotal, locale)}
                       </span>
                     </dd>
                   </div>

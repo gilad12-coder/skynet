@@ -78,11 +78,9 @@ def _version(engine: Engine) -> str | None:
 
 
 def _grant(engine: Engine) -> int:
-    """Return the seeded account's remaining free-grant credits."""
+    """Return the seeded account's remaining free-grant cents."""
     with engine.connect() as conn:
-        return conn.execute(
-            text("SELECT grant_remaining FROM billing_customers WHERE username = 'a@x.com'")
-        ).scalar()
+        return conn.execute(text("SELECT grant_remaining FROM billing_customers WHERE username = 'a@x.com'")).scalar()
 
 
 def _seed(engine: Engine, grant: int) -> None:
@@ -90,14 +88,14 @@ def _seed(engine: Engine, grant: int) -> None:
 
     Args:
         engine: Engine on the live-Postgres target.
-        grant: Remaining free-grant credits to seed.
+        grant: Remaining free-grant cents to seed.
     """
     with Session(engine) as session:
         session.add(
             BillingCustomerModel(
                 username="a@x.com",
                 stripe_customer_id="local:test",
-                credit_balance=0,
+                balance_cents=0,
                 grant_remaining=grant,
             )
         )

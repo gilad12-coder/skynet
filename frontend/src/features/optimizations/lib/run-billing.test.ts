@@ -8,7 +8,7 @@ test("no stamp before the run settles", () => {
 });
 
 test("a billed stamp is returned intact", () => {
-  const billing = { outcome: "billed", credits: 12, estimated_low: 8, estimated_high: 20 };
+  const billing = { outcome: "billed", cents: 12, estimated_low: 8, estimated_high: 20 };
   assert.deepEqual(readBilling({ billing }), billing);
 });
 
@@ -18,7 +18,7 @@ test("malformed stamps are rejected", () => {
 });
 
 test("a legacy refunded stamp is ignored, not rendered", () => {
-  // Stamped by the retired no-lift guarantee; its credits describe a refund,
+  // Stamped by the retired no-lift guarantee; its cents describe a refund,
   // not a charge, so surfacing it as a cost would misread history.
-  assert.equal(readBilling({ billing: { outcome: "refunded", credits: 12 } }), null);
+  assert.equal(readBilling({ billing: { outcome: "refunded", cents: 12 } }), null);
 });

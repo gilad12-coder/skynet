@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from core.billing.operation_pricing import CreditCharge, OperationQuote, json_fingerprint
+from core.billing.operation_pricing import OperationCharge, OperationQuote, json_fingerprint
 from core.billing.recovery_admission import (
     RecoveryAdmissionError,
     build_recovery_plan,
@@ -30,7 +30,7 @@ def _bound(*, maximum: str = "2", count: int = 1) -> dict[str, object]:
     """Return one enforceable prompt-free model call cap.
 
     Args:
-        maximum: Scope and wallet credit ceiling for each call.
+        maximum: Scope and wallet spend ceiling for each call, in cents.
         count: Maximum physical calls permitted during seed replay.
 
     Returns:
@@ -38,7 +38,7 @@ def _bound(*, maximum: str = "2", count: int = 1) -> dict[str, object]:
     """
     quote = OperationQuote(
         request_fingerprint="private-request",
-        maximum=CreditCharge(total=Decimal(maximum), wallet=Decimal(maximum)),
+        maximum=OperationCharge(total=Decimal(maximum), wallet=Decimal(maximum)),
         price_snapshot={"version": "fixture-v1", "provider": "fixture", "rate": "0.01"},
     )
     return model_call_bound("task", "fixture/model", quote, count=count)
@@ -64,16 +64,16 @@ def test_plan_aggregates_runtime_seed_and_one_execution_operation() -> None:
         manifest,
         runtime=_runtime(),
         seed_bounds=[seed],
-        execution_bound={"model_calls": [execution], "max_credits": "4", "max_wallet_credits": "4"},
+        execution_bound={"model_calls": [execution], "max_cents": "4", "max_wallet_cents": "4"},
         seed_marker_seen=True,
     )
 
     validated = validate_recovery_plan(plan, manifest)
 
     assert validated["eligible"] is True
-    expected = Decimal(10) + Decimal(str(_runtime()["max_credits"]))
-    assert Decimal(validated["max_credits"]) == expected
-    assert Decimal(validated["max_wallet_credits"]) == expected
+    expected = Decimal(10) + Decimal(str(_runtime()["max_cents"]))
+    assert Decimal(validated["max_cents"]) == expected
+    assert Decimal(validated["max_wallet_cents"]) == expected
     assert validated["runtime"]["request"]["lifetime_ms"] == 60_000
 
 
@@ -84,7 +84,7 @@ def test_plan_without_finite_seed_marker_is_recovery_ineligible() -> None:
         manifest,
         runtime=_runtime(),
         seed_bounds=[],
-        execution_bound={"model_calls": [_bound()], "max_credits": "2", "max_wallet_credits": "2"},
+        execution_bound={"model_calls": [_bound()], "max_cents": "2", "max_wallet_cents": "2"},
         seed_marker_seen=False,
     )
 
@@ -100,7 +100,7 @@ def test_plan_rejects_changed_runtime_and_malformed_execution_cap() -> None:
         manifest,
         runtime=_runtime(),
         seed_bounds=[_bound()],
-        execution_bound={"model_calls": [_bound()], "max_credits": "2", "max_wallet_credits": "2"},
+        execution_bound={"model_calls": [_bound()], "max_cents": "2", "max_wallet_cents": "2"},
         seed_marker_seen=True,
     )
     changed = _runtime()
@@ -109,7 +109,7 @@ def test_plan_rejects_changed_runtime_and_malformed_execution_cap() -> None:
         validate_recovery_runtime(plan, changed)
 
     malformed = dict(plan)
-    malformed["execution_headroom"] = {"model_calls": [], "max_credits": "2", "max_wallet_credits": "2"}
+    malformed["execution_headroom"] = {"model_calls": [], "max_cents": "2", "max_wallet_cents": "2"}
     malformed.pop("fingerprint")
     malformed["fingerprint"] = json_fingerprint(malformed)
     with pytest.raises(RecoveryAdmissionError, match="next-operation"):

@@ -4,12 +4,12 @@
   "app.shell.search.kw.admin": "administration stockage quota budgets utilisateurs admin storage quota users",
   "app.shell.search.kw.agent": "agent panneau assistant modèle par défaut voix dictée niveau de confiance mémoire agent assistant model voice dictation trust yolo memory",
   "app.shell.search.kw.api": "API jeton développeur intégration générer révoquer documentation API token developer documentation",
-  "app.shell.search.kw.billing": "facturation crédits ajouter des crédits abonnement forfait paiement moyens de paiement carte factures reçus transactions billing credits Skynet Pro subscription payment receipts",
+  "app.shell.search.kw.billing": "facturation solde fonds ajouter des fonds recharger abonnement forfait paiement moyens de paiement carte factures reçus transactions billing balance funds top up Skynet Pro subscription payment receipts",
   "app.shell.search.kw.privacy": "confidentialité données notifications courriel analytique vider le cache exporter mes données supprimer le compte privacy notifications analytics cache export delete account",
   "app.shell.search.kw.providers": "fournisseurs clés API clé personnelle URL de base providers keys BYOK OpenAI Anthropic Gemini Google Groq Mistral Together DeepSeek xAI OpenRouter",
   "app.shell.search.kw.security": "sécurité double authentification authentificateur codes de récupération clés d'accès codes par courriel connexion security 2FA TOTP recovery passkey login",
   "app.shell.search.kw.tagging": "étiquetage étiquettes assisté par IA étiquetage automatique modèle par défaut tagging labels autotag model",
-  "app.shell.search.kw.usage": "utilisation dépenses coût crédits dépensés jetons exécutions par modèle activité usage spend cost tokens",
+  "app.shell.search.kw.usage": "utilisation dépenses coût dollars dépensés jetons exécutions par modèle activité usage spend cost tokens",
   "app.shell.search.kw.wizard": "optimisation assistant génération de code jeu de données découpage registre de paquets modèles optimization wizard split package registry pip models",
   "auth.login.email": "Courriel",
   "auth.login.invalid_credentials": "Courriel ou mot de passe incorrect",
@@ -36,5 +36,5 @@
   "share.role.editor_desc": "Accès en lecture, plus l'exécution du modèle, le clavardage et le renommage",
   "tooltip.submit.blackbox.scorer_install": "S’exécute une fois dans la Vercel Sandbox hors ligne. Utilisez les paquets déjà présents dans l’image épinglée ou les artefacts de paquets gérés par le déploiement ; les dépôts apt et registres de paquets publics sont indisponibles.",
   "submit.budget.byok_note": "Votre fournisseur facture directement les tokens du modèle sur votre clé. Le total comprend uniquement les frais de plateforme Skynet et l’utilisation de Vercel Sandbox.",
-  "submit.blackbox.roles.optimization.managed_hint": "Utilise les paramètres d’échantillonnage par défaut du modèle ; la facturation peut utiliser les crédits Skynet ou votre clé OpenRouter."
+  "submit.blackbox.roles.optimization.managed_hint": "Utilise les paramètres d'échantillonnage par défaut du modèle ; la facturation peut utiliser votre solde Skynet ou votre clé OpenRouter."
 }

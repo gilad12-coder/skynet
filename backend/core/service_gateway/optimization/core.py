@@ -340,7 +340,7 @@ class _GridPairContext:
     # Per-pair token budget from the Max Cost Ceiling: the job-wide cap split
     # evenly across pairs (pairs run concurrently with independent LM histories),
     # so the grid's aggregate spend never exceeds the user's cap. 0 = no ceiling.
-    pair_max_credits: int = 0
+    pair_max_cents: int = 0
     # Worker-owned base dir for resumable grids; each pair writes its GEPA state
     # and (on success) ``result.json`` under ``<base>/pair_<i>``. None = ephemeral.
     gepa_log_dir_base: str | None = None
@@ -457,8 +457,8 @@ def _run_grid_pair(
         callbacks: list[Any] = list(timing_callbacks)
         # Hard-stop this pair at its share of the Max Cost Ceiling so the grid's
         # concurrent pairs can't collectively overrun the user's job-wide cap.
-        if ctx.pair_max_credits > 0 and ctx.payload.execution_budget_id is None:
-            callbacks.append(CostCeilingCallback(ctx.pair_max_credits, language_model, reflection_lm))
+        if ctx.pair_max_cents > 0 and ctx.payload.execution_budget_id is None:
+            callbacks.append(CostCeilingCallback(ctx.pair_max_cents, language_model, reflection_lm))
 
         with (
             dspy.context(lm=language_model, callbacks=callbacks),
@@ -887,8 +887,8 @@ class DspyService:
         # Registered alongside the timing callbacks so it sees every LM call on
         # every worker thread; a trip raises out of the run and the worker leaves
         # the job failed (and unbilled — debiting only fires on success).
-        if payload.max_cost_credits is not None and payload.execution_budget_id is None:
-            callbacks.append(CostCeilingCallback(payload.max_cost_credits, language_model, reflection_lm))
+        if payload.max_cost_cents is not None and payload.execution_budget_id is None:
+            callbacks.append(CostCeilingCallback(payload.max_cost_cents, language_model, reflection_lm))
         with gepa_log_dir(payload.optimizer_name, gepa_log_dir_path) as trajectory_log_dir:
             training_metric = maybe_wrap_minibatch_recorder(
                 metric,
@@ -1195,8 +1195,8 @@ class DspyService:
         # Same Max Cost Ceiling hard-stop the scalar path registers. React routes
         # both the student and the reflection LM through ``gepa.optimize``; the
         # ceiling totals usage across both so the cap covers the whole run.
-        if payload.max_cost_credits is not None and payload.execution_budget_id is None:
-            react_callbacks.append(CostCeilingCallback(payload.max_cost_credits, student_lm, reflection_lm))
+        if payload.max_cost_cents is not None and payload.execution_budget_id is None:
+            react_callbacks.append(CostCeilingCallback(payload.max_cost_cents, student_lm, reflection_lm))
         # Mirror the scalar run's trajectory wiring so react gets the same
         # candidate tree: GEPA persists state into trajectory_log_dir,
         # trajectory_watch streams candidate/rejected events, capture_proposal_prompts
@@ -1542,14 +1542,12 @@ class DspyService:
             if (pair_index_base + i) not in completed
         ]
 
-        # Split the job-wide cost ceiling (in credits) evenly across pairs so
+        # Split the job-wide cost ceiling (in cents) evenly across pairs so
         # concurrent pairs can't collectively exceed the user's cap; 0 = no
         # ceiling. Divided by the PARENT's pair count so a distributed child
         # holding one pair still gets 1/Nth of the grid-wide cap.
-        pair_max_credits = (
-            payload.max_cost_credits // display_total
-            if payload.max_cost_credits is not None and display_total > 0
-            else 0
+        pair_max_cents = (
+            payload.max_cost_cents // display_total if payload.max_cost_cents is not None and display_total > 0 else 0
         )
         # Events display the parent's real pair count; local mechanics (result
         # slots, ceiling split) already use the child-local values above.
@@ -1563,7 +1561,7 @@ class DspyService:
             splits=splits,
             artifact_id=artifact_id,
             progress_callback=progress_callback,
-            pair_max_credits=pair_max_credits,
+            pair_max_cents=pair_max_cents,
             gepa_log_dir_base=gepa_log_dir_path,
             completed=len(completed),
         )

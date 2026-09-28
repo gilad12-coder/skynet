@@ -11,10 +11,10 @@ import type { StoredPreflightEvidence } from "./preflight-outcome.ts";
 /** Shared durable metadata; workflow snapshots never own separate spending pools. */
 export interface WizardBudgetDraft {
   executionBudgetRef?: ExecutionBudgetRef;
-  budgetTotalCredits?: number | null;
+  budgetTotalCents?: number | null;
   budgetUncapped?: boolean;
   budgetCreateIdempotencyKey?: string;
-  budgetCreateTotalCredits?: number;
+  budgetCreateTotalCents?: number;
   budgetCreateUncapped?: boolean;
   submissionIdempotencyKey?: string;
   submissionFingerprint?: string;
@@ -86,12 +86,12 @@ export function readBudgetDraft(raw: WizardBudgetDraft): WizardBudgetDraft {
     ...(ref && typeof ref.id === "string" && Number.isInteger(ref.revision)
       ? { executionBudgetRef: { id: ref.id, revision: ref.revision } }
       : {}),
-    ...(raw.budgetTotalCredits === null ||
-    (Number.isInteger(raw.budgetTotalCredits) && (raw.budgetTotalCredits ?? 0) > 0)
-      ? { budgetTotalCredits: raw.budgetTotalCredits }
+    ...(raw.budgetTotalCents === null ||
+    (Number.isInteger(raw.budgetTotalCents) && (raw.budgetTotalCents ?? 0) > 0)
+      ? { budgetTotalCents: raw.budgetTotalCents }
       : {}),
-    ...(Number.isInteger(raw.budgetCreateTotalCredits) && (raw.budgetCreateTotalCredits ?? 0) > 0
-      ? { budgetCreateTotalCredits: raw.budgetCreateTotalCredits }
+    ...(Number.isInteger(raw.budgetCreateTotalCents) && (raw.budgetCreateTotalCents ?? 0) > 0
+      ? { budgetCreateTotalCents: raw.budgetCreateTotalCents }
       : {}),
     ...Object.fromEntries(
       (["budgetUncapped", "budgetCreateUncapped"] as const)
@@ -111,7 +111,7 @@ export class ExecutionBudgetSession {
   draft: WizardBudgetDraft;
   budget: ExecutionBudget | null = null;
   error: string | null = null;
-  minimumTotalCredits: number | null = null;
+  minimumTotalCents: number | null = null;
   busy = false;
   persistenceUnavailable = false;
   private active = true;
@@ -128,10 +128,10 @@ export class ExecutionBudgetSession {
   }
 
   setTotal(total: number | null): void {
-    if (!this.active || this.draft.budgetTotalCredits === total) return;
-    this.draft = { ...this.draft, budgetTotalCredits: total };
+    if (!this.active || this.draft.budgetTotalCents === total) return;
+    this.draft = { ...this.draft, budgetTotalCents: total };
     this.error = null;
-    this.minimumTotalCredits = null;
+    this.minimumTotalCents = null;
     this.deps.changed();
     void this.save().catch((error: unknown) => this.report(error));
   }
@@ -140,7 +140,7 @@ export class ExecutionBudgetSession {
     if (!this.active || (this.draft.budgetUncapped ?? false) === uncapped) return;
     this.draft = { ...this.draft, budgetUncapped: uncapped };
     this.error = null;
-    this.minimumTotalCredits = null;
+    this.minimumTotalCents = null;
     this.deps.changed();
     void this.save().catch((error: unknown) => this.report(error));
   }
@@ -164,7 +164,7 @@ export class ExecutionBudgetSession {
     if (this.pending) await this.pending;
     return this.perform(async () => {
       const uncapped = this.draft.budgetUncapped ?? false;
-      const total = this.draft.budgetTotalCredits;
+      const total = this.draft.budgetTotalCents;
       if (!uncapped && (!Number.isInteger(total) || total == null || total < 1))
         throw new Error("budget.invalid");
       // A budget without a limit still carries a total; the server ignores it.
@@ -177,25 +177,25 @@ export class ExecutionBudgetSession {
           this.draft = {
             ...this.draft,
             budgetCreateIdempotencyKey: this.newKey(),
-            budgetCreateTotalCredits: wanted,
+            budgetCreateTotalCents: wanted,
             budgetCreateUncapped: uncapped,
           };
         }
         await this.save();
         this.assertActive();
         budget = await this.deps.create(
-          this.draft.budgetCreateTotalCredits ?? wanted,
+          this.draft.budgetCreateTotalCents ?? wanted,
           this.draft.budgetCreateIdempotencyKey!,
           this.controller.signal,
           this.draft.budgetCreateUncapped ?? false,
         );
       }
       await this.adopt(budget);
-      if (budget.uncapped !== uncapped || (!uncapped && budget.total_credits !== wanted)) {
+      if (budget.uncapped !== uncapped || (!uncapped && budget.total_cents !== wanted)) {
         try {
           budget = await this.deps.update(
             budget.id,
-            uncapped ? budget.total_credits : wanted,
+            uncapped ? budget.total_cents : wanted,
             budget.revision,
             this.controller.signal,
             uncapped,
@@ -267,13 +267,13 @@ export class ExecutionBudgetSession {
 
   private report(error: unknown): void {
     if (!this.active) return;
-    this.minimumTotalCredits = errorNumber(error, "minimum_total_credits");
+    this.minimumTotalCents = errorNumber(error, "minimum_total_cents");
     this.error = error instanceof Error ? error.message : "budget.invalid";
     this.deps.changed();
   }
 
   private async restoreRejectedTotal(error: unknown, lastAccepted: ExecutionBudget): Promise<void> {
-    const current = errorNumber(error, "current_total_credits");
+    const current = errorNumber(error, "current_total_cents");
     if (current == null) return;
     let accepted = lastAccepted;
     try {
@@ -286,7 +286,7 @@ export class ExecutionBudgetSession {
     }
     this.draft = {
       ...this.draft,
-      budgetTotalCredits: accepted.total_credits === current ? accepted.total_credits : current,
+      budgetTotalCents: accepted.total_cents === current ? accepted.total_cents : current,
     };
     await this.save();
     this.assertActive();

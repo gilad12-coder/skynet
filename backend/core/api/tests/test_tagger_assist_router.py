@@ -135,23 +135,21 @@ def _client(
     store = store or _MemStore()
     worker = (worker or _FakeWorker()) if worker_available else None
     # No free allowance exists, so the authed user is funded explicitly to pass
-    # the 402 credit gate on the LLM-invoking assist routes.
+    # the 402 balance gate on the LLM-invoking assist routes.
     with Session(store.engine) as session:
         if session.get(BillingCustomerModel, user.username) is None:
             session.add(
                 BillingCustomerModel(
                     username=user.username,
                     stripe_customer_id=f"cus_{user.username}",
-                    credit_balance=10_000,
+                    balance_cents=10_000,
                     grant_remaining=0,
                 )
             )
             session.commit()
     app = FastAPI()
     app.include_router(create_tagging_session_router(job_store=store))
-    app.include_router(
-        create_tagger_assist_router(job_store=store, get_worker_ref=lambda: worker)
-    )
+    app.include_router(create_tagger_assist_router(job_store=store, get_worker_ref=lambda: worker))
     app.dependency_overrides[get_authenticated_user] = lambda: user
 
     @app.exception_handler(DomainError)
@@ -218,9 +216,7 @@ def test_interview_returns_turn(monkeypatch) -> None:
     """The interview route forwards the transcript and returns the turn."""
     seen: dict = {}
 
-    def fake_turn(
-        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None
-    ):
+    def fake_turn(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
         """Capture the forwarded arguments and return a canned turn."""
         seen.update(
             {
@@ -287,9 +283,7 @@ def test_interview_stream_forwards_model(monkeypatch) -> None:
     """The SSE interview route hands the chosen model to the engine."""
     seen: dict = {}
 
-    async def fake_stream(
-        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None
-    ):
+    async def fake_stream(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
         """Capture the forwarded kwargs and finish immediately."""
         seen.update(
             {
@@ -318,9 +312,7 @@ def test_interview_stream_tolerates_turn_bookkeeping_fields(monkeypatch) -> None
     """Echoed turns with extra (even null) bookkeeping fields still validate."""
     seen: dict = {}
 
-    async def fake_stream(
-        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None
-    ):
+    async def fake_stream(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
         """Capture the forwarded turns and finish immediately."""
         seen["turns"] = turns
         yield {"event": "interview_done", "data": {"message": "hi", "done": False}}
@@ -355,9 +347,7 @@ def test_interview_stream_auto_runs_catalog_default(monkeypatch) -> None:
     """No chosen model runs the catalog default with no router extras."""
     seen: dict = {}
 
-    async def fake_stream(
-        config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None
-    ):
+    async def fake_stream(config, columns, data, turns, locale, model=None, reasoning_effort=None, usage_sink=None):
         """Capture the forwarded kwargs and finish immediately."""
         seen.update({"model": model})
         yield {"event": "interview_done", "data": {"message": "hi", "done": False}}
@@ -401,19 +391,15 @@ def test_predict_excludes_requested_rows_from_examples(monkeypatch) -> None:
     monkeypatch.setattr(tagging, "predict_rows", fake_predict)
     client, _ = _client(_ALICE)
     session_id = _create(client)
-    resp = client.post(
-        f"/tagging-sessions/{session_id}/assist/predict", json={"row_ids": ["2", "3"]}
-    )
+    resp = client.post(f"/tagging-sessions/{session_id}/assist/predict", json={"row_ids": ["2", "3"]})
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["credits"] == 2
+    assert body["cents"] == 2
     assert set(body["predictions"]) == {"2", "3"}
     # Row 1 is the only labeled row, so it is the only candidate example; the
     # requested rows must not appear as examples even if labeled.
     assert "great" in captured["instructions"]
-    resp = client.post(
-        f"/tagging-sessions/{session_id}/assist/predict", json={"row_ids": ["999"]}
-    )
+    resp = client.post(f"/tagging-sessions/{session_id}/assist/predict", json={"row_ids": ["999"]})
     assert resp.status_code == 404
     assert resp.json()["code"] == "tagger.assist.rows_not_found"
 
@@ -431,14 +417,12 @@ def test_predict_stream_emits_rows_then_done(monkeypatch) -> None:
             prediction = {"value": "no", "confidence": 0.8, "reason": "test"}
             merged[str(r["id"])] = prediction
             yield {"event": "prediction", "data": {"id": str(r["id"]), "prediction": prediction}}
-        yield {"event": "predict_done", "data": {"predictions": merged, "credits": 2}}
+        yield {"event": "predict_done", "data": {"predictions": merged, "cents": 2}}
 
     monkeypatch.setattr(tagging, "predict_rows_stream", fake_stream)
     client, _ = _client(_ALICE)
     session_id = _create(client)
-    resp = client.post(
-        f"/tagging-sessions/{session_id}/assist/predict/stream", json={"row_ids": ["2", "3"]}
-    )
+    resp = client.post(f"/tagging-sessions/{session_id}/assist/predict/stream", json={"row_ids": ["2", "3"]})
     assert resp.status_code == 200, resp.text
     assert captured["ids"] == ["2", "3"]
     # Same exclusion semantics as the non-streaming route: row 1 is the only
@@ -446,9 +430,7 @@ def test_predict_stream_emits_rows_then_done(monkeypatch) -> None:
     assert "great" in captured["instructions"]
     assert resp.text.count("event: prediction") == 2
     assert resp.text.index("event: predict_done") > resp.text.rindex("event: prediction")
-    resp = client.post(
-        f"/tagging-sessions/{session_id}/assist/predict/stream", json={"row_ids": ["999"]}
-    )
+    resp = client.post(f"/tagging-sessions/{session_id}/assist/predict/stream", json={"row_ids": ["999"]})
     assert resp.status_code == 404
     assert resp.json()["code"] == "tagger.assist.rows_not_found"
 
@@ -461,19 +443,22 @@ def test_estimate_counts_untagged_rows() -> None:
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["rows"] == 3
-    assert body["credits_high"] >= body["credits_low"] >= 0
+    assert body["cents_high"] >= body["cents_low"] >= 0
 
 
 def _catalog_with(*values: str, default: str | None = None) -> SimpleNamespace:
     """Build a stand-in model catalog carrying just the given model ids."""
-    return SimpleNamespace(models=[SimpleNamespace(value=v, is_default=v == default, reasoning_efforts=None, reasoning_default_enabled=None) for v in values])
+    return SimpleNamespace(
+        models=[
+            SimpleNamespace(value=v, is_default=v == default, reasoning_efforts=None, reasoning_default_enabled=None)
+            for v in values
+        ]
+    )
 
 
 def test_estimate_runs_on_chosen_model(monkeypatch) -> None:
     """A session's chosen tagging model drives (and is echoed by) the estimate."""
-    monkeypatch.setattr(
-        tagger_assist, "get_catalog_cached", lambda: _catalog_with("openai/gpt-test")
-    )
+    monkeypatch.setattr(tagger_assist, "get_catalog_cached", lambda: _catalog_with("openai/gpt-test"))
     client, _ = _client(_ALICE)
     body = dict(_SESSION_BODY)
     body["assist"] = {**_SESSION_BODY["assist"], "model": "openai/gpt-test"}
@@ -541,9 +526,7 @@ def test_byok_tagger_without_verified_connection_is_blocked() -> None:
 
 def test_unknown_model_rejected_before_spending(monkeypatch) -> None:
     """A model outside the curated catalog is refused on every spend route."""
-    monkeypatch.setattr(
-        tagger_assist, "get_catalog_cached", lambda: _catalog_with("openai/gpt-test")
-    )
+    monkeypatch.setattr(tagger_assist, "get_catalog_cached", lambda: _catalog_with("openai/gpt-test"))
     worker = _FakeWorker()
     client, _ = _client(_ALICE, worker=worker)
     body = dict(_SESSION_BODY)
@@ -603,18 +586,14 @@ def test_autotag_start_submits_worker_job(monkeypatch) -> None:
         model_config=None,
     ):
         """Emit one canned batch through on_batch, like the real engine."""
-        batch = {
-            str(r["id"]): {"value": "no", "confidence": 0.4, "reason": "test"} for r in rows
-        }
+        batch = {str(r["id"]): {"value": "no", "confidence": 0.4, "reason": "test"} for r in rows}
         if on_batch is not None:
             on_batch(batch)
         return batch, 5
 
     monkeypatch.setattr(tagging, "predict_rows", fake_predict)
-    outcome = run_autotag_job(
-        store, job_id, session_id, cancel_event=threading.Event(), heartbeat=lambda: None
-    )
-    assert outcome == {"status": "done", "rows_tagged": 3, "credits_spent": 5}
+    outcome = run_autotag_job(store, job_id, session_id, cancel_event=threading.Event(), heartbeat=lambda: None)
+    assert outcome == {"status": "done", "rows_tagged": 3, "cents_spent": 5}
 
     detail = client.get(f"/tagging-sessions/{session_id}").json()
     assert detail["phase"] == "complete"
@@ -713,9 +692,7 @@ def test_ownership_enforced_on_assist_routes() -> None:
     alice_client, store = _client(_ALICE)
     session_id = _create(alice_client)
     bob_client, _ = _client(_BOB, store=store)
-    resp = bob_client.post(
-        f"/tagging-sessions/{session_id}/assist/interview", json={"turns": []}
-    )
+    resp = bob_client.post(f"/tagging-sessions/{session_id}/assist/interview", json={"turns": []})
     assert resp.status_code == 404
     resp = bob_client.post(f"/tagging-sessions/{session_id}/assist/estimate")
     assert resp.status_code == 404
@@ -763,9 +740,14 @@ def test_synthesize_persists_rows_on_the_session(monkeypatch) -> None:
             "fields": [{"column": "text", "value": "Card declined"}, {"column": "channel", "value": "chat"}],
         }
     ]
-    assert body["credits"] == 3
+    assert body["cents"] == 3
     assert body["model"] == "openai/gpt-test"
-    assert seen == {"brief": "Bank support chats", "columns": ["text", "channel"], "count": 1, "model": "openai/gpt-test"}
+    assert seen == {
+        "brief": "Bank support chats",
+        "columns": ["text", "channel"],
+        "count": 1,
+        "model": "openai/gpt-test",
+    }
     detail = client.get(f"/tagging-sessions/{session_id}").json()
     assert detail["row_count"] == 1
     assert detail["columns"] == ["text", "channel"]
@@ -792,9 +774,7 @@ def test_synthesize_refuses_sessions_with_data_or_unknown_models(monkeypatch) ->
     body["assist"] = {**_SYNTHETIC_BODY["assist"], "model": "openai/nope"}
     session_id = client.post("/tagging-sessions", json=body).json()["id"]
     too_many = tagging.MAX_SYNTH_ROWS + 1
-    resp = client.post(
-        f"/tagging-sessions/{session_id}/assist/synthesize", json={"brief": "Reviews", "rows": too_many}
-    )
+    resp = client.post(f"/tagging-sessions/{session_id}/assist/synthesize", json={"brief": "Reviews", "rows": too_many})
     assert resp.status_code == 422
     resp = client.post(f"/tagging-sessions/{session_id}/assist/synthesize", json={"brief": "Reviews", "rows": 5})
     assert resp.status_code == 422

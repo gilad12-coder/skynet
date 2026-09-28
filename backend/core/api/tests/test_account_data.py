@@ -28,12 +28,12 @@ from ...storage.models import (
     ApiTokenModel,
     Base,
     BillingCustomerModel,
-    CreditLedgerModel,
     DatasetModel,
     JobModel,
     NotificationPreferenceModel,
     TelemetryEventModel,
     UserModel,
+    WalletLedgerModel,
 )
 from ..account_data_service import _anonymized_username
 from ..auth import AuthenticatedUser, get_authenticated_user
@@ -72,14 +72,10 @@ def _seed_user_data(engine: Any, username: str, stripe_id: str) -> None:
                     stored_bytes=80,
                     content_hash="deadbeef",
                 ),
-                CreditLedgerModel(
-                    username=username, delta_credits=500, kind="grant", description="welcome"
-                ),
+                WalletLedgerModel(username=username, delta_cents=500, kind="grant", description="welcome"),
                 ApiTokenModel(username=username, token_hash=f"hash-{username}", last4="abcd"),
                 AgentMemoryModel(username=username, seq=0, content="remembers a thing"),
-                TelemetryEventModel(
-                    event_name=f"view-{username}", username=username, received_at=now
-                ),
+                TelemetryEventModel(event_name=f"view-{username}", username=username, received_at=now),
                 BillingCustomerModel(username=username, stripe_customer_id=stripe_id),
                 NotificationPreferenceModel(
                     username=username,
@@ -106,9 +102,7 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         A namespace exposing ``client``, ``app``, and ``engine``.
     """
     monkeypatch.setattr(settings, "backend_auth_secret", SecretStr(_SECRET))
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     store = SimpleNamespace(engine=engine)
     app = FastAPI()
@@ -127,9 +121,7 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         username=_EMAIL, role="user", groups=()
     )
     client = TestClient(app)
-    resp = client.post(
-        "/auth/register", json={"email": _EMAIL, "password": _PASSWORD}, headers=_AUTH_HEADER
-    )
+    resp = client.post("/auth/register", json={"email": _EMAIL, "password": _PASSWORD}, headers=_AUTH_HEADER)
     assert resp.status_code == 201
     _seed_user_data(engine, _EMAIL, "cus_owner")
     _seed_user_data(engine, _OTHER, "cus_other")
@@ -186,13 +178,9 @@ def test_delete_purges_owned_data_and_anonymizes_records(harness: SimpleNamespac
         assert session.get(NotificationPreferenceModel, _EMAIL) is None
 
         tombstone = _anonymized_username(_EMAIL)
-        ledger = session.scalars(
-            select(CreditLedgerModel).where(CreditLedgerModel.username == tombstone)
-        ).all()
+        ledger = session.scalars(select(WalletLedgerModel).where(WalletLedgerModel.username == tombstone)).all()
         assert len(ledger) == 1
-        assert not session.scalars(
-            select(CreditLedgerModel).where(CreditLedgerModel.username == _EMAIL)
-        ).all()
+        assert not session.scalars(select(WalletLedgerModel).where(WalletLedgerModel.username == _EMAIL)).all()
 
         telemetry = session.scalars(
             select(TelemetryEventModel).where(TelemetryEventModel.event_name == f"view-{_EMAIL}")
@@ -202,9 +190,7 @@ def test_delete_purges_owned_data_and_anonymizes_records(harness: SimpleNamespac
         # The bystander account is entirely untouched.
         assert session.get(JobModel, f"job-{_OTHER}") is not None
         assert session.get(NotificationPreferenceModel, _OTHER) is not None
-        assert session.scalars(
-            select(CreditLedgerModel).where(CreditLedgerModel.username == _OTHER)
-        ).all()
+        assert session.scalars(select(WalletLedgerModel).where(WalletLedgerModel.username == _OTHER)).all()
 
 
 def test_delete_oauth_account_needs_no_password(harness: SimpleNamespace) -> None:

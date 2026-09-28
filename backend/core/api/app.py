@@ -765,10 +765,10 @@ def create_app(
         orphan_sweeper = start_orphan_recovery_sweeper(job_store)
         stale_conversation_sweeper = start_stale_conversation_sweeper(getattr(job_store, "engine", None))
         staged_dataset_sweeper = start_staged_dataset_sweeper(getattr(job_store, "engine", None))
-        # The Stripe webhook only checks the OpenRouter float when someone buys
-        # credits; this loop catches a declined Auto Top-Up card on a quiet day.
+        # The Stripe webhook only checks the OpenRouter float when someone tops
+        # up; this loop catches a declined Auto Top-Up card on a quiet day.
         openrouter_float_sweeper = start_openrouter_float_sweeper(
-            job_store.engine, StripeBillingService(engine=job_store.engine).total_outstanding_credits
+            job_store.engine, StripeBillingService(engine=job_store.engine).total_outstanding_cents
         )
         # Keeps the Issuing balance behind the provider card funded, so upstream
         # top-ups charged to that card don't decline.

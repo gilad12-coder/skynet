@@ -29,7 +29,7 @@ import {
   getStagedDataset,
   getJob,
   getOptimizationPayload,
-  isInsufficientCreditsError,
+  isInsufficientFundsError,
   isStorageQuotaError,
   stageDatasetForAgent,
   submitBlackboxRun,
@@ -379,13 +379,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     modelDefaultsOnly?: boolean;
   } | null>(null);
   const {
-    maxCostCredits,
-    setMaxCostCredits,
+    maxCostCents,
+    setMaxCostCents,
     budgetUncapped,
     setBudgetUncapped,
     session: budgetSession,
     setupSpent,
-    availableCredits,
+    availableCents,
   } = useExecutionBudget();
 
   const drafts = useWizardDrafts();
@@ -752,7 +752,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             setMaxIterations(budget.max_iterations ?? "");
             setStopAtScore(budget.stop_at_score == null ? "" : String(budget.stop_at_score));
           }
-          if (source.max_cost_credits != null) setMaxCostCredits(source.max_cost_credits);
+          if (source.max_cost_cents != null) setMaxCostCents(source.max_cost_cents);
         }
         // Both recipes store the reflection model the same way.
         const reflection = stored.reflection_model_config as ModelConfig | undefined;
@@ -946,9 +946,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       reflection_model_config: reflection,
       token_source: tokenSource,
       is_private: isPrivate,
-      max_cost_credits: budgetUncapped ? undefined : (maxCostCredits ?? undefined),
-      estimated_credits_low: estimate.lowCredits,
-      estimated_credits_high: estimate.highCredits,
+      max_cost_cents: budgetUncapped ? undefined : (maxCostCents ?? undefined),
+      estimated_cents_low: estimate.lowCents,
+      estimated_cents_high: estimate.highCents,
     };
   };
 
@@ -1056,7 +1056,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
           error,
           checkedAt: Date.now(),
           modelName: scorerUsesModel ? (resolvedScorerModel?.name ?? null) : null,
-          creditsCharged: response.scorer_result?.credits_charged,
+          centsCharged: response.scorer_result?.cents_charged,
         };
         const outcome: ValidationResult | null =
           response.status === "pending"
@@ -1304,7 +1304,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         return null;
       }
       case WIZARD_STAGE.evaluation: {
-        if (!budgetUncapped && maxCostCredits == null)
+        if (!budgetUncapped && maxCostCents == null)
           return fail("budget.invalid", "totalBudgetInput");
         if (scorerKind === "python" && !metricCode.trim())
           return fail("submit.blackbox.validation.scorer_code_required", "bb-scorer-code");
@@ -1447,7 +1447,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       if (response.status === "succeeded" && preflightMayAdvance(response, scope)) {
         const locale = getActiveIntlLocale();
         t.succeed(
-          `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetUsd(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetUsd(response.budget.available_credits, locale)}`,
+          `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetUsd(response.budget.setup_spent_cents, locale)} · ${msg("submit.budget.available")}: ${formatBudgetUsd(response.budget.available_cents, locale)}`,
         );
         return response;
       }
@@ -1606,10 +1606,10 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         router.push(jobUrl);
       }, 1500);
     } catch (err) {
-      // The storage-budget 409 and the credit-gate 402 each open their own shared
+      // The storage-budget 409 and the balance-gate 402 each open their own shared
       // modal centrally; suppress the redundant toast so the modal is the single
       // surface for both.
-      if (!isStorageQuotaError(err) && !isInsufficientCreditsError(err)) {
+      if (!isStorageQuotaError(err) && !isInsufficientFundsError(err)) {
         toast.error(err instanceof Error ? err.message : msg("submit.submit_failed"));
       }
       setSubmitPhase("idle");
@@ -1664,7 +1664,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       maxIterations,
       stopAtScore,
       reflectionModel: safeReflectionModel,
-      maxCostCredits,
+      maxCostCents,
       setupSpent,
     };
     if (cloneReady && !pendingRestore && !cloneCompared.current) {
@@ -1808,13 +1808,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     costBracket,
     suggestedCeiling,
     tokenSource,
-    maxCostCredits,
-    setMaxCostCredits,
+    maxCostCents,
+    setMaxCostCents,
     budgetUncapped,
     setBudgetUncapped,
     budgetSession,
     setupSpent,
-    availableCredits,
+    availableCents,
     suggestedName,
   };
 }

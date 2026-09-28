@@ -11,13 +11,13 @@ import pytest
 
 from core.billing import openrouter_prices
 from core.billing.pricing import (
-    CREDIT_USD_VALUE,
+    CENT_USD_VALUE,
     FALLBACK_INPUT_COST_PER_TOKEN,
     FALLBACK_OUTPUT_COST_PER_TOKEN,
     ModelUsage,
+    cents_for_cost_usd,
+    cents_for_usage,
     combine_usages,
-    credits_for_cost_usd,
-    credits_for_usage,
     fallback_priced_usages,
     model_token_costs,
     raw_cost_usd,
@@ -37,10 +37,10 @@ _FAKE_COSTS = {
 }
 
 
-def _expected_credits(raw_usd: float) -> int:
-    """Mirror ``credits_for_usage`` arithmetic so tests track a tuned markup."""
+def _expected_cents(raw_usd: float) -> int:
+    """Mirror ``cents_for_usage`` arithmetic so tests track a tuned markup."""
     cost = raw_usd * usage_markup()
-    return 0 if cost <= 0 else max(1, math.ceil(cost / CREDIT_USD_VALUE))
+    return 0 if cost <= 0 else max(1, math.ceil(cost / CENT_USD_VALUE))
 
 
 def test_model_token_costs_reads_known_model() -> None:
@@ -129,12 +129,12 @@ def test_reported_cost_is_used_for_the_tokens_it_covers() -> None:
         assert raw_cost_usd([partial]) == pytest.approx(0.02 + 2000 * 1e-7)
 
 
-def test_markup_multiplies_platform_paid_credits(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The configured usage markup scales credits; ``markup=1.0`` prices at cost."""
+def test_markup_multiplies_platform_paid_cents(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The configured usage markup scales the cost; ``markup=1.0`` prices at cost."""
     monkeypatch.setattr(settings, "usage_markup", 1.15)
     usage = [ModelUsage("x/y", 0, 0, reported_cost_usd=1.0)]
-    assert credits_for_usage(usage) == 115
-    assert credits_for_usage(usage, markup=1.0) == 100
+    assert cents_for_usage(usage) == 115
+    assert cents_for_usage(usage, markup=1.0) == 100
 
 
 def test_combine_usages_sums_rows_per_model() -> None:
@@ -160,16 +160,16 @@ def test_combine_usages_sums_rows_per_model() -> None:
     ]
 
 
-def test_credits_for_usage_prices_input_and_output_separately() -> None:
+def test_cents_for_usage_prices_input_and_output_separately() -> None:
     """A single-model run is priced from its split token volume, marked up."""
     with patch.dict(litellm.model_cost, _FAKE_COSTS, clear=False):
         usage = [ModelUsage("test/cheap", input_tokens=1_000_000, output_tokens=1_000_000)]
         raw = 1_000_000 * 1e-7 + 1_000_000 * 4e-7  # 0.5 USD
         assert raw_cost_usd(usage) == raw
-        assert credits_for_usage(usage) == _expected_credits(raw)
+        assert cents_for_usage(usage) == _expected_cents(raw)
 
 
-def test_credits_for_usage_aggregates_multiple_models() -> None:
+def test_cents_for_usage_aggregates_multiple_models() -> None:
     """A run spanning two models sums each model's marked-up cost."""
     with patch.dict(litellm.model_cost, _FAKE_COSTS, clear=False):
         usage = [
@@ -177,27 +177,27 @@ def test_credits_for_usage_aggregates_multiple_models() -> None:
             ModelUsage("test/frontier", input_tokens=100_000, output_tokens=50_000),
         ]
         raw = (500_000 * 1e-7 + 200_000 * 4e-7) + (100_000 * 5e-6 + 50_000 * 3e-5)
-        assert credits_for_usage(usage) == _expected_credits(raw)
+        assert cents_for_usage(usage) == _expected_cents(raw)
 
 
-def test_credits_for_usage_any_usage_costs_at_least_one_credit() -> None:
-    """A sliver of usage rounds up to one credit, never billed zero."""
+def test_cents_for_usage_any_usage_costs_at_least_one_cent() -> None:
+    """A sliver of usage rounds up to one cent, never billed zero."""
     with patch.dict(litellm.model_cost, _FAKE_COSTS, clear=False):
-        assert credits_for_usage([ModelUsage("test/cheap", input_tokens=1, output_tokens=0)]) == 1
+        assert cents_for_usage([ModelUsage("test/cheap", input_tokens=1, output_tokens=0)]) == 1
 
 
-def test_credits_for_usage_zero_usage_is_zero() -> None:
-    """No tokens cost no credits."""
-    assert credits_for_usage([]) == 0
+def test_cents_for_usage_zero_usage_is_zero() -> None:
+    """No tokens cost nothing."""
+    assert cents_for_usage([]) == 0
     with patch.dict(litellm.model_cost, _FAKE_COSTS, clear=False):
-        assert credits_for_usage([ModelUsage("test/cheap", input_tokens=0, output_tokens=0)]) == 0
+        assert cents_for_usage([ModelUsage("test/cheap", input_tokens=0, output_tokens=0)]) == 0
 
 
 def test_frontier_costs_more_than_mini_for_same_volume() -> None:
     """The whole point: identical token volume prices higher on a frontier model."""
     with patch.dict(litellm.model_cost, _FAKE_COSTS, clear=False):
-        mini = credits_for_usage([ModelUsage("test/cheap", 200_000, 200_000)])
-        frontier = credits_for_usage([ModelUsage("test/frontier", 200_000, 200_000)])
+        mini = cents_for_usage([ModelUsage("test/cheap", 200_000, 200_000)])
+        frontier = cents_for_usage([ModelUsage("test/frontier", 200_000, 200_000)])
         assert frontier > mini
 
 
@@ -220,4 +220,4 @@ def test_fallback_priced_usages_prices_every_token_at_frontier_rates() -> None:
     assert row.reported_cost_usd == pytest.approx(expected_usd)
     assert (row.reported_input_tokens, row.reported_output_tokens) == (1_000_000, 100_000)
     with patch("core.billing.pricing.model_token_costs", side_effect=AssertionError("no lookup")):
-        assert credits_for_usage([row]) == credits_for_cost_usd(expected_usd * usage_markup())
+        assert cents_for_usage([row]) == cents_for_cost_usd(expected_usd * usage_markup())

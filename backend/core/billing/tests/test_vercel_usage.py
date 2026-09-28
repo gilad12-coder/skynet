@@ -17,7 +17,7 @@ from vercel.sandbox import SandboxApiError
 from core.billing.budgets import BudgetInsufficientError, BudgetService
 from core.billing.operation_pricing import UnpricedOperationError
 from core.billing.runtime import BudgetRuntime, UsagePendingError
-from core.billing.vercel_usage import quote_vercel_sandbox, vercel_actual_usd, vercel_sandbox_credit_range
+from core.billing.vercel_usage import quote_vercel_sandbox, vercel_actual_usd, vercel_sandbox_cost_range
 from core.config import settings
 from core.service_gateway.optimization.blackbox import sandbox as sandbox_module
 from core.service_gateway.optimization.blackbox.sandbox import SandboxSpec, VercelCredentials, VercelSandboxRuntime
@@ -62,7 +62,7 @@ def database(tmp_path: Path) -> Iterator[Engine]:
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         session.add(
-            BillingCustomerModel(username="alice", stripe_customer_id="fixture", credit_balance=100, grant_remaining=0)
+            BillingCustomerModel(username="alice", stripe_customer_id="fixture", balance_cents=100, grant_remaining=0)
         )
         session.commit()
     yield engine
@@ -79,15 +79,15 @@ def _runtime(database: Engine, total: int = 50) -> BudgetRuntime:
 def test_quote_covers_all_regions_and_settles_cpu_separately_from_wall_time() -> None:
     """Cover maximum active CPU, charge actual CPU, and round only memory duration."""
     quote = quote_vercel_sandbox(CREATE)
-    minimum_credits, maximum_credits = vercel_sandbox_credit_range(CREATE)
+    minimum_cents, maximum_cents = vercel_sandbox_cost_range(CREATE)
     maximum_usd = (
         Decimal("0.0000006")
         + Decimal(240_000) * Decimal("0.177") / 3_600_000
         + Decimal(480_000) * Decimal("0.0294") / 3_600_000
     )
     assert quote.maximum.wallet == quote.maximum.total == maximum_usd * 100
-    assert minimum_credits == Decimal("0.141393334")
-    assert maximum_credits == quote.maximum.total
+    assert minimum_cents == Decimal("0.141393334")
+    assert maximum_cents == quote.maximum.total
     actual = vercel_actual_usd(RECEIPT, session_id="session-one", vcpus=2)
     expected = (
         Decimal("0.0000006")
@@ -176,7 +176,7 @@ def _mock_provider(
         """Require durable coverage before returning realistic provider metadata."""
         requests.append(request)
         if request.method == "POST" and request.url.path.endswith("/v3/sandboxes"):
-            assert runtime.service.get(runtime.budget_id, "alice").reserved_credits > 0
+            assert runtime.service.get(runtime.budget_id, "alice").reserved_cents > 0
             body = json.loads(request.content)
             assert body["persistent"] is False
             assert body["ports"] == []
@@ -243,9 +243,9 @@ def test_real_sdk_stop_metrics_are_preserved_and_settled_once(
     sandbox.close()
     assert [request.method for request in requests] == ["POST", "POST", "DELETE"]
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.reserved_credits == 0
-    assert snapshot.billed_credits == 1
-    assert snapshot.setup_spent_credits == Decimal("0.300504445")
+    assert snapshot.reserved_cents == 0
+    assert snapshot.billed_cents == 1
+    assert snapshot.setup_spent_cents == Decimal("0.300504445")
     with Session(database) as session:
         evidence = session.scalar(
             select(ExecutionUsageEvidenceModel).where(ExecutionUsageEvidenceModel.final.is_(True))
@@ -262,10 +262,10 @@ def test_control_plane_transfer_is_recorded_and_settled(database: Engine, monkey
     sandbox.close()
     assert requests[-1].method == "DELETE"
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.reserved_credits == 0
-    assert snapshot.billed_credits == 1
+    assert snapshot.reserved_cents == 0
+    assert snapshot.billed_cents == 1
     assert snapshot.pending_operations == 0
-    assert snapshot.setup_spent_credits == Decimal("0.300504445")
+    assert snapshot.setup_spent_cents == Decimal("0.300504445")
     with Session(database) as session:
         evidence = session.scalar(
             select(ExecutionUsageEvidenceModel).where(ExecutionUsageEvidenceModel.final.is_(True))
@@ -300,21 +300,21 @@ def test_refused_creation_releases_the_hold_and_admits_the_next_attempt(
     assert [request.method for request in requests] == ["POST"]
     snapshot = runtime.service.get(runtime.budget_id, "alice")
     assert snapshot.pending_operations == 0
-    assert snapshot.reserved_credits == 0
-    assert snapshot.billed_credits == 0
+    assert snapshot.reserved_cents == 0
+    assert snapshot.billed_cents == 0
     with Session(database) as session:
         assert session.scalar(select(ExecutionOperationModel)).state == "released"
         evidence = session.scalar(select(ExecutionUsageEvidenceModel))
         assert evidence.issue == "rejected"
         assert evidence.final is True
-        assert evidence.billed_credits == 0
+        assert evidence.billed_cents == 0
         assert evidence.evidence["status_code"] == 400
     sandbox_runtime.open(_spec(key="evaluation-two")).close()
     assert sum(request.url.path.endswith("/v3/sandboxes") for request in requests) == 2
     snapshot = runtime.service.get(runtime.budget_id, "alice")
     assert snapshot.pending_operations == 0
-    assert snapshot.reserved_credits == 0
-    assert snapshot.billed_credits == 1
+    assert snapshot.reserved_cents == 0
+    assert snapshot.billed_cents == 1
 
 
 def test_insufficient_sandbox_coverage_never_calls_provider(database: Engine, monkeypatch: pytest.MonkeyPatch) -> None:

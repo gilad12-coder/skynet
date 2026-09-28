@@ -49,7 +49,7 @@ function anythingDraft(overrides: Partial<AnythingDraftData> = {}): AnythingDraf
     maxIterations: "",
     stopAtScore: "",
     reflectionModel: { name: "" },
-    maxCostCredits: null,
+    maxCostCents: null,
     setupSpent: 0,
     ...overrides,
   };
@@ -189,7 +189,7 @@ test("an identical clone matches a saved draft despite navigation and key order"
     { objective: "A different goal" },
     { metricCode: "def evaluate(candidate): return 1" },
     { reflectionModel: { name: "another-model" } },
-    { maxCostCredits: 25 },
+    { maxCostCents: 25 },
     { split: { train: 0.8, val: 0.1, test: 0.1 } },
     { seedParts: [{ key: "instruction", value: "New instructions" }] },
   ]) {
@@ -501,12 +501,12 @@ test("shared budget identities survive workflow changes and reject failed durabl
     executionBudgetRef: { id: "budget", revision: 2 },
     budgetCreateIdempotencyKey: "create-key",
     submissionIdempotencyKey: "submit-key",
-    budgetTotalCredits: 30,
+    budgetTotalCents: 30,
   });
-  saver.publish("program", { stage: "goal", maxCostCredits: 5 } as WizardDraftData, true);
+  saver.publish("program", { stage: "goal", maxCostCents: 5 } as WizardDraftData, true);
   await saver.flush();
   assert.deepEqual(store.stored?.executionBudgetRef, { id: "budget", revision: 2 });
-  assert.equal(store.stored?.budgetTotalCredits, 30);
+  assert.equal(store.stored?.budgetTotalCents, 30);
   assert.equal(store.stored?.submissionIdempotencyKey, "submit-key");
   store.setFailWrites(true);
   await assert.rejects(saver.saveExecution({ budgetCreateIdempotencyKey: "next" }), /quota/);

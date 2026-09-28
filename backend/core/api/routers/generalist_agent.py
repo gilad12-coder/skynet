@@ -43,7 +43,7 @@ from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort
 from ..model_router import effective_reasoning_effort, route_agent_model
-from ._helpers import enforce_llm_credits, sse_from_events, stream_with_llm_metering
+from ._helpers import enforce_llm_balance, sse_from_events, stream_with_llm_metering
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +134,7 @@ class GeneralistAgentRequest(BaseModel):
     regenerate: bool = Field(
         default=False,
         description=(
-            "Replace the existing conversation's final user/assistant turn "
-            "instead of appending a duplicate turn."
+            "Replace the existing conversation's final user/assistant turn instead of appending a duplicate turn."
         ),
     )
     locale: str | None = Field(
@@ -156,10 +155,7 @@ class GeneralistAgentRequest(BaseModel):
     )
     reasoning_effort: ReasoningEffort | None = Field(
         default=None,
-        description=(
-            "Explicit reasoning-effort level for the chosen model; absent "
-            "keeps the model's default."
-        ),
+        description=("Explicit reasoning-effort level for the chosen model; absent keeps the model's default."),
     )
 
 
@@ -434,9 +430,7 @@ async def _wrap_with_persistence(
                 allowed_tools=allowed_tools,
                 tool_schema_hashes=tool_schema_hashes,
                 router_metadata={
-                    key: value
-                    for key, value in (("served_model", served_model_used), ("stats", turn_stats))
-                    if value
+                    key: value for key, value in (("served_model", served_model_used), ("stats", turn_stats)) if value
                 }
                 or None,
             )
@@ -628,7 +622,7 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
                 logger.exception("Failed to wake agent memory")
                 return ""
 
-        await asyncio.to_thread(enforce_llm_credits, job_store, current_user.username)
+        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
         conversation_id, title = await asyncio.to_thread(_setup_turn)
         memory_context = await asyncio.to_thread(_wake_memory)
 

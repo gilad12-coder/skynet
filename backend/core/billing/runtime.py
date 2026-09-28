@@ -151,8 +151,8 @@ class BudgetRuntime:
                         cost_kind=cost_kind,
                         request_fingerprint=quote.request_fingerprint,
                         price_snapshot=quote.price_snapshot,
-                        max_credits=quote.maximum.total,
-                        max_wallet_credits=quote.maximum.wallet,
+                        max_cents=quote.maximum.total,
+                        max_wallet_cents=quote.maximum.wallet,
                         attempt=attempt,
                         role=role,
                         headroom_operation_id=headroom_operation_id,
@@ -187,8 +187,8 @@ class BudgetRuntime:
             self.service.trim_recovery_headroom(
                 operation_id,
                 self.username,
-                max_credits=remaining[0],
-                max_wallet_credits=remaining[1],
+                max_cents=remaining[0],
+                max_wallet_cents=remaining[1],
             )
             if self._recovery_headroom_operation_id == operation_id:
                 self._release_headroom_after_next = True
@@ -274,8 +274,8 @@ class BudgetRuntime:
                 operation.id,
                 self.username,
                 evidence_key=json_fingerprint(dict(result.evidence)),
-                actual_credits=charge.total,
-                actual_wallet_credits=charge.wallet,
+                actual_cents=charge.total,
+                actual_wallet_cents=charge.wallet,
                 evidence=dict(result.evidence),
                 final=result.final,
             )

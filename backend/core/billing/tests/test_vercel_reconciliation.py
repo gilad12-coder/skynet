@@ -46,7 +46,7 @@ def ledger(tmp_path: Path) -> Iterator[BudgetService]:
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         session.add(
-            BillingCustomerModel(username="alice", stripe_customer_id="fixture", credit_balance=100, grant_remaining=0)
+            BillingCustomerModel(username="alice", stripe_customer_id="fixture", balance_cents=100, grant_remaining=0)
         )
         session.commit()
     yield BudgetService(engine=engine)
@@ -75,7 +75,7 @@ def _admit(ledger: BudgetService, *, key: str = "draft", session_id: str | None 
         cost_kind="sandbox",
         request_fingerprint=quote.request_fingerprint,
         price_snapshot=quote.price_snapshot,
-        max_credits=quote.maximum.total,
+        max_cents=quote.maximum.total,
     )
     return ledger.mark_dispatched(operation.id, "alice", session_id)
 
@@ -114,9 +114,9 @@ def test_durable_receipt_settles_after_fencing_at_original_prices(
     replay = reconcile.reconcile(operation.id, "alice")
     assert first == replay
     assert first.state == "settled"
-    assert first.actual_credits == expected
-    assert first.budget.reserved_credits == 0
-    assert first.budget.billed_credits == 1
+    assert first.actual_cents == expected
+    assert first.budget.reserved_cents == 0
+    assert first.budget.billed_cents == 1
 
 
 def test_missing_final_metrics_can_arrive_after_stop(ledger: BudgetService) -> None:
@@ -160,9 +160,9 @@ def test_control_plane_transfer_settles_from_stored_stop_evidence(ledger: Budget
     settled = VercelUsageReconciler(ledger, _unavailable).reconcile(operation.id, "alice")
     assert settled.state == "settled"
     expected = ChargePolicy("sandbox").convert(vercel_actual_usd(RECEIPT, session_id="session-one", vcpus=2)).total
-    assert settled.actual_credits == expected
-    assert settled.budget.reserved_credits == 0
-    assert settled.budget.billed_credits == 1
+    assert settled.actual_cents == expected
+    assert settled.budget.reserved_cents == 0
+    assert settled.budget.billed_cents == 1
 
 
 def test_unfinished_runtime_retains_full_coverage(ledger: BudgetService) -> None:
@@ -177,9 +177,9 @@ def test_unfinished_runtime_retains_full_coverage(ledger: BudgetService) -> None
         VercelUsageReconciler(ledger, lambda session_id: receipt).reconcile(operation.id, "alice")
     current = ledger.get_operation(operation.id, "alice")
     assert current.state == "pending"
-    assert current.actual_credits == 0
-    assert current.budget.reserved_credits == operation.max_credits
-    assert current.budget.billed_credits == 0
+    assert current.actual_cents == 0
+    assert current.budget.reserved_cents == operation.max_cents
+    assert current.budget.billed_cents == 0
     assert ledger.get_reconciliation(operation.id, "alice").evidence
 
 
@@ -195,7 +195,7 @@ def test_missing_identity_and_wrong_owner_never_issue_provider_calls(ledger: Bud
         reconcile.reconcile(operation.id, "bob")
     with pytest.raises(UsagePendingError, match="exact session identity"):
         reconcile.reconcile(operation.id, "alice")
-    assert ledger.get(operation.budget_id, "alice").reserved_credits == operation.max_credits
+    assert ledger.get(operation.budget_id, "alice").reserved_cents == operation.max_cents
 
 
 def test_concurrent_reconciliation_settles_once(ledger: BudgetService) -> None:
@@ -224,7 +224,7 @@ def test_concurrent_reconciliation_settles_once(ledger: BudgetService) -> None:
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(reconcile.reconcile, operation.id, "alice") for _ in range(2)]
         assert all(future.result().state == "settled" for future in futures)
-    assert ledger.get(operation.budget_id, "alice").billed_credits == 1
+    assert ledger.get(operation.budget_id, "alice").billed_cents == 1
 
 
 def test_sweep_pages_past_unrecoverable_creation(ledger: BudgetService) -> None:

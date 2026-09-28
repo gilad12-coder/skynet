@@ -69,7 +69,7 @@ def test_record_exports_to_posthog_off_thread(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(server_events, "export_telemetry_events", fake_export)
 
-    record_server_event(engine, username="alice", name="purchase_completed", properties={"credits": 500})
+    record_server_event(engine, username="alice", name="purchase_completed", properties={"cents": 500})
 
     assert done.wait(timeout=5)
     assert captured["username"] == "alice"
@@ -77,7 +77,7 @@ def test_record_exports_to_posthog_off_thread(monkeypatch: pytest.MonkeyPatch) -
     events = captured["events"]
     assert isinstance(events, list)
     assert events[0]["name"] == "purchase_completed"
-    assert events[0]["properties"] == {"credits": 500}
+    assert events[0]["properties"] == {"cents": 500}
     assert events[0]["context"] == {"source": "server"}
 
 

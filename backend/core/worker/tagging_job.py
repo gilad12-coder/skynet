@@ -13,7 +13,7 @@ the worker thread, so this module owns the responsibilities the subprocess
 drain loop normally covers — renewing the claim lease via the injected
 ``heartbeat`` and watching both the in-memory cancel event and the persisted
 job status (cross-pod cancel) through a small monitor thread. The same
-monitor doubles as the credit watch: it prices the run's accrued LM usage
+monitor doubles as the balance watch: it prices the run's accrued LM usage
 every tick and stops the batch loop once the cost reaches the account's
 spendable balance, so a bulk job can never spend meaningfully past what the
 account holds (the final debit clamps at zero regardless).
@@ -30,7 +30,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..billing import ProviderKeyVault, resolve_byok_model_config
-from ..billing.metering import estimate_run_credits, meter_llm_run
+from ..billing.metering import estimate_run_cents, meter_llm_run
 from ..billing.service import StripeBillingService
 from ..constants import TOKEN_SOURCE_MANAGED
 from ..service_gateway import tagging
@@ -74,18 +74,16 @@ def untagged_rows(data: list[dict[str, Any]], annotations: dict[str, Any]) -> li
     return [row for row in data if not is_labeled(annotations.get(str(row.get("id"))))]
 
 
-def _write_terminal(
-    engine: Any, session_id: str, status: str, credits: int, *, reason: str | None = None
-) -> None:
+def _write_terminal(engine: Any, session_id: str, status: str, cents: int, *, reason: str | None = None) -> None:
     """Write the session row's terminal autotag state (best-effort).
 
     Args:
         engine: SQLAlchemy engine of the job store.
         session_id: UUID of the tagger session.
         status: Terminal autotag status (``done`` / ``canceled`` / ``failed``).
-        credits: Credits spent by this run, added to any prior spend.
+        cents: Cents spent by this run, added to any prior spend.
         reason: Machine-readable cause stamped beside the status (e.g.
-            ``credits_exhausted``); ``None`` clears any prior cause so the
+            ``balance_exhausted``); ``None`` clears any prior cause so the
             stamp always explains the status it sits next to.
     """
     try:
@@ -100,7 +98,7 @@ def _write_terminal(
                 autotag["reason"] = reason
             else:
                 autotag.pop("reason", None)
-            autotag["credits_spent"] = int(autotag.get("credits_spent", 0)) + credits
+            autotag["cents_spent"] = int(autotag.get("cents_spent", 0)) + cents
             state["autotag"] = autotag
             row.assist = cast(Any, state)
             if status == "done":
@@ -144,9 +142,9 @@ def run_autotag_job(
             monitor tick.
 
     Returns:
-        ``{"status": "done", "rows_tagged", "credits_spent"}`` on completion;
+        ``{"status": "done", "rows_tagged", "cents_spent"}`` on completion;
         ``{"status": "cancelled"}`` when the user cancelled — with ``"reason":
-        "credits_exhausted"`` when the credit watch (not the user) stopped it;
+        "balance_exhausted"`` when the balance watch (not the user) stopped it;
         ``{"status": "aborted"}`` when the claim was lost to a peer pod (no
         terminal state is written — the peer owns the session now).
 
@@ -157,8 +155,8 @@ def run_autotag_job(
     engine = job_store.engine
     stop = threading.Event()
     done = threading.Event()
-    credit_stop = threading.Event()
-    credits = 0
+    balance_stop = threading.Event()
+    cents = 0
     usage_sink: list = []
     billing = StripeBillingService(engine=engine) if username else None
     token_source = TOKEN_SOURCE_MANAGED
@@ -166,10 +164,10 @@ def run_autotag_job(
     def monitor() -> None:
         """Renew the lease and fold every cancel source into ``stop``.
 
-        Also the credit watch: prices the run's accrued usage each tick and
-        raises ``credit_stop`` once it reaches the account's live spendable
+        Also the balance watch: prices the run's accrued usage each tick and
+        raises ``balance_stop`` once it reaches the account's live spendable
         balance, so a bulk job halts within one tick of going balance-broke
-        instead of running its full row count on credit.
+        instead of running its full row count unfunded.
         """
         while not done.wait(MONITOR_TICK_SECONDS):
             try:
@@ -181,18 +179,18 @@ def run_autotag_job(
                 return
             if billing is not None:
                 try:
-                    spent = estimate_run_credits(usage_sink, token_source)
-                    if spent >= billing.spendable_credits(username):
+                    spent = estimate_run_cents(usage_sink, token_source)
+                    if spent >= billing.spendable_cents(username):
                         logger.warning(
-                            "autotag %s stopped: accrued cost %d credits reached the balance",
+                            "autotag %s stopped: accrued cost %d cents reached the balance",
                             optimization_id,
                             spent,
                         )
-                        credit_stop.set()
+                        balance_stop.set()
                         stop.set()
                         return
                 except Exception:
-                    logger.exception("autotag credit watch failed for %s", optimization_id)
+                    logger.exception("autotag balance watch failed for %s", optimization_id)
             try:
                 status = job_store.get_job_status_fields(optimization_id).get("status")
             except Exception:
@@ -201,15 +199,13 @@ def run_autotag_job(
                 stop.set()
                 return
 
-    monitor_thread = threading.Thread(
-        target=monitor, name=f"tagger-autotag-monitor-{session_id[:8]}", daemon=True
-    )
+    monitor_thread = threading.Thread(target=monitor, name=f"tagger-autotag-monitor-{session_id[:8]}", daemon=True)
     monitor_thread.start()
 
     try:
-        if billing is not None and billing.spendable_credits(username) <= 0:
-            _write_terminal(engine, session_id, "canceled", 0, reason="credits_exhausted")
-            return {"status": "cancelled", "reason": "credits_exhausted"}
+        if billing is not None and billing.spendable_cents(username) <= 0:
+            _write_terminal(engine, session_id, "canceled", 0, reason="balance_exhausted")
+            return {"status": "cancelled", "reason": "balance_exhausted"}
         with Session(engine) as db:
             row = db.get(TaggingSessionModel, session_id)
             if row is None:
@@ -258,16 +254,14 @@ def run_autotag_job(
                     predictions[row_id] = pred
                     provenance[row_id] = "ai_auto"
                 autotag["done"] = int(autotag.get("done", 0)) + len(batch)
-                state.update(
-                    {"predictions": predictions, "provenance": provenance, "autotag": autotag}
-                )
+                state.update({"predictions": predictions, "provenance": provenance, "autotag": autotag})
                 fresh.annotations = cast(Any, anns)
                 fresh.assist = cast(Any, state)
                 fresh.tagged_count = cast(Any, _count_labeled(anns))
                 fresh.updated_at = cast(Any, datetime.now(UTC))
                 db.commit()
 
-        tagged, credits = tagging.predict_rows(
+        tagged, cents = tagging.predict_rows(
             config,
             instructions,
             pending,
@@ -278,7 +272,7 @@ def run_autotag_job(
         )
     except Exception:
         done.set()
-        _write_terminal(engine, session_id, "failed", credits)
+        _write_terminal(engine, session_id, "failed", cents)
         raise
     finally:
         done.set()
@@ -299,14 +293,14 @@ def run_autotag_job(
             # the user: a peer pod owns the session now, so write nothing.
             logger.warning("autotag %s abandoned after lease loss", optimization_id)
             return {"status": "aborted"}
-        if credit_stop.is_set():
-            _write_terminal(engine, session_id, "canceled", credits, reason="credits_exhausted")
-            return {"status": "cancelled", "reason": "credits_exhausted"}
-        _write_terminal(engine, session_id, "canceled", credits)
+        if balance_stop.is_set():
+            _write_terminal(engine, session_id, "canceled", cents, reason="balance_exhausted")
+            return {"status": "cancelled", "reason": "balance_exhausted"}
+        _write_terminal(engine, session_id, "canceled", cents)
         return {"status": "cancelled"}
 
-    _write_terminal(engine, session_id, "done", credits)
-    return {"status": "done", "rows_tagged": len(tagged), "credits_spent": credits}
+    _write_terminal(engine, session_id, "done", cents)
+    return {"status": "done", "rows_tagged": len(tagged), "cents_spent": cents}
 
 
 def _job_cancelled(job_store: Any, optimization_id: str) -> bool:

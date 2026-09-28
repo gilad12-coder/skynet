@@ -4,12 +4,12 @@
   "app.shell.search.kw.admin": "administración almacenamiento cuota presupuestos usuarios admin storage quota users",
   "app.shell.search.kw.agent": "agente panel asistente modelo predeterminado voz dictado nivel de confianza memoria agent assistant model voice dictation trust yolo memory",
   "app.shell.search.kw.api": "API token desarrollador integración generar revocar documentación API token developer documentation",
-  "app.shell.search.kw.billing": "facturación créditos agregar créditos suscripción plan pago métodos de pago tarjeta facturas recibos transacciones billing credits Skynet Pro subscription payment receipts",
+  "app.shell.search.kw.billing": "facturación saldo fondos agregar fondos recargar suscripción plan pago métodos de pago tarjeta facturas recibos transacciones billing balance funds top up Skynet Pro subscription payment receipts",
   "app.shell.search.kw.privacy": "privacidad datos notificaciones correo analíticas borrar caché exportar mis datos eliminar cuenta privacy notifications analytics cache export delete account",
   "app.shell.search.kw.providers": "proveedores claves API clave propia URL base providers keys BYOK OpenAI Anthropic Gemini Google Groq Mistral Together DeepSeek xAI OpenRouter",
   "app.shell.search.kw.security": "seguridad dos factores autenticador códigos de recuperación llaves de acceso códigos por correo inicio de sesión security 2FA TOTP recovery passkey login",
   "app.shell.search.kw.tagging": "etiquetado etiquetas asistido por IA etiquetado automático modelo predeterminado tagging labels autotag model",
-  "app.shell.search.kw.usage": "uso gasto costo créditos gastados tokens ejecuciones por modelo actividad usage spend cost tokens",
+  "app.shell.search.kw.usage": "uso gasto costo dólares gastados tokens ejecuciones por modelo actividad usage spend cost tokens",
   "app.shell.search.kw.wizard": "optimización asistente generación de código conjunto de datos división registro de paquetes modelos optimization wizard split package registry pip models",
   "auto.features.tutorial.components.concepts.guide.literal.140": "Para un solo módulo, signature_code declara las entradas y salidas de la tarea. Un flujo de trabajo almacena ese contrato en los nodos de su módulo. column_mapping conecta cada campo de firma con la columna del conjunto de datos coincidente.",
   "common.empty": "—",
@@ -26,5 +26,5 @@
   "tagger.library.saved": "“{name}” guardado en la biblioteca",
   "tooltip.submit.blackbox.scorer_install": "Se ejecuta una vez dentro de Vercel Sandbox sin acceso a la red. Usa paquetes que ya estén en la imagen fijada o artefactos de paquetes gestionados por el despliegue; los registros públicos de apt y de paquetes no están disponibles.",
   "submit.budget.byok_note": "Tu proveedor factura los tokens del modelo directamente a tu clave. El total incluye solo la tarifa de plataforma de Skynet y el uso de Vercel Sandbox.",
-  "submit.blackbox.roles.optimization.managed_hint": "Usa la configuración de muestreo predeterminada del modelo; puedes pagar con créditos de Skynet o con tu clave de OpenRouter."
+  "submit.blackbox.roles.optimization.managed_hint": "Usa la configuración de muestreo predeterminada del modelo; puedes pagar con tu saldo de Skynet o con tu clave de OpenRouter."
 }

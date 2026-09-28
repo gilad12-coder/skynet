@@ -177,8 +177,8 @@ export type ExecutionRuntime = "vercel";
 
 export interface RuntimeCostProfile {
   billing_basis: "at_cost" | "included_in_model_markup";
-  minimum_session_credits: string | null;
-  maximum_session_credits: string | null;
+  minimum_session_cents: string | null;
+  maximum_session_cents: string | null;
   maximum_lifetime_seconds: number | null;
   vcpus: number | null;
 }
@@ -223,24 +223,24 @@ interface OptimizationRequestBase {
   shuffle?: boolean;
   seed?: number | null;
   is_private?: boolean;
-  // How the run's tokens are billed: "managed" (Skynet credits) or "byok" (the
+  // How the run's tokens are billed: "managed" (the Skynet balance) or "byok" (the
   // user's own key — not billed). Threaded from the wizard's token-source toggle
   // so billing mode is enforced server-side, not advisory. Defaults to "managed".
   token_source?: "managed" | "byok";
-  // User-set Max Cost Ceiling in credits [FG-1]. A DSPy job's token use isn't
+  // User-set Max Cost Ceiling in cents [FG-1]. A DSPy job's token use isn't
   // linear, so the wizard shows a projected bracket instead of a tight estimate
   // and lets the user cap the run here; the backend hard-stops the job once spend
   // exceeds the budget this cap buys. Omitted when no ceiling is set.
-  max_cost_credits?: number;
+  max_cost_cents?: number;
   // Optional GEPA validation target, expressed as a percentage (0–100). The
   // optimizer stops searching when its best validation candidate reaches it.
   target_score?: number;
-  // Projected credit bracket the wizard showed at submit [FG-1], persisted with
+  // Projected cost bracket the wizard showed at submit [FG-1], persisted with
   // the billing stamp so the estimate can be reconciled against the actual
   // charge. Carries the chargeable bracket for the run's token source
   // (managed: full per-model cost; byok: platform fee). Omitted when unestimated.
-  estimated_credits_low?: number;
-  estimated_credits_high?: number;
+  estimated_cents_low?: number;
+  estimated_cents_high?: number;
 }
 
 export interface RunRequest extends OptimizationRequestBase {
@@ -301,9 +301,9 @@ interface TerminalEvidence {
 interface BudgetProjection {
   planned_calls: number;
   done_calls: number;
-  spent_credits: string;
-  projected_credits: number;
-  limit_credits: number;
+  spent_cents: string;
+  projected_cents: number;
+  limit_cents: number;
 }
 
 export interface OptimizationSummaryResponse {
@@ -479,14 +479,14 @@ export interface LMActivity {
 }
 
 /**
- * What a finished run cost against the credit ledger: every run bills, and
- * `credits` is the charged amount. Stamped by the worker under
+ * What a finished run cost against the balance ledger: every run bills, and
+ * `cents` is the charged amount. Stamped by the worker under
  * `RunResult.details.billing`.
  */
 export interface RunBillingOutcome {
   outcome: "billed";
-  credits: number;
-  // The projected credit bracket persisted at submit, echoed back so the
+  cents: number;
+  // The projected cost bracket persisted at submit, echoed back so the
   // estimate can be reconciled against the actual charge. Absent on runs
   // submitted before an estimate was persisted (older runs).
   estimated_low?: number;
@@ -559,7 +559,12 @@ export interface GridSearchResult {
 /** A candidate is one text, or a dict of named parts (GEPA / meta_harness only). */
 export type BlackboxCandidate = string | Record<string, string>;
 
-export type BlackboxEngineId = "gepa" | "best_of_n" | "autoresearch" | "meta_harness" | "autosaddler";
+export type BlackboxEngineId =
+  | "gepa"
+  | "best_of_n"
+  | "autoresearch"
+  | "meta_harness"
+  | "autosaddler";
 export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "prime" | "custom";
 export type BlackboxProposerRuntime = "vercel";
 
@@ -660,9 +665,9 @@ export interface BlackboxRunRequest {
   reflection_model_config: ModelConfig;
   token_source?: "managed" | "byok";
   is_private?: boolean;
-  max_cost_credits?: number | null;
-  estimated_credits_low?: number | null;
-  estimated_credits_high?: number | null;
+  max_cost_cents?: number | null;
+  estimated_cents_low?: number | null;
+  estimated_cents_high?: number | null;
 }
 
 export interface ScorerDryRunRequest {
@@ -686,7 +691,7 @@ export interface ScorerDryRunResponse {
   // Per-model token usage when the scorer called the injected `llm()` helper.
   usage_by_model?: ModelTokenUsage[];
   // Optional per-check attribution; the shared budget owns cumulative setup spending.
-  credits_charged?: number;
+  cents_charged?: number;
 }
 
 interface BlackboxLaneResult {
@@ -899,7 +904,7 @@ export interface ServeResponse {
   model_used: string;
   // Per-node execution trace, present only for workflow runs.
   node_traces?: WorkflowNodeTrace[] | null;
-  credits_charged?: string | null;
+  cents_charged?: string | null;
   budget?: ExecutionBudget | null;
 }
 

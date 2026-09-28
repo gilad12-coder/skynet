@@ -32,7 +32,7 @@ _LLM_ERROR_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         re.compile(r"managed_funds_exhausted", re.IGNORECASE),
         (
             "Provider funds: the managed model provider refused the run for lack of funds. "
-            "The refused calls were not charged and your credits are untouched. The team "
+            "The refused calls were not charged and your balance is untouched. The team "
             "has been alerted; retry shortly."
         ),
     ),
@@ -45,13 +45,12 @@ _LLM_ERROR_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (
         re.compile(r"provider_budget_busy", re.IGNORECASE),
-        (
-            "Provider busy: the model provider held the run while earlier spend settled. "
-            "Retry in a minute."
-        ),
+        ("Provider busy: the model provider held the run while earlier spend settled. Retry in a minute."),
     ),
     (
-        re.compile(r"insufficient_quota|exceeded your current quota|check your plan and billing|billing", re.IGNORECASE),
+        re.compile(
+            r"insufficient_quota|exceeded your current quota|check your plan and billing|billing", re.IGNORECASE
+        ),
         (
             "Billing/quota: the language-model provider rejected the request for billing "
             "reasons (insufficient quota or no remaining credit). Top up or check the "
@@ -59,7 +58,9 @@ _LLM_ERROR_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
     ),
     (
-        re.compile(r"invalid[_ ]?api[_ ]?key|incorrect api key|authenticationerror|\b401\b|unauthorized", re.IGNORECASE),
+        re.compile(
+            r"invalid[_ ]?api[_ ]?key|incorrect api key|authenticationerror|\b401\b|unauthorized", re.IGNORECASE
+        ),
         (
             "Authentication: the language-model provider rejected the API key. Verify the "
             "key configured for this provider."
@@ -81,20 +82,17 @@ _LLM_ERROR_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (
         re.compile(r"model.{0,30}(not found|does not exist)|invalid model|unknown model|no such model", re.IGNORECASE),
-        (
-            "Model unavailable: the requested model is not available for this provider or "
-            "account."
-        ),
+        ("Model unavailable: the requested model is not available for this provider or account."),
     ),
     (
         re.compile(r"timed? ?out|timeout", re.IGNORECASE),
-        (
-            "Timeout: the language-model provider did not respond in time. Retry, or lower "
-            "the parallelism."
-        ),
+        ("Timeout: the language-model provider did not respond in time. Retry, or lower the parallelism."),
     ),
     (
-        re.compile(r"connection error|connection refused|failed to establish|name resolution|network is unreachable", re.IGNORECASE),
+        re.compile(
+            r"connection error|connection refused|failed to establish|name resolution|network is unreachable",
+            re.IGNORECASE,
+        ),
         "Network: could not reach the language-model provider (connection error).",
     ),
 )

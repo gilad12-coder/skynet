@@ -24,7 +24,7 @@ import {
 } from "@/features/settings";
 import { StorageQuotaModalHost } from "@/features/storage";
 import { PreflightNotifications } from "@/features/submit";
-import { CreditProvider, ByokKeysProvider, InsufficientCreditsModalHost } from "@/features/billing";
+import { BalanceProvider, ByokKeysProvider, InsufficientFundsModalHost } from "@/features/billing";
 import { AppSkeletonTheme } from "@/shared/ui/skeleton";
 import { msg } from "@/shared/lib/messages";
 import { getServerRuntimeEnv, serializeRuntimeEnv } from "@/shared/lib/runtime-env";
@@ -227,7 +227,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <DeviceClassProvider initial={deviceClass}>
           <LocaleProvider initialLocale={locale}>
             <SessionProvider session={session}>
-              <CreditProvider>
+              <BalanceProvider>
                 <ByokKeysProvider>
                   <UserPrefsProvider>
                     <LiteModeProvider>
@@ -241,7 +241,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                                 <SettingsModal />
                                 {/* Inside SettingsModalProvider: its CTA opens the
                                     wallet settings tab now that /upgrade is gone. */}
-                                <InsufficientCreditsModalHost />
+                                <InsufficientFundsModalHost />
                               </SettingsModalProvider>
                               <TutorialOverlay />
                             </TutorialProvider>
@@ -251,7 +251,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     </LiteModeProvider>
                   </UserPrefsProvider>
                 </ByokKeysProvider>
-              </CreditProvider>
+              </BalanceProvider>
             </SessionProvider>
             <TelemetryProvider />
             <StorageQuotaModalHost />

@@ -25,7 +25,7 @@ from ..service_gateway.language_models import (
     usage_by_model_from_history,
 )
 from .pricing import ModelUsage, combine_usages, fallback_priced_usages, usages_from_breakdown
-from .service import StripeBillingService, run_cost_credits
+from .service import StripeBillingService, run_cost_cents
 
 logger = logging.getLogger("skynet.billing.metering")
 
@@ -111,7 +111,7 @@ def debit_at_fallback_price(
         settlement_key: Idempotency key forwarded to the debit.
 
     Returns:
-        The credits charged, or ``0`` when there were no tokens or the debit failed.
+        The cents charged, or ``0`` when there were no tokens or the debit failed.
     """
     fallback = fallback_priced_usages(usages)
     if not fallback:
@@ -192,7 +192,7 @@ def meter_llm_usage(
         token_source: Billing source for the call.
 
     Returns:
-        The credits charged, or ``0`` when nothing was billed.
+        The cents charged, or ``0`` when nothing was billed.
     """
     if engine is None or not username or not breakdown:
         return 0
@@ -229,11 +229,11 @@ def meter_llm_usage(
         )
 
 
-def estimate_run_credits(language_models, token_source: str = TOKEN_SOURCE_MANAGED) -> int:
+def estimate_run_cents(language_models, token_source: str = TOKEN_SOURCE_MANAGED) -> int:
     """Price the billable usage a set of LMs has accumulated so far.
 
     A ``MeteredLM``'s running totals are current at any point, so this can be
-    polled mid-run — the auto-tag job's credit watch uses it to stop a bulk
+    polled mid-run — the auto-tag job's balance watch uses it to stop a bulk
     job once its accrued cost reaches the account's balance, before the final
     debit clamps. Read-only: nothing is debited. Never raises; a harvest
     failure prices as ``0`` so a watcher fails open rather than killing a run
@@ -245,7 +245,7 @@ def estimate_run_credits(language_models, token_source: str = TOKEN_SOURCE_MANAG
             platform-fee portion only.
 
     Returns:
-        The billable credit cost of the usage so far (``0`` when nothing was
+        The billable cost in cents of the usage so far (``0`` when nothing was
         tracked).
     """
     lms = _coerce_lms(language_models)
@@ -253,7 +253,7 @@ def estimate_run_credits(language_models, token_source: str = TOKEN_SOURCE_MANAG
         return 0
     try:
         usages, _ = _harvest_usages(lms)
-        return run_cost_credits(usages, token_source)
+        return run_cost_cents(usages, token_source)
     except Exception:
         logger.exception("failed to price in-flight LLM usage")
         return 0
@@ -289,7 +289,7 @@ def meter_llm_run(
         token_source: Billing source for the interactive model call.
 
     Returns:
-        The credits charged, or ``0`` when nothing was billed.
+        The cents charged, or ``0`` when nothing was billed.
     """
     if engine is None or not username:
         return 0

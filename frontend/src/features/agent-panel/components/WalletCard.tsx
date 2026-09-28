@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { formatCreditsUsd } from "@/features/billing";
+import { formatCentsUsd } from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
 
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
@@ -16,20 +16,20 @@ interface WalletCardProps {
 }
 
 interface FreeGrant {
-  credits_remaining?: number;
-  credits_total?: number;
+  cents_remaining?: number;
+  cents_total?: number;
 }
 
 interface UsageEntry {
   id?: string;
   label?: string;
   model?: string | null;
-  credits?: number;
+  cents?: number;
   kind?: string;
 }
 
 interface WalletResult {
-  paid_balance_credits?: number;
+  paid_balance_cents?: number;
   free_grant?: FreeGrant;
   usage?: UsageEntry[];
 }
@@ -39,23 +39,23 @@ function extractWallet(call: AgentToolCall): WalletResult | null {
   const result = payload.result;
   if (!result || typeof result !== "object" || Array.isArray(result)) return null;
   const r = result as WalletResult;
-  if (typeof r.paid_balance_credits !== "number" || typeof r.free_grant !== "object") return null;
+  if (typeof r.paid_balance_cents !== "number" || typeof r.free_grant !== "object") return null;
   return r;
 }
 
-function totalCredits(w: WalletResult): number {
-  return (w.free_grant?.credits_remaining ?? 0) + (w.paid_balance_credits ?? 0);
+function totalCents(w: WalletResult): number {
+  return (w.free_grant?.cents_remaining ?? 0) + (w.paid_balance_cents ?? 0);
 }
 
-/** A credit count as its dollar value — credits are a par-USD unit (one credit is one cent). */
-function fmtUsd(credits: number): string {
-  return formatCreditsUsd(credits, getActiveIntlLocale());
+/** A cent amount as its dollar value. */
+function fmtUsd(cents: number): string {
+  return formatCentsUsd(cents, getActiveIntlLocale());
 }
 
 function buildSummary(w: WalletResult | null, isRunning: boolean): string | null {
   if (isRunning || !w) return null;
   return formatMsg("auto.features.agent.panel.components.walletcard.summary", {
-    p1: fmtUsd(totalCredits(w)),
+    p1: fmtUsd(totalCents(w)),
   });
 }
 
@@ -72,7 +72,7 @@ export function WalletCard({ call }: WalletCardProps) {
     return <ToolCallRow call={call} summary={summary} />;
   }
 
-  const total = totalCredits(wallet);
+  const total = totalCents(wallet);
   const grant = wallet.free_grant ?? {};
   const usage = wallet.usage ?? [];
 
@@ -90,20 +90,20 @@ export function WalletCard({ call }: WalletCardProps) {
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
         {/* Only legacy accounts still hold a grant — hide the tile when the
             account never had one. */}
-        {(grant.credits_total ?? 0) > 0 && (
+        {(grant.cents_total ?? 0) > 0 && (
           <StatTile
             label={msg("auto.features.agent.panel.components.walletcard.free_grant")}
             value={
-              grant.credits_remaining == null
+              grant.cents_remaining == null
                 ? null
-                : `${fmtUsd(grant.credits_remaining)} / ${fmtUsd(grant.credits_total ?? 0)}`
+                : `${fmtUsd(grant.cents_remaining)} / ${fmtUsd(grant.cents_total ?? 0)}`
             }
             valueDir="ltr"
           />
         )}
         <StatTile
           label={msg("auto.features.agent.panel.components.walletcard.paid_balance")}
-          value={fmtUsd(wallet.paid_balance_credits ?? 0)}
+          value={fmtUsd(wallet.paid_balance_cents ?? 0)}
           valueDir="ltr"
         />
       </dl>
@@ -119,7 +119,7 @@ export function WalletCard({ call }: WalletCardProps) {
                 <span dir="auto" className="min-w-0 flex-1 truncate text-foreground/75">
                   {row.label ?? "—"}
                 </span>
-                <CreditDelta credits={row.credits ?? 0} />
+                <AmountDelta cents={row.cents ?? 0} />
               </li>
             ))}
           </ul>
@@ -131,9 +131,9 @@ export function WalletCard({ call }: WalletCardProps) {
   return <ToolCallRow call={call} summary={summary} customBody={customBody} />;
 }
 
-function CreditDelta({ credits }: { credits: number }) {
-  const positive = credits > 0;
-  const text = positive ? `+${fmtUsd(credits)}` : fmtUsd(credits);
+function AmountDelta({ cents }: { cents: number }) {
+  const positive = cents > 0;
+  const text = positive ? `+${fmtUsd(cents)}` : fmtUsd(cents);
   return (
     <span
       dir="ltr"

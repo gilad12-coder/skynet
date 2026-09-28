@@ -123,14 +123,14 @@ def _app_for(store: _MemStore, user: AuthenticatedUser, *, monkeypatch: pytest.M
     monkeypatch.setattr(preflight_execution.settings, "openrouter_api_key", SecretStr("fixture-only"))
 
     # No free allowance exists, so the authed user is funded explicitly to pass
-    # the 402 credit gate on run submissions.
+    # the 402 balance gate on run submissions.
     with Session(store.engine) as session:
         if session.get(BillingCustomerModel, user.username) is None:
             session.add(
                 BillingCustomerModel(
                     username=user.username,
                     stripe_customer_id=f"cus_{user.username}",
-                    credit_balance=10_000,
+                    balance_cents=10_000,
                     grant_remaining=0,
                 )
             )

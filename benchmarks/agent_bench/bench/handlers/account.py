@@ -12,8 +12,13 @@ from typing import Any
 from bench.world import ToolError, World, tool
 
 PREFERENCE_KEYS = (
-    "advanced_mode", "expand_advanced", "lite_mode", "wizard_code_assist",
-    "wizard_split_mode", "tagger_assist", "dictation_enabled",
+    "advanced_mode",
+    "expand_advanced",
+    "lite_mode",
+    "wizard_code_assist",
+    "wizard_split_mode",
+    "tagger_assist",
+    "dictation_enabled",
 )
 
 
@@ -22,15 +27,16 @@ def get_wallet(w: World, args: dict[str, Any]) -> dict[str, Any]:
     """Return the caller's purchased balance, free grant, and recent ledger.
 
     Returns:
-        The wallet with a computed ``spendable_credits`` total and the ledger
+        The wallet with a computed ``spendable_cents`` total and the ledger
         trimmed to the 15 most recent entries, newest first.
     """
     wallet = w.s["wallet"]
     ledger = list(reversed(wallet["ledger"]))[:15]
     return {
-        "paid_balance_credits": wallet["paid_balance_credits"],
+        "paid_balance_cents": wallet["paid_balance_cents"],
         "free_grant": dict(wallet["free_grant"]),
-        "spendable_credits": wallet["paid_balance_credits"] + wallet["free_grant"]["credits_remaining"],
+        "spendable_cents": wallet["paid_balance_cents"]
+        + wallet["free_grant"]["cents_remaining"],
         "ledger": ledger,
     }
 
@@ -67,11 +73,19 @@ def discover_models(w: World, args: dict[str, Any]) -> dict[str, Any]:
     base_url = (args.get("base_url") or "").rstrip("/")
     endpoint = w.s["endpoints"].get(base_url)
     if endpoint is None:
-        return {"base_url": base_url, "models": [], "error": "Could not reach endpoint or it is not OpenAI-compatible."}
+        return {
+            "base_url": base_url,
+            "models": [],
+            "error": "Could not reach endpoint or it is not OpenAI-compatible.",
+        }
     if endpoint.get("error"):
         return {"base_url": base_url, "models": [], "error": endpoint["error"]}
     if endpoint.get("needs_key") and not args.get("api_key"):
-        return {"base_url": base_url, "models": [], "error": "This endpoint requires an API key."}
+        return {
+            "base_url": base_url,
+            "models": [],
+            "error": "This endpoint requires an API key.",
+        }
     return {"base_url": base_url, "models": list(endpoint["models"]), "error": None}
 
 

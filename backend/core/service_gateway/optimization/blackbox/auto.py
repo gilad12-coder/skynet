@@ -104,7 +104,7 @@ def _admit_context(ctx: EngineContext) -> EngineContext:
         return ctx
     remaining = ctx.remaining_cost_usd()
     if remaining <= 0:
-        raise BudgetReached("The run's total credit budget has been reached.")
+        raise BudgetReached("The run's total spending budget has been reached.")
     budget = min(ctx.proposer_token_budget_usd or remaining, remaining)
     native = (
         None

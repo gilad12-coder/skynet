@@ -9,7 +9,7 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
 from ..billing import ProviderKeyVault, payload_uses_token_source
-from ..billing.budget_amounts import MAX_CREDITS
+from ..billing.budget_amounts import MAX_CENTS
 from ..billing.budgets import BudgetConflictError, BudgetError, BudgetService, OperationSnapshot
 from ..billing.model_gateway import ModelGateway
 from ..billing.operation_pricing import OperationQuote, json_fingerprint
@@ -86,9 +86,7 @@ class _InteractionRuntime(BudgetRuntime):
         """
         return super().reserve(
             quote,
-            operation_key=self.prefix + json_fingerprint(
-                {"claim": self.claim_token, "operation": operation_key}
-            ),
+            operation_key=self.prefix + json_fingerprint({"claim": self.claim_token, "operation": operation_key}),
             cost_kind=cost_kind,
             role=role,
             attempt=attempt,
@@ -121,11 +119,7 @@ class _InteractionEvents:
             self.error = str(event.get("error") or "The isolated interaction failed.")
         elif event.get("type") == "terminal":
             self.error = str(event.get("outcome", {}).get("message") or "The interaction stopped.")
-        elif (
-            isinstance(event.get("event"), str)
-            and isinstance(event.get("data"), dict)
-            and self.on_event is not None
-        ):
+        elif isinstance(event.get("event"), str) and isinstance(event.get("data"), dict) and self.on_event is not None:
             self.on_event(event)
 
 
@@ -259,9 +253,7 @@ def _tool_authorizer(
                 "data": {"id": call_id, "tool": tool_name, "arguments": arguments},
             }
         )
-        approved = registry.wait_for_blocking_decision(
-            call_id, event, timeout_seconds=INTERACTION_APPROVAL_SECONDS
-        )
+        approved = registry.wait_for_blocking_decision(call_id, event, timeout_seconds=INTERACTION_APPROVAL_SECONDS)
         on_event(
             {
                 "event": "approval_resolved",
@@ -277,7 +269,7 @@ def run_protected_interaction(
     payload: dict[str, Any],
     *,
     kind: str,
-    max_cost_credits: int | None,
+    max_cost_cents: int | None,
     idempotency_key: str,
     user: AuthenticatedUser,
     job_store: Any,
@@ -291,7 +283,7 @@ def run_protected_interaction(
     Args:
         payload: Secret-free program, evaluator, and request data.
         kind: Serve, evaluation, or chat identity.
-        max_cost_credits: Maximum the caller accepted for this request, or ``None``
+        max_cost_cents: Maximum the caller accepted for this request, or ``None``
             to let the request draw on the account balance instead.
         idempotency_key: Transport replay identity.
         user: Authenticated account funding model and sandbox work.
@@ -315,12 +307,12 @@ def run_protected_interaction(
     scope = json_fingerprint({"kind": kind, "key": key})[:24]
     request_fingerprint = json_fingerprint(payload)
     try:
-        if max_cost_credits is None:
+        if max_cost_cents is None:
             # No caller cap: the budget stays uncapped so only the account balance
             # bounds the request, and the fixed total keeps replays fingerprint-stable.
-            budget = service.create(user.username, MAX_CREDITS, idempotency_key=creation_key, uncapped=True)
+            budget = service.create(user.username, MAX_CENTS, idempotency_key=creation_key, uncapped=True)
         else:
-            budget = service.create(user.username, max_cost_credits, idempotency_key=creation_key)
+            budget = service.create(user.username, max_cost_cents, idempotency_key=creation_key)
         document = _existing_document(engine, budget.id, scope)
         if budget.state == "closed":
             if document is None or document.get("_request_fingerprint") != request_fingerprint:
@@ -354,9 +346,7 @@ def run_protected_interaction(
                         if settings.openrouter_api_key is None and payload_uses_token_source(
                             parent_payload,
                             TOKEN_SOURCE_MANAGED,
-                            default_token_source=str(
-                                parent_payload.get("token_source") or TOKEN_SOURCE_MANAGED
-                            ),
+                            default_token_source=str(parent_payload.get("token_source") or TOKEN_SOURCE_MANAGED),
                         ):
                             raise ValueError("Managed model routing is not configured.")
                         gateway = ModelGateway(
@@ -385,9 +375,7 @@ def run_protected_interaction(
                         protected = gateway.protect_payload(
                             parent_payload,
                             managed_key=(
-                                settings.openrouter_api_key.get_secret_value()
-                                if settings.openrouter_api_key
-                                else ""
+                                settings.openrouter_api_key.get_secret_value() if settings.openrouter_api_key else ""
                             ),
                             allow_private_tools=settings.discover_allow_private,
                             authorize_tool=authorizer,
@@ -410,9 +398,7 @@ def run_protected_interaction(
                     status = "failed" if result.get("error") else "succeeded"
                     if service.get(budget.id, user.username).pending_operations:
                         status = "pending"
-                    document = PreflightStore(
-                        engine, lease_seconds=INTERACTION_LIFETIME_SECONDS + 60
-                    ).finish(
+                    document = PreflightStore(engine, lease_seconds=INTERACTION_LIFETIME_SECONDS + 60).finish(
                         document["id"],
                         claim_token=claim.token,
                         status=status,
@@ -433,7 +419,7 @@ def run_protected_interaction(
         public_budget = budget_response(current).model_dump(mode="json")
         result.update(
             {
-                "credits_charged": public_budget["setup_spent_credits"],
+                "cents_charged": public_budget["setup_spent_cents"],
                 "budget": public_budget,
                 "interaction_status": document["status"],
                 "interaction_id": document["id"],

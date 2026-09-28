@@ -7,9 +7,9 @@ from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
-from ...billing.budget_amounts import MAX_CREDITS
+from ...billing.budget_amounts import MAX_CENTS
 from ...billing.budgets import (
     BudgetConflictError,
     BudgetError,
@@ -28,7 +28,9 @@ IdempotencyKey = Annotated[str, Header(alias="Idempotency-Key", min_length=1, ma
 
 
 class CreateExecutionBudgetRequest(BaseModel):
-    total_credits: int = Field(ge=1, le=MAX_CREDITS, strict=True)
+    total_cents: int = Field(
+        validation_alias=AliasChoices("total_cents", "total_credits"), ge=1, le=MAX_CENTS, strict=True
+    )
     uncapped: bool = Field(default=False, strict=True)
 
 
@@ -38,28 +40,28 @@ class UpdateExecutionBudgetRequest(CreateExecutionBudgetRequest):
 
 class ExecutionBudgetResponse(BaseModel):
     id: str
-    total_credits: int
+    total_cents: int
     uncapped: bool
     revision: int
     generation: int
     state: str
     job_id: str | None
-    setup_spent_credits: Decimal
-    run_spent_credits: Decimal
-    reserved_credits: Decimal
-    available_credits: Decimal
-    billed_credits: int
-    wallet_setup_spent_credits: Decimal
-    wallet_run_spent_credits: Decimal
-    wallet_reserved_credits: int
-    account_available_credits: int
-    external_spent_credits: Decimal
+    setup_spent_cents: Decimal
+    run_spent_cents: Decimal
+    reserved_cents: Decimal
+    available_cents: Decimal
+    billed_cents: int
+    wallet_setup_spent_cents: Decimal
+    wallet_run_spent_cents: Decimal
+    wallet_reserved_cents: int
+    account_available_cents: int
+    external_spent_cents: Decimal
     pending_operations: int
     blocked_reason: str | None
 
 
 def budget_response(snapshot: BudgetSnapshot) -> ExecutionBudgetResponse:
-    """Serialize exact credit amounts without exposing an account identifier.
+    """Serialize exact cent amounts without exposing an account identifier.
 
     Args:
         snapshot: Authoritative state read under the ledger's transaction locks.
@@ -89,8 +91,8 @@ def budget_http_error(error: BudgetError) -> HTTPException:
         return DomainError(
             "budget.conflict",
             status=409,
-            current_total_credits=error.current_total_credits,
-            minimum_total_credits=error.minimum_total_credits,
+            current_total_cents=error.current_total_cents,
+            minimum_total_cents=error.minimum_total_cents,
         )
     elif isinstance(error, BudgetConflictError):
         status, code = 409, "budget.conflict"
@@ -136,7 +138,7 @@ def create_execution_budgets_router(*, job_store: Any) -> APIRouter:
         try:
             return budget_response(
                 ledger().create(
-                    user.username, request.total_credits, idempotency_key=idempotency_key, uncapped=request.uncapped
+                    user.username, request.total_cents, idempotency_key=idempotency_key, uncapped=request.uncapped
                 )
             )
         except BudgetError as error:
@@ -151,7 +153,7 @@ def create_execution_budgets_router(*, job_store: Any) -> APIRouter:
             user: Authenticated budget owner.
 
         Returns:
-            Current settled and reserved credit totals.
+            Current settled and reserved totals, in cents.
         """
         try:
             return budget_response(ledger().get(budget_id, user.username))
@@ -177,7 +179,7 @@ def create_execution_budgets_router(*, job_store: Any) -> APIRouter:
                 ledger().update_total(
                     budget_id,
                     user.username,
-                    request.total_credits,
+                    request.total_cents,
                     expected_revision=request.expected_revision,
                     uncapped=request.uncapped,
                 )

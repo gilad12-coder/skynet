@@ -6,7 +6,7 @@ debit). When ``OPENROUTER_PROVISIONING_KEY`` is configured, this module mints
 one OpenRouter runtime key per account through OpenRouter's key-management API
 and, before each managed dispatch, syncs that key's spend limit to
 ``usage + spendable balance`` — so the provider itself refuses requests once
-the account's prepaid credits are gone, even if every backend gate fails. The
+the account's prepaid balance is gone, even if every backend gate fails. The
 minted secret is Fernet-encrypted at rest under the same vault key as BYOK
 connections and injected into the run payload in memory only, exactly like the
 BYOK bridge. Any provisioning failure falls back to the shared gateway key:
@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 OPENROUTER_KEYS_URL = "https://openrouter.ai/api/v1/keys"
 _REQUEST_TIMEOUT_SECONDS = 15.0
 # OpenRouter denominates key limits in account credits (1 credit = 1 USD);
-# Skynet credits are cents, hence the /100 on every limit push.
-_CREDITS_PER_DOLLAR = 100
+# Skynet balances are in cents, hence the /100 on every limit push.
+_CENTS_PER_DOLLAR = 100
 # Float-compare slack for "is the limit already right": well under the
 # half-cent granularity any limit we push can differ by.
 _LIMIT_EPSILON_DOLLARS = 0.005
@@ -109,13 +109,13 @@ class OpenRouterKeyProvisioner:
         """Report whether provisioning is configured (see :func:`provisioning_enabled`)."""
         return provisioning_enabled()
 
-    def ensure_runtime_key(self, username: str, spendable_credits: int) -> str | None:
+    def ensure_runtime_key(self, username: str, spendable_cents: int) -> str | None:
         """Return the account's runtime key with its headroom synced to the balance.
 
         Mints a key through the key-management API on first use; afterwards
         reads the key's accumulated usage and pushes ``limit = usage +
         spendable`` so the remaining provider-side headroom always equals the
-        account's spendable credits — shrinking as well as growing. Every
+        account's spendable balance — shrinking as well as growing. Every
         failure path (API unreachable, unexpected response shape, undecryptable
         stored secret) returns ``None`` so the dispatch falls back to the
         shared gateway key rather than blocking the run; deleting the account's
@@ -124,8 +124,8 @@ class OpenRouterKeyProvisioner:
 
         Args:
             username: Account the managed run bills to.
-            spendable_credits: The account's spendable balance in Skynet
-                credits (cents).
+            spendable_cents: The account's spendable balance, in
+                cents.
 
         Returns:
             The plaintext runtime key, or ``None`` when provisioning is
@@ -138,7 +138,7 @@ class OpenRouterKeyProvisioner:
             ciphertext = row.secret_ciphertext if row is not None else None
             key_hash = row.key_hash if row is not None else None
         if ciphertext is None or key_hash is None:
-            return self._create_key(username, spendable_credits)
+            return self._create_key(username, spendable_cents)
         try:
             secret = self._cipher().decrypt(ciphertext).decode("utf-8")
         except InvalidToken:
@@ -148,16 +148,16 @@ class OpenRouterKeyProvisioner:
                 username,
             )
             return None
-        if not self._sync_limit(username, key_hash, spendable_credits):
+        if not self._sync_limit(username, key_hash, spendable_cents):
             return None
         return secret
 
-    def _create_key(self, username: str, spendable_credits: int) -> str | None:
+    def _create_key(self, username: str, spendable_cents: int) -> str | None:
         """Mint a runtime key limited to the balance and persist it encrypted.
 
         Args:
             username: Account to mint for.
-            spendable_credits: Initial spend limit, in Skynet credits (cents).
+            spendable_cents: Initial spend limit, in cents.
 
         Returns:
             The plaintext runtime key, or ``None`` when the mint failed.
@@ -165,7 +165,7 @@ class OpenRouterKeyProvisioner:
         body = self._request(
             "POST",
             OPENROUTER_KEYS_URL,
-            {"name": f"skynet-user-{username}", "limit": self._dollars(spendable_credits)},
+            {"name": f"skynet-user-{username}", "limit": self._dollars(spendable_cents)},
         )
         if body is None:
             return None
@@ -189,13 +189,13 @@ class OpenRouterKeyProvisioner:
             session.commit()
         return secret
 
-    def _sync_limit(self, username: str, key_hash: str, spendable_credits: int) -> bool:
+    def _sync_limit(self, username: str, key_hash: str, spendable_cents: int) -> bool:
         """Push ``limit = usage + spendable`` onto the account's runtime key.
 
         Args:
             username: Account the key belongs to (for log context only).
             key_hash: The key's identifier in the key-management API.
-            spendable_credits: Desired remaining headroom, in Skynet credits.
+            spendable_cents: Desired remaining headroom, in cents.
 
         Returns:
             ``True`` when the key's limit now matches the balance (already in
@@ -208,7 +208,7 @@ class OpenRouterKeyProvisioner:
         data = detail.get("data") if isinstance(detail.get("data"), dict) else {}
         usage = data.get("usage")
         usage_dollars = float(usage) if isinstance(usage, (int, float)) else 0.0
-        target = round(usage_dollars + self._dollars(spendable_credits), 2)
+        target = round(usage_dollars + self._dollars(spendable_cents), 2)
         current = data.get("limit")
         if isinstance(current, (int, float)) and abs(float(current) - target) < _LIMIT_EPSILON_DOLLARS:
             return True
@@ -260,13 +260,13 @@ class OpenRouterKeyProvisioner:
         return Fernet(settings.byok_vault_key.get_secret_value().encode("utf-8"))
 
     @staticmethod
-    def _dollars(credits: int) -> float:
-        """Convert Skynet credits (cents) to OpenRouter's dollar denomination.
+    def _dollars(cents: int) -> float:
+        """Convert cents to OpenRouter's dollar denomination.
 
         Args:
-            credits: Amount in Skynet credits; negative clamps to zero.
+            cents: Amount in cents; negative clamps to zero.
 
         Returns:
             The non-negative dollar amount.
         """
-        return max(0, credits) / _CREDITS_PER_DOLLAR
+        return max(0, cents) / _CENTS_PER_DOLLAR

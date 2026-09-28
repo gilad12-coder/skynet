@@ -21,7 +21,7 @@ import {
   getStagedDataset,
   getDatasetRows,
   isStorageQuotaError,
-  isInsufficientCreditsError,
+  isInsufficientFundsError,
   type DatasetSummary,
 } from "@/shared/lib/api";
 import type {
@@ -450,13 +450,13 @@ export function useSubmitWizard() {
   const [shuffle, setShuffle] = useState(true);
   // One shared total follows both workflow forms; the server owns spending and reservations.
   const {
-    maxCostCredits,
-    setMaxCostCredits,
+    maxCostCents,
+    setMaxCostCents,
     budgetUncapped,
     setBudgetUncapped,
     session: budgetSession,
     setupSpent,
-    availableCredits,
+    availableCents,
   } = useExecutionBudget();
 
   const [submitting, setSubmitting] = useState(false);
@@ -635,7 +635,7 @@ export function useSubmitWizard() {
       pxnParents,
       pxnProposals,
       shuffle,
-      maxCostCredits,
+      maxCostCents,
     };
     // A submit that has left is not re-parked while its splash plays out.
     if (hydratedRef.current && !submittedRef.current) {
@@ -904,7 +904,7 @@ export function useSubmitWizard() {
       : [...generationModels, ...reflectionModels];
   const estimateTokenSource = aggregateTokenSource(estimateModelConfigs);
 
-  // Projected pre-run credit bracket [FG-1]: a DSPy job's token use isn't linear,
+  // Projected pre-run cost bracket [FG-1]: a DSPy job's token use isn't linear,
   // so we show a range rather than a false-precision single number and seed the
   // Max Cost Ceiling from its high end. For a grid, count the (gen × refl) pairs
   // so the bracket reflects the whole sweep.
@@ -1687,9 +1687,9 @@ export function useSubmitWizard() {
       shuffle,
       is_private: isPrivate,
       token_source: tokenSource,
-      estimated_credits_low: estimate.lowCredits,
-      estimated_credits_high: estimate.highCredits,
-      ...(!budgetUncapped && maxCostCredits != null && { max_cost_credits: maxCostCredits }),
+      estimated_cents_low: estimate.lowCents,
+      estimated_cents_high: estimate.highCents,
+      ...(!budgetUncapped && maxCostCents != null && { max_cost_cents: maxCostCents }),
       ...(parsedTargetScore != null && { target_score: parsedTargetScore }),
       ...(seed != null && { seed }),
       ...(Object.keys(optKw).length > 0 && { optimizer_kwargs: optKw }),
@@ -1874,7 +1874,7 @@ export function useSubmitWizard() {
         return null;
       }
       case WIZARD_STAGE.optimization: {
-        if (!budgetUncapped && maxCostCredits == null)
+        if (!budgetUncapped && maxCostCents == null)
           return fail(msg("budget.invalid"), "totalBudgetInput");
         if (!structureOnly && runtimeUnavailableReason) return fail(runtimeUnavailableReason);
         const targetProblem = targetScoreIssue();
@@ -2287,7 +2287,7 @@ export function useSubmitWizard() {
         if (response.status === "succeeded") {
           const locale = getActiveIntlLocale();
           t.succeed(
-            `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetUsd(response.budget.setup_spent_credits, locale)} · ${msg("submit.budget.available")}: ${formatBudgetUsd(response.budget.available_credits, locale)}`,
+            `${msg("submit.preflight.succeeded")} · ${msg("submit.budget.setup_spent")}: ${formatBudgetUsd(response.budget.setup_spent_cents, locale)} · ${msg("submit.budget.available")}: ${formatBudgetUsd(response.budget.available_cents, locale)}`,
           );
         } else {
           t.pending(msg(preflightPendingMessageKey(response)));
@@ -2388,10 +2388,10 @@ export function useSubmitWizard() {
         router.push(jobUrl);
       }, 1500);
     } catch (err) {
-      // The storage-budget 409 and the credit-gate 402 each open their own shared
+      // The storage-budget 409 and the balance-gate 402 each open their own shared
       // modal centrally; suppress the redundant toast so the modal is the single
       // surface for both.
-      if (!isStorageQuotaError(err) && !isInsufficientCreditsError(err)) {
+      if (!isStorageQuotaError(err) && !isInsufficientFundsError(err)) {
         toast.error(err instanceof Error ? err.message : msg("submit.submit_failed"));
       }
       setSubmitPhase("idle");
@@ -2670,13 +2670,13 @@ export function useSubmitWizard() {
     setPxnParents,
     pxnProposals,
     setPxnProposals,
-    maxCostCredits,
-    setMaxCostCredits,
+    maxCostCents,
+    setMaxCostCents,
     budgetUncapped,
     setBudgetUncapped,
     budgetSession,
     setupSpent,
-    availableCredits,
+    availableCents,
     costBracket,
     suggestedCeiling,
     submitting,

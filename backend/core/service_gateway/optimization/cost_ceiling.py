@@ -1,15 +1,15 @@
-"""Per-job cost ceiling: hard-stop a run once its credit spend exceeds the cap.
+"""Per-job cost ceiling: hard-stop a run once its spend exceeds the cap.
 
 A DSPy optimizer's token use is not linear — bootstrapping, compile steps, and
 validation loops make a tight pre-run estimate dishonest. The wizard therefore
-shows a projected bracket and lets the user set a Max Cost Ceiling in credits;
+shows a projected bracket and lets the user set a Max Cost Ceiling in dollars;
 :class:`CostCeilingCallback` enforces that ceiling at runtime. Registered as a
 ``dspy`` callback alongside the timing callbacks, it re-prices the run's
 accumulated per-model usage after every LM call (across the generation and
 reflection LMs, on whichever worker thread the call lands) and raises
-:class:`CostCeilingExceededError` the moment the run's full per-model credit cost
+:class:`CostCeilingExceededError` the moment the run's full per-model cost
 crosses the cap. Pricing per-model — not a flat token budget — keeps the cap
-honest now that a credit means real provider cost: the same N-credit cap stops a
+honest because every cent is real provider cost: the same N-cent cap stops a
 frontier run far sooner than a mini one. The raise unwinds out of ``service.run``
 and the subprocess reports a normal budget stop with any evaluated result.
 Protected execution relies on predispatch admission; this callback is retained
@@ -23,7 +23,7 @@ from typing import Any
 
 from dspy.utils.callback import BaseCallback
 
-from ...billing.pricing import credits_for_usage
+from ...billing.pricing import cents_for_usage
 from ...billing.signals import BudgetReached
 from ..language_models import model_usages_from_history
 
@@ -36,10 +36,10 @@ class CostCeilingExceededError(BudgetReached):
 
 
 class CostCeilingCallback(BaseCallback):
-    """Hard-stop a run once its full per-model credit cost exceeds a credit cap.
+    """Hard-stop a run once its full per-model cost exceeds a cents cap.
 
     Holds the LMs whose ``history`` carries the run's token usage and a
-    ``max_credits`` cap (the user's Max Cost Ceiling, in full-cost credits). After
+    ``max_cents`` cap (the user's Max Cost Ceiling, in full-cost cents). After
     each LM call completes, it re-prices accumulated per-model usage and raises
     :class:`CostCeilingExceededError` once the full per-model cost exceeds the cap
     — at the next ``on_lm_end`` boundary rather than mid-call, so the just-finished
@@ -48,18 +48,18 @@ class CostCeilingCallback(BaseCallback):
     ``Evaluate`` worker threads can't race the tripped flag.
     """
 
-    def __init__(self, max_credits: int, *language_models: Any) -> None:
-        """Bind the ceiling to the run's LMs and full-cost credit cap.
+    def __init__(self, max_cents: int, *language_models: Any) -> None:
+        """Bind the ceiling to the run's LMs and full-cost cents cap.
 
         Args:
-            max_credits: The user's Max Cost Ceiling in full-cost credits; the run
+            max_cents: The user's Max Cost Ceiling in full-cost cents; the run
                 is stopped once its per-model cost exceeds it. A non-positive cap
                 makes the callback inert (it never trips).
             *language_models: The LMs whose ``history`` usage counts toward the
                 ceiling — typically the generation LM and, when present, the
                 reflection LM. ``None`` entries are tolerated.
         """
-        self._max_credits = max_credits
+        self._max_cents = max_cents
         self._language_models = [lm for lm in language_models if lm is not None]
         self._lock = threading.Lock()
         self._tripped = False
@@ -68,10 +68,10 @@ class CostCeilingCallback(BaseCallback):
         """Keep raising after the first confirmed ceiling crossing.
 
         Raises:
-            CostCeilingExceededError: When the full per-model credit cost across the
-                bound LMs exceeds ``max_credits``.
+            CostCeilingExceededError: When the full per-model cost across the
+                bound LMs exceeds ``max_cents``.
         """
-        if self._max_credits <= 0:
+        if self._max_cents <= 0:
             return
         with self._lock:
             if self._tripped:
@@ -79,14 +79,13 @@ class CostCeilingCallback(BaseCallback):
         usages = model_usages_from_history(*self._language_models)
         if usages is None:
             return
-        used = credits_for_usage(usages)
-        if used <= self._max_credits:
+        used = cents_for_usage(usages)
+        if used <= self._max_cents:
             return
         with self._lock:
             self._tripped = True
         raise CostCeilingExceededError(
-            f"Run stopped at the cost ceiling: {used} credits used exceeds the "
-            f"{self._max_credits}-credit Max Cost Ceiling."
+            f"Run stopped at the cost ceiling: {used} cents used exceeds the {self._max_cents}-cent Max Cost Ceiling."
         )
 
     def on_lm_end(

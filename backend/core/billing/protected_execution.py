@@ -17,7 +17,7 @@ from ..service_gateway.optimization.blackbox.sandbox_broker import SandboxBroker
 from .model_gateway import ModelGateway
 from .model_mailbox import ModelMailbox
 from .operation_pricing import UnpricedOperationError
-from .vercel_usage import vercel_sandbox_credit_range
+from .vercel_usage import vercel_sandbox_cost_range
 
 _IMMUTABLE_IMAGE = re.compile(r"^\S+@sha256:[0-9a-f]{64}$")
 
@@ -69,8 +69,8 @@ def runtime_cost_profile(settings: Settings, workflow: str, runtime: str) -> dic
     if runtime != "vercel" or image is None:
         return {
             "billing_basis": "at_cost",
-            "minimum_session_credits": None,
-            "maximum_session_credits": None,
+            "minimum_session_cents": None,
+            "maximum_session_cents": None,
             "maximum_lifetime_seconds": None,
             "vcpus": 2,
         }
@@ -83,11 +83,11 @@ def runtime_cost_profile(settings: Settings, workflow: str, runtime: str) -> dic
         "ports": [],
         "persistent": False,
     }
-    minimum, maximum = vercel_sandbox_credit_range(request)
+    minimum, maximum = vercel_sandbox_cost_range(request)
     return {
         "billing_basis": "at_cost",
-        "minimum_session_credits": str(minimum),
-        "maximum_session_credits": str(maximum),
+        "minimum_session_cents": str(minimum),
+        "maximum_session_cents": str(maximum),
         "maximum_lifetime_seconds": lifetime,
         "vcpus": 2,
     }
@@ -104,7 +104,7 @@ def bind_protected_sandbox(
     """Keep provider credentials, fixed resource profiles, and metering in the parent.
 
     Args:
-        gateway: Existing generation-fenced model and credit authority.
+        gateway: Existing generation-fenced model and spend authority.
         settings: Trusted Vercel account and deployment image configuration.
         workflow: Execution family selecting its immutable prebuilt image.
         owner_id: Stable job or setup identity used for cleanup after interruption.

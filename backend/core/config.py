@@ -12,7 +12,7 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = Path(__file__).parent.parent / ".env"
@@ -95,13 +95,13 @@ class Settings(BaseSettings):
     stripe_price_pack_starter: str = Field(
         default="",
         alias="STRIPE_PRICE_PACK_STARTER",
-        description="Stripe price id for the 'starter' one-time credit pack.",
+        description="Stripe price id for the 'starter' one-time top-up pack.",
     )
     stripe_price_pack_plus: str = Field(
-        default="", alias="STRIPE_PRICE_PACK_PLUS", description="Stripe price id for the 'plus' one-time credit pack."
+        default="", alias="STRIPE_PRICE_PACK_PLUS", description="Stripe price id for the 'plus' one-time top-up pack."
     )
     stripe_price_pack_pro: str = Field(
-        default="", alias="STRIPE_PRICE_PACK_PRO", description="Stripe price id for the 'pro' one-time credit pack."
+        default="", alias="STRIPE_PRICE_PACK_PRO", description="Stripe price id for the 'pro' one-time top-up pack."
     )
     stripe_price_pro_monthly: str = Field(
         default="",
@@ -294,34 +294,35 @@ class Settings(BaseSettings):
     openrouter_provisioning_key: SecretStr | None = Field(
         default=None,
         alias="OPENROUTER_PROVISIONING_KEY",
-        description="OpenRouter key-management (provisioning) API key. When set, managed runs authenticate with a per-user OpenRouter runtime key whose spend limit is synced to the account's credit balance before each dispatch, capping upstream spend at the provider itself. Unset (the default) sends managed runs through the shared gateway key. Requires BYOK_VAULT_KEY to encrypt the minted secrets at rest.",
+        description="OpenRouter key-management (provisioning) API key. When set, managed runs authenticate with a per-user OpenRouter runtime key whose spend limit is synced to the account's balance before each dispatch, capping upstream spend at the provider itself. Unset (the default) sends managed runs through the shared gateway key. Requires BYOK_VAULT_KEY to encrypt the minted secrets at rest.",
     )
     usage_markup: float = Field(
         default=1.15,
         ge=1.0,
         alias="USAGE_MARKUP",
-        description="Multiplier applied to the provider cost of every platform-paid metered charge (managed LLM tokens and Vercel sandbox compute) before converting to credits. 1.15 bills cost plus 15%. BYOK runs are unaffected: they pay only the 5% platform fee on model cost. Holds, pre-run estimates and displayed model prices include it.",
+        description="Multiplier applied to the provider cost of every platform-paid metered charge (managed LLM tokens and Vercel sandbox compute) before converting to cents. 1.15 bills cost plus 15%. BYOK runs are unaffected: they pay only the 5% platform fee on model cost. Holds, pre-run estimates and displayed model prices include it.",
     )
     openrouter_api_key: SecretStr | None = Field(
         default=None,
         alias="OPENROUTER_API_KEY",
-        description="OpenRouter master-account (inference) API key. Read-only here: the float monitor uses it to read the shared prepaid balance (GET /api/v1/credits) so it can warn when the OpenRouter float runs thin against outstanding credit liability. Managed inference itself routes through the LiteLLM proxy or per-user provisioned keys, not this field.",
+        description="OpenRouter master-account (inference) API key. Read-only here: the float monitor uses it to read the shared prepaid balance (GET /api/v1/credits) so it can warn when the OpenRouter float runs thin against outstanding customer balances. Managed inference itself routes through the LiteLLM proxy or per-user provisioned keys, not this field.",
     )
-    openrouter_balance_floor_credits: int = Field(
+    # Every *_CENTS variable still reads its pre-rename *_CREDITS name so existing deployments keep their values.
+    openrouter_balance_floor_cents: int = Field(
         default=1000,
-        alias="OPENROUTER_BALANCE_FLOOR_CREDITS",
-        description="Low-water mark for the OpenRouter master-account balance, in credits (1 credit = 1 cent; default 1000 = $10). When the balance falls below this floor the float monitor logs a WARNING — native Auto Top-Up may have failed or demand is outrunning refills. 0 disables the monitor. Only consulted when OPENROUTER_API_KEY is set.",
+        validation_alias=AliasChoices("OPENROUTER_BALANCE_FLOOR_CENTS", "OPENROUTER_BALANCE_FLOOR_CREDITS"),
+        description="Low-water mark for the OpenRouter master-account balance, in cents (default 1000 = $10). When the balance falls below this floor the float monitor logs a WARNING — native Auto Top-Up may have failed or demand is outrunning refills. 0 disables the monitor. Only consulted when OPENROUTER_API_KEY is set.",
     )
     openrouter_float_check_interval_seconds: float = Field(
         default=900.0,
         ge=0.0,
         alias="OPENROUTER_FLOAT_CHECK_INTERVAL_SECONDS",
-        description="Seconds between periodic OpenRouter float checks on the API pods (advisory-lock-gated so one replica per tick reads the balance). Complements the post-purchase check, which only fires when a customer buys credits — a failed Auto Top-Up on a quiet day would otherwise go unnoticed until the next 402. 0 disables the periodic check; values below 60 are raised to 60.",
+        description="Seconds between periodic OpenRouter float checks on the API pods (advisory-lock-gated so one replica per tick reads the balance). Complements the post-purchase check, which only fires when a customer tops up — a failed Auto Top-Up on a quiet day would otherwise go unnoticed until the next 402. 0 disables the periodic check; values below 60 are raised to 60.",
     )
     openrouter_float_alert_email: str = Field(
         default="",
         alias="OPENROUTER_FLOAT_ALERT_EMAIL",
-        description="Operator address that receives an email when the OpenRouter float falls below OPENROUTER_BALANCE_FLOOR_CREDITS (requires SMTP_HOST). Empty disables the email; the WARNING log and ALERT_WEBHOOK_URL forward still fire.",
+        description="Operator address that receives an email when the OpenRouter float falls below OPENROUTER_BALANCE_FLOOR_CENTS (requires SMTP_HOST). Empty disables the email; the WARNING log and ALERT_WEBHOOK_URL forward still fire.",
     )
     openrouter_float_alert_cooldown_seconds: float = Field(
         default=21600.0,
@@ -329,15 +330,15 @@ class Settings(BaseSettings):
         alias="OPENROUTER_FLOAT_ALERT_COOLDOWN_SECONDS",
         description="Minimum seconds between two low-float notifications (email + webhook). Shared across replicas through Redis when REDIS_URL is set, per-process otherwise, so a 15-minute check loop can't page every tick. 0 sends on every breach.",
     )
-    issuing_balance_floor_credits: int = Field(
+    issuing_balance_floor_cents: int = Field(
         default=0,
-        alias="ISSUING_BALANCE_FLOOR_CREDITS",
-        description="Low-water mark for the Stripe Issuing balance that funds the provider card, in credits (1 credit = 1 cent). When the Issuing balance plus pending Skynet top-ups falls below it, the funding loop refills to ISSUING_BALANCE_TARGET_CREDITS: first from the Stripe payments balance, then from the linked bank. 0 (the default) disables the loop.",
+        validation_alias=AliasChoices("ISSUING_BALANCE_FLOOR_CENTS", "ISSUING_BALANCE_FLOOR_CREDITS"),
+        description="Low-water mark for the Stripe Issuing balance that funds the provider card, in cents. When the Issuing balance plus pending Skynet top-ups falls below it, the funding loop refills to ISSUING_BALANCE_TARGET_CENTS: first from the Stripe payments balance, then from the linked bank. 0 (the default) disables the loop.",
     )
-    issuing_balance_target_credits: int = Field(
+    issuing_balance_target_cents: int = Field(
         default=0,
-        alias="ISSUING_BALANCE_TARGET_CREDITS",
-        description="Level the funding loop refills the Stripe Issuing balance to, in credits. Must sit above ISSUING_BALANCE_FLOOR_CREDITS or the loop stays off. Bank top-ups take up to five business days, so size the gap to cover about a week of provider spend.",
+        validation_alias=AliasChoices("ISSUING_BALANCE_TARGET_CENTS", "ISSUING_BALANCE_TARGET_CREDITS"),
+        description="Level the funding loop refills the Stripe Issuing balance to, in cents. Must sit above ISSUING_BALANCE_FLOOR_CENTS or the loop stays off. Bank top-ups take up to five business days, so size the gap to cover about a week of provider spend.",
     )
     issuing_funding_check_interval_seconds: float = Field(
         default=900.0,
@@ -1066,22 +1067,24 @@ class Settings(BaseSettings):
             "Past the grace the account falls back to the free limits until payment succeeds."
         ),
     )
-    global_daily_spend_ceiling_credits: int = Field(
+    global_daily_spend_ceiling_cents: int = Field(
+        validation_alias=AliasChoices("GLOBAL_DAILY_SPEND_CEILING_CENTS", "GLOBAL_DAILY_SPEND_CEILING_CREDITS"),
         default=5000,
         ge=0,
         description=(
-            "Platform-wide credit-spend backstop over a trailing 24h ($50 at the default); new "
+            "Platform-wide spend backstop over a trailing 24h ($50 at the default); new "
             "submissions are refused with a 503 and an ERROR alert once reached. 0 disables the "
-            "kill-switch (per-user credit gate still applies)."
+            "kill-switch (per-user balance gate still applies)."
         ),
     )
-    interactive_min_balance_credits: int = Field(
+    interactive_min_balance_cents: int = Field(
+        validation_alias=AliasChoices("INTERACTIVE_MIN_BALANCE_CENTS", "INTERACTIVE_MIN_BALANCE_CREDITS"),
         default=5,
         ge=0,
         description=(
-            "Minimum spendable credits an account must hold before an interactive LLM turn "
+            "Minimum spendable balance, in cents, an account must hold before an interactive LLM turn "
             "(agent chat, interview, tagging) starts. A turn is billed after it finishes, so a "
-            "1-credit balance would otherwise buy an arbitrarily expensive turn. Values below 1 "
+            "1-cent balance would otherwise buy an arbitrarily expensive turn. Values below 1 "
             "still require a positive balance."
         ),
     )
@@ -1113,7 +1116,7 @@ class Settings(BaseSettings):
         ge=0,
         description=(
             "Per-account cap on dictation clips per hour, enforced across replicas via Redis. "
-            "Dictation runs on the platform's Groq key and is not billed to credits. 0 disables the cap."
+            "Dictation runs on the platform's Groq key and is not billed to user balances. 0 disables the cap."
         ),
     )
     groq_monthly_budget_usd: float = Field(
@@ -1269,7 +1272,7 @@ class Settings(BaseSettings):
 
     @property
     def stripe_pack_price_ids(self) -> dict[str, str]:
-        """Return the one-time credit-pack Stripe price ids keyed by pack id."""
+        """Return the one-time top-up pack Stripe price ids keyed by pack id."""
         return {
             "starter": self.stripe_price_pack_starter,
             "plus": self.stripe_price_pack_plus,

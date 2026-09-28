@@ -201,7 +201,7 @@ def price_text_request(request: Mapping[str, Any], catalog: Mapping[str, Any], p
     Args:
         request: Final OpenAI or Anthropic compatible body after SDK overrides.
         catalog: Fresh endpoint response for the exact routed model.
-        policy: Approved managed or BYOK credit conversion.
+        policy: Approved managed or BYOK cent conversion.
 
     Returns:
         A copied request with price and endpoint caps, and its immutable quote.

@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from .common import ModelConfig
 
@@ -18,12 +18,13 @@ class ServeRequest(BaseModel):
         default=None,
         description="Optional model config override. Uses the original optimization model if omitted.",
     )
-    max_cost_credits: int | None = Field(
+    max_cost_cents: int | None = Field(
+        validation_alias=AliasChoices("max_cost_cents", "max_cost_credits"),
         default=None,
         ge=1,
         le=1_000_000_000,
         strict=True,
-        description="Maximum credits authorized for this one invocation; required for protected runs.",
+        description="Maximum cents authorized for this one invocation; required for protected runs.",
     )
 
     @model_validator(mode="after")
@@ -72,9 +73,9 @@ class ServeResponse(BaseModel):
         default=None,
         description="Per-node execution trace, present only for workflow runs.",
     )
-    credits_charged: Decimal | None = Field(
+    cents_charged: Decimal | None = Field(
         default=None,
-        description="Exact settled credits charged for this invocation.",
+        description="Exact settled cents charged for this invocation.",
     )
     budget: dict[str, Any] | None = Field(
         default=None,

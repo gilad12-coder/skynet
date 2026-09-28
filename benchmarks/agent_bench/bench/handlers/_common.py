@@ -16,13 +16,43 @@ TERMINAL_STATUSES = {"success", "failed", "cancelled", "stopped", "paused"}
 ROLE_RANK = {"viewer": 1, "editor": 2, "owner": 3}
 
 SUMMARY_FIELDS = (
-    "optimization_id", "name", "description", "status", "optimization_type", "composition",
-    "module_name", "optimizer_name", "model_name", "reflection_model_name", "username", "pinned",
-    "created_at", "started_at", "completed_at", "elapsed", "elapsed_seconds", "estimated_remaining",
-    "baseline_test_metric", "optimized_test_metric", "metric_improvement", "metric_name",
-    "dataset_rows", "source_dataset_id", "stop_reason", "message", "resumable", "pausable",
-    "total_pairs", "completed_pairs", "failed_pairs", "best_pair_label", "summary_text",
-    "latest_metrics", "generation_models", "reflection_models", "execution_budget",
+    "optimization_id",
+    "name",
+    "description",
+    "status",
+    "optimization_type",
+    "composition",
+    "module_name",
+    "optimizer_name",
+    "model_name",
+    "reflection_model_name",
+    "username",
+    "pinned",
+    "created_at",
+    "started_at",
+    "completed_at",
+    "elapsed",
+    "elapsed_seconds",
+    "estimated_remaining",
+    "baseline_test_metric",
+    "optimized_test_metric",
+    "metric_improvement",
+    "metric_name",
+    "dataset_rows",
+    "source_dataset_id",
+    "stop_reason",
+    "message",
+    "resumable",
+    "pausable",
+    "total_pairs",
+    "completed_pairs",
+    "failed_pairs",
+    "best_pair_label",
+    "summary_text",
+    "latest_metrics",
+    "generation_models",
+    "reflection_models",
+    "execution_budget",
 )
 
 
@@ -101,7 +131,11 @@ def accessible_jobs(w: World, *, include_shared: bool = False) -> list[dict[str,
     out = []
     for job in w.s["jobs"].values():
         owned = admin or job.get("username", "").lower() == user
-        shared = not owned and include_shared and user in {u.lower() for u in (job.get("grants") or {})}
+        shared = (
+            not owned
+            and include_shared
+            and user in {u.lower() for u in (job.get("grants") or {})}
+        )
         if owned or shared:
             out.append(job)
     out.sort(key=lambda j: j.get("created_at") or "", reverse=True)
@@ -132,10 +166,10 @@ def new_job_id(w: World) -> str:
     return f"22222222-0000-4000-8000-{seq:012d}"
 
 
-def spendable_credits(w: World) -> int:
+def spendable_cents(w: World) -> int:
     """Return the caller's total spendable credits (paid balance + free grant)."""
     wallet = w.s["wallet"]
-    return wallet["paid_balance_credits"] + wallet["free_grant"]["credits_remaining"]
+    return wallet["paid_balance_cents"] + wallet["free_grant"]["cents_remaining"]
 
 
 def push_card(w: World, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -154,7 +188,7 @@ def push_card(w: World, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "card": card}
 
 
-def require_credits(w: World) -> None:
+def require_balance(w: World) -> None:
     """Raise 402 when the caller has no spendable credits left.
 
     Mirrors the real submit route, which gates only on an empty balance and
@@ -163,5 +197,8 @@ def require_credits(w: World) -> None:
     Raises:
         ToolError: 402 when spendable credits are zero or below.
     """
-    if spendable_credits(w) <= 0:
-        raise ToolError(402, "Insufficient credits: your balance is empty. Top up to submit new runs.")
+    if spendable_cents(w) <= 0:
+        raise ToolError(
+            402,
+            "Insufficient credits: your balance is empty. Top up to submit new runs.",
+        )

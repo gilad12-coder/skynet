@@ -28,7 +28,7 @@ export interface ServeChatProps {
     ts: number;
     // Per-node execution trace — present only for workflow runs.
     nodeTraces?: WorkflowNodeTrace[] | null;
-    creditsCharged?: string | null;
+    centsCharged?: string | null;
   }>;
   setRunHistory: React.Dispatch<React.SetStateAction<ServeChatProps["runHistory"]>>;
   streamingRun: { inputs: Record<string, string>; partial: Record<string, string> } | null;
@@ -189,10 +189,10 @@ export function ServeChat({
                   {run.nodeTraces && run.nodeTraces.length > 0 && (
                     <NodeTraceStrip traces={run.nodeTraces} />
                   )}
-                  {run.creditsCharged != null && (
+                  {run.centsCharged != null && (
                     <p className="mt-1 text-[0.6875rem] text-muted-foreground">
                       {formatMsg("optimizations.serve.request_spent", {
-                        credits: formatBudgetUsd(String(run.creditsCharged), getActiveIntlLocale()),
+                        cents: formatBudgetUsd(String(run.centsCharged), getActiveIntlLocale()),
                       })}
                     </p>
                   )}

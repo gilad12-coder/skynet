@@ -274,40 +274,40 @@ class BillingCustomerModel(Base):
     Keyed on ``username`` (the lowercased email every other table owns rows by)
     rather than a foreign key to ``users`` so SSO accounts — which never get a
     ``users`` row — are billed too. ``stripe_customer_id`` is the durable link to
-    Stripe. ``credit_balance`` is the denormalized spendable purchased-credit
-    total, kept in step with ``credit_ledger`` on every mutation so a balance
+    Stripe. ``balance_cents`` is the denormalized spendable purchased balance
+    in cents, kept in step with ``wallet_ledger`` on every mutation so a balance
     read is a single fast integer.
     """
 
     __tablename__ = "billing_customers"
-    # Credits are prepaid: a balance below zero would mean the platform lent
+    # The balance is prepaid: a balance below zero would mean the platform lent
     # tokens, so the DB refuses it outright — the clamped debit in
     # ``StripeBillingService.debit_run`` keeps writes inside these bounds.
     __table_args__ = (
         CheckConstraint(
-            "credit_balance >= 0",
-            name="ck_billing_customers_credit_balance_non_negative",
+            "balance_cents >= 0",
+            name="ck_billing_customers_balance_cents_non_negative",
         ),
         CheckConstraint(
             "grant_remaining IS NULL OR grant_remaining >= 0",
             name="ck_billing_customers_grant_remaining_non_negative",
         ),
         CheckConstraint(
-            "debt_credits >= 0",
-            name="ck_billing_customers_debt_credits_non_negative",
+            "debt_cents >= 0",
+            name="ck_billing_customers_debt_cents_non_negative",
         ),
     )
 
     username: Mapped[str] = mapped_column(String(255), primary_key=True)
     stripe_customer_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
-    credit_balance: Mapped[int] = mapped_column(
+    balance_cents: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer(), "sqlite"),
         nullable=False,
         default=0,
         server_default="0",
     )
-    # ``grant_remaining`` is what is left of the account's one-time free credit
-    # grant (500 credits, seeded once and never renewed). NULL until the first
+    # ``grant_remaining`` is what is left of the account's one-time free
+    # grant (500 cents = $5, seeded once and never renewed). NULL until the first
     # wallet read or run seeds it; seeding is lazy-evaluated on read, never
     # cron'd.
     grant_remaining: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
@@ -324,11 +324,11 @@ class BillingCustomerModel(Base):
     # When the subscription entered ``past_due``; anchors the bounded Pro grace
     # period and is cleared once the status moves on.
     subscription_past_due_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Credits a refund or chargeback reversed after they were already spent.
+    # Cents a refund or chargeback reversed after they were already spent.
     # The platform paid for those tokens, so the account owes them back: while
     # this is positive the balance and grant are held at zero (nothing is
     # spendable) and the next top-up repays it before crediting anything.
-    debt_credits: Mapped[int] = mapped_column(
+    debt_cents: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer(), "sqlite"),
         nullable=False,
         default=0,
@@ -342,18 +342,18 @@ class BillingCustomerModel(Base):
     )
 
 
-class CreditLedgerModel(Base):
-    """Immutable, append-only record of every credit movement for an account.
+class WalletLedgerModel(Base):
+    """Immutable, append-only record of every balance movement for an account.
 
-    Each row is a signed ``delta_credits`` against ``username``: positive for a
+    Each row is a signed ``delta_cents`` against ``username``: positive for a
     top-up (pack purchase) or monthly grant, negative for a run charge. The
-    running sum is denormalized onto ``billing_customers.credit_balance`` for
+    running sum is denormalized onto ``billing_customers.balance_cents`` for
     fast gating; this table is the audit trail that explains that balance and
     backs the wallet's usage ledger. ``stripe_event_id`` ties a top-up row to the
     webhook event that created it so a redelivered event can't double-credit.
     """
 
-    __tablename__ = "credit_ledger"
+    __tablename__ = "wallet_ledger"
 
     id: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer(), "sqlite"),
@@ -361,7 +361,7 @@ class CreditLedgerModel(Base):
         autoincrement=True,
     )
     username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    delta_credits: Mapped[int] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=False)
+    delta_cents: Mapped[int] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     description: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -375,12 +375,10 @@ class CreditLedgerModel(Base):
     # clamped to the balance, or a clawback beyond the balance (carried as
     # debt). Kept so revenue lost to the balance floor is queryable instead of
     # only living in a log line. None/0 when the full amount was collected.
-    uncollected_credits: Mapped[int | None] = mapped_column(
-        BigInteger().with_variant(Integer(), "sqlite"), nullable=True
-    )
+    uncollected_cents: Mapped[int | None] = mapped_column(BigInteger().with_variant(Integer(), "sqlite"), nullable=True)
     stripe_event_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # The PaymentIntent behind a top-up (``pi_…``), the join key a refund or
-    # dispute webhook uses to find the account and the credits to claw back —
+    # dispute webhook uses to find the account and the cents to claw back —
     # it is the one id present on the checkout, charge, and dispute objects
     # alike. None on grants/runs/adjustments and on top-ups predating this column.
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
@@ -395,10 +393,10 @@ class ExecutionBudgetModel(Base):
     __tablename__ = "execution_budgets"
     __table_args__ = (
         UniqueConstraint("username", "creation_key", name="uq_execution_budget_creation"),
-        CheckConstraint("total_credits > 0", name="ck_execution_budget_total"),
+        CheckConstraint("total_cents > 0", name="ck_execution_budget_total"),
         CheckConstraint(
             "settled_units >= 0 AND wallet_settled_units >= 0 AND reserved_units >= 0 "
-            "AND wallet_reserved_units >= 0 AND billed_credits >= 0",
+            "AND wallet_reserved_units >= 0 AND billed_cents >= 0",
             name="ck_execution_budget_amounts",
         ),
     )
@@ -407,7 +405,7 @@ class ExecutionBudgetModel(Base):
     username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     creation_key: Mapped[str] = mapped_column(String(128), nullable=False)
     creation_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    total_credits: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     uncapped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -418,7 +416,7 @@ class ExecutionBudgetModel(Base):
     wallet_settled_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     reserved_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     wallet_reserved_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
-    billed_credits: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    billed_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -470,7 +468,7 @@ class ExecutionUsageEvidenceModel(Base):
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     actual_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
     actual_wallet_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    billed_credits: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    billed_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     final: Mapped[bool] = mapped_column(Boolean, nullable=False)
     issue: Mapped[str | None] = mapped_column(String(32), nullable=True)
     evidence: Mapped[dict[str, Any]] = mapped_column(JSON_STORE, nullable=False)
@@ -498,8 +496,8 @@ class BillingWebhookEventModel(Base):
 class BillingProviderKeyModel(Base):
     """One stored BYOK provider connection for an account, encrypted at rest.
 
-    Backs BYOK mode: the user's provider key pays model usage while Skynet credits
-    cover only the platform fee and sandbox usage. The secret is never stored
+    Backs BYOK mode: the user's provider key pays model usage while the Skynet balance
+    covers only the platform fee and sandbox usage. The secret is never stored
     in plaintext — only ``secret_ciphertext`` (the Fernet-encrypted bytes) is
     persisted, so a database dump never leaks a usable key. ``last4`` is the
     recognizable tail kept for masked display, and ``status`` records whether the
@@ -610,7 +608,7 @@ class BillingOpenRouterKeyModel(Base):
     Backs provider-side spend capping for managed runs: when
     ``OPENROUTER_PROVISIONING_KEY`` is configured, the worker mints one
     OpenRouter runtime key per account and syncs its spend limit to the
-    account's credit balance before each managed dispatch, so upstream spend is
+    account's balance before each managed dispatch, so upstream spend is
     capped at OpenRouter itself even if every backend-side gate fails (see
     ``core.billing.openrouter_keys``). Only the Fernet-encrypted secret is
     persisted — the same at-rest contract as the BYOK vault — and ``key_hash``

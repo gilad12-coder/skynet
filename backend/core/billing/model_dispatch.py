@@ -71,7 +71,7 @@ def funds_refusal(managed: bool, retry_after: str | None) -> tuple[bytes, float]
         code = MANAGED_FUNDS_EXHAUSTED
         message = (
             "The managed model provider refused this request for lack of funds. It was not charged, and "
-            "your credits are untouched. The team has been alerted; try again shortly."
+            "your balance is untouched. The team has been alerted; try again shortly."
         )
     else:
         code = BYOK_FUNDS_EXHAUSTED

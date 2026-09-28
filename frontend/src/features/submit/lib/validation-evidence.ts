@@ -18,8 +18,8 @@ export interface ValidationEvidence {
   checkedAt: number;
   /** The scoring model the check ran with, when the evaluator invoked one. */
   modelName: string | null;
-  /** Credits the check debited, for the setup-spend line. */
-  creditsCharged?: number;
+  /** Cents the check debited, for the setup-spend line. */
+  centsCharged?: number;
 }
 
 /** JSON with object keys sorted at every depth, so equal inputs serialize equal. */
@@ -89,8 +89,8 @@ export function preflightIdentity(workflow: "anything" | "dspy", payload: object
     name: _name,
     description: _description,
     is_private: _privacy,
-    estimated_credits_low: _low,
-    estimated_credits_high: _high,
+    estimated_cents_low: _low,
+    estimated_cents_high: _high,
     ...setup
   } = payload as Record<string, unknown>;
   return stableStringify({ workflow, setup });

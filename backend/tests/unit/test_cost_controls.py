@@ -4,11 +4,11 @@ Covers the three admission guards that bound platform cost without new infra:
 the sign-up cap (:func:`accounts._enforce_signup_cap`), the per-user concurrency
 cap and global kill-switches (:func:`submissions._enforce_submission_admission`
 and :func:`submissions._enforce_global_daily_spend_ceiling`), and the ledger
-query that backs the daily spend switch (``StripeBillingService.credits_spent_since``).
+query that backs the daily spend switch (``StripeBillingService.cents_spent_since``).
 
 The guard logic is exercised with duck-typed fake stores and a patched billing
-service so no database is required; ``credits_spent_since`` runs against an
-in-memory SQLite engine holding only the ``credit_ledger`` table.
+service so no database is required; ``cents_spent_since`` runs against an
+in-memory SQLite engine holding only the ``wallet_ledger`` table.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from core.api.errors import DomainError
 from core.api.routers import accounts, submissions
 from core.billing.service import StripeBillingService
 from core.config import settings
-from core.storage.models import CreditLedgerModel
+from core.storage.models import WalletLedgerModel
 
 
 class _FakeStore:
@@ -85,14 +85,14 @@ def _patch_billing_spend(monkeypatch: pytest.MonkeyPatch, spent: int) -> None:
 
     Args:
         monkeypatch: Pytest patcher.
-        spent: Value every ``credits_spent_since`` call should return.
+        spent: Value every ``cents_spent_since`` call should return.
     """
 
     class _FakeBilling:
         def __init__(self, *, engine: object) -> None:
             self._engine = engine
 
-        def credits_spent_since(self, since: datetime) -> int:
+        def cents_spent_since(self, since: datetime) -> int:
             return spent
 
     monkeypatch.setattr(submissions, "StripeBillingService", _FakeBilling)
@@ -151,7 +151,7 @@ def test_signup_cap_blocks_when_monthly_capacity_is_full(
 def test_admission_paused_switch_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
     """The manual pause switch refuses submissions with a generic 503."""
     monkeypatch.setattr(settings, "submissions_paused", True)
-    monkeypatch.setattr(settings, "global_daily_spend_ceiling_credits", 0)
+    monkeypatch.setattr(settings, "global_daily_spend_ceiling_cents", 0)
     monkeypatch.setattr(settings, "max_concurrent_jobs_per_user", 0)
 
     with pytest.raises(DomainError) as exc:
@@ -164,7 +164,7 @@ def test_admission_paused_switch_blocks(monkeypatch: pytest.MonkeyPatch) -> None
 def test_admission_concurrency_cap_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
     """At the per-user active-run cap a submission is refused (429, limit param)."""
     monkeypatch.setattr(settings, "submissions_paused", False)
-    monkeypatch.setattr(settings, "global_daily_spend_ceiling_credits", 0)
+    monkeypatch.setattr(settings, "global_daily_spend_ceiling_cents", 0)
     monkeypatch.setattr(settings, "max_concurrent_jobs_per_user", 2)
 
     with pytest.raises(DomainError) as exc:
@@ -178,7 +178,7 @@ def test_admission_concurrency_cap_blocks(monkeypatch: pytest.MonkeyPatch) -> No
 def test_admission_concurrency_cap_allows_below(monkeypatch: pytest.MonkeyPatch) -> None:
     """Below the active-run cap the submission is admitted."""
     monkeypatch.setattr(settings, "submissions_paused", False)
-    monkeypatch.setattr(settings, "global_daily_spend_ceiling_credits", 0)
+    monkeypatch.setattr(settings, "global_daily_spend_ceiling_cents", 0)
     monkeypatch.setattr(settings, "max_concurrent_jobs_per_user", 2)
 
     submissions._enforce_submission_admission(_FakeStore(active=1), "alice")
@@ -187,7 +187,7 @@ def test_admission_concurrency_cap_allows_below(monkeypatch: pytest.MonkeyPatch)
 def test_admission_concurrency_disabled_when_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     """A concurrency cap of 0 disables the per-user guard."""
     monkeypatch.setattr(settings, "submissions_paused", False)
-    monkeypatch.setattr(settings, "global_daily_spend_ceiling_credits", 0)
+    monkeypatch.setattr(settings, "global_daily_spend_ceiling_cents", 0)
     monkeypatch.setattr(settings, "max_concurrent_jobs_per_user", 0)
 
     submissions._enforce_submission_admission(_FakeStore(active=1_000), "alice")
@@ -196,7 +196,7 @@ def test_admission_concurrency_disabled_when_zero(monkeypatch: pytest.MonkeyPatc
 def test_admission_skips_store_without_counter(monkeypatch: pytest.MonkeyPatch) -> None:
     """A store lacking ``count_jobs_by_status`` skips the concurrency check."""
     monkeypatch.setattr(settings, "submissions_paused", False)
-    monkeypatch.setattr(settings, "global_daily_spend_ceiling_credits", 0)
+    monkeypatch.setattr(settings, "global_daily_spend_ceiling_cents", 0)
     monkeypatch.setattr(settings, "max_concurrent_jobs_per_user", 1)
 
     submissions._enforce_submission_admission(_NoCounterStore(), "alice")
@@ -204,7 +204,7 @@ def test_admission_skips_store_without_counter(monkeypatch: pytest.MonkeyPatch) 
 
 def test_global_ceiling_blocks_at_or_above(monkeypatch: pytest.MonkeyPatch) -> None:
     """Trailing-window spend at the ceiling refuses new submissions (503)."""
-    monkeypatch.setattr(settings, "global_daily_spend_ceiling_credits", 100)
+    monkeypatch.setattr(settings, "global_daily_spend_ceiling_cents", 100)
     _patch_billing_spend(monkeypatch, 100)
 
     with pytest.raises(DomainError) as exc:
@@ -216,7 +216,7 @@ def test_global_ceiling_blocks_at_or_above(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_global_ceiling_allows_below(monkeypatch: pytest.MonkeyPatch) -> None:
     """Spend below the ceiling admits the submission."""
-    monkeypatch.setattr(settings, "global_daily_spend_ceiling_credits", 100)
+    monkeypatch.setattr(settings, "global_daily_spend_ceiling_cents", 100)
     _patch_billing_spend(monkeypatch, 99)
 
     submissions._enforce_global_daily_spend_ceiling(_FakeStore())
@@ -224,63 +224,55 @@ def test_global_ceiling_allows_below(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_global_ceiling_disabled_when_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     """A ceiling of 0 disables the kill-switch without touching billing."""
-    monkeypatch.setattr(settings, "global_daily_spend_ceiling_credits", 0)
+    monkeypatch.setattr(settings, "global_daily_spend_ceiling_cents", 0)
 
     submissions._enforce_global_daily_spend_ceiling(_FakeStore())
 
 
 def test_global_ceiling_skips_engineless_store(monkeypatch: pytest.MonkeyPatch) -> None:
     """A store with no SQL engine skips the spend lookup."""
-    monkeypatch.setattr(settings, "global_daily_spend_ceiling_credits", 100)
+    monkeypatch.setattr(settings, "global_daily_spend_ceiling_cents", 100)
 
     submissions._enforce_global_daily_spend_ceiling(_FakeStore(engine=None))
 
 
-def test_credits_spent_since_sums_only_recent_debits() -> None:
+def test_cents_spent_since_sums_only_recent_debits() -> None:
     """Only negative ledger deltas at/after the window count, as positive magnitude."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    CreditLedgerModel.__table__.create(engine)
+    WalletLedgerModel.__table__.create(engine)
     now = datetime.now(UTC)
     with Session(engine) as session:
         session.add_all(
             [
-                CreditLedgerModel(
-                    username="a", delta_credits=-30, kind="run", created_at=now - timedelta(hours=1)
-                ),
-                CreditLedgerModel(
-                    username="b", delta_credits=-12, kind="run", created_at=now - timedelta(hours=2)
-                ),
-                CreditLedgerModel(
-                    username="a", delta_credits=500, kind="topup", created_at=now - timedelta(hours=1)
-                ),
-                CreditLedgerModel(
-                    username="c", delta_credits=-99, kind="run", created_at=now - timedelta(hours=48)
-                ),
+                WalletLedgerModel(username="a", delta_cents=-30, kind="run", created_at=now - timedelta(hours=1)),
+                WalletLedgerModel(username="b", delta_cents=-12, kind="run", created_at=now - timedelta(hours=2)),
+                WalletLedgerModel(username="a", delta_cents=500, kind="topup", created_at=now - timedelta(hours=1)),
+                WalletLedgerModel(username="c", delta_cents=-99, kind="run", created_at=now - timedelta(hours=48)),
             ]
         )
         session.commit()
 
     service = StripeBillingService(engine=engine)
 
-    assert service.credits_spent_since(now - timedelta(hours=24)) == 42
+    assert service.cents_spent_since(now - timedelta(hours=24)) == 42
 
 
-def test_credits_spent_since_empty_window_is_zero() -> None:
+def test_cents_spent_since_empty_window_is_zero() -> None:
     """With no debits in the window the spend total is zero, not an error."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    CreditLedgerModel.__table__.create(engine)
+    WalletLedgerModel.__table__.create(engine)
 
     service = StripeBillingService(engine=engine)
 
-    assert service.credits_spent_since(datetime.now(UTC) - timedelta(hours=24)) == 0
+    assert service.cents_spent_since(datetime.now(UTC) - timedelta(hours=24)) == 0
 
 
 class _ProStore(_FakeStore):
@@ -294,7 +286,7 @@ class _ProStore(_FakeStore):
 def test_admission_pro_plan_uses_higher_concurrency_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     """A Pro account is held to the Pro active-run cap, not the free one."""
     monkeypatch.setattr(settings, "submissions_paused", False)
-    monkeypatch.setattr(settings, "global_daily_spend_ceiling_credits", 0)
+    monkeypatch.setattr(settings, "global_daily_spend_ceiling_cents", 0)
     monkeypatch.setattr(settings, "max_concurrent_jobs_per_user", 2)
     monkeypatch.setattr(settings, "pro_max_concurrent_jobs_per_user", 5)
 

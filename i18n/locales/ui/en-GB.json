@@ -6,7 +6,7 @@
   "app.shell.search.kw.admin": "admin storage quota budgets users",
   "app.shell.search.kw.agent": "agent panel assistant default model voice dictation trust level yolo memory",
   "app.shell.search.kw.api": "API token developer integration generate revoke documentation",
-  "app.shell.search.kw.billing": "billing credits add credits Skynet Pro subscription plan payment methods card invoices receipts transactions",
+  "app.shell.search.kw.billing": "billing balance add funds top up Skynet Pro subscription plan payment methods card invoices receipts transactions",
   "app.shell.search.kw.dashboard": "dashboard home optimizations runs jobs",
   "app.shell.search.kw.data": "data datasets library upload import CSV Hugging Face share",
   "app.shell.search.kw.explore": "explore browse public runs search task model optimizer engine",
@@ -16,7 +16,7 @@
   "app.shell.search.kw.security": "security two-factor 2FA authenticator TOTP recovery codes passkeys email codes login",
   "app.shell.search.kw.storage": "storage files space quota usage delete cleanup",
   "app.shell.search.kw.tagging": "tagging labelling labeling AI-assisted autotag default tagging model",
-  "app.shell.search.kw.usage": "usage spend cost credits spent tokens runs by model activity",
+  "app.shell.search.kw.usage": "usage spend cost dollars spent tokens runs by model activity",
   "app.shell.search.kw.wizard": "optimisation optimization wizard code generation dataset split package registry pip models",
   "app.submit.title": "New Optimization",
   "auth.login.meta_description": "Sign in to Skynet, a prompt-optimisation platform",
@@ -148,5 +148,5 @@
   "trajectory.prompt.react.tools.explain": "The description of each tool and its arguments, as updated during the optimisation. Page through the tools to see the full detail.",
   "tutorial.step.dataset_actions.body": "Tick a dataset's box to act on it. The tag icon sends it to labelling, the table icon edits its rows, and the people icon controls who can see it.",
   "tooltip.submit.blackbox.scorer_install": "Runs once inside the offline Vercel Sandbox. Use packages already in the pinned image or deployment-owned package artifacts; public apt and package registries are unavailable.",
-  "submit.blackbox.roles.optimization.managed_hint": "Uses the model's default sampling settings; billing can use Skynet credits or your OpenRouter key."
+  "submit.blackbox.roles.optimization.managed_hint": "Uses the model's default sampling settings; billing can use your Skynet balance or your OpenRouter key."
 }

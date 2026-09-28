@@ -197,11 +197,11 @@ const STORAGE_QUOTA_CODE = I18N_KEY.USER_STORAGE_QUOTA_EXCEEDED;
 /** Browser event the central error path fires when a write hits the storage budget. */
 export const STORAGE_QUOTA_EVENT = "storage-quota-exceeded";
 
-/** Backend error code for a managed run blocked by an empty credit balance (HTTP 402). */
-const INSUFFICIENT_CREDITS_CODE = I18N_KEY.BILLING_INSUFFICIENT_CREDITS;
+/** Backend error code for a managed run blocked by an empty balance (HTTP 402). */
+const INSUFFICIENT_FUNDS_CODE = I18N_KEY.BILLING_INSUFFICIENT_FUNDS;
 
-/** Browser event the central error path fires when a submit hits the credit gate. */
-export const INSUFFICIENT_CREDITS_EVENT = "billing-insufficient-credits";
+/** Browser event the central error path fires when a submit hits the balance gate. */
+export const INSUFFICIENT_FUNDS_EVENT = "billing-insufficient-credits";
 
 /** Browser event fired after a storage-freeing delete so the meter re-reads usage. */
 export const STORAGE_CHANGED_EVENT = "storage-changed";
@@ -233,9 +233,9 @@ export function isStorageQuotaError(err: unknown): err is ApiError {
   return err instanceof ApiError && err.code === STORAGE_QUOTA_CODE;
 }
 
-/** Narrow a caught value to the credit-gate 402 so its toast can be suppressed. */
-export function isInsufficientCreditsError(err: unknown): err is ApiError {
-  return err instanceof ApiError && err.code === INSUFFICIENT_CREDITS_CODE;
+/** Narrow a caught value to the balance-gate 402 so its toast can be suppressed. */
+export function isInsufficientFundsError(err: unknown): err is ApiError {
+  return err instanceof ApiError && err.code === INSUFFICIENT_FUNDS_CODE;
 }
 
 /**
@@ -307,11 +307,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (parsed.code === STORAGE_QUOTA_CODE && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(STORAGE_QUOTA_EVENT, { detail: parsed.params }));
     }
-    // The credit gate is account-wide like the storage budget: any blocked submit
+    // The balance gate is account-wide like the storage budget: any blocked submit
     // opens the one paywall modal, and producers suppress their own toast via
-    // isInsufficientCreditsError so the modal is the single surface.
-    if (parsed.code === INSUFFICIENT_CREDITS_CODE && typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent(INSUFFICIENT_CREDITS_EVENT));
+    // isInsufficientFundsError so the modal is the single surface.
+    if (parsed.code === INSUFFICIENT_FUNDS_CODE && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent(INSUFFICIENT_FUNDS_EVENT));
     }
     throw new ApiError(
       parsed.message ?? formatMsg("auto.shared.lib.api.template.1", { p1: res.status }),
@@ -469,7 +469,7 @@ export async function runWizardPreflight(
 }
 
 export function createExecutionBudget(
-  totalCredits: number,
+  totalCents: number,
   idempotencyKey: string,
   signal?: AbortSignal,
   uncapped = false,
@@ -477,7 +477,7 @@ export function createExecutionBudget(
   return request<ExecutionBudget>("/execution-budgets", {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ total_credits: totalCredits, uncapped }),
+    body: JSON.stringify({ total_cents: totalCents, uncapped }),
     signal,
   });
 }
@@ -488,7 +488,7 @@ export function getExecutionBudget(budgetId: string, signal?: AbortSignal) {
 
 export function updateExecutionBudget(
   budgetId: string,
-  totalCredits: number,
+  totalCents: number,
   expectedRevision: number,
   signal?: AbortSignal,
   uncapped = false,
@@ -496,7 +496,7 @@ export function updateExecutionBudget(
   return request<ExecutionBudget>(`/execution-budgets/${encodeURIComponent(budgetId)}`, {
     method: "PATCH",
     body: JSON.stringify({
-      total_credits: totalCredits,
+      total_cents: totalCents,
       expected_revision: expectedRevision,
       uncapped,
     }),
@@ -815,8 +815,8 @@ export function updateMemorySettings(patch: Partial<Record<MemoryKnobName, numbe
 }
 
 interface BillingFreeGrant {
-  credits_remaining: number;
-  credits_total: number;
+  cents_remaining: number;
+  cents_total: number;
 }
 
 export interface BillingUsageEntry {
@@ -824,7 +824,7 @@ export interface BillingUsageEntry {
   at: string;
   label: string;
   model: string | null;
-  credits: number;
+  cents: number;
   kind: string;
 }
 
@@ -848,7 +848,7 @@ export interface BillingPricingTerms {
 }
 
 export interface BillingWalletResponse {
-  paid_balance_credits: number;
+  paid_balance_cents: number;
   free_grant: BillingFreeGrant;
   usage: BillingUsageEntry[];
   plan: BillingPlanResponse;
@@ -856,7 +856,7 @@ export interface BillingWalletResponse {
   pricing?: BillingPricingTerms;
 }
 
-/** Fetch the caller's credit wallet. Reads work even without Stripe. */
+/** Fetch the caller's wallet. Reads work even without Stripe. */
 export function getWallet() {
   return cachedGet<BillingWalletResponse>("/billing/wallet", 0);
 }
@@ -864,13 +864,13 @@ export function getWallet() {
 /** One day's billed run spend (the usage dashboard's time series). */
 interface BillingUsageDay {
   date: string;
-  billed_credits: number;
+  billed_cents: number;
 }
 
 /** One model's share of run spend over the window. */
 interface BillingUsageModel {
   model: string | null;
-  credits: number;
+  cents: number;
   runs: number;
   /** Measured token counts behind the billed runs; absent on the client-side
    *  ledger fallback, which has no per-row token data. */
@@ -882,7 +882,7 @@ interface BillingUsageModel {
 export interface BillingUsageResponse {
   start: string;
   end: string;
-  billed_credits: number;
+  billed_cents: number;
   runs: number;
   by_day: BillingUsageDay[];
   by_model: BillingUsageModel[];
@@ -941,7 +941,7 @@ export interface BillingTransaction {
   amount: number;
   currency: string;
   status: "paid" | "processing" | "refunded" | "partially_refunded" | "disputed";
-  credits: number | null;
+  cents: number | null;
   pack_id: string | null;
   document_url: string | null;
 }
@@ -997,12 +997,12 @@ export function removePaymentMethod(id: string) {
   });
 }
 
-/** Start a Stripe Checkout session for a credit pack; redirect the browser to `.url`. */
-export function createCheckoutSession(purchase: { packId: string } | { credits: number }) {
+/** Start a Stripe Checkout session for a top-up; redirect the browser to `.url`. */
+export function createCheckoutSession(purchase: { packId: string } | { cents: number }) {
   return request<{ url: string }>("/billing/checkout", {
     method: "POST",
     body: JSON.stringify(
-      "packId" in purchase ? { pack_id: purchase.packId } : { credits: purchase.credits },
+      "packId" in purchase ? { pack_id: purchase.packId } : { cents: purchase.cents },
     ),
   });
 }
@@ -1932,9 +1932,9 @@ export async function moveTaggerSessionToLibrary(
   return res;
 }
 
-/** Credit estimate for auto-tagging every currently-unlabeled row. */
+/** Cost estimate for auto-tagging every currently-unlabeled row. */
 export function taggerAssistEstimate(sessionId: string) {
-  return request<{ rows: number; model: string; credits_low: number; credits_high: number }>(
+  return request<{ rows: number; model: string; cents_low: number; cents_high: number }>(
     `/tagging-sessions/${sessionId}/assist/estimate`,
     { method: "POST" },
   );
@@ -1953,7 +1953,7 @@ export function taggerAssistAutotagStatus(sessionId: string) {
     status: string;
     total: number;
     done: number;
-    credits_spent: number;
+    cents_spent: number;
     live: boolean;
   }>(`/tagging-sessions/${sessionId}/assist/autotag`);
 }
@@ -1978,7 +1978,7 @@ export function synthesizeTaggerDataset(
   return request<{
     columns: string[];
     rows: Array<Record<string, unknown>>;
-    credits: number;
+    cents: number;
     model: string;
   }>(`/tagging-sessions/${sessionId}/assist/synthesize`, {
     method: "POST",
@@ -2632,7 +2632,7 @@ export interface StreamServeHandlers {
     model_used: string;
     input_fields: string[];
     output_fields: string[];
-    credits_charged?: string | null;
+    cents_charged?: string | null;
     budget?: ExecutionBudget | null;
   }) => void;
   onError: (message: string) => void;
@@ -2679,7 +2679,7 @@ export async function serveProgramStream(
         model_used: String(data.model_used ?? ""),
         input_fields: (data.input_fields as string[]) ?? [],
         output_fields: (data.output_fields as string[]) ?? [],
-        credits_charged: typeof data.credits_charged === "string" ? data.credits_charged : null,
+        cents_charged: typeof data.cents_charged === "string" ? data.cents_charged : null,
         budget: (data.budget as ExecutionBudget | null) ?? null,
       });
     } else if (event === "error") {
@@ -2739,7 +2739,7 @@ export async function servePairProgramStream(
         model_used: String(data.model_used ?? ""),
         input_fields: (data.input_fields as string[]) ?? [],
         output_fields: (data.output_fields as string[]) ?? [],
-        credits_charged: typeof data.credits_charged === "string" ? data.credits_charged : null,
+        cents_charged: typeof data.cents_charged === "string" ? data.cents_charged : null,
         budget: (data.budget as ExecutionBudget | null) ?? null,
       });
     } else if (event === "error") {

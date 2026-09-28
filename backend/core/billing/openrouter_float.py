@@ -1,14 +1,14 @@
-"""Monitor the OpenRouter master-account float against outstanding credit liability.
+"""Monitor the OpenRouter master-account float against outstanding user-balance liability.
 
 Native Auto Top-Up (configured in the OpenRouter dashboard) is what actually
 refills the shared prepaid balance from a saved card. This module does not move
 money; it is a tripwire. It reads the master-account balance (GET
 ``/api/v1/credits``) and warns when that balance has fallen below a configured
 floor — the signal that Auto Top-Up has failed (a declined card) or that demand
-is outrunning refills. Outstanding credit liability (credits users have bought
+is outrunning refills. Outstanding balance liability (funds users have bought
 but not yet spent) rides along in the warning for context.
 
-Two things trigger a check: the Stripe webhook after every credit purchase
+Two things trigger a check: the Stripe webhook after every top-up purchase
 (:meth:`~core.billing.service.StripeBillingService._monitor_float`) and the
 periodic :class:`OpenRouterFloatSweeper` started by the API lifespan, so a
 declined card on a quiet day is still caught. A breach fans out to the WARNING
@@ -49,7 +49,7 @@ OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 # run on its own small-limit key rather than the production key.
 LOCAL_KEY_LIMIT_CEILING_DOLLARS = 20.0
 _REQUEST_TIMEOUT_SECONDS = 6.0
-_CREDITS_PER_DOLLAR = 100
+_CENTS_PER_DOLLAR = 100
 # Continues the 7421370000xx advisory-lock series in core/api/observability.py;
 # defined here rather than imported so billing does not pull in the router
 # graph that observability imports.
@@ -65,45 +65,45 @@ _local_cooldown_until = 0.0
 class FloatStatus:
     """Snapshot of the OpenRouter float against its floor and outstanding liability.
 
-    All three figures are in credits (1 credit = 1 cent), so they compare
-    directly. ``balance_credits`` is the master account's prepaid remainder,
-    ``floor_credits`` the low-water mark below which the float is considered
-    thin, and ``liability_credits`` the credits users have bought but not spent.
+    All three figures are in cents, so they compare
+    directly. ``balance_cents`` is the master account's prepaid remainder,
+    ``floor_cents`` the low-water mark below which the float is considered
+    thin, and ``liability_cents`` the funds users have bought but not spent.
     """
 
-    balance_credits: int
-    floor_credits: int
-    liability_credits: int
+    balance_cents: int
+    floor_cents: int
+    liability_cents: int
 
     @property
-    def required_credits(self) -> int:
+    def required_cents(self) -> int:
         """Return the balance the float must hold: the floor or the liability, whichever is larger.
 
         Returns:
-            The larger of the floor and the outstanding liability, in credits.
+            The larger of the floor and the outstanding liability, in cents.
         """
-        return max(self.floor_credits, self.liability_credits)
+        return max(self.floor_cents, self.liability_cents)
 
     @property
     def covered(self) -> bool:
         """Return whether the balance clears both the floor and the outstanding liability.
 
         Returns:
-            True when the float could pay out every unspent credit and still
+            True when the float could pay out every unspent user balance and still
             sit at or above its low-water mark.
         """
-        return self.balance_credits >= self.required_credits
+        return self.balance_cents >= self.required_cents
 
 
-def read_account_balance_credits() -> int | None:
-    """Read the OpenRouter master-account prepaid balance, in credits.
+def read_account_balance_cents() -> int | None:
+    """Read the OpenRouter master-account prepaid balance, in cents.
 
     Calls ``GET /api/v1/credits`` with the master inference key and returns the
     remaining balance (``total_credits - total_usage``) converted from dollars to
-    credits. Fails open.
+    cents. Fails open.
 
     Returns:
-        Remaining balance in credits, or ``None`` when the key is unset or the
+        Remaining balance in cents, or ``None`` when the key is unset or the
         read fails (unreachable, non-2xx, or an unexpected body shape).
     """
     key = settings.openrouter_api_key
@@ -127,7 +127,7 @@ def read_account_balance_credits() -> int | None:
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         logger.warning("OpenRouter balance read had an unexpected shape: %s", exc)
         return None
-    return round(remaining_dollars * _CREDITS_PER_DOLLAR)
+    return round(remaining_dollars * _CENTS_PER_DOLLAR)
 
 
 def local_key_limit_problem() -> str | None:
@@ -136,7 +136,7 @@ def local_key_limit_problem() -> str | None:
     Railway sets ``RAILWAY_ENVIRONMENT_NAME`` on every deployed service, so its
     absence means a developer machine. There the key should be a separate one
     with a small spend limit: a local run on the production key spends the
-    same balance that backs every user's credits. Fails open.
+    same balance that backs every user's balance. Fails open.
 
     Returns:
         A warning to log, or ``None`` when deployed, no key is set, the key is
@@ -161,7 +161,7 @@ def local_key_limit_problem() -> str | None:
     cap = "no spend limit" if limit is None else f"a ${float(limit):.2f} spend limit"
     return (
         f"OPENROUTER_API_KEY has {cap} and this backend is not on Railway. Local runs "
-        "spend the same balance that backs user credits. Create a separate key at "
+        "spend the same balance that backs user balances. Create a separate key at "
         f"https://openrouter.ai/settings/keys with a limit of ${LOCAL_KEY_LIMIT_CEILING_DOLLARS:.0f} "
         "or less and put it in backend/.env."
     )
@@ -179,18 +179,18 @@ def warn_if_local_key_uncapped() -> None:
     threading.Thread(target=run, name="openrouter-local-key-check", daemon=True).start()
 
 
-def check_float(outstanding_credits: int) -> FloatStatus | None:
+def check_float(outstanding_cents: int) -> FloatStatus | None:
     """Compare the OpenRouter float to its floor and warn when it runs thin.
 
     Reads the master-account balance and builds a :class:`FloatStatus` against
-    the configured floor (``settings.openrouter_balance_floor_credits``). Below
+    the configured floor (``settings.openrouter_balance_floor_cents``). Below
     the floor, or below the outstanding liability, it logs a WARNING carrying
     balance, floor, and outstanding liability and notifies the operator (alert
     webhook + email, cooldown-gated); stays quiet otherwise. Fails open — a disabled monitor or an unreadable
     balance simply yields ``None``.
 
     Args:
-        outstanding_credits: Credits users have bought (or been granted) but not
+        outstanding_cents: Cents users have bought (or been granted) but not
             yet spent — the liability the shared float ultimately backs. A
             balance below it fires the warning just as a balance below the
             floor does.
@@ -199,25 +199,25 @@ def check_float(outstanding_credits: int) -> FloatStatus | None:
         The float status, or ``None`` when the monitor is disabled (floor ``<=
         0`` or the key is unset) or the balance could not be read.
     """
-    floor = settings.openrouter_balance_floor_credits
+    floor = settings.openrouter_balance_floor_cents
     if floor <= 0:
         return None
-    balance = read_account_balance_credits()
+    balance = read_account_balance_cents()
     if balance is None:
         return None
     status = FloatStatus(
-        balance_credits=balance,
-        floor_credits=floor,
-        liability_credits=outstanding_credits,
+        balance_cents=balance,
+        floor_cents=floor,
+        liability_cents=outstanding_cents,
     )
     if not status.covered:
         logger.warning(
             "OpenRouter float low: balance $%.2f below required $%.2f "
             "(floor $%.2f, outstanding liability $%.2f). Check Auto Top-Up and the saved card.",
-            balance / _CREDITS_PER_DOLLAR,
-            status.required_credits / _CREDITS_PER_DOLLAR,
-            floor / _CREDITS_PER_DOLLAR,
-            outstanding_credits / _CREDITS_PER_DOLLAR,
+            balance / _CENTS_PER_DOLLAR,
+            status.required_cents / _CENTS_PER_DOLLAR,
+            floor / _CENTS_PER_DOLLAR,
+            outstanding_cents / _CENTS_PER_DOLLAR,
         )
         notify_low_float(status)
     return status
@@ -264,14 +264,14 @@ def _format_low_float(status: FloatStatus) -> tuple[str, str]:
         ``(subject, body)`` in plain text.
     """
     subject = (
-        f"OpenRouter float low: ${status.balance_credits / _CREDITS_PER_DOLLAR:.2f} "
-        f"below required ${status.required_credits / _CREDITS_PER_DOLLAR:.2f}"
+        f"OpenRouter float low: ${status.balance_cents / _CENTS_PER_DOLLAR:.2f} "
+        f"below required ${status.required_cents / _CENTS_PER_DOLLAR:.2f}"
     )
     body = (
-        f"OpenRouter master-account balance: ${status.balance_credits / _CREDITS_PER_DOLLAR:.2f}\n"
-        f"Configured floor: ${status.floor_credits / _CREDITS_PER_DOLLAR:.2f}\n"
-        f"Outstanding credit liability: ${status.liability_credits / _CREDITS_PER_DOLLAR:.2f}\n\n"
-        "The balance must cover both the floor and every unspent user credit. "
+        f"OpenRouter master-account balance: ${status.balance_cents / _CENTS_PER_DOLLAR:.2f}\n"
+        f"Configured floor: ${status.floor_cents / _CENTS_PER_DOLLAR:.2f}\n"
+        f"Outstanding user-balance liability: ${status.liability_cents / _CENTS_PER_DOLLAR:.2f}\n\n"
+        "The balance must cover both the floor and every unspent user balance. "
         "Auto Top-Up has likely failed (declined or expired card), demand is "
         "outrunning refills, or the Auto Top-Up threshold sits below the liability. Check the saved card and Auto Top-Up settings at "
         "https://openrouter.ai/settings/credits — managed runs return 402 once "
@@ -372,7 +372,7 @@ def _deliver_email(recipient: str, subject: str, body: str) -> None:
 class OpenRouterFloatSweeper:
     """Periodically read the OpenRouter float so a failed Auto Top-Up is caught.
 
-    The post-purchase check only runs when a customer buys credits; on a quiet
+    The post-purchase check only runs when a customer tops up; on a quiet
     day a declined card would surface as a 402 on the next managed run. This
     loop checks every ``settings.openrouter_float_check_interval_seconds`` on
     the API pods. Leader election uses a Postgres transaction-scoped advisory
@@ -383,21 +383,21 @@ class OpenRouterFloatSweeper:
     def __init__(
         self,
         engine: Any,
-        outstanding_credits: Callable[[], int],
+        outstanding_cents: Callable[[], int],
         interval_seconds: float | None = None,
     ) -> None:
         """Initialize the sweeper.
 
         Args:
             engine: SQLAlchemy engine the advisory lock is taken on.
-            outstanding_credits: Callable returning the platform-wide unspent
-                credit liability (``StripeBillingService.total_outstanding_credits``);
+            outstanding_cents: Callable returning the platform-wide unspent
+                balance liability (``StripeBillingService.total_outstanding_cents``);
                 injected so this module never imports the service that imports it.
             interval_seconds: Override for the polling interval; defaults to
                 ``settings.openrouter_float_check_interval_seconds``.
         """
         self._engine = engine
-        self._outstanding_credits = outstanding_credits
+        self._outstanding_cents = outstanding_cents
         resolved = (
             interval_seconds if interval_seconds is not None else settings.openrouter_float_check_interval_seconds
         )
@@ -432,8 +432,8 @@ class OpenRouterFloatSweeper:
                     ).scalar()
                     if not acquired:
                         return None
-                    return check_float(self._outstanding_credits())
-            return check_float(self._outstanding_credits())
+                    return check_float(self._outstanding_cents())
+            return check_float(self._outstanding_cents())
         except Exception:
             logger.warning("OpenRouter float sweep failed", exc_info=True)
             return None
@@ -445,15 +445,13 @@ class OpenRouterFloatSweeper:
             self.sweep_once()
 
 
-def start_openrouter_float_sweeper(
-    engine: Any, outstanding_credits: Callable[[], int]
-) -> OpenRouterFloatSweeper | None:
+def start_openrouter_float_sweeper(engine: Any, outstanding_cents: Callable[[], int]) -> OpenRouterFloatSweeper | None:
     """Start the periodic float sweeper when the monitor is configured.
 
     Args:
         engine: SQLAlchemy engine the advisory lock is taken on.
-        outstanding_credits: Callable returning the platform-wide unspent
-            credit liability, forwarded to :class:`OpenRouterFloatSweeper`.
+        outstanding_cents: Callable returning the platform-wide unspent
+            balance liability, forwarded to :class:`OpenRouterFloatSweeper`.
 
     Returns:
         The started sweeper, or ``None`` when the periodic check is disabled
@@ -462,10 +460,10 @@ def start_openrouter_float_sweeper(
     """
     if (
         settings.openrouter_float_check_interval_seconds <= 0
-        or settings.openrouter_balance_floor_credits <= 0
+        or settings.openrouter_balance_floor_cents <= 0
         or settings.openrouter_api_key is None
     ):
         return None
-    sweeper = OpenRouterFloatSweeper(engine, outstanding_credits)
+    sweeper = OpenRouterFloatSweeper(engine, outstanding_cents)
     sweeper.start()
     return sweeper

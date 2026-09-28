@@ -4,12 +4,12 @@
   "app.shell.search.kw.admin": "administração armazenamento quota orçamentos utilizadores admin storage quota users",
   "app.shell.search.kw.agent": "agente painel assistente modelo predefinido voz ditado nível de confiança memória agent assistant model voice dictation trust yolo memory",
   "app.shell.search.kw.api": "API token desenvolvedor integração gerar revogar documentação API token developer documentation",
-  "app.shell.search.kw.billing": "faturação créditos adicionar créditos assinatura plano pagamento formas de pagamento cartão faturas recibos transações billing credits Skynet Pro subscription payment receipts",
+  "app.shell.search.kw.billing": "faturação saldo fundos adicionar fundos carregamento assinatura plano pagamento formas de pagamento cartão faturas recibos transações billing balance funds top up Skynet Pro subscription payment receipts",
   "app.shell.search.kw.privacy": "privacidade dados notificações e-mail análises limpar cache exportar meus dados eliminar conta privacy notifications analytics cache export delete account",
   "app.shell.search.kw.providers": "provedores chaves de API chave própria URL base providers keys BYOK OpenAI Anthropic Gemini Google Groq Mistral Together DeepSeek xAI OpenRouter",
   "app.shell.search.kw.security": "segurança dois fatores autenticador códigos de recuperação chaves de acesso códigos por e-mail login security 2FA TOTP recovery passkey login",
   "app.shell.search.kw.tagging": "marcação rotulagem rótulos assistida por IA marcação automática modelo predefinido tagging labels autotag model",
-  "app.shell.search.kw.usage": "uso gastos custo créditos gastos tokens execuções por modelo atividade usage spend cost tokens",
+  "app.shell.search.kw.usage": "uso gastos custo dólares gastos tokens execuções por modelo atividade usage spend cost tokens",
   "app.shell.search.kw.wizard": "otimização assistente geração de código conjunto de dados divisão registo de pacotes modelos optimization wizard split package registry pip models",
   "common.empty": "—",
   "optimizations.duration.lt_0_1s": "<0.1s",
@@ -21,5 +21,5 @@
   "share.you": "(o próprio)",
   "tooltip.submit.blackbox.scorer_install": "É executado uma vez na Vercel Sandbox offline. Use pacotes já presentes na imagem fixada ou artefatos de pacotes geridos pela implantação; os repositórios públicos de apt e de pacotes não estão disponíveis.",
   "submit.budget.byok_note": "O seu fornecedor cobra os tokens do modelo na sua chave. Este limite cobre apenas a taxa de plataforma da Skynet e o ambiente de execução.",
-  "submit.blackbox.roles.optimization.managed_hint": "Usa as definições de amostragem predefinidas do modelo; o pagamento pode usar créditos Skynet ou a sua chave OpenRouter."
+  "submit.blackbox.roles.optimization.managed_hint": "Usa as definições de amostragem predefinidas do modelo; o pagamento pode usar o seu saldo Skynet ou a sua chave OpenRouter."
 }

@@ -1,7 +1,7 @@
 """Tests for the per-job cost ceiling callback.
 
 The callback re-prices accumulated per-model LM usage after each call and
-hard-stops the run once its full per-model credit cost exceeds the cap. These
+hard-stops the run once its full per-model cost exceeds the cap. These
 exercise the trip boundary, the no-ceiling inert case, multi-LM totalling, and
 the latch — with budgets set relative to the pricing engine so the assertions
 don't hinge on exact per-token arithmetic.
@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from core.billing.pricing import credits_for_usage, usages_from_breakdown
+from core.billing.pricing import cents_for_usage, usages_from_breakdown
 from core.service_gateway.language_models import usage_by_model_from_history
 from core.service_gateway.optimization.cost_ceiling import (
     CostCeilingCallback,
@@ -44,27 +44,27 @@ class _FakeLM:
         self.history.append({"usage": {"prompt_tokens": input_tokens, "completion_tokens": 0}})
 
 
-def _credits(*lms: _FakeLM) -> int:
-    """Return the per-model credit cost of the LMs' accumulated usage."""
+def _cents(*lms: _FakeLM) -> int:
+    """Return the per-model cost, in cents, of the LMs' accumulated usage."""
     breakdown = usage_by_model_from_history(*lms)
-    return credits_for_usage(usages_from_breakdown(breakdown)) if breakdown else 0
+    return cents_for_usage(usages_from_breakdown(breakdown)) if breakdown else 0
 
 
 def test_does_not_trip_while_usage_within_budget() -> None:
-    """Usage that prices below the credit cap never raises."""
+    """Usage that prices below the cents cap never raises."""
     lm = _FakeLM()
     cb = CostCeilingCallback(1000, lm)
     lm.record(50_000)
     cb.on_lm_end("c1", outputs={})
     lm.record(50_000)
-    cb.on_lm_end("c2", outputs={})  # ~15 credits, well under the 1000-credit cap
+    cb.on_lm_end("c2", outputs={})  # ~15 cents, well under the 1000-cent cap
 
 
 def test_trips_once_cost_exceeds_budget() -> None:
-    """The first call that prices the run past the credit cap raises."""
+    """The first call that prices the run past the cents cap raises."""
     first_chunk = _FakeLM()
     first_chunk.record(50_000)
-    budget = _credits(first_chunk)  # cap == the cost of the first chunk alone
+    budget = _cents(first_chunk)  # cap == the cost of the first chunk alone
     assert budget > 0
 
     lm = _FakeLM()
@@ -80,7 +80,7 @@ def test_latches_after_tripping() -> None:
     """Once tripped every later boundary continues unwinding the stopped run."""
     lm = _FakeLM()
     cb = CostCeilingCallback(5, lm)
-    lm.record(100_000)  # ~15 credits > 5
+    lm.record(100_000)  # ~15 cents > 5
     with pytest.raises(CostCeilingExceededError):
         cb.on_lm_end("c1", outputs={})
     with pytest.raises(CostCeilingExceededError):
@@ -93,9 +93,9 @@ def test_totals_cost_across_generation_and_reflection() -> None:
     refl = _FakeLM()
     gen.record(50_000)
     refl.record(50_000)
-    combined = _credits(gen, refl)
+    combined = _cents(gen, refl)
     # Each LM alone prices below the cap; only their summed cost trips it.
-    assert _credits(gen) < combined
+    assert _cents(gen) < combined
     cb = CostCeilingCallback(combined - 1, gen, refl)
     with pytest.raises(CostCeilingExceededError):
         cb.on_lm_end("c1", outputs={})
@@ -105,7 +105,7 @@ def test_none_lm_is_tolerated() -> None:
     """A ``None`` LM (no reflection model) is skipped, not an error."""
     gen = _FakeLM()
     cb = CostCeilingCallback(5, gen, None)
-    gen.record(100_000)  # ~15 credits > 5
+    gen.record(100_000)  # ~15 cents > 5
     with pytest.raises(CostCeilingExceededError):
         cb.on_lm_end("c1", outputs={})
 

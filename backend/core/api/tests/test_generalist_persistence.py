@@ -134,7 +134,7 @@ def persistence_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, Eng
 
 
 def _fund(engine: Engine) -> None:
-    """Give the test identity a purchased balance to pass the 402 credit gate.
+    """Give the test identity a purchased balance to pass the 402 balance gate.
 
     There is no free allowance, so any turn that should stream must be backed by
     an explicitly funded account.
@@ -144,7 +144,7 @@ def _fund(engine: Engine) -> None:
             BillingCustomerModel(
                 username="alice@example.com",
                 stripe_customer_id="cus_alice",
-                credit_balance=10_000,
+                balance_cents=10_000,
                 grant_remaining=0,
             )
         )
@@ -219,7 +219,7 @@ def test_depleted_account_gets_402_before_streaming(
             BillingCustomerModel(
                 username="alice@example.com",
                 stripe_customer_id="cus_alice",
-                credit_balance=0,
+                balance_cents=0,
                 grant_remaining=0,
             )
         )
@@ -616,4 +616,3 @@ def test_confirm_resolves_only_for_the_stream_owner(
     assert not decided.is_set()
     assert confirm("alice@example.com") == 200
     assert decided.is_set()
-

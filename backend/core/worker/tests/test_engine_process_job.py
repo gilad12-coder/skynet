@@ -831,7 +831,7 @@ def _run_failing_leg(worker: BackgroundWorker, store: FakeJobStore, job_id: str,
         error_event: The child's terminal error event.
 
     Returns:
-        The patched ``_debit_run_credits`` mock.
+        The patched ``_debit_run_cents`` mock.
     """
     store.seed_job(job_id, payload=REAL_RUN_PAYLOAD, attempts=0, execution_generation=3)
     store.engine = MagicMock()
@@ -843,7 +843,7 @@ def _run_failing_leg(worker: BackgroundWorker, store: FakeJobStore, job_id: str,
     with (
         patch("core.worker.engine.notify_job_completed"),
         patch.object(worker, "_get_service") as mock_svc,
-        patch.object(worker, "_debit_run_credits", return_value=7) as debit,
+        patch.object(worker, "_debit_run_cents", return_value=7) as debit,
     ):
         mock_svc.return_value.validate_payload = MagicMock()
         worker._process_job(job_id, 0)

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from .common import ModelConfig, SplitCounts, SplitFractions
 from .results import LMActivity, ModelTokenUsage
@@ -46,9 +46,7 @@ BLACKBOX_HARNESSES = (
 # Engines that accept a multi-part (named files) starting point.
 BLACKBOX_MULTI_PART_ENGINES = frozenset({BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_AUTOSADDLER})
 # Single-mode engines that honor an explicit iteration cap.
-BLACKBOX_ITERATION_LIMIT_ENGINES = frozenset(
-    {BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER}
-)
+BLACKBOX_ITERATION_LIMIT_ENGINES = frozenset({BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER})
 # Stands in for ``module_name`` in the job overview and notifications, where
 # DSPy jobs record the program they optimized.
 BLACKBOX_MODULE_NAME = "blackbox"
@@ -246,9 +244,15 @@ class BlackboxRunRequest(BaseModel):
     execution_budget_id: str | None = Field(default=None, min_length=1, max_length=64)
     execution_budget_revision: int | None = Field(default=None, ge=1)
     execution_budget_generation: int | None = Field(default=None, ge=0)
-    max_cost_credits: int | None = Field(default=None, ge=1)
-    estimated_credits_low: int | None = Field(default=None, ge=0)
-    estimated_credits_high: int | None = Field(default=None, ge=0)
+    max_cost_cents: int | None = Field(
+        validation_alias=AliasChoices("max_cost_cents", "max_cost_credits"), default=None, ge=1
+    )
+    estimated_cents_low: int | None = Field(
+        validation_alias=AliasChoices("estimated_cents_low", "estimated_credits_low"), default=None, ge=0
+    )
+    estimated_cents_high: int | None = Field(
+        validation_alias=AliasChoices("estimated_cents_high", "estimated_credits_high"), default=None, ge=0
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -306,12 +310,9 @@ class BlackboxRunRequest(BaseModel):
         if self.target.kind != BLACKBOX_TARGET_AGENT and self.task_model_settings is not None:
             raise ValueError("task_model_config is only used when the evaluated target is an agent.")
         if self.budget.max_iterations is not None and (
-            self.strategy.mode != "single"
-            or self.strategy.engine not in BLACKBOX_ITERATION_LIMIT_ENGINES
+            self.strategy.mode != "single" or self.strategy.engine not in BLACKBOX_ITERATION_LIMIT_ENGINES
         ):
-            raise ValueError(
-                "An iteration limit is only supported by single Meta-Harness or AutoSaddler runs."
-            )
+            raise ValueError("An iteration limit is only supported by single Meta-Harness or AutoSaddler runs.")
         return self
 
 
@@ -333,7 +334,7 @@ class ScorerDryRunResponse(BaseModel):
     elapsed_ms: float
     usage_by_model: list[ModelTokenUsage] = Field(default_factory=list)
     # What this one check debited, so the wizard can show setup spend against the total budget.
-    credits_charged: int = 0
+    cents_charged: int = 0
     budget: dict[str, Any] | None = None
     preview_status: Literal["succeeded", "failed", "pending"] | None = None
     preflight_id: str | None = None
@@ -476,8 +477,8 @@ class BlackboxEngineInfo(BaseModel):
 
 class SandboxRuntimeCost(BaseModel):
     billing_basis: Literal["at_cost", "included_in_model_markup"]
-    minimum_session_credits: str | None = None
-    maximum_session_credits: str | None = None
+    minimum_session_cents: str | None = None
+    maximum_session_cents: str | None = None
     maximum_lifetime_seconds: float | None = None
     vcpus: int | None = None
 

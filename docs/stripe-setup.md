@@ -1,8 +1,8 @@
 # Stripe billing setup
 
-This wires Skynet's managed-credit billing to a real Stripe account: prepaid
-pay-as-you-go credit packs and webhook reconciliation into the
-`billing_customers` / `credit_ledger` tables.
+This wires Skynet's prepaid-balance billing to a real Stripe account:
+pay-as-you-go balance top-up packs and webhook reconciliation into the
+`billing_customers` / `wallet_ledger` tables.
 
 You run the account steps (Stripe can't be driven on your behalf); the code is
 already in place. Start in **test mode** — every step below uses test keys and
@@ -14,7 +14,7 @@ section).
 | Piece | Where |
 |---|---|
 | Config (`STRIPE_*` env) | `backend/core/config.py`, `backend/.env.example` |
-| DB tables (customer link, credit ledger, webhook idempotency) | `backend/core/storage/models.py`, migration `f0a1b2c3d4e5_add_billing_tables.py` |
+| DB tables (customer link, wallet ledger, webhook idempotency) | `backend/core/storage/models.py`, migration `f0a1b2c3d4e5_add_billing_tables.py` |
 | Stripe service (checkout, billing profile, transactions, portal, webhook sync) | `backend/core/billing/service.py` |
 | API (`/billing/*`) | `backend/core/api/routers/billing.py` |
 | Frontend (wallet, billing details, payment methods, usage, transactions) | `frontend/src/features/billing/*` |
@@ -51,8 +51,8 @@ From `backend/` with the venv active:
 python scripts/provision_stripe.py
 ```
 
-It creates (idempotently — safe to re-run) three one-time credit-pack prices
-($5 / $20 / $50) and the $9/month Skynet Pro plan price, then prints the env
+It creates (idempotently — safe to re-run) three one-time top-up pack prices
+($5 / $20 / $50, named "Skynet top-up — Starter/Plus/Pro") and the $9/month Skynet Pro plan price, then prints the env
 lines. Paste them into `backend/.env`:
 
 ```bash
@@ -62,15 +62,20 @@ STRIPE_PRICE_PACK_PRO=price_...
 STRIPE_PRICE_PRO_MONTHLY=price_...
 ```
 
-> **Skynet Pro** is the platform plan: credits still pay for usage at cost,
+> **Skynet Pro** is the platform plan: the balance still pays for usage at cost,
 > and Pro lifts the platform limits (10 GB storage, unlimited saved jobs, 20
 > concurrent runs; see the `pro_*` settings in `core/config.py`). Leaving
 > `STRIPE_PRICE_PRO_MONTHLY` unset hides the upgrade.
 
-> The **credits** each pack grants (500 / 2000 / 5000 — at par, one credit per
-> cent) live in
-> `core/billing/service.py::PACK_CREDITS`. Stripe only holds the dollar price, so
+> The balance each pack adds (500 / 2000 / 5000 cents, i.e. $5 / $20 / $50)
+> lives in `core/billing/service.py::PACK_CENTS`. Stripe only holds the dollar price, so
 > you can re-price or change the markup without touching Stripe.
+
+> Stripe products created before the move from credits to a dollar balance may
+> still carry the old "Skynet Credits — …" names. Re-running the script does
+> not rename them; rename them by hand in the Stripe dashboard (Product
+> catalog) to "Skynet top-up — Starter/Plus/Pro" so checkout and receipts
+> match the app.
 
 ## 4. Configure the Customer Portal
 
@@ -91,7 +96,7 @@ only masked display metadata such as brand, last four digits, and expiry.
 
 ## 5. Wire the webhook
 
-The webhook is how a completed payment actually credits the account. The
+The webhook is how a completed payment actually tops up the balance. The
 endpoint is `POST /billing/webhook` and it verifies Stripe's signature, so it
 needs the signing secret.
 
@@ -133,7 +138,7 @@ cd backend && python manage.py setup        # runs alembic upgrade head
 # or directly:  alembic upgrade head
 ```
 
-This creates `billing_customers`, `credit_ledger`, and `billing_webhook_events`.
+This creates `billing_customers`, `wallet_ledger`, and `billing_webhook_events`.
 (The app also builds them via `create_all` on boot, so a fresh DB needs no
 manual step — the migration is for existing databases.)
 
@@ -145,7 +150,7 @@ manual step — the migration is for existing databases.)
    future expiry, any CVC, and any ZIP. Opt in to save the payment method.
 4. You're redirected back to `/?billing=success`. Within a second or two
    `stripe listen` (or the dashboard endpoint) delivers
-   `checkout.session.completed`, the webhook credits the ledger, and the wallet
+   `checkout.session.completed`, the webhook records the top-up in the ledger, and the wallet
    balance updates on the next fetch.
 5. Reopen Settings → **Billing** to verify the saved billing fields and masked
    payment method. Open **Usage** to verify the transaction, amount, status,
@@ -170,10 +175,10 @@ Upstream providers such as OpenRouter are paid with a Stripe Issuing virtual
 card. That card spends only from the account's **Issuing balance**, which the
 API pods keep funded on their own (`backend/core/billing/issuing_float.py`).
 When the Issuing balance plus pending Skynet top-ups drops below
-`ISSUING_BALANCE_FLOOR_CREDITS`, the loop refills it to
-`ISSUING_BALANCE_TARGET_CREDITS`:
+`ISSUING_BALANCE_FLOOR_CENTS`, the loop refills it to
+`ISSUING_BALANCE_TARGET_CENTS`:
 
-1. From the Stripe payments balance, meaning what customers paid for credits.
+1. From the Stripe payments balance, meaning what customers paid for top-ups.
    This is instant, but it needs the Balance Transfers beta. Until Stripe
    enables it, the loop skips this step.
 2. From the bank account that receives your payouts, as a top-up. This takes up
@@ -193,5 +198,5 @@ One-time setup, all in the dashboard:
    Do the same for any other provider that bills a card.
 5. Optionally, ask Stripe support to enable the **Balance Transfers** beta so
    step 1 of the loop works.
-6. Set `ISSUING_BALANCE_FLOOR_CREDITS` and `ISSUING_BALANCE_TARGET_CREDITS` and
+6. Set `ISSUING_BALANCE_FLOOR_CENTS` and `ISSUING_BALANCE_TARGET_CENTS` and
    redeploy.

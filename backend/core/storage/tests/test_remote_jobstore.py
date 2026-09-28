@@ -32,7 +32,7 @@ from sqlalchemy.pool import StaticPool
 
 import core.storage.remote as remote_mod
 from core.billing.budgets import BudgetService
-from core.billing.operation_pricing import CreditCharge, OperationQuote
+from core.billing.operation_pricing import OperationCharge, OperationQuote
 from core.billing.recovery_admission import build_recovery_plan, model_call_bound, runtime_bound
 from core.constants import OPTIMIZATION_TYPE_TAGGING
 from core.storage.base import JobStore
@@ -71,9 +71,7 @@ class SQLiteJobStore(RemoteDBJobStore):
 _RECOVERY_IMAGE = "fixture@sha256:" + "a" * 64
 
 
-def _fund_checkpoint(
-    store: SQLiteJobStore, optimization_id: str, monkeypatch: pytest.MonkeyPatch
-) -> BudgetService:
+def _fund_checkpoint(store: SQLiteJobStore, optimization_id: str, monkeypatch: pytest.MonkeyPatch) -> BudgetService:
     """Attach reconciled funding and a real pinned checkpoint to an existing test run.
 
     Args:
@@ -89,7 +87,7 @@ def _fund_checkpoint(
     with Session(store.engine) as session:
         session.add(
             BillingCustomerModel(
-                username="resume-owner", stripe_customer_id="local-resume", credit_balance=50, grant_remaining=0
+                username="resume-owner", stripe_customer_id="local-resume", balance_cents=50, grant_remaining=0
             )
         )
         session.commit()
@@ -117,7 +115,7 @@ def _fund_checkpoint(
     manifest = checkpoint_manifest(data, payload, store.get_job(optimization_id)["code_version"])
     quote = OperationQuote(
         request_fingerprint="fixture-request",
-        maximum=CreditCharge(total=Decimal(1), wallet=Decimal(1)),
+        maximum=OperationCharge(total=Decimal(1), wallet=Decimal(1)),
         price_snapshot={"version": "fixture-prices", "provider": "fixture"},
     )
     bound = model_call_bound("task", "fixture/model", quote)
@@ -128,7 +126,7 @@ def _fund_checkpoint(
             {"image": _RECOVERY_IMAGE, "lifetime_seconds": 60},
         ),
         seed_bounds=[bound],
-        execution_bound={"model_calls": [bound], "max_credits": "1", "max_wallet_credits": "1"},
+        execution_bound={"model_calls": [bound], "max_cents": "1", "max_wallet_cents": "1"},
         seed_marker_seen=True,
     )
     store.save_gepa_checkpoint(
@@ -866,9 +864,7 @@ def test_count_jobs_zero_when_empty(store: SQLiteJobStore) -> None:
     assert store.count_jobs() == 0
 
 
-def test_recover_orphaned_jobs_requeues_running_job(
-    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_recover_orphaned_jobs_requeues_running_job(store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch) -> None:
     """Recover orphaned jobs requeues a first-attempt running job.
 
     Args:
@@ -886,9 +882,7 @@ def test_recover_orphaned_jobs_requeues_running_job(
     assert job["recovery"]["phase"] == "resuming"
 
 
-def test_recover_orphaned_jobs_requeues_validating_job(
-    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_recover_orphaned_jobs_requeues_validating_job(store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch) -> None:
     """Recover orphaned jobs requeues a first-attempt validating job.
 
     Args:
@@ -1529,9 +1523,7 @@ def test_requeue_for_resume_missing_job_returns_none(store: SQLiteJobStore) -> N
     assert store.requeue_for_resume("no-such-job") is None
 
 
-def test_requeue_for_resume_banks_finished_leg_runtime(
-    store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_requeue_for_resume_banks_finished_leg_runtime(store: SQLiteJobStore, monkeypatch: pytest.MonkeyPatch) -> None:
     """Each resume folds the finished leg's duration in; the paused gap is excluded.
 
     Args:

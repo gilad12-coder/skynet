@@ -137,7 +137,7 @@ def test_actual_protocol_pins_destination_and_preserves_endpoint_result(
     assert request.headers["authorization"] == "Bearer parent-evaluator-secret"
     assert json.loads(request.content) == {"candidate": payload["seed_candidate"], "case": {"question": "actual case"}}
     snapshot = gateway.runtime.service.get(gateway.runtime.budget_id, "alice")
-    assert snapshot.setup_spent_credits == 0
+    assert snapshot.setup_spent_cents == 0
     assert snapshot.pending_operations == 0
     with Session(gateway.runtime.service._engine) as session:
         assert session.scalar(select(func.count()).select_from(ExecutionOperationModel)) == 0
@@ -371,7 +371,7 @@ def test_continue_uses_nonheldout_case_and_persists_actual_remote_result(
     assert result["scorer_result"]["score"] == 0.75
     [request] = endpoint.requests
     assert json.loads(request.content)["case"] == {"question": "training case"}
-    assert result["budget"]["setup_spent_credits"] == "0"
+    assert result["budget"]["setup_spent_cents"] == "0"
     assert len(bindings) == 1
     assert bindings[0]["workflow"] == "anything"
     assert isinstance(bindings[0]["owner_id"], str)
@@ -406,7 +406,7 @@ def test_legacy_preview_preserves_real_output_and_replays_without_external_retry
         assert "HTTP 400" in result["error"]
         assert "actual rejected input" in result["error"]
     assert replay["preflight_id"] == result["preflight_id"]
-    assert result["credits_charged"] == 0
+    assert result["cents_charged"] == 0
     assert bindings == [{"workflow": "anything", "owner_id": result["preflight_id"]}]
     assert len(endpoint.requests) == 1
     assert json.loads(endpoint.requests[0].content) == {

@@ -116,6 +116,7 @@ def _apply_interactive_timeout(config: ModelConfig) -> None:
     config.extra.setdefault("timeout", settings.agent_request_timeout_seconds)
     config.extra.setdefault("num_retries", 2)
 
+
 TrustMode = Literal["ask", "auto_safe", "yolo"]
 
 # Tools whose side-effects can destroy or create billing-bearing work.
@@ -131,7 +132,7 @@ _DESTRUCTIVE_TOOLS: frozenset[str] = frozenset(
         "clone_job_optimizations",
         "retry_job_optimizations",
         # Resume and restart put a stopped run back on the queue, so they spend
-        # credits the same way a fresh submit does.
+        # the balance the same way a fresh submit does.
         "resume_job_optimizations",
         "restart_job_optimizations",
         "submit_blackbox_run_blackbox_run_post",
@@ -159,7 +160,7 @@ _SAFE_MUTATIONS: frozenset[str] = frozenset(
         "pause_job_optimizations",
         # Staging a sample overwrites the wizard's dataset, roles and code.
         "stage_sample_dataset_datasets_samples",
-        # One scorer execution; a model-backed scorer can debit setup credits.
+        # One scorer execution; a model-backed scorer can debit setup cost.
         "blackbox_scorer_dry_run_blackbox_scorer_dry_run_post",
     }
 )
@@ -273,9 +274,7 @@ class ApprovalRegistry:
         if fut is not None and not fut.done():
             fut.get_loop().call_soon_threadsafe(fut.cancel)
 
-    def wait_for_blocking_decision(
-        self, call_id: str, event: threading.Event, *, timeout_seconds: float
-    ) -> bool:
+    def wait_for_blocking_decision(self, call_id: str, event: threading.Event, *, timeout_seconds: float) -> bool:
         """Wait for a relayed sandbox tool decision with durable cross-replica polling.
 
         Args:
@@ -385,9 +384,7 @@ class ApprovalRegistry:
             try:
                 # shield(): a poll-interval timeout must not cancel the shared
                 # future — the next loop iteration keeps awaiting it.
-                return await asyncio.wait_for(
-                    asyncio.shield(fut), timeout=min(_DURABLE_POLL_SECONDS, remaining)
-                )
+                return await asyncio.wait_for(asyncio.shield(fut), timeout=min(_DURABLE_POLL_SECONDS, remaining))
             except TimeoutError:
                 if self._engine is None:
                     continue
@@ -602,9 +599,7 @@ class _ApprovalGatedTool:
         propagates exceptions naturally so DSPy's ReAct loop sees real
         errors instead of timing out on a hung coroutine.
         """
-        future = asyncio.run_coroutine_threadsafe(
-            self._async_body(*args, **kwargs), self._outer_loop
-        )
+        future = asyncio.run_coroutine_threadsafe(self._async_body(*args, **kwargs), self._outer_loop)
         return future.result()
 
     async def _async_body(self, *args: Any, **kwargs: Any) -> Any:
@@ -638,16 +633,9 @@ class _ApprovalGatedTool:
         # is the runtime backstop.
         if self._tool_name in _CODE_AUTHORING_TOOLS:
             self._authoring_flag.authoring_requested = True
-        submit_after_authoring = (
-            self._tool_name in _SUBMIT_TOOLS
-            and self._authoring_flag.authoring_requested
-        )
+        submit_after_authoring = self._tool_name in _SUBMIT_TOOLS and self._authoring_flag.authoring_requested
         if self._tool_name in _SUBMIT_TOOLS and not submit_after_authoring:
-            if (
-                self._staged_dataset_id
-                and not kwargs.get("staged_dataset_id")
-                and not kwargs.get("dataset")
-            ):
+            if self._staged_dataset_id and not kwargs.get("staged_dataset_id") and not kwargs.get("dataset"):
                 kwargs["staged_dataset_id"] = self._staged_dataset_id
             # By-reference twin: a library dataset the user picked. Only inject
             # when no other dataset source is present — ``RunRequest`` requires
@@ -1100,8 +1088,8 @@ _ALWAYS_TOOLS = frozenset(
         "get_analytics_summary_analytics_summary_get",
         "get_optimizer_stats_analytics_optimizers_get",
         "get_model_stats_analytics_models_get",
-        # Read-only wallet: credit balance, free grant, plan, and recent ledger —
-        # lets the agent answer "how many credits do I have / what did I spend?".
+        # Read-only wallet: balance, free grant, plan, and recent ledger —
+        # lets the agent answer "how much money do I have left / what did I spend?".
         "get_wallet_for_agent",
         "serve_info_serve",
         "serve_pair_info_serve",
@@ -1326,9 +1314,7 @@ def _is_grid(state: WizardState) -> bool:
 
 def _has_model_list(value: object) -> bool:
     """Return True when ``value`` is a non-empty list of named model configs."""
-    return isinstance(value, list) and any(
-        isinstance(m, dict) and m.get("name") for m in value
-    )
+    return isinstance(value, list) and any(isinstance(m, dict) and m.get("name") for m in value)
 
 
 def _model_ready(state: WizardState) -> bool:
@@ -1349,20 +1335,14 @@ def _model_ready(state: WizardState) -> bool:
     """
     is_gepa = str(state.get("optimizer_name") or "gepa").strip().lower() == "gepa"
     if _is_grid(state):
-        has_generation = bool(state.get("use_all_generation_models")) or _has_model_list(
-            state.get("generation_models")
-        )
+        has_generation = bool(state.get("use_all_generation_models")) or _has_model_list(state.get("generation_models"))
         if not has_generation:
             return False
         if is_gepa:
-            return bool(state.get("use_all_reflection_models")) or _has_model_list(
-                state.get("reflection_models")
-            )
+            return bool(state.get("use_all_reflection_models")) or _has_model_list(state.get("reflection_models"))
         return True
     model_cfg = state.get("model_config") or {}
-    has_generation = bool(state.get("model_configured")) or bool(
-        isinstance(model_cfg, dict) and model_cfg.get("name")
-    )
+    has_generation = bool(state.get("model_configured")) or bool(isinstance(model_cfg, dict) and model_cfg.get("name"))
     if not has_generation:
         return False
     if is_gepa:
@@ -1392,11 +1372,7 @@ def _uses_tools(module_name: str, workflow: Any) -> bool:
         return False
     return any(
         isinstance(node, dict)
-        and (
-            node.get("kind") == "mcp"
-            or node.get("module_name") in _TOOL_MODULE_NAMES
-            or node.get("tool_filter")
-        )
+        and (node.get("kind") == "mcp" or node.get("module_name") in _TOOL_MODULE_NAMES or node.get("tool_filter"))
         for node in workflow.get("nodes") or []
     )
 
@@ -1431,12 +1407,7 @@ def tools_for(state: WizardState) -> set[str]:
         # stops the agent from authoring/submitting an unnamed run.
         if name_set:
             allowed |= _CODE_AUTHORING_TOOLS
-    if (
-        dataset_ready
-        and name_set
-        and _code_ready(state)
-        and _model_ready(state)
-    ):
+    if dataset_ready and name_set and _code_ready(state) and _model_ready(state):
         # Expose exactly one submit surface, matching the chosen run type, so
         # the agent never sees two submit tools at once (which made the model
         # oscillate). Grid runs sweep model lists; single runs use one pair.
@@ -1541,11 +1512,7 @@ def validate_wizard_patch_order(patch: dict[str, Any], state: WizardState) -> st
         return None
     target_step = max(step for step, _ in touched)
     blocked_field = next(field for step, field in touched if step == target_step)
-    missing = [
-        step
-        for step in _PREREQ_STEPS
-        if step < target_step and not _step_satisfied(step, state, patch)
-    ]
+    missing = [step for step in _PREREQ_STEPS if step < target_step and not _step_satisfied(step, state, patch)]
     if not missing:
         return None
     steps_txt = "; ".join(f"{_WIZARD_STEP_LABELS[s]} — {_STEP_FIX_HINT[s]}" for s in missing)
@@ -2221,9 +2188,7 @@ async def _drive_generalist_agent(
                 "event": "turn_metadata",
                 "data": {
                     "allowed_tools": sorted(t.name for t in dspy_tools),
-                    "tool_schema_hashes": {
-                        tool.name: hash_tool_schema(tool) for tool in dspy_tools
-                    },
+                    "tool_schema_hashes": {tool.name: hash_tool_schema(tool) for tool in dspy_tools},
                 },
             }
         )

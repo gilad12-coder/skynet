@@ -15,10 +15,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from core.billing.metering import estimate_run_credits, meter_llm_run, meter_llm_usage
-from core.billing.pricing import ModelUsage, credits_for_usage, fallback_priced_usages
+from core.billing.metering import estimate_run_cents, meter_llm_run, meter_llm_usage
+from core.billing.pricing import ModelUsage, cents_for_usage, fallback_priced_usages
 from core.billing.service import StripeBillingService
-from core.storage.models import Base, BillingCustomerModel, CreditLedgerModel
+from core.storage.models import Base, BillingCustomerModel, WalletLedgerModel
 
 
 @pytest.fixture
@@ -53,13 +53,13 @@ class _FakeLm:
             self.last_response_model = served
 
 
-def _ledger_rows(engine: object) -> list[CreditLedgerModel]:
-    """Return every credit-ledger row, oldest first."""
+def _ledger_rows(engine: object) -> list[WalletLedgerModel]:
+    """Return every wallet-ledger row, oldest first."""
     with Session(engine) as session:
-        return session.query(CreditLedgerModel).order_by(CreditLedgerModel.id).all()
+        return session.query(WalletLedgerModel).order_by(WalletLedgerModel.id).all()
 
 
-def _fund(engine: object, username: str, credits: int = 100_000) -> None:
+def _fund(engine: object, username: str, cents: int = 100_000) -> None:
     """Seed a billing row with a paid balance so a debit has something to draw.
 
     The clamped debit charges at most what the account holds, so a test that
@@ -68,14 +68,14 @@ def _fund(engine: object, username: str, credits: int = 100_000) -> None:
     Args:
         engine: The SQLite engine to write to.
         username: Account to fund.
-        credits: Paid balance to seed.
+        cents: Paid balance to seed.
     """
     with Session(engine) as session:
         session.add(
             BillingCustomerModel(
                 username=username,
                 stripe_customer_id=f"cus_{username}",
-                credit_balance=credits,
+                balance_cents=cents,
                 grant_remaining=0,
             )
         )
@@ -86,21 +86,21 @@ def test_meter_llm_run_debits_and_stamps_tokens(engine: object) -> None:
     """A tracked run writes one run row with the measured token counts."""
     _fund(engine, "alice@x.io")
     lm = _FakeLm([{"usage": {"prompt_tokens": 100_000, "completion_tokens": 40_000}}])
-    credits = meter_llm_run(engine, "alice@x.io", [lm], description="Agent chat")
-    assert credits > 0
+    cents = meter_llm_run(engine, "alice@x.io", [lm], description="Agent chat")
+    assert cents > 0
     rows = _ledger_rows(engine)
     assert len(rows) == 1
     row = rows[0]
     assert row.kind == "run"
     assert row.description == "Agent chat"
     assert row.model == "openrouter/test/unpriced"
-    assert row.delta_credits == -credits
+    assert row.delta_cents == -cents
     assert row.input_tokens == 100_000
     assert row.output_tokens == 40_000
     with Session(engine) as session:
         customer = session.get(BillingCustomerModel, "alice@x.io")
         assert customer is not None
-        assert int(customer.credit_balance) == 100_000 - credits
+        assert int(customer.balance_cents) == 100_000 - cents
 
 
 def test_meter_llm_run_rekeys_auto_route_to_served_model(engine: object) -> None:
@@ -144,29 +144,29 @@ def test_meter_llm_run_skips_without_engine_or_username(engine: object) -> None:
     assert _ledger_rows(engine) == []
 
 
-def test_estimate_run_credits_prices_without_debiting(engine: object) -> None:
+def test_estimate_run_cents_prices_without_debiting(engine: object) -> None:
     """The in-flight estimate matches what a debit would charge and writes nothing."""
     _fund(engine, "alice@x.io")
     history = [{"usage": {"prompt_tokens": 100_000, "completion_tokens": 40_000}}]
-    estimate = estimate_run_credits([_FakeLm(history)])
+    estimate = estimate_run_cents([_FakeLm(history)])
     assert estimate > 0
     assert _ledger_rows(engine) == []
     assert estimate == meter_llm_run(engine, "alice@x.io", [_FakeLm(history)], description="x")
 
 
-def test_estimate_run_credits_applies_byok_platform_fee() -> None:
-    """The live credit watch prices BYOK usage at the same reduced source rate."""
+def test_estimate_run_cents_applies_byok_platform_fee() -> None:
+    """The live balance watch prices BYOK usage at the same reduced source rate."""
     history = [{"usage": {"prompt_tokens": 100_000, "completion_tokens": 40_000}}]
-    managed = estimate_run_credits([_FakeLm(history)], "managed")
-    byok = estimate_run_credits([_FakeLm(history)], "byok")
+    managed = estimate_run_cents([_FakeLm(history)], "managed")
+    byok = estimate_run_cents([_FakeLm(history)], "byok")
     assert 0 < byok < managed
 
 
-def test_estimate_run_credits_handles_empty_and_untracked_lms() -> None:
+def test_estimate_run_cents_handles_empty_and_untracked_lms() -> None:
     """No LMs or no tracked usage estimates to zero instead of raising."""
-    assert estimate_run_credits([]) == 0
-    assert estimate_run_credits([None]) == 0
-    assert estimate_run_credits([_FakeLm([{"response": "hi"}])]) == 0
+    assert estimate_run_cents([]) == 0
+    assert estimate_run_cents([None]) == 0
+    assert estimate_run_cents([_FakeLm([{"response": "hi"}])]) == 0
 
 
 def test_meter_llm_run_never_raises_on_billing_failure(engine: object) -> None:
@@ -178,15 +178,18 @@ def test_meter_llm_run_never_raises_on_billing_failure(engine: object) -> None:
 def test_meter_llm_usage_debits_a_token_breakdown(engine: object) -> None:
     """A per-model breakdown (a scorer dry run's ``llm()`` calls) debits like a run, keyed by the bare model."""
     _fund(engine, "alice@x.io")
-    credits = meter_llm_usage(
-        engine, "alice@x.io", {"litellm_proxy/openrouter/test/unpriced": (100_000, 40_000)}, description="Scorer dry run"
+    cents = meter_llm_usage(
+        engine,
+        "alice@x.io",
+        {"litellm_proxy/openrouter/test/unpriced": (100_000, 40_000)},
+        description="Scorer dry run",
     )
-    assert credits > 0
+    assert cents > 0
     [row] = _ledger_rows(engine)
     assert row.kind == "run"
     assert row.description == "Scorer dry run"
     assert row.model == "openrouter/test/unpriced"
-    assert row.delta_credits == -credits
+    assert row.delta_cents == -cents
     assert row.input_tokens == 100_000
     assert row.output_tokens == 40_000
 
@@ -200,8 +203,8 @@ def test_meter_llm_usage_skips_empty_or_unbound(engine: object) -> None:
 
 
 def _fallback_cost(model: str, input_tokens: int, output_tokens: int) -> int:
-    """Credits a single-model usage costs at the conservative fallback rates."""
-    return credits_for_usage(fallback_priced_usages([ModelUsage(model, input_tokens, output_tokens)]))
+    """Cents a single-model usage costs at the conservative fallback rates."""
+    return cents_for_usage(fallback_priced_usages([ModelUsage(model, input_tokens, output_tokens)]))
 
 
 def test_meter_llm_run_charges_fallback_price_when_harvest_fails(
@@ -211,10 +214,10 @@ def test_meter_llm_run_charges_fallback_price_when_harvest_fails(
     _fund(engine, "alice@x.io")
     lm = _FakeLm([{"usage": {"prompt_tokens": 100_000, "completion_tokens": 40_000}}])
     with patch("core.billing.metering._harvest_usages", side_effect=RuntimeError("boom")):
-        credits = meter_llm_run(engine, "alice@x.io", [lm], description="Agent chat")
-    assert credits == _fallback_cost("openrouter/test/unpriced", 100_000, 40_000)
+        cents = meter_llm_run(engine, "alice@x.io", [lm], description="Agent chat")
+    assert cents == _fallback_cost("openrouter/test/unpriced", 100_000, 40_000)
     (row,) = _ledger_rows(engine)
-    assert row.delta_credits == -credits
+    assert row.delta_cents == -cents
     assert (row.input_tokens, row.output_tokens) == (100_000, 40_000)
     assert any(r.levelname == "ERROR" and "fallback price" in r.getMessage() for r in caplog.records)
 
@@ -232,8 +235,8 @@ def test_meter_llm_usage_charges_fallback_price_when_debit_fails(engine: object)
         return real_debit(self, *args, **kwargs)
 
     with patch.object(StripeBillingService, "debit_run", flaky):
-        credits = meter_llm_usage(engine, "alice@x.io", {"test/unpriced": (100_000, 40_000)}, description="Scorer")
+        cents = meter_llm_usage(engine, "alice@x.io", {"test/unpriced": (100_000, 40_000)}, description="Scorer")
     assert len(calls) == 2
-    assert credits == _fallback_cost("test/unpriced", 100_000, 40_000)
+    assert cents == _fallback_cost("test/unpriced", 100_000, 40_000)
     (row,) = _ledger_rows(engine)
-    assert row.delta_credits == -credits
+    assert row.delta_cents == -cents

@@ -19,11 +19,11 @@ from typing import Annotated, Any
 import dspy
 from dspy.streaming import StreamListener, StreamResponse
 from fastapi import APIRouter, Depends, Header
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from starlette.responses import StreamingResponse
 
 from ...billing import ProviderKeyVault, resolve_byok_model_config
-from ...billing.budget_amounts import MAX_CREDITS
+from ...billing.budget_amounts import MAX_CENTS
 from ...billing.metering import meter_llm_run
 from ...config import settings
 from ...constants import (
@@ -52,7 +52,7 @@ from ..response_limits import AGENT_MAX_INSTRUCTIONS, AGENT_MAX_TEXT, truncate_t
 from ..sharing_access import ShareRole
 from ._helpers import (
     _protected_api_runtime,
-    enforce_llm_credits,
+    enforce_llm_balance,
     load_job_for_user,
     load_pair_program,
     load_pair_program_metadata,
@@ -173,12 +173,13 @@ class ServeChatRequest(BaseModel):
         default=None,
         description="Optional model override. Uses the run's model if omitted.",
     )
-    max_cost_credits: int | None = Field(
+    max_cost_cents: int | None = Field(
+        validation_alias=AliasChoices("max_cost_cents", "max_cost_credits"),
         default=None,
         ge=1,
-        le=MAX_CREDITS,
+        le=MAX_CENTS,
         strict=True,
-        description="Optional cap on credits for this one chat turn; omitted, the turn draws on the account balance.",
+        description="Optional cap in cents for this one chat turn; omitted, the turn draws on the account balance.",
     )
 
 
@@ -213,11 +214,11 @@ def _cap_serve_outputs(outputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _interaction_authority(max_cost_credits: int | None, idempotency_key: str | None) -> tuple[int | None, str]:
+def _interaction_authority(max_cost_cents: int | None, idempotency_key: str | None) -> tuple[int | None, str]:
     """Require a replay key; a one-request maximum stays optional.
 
     Args:
-        max_cost_credits: Caller-selected maximum credits, or ``None`` to draw on the account.
+        max_cost_cents: Caller-selected maximum in cents, or ``None`` to draw on the account.
         idempotency_key: Transport replay identity.
 
     Returns:
@@ -229,7 +230,7 @@ def _interaction_authority(max_cost_credits: int | None, idempotency_key: str | 
     key = (idempotency_key or "").strip()
     if not key:
         raise DomainError("budget.idempotency_required", status=400)
-    return max_cost_credits, key
+    return max_cost_cents, key
 
 
 def _protected_payload(
@@ -255,16 +256,14 @@ def _protected_payload(
     """
     stored = job_data.get("payload") if isinstance(job_data.get("payload"), dict) else {}
     effective_overview = dict(overview)
-    effective_overview[PAYLOAD_OVERVIEW_SIGNATURE_CODE] = (
-        effective_overview.get(PAYLOAD_OVERVIEW_SIGNATURE_CODE) or stored.get("signature_code")
-    )
+    effective_overview[PAYLOAD_OVERVIEW_SIGNATURE_CODE] = effective_overview.get(
+        PAYLOAD_OVERVIEW_SIGNATURE_CODE
+    ) or stored.get("signature_code")
     tool_source = stored.get("tool_source") or effective_overview.get(PAYLOAD_OVERVIEW_TOOL_SOURCE)
     payload = {
         "model_config": model_config.model_dump(mode="json"),
         "token_source": model_config.token_source or TOKEN_SOURCE_MANAGED,
-        "program_artifact": (
-            artifact.model_dump(mode="json") if hasattr(artifact, "model_dump") else artifact
-        ),
+        "program_artifact": (artifact.model_dump(mode="json") if hasattr(artifact, "model_dump") else artifact),
         "payload_overview": effective_overview,
         "inputs": inputs,
         "_interaction": interaction,
@@ -283,7 +282,7 @@ def _protected_result(
     model_config: ModelConfig,
     inputs: dict[str, Any],
     interaction: dict[str, Any],
-    max_cost_credits: int | None,
+    max_cost_cents: int | None,
     idempotency_key: str,
     current_user: AuthenticatedUser,
     on_event: Callable[[dict[str, Any]], None] | None = None,
@@ -299,7 +298,7 @@ def _protected_result(
         model_config: Requested task model.
         inputs: Validated program inputs.
         interaction: Guest operation descriptor.
-        max_cost_credits: Optional request maximum accepted by the caller.
+        max_cost_cents: Optional request maximum accepted by the caller.
         idempotency_key: Stable request replay identity.
         current_user: Authenticated caller who funds this interaction.
         on_event: Optional live event receiver.
@@ -315,7 +314,7 @@ def _protected_result(
     result = run_protected_interaction(
         _protected_payload(job_data, artifact, overview, model_config, inputs, interaction),
         kind=str(interaction["kind"]),
-        max_cost_credits=max_cost_credits,
+        max_cost_cents=max_cost_cents,
         idempotency_key=idempotency_key,
         user=current_user,
         job_store=job_store,
@@ -357,7 +356,7 @@ def _protected_program_call(
     Returns:
         Completed isolated serve response.
     """
-    maximum, key = _interaction_authority(req.max_cost_credits, idempotency_key)
+    maximum, key = _interaction_authority(req.max_cost_cents, idempotency_key)
     if pair_index is None:
         artifact, overview, model_name = load_program_metadata(job_store, optimization_id, current_user)
         model_settings = overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
@@ -370,9 +369,7 @@ def _protected_program_call(
         else:
             raise DomainError("serve.no_model_config", status=400)
     else:
-        artifact, pair, overview = load_pair_program_metadata(
-            job_store, optimization_id, pair_index, current_user
-        )
+        artifact, pair, overview = load_pair_program_metadata(job_store, optimization_id, pair_index, current_user)
         pair_model = pair.get("generation_model", "") if isinstance(pair, dict) else pair.generation_model
         model_config = _pair_model_config(pair_model, overview, req.model_config_override)
     input_fields, output_fields, _instructions, _demo_count = _artifact_prompt_fields(artifact)
@@ -407,16 +404,14 @@ def _protected_program_call(
             "output_fields": output_fields,
             "stream": stream,
         },
-        max_cost_credits=maximum,
+        max_cost_cents=maximum,
         idempotency_key=key,
         current_user=current_user,
         on_event=on_event,
     )
 
 
-async def _protected_sse(
-    run: Callable[[Callable[[dict[str, Any]], None]], dict[str, Any]], *, final_event: str
-):
+async def _protected_sse(run: Callable[[Callable[[dict[str, Any]], None]], dict[str, Any]], *, final_event: str):
     """Bridge blocking sandbox execution and tool approvals into an SSE source.
 
     Args:
@@ -942,7 +937,7 @@ def create_serve_router(*, job_store) -> APIRouter:
 
         Raises:
             DomainError: 400 (bad inputs / no model), 402 (caller has no
-                spendable credits), 404 (unknown or inaccessible), 409 (not
+                spendable balance), 404 (unknown or inaccessible), 409 (not
                 in a serveable state).
         """
         job_data = load_job_for_user(job_store, optimization_id, current_user)
@@ -992,7 +987,7 @@ def create_serve_router(*, job_store) -> APIRouter:
             )
         filtered_inputs = {f: req.inputs[f] for f in input_fields}
 
-        enforce_llm_credits(job_store, current_user.username)
+        enforce_llm_balance(job_store, current_user.username)
         model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
         lm = build_language_model(model_config)
 
@@ -1069,7 +1064,7 @@ def create_serve_router(*, job_store) -> APIRouter:
                 raise
             job_data = None
         if job_data is not None and _protected_api_runtime(job_data) is not None:
-            _interaction_authority(req.max_cost_credits, idempotency_key)
+            _interaction_authority(req.max_cost_cents, idempotency_key)
             source = _protected_sse(
                 lambda emit: _protected_program_call(
                     job_store=job_store,
@@ -1134,7 +1129,7 @@ def create_serve_router(*, job_store) -> APIRouter:
             )
         filtered_inputs = {f: req.inputs[f] for f in input_fields}
 
-        await asyncio.to_thread(enforce_llm_credits, job_store, current_user.username)
+        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
         model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
         lm = build_language_model(model_config)
         model_used = model_config.normalized_identifier()
@@ -1238,7 +1233,7 @@ def create_serve_router(*, job_store) -> APIRouter:
 
         Raises:
             DomainError: 400 (bad inputs), 402 (caller has no spendable
-                credits), 404 (unknown / inaccessible), 409 (not finished
+                balance), 404 (unknown / inaccessible), 409 (not finished
                 or pair failed).
         """
         job_data = load_job_for_user(job_store, optimization_id, current_user)
@@ -1273,7 +1268,7 @@ def create_serve_router(*, job_store) -> APIRouter:
             )
         filtered_inputs = {f: req.inputs[f] for f in input_fields}
 
-        enforce_llm_credits(job_store, current_user.username)
+        enforce_llm_balance(job_store, current_user.username)
         model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
         lm = build_language_model(model_config)
 
@@ -1334,7 +1329,7 @@ def create_serve_router(*, job_store) -> APIRouter:
 
         Raises:
             DomainError: 400 (bad inputs), 402 (caller has no spendable
-                credits), 404 (unknown / inaccessible), 409 (not finished
+                balance), 404 (unknown / inaccessible), 409 (not finished
                 or pair failed).
         """
         try:
@@ -1344,7 +1339,7 @@ def create_serve_router(*, job_store) -> APIRouter:
                 raise
             job_data = None
         if job_data is not None and _protected_api_runtime(job_data) is not None:
-            _interaction_authority(req.max_cost_credits, idempotency_key)
+            _interaction_authority(req.max_cost_cents, idempotency_key)
             source = _protected_sse(
                 lambda emit: _protected_program_call(
                     job_store=job_store,
@@ -1391,7 +1386,7 @@ def create_serve_router(*, job_store) -> APIRouter:
             )
         filtered_inputs = {f: req.inputs[f] for f in input_fields}
 
-        await asyncio.to_thread(enforce_llm_credits, job_store, current_user.username)
+        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
         model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
         lm = build_language_model(model_config)
         model_used = model_config.normalized_identifier()
@@ -1458,7 +1453,7 @@ def create_serve_router(*, job_store) -> APIRouter:
         Raises:
             DomainError: 404 (unknown/inaccessible), 409 (not a success react
                 run, or not served from a live-MCP source), 400 (no model),
-                402 (caller has no spendable credits).
+                402 (caller has no spendable balance).
         """
         try:
             job_data = await asyncio.to_thread(load_job_for_user, job_store, optimization_id, current_user)
@@ -1467,7 +1462,7 @@ def create_serve_router(*, job_store) -> APIRouter:
                 raise
             job_data = None
         if job_data is not None and _protected_api_runtime(job_data) is not None:
-            maximum, key = _interaction_authority(req.max_cost_credits, idempotency_key)
+            maximum, key = _interaction_authority(req.max_cost_cents, idempotency_key)
             artifact, overview, model_name = await asyncio.to_thread(
                 load_program_metadata, job_store, optimization_id, current_user
             )
@@ -1508,7 +1503,7 @@ def create_serve_router(*, job_store) -> APIRouter:
                         "output_fields": output_fields,
                         "stream": True,
                     },
-                    max_cost_credits=maximum,
+                    max_cost_cents=maximum,
                     idempotency_key=key,
                     current_user=current_user,
                     on_event=emit,
@@ -1543,7 +1538,7 @@ def create_serve_router(*, job_store) -> APIRouter:
             else:
                 raise DomainError("serve.no_model_config", status=400)
 
-        await asyncio.to_thread(enforce_llm_credits, job_store, current_user.username)
+        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
         model_config = _resolve_inference_model_config(job_store, current_user.username, model_config)
         lm = build_language_model(model_config)
         tool_source = react_overlay.tool_source or {}

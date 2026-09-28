@@ -382,7 +382,7 @@ export function useWizardDraftController({
         const record = saver.current;
         if (!record) return {};
         return {
-          budgetTotalCredits: record[record.activeRecipe]?.data.maxCostCredits ?? null,
+          budgetTotalCents: record[record.activeRecipe]?.data.maxCostCents ?? null,
           ...readBudgetDraft(record),
         };
       },

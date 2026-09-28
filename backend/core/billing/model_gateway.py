@@ -306,9 +306,7 @@ class ModelGateway:
                 except BudgetReached:
                     self._error(402, "budget_reached", "The remaining budget cannot cover the next operation.")
                 except BudgetInsufficientError:
-                    self._error(
-                        402, "budget_insufficient", "Increase the total budget or available credits to continue."
-                    )
+                    self._error(402, "budget_insufficient", "Increase the total budget or add funds to continue.")
                 except (UsagePendingError, BudgetError):
                     self._error(424, "usage_pending", "Previous work must settle before another attempt is admitted.")
                 except (UnpricedOperationError, ValueError, TypeError) as error:
@@ -385,8 +383,8 @@ class ModelGateway:
             str(bound.get("role")),
             str(bound.get("model")),
             str(bound.get("price_binding")),
-            str(bound.get("max_credits")),
-            str(bound.get("max_wallet_credits")),
+            str(bound.get("max_cents")),
+            str(bound.get("max_wallet_cents")),
         )
 
     def _observe_model_quote(
@@ -482,8 +480,8 @@ class ModelGateway:
         if execution_bounds:
             execution = {
                 "model_calls": execution_bounds,
-                "max_credits": str(max(Decimal(item["max_credits"]) for item in execution_bounds)),
-                "max_wallet_credits": str(max(Decimal(item["max_wallet_credits"]) for item in execution_bounds)),
+                "max_cents": str(max(Decimal(item["max_cents"]) for item in execution_bounds)),
+                "max_wallet_cents": str(max(Decimal(item["max_wallet_cents"]) for item in execution_bounds)),
             }
         return build_recovery_plan(
             manifest,
@@ -612,21 +610,21 @@ class ModelGateway:
         """Expose only the owning run's state and mark replaced capabilities as fenced."""
         snapshot = asdict(self.runtime.service.get(self.runtime.budget_id, self.runtime.username))
         snapshot.pop("username", None)
-        snapshot.pop("account_available_credits", None)
+        snapshot.pop("account_available_cents", None)
         if snapshot["generation"] != self.runtime.generation:
             snapshot["blocked_reason"] = "generation_fenced"
         return snapshot
 
-    def cost_ceiling_credits(self) -> int:
-        """Return the credits a guest may plan its own spending against.
+    def cost_ceiling_cents(self) -> int:
+        """Return the cents a guest may plan its own spending against.
 
         Returns:
             The budget's total, or for a budget without a limit whatever the
-            account can still fund; never below one credit so the guest's
+            account can still fund; never below one cent so the guest's
             ceiling stays a valid request field.
         """
         snapshot = self.runtime.service.get(self.runtime.budget_id, self.runtime.username)
-        ceiling = snapshot.available_credits if snapshot.uncapped else snapshot.total_credits
+        ceiling = snapshot.available_cents if snapshot.uncapped else snapshot.total_cents
         return max(1, int(ceiling))
 
     def protect_payload(

@@ -73,7 +73,7 @@ test("the concepts guide matches the current optimization surface", () => {
     "pxn_parents",
     "pxn_proposals",
     "target_score",
-    "max_cost_credits",
+    "max_cost_cents",
     "token_source",
     "temperature",
     "max_tokens",

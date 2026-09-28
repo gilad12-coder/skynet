@@ -84,8 +84,8 @@ function deriveSessionName(config: TaggerConfig): string {
 export interface AutotagEstimate {
   rows: number;
   model: string;
-  credits_low: number;
-  credits_high: number;
+  cents_low: number;
+  cents_high: number;
 }
 
 /**
@@ -166,7 +166,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
     status: string;
     total: number;
     done: number;
-    credits_spent: number;
+    cents_spent: number;
     live: boolean;
   } | null>(null);
 
@@ -981,7 +981,7 @@ export function useTagger(initialSession?: TaggerSessionDetail | null) {
     if (last.flaggedPass) setPhase("complete");
   }, [effectiveConfig]);
 
-  /** Fetch the credit estimate for tagging everything that is still unlabeled. */
+  /** Fetch the cost estimate for tagging everything that is still unlabeled. */
   const fetchEstimate = useCallback(async () => {
     if (!sessionId) return;
     try {

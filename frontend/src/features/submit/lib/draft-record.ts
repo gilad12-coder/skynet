@@ -66,7 +66,7 @@ export interface WizardDraftData {
   pxnParents?: string;
   pxnProposals?: string;
   shuffle: boolean;
-  maxCostCredits: number | null;
+  maxCostCents: number | null;
 }
 
 /** The Anything wizard's snapshot. Evidence, dry-run state and secrets stay out. */
@@ -109,7 +109,7 @@ export interface AnythingDraftData {
   maxIterations: number | "";
   stopAtScore: string;
   reflectionModel: ModelConfig;
-  maxCostCredits: number | null;
+  maxCostCents: number | null;
   setupSpent: number;
 }
 

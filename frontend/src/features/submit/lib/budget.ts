@@ -12,7 +12,7 @@ export interface BudgetLedger {
   reserved: number;
 }
 
-/** Credits still available under the total, or null when no total is set. */
+/** Cents still available under the total, or null when no total is set. */
 export function availableBudget(ledger: BudgetLedger): number | null {
   if (ledger.total == null) return null;
   return Math.max(0, ledger.total - ledger.setupSpent - ledger.runSpent - ledger.reserved);

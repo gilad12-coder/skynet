@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, Decimal, InvalidOperation
 from typing import Any, Literal
 
-from .pricing import CREDIT_USD_VALUE, PLATFORM_FEE_FRACTION, usage_markup
+from .pricing import CENT_USD_VALUE, PLATFORM_FEE_FRACTION, usage_markup
 
-_CREDIT_QUANTUM = Decimal("0.000000001")
+_CENT_QUANTUM = Decimal("0.000000001")
 _BYOK_FEE = Decimal(str(PLATFORM_FEE_FRACTION))
 
 
@@ -48,7 +48,7 @@ def json_fingerprint(value: Any) -> str:
 
 
 @dataclass(frozen=True)
-class CreditCharge:
+class OperationCharge:
     """Separate the approved spending scope from the amount payable to Skynet."""
 
     total: Decimal
@@ -60,13 +60,13 @@ class ChargePolicy:
     """Retain the approved conversion policy with each operation's price snapshot."""
 
     kind: Literal["managed_model", "byok_model", "sandbox"]
-    credit_usd: Decimal = Decimal(str(CREDIT_USD_VALUE))
+    cent_usd: Decimal = Decimal(str(CENT_USD_VALUE))
     # Read at construction, not import, so a policy snapshots the markup in force when it was quoted.
     model_markup: Decimal = field(default_factory=lambda: Decimal(str(usage_markup())))
     byok_fee_fraction: Decimal = _BYOK_FEE
 
-    def convert(self, provider_usd: Decimal) -> CreditCharge:
-        """Convert measured or maximum USD consistently without per-call credit rounding.
+    def convert(self, provider_usd: Decimal) -> OperationCharge:
+        """Convert measured or maximum USD consistently without per-call cent rounding.
 
         Args:
             provider_usd: Applicable raw provider charge, including billable categories.
@@ -74,15 +74,15 @@ class ChargePolicy:
         Returns:
             Exact scope and wallet amounts rounded only to ledger precision.
         """
-        raw = exact_nonnegative(provider_usd) / self.credit_usd
+        raw = exact_nonnegative(provider_usd) / self.cent_usd
         if self.kind == "byok_model":
             # BYOK pays only the platform fee on the at-cost model price; the markup is for platform-paid spend.
             wallet = total = raw * self.byok_fee_fraction
         else:
             wallet = total = raw * self.model_markup
-        return CreditCharge(
-            total.quantize(_CREDIT_QUANTUM, rounding=ROUND_CEILING),
-            wallet.quantize(_CREDIT_QUANTUM, rounding=ROUND_CEILING),
+        return OperationCharge(
+            total.quantize(_CENT_QUANTUM, rounding=ROUND_CEILING),
+            wallet.quantize(_CENT_QUANTUM, rounding=ROUND_CEILING),
         )
 
     def snapshot(self) -> dict[str, Any]:
@@ -90,7 +90,7 @@ class ChargePolicy:
         return {
             "version": "skynet-operation-pricing-v1",
             "kind": self.kind,
-            "credit_usd": str(self.credit_usd),
+            "cent_usd": str(self.cent_usd),
             "model_markup": str(self.model_markup),
             "byok_fee_fraction": str(self.byok_fee_fraction),
         }
@@ -101,7 +101,7 @@ class OperationQuote:
     """Bind an enforceable physical request to its applicable maximum charges."""
 
     request_fingerprint: str
-    maximum: CreditCharge
+    maximum: OperationCharge
     price_snapshot: Mapping[str, Any]
 
 

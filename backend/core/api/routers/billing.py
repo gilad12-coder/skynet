@@ -1,7 +1,7 @@
-"""Managed-credit billing routes: wallet, usage, Stripe records, and checkout.
+"""Prepaid-balance billing routes: wallet, usage, Stripe records, and checkout.
 
-Backs the in-app wallet and the add-credits/paywall page — pay-as-you-go
-prepaid credits are the only plan.
+Backs the in-app wallet and the add-funds/paywall page — a pay-as-you-go
+prepaid balance is the only plan.
 Authenticated routes resolve the caller via the shared session-JWT/PAT
 dependency and key every operation on ``user.username`` (the lowercased email).
 The webhook route is deliberately unauthenticated — Stripe can't present a
@@ -24,16 +24,16 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 from ...billing import ProviderKeyVault, StripeBillingService, openrouter_oauth
 from ...billing.byok_vault import ProviderKeyView, ResolvedConnection
 from ...billing.pricing import PLATFORM_FEE_FRACTION, usage_markup
 from ...billing.service import (
-    CREDIT_PURCHASE_FEE_FIXED_CENTS,
-    CREDIT_PURCHASE_FEE_RATE,
-    CUSTOM_CREDITS_MAX,
-    CUSTOM_CREDITS_MIN,
+    CUSTOM_CENTS_MAX,
+    CUSTOM_CENTS_MIN,
+    PURCHASE_FEE_FIXED_CENTS,
+    PURCHASE_FEE_RATE,
     BillingProfileSnapshot,
 )
 from ...config import settings
@@ -247,20 +247,20 @@ def _byok_catalog_for_user(vault: ProviderKeyVault, username: str) -> ModelCatal
 
 
 class FreeGrantResponse(BaseModel):
-    """The account's one-time free credit grant."""
+    """The account's one-time free grant."""
 
-    credits_remaining: int = Field(description="Credits left in the grant.")
-    credits_total: int = Field(description="Full grant size (500).")
+    cents_remaining: int = Field(description="Cents left in the grant.")
+    cents_total: int = Field(description="Full grant size (500).")
 
 
 class UsageEntryResponse(BaseModel):
-    """One row of the credit usage ledger."""
+    """One row of the wallet usage ledger."""
 
     id: str = Field(description="Stable row id.")
     at: str = Field(description="ISO-8601 instant the entry was recorded.")
     label: str = Field(description="Human label for the row (a run name, 'Top-up', etc.).")
     model: str | None = Field(default=None, description="Model id for a run row, else null.")
-    credits: int = Field(description="Signed credit delta: negative for a spend.")
+    cents: int = Field(description="Signed delta in cents: negative for a spend.")
     kind: str = Field(description="Entry kind: 'run', 'topup', or 'grant'.")
 
 
@@ -281,7 +281,7 @@ class PricingTermsResponse(BaseModel):
     byok_fee_fraction: float = Field(
         description="Platform fee on a BYOK run, as a fraction of its at-cost model price."
     )
-    purchase_fee_rate: float = Field(description="Top-up service fee, as a fraction of the credit value.")
+    purchase_fee_rate: float = Field(description="Top-up service fee, as a fraction of the top-up amount.")
     purchase_fee_fixed_cents: int = Field(description="Flat top-up service fee, in cents.")
 
 
@@ -294,15 +294,15 @@ def _pricing_terms() -> PricingTermsResponse:
     return PricingTermsResponse(
         usage_markup=usage_markup(),
         byok_fee_fraction=PLATFORM_FEE_FRACTION,
-        purchase_fee_rate=CREDIT_PURCHASE_FEE_RATE,
-        purchase_fee_fixed_cents=CREDIT_PURCHASE_FEE_FIXED_CENTS,
+        purchase_fee_rate=PURCHASE_FEE_RATE,
+        purchase_fee_fixed_cents=PURCHASE_FEE_FIXED_CENTS,
     )
 
 
 class WalletResponse(BaseModel):
     """The caller's wallet: purchased balance, free grant, recent ledger."""
 
-    paid_balance_credits: int = Field(description="Purchased credit balance, on top of the free grant.")
+    paid_balance_cents: int = Field(description="Purchased balance in cents, on top of the free grant.")
     free_grant: FreeGrantResponse
     usage: list[UsageEntryResponse] = Field(default_factory=list, description="Most-recent-first ledger rows.")
     plan: PlanResponse = Field(default_factory=lambda: PlanResponse(plan="free"))
@@ -310,17 +310,17 @@ class WalletResponse(BaseModel):
 
 
 class UsageDayResponse(BaseModel):
-    """One day's billed run spend, in credits."""
+    """One day's billed run spend, in cents."""
 
     date: str = Field(description="Calendar day (YYYY-MM-DD, UTC).")
-    billed_credits: int = Field(description="Gross run credits billed that day.")
+    billed_cents: int = Field(description="Gross run spend billed that day, in cents.")
 
 
 class UsageModelResponse(BaseModel):
     """One model's share of run spend over the window."""
 
     model: str | None = Field(default=None, description="Model id, or null for runs without one.")
-    credits: int = Field(description="Gross run credits billed to this model.")
+    cents: int = Field(description="Gross run spend billed to this model, in cents.")
     runs: int = Field(description="Billed runs attributed to this model.")
     input_tokens: int = Field(default=0, description="Measured input tokens behind this model's billed runs.")
     output_tokens: int = Field(default=0, description="Measured output tokens behind this model's billed runs.")
@@ -331,11 +331,11 @@ class UsageResponse(BaseModel):
 
     start: str = Field(description="ISO-8601 inclusive window start.")
     end: str = Field(description="ISO-8601 inclusive window end.")
-    billed_credits: int = Field(description="Gross run credits billed across the window.")
+    billed_cents: int = Field(description="Gross run spend billed across the window, in cents.")
     runs: int = Field(description="Billed runs across the window.")
     by_day: list[UsageDayResponse] = Field(default_factory=list, description="Per-day spend series, ascending by date.")
     by_model: list[UsageModelResponse] = Field(
-        default_factory=list, description="Per-model spend series, descending by credits."
+        default_factory=list, description="Per-model spend series, descending by spend."
     )
     entries: list[UsageEntryResponse] = Field(
         default_factory=list, description="Most-recent-first raw ledger rows in the window."
@@ -426,7 +426,7 @@ class BillingTransactionResponse(BaseModel):
     amount: int
     currency: str
     status: str
-    credits: int | None = None
+    cents: int | None = None
     pack_id: str | None = None
     document_url: str | None = None
 
@@ -436,16 +436,18 @@ class BillingTransactionsResponse(BaseModel):
     entries: list[BillingTransactionResponse] = Field(default_factory=list)
 
 
-# Request to start a credit checkout: either a named pack (starter/plus/pro)
-# or a custom credit amount. Exactly one of the two selects the purchase;
-# ``credits`` wins when both are sent.
+# Request to start a top-up checkout: either a named pack (starter/plus/pro)
+# or a custom amount in cents. Exactly one of the two selects the purchase;
+# ``cents`` wins when both are sent. A page loaded before the credits-to-cents
+# rename still sends ``credits``, so that name is accepted too.
 class CheckoutRequest(BaseModel):
-    pack_id: str | None = Field(default=None, description="Credit pack to buy: 'starter', 'plus', or 'pro'.")
-    credits: int | None = Field(
+    pack_id: str | None = Field(default=None, description="Top-up pack to buy: 'starter', 'plus', or 'pro'.")
+    cents: int | None = Field(
         default=None,
-        ge=CUSTOM_CREDITS_MIN,
-        le=CUSTOM_CREDITS_MAX,
-        description="Custom credit amount to buy instead of a pack (1 credit = $0.01).",
+        ge=CUSTOM_CENTS_MIN,
+        le=CUSTOM_CENTS_MAX,
+        validation_alias=AliasChoices("cents", "credits"),
+        description="Custom top-up amount in US cents, instead of a pack.",
     )
 
 
@@ -511,7 +513,7 @@ class SaveProviderKeyRequest(BaseModel):
 
 
 def create_billing_router(*, job_store) -> APIRouter:
-    """Build the managed-credit billing router.
+    """Build the prepaid-balance billing router.
 
     Args:
         job_store: Job-store instance whose ORM engine backs the billing tables.
@@ -528,7 +530,7 @@ def create_billing_router(*, job_store) -> APIRouter:
         "/billing/wallet",
         response_model=WalletResponse,
         operation_id="get_wallet_for_agent",
-        summary="Return the caller's credit wallet",
+        summary="Return the caller's wallet",
         tags=["agent"],
     )
     def get_wallet(user: AuthenticatedUserDep) -> WalletResponse:
@@ -542,10 +544,10 @@ def create_billing_router(*, job_store) -> APIRouter:
         """
         snapshot = service.get_wallet(user.username)
         return WalletResponse(
-            paid_balance_credits=snapshot.paid_balance_credits,
+            paid_balance_cents=snapshot.paid_balance_cents,
             free_grant=FreeGrantResponse(
-                credits_remaining=snapshot.free_grant_remaining,
-                credits_total=snapshot.free_grant_total,
+                cents_remaining=snapshot.free_grant_remaining,
+                cents_total=snapshot.free_grant_total,
             ),
             usage=[
                 UsageEntryResponse(
@@ -553,7 +555,7 @@ def create_billing_router(*, job_store) -> APIRouter:
                     at=row.at,
                     label=row.label,
                     model=row.model,
-                    credits=row.credits,
+                    cents=row.cents,
                     kind=row.kind,
                 )
                 for row in snapshot.usage
@@ -599,13 +601,13 @@ def create_billing_router(*, job_store) -> APIRouter:
         return UsageResponse(
             start=snapshot.start,
             end=snapshot.end,
-            billed_credits=snapshot.billed_credits,
+            billed_cents=snapshot.billed_cents,
             runs=snapshot.runs,
-            by_day=[UsageDayResponse(date=day.date, billed_credits=day.billed_credits) for day in snapshot.by_day],
+            by_day=[UsageDayResponse(date=day.date, billed_cents=day.billed_cents) for day in snapshot.by_day],
             by_model=[
                 UsageModelResponse(
                     model=row.model,
-                    credits=row.credits,
+                    cents=row.cents,
                     runs=row.runs,
                     input_tokens=row.input_tokens,
                     output_tokens=row.output_tokens,
@@ -618,7 +620,7 @@ def create_billing_router(*, job_store) -> APIRouter:
                     at=row.at,
                     label=row.label,
                     model=row.model,
-                    credits=row.credits,
+                    cents=row.cents,
                     kind=row.kind,
                 )
                 for row in snapshot.entries
@@ -699,7 +701,7 @@ def create_billing_router(*, job_store) -> APIRouter:
         start: str | None = None,
         end: str | None = None,
     ) -> BillingTransactionsResponse:
-        """Return completed credit purchases over an optional date window.
+        """Return completed top-up purchases over an optional date window.
 
         Args:
             user: Authenticated caller whose Stripe purchases are read.
@@ -722,7 +724,7 @@ def create_billing_router(*, job_store) -> APIRouter:
                     amount=entry.amount,
                     currency=entry.currency,
                     status=entry.status,
-                    credits=entry.credits,
+                    cents=entry.cents,
                     pack_id=entry.pack_id,
                     document_url=entry.document_url,
                 )
@@ -733,23 +735,23 @@ def create_billing_router(*, job_store) -> APIRouter:
     @router.post(
         "/billing/checkout",
         response_model=CheckoutSessionResponse,
-        summary="Start a Stripe Checkout session for a credit pack or custom amount",
+        summary="Start a Stripe Checkout session for a top-up pack or custom amount",
     )
     def create_checkout(body: CheckoutRequest, user: AuthenticatedUserDep) -> CheckoutSessionResponse:
-        """Create a one-time Checkout session for a credit pack or custom amount.
+        """Create a one-time Checkout session for a top-up pack or custom amount.
 
         Args:
-            body: The pack — or custom credit amount — to buy.
-            user: Authenticated buyer; credits land on their account via webhook.
+            body: The pack — or custom amount in cents — to buy.
+            user: Authenticated buyer; the top-up lands on their balance via webhook.
 
         Returns:
             The hosted Checkout URL to redirect the buyer to.
 
         Raises:
-            DomainError: 400 when neither a pack nor a credit amount is given.
+            DomainError: 400 when neither a pack nor a custom amount is given.
         """
-        if body.credits is not None:
-            url = service.create_custom_checkout(user.username, body.credits)
+        if body.cents is not None:
+            url = service.create_custom_checkout(user.username, body.cents)
         elif body.pack_id:
             url = service.create_pack_checkout(user.username, body.pack_id)
         else:

@@ -38,7 +38,7 @@ PAYLOAD = {
     "scorer": {"kind": "python", "metric_code": "def score(candidate): return 1.0"},
     "reflection_model_config": {"name": "fixture/text"},
     "strategy": {"mode": "single", "engine": "gepa"},
-    "max_cost_credits": 20,
+    "max_cost_cents": 20,
 }
 
 
@@ -70,7 +70,7 @@ def setup_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tu
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         session.add(
-            BillingCustomerModel(username="alice", stripe_customer_id="local", credit_balance=100, grant_remaining=0)
+            BillingCustomerModel(username="alice", stripe_customer_id="local", balance_cents=100, grant_remaining=0)
         )
         session.commit()
     calls = []
@@ -106,7 +106,7 @@ def setup_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tu
 
 def _budget(client: TestClient) -> dict:
     """Create one funded draft authority for the API scenarios."""
-    return client.post("/execution-budgets", json={"total_credits": 20}, headers={"Idempotency-Key": "draft"}).json()
+    return client.post("/execution-budgets", json={"total_cents": 20}, headers={"Idempotency-Key": "draft"}).json()
 
 
 def _request(budget: dict, payload: dict | None = None) -> dict:
@@ -128,10 +128,10 @@ def test_continue_reuses_matching_success_and_preserves_setup_spend(setup_client
     assert first.status_code == 200
     assert first.json()["status"] == "succeeded"
     assert first.json()["may_advance"] is True
-    assert first.json()["budget"]["setup_spent_credits"] == "1"
+    assert first.json()["budget"]["setup_spent_cents"] == "1"
     second = client.post("/wizard/preflight", json=_request(budget, {**PAYLOAD, "name": "Renamed", "is_private": True}))
     assert second.json()["id"] == first.json()["id"]
-    assert second.json()["budget"]["setup_spent_credits"] == "1"
+    assert second.json()["budget"]["setup_spent_cents"] == "1"
     assert len(calls) == 1
 
 
@@ -179,7 +179,7 @@ def test_scorer_changes_require_new_paid_verification(setup_client) -> None:
     changed = {**PAYLOAD, "scorer": {"kind": "python", "metric_code": "def score(candidate): return 0.5"}}
     second = client.post("/wizard/preflight", json=_request(budget, changed)).json()
     assert second["fingerprint"] != first["fingerprint"]
-    assert second["budget"]["setup_spent_credits"] == "2"
+    assert second["budget"]["setup_spent_cents"] == "2"
     assert len(calls) == 2
 
 
@@ -237,14 +237,14 @@ def test_preflight_never_uses_held_out_case() -> None:
 
 @pytest.mark.parametrize("key", ["_gepa_log_dir", "_budget_gateway_descriptor", "_skynet_tools_route", "_preflight"])
 def test_public_preflight_rejects_parent_runtime_controls(setup_client, key: str) -> None:
-    """Reject forged filesystem and relay authority before claiming setup or spending credits."""
+    """Reject forged filesystem and relay authority before claiming setup or spending funds."""
     client, _engine, calls = setup_client
     budget = _budget(client)
     response = client.post("/wizard/preflight", json=_request(budget, {**PAYLOAD, key: "/"}))
     assert response.status_code == 422
     assert "Runtime control fields" in response.text
     assert calls == []
-    assert client.get(f"/execution-budgets/{budget['id']}").json()["setup_spent_credits"] == "0"
+    assert client.get(f"/execution-budgets/{budget['id']}").json()["setup_spent_cents"] == "0"
 
 
 def test_unavailable_default_runtime_defers_evaluation_to_optimization(
@@ -264,7 +264,7 @@ def test_unavailable_default_runtime_defers_evaluation_to_optimization(
     assert result["may_advance"] is True
     assert result["pending_reason"]["category"] == "later_stage_dependency"
     assert result["checks"][0]["field"] == "execution_runtime"
-    assert result["budget"]["setup_spent_credits"] == "0"
+    assert result["budget"]["setup_spent_cents"] == "0"
     assert calls == []
 
 

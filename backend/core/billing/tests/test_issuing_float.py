@@ -46,8 +46,8 @@ def _client(*, issuing: int, payments: int, pending: list[SimpleNamespace] | Non
 def funding_on(monkeypatch: pytest.MonkeyPatch) -> None:
     """Enable the loop with a $50 floor and a $150 target."""
     monkeypatch.setattr(settings, "stripe_secret_key", SecretStr("sk_test_x"))
-    monkeypatch.setattr(settings, "issuing_balance_floor_credits", 5000)
-    monkeypatch.setattr(settings, "issuing_balance_target_credits", 15000)
+    monkeypatch.setattr(settings, "issuing_balance_floor_cents", 5000)
+    monkeypatch.setattr(settings, "issuing_balance_target_cents", 15000)
     monkeypatch.setattr(settings, "openrouter_float_alert_cooldown_seconds", 0)
 
 
@@ -66,8 +66,8 @@ def _use(monkeypatch: pytest.MonkeyPatch, client: Mock) -> None:
 
 def test_funding_disabled_without_a_target_above_the_floor(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "stripe_secret_key", SecretStr("sk_test_x"))
-    monkeypatch.setattr(settings, "issuing_balance_floor_credits", 5000)
-    monkeypatch.setattr(settings, "issuing_balance_target_credits", 5000)
+    monkeypatch.setattr(settings, "issuing_balance_floor_cents", 5000)
+    monkeypatch.setattr(settings, "issuing_balance_target_cents", 5000)
     assert not funding_enabled()
     assert fund_issuing_once() is None
     assert start_issuing_funding_sweeper(None) is None
@@ -79,7 +79,7 @@ def test_no_funding_when_balance_and_pending_clear_the_floor(monkeypatch: pytest
     _use(monkeypatch, client)
     result = fund_issuing_once()
     assert result is not None
-    assert (result.issuing_credits, result.pending_credits) == (2000, 4000)
+    assert (result.issuing_cents, result.pending_cents) == (2000, 4000)
     client.raw_request.assert_not_called()
     client.v1.topups.create.assert_not_called()
 
@@ -90,8 +90,8 @@ def test_shortfall_comes_from_payments_balance_first(monkeypatch: pytest.MonkeyP
     _use(monkeypatch, client)
     result = fund_issuing_once()
     assert result is not None
-    assert result.transferred_credits == 14000
-    assert result.topped_up_credits == 0
+    assert result.transferred_cents == 14000
+    assert result.topped_up_cents == 0
     args, kwargs = client.raw_request.call_args
     assert args == ("post", "/v1/balance_transfers")
     assert kwargs["amount"] == 14000
@@ -107,8 +107,8 @@ def test_bank_top_up_covers_what_payments_cannot(monkeypatch: pytest.MonkeyPatch
     _use(monkeypatch, client)
     result = fund_issuing_once(now=7200.0)
     assert result is not None
-    assert result.transferred_credits == 4000
-    assert result.topped_up_credits == 10000
+    assert result.transferred_cents == 4000
+    assert result.topped_up_cents == 10000
     params, options = client.v1.topups.create.call_args.args
     assert params["amount"] == 10000
     assert params["destination_balance"] == "issuing"
@@ -122,8 +122,8 @@ def test_missing_transfer_beta_falls_back_to_the_bank(monkeypatch: pytest.Monkey
     _use(monkeypatch, client)
     result = fund_issuing_once()
     assert result is not None
-    assert result.transferred_credits == 0
-    assert result.topped_up_credits == 15000
+    assert result.transferred_cents == 0
+    assert result.topped_up_cents == 15000
 
 
 @pytest.mark.usefixtures("funding_on")
@@ -133,7 +133,7 @@ def test_failed_top_up_alerts_the_operator(monkeypatch: pytest.MonkeyPatch, aler
     _use(monkeypatch, client)
     result = fund_issuing_once()
     assert result is not None
-    assert result.topped_up_credits == 0
+    assert result.topped_up_cents == 0
     assert result.error is not None
     assert "No bank account" in result.error
     client.raw_request.assert_not_called()

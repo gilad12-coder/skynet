@@ -29,12 +29,12 @@ export function BudgetTab({ job }: { job: OptimizationStatusResponse }) {
           [
             [
               "submit.budget.label",
-              budget.uncapped ? msg("submit.budget.uncapped_short") : amount(budget.total_credits),
+              budget.uncapped ? msg("submit.budget.uncapped_short") : amount(budget.total_cents),
             ],
-            ["submit.budget.setup_spent", amount(budget.setup_spent_credits)],
-            ["submit.budget.run_spent", amount(budget.run_spent_credits)],
-            ["submit.budget.reserved", amount(budget.reserved_credits)],
-            ["submit.budget.available", amount(budget.available_credits)],
+            ["submit.budget.setup_spent", amount(budget.setup_spent_cents)],
+            ["submit.budget.run_spent", amount(budget.run_spent_cents)],
+            ["submit.budget.reserved", amount(budget.reserved_cents)],
+            ["submit.budget.available", amount(budget.available_cents)],
           ] as const
         ).map(([key, value]) => (
           <div key={key} className="min-w-0 space-y-1">

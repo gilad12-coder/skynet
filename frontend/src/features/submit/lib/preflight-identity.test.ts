@@ -7,7 +7,7 @@ test("data, model settings and funding edits invalidate setup evidence while nam
     execution_runtime: "vercel",
     model_config: { name: "model", temperature: 0.5 },
     dataset: [{ q: "first" }],
-    max_cost_credits: 20,
+    max_cost_cents: 20,
   };
   const original = preflightIdentity("dspy", payload);
   assert.equal(
@@ -24,7 +24,7 @@ test("data, model settings and funding edits invalidate setup evidence while nam
     original,
   );
   assert.notEqual(preflightIdentity("dspy", { ...payload, dataset: [{ q: "edited" }] }), original);
-  assert.notEqual(preflightIdentity("dspy", { ...payload, max_cost_credits: 30 }), original);
+  assert.notEqual(preflightIdentity("dspy", { ...payload, max_cost_cents: 30 }), original);
 });
 
 test("MCP tool permission edits invalidate setup evidence", () => {

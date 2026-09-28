@@ -220,7 +220,7 @@ def embed_finished_job(optimization_id: str, *, job_store: Any) -> bool:
 def _owner_can_fund_summary(engine: Any, owner: str | None) -> bool:
     """Return whether the job owner can pay for the LLM task summary.
 
-    An owner with no spendable credits gets the free heuristic summary
+    An owner with no spendable balance gets the free heuristic summary
     instead: the job still lands in explore, just with a weaker description.
 
     Args:
@@ -233,7 +233,7 @@ def _owner_can_fund_summary(engine: Any, owner: str | None) -> bool:
     if engine is None or not owner:
         return False
     try:
-        return StripeBillingService(engine).spendable_credits(owner) > 0
+        return StripeBillingService(engine).spendable_cents(owner) > 0
     except Exception as exc:
         logger.warning("Summary balance check failed for %s: %s", owner, exc)
         return False
@@ -384,9 +384,7 @@ def set_embedding_privacy(job_store: Any, optimization_id: str, is_private: bool
         is_private: New visibility flag (``True`` hides it from the public corpus).
     """
     with Session(job_store.engine) as session:
-        session.query(JobEmbeddingModel).filter(
-            JobEmbeddingModel.optimization_id == optimization_id
-        ).update(
+        session.query(JobEmbeddingModel).filter(JobEmbeddingModel.optimization_id == optimization_id).update(
             {
                 JobEmbeddingModel.is_private: is_private,
                 JobEmbeddingModel.updated_at: datetime.now(UTC),
@@ -414,9 +412,7 @@ def set_embedding_task_name(job_store: Any, optimization_id: str, task_name: str
     if getattr(job_store, "engine", None) is None:
         return
     with Session(job_store.engine) as session:
-        session.query(JobEmbeddingModel).filter(
-            JobEmbeddingModel.optimization_id == optimization_id
-        ).update(
+        session.query(JobEmbeddingModel).filter(JobEmbeddingModel.optimization_id == optimization_id).update(
             {
                 JobEmbeddingModel.task_name: task_name,
                 JobEmbeddingModel.updated_at: datetime.now(UTC),
@@ -456,8 +452,7 @@ def _fetch_missing_embedding_ids(job_store: Any, *, limit: int | None = None) ->
                         "OR e.updated_at < COALESCE(j.completed_at, j.created_at)"
                         ") "
                         "ORDER BY COALESCE(e.updated_at, j.completed_at, j.created_at) ASC, "
-                        "j.created_at ASC"
-                        + (" LIMIT :limit" if limit is not None else "")
+                        "j.created_at ASC" + (" LIMIT :limit" if limit is not None else "")
                     ),
                     {"limit": limit} if limit is not None else {},
                 )
@@ -619,15 +614,9 @@ class EmbeddingIndexSweeper:
         self._job_store = job_store
         self._engine = getattr(job_store, "engine", None)
         resolved_interval = (
-            interval_seconds
-            if interval_seconds is not None
-            else settings.embedding_index_sweep_interval_seconds
+            interval_seconds if interval_seconds is not None else settings.embedding_index_sweep_interval_seconds
         )
-        resolved_batch = (
-            batch_size
-            if batch_size is not None
-            else settings.embedding_index_sweep_batch_size
-        )
+        resolved_batch = batch_size if batch_size is not None else settings.embedding_index_sweep_batch_size
         self._interval_seconds = max(5.0, float(resolved_interval))
         self._batch_size = max(1, int(resolved_batch))
         self._stop_event = threading.Event()

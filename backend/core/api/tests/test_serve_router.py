@@ -31,7 +31,7 @@ from ...service_gateway.agents.generalist import get_approval_registry
 from ...storage.models import (
     Base,
     BillingCustomerModel,
-    CreditLedgerModel,
+    WalletLedgerModel,
 )
 
 # noinspection PyProtectedMember
@@ -954,17 +954,17 @@ def _deplete(engine: object) -> None:
             BillingCustomerModel(
                 username="alice",
                 stripe_customer_id="cus_alice",
-                credit_balance=0,
+                balance_cents=0,
                 grant_remaining=0,
             )
         )
         session.commit()
 
 
-def _fund(engine: object, credits: int = 10_000) -> None:
+def _fund(engine: object, cents: int = 10_000) -> None:
     """Seed the test user's billing row with a purchased balance.
 
-    There is no free allowance, so any test that must pass the 402 credit gate
+    There is no free allowance, so any test that must pass the 402 balance gate
     funds the account explicitly.
     """
     with Session(engine) as session:
@@ -972,17 +972,17 @@ def _fund(engine: object, credits: int = 10_000) -> None:
             BillingCustomerModel(
                 username="alice",
                 stripe_customer_id="cus_alice",
-                credit_balance=credits,
+                balance_cents=cents,
                 grant_remaining=0,
             )
         )
         session.commit()
 
 
-def _ledger_rows(engine: object) -> list[CreditLedgerModel]:
-    """Return every credit-ledger row, oldest first."""
+def _ledger_rows(engine: object) -> list[WalletLedgerModel]:
+    """Return every wallet-ledger row, oldest first."""
     with Session(engine) as session:
-        return session.query(CreditLedgerModel).order_by(CreditLedgerModel.id).all()
+        return session.query(WalletLedgerModel).order_by(WalletLedgerModel.id).all()
 
 
 @pytest.mark.parametrize(
@@ -1003,7 +1003,7 @@ def test_serve_endpoints_return_402_when_depleted(
     resp = metered_client.post(url, json={"inputs": {"question": "hi"}})
 
     assert resp.status_code == 402
-    assert resp.json()["code"] == I18nKey.BILLING_INSUFFICIENT_CREDITS.value
+    assert resp.json()["code"] == I18nKey.BILLING_INSUFFICIENT_FUNDS.value
 
 
 def test_serve_chat_returns_402_when_depleted(metered_client: TestClient, metered_store: _FakeJobStore) -> None:
@@ -1031,7 +1031,7 @@ def test_serve_program_debits_the_turn(metered_client: TestClient, metered_store
     assert resp.status_code == 200
     (row,) = _ledger_rows(metered_store.engine)
     assert row.description == "Serve inference"
-    assert row.delta_credits < 0
+    assert row.delta_cents < 0
     assert row.input_tokens == 120_000
     assert row.output_tokens == 30_000
 
@@ -1095,7 +1095,7 @@ def test_serve_stream_debits_on_completion(metered_client: TestClient, metered_s
     assert "event: final" in resp.text
     (row,) = _ledger_rows(metered_store.engine)
     assert row.description == "Serve inference"
-    assert row.delta_credits < 0
+    assert row.delta_cents < 0
 
 
 def test_serve_chat_debits_the_turn(metered_client: TestClient, metered_store: _FakeJobStore) -> None:
@@ -1117,7 +1117,7 @@ def test_serve_chat_debits_the_turn(metered_client: TestClient, metered_store: _
     assert resp.status_code == 200
     (row,) = _ledger_rows(metered_store.engine)
     assert row.description == "Serve chat"
-    assert row.delta_credits < 0
+    assert row.delta_cents < 0
 
 
 def test_coerce_sample_value_keeps_clean_values_and_drops_unusable() -> None:

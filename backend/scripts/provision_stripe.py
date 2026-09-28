@@ -18,12 +18,12 @@ import stripe
 
 from core.config import settings
 
-# (lookup_key, display name, unit amount in cents). The credits each pack grants
-# live in core.billing.service.PACK_CREDITS — Stripe only holds the dollar price.
+# (lookup_key, display name, unit amount in cents). The cents each pack grants
+# live in core.billing.service.PACK_CENTS — Stripe only holds the dollar price.
 _PACKS: list[tuple[str, str, int]] = [
-    ("skynet_pack_starter", "Skynet Credits — Starter", 500),
-    ("skynet_pack_plus", "Skynet Credits — Plus", 2000),
-    ("skynet_pack_pro", "Skynet Credits — Pro", 5000),
+    ("skynet_pack_starter", "Skynet top-up — Starter", 500),
+    ("skynet_pack_plus", "Skynet top-up — Plus", 2000),
+    ("skynet_pack_pro", "Skynet top-up — Pro", 5000),
 ]
 
 # The Skynet Pro platform plan: a monthly recurring price. Its limits live in
@@ -45,7 +45,7 @@ def _find_price(lookup_key: str) -> str | None:
 
 
 def _ensure_price(lookup_key: str, name: str, unit_amount: int, *, monthly: bool = False) -> str:
-    """Return the price id for a credit pack or plan, creating it if absent.
+    """Return the price id for a top-up pack or plan, creating it if absent.
 
     Args:
         lookup_key: Stable idempotency key; a re-run reuses the matching price.
@@ -83,7 +83,7 @@ def main() -> int:
         return 1
     stripe.api_key = settings.stripe_secret_key.get_secret_value()
 
-    print("Provisioning credit packs ...")
+    print("Provisioning top-up packs ...")
     pack_ids = {key: _ensure_price(key, name, amount) for key, name, amount in _PACKS}
 
     print("Provisioning the Skynet Pro plan ...")

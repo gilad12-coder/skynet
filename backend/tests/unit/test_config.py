@@ -44,7 +44,7 @@ _SETTINGS_ENV_VARS = (
     "MAX_TOTAL_USERS",
     "MAX_MONTHLY_ACTIVE_USERS",
     "MAX_CONCURRENT_JOBS_PER_USER",
-    "GLOBAL_DAILY_SPEND_CEILING_CREDITS",
+    "GLOBAL_DAILY_SPEND_CEILING_CENTS",
     "SUBMISSIONS_PAUSED",
     "REDIS_URL",
     "RATE_LIMIT_SUBMISSIONS_PER_MINUTE",
@@ -622,8 +622,8 @@ def test_settings_defaults_cost_guardrails() -> None:
     assert s.max_total_users == 0
     assert s.max_monthly_active_users == 0
     assert s.max_concurrent_jobs_per_user == 5
-    assert s.global_daily_spend_ceiling_credits == 5000
-    assert s.interactive_min_balance_credits == 5
+    assert s.global_daily_spend_ceiling_cents == 5000
+    assert s.interactive_min_balance_cents == 5
     assert s.submissions_paused is False
 
 
@@ -654,7 +654,7 @@ def test_settings_cost_guardrails_from_env(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("MAX_TOTAL_USERS", "250")
     monkeypatch.setenv("MAX_MONTHLY_ACTIVE_USERS", "200")
     monkeypatch.setenv("MAX_CONCURRENT_JOBS_PER_USER", "3")
-    monkeypatch.setenv("GLOBAL_DAILY_SPEND_CEILING_CREDITS", "1000000")
+    monkeypatch.setenv("GLOBAL_DAILY_SPEND_CEILING_CENTS", "1000000")
     monkeypatch.setenv("SUBMISSIONS_PAUSED", "true")
 
     s = Settings(_env_file=None)
@@ -662,7 +662,7 @@ def test_settings_cost_guardrails_from_env(monkeypatch: pytest.MonkeyPatch) -> N
     assert s.max_total_users == 250
     assert s.max_monthly_active_users == 200
     assert s.max_concurrent_jobs_per_user == 3
-    assert s.global_daily_spend_ceiling_credits == 1000000
+    assert s.global_daily_spend_ceiling_cents == 1000000
     assert s.submissions_paused is True
 
 

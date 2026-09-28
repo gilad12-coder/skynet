@@ -1,7 +1,7 @@
 """Encrypt-at-rest vault for bring-your-own-key (BYOK) provider secrets.
 
 When an account runs in ``byok`` token source, the provider bills model tokens
-directly to the user's key while Skynet credits fund the platform fee and
+directly to the user's key while the Skynet balance funds the platform fee and
 managed sandbox. This module is the only place that holds those secrets: it
 encrypts them with Fernet under
 ``settings.byok_vault_key`` before they touch the database, decrypts them only
@@ -44,6 +44,7 @@ from ..storage.models import BillingProviderKeyModel
 STATUS_UNVERIFIED = "unverified"
 STATUS_VERIFIED = "verified"
 STATUS_INVALID = "invalid"
+
 
 def _bearer_probe(url: str) -> dict[str, str]:
     """Build a verify probe for an OpenAI-style ``Authorization: Bearer`` API.

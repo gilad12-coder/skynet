@@ -1,24 +1,24 @@
-export { CreditProvider, useCredits, usePricingTerms } from "./providers/credit-provider";
+export { BalanceProvider, useBalance, usePricingTerms } from "./providers/balance-provider";
 export { ByokKeysProvider, useByokKeys } from "./providers/byok-provider";
-export { CreditBalanceChip } from "./components/CreditBalanceChip";
+export { BalanceChip } from "./components/BalanceChip";
 export { WalletTab } from "./components/WalletTab";
 export { UsageTab } from "./components/UsageTab";
 export { ByokKeysSection } from "./components/ByokKeysSection";
-export { InsufficientCreditsModalHost } from "./components/InsufficientCreditsModalHost";
+export { InsufficientFundsModalHost } from "./components/InsufficientFundsModalHost";
 export { litellmProviderForByok } from "./lib/byok";
 export {
-  creditsToUsd,
-  usdToCredits,
+  centsToUsd,
+  usdToCents,
   formatBudgetUsd,
-  formatCreditsUsd,
+  formatCentsUsd,
   formatUsd,
   type TokenSourceMode,
-} from "./lib/credit";
+} from "./lib/wallet";
 export {
   DEFAULT_PRICING_TERMS,
-  creditsForUsage,
+  centsForUsage,
   modelTokenCosts,
-  platformFeeCredits,
+  platformFeeCents,
   rawCostUsd,
   type ModelTokenUsage,
   type PricingTerms,

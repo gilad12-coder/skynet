@@ -10,7 +10,7 @@ import { resumeJob, updateExecutionBudget } from "@/shared/lib/api";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { TERMS } from "@/shared/lib/terms";
 import { formatBlackboxScore, formatPercent } from "@/shared/lib/formatters";
-import { creditsToUsd, formatBudgetUsd, usdToCredits } from "@/features/billing";
+import { centsToUsd, formatBudgetUsd, usdToCents } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import {
   budgetResultKind,
@@ -193,17 +193,17 @@ export function RunLifecycleNotice({
   // a hard stop, or the worker would halt again before its next evaluation.
   const committed = budget
     ? Math.floor(
-        Number(budget.setup_spent_credits) +
-          Number(budget.run_spent_credits) +
-          Number(budget.reserved_credits),
+        Number(budget.setup_spent_cents) +
+          Number(budget.run_spent_cents) +
+          Number(budget.reserved_cents),
       ) + 1
     : 0;
-  const minimumLimit = Math.max(committed, projection ? projection.projected_credits + 1 : 0);
+  const minimumLimit = Math.max(committed, projection ? projection.projected_cents + 1 : 0);
   const suggestedLimit = Math.max(
     minimumLimit,
     projection
-      ? Math.ceil(projection.projected_credits * PROJECTION_MARGIN)
-      : Math.ceil((budget?.total_credits ?? 0) * HARD_STOP_MARGIN),
+      ? Math.ceil(projection.projected_cents * PROJECTION_MARGIN)
+      : Math.ceil((budget?.total_cents ?? 0) * HARD_STOP_MARGIN),
   );
   const requested = Math.max(minimumLimit, requestedLimit ?? suggestedLimit);
   const settling = (budget?.pending_operations ?? 0) > 0;
@@ -260,9 +260,9 @@ export function RunLifecycleNotice({
                     ? formatMsg("optimization.budget_projected.body", {
                         done: projection.done_calls,
                         planned: projection.planned_calls,
-                        spent: amount(projection.spent_credits),
-                        projected: amount(projection.projected_credits),
-                        limit: amount(projection.limit_credits),
+                        spent: amount(projection.spent_cents),
+                        projected: amount(projection.projected_cents),
+                        limit: amount(projection.limit_cents),
                       })
                     : msg("optimization.budget_reached.raise_hint")
                   : msg(bodyKey)}
@@ -309,12 +309,12 @@ export function RunLifecycleNotice({
                   "submit.budget.label",
                   budget.uncapped
                     ? msg("submit.budget.uncapped_short")
-                    : String(budget.total_credits),
+                    : String(budget.total_cents),
                 ],
-                ["submit.budget.setup_spent", budget.setup_spent_credits],
-                ["submit.budget.run_spent", budget.run_spent_credits],
-                ["submit.budget.reserved", budget.reserved_credits],
-                ["submit.budget.available", budget.available_credits],
+                ["submit.budget.setup_spent", budget.setup_spent_cents],
+                ["submit.budget.run_spent", budget.run_spent_cents],
+                ["submit.budget.reserved", budget.reserved_cents],
+                ["submit.budget.available", budget.available_cents],
               ] as const
             ).map(([key, value]) => (
               <div key={key} className="min-w-0 space-y-1">
@@ -342,9 +342,9 @@ export function RunLifecycleNotice({
             <Label htmlFor={limitInputId}>{msg("optimization.budget_raise.label")}</Label>
             <NumberInput
               id={limitInputId}
-              value={creditsToUsd(requested)}
-              onChange={(dollars) => setRequestedLimit(usdToCredits(dollars))}
-              min={creditsToUsd(minimumLimit)}
+              value={centsToUsd(requested)}
+              onChange={(dollars) => setRequestedLimit(usdToCents(dollars))}
+              min={centsToUsd(minimumLimit)}
               step={0.01}
               className="w-36"
               disabled={raising || settling}

@@ -6,11 +6,11 @@ separate Issuing balance, so this module keeps that balance between a floor and
 a target without anyone touching the dashboard.
 
 Each check reads ``GET /v1/balance``. When the Issuing balance plus our own
-still-pending top-ups falls below ``ISSUING_BALANCE_FLOOR_CREDITS``, it refills
-up to ``ISSUING_BALANCE_TARGET_CREDITS``:
+still-pending top-ups falls below ``ISSUING_BALANCE_FLOOR_CENTS``, it refills
+up to ``ISSUING_BALANCE_TARGET_CENTS``:
 
 1. First from the Stripe payments balance (the money customers paid for
-   credits) through ``POST /v1/balance_transfers``. Instant in the US, but the
+   top-ups) through ``POST /v1/balance_transfers``. Instant in the US, but the
    endpoint is a Stripe private beta, so a refusal just falls through.
 2. Then from the linked bank account through ``POST /v1/topups`` with
    ``destination_balance=issuing``. Up to five business days to land, which is
@@ -54,18 +54,18 @@ _local_cooldown_until = 0.0
 
 @dataclass(frozen=True)
 class FundingResult:
-    """Outcome of one Issuing funding check, all amounts in credits (1 credit = 1 cent).
+    """Outcome of one Issuing funding check, all amounts in cents.
 
-    ``issuing_credits`` is the available Issuing balance before this check and
-    ``pending_credits`` our top-ups still in flight. ``transferred_credits``
-    and ``topped_up_credits`` are what this check moved; ``error`` is set when
+    ``issuing_cents`` is the available Issuing balance before this check and
+    ``pending_cents`` our top-ups still in flight. ``transferred_cents``
+    and ``topped_up_cents`` are what this check moved; ``error`` is set when
     a shortfall could not be fully covered.
     """
 
-    issuing_credits: int
-    pending_credits: int
-    transferred_credits: int = 0
-    topped_up_credits: int = 0
+    issuing_cents: int
+    pending_cents: int
+    transferred_cents: int = 0
+    topped_up_cents: int = 0
     error: str | None = None
 
 
@@ -75,8 +75,8 @@ def funding_enabled() -> bool:
     Returns:
         True when a Stripe key is set and the target sits above a positive floor.
     """
-    floor = settings.issuing_balance_floor_credits
-    return settings.stripe_secret_key is not None and floor > 0 and settings.issuing_balance_target_credits > floor
+    floor = settings.issuing_balance_floor_cents
+    return settings.stripe_secret_key is not None and floor > 0 and settings.issuing_balance_target_cents > floor
 
 
 def _client() -> stripe.StripeClient:
@@ -101,7 +101,7 @@ def _usd(entries: Any) -> int:
     return sum(int(e["amount"]) for e in entries or [] if e["currency"] == _CURRENCY)
 
 
-def _pending_topup_credits(client: stripe.StripeClient) -> int:
+def _pending_topup_cents(client: stripe.StripeClient) -> int:
     """Sum the top-ups this module created that have not landed yet.
 
     Args:
@@ -161,16 +161,16 @@ def fund_issuing_once(now: float | None = None) -> FundingResult | None:
         balance = client.v1.balance.retrieve()
         issuing = _usd((balance.get("issuing") or {}).get("available"))
         payments = _usd(balance.get("available"))
-        pending = _pending_topup_credits(client)
+        pending = _pending_topup_cents(client)
     except stripe.StripeError as exc:
         logger.warning("Issuing balance read failed: %s", exc)
         notify_funding_problem(f"Could not read the Stripe balance: {exc}")
         return None
 
-    if issuing + pending >= settings.issuing_balance_floor_credits:
-        return FundingResult(issuing_credits=issuing, pending_credits=pending)
+    if issuing + pending >= settings.issuing_balance_floor_cents:
+        return FundingResult(issuing_cents=issuing, pending_cents=pending)
 
-    shortfall = settings.issuing_balance_target_credits - issuing - pending
+    shortfall = settings.issuing_balance_target_cents - issuing - pending
     transferred = _transfer_from_payments(client, min(shortfall, payments)) if payments > 0 else 0
     remaining = shortfall - transferred
     topped_up = 0
@@ -196,10 +196,10 @@ def fund_issuing_once(now: float | None = None) -> FundingResult | None:
             error = f"Bank top-up of ${remaining / 100:.2f} failed: {exc}"
 
     result = FundingResult(
-        issuing_credits=issuing,
-        pending_credits=pending,
-        transferred_credits=transferred,
-        topped_up_credits=topped_up,
+        issuing_cents=issuing,
+        pending_cents=pending,
+        transferred_cents=transferred,
+        topped_up_cents=topped_up,
         error=error,
     )
     logger.info(
@@ -212,7 +212,7 @@ def fund_issuing_once(now: float | None = None) -> FundingResult | None:
         logger.warning("Issuing funding incomplete: %s", error)
         notify_funding_problem(
             f"Issuing balance is ${issuing / 100:.2f}, below the "
-            f"${settings.issuing_balance_floor_credits / 100:.2f} floor.\n{error}\n\n"
+            f"${settings.issuing_balance_floor_cents / 100:.2f} floor.\n{error}\n\n"
             "The provider card will start declining once the Issuing balance hits zero. "
             "Add funds at https://dashboard.stripe.com/balance/overview."
         )

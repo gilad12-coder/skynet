@@ -22,7 +22,7 @@ from core.billing.budgets import BudgetService
 from core.billing.model_dispatch import ModelHTTPResult
 from core.billing.model_gateway import ROUTE_KEY, ModelGateway
 from core.billing.model_mailbox import ModelMailbox
-from core.billing.operation_pricing import ChargePolicy, CreditCharge, OperationQuote
+from core.billing.operation_pricing import ChargePolicy, OperationCharge, OperationQuote
 from core.billing.protected_credentials import (
     ProtectedCredentialVault,
     protect_execution_credentials,
@@ -64,7 +64,7 @@ def gateway(tmp_path: Path) -> Iterator[ModelGateway]:
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         session.add(
-            BillingCustomerModel(username="alice", stripe_customer_id="fixture", credit_balance=50, grant_remaining=0)
+            BillingCustomerModel(username="alice", stripe_customer_id="fixture", balance_cents=50, grant_remaining=0)
         )
         session.commit()
     ledger = BudgetService(engine=engine)
@@ -77,7 +77,7 @@ def gateway(tmp_path: Path) -> Iterator[ModelGateway]:
         """Require durable coverage before replying with measured usage."""
         if request.method == "GET":
             return httpx.Response(200, json={"data": CATALOG})
-        assert ledger.get(budget.id, "alice").reserved_credits > 0
+        assert ledger.get(budget.id, "alice").reserved_cents > 0
         return httpx.Response(
             200,
             json={
@@ -117,7 +117,7 @@ def test_recovery_attempt_claims_are_idempotent_and_single_consumer(gateway: Mod
     """Bind seed quotas and execution headroom to stable physical attempt ids."""
     quote = OperationQuote(
         request_fingerprint="bounded-request",
-        maximum=CreditCharge(total=Decimal(2), wallet=Decimal(2)),
+        maximum=OperationCharge(total=Decimal(2), wallet=Decimal(2)),
         price_snapshot={"version": "fixture-v1", "provider": "fixture"},
     )
     bound = model_call_bound("task", "fixture/text", quote)
@@ -141,12 +141,12 @@ def test_checkpoint_plan_uses_observed_seed_count_and_next_operation_bound(gatew
     """Publish only actual bounded replay work with one enforced execution operation."""
     seed_quote = OperationQuote(
         request_fingerprint="seed-request",
-        maximum=CreditCharge(total=Decimal(2), wallet=Decimal(2)),
+        maximum=OperationCharge(total=Decimal(2), wallet=Decimal(2)),
         price_snapshot={"version": "seed-v1", "provider": "fixture"},
     )
     execution_quote = OperationQuote(
         request_fingerprint="execution-request",
-        maximum=CreditCharge(total=Decimal(3), wallet=Decimal(3)),
+        maximum=OperationCharge(total=Decimal(3), wallet=Decimal(3)),
         price_snapshot={"version": "execution-v1", "provider": "fixture"},
     )
     manifest = {
@@ -169,8 +169,8 @@ def test_checkpoint_plan_uses_observed_seed_count_and_next_operation_bound(gatew
 
     assert plan["eligible"] is True
     assert plan["seed_reevaluation"]["model_calls"][0]["count"] == 2
-    assert plan["execution_headroom"]["max_credits"] == "3"
-    assert Decimal(plan["max_credits"]) == Decimal(7) + Decimal(plan["runtime"]["max_credits"])
+    assert plan["execution_headroom"]["max_cents"] == "3"
+    assert Decimal(plan["max_cents"]) == Decimal(7) + Decimal(plan["runtime"]["max_cents"])
 
 
 def test_guest_controls_and_dataset_routes_cannot_replace_parent_authority(gateway: ModelGateway) -> None:
@@ -289,7 +289,7 @@ def test_selected_tools_keep_credentials_outside_guest_and_cannot_call_models(
     assert httpx.post(f"{gateway.url}/chat/completions", headers=headers, json={}, trust_env=False).status_code == 401
     state = httpx.get(f"{gateway.url}/_budget/state", headers=headers, trust_env=False)
     assert state.status_code == 200
-    assert "account_available_credits" not in state.json()
+    assert "account_available_cents" not in state.json()
     gateway.runtime.service.fence_generation(gateway.runtime.budget_id, "alice", expected_generation=0)
     state = httpx.get(f"{gateway.url}/_budget/state", headers=headers, trust_env=False)
     assert state.json()["blocked_reason"] == "generation_fenced"
@@ -341,7 +341,7 @@ def test_remote_runtime_streams_and_metered_mailbox_scrubs_protocol(gateway: Mod
     assert "private prompt" not in result.stdout
     assert "SKYNET_MODEL_" not in "".join(output)
     assert gateway._seed_marker_count == 1
-    assert gateway.runtime.service.get(gateway.runtime.budget_id, "alice").setup_spent_credits == Decimal("0.1")
+    assert gateway.runtime.service.get(gateway.runtime.budget_id, "alice").setup_spent_cents == Decimal("0.1")
     assert "upstream-secret" not in json.dumps(protected)
 
 
@@ -358,7 +358,7 @@ def test_mailbox_retries_have_independent_coverage_and_duplicate_frames_do_not_r
         if request.method == "GET":
             return httpx.Response(200, json={"data": CATALOG})
         posts.append(request)
-        holds.append(gateway.runtime.service.get(gateway.runtime.budget_id, gateway.runtime.username).reserved_credits)
+        holds.append(gateway.runtime.service.get(gateway.runtime.budget_id, gateway.runtime.username).reserved_cents)
         attempt = len(posts)
         return httpx.Response(
             503 if attempt == 1 else 200,
@@ -426,8 +426,8 @@ def test_mailbox_retries_have_independent_coverage_and_duplicate_frames_do_not_r
     assert len(holds) == 2
     assert all(hold > 0 for hold in holds)
     snapshot = gateway.runtime.service.get(gateway.runtime.budget_id, gateway.runtime.username)
-    assert snapshot.setup_spent_credits == Decimal("0.2")
-    assert snapshot.reserved_credits == 0
+    assert snapshot.setup_spent_cents == Decimal("0.2")
+    assert snapshot.reserved_cents == 0
     with Session(gateway.runtime.service._engine) as session:
         operations = session.scalars(
             select(ExecutionOperationModel).order_by(ExecutionOperationModel.operation_key)
@@ -444,12 +444,12 @@ def test_cost_ceiling_is_the_total_or_what_the_account_can_fund(gateway: ModelGa
     Args:
         gateway: Parent protocol over the capped fixture budget.
     """
-    assert gateway.cost_ceiling_credits() == 20
+    assert gateway.cost_ceiling_cents() == 20
     ledger = gateway.runtime.service
     uncapped = ledger.create("alice", 1, idempotency_key="uncapped", uncapped=True)
     other = ModelGateway(BudgetRuntime(ledger, username="alice", budget_id=uncapped.id, generation=0, phase="run"))
     try:
-        ceiling = other.cost_ceiling_credits()
+        ceiling = other.cost_ceiling_cents()
     finally:
         other.close()
-    assert ceiling == int(uncapped.available_credits) > uncapped.total_credits
+    assert ceiling == int(uncapped.available_cents) > uncapped.total_cents

@@ -21,9 +21,7 @@ harness = _harness_fixture
 
 
 @pytest.fixture
-def interactions(
-    harness: _Harness, monkeypatch: pytest.MonkeyPatch
-) -> tuple[_Harness, dict[str, Any]]:
+def interactions(harness: _Harness, monkeypatch: pytest.MonkeyPatch) -> tuple[_Harness, dict[str, Any]]:
     """Replace physical transports while retaining real budgets and settlements.
 
     Args:
@@ -46,14 +44,12 @@ def interactions(
         """
         runtime = payload["_fixture_runtime"]
         policy = ChargePolicy("managed_model")
-        quote = operation_quote(
-            {"interaction": identity}, Decimal("0.02"), policy, {"provider": "fixture"}
-        )
+        quote = operation_quote({"interaction": identity}, Decimal("0.02"), policy, {"provider": "fixture"})
 
         def dispatch() -> PaidResult[None]:
             """Record the call after the wallet and request budget accepted it."""
             snapshot = runtime.service.get(runtime.budget_id, runtime.username)
-            assert snapshot.reserved_credits == 2
+            assert snapshot.reserved_cents == 2
             state["calls"].append(
                 {
                     "identity": identity,
@@ -125,7 +121,7 @@ def test_interaction_closes_caller_budget_and_replays_without_a_second_charge(
     first = protected_interaction.run_protected_interaction(
         _payload(),
         kind="serve",
-        max_cost_credits=10,
+        max_cost_cents=10,
         idempotency_key="one-call",
         user=AuthenticatedUser("alice", "user", ()),
         job_store=harness.store,
@@ -133,17 +129,17 @@ def test_interaction_closes_caller_budget_and_replays_without_a_second_charge(
     replay = protected_interaction.run_protected_interaction(
         _payload(),
         kind="serve",
-        max_cost_credits=10,
+        max_cost_cents=10,
         idempotency_key="one-call",
         user=AuthenticatedUser("alice", "user", ()),
         job_store=harness.store,
     )
 
     assert first["outputs"] == {"answer": "sandboxed"}
-    assert first["credits_charged"] == "1"
-    assert first["budget"]["total_credits"] == 10
+    assert first["cents_charged"] == "1"
+    assert first["budget"]["total_cents"] == 10
     assert first["budget"]["state"] == "closed"
-    assert first["budget"]["reserved_credits"] == "0"
+    assert first["budget"]["reserved_cents"] == "0"
     assert replay["interaction_id"] == first["interaction_id"]
     assert len(state["calls"]) == len(state["bindings"]) == 1
     assert state["calls"][0]["username"] == "alice"
@@ -160,7 +156,7 @@ def test_interaction_without_a_caller_maximum_draws_on_the_account(
     harness, state = interactions
     authority = {
         "kind": "serve",
-        "max_cost_credits": None,
+        "max_cost_cents": None,
         "idempotency_key": "uncapped-call",
         "user": AuthenticatedUser("alice", "user", ()),
         "job_store": harness.store,
@@ -169,7 +165,7 @@ def test_interaction_without_a_caller_maximum_draws_on_the_account(
     replay = protected_interaction.run_protected_interaction(_payload(), **authority)
 
     assert first["outputs"] == {"answer": "sandboxed"}
-    assert first["credits_charged"] == "1"
+    assert first["cents_charged"] == "1"
     assert first["budget"]["uncapped"] is True
     assert first["budget"]["state"] == "closed"
     assert replay["interaction_id"] == first["interaction_id"]
@@ -188,14 +184,10 @@ def test_same_transport_key_cannot_change_the_approved_ceiling(
         "user": AuthenticatedUser("alice", "user", ()),
         "job_store": harness.store,
     }
-    protected_interaction.run_protected_interaction(
-        _payload(), max_cost_credits=10, **authority
-    )
+    protected_interaction.run_protected_interaction(_payload(), max_cost_cents=10, **authority)
 
     with pytest.raises(DomainError) as caught:
-        protected_interaction.run_protected_interaction(
-            _payload(), max_cost_credits=11, **authority
-        )
+        protected_interaction.run_protected_interaction(_payload(), max_cost_cents=11, **authority)
 
     assert caught.value.code == "budget.conflict"
     assert len(state["calls"]) == 1
@@ -208,7 +200,7 @@ def test_same_transport_key_cannot_replay_a_different_request(
     harness, state = interactions
     authority = {
         "kind": "serve",
-        "max_cost_credits": 10,
+        "max_cost_cents": 10,
         "idempotency_key": "fixed-payload",
         "user": AuthenticatedUser("alice", "user", ()),
         "job_store": harness.store,

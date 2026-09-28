@@ -1,4 +1,4 @@
-"""Run explicit workflow previews inside protected executors with reserved setup credits."""
+"""Run explicit workflow previews inside protected executors with reserved setup funds."""
 
 from __future__ import annotations
 

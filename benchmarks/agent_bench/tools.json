@@ -2231,7 +2231,7 @@
        }
       ]
      },
-     "max_cost_credits": {
+     "max_cost_cents": {
       "anyOf": [
        {
         "type": "integer",
@@ -2242,7 +2242,7 @@
        }
       ]
      },
-     "estimated_credits_low": {
+     "estimated_cents_low": {
       "anyOf": [
        {
         "type": "integer",
@@ -2253,7 +2253,7 @@
        }
       ]
      },
-     "estimated_credits_high": {
+     "estimated_cents_high": {
       "anyOf": [
        {
         "type": "integer",
@@ -3094,7 +3094,7 @@
        }
       ]
      },
-     "max_cost_credits": {
+     "max_cost_cents": {
       "anyOf": [
        {
         "type": "integer",
@@ -3119,7 +3119,7 @@
       ],
       "description": "Optional validation score target, expressed as a percentage. GEPA stops searching when its best validation candidate reaches this score; the existing metric-call budget remains a safety ceiling."
      },
-     "estimated_credits_low": {
+     "estimated_cents_low": {
       "anyOf": [
        {
         "type": "integer",
@@ -3131,7 +3131,7 @@
       ],
       "description": "Low end of the projected credit bracket the wizard showed at submit. Persisted so the post-run proof moment can reconcile the estimate against the actual charge. Carries the chargeable bracket for the run's token_source (managed: full per-model cost; byok: platform fee). Advisory only — never gates or bills. Omit (null) when no estimate was computed."
      },
-     "estimated_credits_high": {
+     "estimated_cents_high": {
       "anyOf": [
        {
         "type": "integer",
@@ -3141,7 +3141,7 @@
         "type": "null"
        }
       ],
-      "description": "High end of the projected credit bracket (see estimated_credits_low). Seeds the post-run estimate-vs-actual reconciliation. Advisory only."
+      "description": "High end of the projected credit bracket (see estimated_cents_low). Seeds the post-run estimate-vs-actual reconciliation. Advisory only."
      },
      "generation_models": {
       "items": {
@@ -4136,7 +4136,7 @@
        }
       ]
      },
-     "max_cost_credits": {
+     "max_cost_cents": {
       "anyOf": [
        {
         "type": "integer",
@@ -4161,7 +4161,7 @@
       ],
       "description": "Optional validation score target, expressed as a percentage. GEPA stops searching when its best validation candidate reaches this score; the existing metric-call budget remains a safety ceiling."
      },
-     "estimated_credits_low": {
+     "estimated_cents_low": {
       "anyOf": [
        {
         "type": "integer",
@@ -4173,7 +4173,7 @@
       ],
       "description": "Low end of the projected credit bracket the wizard showed at submit. Persisted so the post-run proof moment can reconcile the estimate against the actual charge. Carries the chargeable bracket for the run's token_source (managed: full per-model cost; byok: platform fee). Advisory only — never gates or bills. Omit (null) when no estimate was computed."
      },
-     "estimated_credits_high": {
+     "estimated_cents_high": {
       "anyOf": [
        {
         "type": "integer",
@@ -4183,7 +4183,7 @@
         "type": "null"
        }
       ],
-      "description": "High end of the projected credit bracket (see estimated_credits_low). Seeds the post-run estimate-vs-actual reconciliation. Advisory only."
+      "description": "High end of the projected credit bracket (see estimated_cents_low). Seeds the post-run estimate-vs-actual reconciliation. Advisory only."
      },
      "model_config": {
       "properties": {

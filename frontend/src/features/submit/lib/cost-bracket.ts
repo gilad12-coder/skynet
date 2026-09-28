@@ -1,10 +1,10 @@
 /**
- * Projected credit bracket for a pre-run estimate.
+ * Projected cost bracket for a pre-run estimate.
  *
  * A DSPy/GEPA job's token use is not linear: bootstrapping, compile steps,
  * dataset size, and validation loops all swing the total, so a single tight
  * number would imply a precision the optimizer can't honour. Instead we project
- * a *bracket* — a low/high credit range — and let the user cap the run with a
+ * a *bracket* — a low/high cost range — and let the user cap the run with a
  * Max Cost Ceiling. The numbers here are deliberately coarse and operator-tunable;
  * they exist to set expectations and seed a sensible default cap, never to promise
  * an exact charge.
@@ -19,9 +19,9 @@
 import type { CatalogModel, ModelConfig, RuntimeCostProfile } from "@/shared/types/api";
 import {
   DEFAULT_PRICING_TERMS,
-  creditsForUsage,
+  centsForUsage,
   modelTokenCosts,
-  platformFeeCredits,
+  platformFeeCents,
   rawCostUsd,
   type ModelTokenUsage,
   type PricingTerms,
@@ -95,8 +95,8 @@ export interface ProjectedModelRole {
 
 export interface RuntimeCostProjection {
   billingBasis: "at_cost" | "included_in_model_markup";
-  minimumSessionCredits: number | null;
-  maximumSessionCredits: number | null;
+  minimumSessionCents: number | null;
+  maximumSessionCents: number | null;
   /** Distinct paid preflight scopes on this path plus its submitted run. */
   expectedSessions: number;
 }
@@ -114,8 +114,8 @@ export function runtimeCostProjection(
   };
   return {
     billingBasis: profile.billing_basis,
-    minimumSessionCredits: parse(profile.minimum_session_credits),
-    maximumSessionCredits: parse(profile.maximum_session_credits),
+    minimumSessionCents: parse(profile.minimum_session_cents),
+    maximumSessionCents: parse(profile.maximum_session_cents),
     expectedSessions,
   };
 }
@@ -140,7 +140,7 @@ export interface RoleCostTrace {
 /**
  * Every input and intermediate value behind a bracket, so a surface can unfold
  * the arithmetic instead of restating it. Built by the same pass that produces
- * the credit totals, which keeps the two from drifting apart.
+ * the cent totals, which keeps the two from drifting apart.
  */
 export interface CostBracketTrace {
   metricCalls: number;
@@ -162,30 +162,30 @@ export interface CostBracketTrace {
 }
 
 export interface CostBracket {
-  /** Low end of the projected credit range. */
-  lowCredits: number;
-  /** High end of the projected credit range. */
-  highCredits: number;
-  /** Managed-role model credits, including the usage markup. */
-  managedModelLowCredits: number;
-  managedModelHighCredits: number;
-  /** BYOK-role model credits at cost (no markup) — the base the BYOK fee is taken from. */
-  byokModelLowCredits: number;
-  byokModelHighCredits: number;
-  /** The usage markup applied to the managed credits. */
+  /** Low end of the projected cost range, in cents. */
+  lowCents: number;
+  /** High end of the projected cost range, in cents. */
+  highCents: number;
+  /** Managed-role model cents, including the usage markup. */
+  managedModelLowCents: number;
+  managedModelHighCents: number;
+  /** BYOK-role model cents at cost (no markup) — the base the BYOK fee is taken from. */
+  byokModelLowCents: number;
+  byokModelHighCents: number;
+  /** The usage markup applied to the managed cents. */
   usageMarkup: number;
   /** The BYOK platform fee fraction `chargeableBracket` applies. */
   byokFeeFraction: number;
-  runtimeLowCredits: number;
-  runtimeHighCredits: number;
-  runtimeSessionLowCredits: number;
-  runtimeSessionHighCredits: number;
+  runtimeLowCents: number;
+  runtimeHighCents: number;
+  runtimeSessionLowCents: number;
+  runtimeSessionHighCents: number;
   runtimeBillingBasis: RuntimeCostProjection["billingBasis"] | null;
   expectedRuntimeSessions: number;
   trace: CostBracketTrace;
 }
 
-/** How a charged bracket splits between full-price credits, BYOK fees and runtime. */
+/** How a charged bracket splits between full-price usage, BYOK fees and runtime. */
 export interface ChargeTrace {
   mode: TokenSourceMode;
   managedLow: number;
@@ -234,14 +234,14 @@ function roleUsage(totalTokens: number, roles: ProjectedModelRole[]): ModelToken
 }
 
 /** Convert current runtime metadata into one setup-plus-run estimate category. */
-function runtimeCredits(runtime: RuntimeCostProjection | null | undefined): {
+function runtimeCents(runtime: RuntimeCostProjection | null | undefined): {
   low: number;
   high: number;
 } {
   if (!runtime || runtime.billingBasis === "included_in_model_markup") return { low: 0, high: 0 };
   const sessions = Math.max(0, Math.floor(runtime.expectedSessions));
-  const low = runtime.minimumSessionCredits;
-  const high = runtime.maximumSessionCredits;
+  const low = runtime.minimumSessionCents;
+  const high = runtime.maximumSessionCents;
   const perSessionHigh = high == null || !Number.isFinite(high) ? 0 : Math.max(0, high);
   // A box reserves its whole lifetime the moment it opens, so the low end
   // starts at one full session's hold however briefly the sessions run.
@@ -256,11 +256,11 @@ function runtimeCredits(runtime: RuntimeCostProjection | null | undefined): {
 }
 
 /**
- * Project a low/high credit bracket for a run from its GEPA budget, dataset, and
+ * Project a low/high cost bracket for a run from its GEPA budget, dataset, and
  * chosen model(s).
  *
- * Returns rounded credit bounds; the high end seeds the default Max Cost Ceiling.
- * Always returns `highCredits >= lowCredits >= 1` so the bracket reads sensibly
+ * Returns rounded cent bounds; the high end seeds the default Max Cost Ceiling.
+ * Always returns `highCents >= lowCents >= 1` so the bracket reads sensibly
  * even before a dataset or catalog has loaded (models price at defaults until then).
  */
 export function projectCostBracket(input: CostBracketInput): CostBracket {
@@ -312,18 +312,15 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
   const managed = roles.filter((role) => role.tokenSource !== "byok");
   const byok = roles.filter((role) => role.tokenSource === "byok");
   const { usageMarkup, byokFeeFraction } = pricing;
-  const managedModelLowCredits = creditsForUsage(roleUsage(lowTokens, managed), usageMarkup);
-  const managedModelHighCredits = creditsForUsage(roleUsage(highTokens, managed), usageMarkup);
-  const byokModelLowCredits = creditsForUsage(roleUsage(lowTokens, byok), 1);
-  const byokModelHighCredits = creditsForUsage(roleUsage(highTokens, byok), 1);
-  const runtimeEstimate = runtimeCredits(runtime);
-  const lowCredits = Math.max(
-    1,
-    managedModelLowCredits + byokModelLowCredits + runtimeEstimate.low,
-  );
-  const highCredits = Math.max(
-    lowCredits,
-    managedModelHighCredits + byokModelHighCredits + runtimeEstimate.high,
+  const managedModelLowCents = centsForUsage(roleUsage(lowTokens, managed), usageMarkup);
+  const managedModelHighCents = centsForUsage(roleUsage(highTokens, managed), usageMarkup);
+  const byokModelLowCents = centsForUsage(roleUsage(lowTokens, byok), 1);
+  const byokModelHighCents = centsForUsage(roleUsage(highTokens, byok), 1);
+  const runtimeEstimate = runtimeCents(runtime);
+  const lowCents = Math.max(1, managedModelLowCents + byokModelLowCents + runtimeEstimate.low);
+  const highCents = Math.max(
+    lowCents,
+    managedModelHighCents + byokModelHighCents + runtimeEstimate.high,
   );
   const tracedRoles: RoleCostTrace[] = roles
     .filter((role) => Number.isFinite(role.tokenShare) && role.tokenShare > 0)
@@ -348,18 +345,18 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
       };
     });
   return {
-    lowCredits,
-    highCredits,
-    managedModelLowCredits,
-    managedModelHighCredits,
-    byokModelLowCredits,
-    byokModelHighCredits,
+    lowCents,
+    highCents,
+    managedModelLowCents,
+    managedModelHighCents,
+    byokModelLowCents,
+    byokModelHighCents,
     usageMarkup,
     byokFeeFraction,
-    runtimeLowCredits: runtimeEstimate.low,
-    runtimeHighCredits: runtimeEstimate.high,
-    runtimeSessionLowCredits: Math.max(0, runtime?.minimumSessionCredits ?? 0),
-    runtimeSessionHighCredits: Math.max(0, runtime?.maximumSessionCredits ?? 0),
+    runtimeLowCents: runtimeEstimate.low,
+    runtimeHighCents: runtimeEstimate.high,
+    runtimeSessionLowCents: Math.max(0, runtime?.minimumSessionCents ?? 0),
+    runtimeSessionHighCents: Math.max(0, runtime?.maximumSessionCents ?? 0),
     runtimeBillingBasis: runtime?.billingBasis ?? null,
     expectedRuntimeSessions: runtime?.expectedSessions ?? 0,
     trace: {
@@ -383,7 +380,7 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
 }
 
 /**
- * The credit bracket the user is actually charged, given the token source.
+ * The cost bracket the user is actually charged, given the token source.
  *
  * Managed roles are charged at full per-model cost; BYOK roles pay only
  * Skynet's platform fee because provider tokens use the user's key. Sandbox
@@ -392,39 +389,39 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
  * the charge the same way and cannot drift apart.
  */
 export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): ChargedBracket {
-  const hasRoleSources = bracket.managedModelLowCredits > 0 || bracket.byokModelLowCredits > 0;
+  const hasRoleSources = bracket.managedModelLowCents > 0 || bracket.byokModelLowCents > 0;
   if (!hasRoleSources && mode !== "byok") {
     return {
       ...bracket,
       charge: {
         mode,
-        managedLow: bracket.lowCredits - bracket.runtimeLowCredits,
-        managedHigh: bracket.highCredits - bracket.runtimeHighCredits,
+        managedLow: bracket.lowCents - bracket.runtimeLowCents,
+        managedHigh: bracket.highCents - bracket.runtimeHighCents,
         byokFullLow: 0,
         byokFullHigh: 0,
         byokFeeLow: 0,
         byokFeeHigh: 0,
-        runtimeLow: bracket.runtimeLowCredits,
-        runtimeHigh: bracket.runtimeHighCredits,
+        runtimeLow: bracket.runtimeLowCents,
+        runtimeHigh: bracket.runtimeHighCents,
       },
     };
   }
-  const managedLow = hasRoleSources ? bracket.managedModelLowCredits : 0;
-  const managedHigh = hasRoleSources ? bracket.managedModelHighCredits : 0;
+  const managedLow = hasRoleSources ? bracket.managedModelLowCents : 0;
+  const managedHigh = hasRoleSources ? bracket.managedModelHighCents : 0;
   const byokLow = hasRoleSources
-    ? bracket.byokModelLowCredits
-    : bracket.lowCredits - bracket.runtimeLowCredits;
+    ? bracket.byokModelLowCents
+    : bracket.lowCents - bracket.runtimeLowCents;
   const byokHigh = hasRoleSources
-    ? bracket.byokModelHighCredits
-    : bracket.highCredits - bracket.runtimeHighCredits;
-  const byokFeeLow = platformFeeCredits(byokLow, bracket.byokFeeFraction);
-  const byokFeeHigh = platformFeeCredits(byokHigh, bracket.byokFeeFraction);
-  const lowCredits = Math.max(1, managedLow + byokFeeLow + bracket.runtimeLowCredits);
-  const highCredits = Math.max(lowCredits, managedHigh + byokFeeHigh + bracket.runtimeHighCredits);
+    ? bracket.byokModelHighCents
+    : bracket.highCents - bracket.runtimeHighCents;
+  const byokFeeLow = platformFeeCents(byokLow, bracket.byokFeeFraction);
+  const byokFeeHigh = platformFeeCents(byokHigh, bracket.byokFeeFraction);
+  const lowCents = Math.max(1, managedLow + byokFeeLow + bracket.runtimeLowCents);
+  const highCents = Math.max(lowCents, managedHigh + byokFeeHigh + bracket.runtimeHighCents);
   return {
     ...bracket,
-    lowCredits,
-    highCredits,
+    lowCents,
+    highCents,
     charge: {
       mode,
       managedLow,
@@ -433,21 +430,19 @@ export function chargeableBracket(bracket: CostBracket, mode: TokenSourceMode): 
       byokFullHigh: byokHigh,
       byokFeeLow,
       byokFeeHigh,
-      runtimeLow: bracket.runtimeLowCredits,
-      runtimeHigh: bracket.runtimeHighCredits,
+      runtimeLow: bracket.runtimeLowCents,
+      runtimeHigh: bracket.runtimeHighCents,
     },
   };
 }
 
 /**
- * Credits the run's execution environment holds the moment it starts: the
+ * Cents the run's execution environment holds the moment it starts: the
  * cost of its whole lifetime, released as the run settles. A spending limit
  * below this cannot start the run at all, however small the usage estimate.
  */
 export function runtimeStartHold(bracket: CostBracket): number {
-  return bracket.runtimeBillingBasis === "at_cost"
-    ? Math.ceil(bracket.runtimeSessionHighCredits)
-    : 0;
+  return bracket.runtimeBillingBasis === "at_cost" ? Math.ceil(bracket.runtimeSessionHighCents) : 0;
 }
 
 /** Collapse per-model sources to the conservative job-level billing stamp. */
@@ -465,7 +460,7 @@ export function aggregateTokenSource(configs: ModelConfig[]): TokenSourceMode {
  * bounding a runaway.
  */
 export function defaultCeilingForBracket(bracket: CostBracket): number {
-  return defaultCeilingTrace(bracket).ceilingCredits;
+  return defaultCeilingTrace(bracket).ceilingCents;
 }
 
 /** Headroom applied to the bracket's high end before rounding it into a cap. */
@@ -473,35 +468,35 @@ const CEILING_HEADROOM_FACTOR = 1.15;
 
 /** The steps from a bracket's high end to its default cap, for surfaces that show the working. */
 export interface CeilingTrace {
-  highCredits: number;
+  highCents: number;
   headroomFactor: number;
-  withHeadroomCredits: number;
-  /** The rounding step the cap was lifted to (10 credits under 500, 50 above). */
-  stepCredits: number;
-  ceilingCredits: number;
+  withHeadroomCents: number;
+  /** The rounding step the cap was lifted to (10 cents under 500, 50 above). */
+  stepCents: number;
+  ceilingCents: number;
 }
 
 /** Derive the default cap and every intermediate value behind it. */
 export function defaultCeilingTrace(bracket: CostBracket): CeilingTrace {
-  const withHeadroom = Math.ceil(bracket.highCredits * CEILING_HEADROOM_FACTOR);
-  const stepCredits = niceCapStep(withHeadroom);
+  const withHeadroom = Math.ceil(bracket.highCents * CEILING_HEADROOM_FACTOR);
+  const stepCents = niceCapStep(withHeadroom);
   return {
-    highCredits: bracket.highCredits,
+    highCents: bracket.highCents,
     headroomFactor: CEILING_HEADROOM_FACTOR,
-    withHeadroomCredits: withHeadroom,
-    stepCredits,
-    ceilingCredits: roundToNiceCap(withHeadroom),
+    withHeadroomCents: withHeadroom,
+    stepCents,
+    ceilingCents: roundToNiceCap(withHeadroom),
   };
 }
 
-/** The readable step a cap is rounded up to: 10s under 500 credits, 50s above. */
-function niceCapStep(credits: number): number {
-  return credits < 500 ? 10 : 50;
+/** The readable step a cap is rounded up to: 10s under 500 cents, 50s above. */
+function niceCapStep(cents: number): number {
+  return cents < 500 ? 10 : 50;
 }
 
-/** Round a credit cap up to a readable step (10s under 500, 50s above). */
-function roundToNiceCap(credits: number): number {
-  if (credits <= 0) return 1;
-  const step = niceCapStep(credits);
-  return Math.ceil(credits / step) * step;
+/** Round a cent cap up to a readable step (10s under 500, 50s above). */
+function roundToNiceCap(cents: number): number {
+  if (cents <= 0) return 1;
+  const step = niceCapStep(cents);
+  return Math.ceil(cents / step) * step;
 }
