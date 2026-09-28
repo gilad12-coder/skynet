@@ -17,11 +17,13 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
 from ..exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
 from .budgets import BudgetError, BudgetInsufficientError
 from .credential_safety import scrub_model_config
 from .dependency_lock import verify_dependency_lock
 from .mcp_broker import McpToolsBroker
+from .model_batch import BatchCollector
 from .model_dispatch import MODEL_ATTEMPT_HEADER, ModelHTTPResult, OpenRouterDispatcher
 from .openrouter_quotes import resolve_model_slug
 from .operation_pricing import ChargePolicy, UnpricedOperationError
@@ -189,6 +191,9 @@ class ModelGateway:
         self._recovery_seed_claims: dict[tuple[str, int], int] = {}
         self._recovery_execution_claim: tuple[str, int] | None = None
         self._recovery_ineligible_reason: str | None = None
+        # Set once the job's event queue exists, so an economy batch's polling
+        # keeps the stall watchdog from mistaking a long wait for a hang.
+        self.heartbeat: Callable[[], None] | None = None
         gateway = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -509,7 +514,9 @@ class ModelGateway:
         """Return the loopback endpoint passed to the authorized optimizer child."""
         return f"http://127.0.0.1:{self._server.server_port}/v1"
 
-    def register(self, *, model: str, api_key: str, role: str, policy: ChargePolicy) -> dict[str, str]:
+    def register(
+        self, *, model: str, api_key: str, role: str, policy: ChargePolicy, batch: bool = False
+    ) -> dict[str, str]:
         """Register one fixed role without exposing its provider credential.
 
         Args:
@@ -517,6 +524,7 @@ class ModelGateway:
             api_key: Provider credential retained only in the trusted parent.
             role: Task, judge, or optimization usage attribution.
             policy: Approved conversion policy for this particular model source.
+            batch: Send this role's chat calls through half-price OpenRouter batches.
 
         Returns:
             Scoped guest route containing no upstream credential.
@@ -531,8 +539,18 @@ class ModelGateway:
             policy=policy,
             client=self._client,
             quote_observer=self._observe_model_quote,
+            batch=(
+                BatchCollector(api_key=api_key, model=model, client=self._client, heartbeat=self._beat)
+                if batch
+                else None
+            ),
         )
         return {"url": self.url, "token": token, "model": model, "role": role}
+
+    def _beat(self) -> None:
+        """Report that an economy batch is still being awaited."""
+        if self.heartbeat is not None:
+            self.heartbeat()
 
     def model_routes(self) -> list[dict[str, str]]:
         """Return only capabilities registered by this trusted parent for readiness probes."""
@@ -750,6 +768,7 @@ class ModelGateway:
             models.append((scorer["model"], "judge"))
         for key, role in (("generation_models", "task"), ("reflection_models", "optimization")):
             models.extend((config, role) for config in result.get(key, []) if isinstance(config, dict))
+        economy = bool(result.get("economy_mode"))
         for config, role in models:
             source = config.get("token_source") or result.get("token_source") or "managed"
             extra = config.get("extra") or {}
@@ -767,6 +786,7 @@ class ModelGateway:
                 api_key=str(key),
                 role=role,
                 policy=ChargePolicy("byok_model" if source == "byok" else "managed_model"),
+                batch=economy and source == "managed",
             )
             if config is target_config:
                 target_name = str(target.get("model") or "").strip("/")
@@ -778,6 +798,10 @@ class ModelGateway:
             config.update(cleaned)
             config["extra"] = dict(config.get("extra") or {})
             config["extra"][ROUTE_KEY] = route
+            if economy and source == "managed":
+                # A batch can outlast any per-call timeout; a guest that gave up
+                # would retry as a second paid request while the first still runs.
+                config["extra"]["timeout"] = VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
             config.pop("base_url", None)
         if isinstance(target, dict) and target.get("model"):
             if target_route is not None:
@@ -795,6 +819,8 @@ class ModelGateway:
 
     def close(self) -> None:
         """Finish covered requests before releasing the trusted transport and route tokens."""
+        for route in self._routes.values():
+            route.stop_batch()
         try:
             self._server.shutdown()
             self._server.server_close()

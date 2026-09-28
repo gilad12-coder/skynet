@@ -38,6 +38,8 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
     setMaxMetricCalls,
     useMerge,
     setUseMerge,
+    economyMode,
+    setEconomyMode,
     optimizerName,
     targetScore,
     setTargetScore,
@@ -151,6 +153,16 @@ export function ParamsStep({ w }: { w: SubmitWizardContext }) {
               )}
             </div>
           )}
+        </div>
+
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="economy-mode" className="cursor-pointer text-sm font-semibold">
+              <HelpTip text={tip("submit.economy")}>{msg("submit.economy.label")}</HelpTip>
+            </Label>
+            <p className="text-xs text-muted-foreground">{msg("submit.economy.hint")}</p>
+          </div>
+          <Switch id="economy-mode" checked={economyMode} onCheckedChange={setEconomyMode} />
         </div>
 
         <Separator />

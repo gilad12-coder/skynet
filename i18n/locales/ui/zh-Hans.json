@@ -3929,5 +3929,10 @@
   "tutorial.step.sidebar_nav.title": "快速上手导航",
   "tutorial.step.sidebar_nav.body": "使用侧边栏在页面间切换。在任意位置按 ⌘K 或 Ctrl+K，即可跳转到任意页面或设置。",
   "billing.plans.topup.fee_note": "价格包含 {p1} 平台费，所有付款方式相同。",
-  "billing.plans.topup.custom_range": "请输入 {p1} 至 {p2} 之间的金额。"
+  "billing.plans.topup.custom_range": "请输入 {p1} 至 {p2} 之间的金额。",
+  "submit.economy.label": "半价，较慢",
+  "submit.economy.hint": "托管模型调用将以半价通过提供商的批处理队列执行。每一轮可能需要几分钟到几小时。",
+  "submit.economy.summary_off": "正常速度",
+  "submit.economy.summary_label": "经济模式",
+  "tooltip.submit.economy": "将本次运行的托管模型调用以半价分批发送。一个批次最长可能需要一天，因此运行会慢很多。使用你自己密钥的调用以正常速度运行。"
 }

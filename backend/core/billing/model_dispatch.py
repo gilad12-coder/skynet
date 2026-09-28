@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import httpx
 
+from .model_batch import BatchCollector
 from .openrouter_float import notify_managed_refusal
 from .openrouter_quotes import PricedRequest, fetch_endpoint_prices, price_text_request
 from .operation_pricing import ChargePolicy, OperationQuote, UnpricedOperationError, exact_nonnegative, json_fingerprint
@@ -234,6 +235,22 @@ def mark_prompt_cache(path: str, body: dict[str, Any]) -> dict[str, Any]:
     return {**body, "messages": marked}
 
 
+def batch_rates(quote: OperationQuote) -> tuple[Decimal, Decimal]:
+    """Read the quoted prompt and completion list prices used to share a batch bill.
+
+    Args:
+        quote: The request's reservation quote, carrying its endpoint prices.
+
+    Returns:
+        Prompt and completion USD per token, zero when the quote lacks them.
+    """
+    endpoints = quote.price_snapshot.get("endpoints") or [{}]
+    pricing = endpoints[0].get("pricing") or {}
+    if isinstance(pricing, list):
+        pricing = pricing[0] if pricing else {}
+    return exact_nonnegative(pricing.get("prompt", "0")), exact_nonnegative(pricing.get("completion", "0"))
+
+
 class OpenRouterDispatcher:
     """Keep credentials and the spending ledger outside optimizer-controlled code."""
 
@@ -247,6 +264,7 @@ class OpenRouterDispatcher:
         policy: ChargePolicy,
         client: httpx.Client,
         quote_observer: Callable[[str, str, OperationQuote, str, int], bool] | None = None,
+        batch: BatchCollector | None = None,
     ) -> None:
         """Bind one model role to a trusted transport and pricing policy.
 
@@ -259,6 +277,8 @@ class OpenRouterDispatcher:
             client: Non-retrying HTTP client with an enforced request timeout.
             quote_observer: Optional parent-side recovery bound recorder and
                 atomic headroom claimant.
+            batch: Economy-mode collector; managed chat calls then wait for an
+                OpenRouter batch at half price instead of answering directly.
         """
         self.runtime = runtime
         self._api_key = api_key
@@ -269,6 +289,7 @@ class OpenRouterDispatcher:
         self._quote_observer = quote_observer
         self._attempt_quotes: dict[tuple[str, str, int], tuple[str, PricedRequest]] = {}
         self._refusal: tuple[bytes, float] | None = None
+        self._batch = batch
 
     def dispatch(
         self,
@@ -341,10 +362,23 @@ class OpenRouterDispatcher:
             }
         )
 
+        # Batches reject streaming, and BYOK batches bill the user's own
+        # provider under terms this ledger cannot split per request.
+        batched = (
+            self._batch is not None
+            and path == "/chat/completions"
+            and not priced.body.get("stream")
+            and self.policy.kind == "managed_model"
+        )
+
         def send() -> PaidResult[ModelHTTPResult]:
             """Send exactly once and retain trusted usage even for a provider error response."""
             chunks = []
             interrupted = False
+            if batched:
+                assert self._batch is not None
+                answer = self._batch.run(priced.body, batch_rates(priced.quote))
+                return settle(answer.status, "application/json", answer.body, answer.interrupted, None)
             with self._client.stream(
                 "POST", f"https://openrouter.ai/api/v1{path}", headers=headers, json=priced.body, follow_redirects=False
             ) as response:
@@ -357,6 +391,12 @@ class OpenRouterDispatcher:
                 content = b"".join(chunks)
                 status = response.status_code
                 retry_after = response.headers.get("retry-after")
+            return settle(status, content_type, content, interrupted, retry_after)
+
+        def settle(
+            status: int, content_type: str, content: bytes, interrupted: bool, retry_after: str | None
+        ) -> PaidResult[ModelHTTPResult]:
+            """Turn a provider answer into its measured charge and the relay's response."""
             if path == "/responses":
                 identity, usage, complete = responses_receipt(content, content_type)
                 interrupted = interrupted or not complete
@@ -427,6 +467,11 @@ class OpenRouterDispatcher:
             attempt=attempt,
             recovery_headroom=recovery_headroom,
         )
+
+    def stop_batch(self) -> None:
+        """Release callers waiting on an economy batch when the run closes."""
+        if self._batch is not None:
+            self._batch.stop()
 
     def reconcile(self, generation_id: str) -> tuple[Decimal, dict[str, Any]] | None:
         """Read provider billing evidence without launching or repeating inference.

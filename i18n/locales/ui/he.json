@@ -3929,5 +3929,10 @@
   "tutorial.step.sidebar_nav.title": "התמצאות באפליקציה",
   "tutorial.step.sidebar_nav.body": "בסרגל הצד עוברים בין הדפים. לחיצה על ‎⌘K או Ctrl+K מכל מקום קופצת לכל דף או הגדרה.",
   "billing.plans.topup.fee_note": "המחיר כולל עמלת פלטפורמה של {p1}, זהה לכל אמצעי תשלום.",
-  "billing.plans.topup.custom_range": "יש להזין סכום בין {p1} ל-{p2}."
+  "billing.plans.topup.custom_range": "יש להזין סכום בין {p1} ל-{p2}.",
+  "submit.economy.label": "חצי מחיר, איטי יותר",
+  "submit.economy.hint": "קריאות מודל מנוהלות עוברות בתור אצוות אצל הספק בחצי מחיר. כל סבב יכול לקחת בין דקות לשעות.",
+  "submit.economy.summary_off": "מהירות רגילה",
+  "submit.economy.summary_label": "מצב חסכוני",
+  "tooltip.submit.economy": "שולח את קריאות המודל המנוהלות של הריצה באצוות בחצי מחיר. אצווה יכולה לקחת עד יממה, ולכן הריצה איטית בהרבה. קריאות עם המפתח שלך רצות במהירות רגילה."
 }

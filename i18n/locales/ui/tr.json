@@ -3929,5 +3929,10 @@
   "tutorial.step.sidebar_nav.title": "Uygulamada gezinme",
   "tutorial.step.sidebar_nav.body": "Sayfalar arasında geçmek için kenar çubuğunu kullanın. Herhangi bir sayfaya veya ayara atlamak için her yerde ⌘K ya da Ctrl+K'ye basın.",
   "billing.plans.topup.fee_note": "Fiyata {p1} platform ücreti dahildir; her ödeme yönteminde aynıdır.",
-  "billing.plans.topup.custom_range": "{p1} ile {p2} arasında bir tutar girin."
+  "billing.plans.topup.custom_range": "{p1} ile {p2} arasında bir tutar girin.",
+  "submit.economy.label": "Yarı fiyat, daha yavaş",
+  "submit.economy.hint": "Yönetilen model çağrıları sağlayıcının toplu iş kuyruğundan yarı fiyatına geçer. Her tur dakikalardan saatlere kadar sürebilir.",
+  "submit.economy.summary_off": "Normal hız",
+  "submit.economy.summary_label": "Ekonomi modu",
+  "tooltip.submit.economy": "Çalıştırmanın yönetilen model çağrılarını yarı fiyatına toplu olarak gönderir. Bir toplu iş bir güne kadar sürebilir, bu yüzden çalıştırma çok daha yavaştır. Kendi anahtarınızla yapılan çağrılar normal hızda çalışır."
 }

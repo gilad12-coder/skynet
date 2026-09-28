@@ -96,7 +96,15 @@ from .checkpoint_compat import (
     supports_checkpoint,
     validate_checkpoint,
 )
-from .constants import EVENT_AGENT_RUN, EVENT_ERROR, EVENT_LOG, EVENT_PROGRESS, EVENT_RESULT, EVENT_TERMINAL
+from .constants import (
+    EVENT_AGENT_RUN,
+    EVENT_ERROR,
+    EVENT_HEARTBEAT,
+    EVENT_LOG,
+    EVENT_PROGRESS,
+    EVENT_RESULT,
+    EVENT_TERMINAL,
+)
 from .memory_guard import memory_usage_fraction
 from .subprocess_runner import run_service_in_subprocess, set_fork_service
 from .tagging_job import TaggingAutotagPayload, run_autotag_job
@@ -1017,6 +1025,8 @@ class BackgroundWorker:
                 execution_start_method = "spawn" if budget_gateway is not None else self._mp_start_method
                 execution_context = mp.get_context("spawn") if budget_gateway is not None else self._mp_ctx
                 event_queue = execution_context.Queue()
+                if budget_gateway is not None:
+                    budget_gateway.heartbeat = lambda: event_queue.put_nowait({"type": EVENT_HEARTBEAT})
                 run_process = execution_context.Process(  # type: ignore[attr-defined]
                     target=run_vercel_dspy if budget_gateway is not None else run_service_in_subprocess,
                     args=(

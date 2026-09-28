@@ -62,6 +62,9 @@ const REFLECTION_TOKEN_SHARE = 0.35;
 /** Per call, prompt + few-shot + dataset input dominates the shorter completion. */
 const INPUT_TOKEN_SHARE = 0.7;
 
+/** The Batch API bills managed model calls at half the list price. */
+export const ECONOMY_PRICE_FACTOR = 0.5;
+
 export interface CostBracketInput {
   /** GEPA `auto` tier ("light"/"medium"/"heavy"), or "" when an explicit eval count is used. */
   autoLevel: string;
@@ -83,6 +86,8 @@ export interface CostBracketInput {
   runtime?: RuntimeCostProjection | null;
   /** The backend's markup and BYOK fee; the seed defaults until the wallet loads. */
   pricing?: Pick<PricingTerms, "usageMarkup" | "byokFeeFraction">;
+  /** Economy mode sends managed calls through the provider's half-price Batch API. */
+  economyMode?: boolean;
 }
 
 export interface ProjectedModelRole {
@@ -275,6 +280,7 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
     modelRoles,
     runtime,
     pricing = DEFAULT_PRICING_TERMS,
+    economyMode = false,
   } = input;
   const budget = resolveMetricCalls(autoLevel, maxFullEvals, maxMetricCalls);
   const calls = budget.calls;
@@ -312,8 +318,10 @@ export function projectCostBracket(input: CostBracketInput): CostBracket {
   const managed = roles.filter((role) => role.tokenSource !== "byok");
   const byok = roles.filter((role) => role.tokenSource === "byok");
   const { usageMarkup, byokFeeFraction } = pricing;
-  const managedModelLowCents = centsForUsage(roleUsage(lowTokens, managed), usageMarkup);
-  const managedModelHighCents = centsForUsage(roleUsage(highTokens, managed), usageMarkup);
+  // BYOK calls never batch, so only the managed share gets the batch discount.
+  const managedMarkup = usageMarkup * (economyMode ? ECONOMY_PRICE_FACTOR : 1);
+  const managedModelLowCents = centsForUsage(roleUsage(lowTokens, managed), managedMarkup);
+  const managedModelHighCents = centsForUsage(roleUsage(highTokens, managed), managedMarkup);
   const byokModelLowCents = centsForUsage(roleUsage(lowTokens, byok), 1);
   const byokModelHighCents = centsForUsage(roleUsage(highTokens, byok), 1);
   const runtimeEstimate = runtimeCents(runtime);

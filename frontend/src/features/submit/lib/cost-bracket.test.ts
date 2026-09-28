@@ -69,6 +69,23 @@ test("prices repeated model selections as separate physical roles", () => {
   assert.ok(threeRoles.managedModelHighCents > once.managedModelHighCents);
 });
 
+test("economy mode halves only the managed model share", () => {
+  const roles = [
+    { role: "task" as const, model: expensive, tokenSource: "managed" as const, tokenShare: 1 },
+    { role: "optimization" as const, model: expensive, tokenSource: "byok" as const, tokenShare: 1 },
+  ];
+  const standard = projectCostBracket({ ...base, maxMetricCalls: "1000", modelRoles: roles });
+  const economy = projectCostBracket({
+    ...base,
+    maxMetricCalls: "1000",
+    modelRoles: roles,
+    economyMode: true,
+  });
+
+  assert.ok(Math.abs(economy.managedModelHighCents - standard.managedModelHighCents / 2) <= 1);
+  assert.equal(economy.byokModelHighCents, standard.byokModelHighCents);
+});
+
 test("uses each selected model's catalog price", () => {
   const allCheap = projectCostBracket({
     ...base,

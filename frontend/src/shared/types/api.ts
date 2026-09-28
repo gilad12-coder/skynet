@@ -235,6 +235,9 @@ interface OptimizationRequestBase {
   // Optional GEPA validation target, expressed as a percentage (0–100). The
   // optimizer stops searching when its best validation candidate reaches it.
   target_score?: number;
+  // Route managed model calls through the provider's Batch API: half price,
+  // but each round of calls can take minutes to hours. BYOK calls run normally.
+  economy_mode?: boolean;
   // Projected cost bracket the wizard showed at submit [FG-1], persisted with
   // the billing stamp so the estimate can be reconciled against the actual
   // charge. Carries the chargeable bracket for the run's token source
