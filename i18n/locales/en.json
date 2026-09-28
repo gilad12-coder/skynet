@@ -106,6 +106,8 @@
     "billing.openrouter_oauth_failed": "OpenRouter sign-in didn't complete. Try again.",
     "billing.openrouter_oauth_state_invalid": "The OpenRouter sign-in link is invalid or expired. Start again.",
     "billing.openrouter_unreachable": "OpenRouter could not be reached. Try again in a moment.",
+    "billing.payment_method_invalid": "Stripe didn't accept these payment method details.",
+    "billing.payment_method_not_found": "This payment method isn't saved to your account.",
     "code_agent.upstream_failed": "Code agent failed: {error}",
     "dataset.column_roles_invalid": "Invalid role values (must be 'input', 'output', or 'ignore'): {bad}",
     "dataset.column_roles_need_input": "At least one column must have role 'input'.",

@@ -34,6 +34,7 @@ from ...billing.service import (
     CREDIT_PURCHASE_FEE_RATE,
     CUSTOM_CREDITS_MAX,
     CUSTOM_CREDITS_MIN,
+    BillingProfileSnapshot,
 )
 from ...config import settings
 from ...provider_registry import BYOK_TO_LITELLM_PROVIDER
@@ -358,6 +359,16 @@ class PaymentMethodResponse(BaseModel):
     exp_month: int | None = None
     exp_year: int | None = None
     is_default: bool = False
+    holder_name: str | None = None
+
+
+# Edit a saved payment method. Expiry is applied only when both month and year
+# are sent; a null holder name leaves the stored name unchanged.
+class PaymentMethodUpdateRequest(BaseModel):
+    exp_month: int | None = Field(default=None, ge=1, le=12)
+    exp_year: int | None = Field(default=None, ge=2000, le=2100)
+    holder_name: str | None = Field(default=None, max_length=200)
+    make_default: bool = False
 
 
 class BillingProfileResponse(BaseModel):
@@ -368,6 +379,45 @@ class BillingProfileResponse(BaseModel):
     phone: str | None = None
     address: BillingAddressResponse = Field(default_factory=BillingAddressResponse)
     payment_methods: list[PaymentMethodResponse] = Field(default_factory=list)
+
+
+def _profile_response(snapshot: BillingProfileSnapshot) -> BillingProfileResponse:
+    """Map a service billing-profile snapshot onto the API response model.
+
+    Args:
+        snapshot: Stripe-backed profile read by the billing service.
+
+    Returns:
+        The response with masked payment-method metadata.
+    """
+    return BillingProfileResponse(
+        available=snapshot.available,
+        has_customer=snapshot.has_customer,
+        email=snapshot.email,
+        name=snapshot.name,
+        phone=snapshot.phone,
+        address=BillingAddressResponse(
+            line1=snapshot.address.line1,
+            line2=snapshot.address.line2,
+            city=snapshot.address.city,
+            state=snapshot.address.state,
+            postal_code=snapshot.address.postal_code,
+            country=snapshot.address.country,
+        ),
+        payment_methods=[
+            PaymentMethodResponse(
+                id=method.id,
+                type=method.type,
+                brand=method.brand,
+                last4=method.last4,
+                exp_month=method.exp_month,
+                exp_year=method.exp_year,
+                is_default=method.is_default,
+                holder_name=method.holder_name,
+            )
+            for method in snapshot.payment_methods
+        ],
+    )
 
 
 class BillingTransactionResponse(BaseModel):
@@ -589,34 +639,55 @@ def create_billing_router(*, job_store) -> APIRouter:
         Returns:
             Billing contact fields and masked saved payment methods.
         """
-        snapshot = service.get_billing_profile(user.username)
-        return BillingProfileResponse(
-            available=snapshot.available,
-            has_customer=snapshot.has_customer,
-            email=snapshot.email,
-            name=snapshot.name,
-            phone=snapshot.phone,
-            address=BillingAddressResponse(
-                line1=snapshot.address.line1,
-                line2=snapshot.address.line2,
-                city=snapshot.address.city,
-                state=snapshot.address.state,
-                postal_code=snapshot.address.postal_code,
-                country=snapshot.address.country,
-            ),
-            payment_methods=[
-                PaymentMethodResponse(
-                    id=method.id,
-                    type=method.type,
-                    brand=method.brand,
-                    last4=method.last4,
-                    exp_month=method.exp_month,
-                    exp_year=method.exp_year,
-                    is_default=method.is_default,
-                )
-                for method in snapshot.payment_methods
-            ],
+        return _profile_response(service.get_billing_profile(user.username))
+
+    @router.patch(
+        "/billing/payment-methods/{payment_method_id}",
+        response_model=BillingProfileResponse,
+        summary="Edit a saved payment method or make it the default",
+    )
+    def update_payment_method(
+        payment_method_id: str,
+        body: PaymentMethodUpdateRequest,
+        user: AuthenticatedUserDep,
+    ) -> BillingProfileResponse:
+        """Edit one of the caller's saved payment methods and return the fresh profile.
+
+        Args:
+            payment_method_id: Stripe payment method id owned by the caller.
+            body: New expiry, holder name, and default flag.
+            user: Authenticated owner of the payment method.
+
+        Returns:
+            The updated billing profile.
+        """
+        service.update_payment_method(
+            user.username,
+            payment_method_id,
+            exp_month=body.exp_month,
+            exp_year=body.exp_year,
+            holder_name=body.holder_name,
+            make_default=body.make_default,
         )
+        return _profile_response(service.get_billing_profile(user.username))
+
+    @router.delete(
+        "/billing/payment-methods/{payment_method_id}",
+        response_model=BillingProfileResponse,
+        summary="Remove a saved payment method",
+    )
+    def remove_payment_method(payment_method_id: str, user: AuthenticatedUserDep) -> BillingProfileResponse:
+        """Detach one of the caller's saved payment methods and return the fresh profile.
+
+        Args:
+            payment_method_id: Stripe payment method id owned by the caller.
+            user: Authenticated owner of the payment method.
+
+        Returns:
+            The updated billing profile.
+        """
+        service.remove_payment_method(user.username, payment_method_id)
+        return _profile_response(service.get_billing_profile(user.username))
 
     @router.get(
         "/billing/transactions",

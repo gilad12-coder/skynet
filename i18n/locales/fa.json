@@ -125,6 +125,8 @@
     "billing.openrouter_oauth_failed": "ورود به OpenRouter کامل نشد. دوباره تلاش کنید.",
     "billing.openrouter_oauth_state_invalid": "پیوند ورود به OpenRouter نامعتبر است یا منقضی شده. از نو شروع کنید.",
     "billing.openrouter_unreachable": "دسترسی به OpenRouter ممکن نشد. کمی بعد دوباره تلاش کنید.",
+    "billing.payment_method_invalid": "Stripe جزئیات این روش پرداخت را نپذیرفت.",
+    "billing.payment_method_not_found": "این روش پرداخت در حساب شما ذخیره نشده است.",
     "workflow.validation_failed": "اعتبارسنجی گردش کار ناموفق بود: {error}",
     "accounts.email_taken": "این آدرس ایمیل قبلاً ثبت شده است.",
     "accounts.invalid_credentials": "ایمیل یا گذرواژه نادرست است.",

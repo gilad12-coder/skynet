@@ -53,6 +53,8 @@ class I18nKey(StrEnum):
     BILLING_OPENROUTER_OAUTH_FAILED = 'billing.openrouter_oauth_failed'
     BILLING_OPENROUTER_OAUTH_STATE_INVALID = 'billing.openrouter_oauth_state_invalid'
     BILLING_OPENROUTER_UNREACHABLE = 'billing.openrouter_unreachable'
+    BILLING_PAYMENT_METHOD_INVALID = 'billing.payment_method_invalid'
+    BILLING_PAYMENT_METHOD_NOT_FOUND = 'billing.payment_method_not_found'
     BUDGET_IDEMPOTENCY_REQUIRED = 'budget.idempotency_required'
     CODE_AGENT_UPSTREAM_FAILED = 'code_agent.upstream_failed'
     CONNECTORS_EXPIRED = 'connectors.expired'

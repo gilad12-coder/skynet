@@ -125,6 +125,8 @@
     "billing.openrouter_oauth_failed": "L'accesso a OpenRouter non è stato completato. Riprova.",
     "billing.openrouter_oauth_state_invalid": "Il link di accesso a OpenRouter non è valido o è scaduto. Ricomincia.",
     "billing.openrouter_unreachable": "Impossibile raggiungere OpenRouter. Riprova tra un momento.",
+    "billing.payment_method_invalid": "Stripe non ha accettato questi dati del metodo di pagamento.",
+    "billing.payment_method_not_found": "Questo metodo di pagamento non è salvato nel tuo account.",
     "workflow.validation_failed": "Convalida del flusso di lavoro non riuscita: {error}",
     "accounts.email_taken": "Questo indirizzo email è già registrato.",
     "accounts.invalid_credentials": "Email o password non corretti.",

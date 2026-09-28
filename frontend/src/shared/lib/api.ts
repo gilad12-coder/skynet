@@ -920,6 +920,7 @@ interface BillingPaymentMethod {
   exp_month: number | null;
   exp_year: number | null;
   is_default: boolean;
+  holder_name: string | null;
 }
 
 /** Stripe-backed billing details for the authenticated account. */
@@ -970,6 +971,29 @@ export function createBillingPortalSession(flow: "manage" | "payment_method") {
   return request<{ url: string }>("/billing/portal", {
     method: "POST",
     body: JSON.stringify({ flow }),
+  });
+}
+
+/** Edit a saved payment method's expiry and holder name, or make it the default. */
+export function updatePaymentMethod(
+  id: string,
+  changes: {
+    exp_month?: number;
+    exp_year?: number;
+    holder_name?: string;
+    make_default?: boolean;
+  },
+) {
+  return request<BillingProfileResponse>(`/billing/payment-methods/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  });
+}
+
+/** Remove a saved payment method from the account. */
+export function removePaymentMethod(id: string) {
+  return request<BillingProfileResponse>(`/billing/payment-methods/${encodeURIComponent(id)}`, {
+    method: "DELETE",
   });
 }
 

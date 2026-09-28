@@ -125,6 +125,8 @@
     "billing.openrouter_oauth_failed": "OpenRouter へのサインインが完了しませんでした。もう一度お試しください。",
     "billing.openrouter_oauth_state_invalid": "OpenRouter のサインインリンクが無効か、期限切れです。最初からやり直してください。",
     "billing.openrouter_unreachable": "OpenRouter に接続できませんでした。しばらくしてからもう一度お試しください。",
+    "billing.payment_method_invalid": "Stripe がこの支払い方法の情報を受け付けませんでした。",
+    "billing.payment_method_not_found": "この支払い方法はアカウントに保存されていません。",
     "workflow.validation_failed": "ワークフローの検証に失敗しました: {error}",
     "accounts.email_taken": "そのメールアドレスはすでに登録されています。",
     "accounts.invalid_credentials": "メールアドレスまたはパスワードが正しくありません。",

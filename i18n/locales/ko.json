@@ -125,6 +125,8 @@
     "billing.openrouter_oauth_failed": "OpenRouter 로그인이 완료되지 않았습니다. 다시 시도하세요.",
     "billing.openrouter_oauth_state_invalid": "OpenRouter 로그인 링크가 잘못되었거나 만료되었습니다. 처음부터 다시 시작하세요.",
     "billing.openrouter_unreachable": "OpenRouter에 연결할 수 없습니다. 잠시 후 다시 시도하세요.",
+    "billing.payment_method_invalid": "Stripe에서 이 결제 수단 정보를 받아들이지 않았습니다.",
+    "billing.payment_method_not_found": "이 결제 수단은 계정에 저장되어 있지 않습니다.",
     "workflow.validation_failed": "워크플로 검증에 실패했습니다: {error}",
     "accounts.email_taken": "이미 등록된 이메일 주소입니다.",
     "accounts.invalid_credentials": "이메일 또는 비밀번호가 올바르지 않습니다.",
