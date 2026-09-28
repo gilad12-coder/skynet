@@ -3932,6 +3932,7 @@
   "billing.plans.topup.custom_range": "Inserisci un importo da {p1} a {p2}.",
   "submit.economy.label": "Metà prezzo, più lento",
   "submit.economy.hint": "Le chiamate ai modelli gestiti passano dalla coda batch del fornitore a metà prezzo. Ogni round può richiedere da minuti a ore.",
+  "submit.blackbox.economy.native_hint": "Questo proponente è un agente di codice, quindi le sue chiamate restano a prezzo pieno. Le chiamate del modello di valutazione ottengono comunque lo sconto.",
   "submit.economy.summary_off": "Velocità normale",
   "submit.economy.summary_label": "Modalità economica",
   "tooltip.submit.economy": "Invia a metà prezzo, in batch, le chiamate ai modelli gestiti dell'esecuzione. Un batch può richiedere fino a un giorno, quindi l'esecuzione è molto più lenta. Le chiamate con la tua chiave vengono eseguite a velocità normale."

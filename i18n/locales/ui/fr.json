@@ -3932,6 +3932,7 @@
   "billing.plans.topup.custom_range": "Saisissez un montant de {p1} à {p2}.",
   "submit.economy.label": "Moitié prix, plus lent",
   "submit.economy.hint": "Les appels aux modèles gérés passent par la file de lots du fournisseur à moitié prix. Chaque tour peut prendre de quelques minutes à quelques heures.",
+  "submit.blackbox.economy.native_hint": "Ce proposeur est un agent de code, ses propres appels restent donc au prix plein. Les appels du modèle de notation bénéficient toujours de la réduction.",
   "submit.economy.summary_off": "Vitesse normale",
   "submit.economy.summary_label": "Mode économique",
   "tooltip.submit.economy": "Envoie les appels aux modèles gérés de l'exécution par lots, à moitié prix. Un lot peut prendre jusqu'à une journée, l'exécution est donc bien plus lente. Les appels avec votre propre clé s'exécutent à vitesse normale."

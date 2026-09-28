@@ -3932,6 +3932,7 @@
   "billing.plans.topup.custom_range": "Introduce un importe de {p1} a {p2}.",
   "submit.economy.label": "Mitad de precio, más lento",
   "submit.economy.hint": "Las llamadas a modelos gestionados pasan por la cola de lotes del proveedor a mitad de precio. Cada ronda puede tardar de minutos a horas.",
+  "submit.blackbox.economy.native_hint": "Este proponente es un agente de programación, así que sus propias llamadas mantienen el precio completo. Las llamadas del modelo de puntuación siguen con descuento.",
   "submit.economy.summary_off": "Velocidad normal",
   "submit.economy.summary_label": "Modo económico",
   "tooltip.submit.economy": "Envía las llamadas a modelos gestionados de la ejecución en lotes a mitad de precio. Un lote puede tardar hasta un día, así que la ejecución es mucho más lenta. Las llamadas con tu propia clave se ejecutan a velocidad normal."

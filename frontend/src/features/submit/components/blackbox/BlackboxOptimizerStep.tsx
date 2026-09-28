@@ -70,6 +70,8 @@ export function BlackboxOptimizerStep({
     scorerModelMode,
     setEditingModel,
     catalog,
+    economyMode,
+    setEconomyMode,
   } = w;
 
   const engines = engineCatalog?.engines ?? [];
@@ -349,6 +351,19 @@ export function BlackboxOptimizerStep({
                 />
               </Field>
             )}
+          </div>
+
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="bb-economy-mode" className="cursor-pointer text-sm font-semibold">
+                <HelpTip text={tip("submit.economy")}>{msg("submit.economy.label")}</HelpTip>
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {msg("submit.economy.hint")}
+                {nativeProposer && ` ${msg("submit.blackbox.economy.native_hint")}`}
+              </p>
+            </div>
+            <Switch id="bb-economy-mode" checked={economyMode} onCheckedChange={setEconomyMode} />
           </div>
         </>
       )}

@@ -225,6 +225,22 @@ def test_economy_mode_batches_only_managed_roles(gateway: ModelGateway, economy:
     assert "timeout" not in protected["reflection_model_config"]["extra"]
 
 
+def test_economy_mode_batches_every_optimize_anything_model(gateway: ModelGateway) -> None:
+    """Batch an Optimize Anything run's optimization model and its scorer's judge model alike."""
+    protected = gateway.protect_payload(
+        {
+            "economy_mode": True,
+            "target": {"kind": "text"},
+            "reflection_model_config": {"name": "fixture/text"},
+            "scorer": {"kind": "python", "metric_code": "def score(x): return 1", "model": {"name": "fixture/text"}},
+        },
+        managed_key="provider-secret",
+    )
+    for config in (protected["reflection_model_config"], protected["scorer"]["model"]):
+        assert gateway._routes[config["extra"][ROUTE_KEY]["token"]]._batch is not None
+        assert config["extra"]["timeout"] == VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
+
+
 def test_byok_agent_task_uses_its_scoped_fee_metered_route(gateway: ModelGateway) -> None:
     """Route the evaluated agent through its own key while billing only the BYOK fee policy."""
     protected = gateway.protect_payload(

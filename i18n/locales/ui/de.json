@@ -3932,6 +3932,7 @@
   "billing.plans.topup.custom_range": "Gib einen Betrag von {p1} bis {p2} ein.",
   "submit.economy.label": "Halber Preis, langsamer",
   "submit.economy.hint": "Verwaltete Modellaufrufe laufen zum halben Preis über die Batch-Warteschlange des Anbieters. Jede Runde kann Minuten bis Stunden dauern.",
+  "submit.blackbox.economy.native_hint": "Dieser Proposer ist ein Coding-Agent, daher kosten seine eigenen Aufrufe den vollen Preis. Aufrufe des Bewertungsmodells erhalten den Rabatt weiterhin.",
   "submit.economy.summary_off": "Normale Geschwindigkeit",
   "submit.economy.summary_label": "Sparmodus",
   "tooltip.submit.economy": "Sendet die verwalteten Modellaufrufe des Laufs gebündelt zum halben Preis. Ein Batch kann bis zu einem Tag dauern, daher ist der Lauf deutlich langsamer. Aufrufe mit deinem eigenen Schlüssel laufen normal schnell."

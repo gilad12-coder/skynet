@@ -250,6 +250,7 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
     reflectionModel,
     optimizationFamily,
     costBracket,
+    economyMode,
     tokenSource,
   } = w;
 
@@ -612,6 +613,13 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                       principles={estimatePrinciples}
                       className="text-sm"
                     />
+                  </Row>
+                  <Row
+                    icon={<Coins className="size-3.5" />}
+                    label={msg("submit.economy.summary_label")}
+                    tipText={tip("submit.economy")}
+                  >
+                    {economyMode ? msg("submit.economy.label") : msg("submit.economy.summary_off")}
                   </Row>
                 </div>
               )}

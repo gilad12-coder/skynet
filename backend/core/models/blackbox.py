@@ -239,6 +239,15 @@ class BlackboxRunRequest(BaseModel):
     reflection_model_settings: ModelConfig = Field(alias="reflection_model_config")
     token_source: Literal["managed", "byok"] = "managed"
     is_private: bool = False
+    economy_mode: bool = Field(
+        default=False,
+        description=(
+            "Send the run's managed chat model calls through OpenRouter's Batch API at half the "
+            "token price. Each round of calls waits for its batch, typically minutes and at most a "
+            "day, so the run finishes much later. Coding-agent proposer calls and calls on the "
+            "user's own OpenRouter key run normally."
+        ),
+    )
     preflight_id: str | None = Field(default=None, min_length=1, max_length=64)
     preflight_fingerprint: str | None = Field(default=None, min_length=1, max_length=128)
     execution_budget_id: str | None = Field(default=None, min_length=1, max_length=64)

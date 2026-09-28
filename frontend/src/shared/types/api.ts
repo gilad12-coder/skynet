@@ -668,6 +668,9 @@ export interface BlackboxRunRequest {
   reflection_model_config: ModelConfig;
   token_source?: "managed" | "byok";
   is_private?: boolean;
+  // Batch managed chat model calls at half price; coding-agent proposer calls
+  // and BYOK calls run normally.
+  economy_mode?: boolean;
   max_cost_cents?: number | null;
   estimated_cents_low?: number | null;
   estimated_cents_high?: number | null;
