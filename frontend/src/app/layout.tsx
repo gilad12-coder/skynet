@@ -167,9 +167,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // <head> gets emitted twice (literal + React's resource hoist). URLs are the
   // stable public/ copies the globals.css overrides point at; crossOrigin is
   // required since fonts fetch in CORS mode. JetBrains Mono stays non-preloaded.
+  // Geist sits ahead of Heebo in --font-ui, so Heebo's Latin subset never paints
+  // and its Hebrew subset only paints on Hebrew pages; preloading either
+  // elsewhere wastes bandwidth and trips Chrome's unused-preload warning.
   const fontPreload = { as: "font", type: "font/woff2", crossOrigin: "anonymous" } as const;
-  preload("/fonts/heebo-hebrew-wght-normal.woff2", fontPreload);
-  preload("/fonts/heebo-latin-wght-normal.woff2", fontPreload);
+  if (locale === "he") preload("/fonts/heebo-hebrew-wght-normal.woff2", fontPreload);
   preload("/fonts/geist-latin-wght-normal.woff2", fontPreload);
   const runtimeEnv = getServerRuntimeEnv();
   // First-paint guess for the phone shell; the client re-derives it from the
@@ -203,9 +205,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // backend could prematurely close the surrounding <script>. Escape `<`
   // before injecting into dangerouslySetInnerHTML.
   const jsonLdSafe = JSON.stringify(jsonLd).replace(/</g, "\\u003c");
+  // translate="no" plus the notranslate meta: the UI ships its own locales, and
+  // browser page translation swaps React-owned text nodes for its own, so the
+  // next unmount throws "Failed to execute 'removeChild' on 'Node'".
   return (
-    <html lang={locale} dir={dirForLocale(locale)} suppressHydrationWarning>
+    <html lang={locale} dir={dirForLocale(locale)} translate="no" suppressHydrationWarning>
       <head>
+        <meta name="google" content="notranslate" />
         {/* Plain <script> tags, not next/script: `beforeInteractive` with inline
             children makes React 19 warn ("scripts inside components are never
             executed when rendering on the client"). These run straight from the
