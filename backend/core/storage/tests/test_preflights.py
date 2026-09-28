@@ -39,7 +39,7 @@ def store(tmp_path: Path) -> Iterator[PreflightStore]:
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         session.add(
-            BillingCustomerModel(username="alice", stripe_customer_id="fixture", credit_balance=50, grant_remaining=0)
+            BillingCustomerModel(username="alice", stripe_customer_id="fixture", balance_cents=50, grant_remaining=0)
         )
         session.commit()
     yield PreflightStore(engine)
@@ -111,7 +111,7 @@ def _reserve(store: PreflightStore, budget_id: str, generation: int):
         cost_kind="model",
         request_fingerprint="fixed-request",
         price_snapshot={"version": "fixture"},
-        max_credits=2,
+        max_cents=2,
     )
 
 
@@ -183,9 +183,9 @@ def test_dispatched_work_blocks_expired_owner_replay_until_settlement(store: Pre
     assert pending.document["status"] == "pending"
     assert pending.document["may_advance"] is False
     assert pending.document["pending_reason"]["category"] == "usage_reconciliation"
-    assert store.budgets.get(budget_id, "alice").reserved_credits == 2
+    assert store.budgets.get(budget_id, "alice").reserved_cents == 2
     assert not store.renew(first.document["id"], claim_token=first.token)
-    store.budgets.settle(operation.id, "alice", evidence_key="final", actual_credits="0.2", evidence={"actual": True})
+    store.budgets.settle(operation.id, "alice", evidence_key="final", actual_cents="0.2", evidence={"actual": True})
     retry = _claim(store, budget_id, payload)
     assert retry.token is not None
     assert retry.generation == pending.generation
@@ -231,7 +231,7 @@ def test_confirmed_usage_unblocks_only_genuine_completed_evidence(store: Preflig
         == "pending"
     )
     assert _claim(store, budget_id).token is None
-    store.budgets.settle(operation.id, "alice", evidence_key="final", actual_credits="0.3", evidence={"actual": True})
+    store.budgets.settle(operation.id, "alice", evidence_key="final", actual_cents="0.3", evidence={"actual": True})
     reused = _claim(store, budget_id)
     assert reused.token is None
     assert reused.document["status"] == "succeeded"

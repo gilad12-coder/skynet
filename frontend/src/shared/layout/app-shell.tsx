@@ -20,7 +20,7 @@ import { PageContainer } from "@/shared/layout/page-container";
 import { MobileShell } from "@/shared/layout/mobile-shell";
 import { useIsPhone } from "@/shared/hooks/use-device-class";
 import { useUserPrefs, LiteModeHint } from "@/features/settings";
-import { CreditBalanceChip } from "@/features/billing";
+import { BalanceChip } from "@/features/billing";
 import {
   GeneralistPanel,
   GeneralistPanelProvider,
@@ -208,7 +208,7 @@ function ShellChrome({ children }: { children: React.ReactNode }) {
           {/* The balance sits in the global chrome so what a run may cost is
               never more than a glance away; the chip's own popover carries the
               breakdown and the wallet path. */}
-          <CreditBalanceChip />
+          <BalanceChip />
           {/* Tutorials are grouped by workflow so this button opens a replayable
               guide chooser rather than starting one long product tour. */}
           <PopoverPrimitive.Root>

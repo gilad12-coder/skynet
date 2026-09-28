@@ -118,7 +118,7 @@ def harness(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Harness]:
             BillingCustomerModel(
                 username="alice",
                 stripe_customer_id="fixture",
-                credit_balance=100,
+                balance_cents=100,
                 grant_remaining=0,
             )
         )

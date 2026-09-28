@@ -97,12 +97,12 @@ class OpenRouterUsageReconciler:
             raise UsagePendingError("The original model billing scope is unavailable.")
         policy = ChargePolicy(
             kind=kind,
-            credit_usd=exact_nonnegative(values["credit_usd"]),
+            cent_usd=exact_nonnegative(values["cent_usd"]),
             model_markup=exact_nonnegative(values["model_markup"]),
             byok_fee_fraction=exact_nonnegative(values["byok_fee_fraction"]),
         )
-        if policy.credit_usd == Decimal(0):
-            raise UsagePendingError("The original credit conversion is invalid.")
+        if policy.cent_usd == Decimal(0):
+            raise UsagePendingError("The original cent conversion is invalid.")
         if client is None:
             with httpx.Client(timeout=15, trust_env=False, follow_redirects=False) as owned:
                 return self.reconcile(operation_id, username, client=owned)
@@ -129,8 +129,8 @@ class OpenRouterUsageReconciler:
             operation_id,
             username,
             evidence_key=f"openrouter-generation:{identity}",
-            actual_credits=charge.total,
-            actual_wallet_credits=charge.wallet,
+            actual_cents=charge.total,
+            actual_wallet_cents=charge.wallet,
             evidence={"provider": "openrouter", "generation": generation, "provider_usd": str(usd)},
         )
 

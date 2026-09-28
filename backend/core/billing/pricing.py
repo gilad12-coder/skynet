@@ -1,8 +1,8 @@
 """Per-model, per-token run pricing — the shared basis for estimate and charge.
 
-A run's credit cost is the provider cost of its tokens times the configured
+A run's cost in cents is the provider cost of its tokens times the configured
 usage markup (``settings.usage_markup``, env ``USAGE_MARKUP``), converted to
-credits at :data:`CREDIT_USD_VALUE` — one credit per cent. The markup applies to
+cents at :data:`CENT_USD_VALUE`. The markup applies to
 every platform-paid metered charge; a BYOK run pays only
 :data:`PLATFORM_FEE_FRACTION` of the at-cost model price instead.
 
@@ -33,9 +33,9 @@ from .openrouter_prices import TokenPrices, live_prices
 
 logger = logging.getLogger(__name__)
 
-# One credit is worth one US cent: a credit is just a cent that can only be
-# spent inside Skynet. The markup is applied to the cost, never to the credit.
-CREDIT_USD_VALUE = 0.01
+# The balance is kept in US cents. The markup is applied to the cost, never
+# to the balance.
+CENT_USD_VALUE = 0.01
 
 # The platform fee charged on a run whose provider tokens are paid directly
 # through the user's own key (BYOK): a small share of the equivalent at-cost
@@ -201,22 +201,22 @@ def raw_cost_usd(usages: Iterable[ModelUsage]) -> float:
     return sum(usage_cost_usd(usage) for usage in usages)
 
 
-def credits_for_cost_usd(cost_usd: float) -> int:
-    """Convert a USD amount to credits, rounding any non-zero amount up.
+def cents_for_cost_usd(cost_usd: float) -> int:
+    """Convert a USD amount to cents, rounding any non-zero amount up.
 
     Args:
         cost_usd: The amount to bill, already marked up (or fee-scaled).
 
     Returns:
-        The non-negative credit cost; a positive amount costs at least one credit.
+        The non-negative cost in cents; a positive amount costs at least one cent.
     """
     if cost_usd <= 0:
         return 0
-    return max(1, math.ceil(cost_usd / CREDIT_USD_VALUE))
+    return max(1, math.ceil(cost_usd / CENT_USD_VALUE))
 
 
-def credits_for_usage(usages: Iterable[ModelUsage], *, markup: float | None = None) -> int:
-    """Convert per-model usage to the credits a platform-paid run costs.
+def cents_for_usage(usages: Iterable[ModelUsage], *, markup: float | None = None) -> int:
+    """Convert per-model usage to the cents a platform-paid run costs.
 
     Args:
         usages: Per-model usage (measured or projected).
@@ -224,10 +224,10 @@ def credits_for_usage(usages: Iterable[ModelUsage], *, markup: float | None = No
             Pass ``1.0`` for the at-cost value a BYOK fee is computed from.
 
     Returns:
-        The non-negative credit cost; any non-zero usage costs at least one credit.
+        The non-negative cost in cents; any non-zero usage costs at least one cent.
     """
     factor = usage_markup() if markup is None else markup
-    return credits_for_cost_usd(raw_cost_usd(usages) * factor)
+    return cents_for_cost_usd(raw_cost_usd(usages) * factor)
 
 
 def usages_from_breakdown(breakdown: Mapping[str, tuple[int, int]]) -> list[ModelUsage]:

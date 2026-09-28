@@ -139,9 +139,7 @@ def test_checkpoint_incumbent_accepts_only_finite_completed_candidate_events() -
     assert incumbent is not None
     assert incumbent["selection_scope"] == "training"
     assert checkpoint_incumbent({"evaluated_incumbent": incumbent}) == incumbent
-    assert evaluated_incumbent_from_progress(
-        PROGRESS_CANDIDATE, {**metrics, "score": float("nan")}, payload
-    ) is None
+    assert evaluated_incumbent_from_progress(PROGRESS_CANDIDATE, {**metrics, "score": float("nan")}, payload) is None
     assert evaluated_incumbent_from_progress(PROGRESS_CANDIDATE, {**metrics, "per_example": []}, payload) is None
     assert checkpoint_incumbent({"evaluated_incumbent": {**incumbent, "candidate": {"predict": 3}}}) is None
 
@@ -213,7 +211,7 @@ def test_recovery_waits_for_dispatched_usage_then_retains_cumulative_budget(
         cost_kind="model",
         request_fingerprint="fixture",
         price_snapshot={"version": "fixture"},
-        max_credits=3,
+        max_cents=3,
     )
     budgets.mark_dispatched(operation.id, "resume-owner", "fixture-request")
     assert (
@@ -228,7 +226,7 @@ def test_recovery_waits_for_dispatched_usage_then_retains_cumulative_budget(
         operation.id,
         "resume-owner",
         evidence_key="confirmed",
-        actual_credits=2,
+        actual_cents=2,
         evidence={"usage": "authoritative-fixture"},
     )
     assert (
@@ -240,7 +238,7 @@ def test_recovery_waits_for_dispatched_usage_then_retains_cumulative_budget(
     assert resumed["execution_generation"] == 2
     assert resumed["recovery"]["checkpoint_iteration"] == 3
     assert resumed["recovery"]["seed_reevaluation_required"] is True
-    assert budgets.get(budget_id, "resume-owner").run_spent_credits == 2
+    assert budgets.get(budget_id, "resume-owner").run_spent_cents == 2
 
 
 def test_recovery_admission_stops_when_exact_plan_exceeds_remaining_budget(
@@ -283,14 +281,14 @@ def test_recovery_admission_stops_when_exact_plan_exceeds_remaining_budget(
         cost_kind="model",
         request_fingerprint="prior-work",
         price_snapshot={"version": "fixture"},
-        max_credits=19,
+        max_cents=19,
     )
     budgets.mark_dispatched(operation.id, "resume-owner")
     budgets.settle(
         operation.id,
         "resume-owner",
         evidence_key="prior-usage",
-        actual_credits=19,
+        actual_cents=19,
         evidence={"provider": "fixture"},
     )
 
@@ -309,13 +307,11 @@ def test_recovery_admission_stops_when_exact_plan_exceeds_remaining_budget(
     assert job["stop_reason"] == "budget_reached"
     assert job["result_availability"] == "evaluated"
     assert job["terminal_evidence"]["selection_score"] == 0.75
-    assert job["terminal_evidence"]["incumbent"]["candidate"] == {
-        "predict": "best completed instructions"
-    }
+    assert job["terminal_evidence"]["incumbent"]["candidate"] == {"predict": "best completed instructions"}
     assert job["execution_budget_id"] == budget_id
-    assert budget.total_credits == 20
-    assert budget.run_spent_credits == 19
-    assert budget.reserved_credits == 0
+    assert budget.total_cents == 20
+    assert budget.run_spent_cents == 19
+    assert budget.reserved_cents == 0
     assert budget.blocked_reason == "budget_reached"
 
 
@@ -333,7 +329,7 @@ def test_duplicate_recovery_delivery_keeps_one_headroom_hold(
     budgets = _fund_checkpoint(store, "recovery-duplicate", monkeypatch)
     budget_id = store.get_job("recovery-duplicate")["execution_budget_id"]
     checkpoint = store.get_gepa_checkpoint("recovery-duplicate")
-    expected_headroom = Decimal(str(checkpoint.manifest["recovery_admission"]["max_credits"]))
+    expected_headroom = Decimal(str(checkpoint.manifest["recovery_admission"]["max_cents"]))
 
     assert (
         store.requeue_for_resume(
@@ -345,7 +341,7 @@ def test_duplicate_recovery_delivery_keeps_one_headroom_hold(
         == 1
     )
     first = store.get_job("recovery-duplicate")
-    assert budgets.get(budget_id, "resume-owner").reserved_credits == expected_headroom
+    assert budgets.get(budget_id, "resume-owner").reserved_cents == expected_headroom
     assert (
         store.requeue_for_resume(
             "recovery-duplicate",
@@ -358,7 +354,7 @@ def test_duplicate_recovery_delivery_keeps_one_headroom_hold(
     second = store.get_job("recovery-duplicate")
     assert second["execution_generation"] == first["execution_generation"]
     assert second["recovery"]["headroom_operation_id"] == first["recovery"]["headroom_operation_id"]
-    assert budgets.get(budget_id, "resume-owner").reserved_credits == expected_headroom
+    assert budgets.get(budget_id, "resume-owner").reserved_cents == expected_headroom
 
 
 def test_pause_keeps_admission_closed_until_explicit_compatible_resume(
@@ -402,7 +398,7 @@ def test_recovery_fence_rolls_back_with_job_when_publication_fails(monkeypatch: 
         cost_kind="model",
         request_fingerprint="fixture",
         price_snapshot={"version": "fixture"},
-        max_credits=3,
+        max_cents=3,
     )
     fence = budgets.fence_generation
 
@@ -420,7 +416,7 @@ def test_recovery_fence_rolls_back_with_job_when_publication_fails(monkeypatch: 
     assert job["execution_budget_generation"] == budget.generation == 0
     assert job["recovery"] is None
     assert budgets.get_operation(reservation.id, "resume-owner").state == "reserved"
-    assert budget.reserved_credits == 3
+    assert budget.reserved_cents == 3
 
 
 def test_recovery_headroom_rolls_back_with_failed_requeue_publication(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -446,7 +442,7 @@ def test_recovery_headroom_rolls_back_with_failed_requeue_publication(monkeypatc
     with pytest.raises(RuntimeError, match="simulated requeue publication failure"):
         store.requeue_for_resume("recovery-headroom-rollback", automatic=True, budget_service=budgets)
 
-    assert budgets.get(budget_id, "resume-owner").reserved_credits == 0
+    assert budgets.get(budget_id, "resume-owner").reserved_cents == 0
     with Session(store.engine) as session:
         holds = session.scalars(
             select(ExecutionOperationModel).where(ExecutionOperationModel.cost_kind == "recovery_headroom")
@@ -496,7 +492,7 @@ def test_runtime_settlement_precedes_terminal_and_preserves_pending_result(
         cost_kind="sandbox",
         request_fingerprint="fixed-session",
         price_snapshot={"version": "fixture"},
-        max_credits=3,
+        max_cents=3,
     )
     budgets.mark_dispatched(operation.id, "resume-owner", "fixture-session")
 
@@ -511,13 +507,13 @@ def test_runtime_settlement_precedes_terminal_and_preserves_pending_result(
             if pending:
                 raise UsagePendingError("Provider has not published final usage.")
             budgets.settle(
-                operation.id, "resume-owner", evidence_key="closed", actual_credits=1, evidence={"runtime": "closed"}
+                operation.id, "resume-owner", evidence_key="closed", actual_cents=1, evidence={"runtime": "closed"}
             )
 
     snapshot, error = BackgroundWorker(job_store=store)._close_budget_gateway("settling", Gateway(), 0)
     assert error is None
     assert snapshot["pending_operations"] == int(pending)
-    assert snapshot["run_spent_credits"] == ("0" if pending else "1")
+    assert snapshot["run_spent_cents"] == ("0" if pending else "1")
     assert "username" not in snapshot
-    assert "account_available_credits" not in snapshot
+    assert "account_available_cents" not in snapshot
     assert store.get_job("settling")["terminal_evidence"]["execution_budget"] == snapshot

@@ -100,7 +100,9 @@ def _current_recovery_runtime(payload: dict[str, Any], optimization_type: str | 
     except (TypeError, ValueError) as error:
         if isinstance(error, RecoveryAdmissionError):
             raise
-        raise RecoveryAdmissionError("The current sandbox runtime cannot provide a bounded recovery profile.") from error
+        raise RecoveryAdmissionError(
+            "The current sandbox runtime cannot provide a bounded recovery profile."
+        ) from error
 
 
 def _mark_recovery_budget_stop(job: JobModel, manifest: dict[str, Any], checkpoint_revision: Any) -> None:
@@ -137,6 +139,7 @@ def _mark_recovery_budget_stop(job: JobModel, manifest: dict[str, Any], checkpoi
         "reason": message,
         "checkpoint_revision": checkpoint_revision,
     }
+
 
 logger = logging.getLogger(__name__)
 
@@ -1678,13 +1681,13 @@ class RemoteDBJobStore:
                     if job is None:
                         return None
                 budget = budget_service.get(job.execution_budget_id, job.username)
-                if budget.pending_operations or budget.reserved_credits:
+                if budget.pending_operations or budget.reserved_cents:
                     return None
-                if not automatic and budget.state == "closed" and budget.available_credits > 0:
+                if not automatic and budget.state == "closed" and budget.available_cents > 0:
                     budget = budget_service.resume_admission(
                         job.execution_budget_id, job.username, expected_generation=job.execution_budget_generation
                     )
-                if budget.available_credits <= 0 or budget.blocked_reason is not None:
+                if budget.available_cents <= 0 or budget.blocked_reason is not None:
                     if budget.blocked_reason is None:
                         budget_service.stop_admission(
                             job.execution_budget_id,
@@ -1708,8 +1711,8 @@ class RemoteDBJobStore:
                             cost_kind="recovery_headroom",
                             request_fingerprint=recovery_plan["fingerprint"],
                             price_snapshot=headroom_price_snapshot(recovery_plan),
-                            max_credits=recovery_plan["max_credits"],
-                            max_wallet_credits=recovery_plan["max_wallet_credits"],
+                            max_cents=recovery_plan["max_cents"],
+                            max_wallet_cents=recovery_plan["max_wallet_cents"],
                             role="recovery",
                             session=session,
                         )
@@ -1764,9 +1767,9 @@ class RemoteDBJobStore:
                 "execution_generation": int(job.execution_generation or 0),
                 "checkpoint_revision": checkpoint_revision,
                 "headroom_operation_id": headroom_operation_id,
-                "execution_max_credits": recovery_plan.get("execution_max_credits") if recovery_plan else None,
-                "execution_max_wallet_credits": (
-                    recovery_plan.get("execution_max_wallet_credits") if recovery_plan else None
+                "execution_max_cents": recovery_plan.get("execution_max_cents") if recovery_plan else None,
+                "execution_max_wallet_cents": (
+                    recovery_plan.get("execution_max_wallet_cents") if recovery_plan else None
                 ),
             }
             current = int(job.attempts or 0)

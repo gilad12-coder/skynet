@@ -1,6 +1,6 @@
 "use client";
 
-import { formatCreditsUsd } from "@/features/billing";
+import { formatCentsUsd } from "@/features/billing";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 
 import { Coins, SealCheck, Sparkle, User, WarningCircle } from "@/shared/ui/icons";
@@ -43,7 +43,7 @@ const SOURCE_COLOR = {
 export function TaggerResultsSummary({ assist, annotations, onFlaggedPass }: Props) {
   const counts = provenanceCounts(assist, annotations);
   const flagged = flaggedRowIds(assist);
-  const credits = assist.autotag?.credits_spent ?? 0;
+  const cents = assist.autotag?.cents_spent ?? 0;
 
   const stats = [
     {
@@ -114,12 +114,12 @@ export function TaggerResultsSummary({ assist, annotations, onFlaggedPass }: Pro
             hint={s.hint}
           />
         ))}
-        {credits > 0 && (
+        {cents > 0 && (
           <StatCell
-            value={formatCreditsUsd(credits, getActiveIntlLocale())}
+            value={formatCentsUsd(cents, getActiveIntlLocale())}
             icon={Coins}
-            label={msg("tagger.results.recap.credits")}
-            hint={msg("tagger.results.recap.credits_hint")}
+            label={msg("tagger.results.recap.cost")}
+            hint={msg("tagger.results.recap.cost_hint")}
           />
         )}
       </div>

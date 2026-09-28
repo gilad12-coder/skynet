@@ -7,16 +7,16 @@ import { getWallet, type BillingWalletResponse } from "@/shared/lib/api";
 import {
   DEFAULT_PRICING_TERMS,
   EMPTY_WALLET,
-  totalCredits,
+  totalCents,
   walletStatus,
-  type CreditWallet,
+  type WalletBalance,
   type LedgerKind,
   type PricingTerms,
   type WalletStatus,
-} from "../lib/credit";
+} from "../lib/wallet";
 
-interface CreditContextValue {
-  wallet: CreditWallet;
+interface BalanceContextValue {
+  wallet: WalletBalance;
   /** True while the wallet is being fetched — drives the chip's loading shimmer. */
   loading: boolean;
   /**
@@ -30,7 +30,7 @@ interface CreditContextValue {
   /** Whether the latest wallet request failed. */
   loadError: boolean;
   status: WalletStatus;
-  totalCredits: number;
+  totalCents: number;
   /** Re-fetch the wallet from the backend — call after a checkout/portal return. */
   refresh: () => void;
   /**
@@ -43,20 +43,20 @@ interface CreditContextValue {
 }
 
 /** Overlay a backend wallet response onto the current wallet. */
-function applyWalletResponse(prev: CreditWallet, r: BillingWalletResponse): CreditWallet {
+function applyWalletResponse(prev: WalletBalance, r: BillingWalletResponse): WalletBalance {
   return {
     ...prev,
-    paidBalanceCredits: r.paid_balance_credits,
+    paidBalanceCents: r.paid_balance_cents,
     freeGrant: {
-      creditsRemaining: r.free_grant.credits_remaining,
-      creditsTotal: r.free_grant.credits_total,
+      centsRemaining: r.free_grant.cents_remaining,
+      centsTotal: r.free_grant.cents_total,
     },
     usage: r.usage.map((u) => ({
       id: u.id,
       at: u.at,
       label: u.label,
       model: u.model,
-      credits: u.credits,
+      cents: u.cents,
       kind: u.kind as LedgerKind,
     })),
     plan: {
@@ -76,27 +76,27 @@ function applyWalletResponse(prev: CreditWallet, r: BillingWalletResponse): Cred
   };
 }
 
-const CreditContext = React.createContext<CreditContextValue | null>(null);
+const BalanceContext = React.createContext<BalanceContextValue | null>(null);
 
-/** Read the credit wallet and its mutators from the nearest CreditProvider. */
-export function useCredits(): CreditContextValue {
-  const ctx = React.useContext(CreditContext);
+/** Read the wallet and its mutators from the nearest BalanceProvider. */
+export function useBalance(): BalanceContextValue {
+  const ctx = React.useContext(BalanceContext);
   if (!ctx) {
-    throw new Error("useCredits must be used within a CreditProvider");
+    throw new Error("useBalance must be used within a BalanceProvider");
   }
   return ctx;
 }
 
 /**
- * The backend's pricing terms, or the seed defaults outside a CreditProvider
+ * The backend's pricing terms, or the seed defaults outside a BalanceProvider
  * (e.g. an isolated hook), so estimate code never needs its own constants.
  */
 export function usePricingTerms(): PricingTerms {
-  return React.useContext(CreditContext)?.wallet.pricing ?? DEFAULT_PRICING_TERMS;
+  return React.useContext(BalanceContext)?.wallet.pricing ?? DEFAULT_PRICING_TERMS;
 }
 
 /**
- * Provide the credit wallet to the client tree.
+ * Provide the wallet to the client tree.
  *
  * Fetches the real wallet (paid balance, free grant, ledger)
  * from the billing backend on mount and after every `refresh()` — e.g. when a
@@ -107,8 +107,8 @@ export function usePricingTerms(): PricingTerms {
  * Args:
  *   children: App subtree.
  */
-export function CreditProvider({ children }: { children: React.ReactNode }) {
-  const [wallet, setWallet] = React.useState<CreditWallet>(EMPTY_WALLET);
+export function BalanceProvider({ children }: { children: React.ReactNode }) {
+  const [wallet, setWallet] = React.useState<WalletBalance>(EMPTY_WALLET);
   const [loading, setLoading] = React.useState(true);
   const [syncing, setSyncing] = React.useState(false);
   const [available, setAvailable] = React.useState(false);
@@ -136,40 +136,41 @@ export function CreditProvider({ children }: { children: React.ReactNode }) {
   // return we poll the wallet (without toggling `loading`, to avoid wiping the
   // prior balance) until it changes or a short budget elapses. The chip reads
   // `syncing` and shimmers over the prior balance instead of flashing a zero.
-  const beginSync = React.useCallback((until: "balance" | "pro" = "balance") => {
-    setSyncing(true);
-    let attempt = 0;
-    const baseline = wallet.paidBalanceCredits;
-    const poll = () => {
-      attempt += 1;
-      void getWallet()
-        .then((r) => {
-          setWallet((prev) => applyWalletResponse(prev, r));
-          setAvailable(true);
-          setLoadError(false);
-          return until === "pro"
-            ? r.plan.plan === "pro"
-            : r.paid_balance_credits !== baseline;
-        })
-        .catch(() => {
-          setLoadError(true);
-          return false;
-        })
-        .then((landed) => {
-          // Stop once the webhook's effect is visible, or after ~12s of polling
-          // so the shimmer is never permanent if nothing changes (e.g. cancel).
-          if (landed || attempt >= 8) {
-            setSyncing(false);
-            return;
-          }
-          window.setTimeout(poll, 1500);
-        });
-    };
-    poll();
-  }, [wallet.paidBalanceCredits]);
+  const beginSync = React.useCallback(
+    (until: "balance" | "pro" = "balance") => {
+      setSyncing(true);
+      let attempt = 0;
+      const baseline = wallet.paidBalanceCents;
+      const poll = () => {
+        attempt += 1;
+        void getWallet()
+          .then((r) => {
+            setWallet((prev) => applyWalletResponse(prev, r));
+            setAvailable(true);
+            setLoadError(false);
+            return until === "pro" ? r.plan.plan === "pro" : r.paid_balance_cents !== baseline;
+          })
+          .catch(() => {
+            setLoadError(true);
+            return false;
+          })
+          .then((landed) => {
+            // Stop once the webhook's effect is visible, or after ~12s of polling
+            // so the shimmer is never permanent if nothing changes (e.g. cancel).
+            if (landed || attempt >= 8) {
+              setSyncing(false);
+              return;
+            }
+            window.setTimeout(poll, 1500);
+          });
+      };
+      poll();
+    },
+    [wallet.paidBalanceCents],
+  );
 
   // Stripe Checkout returns to `/?billing=success|pro|cancel` (there is no
-  // standalone add-credits page). On success, toast and enter the syncing
+  // standalone add-funds page). On success, toast and enter the syncing
   // state; either way strip the param so a reload doesn't re-toast. beginSync's
   // identity changes as the wallet loads, but re-runs bail on the cleared param.
   React.useEffect(() => {
@@ -188,7 +189,7 @@ export function CreditProvider({ children }: { children: React.ReactNode }) {
     window.history.replaceState(null, "", window.location.pathname + (query ? `?${query}` : ""));
   }, [beginSync]);
 
-  const value = React.useMemo<CreditContextValue>(
+  const value = React.useMemo<BalanceContextValue>(
     () => ({
       wallet,
       loading,
@@ -196,12 +197,12 @@ export function CreditProvider({ children }: { children: React.ReactNode }) {
       available,
       loadError,
       status: walletStatus(wallet),
-      totalCredits: totalCredits(wallet),
+      totalCents: totalCents(wallet),
       refresh,
       beginSync,
     }),
     [wallet, loading, syncing, available, loadError, refresh, beginSync],
   );
 
-  return <CreditContext.Provider value={value}>{children}</CreditContext.Provider>;
+  return <BalanceContext.Provider value={value}>{children}</BalanceContext.Provider>;
 }

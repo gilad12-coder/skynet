@@ -32,7 +32,7 @@ _PREFLIGHT_OVERHEAD_SECONDS = 600.0
 def preflight_lifetime_seconds(payload: dict[str, Any]) -> float:
     """Return the outer box lifetime one setup check can need.
 
-    A box reserves credits for its whole lifetime the moment it opens, so
+    A box reserves funds for its whole lifetime the moment it opens, so
     the check gets the time its own inner boxes can take on top of the fixed
     overhead, not the run's configured ceiling: that is hours longer and its
     hold refused most spending limits before a single check ran.

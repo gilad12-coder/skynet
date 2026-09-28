@@ -168,8 +168,8 @@ class VercelUsageReconciler:
             operation_id,
             username,
             evidence_key=f"vercel-stop:{session_id}",
-            actual_credits=charge.total,
-            actual_wallet_credits=charge.wallet,
+            actual_cents=charge.total,
+            actual_wallet_cents=charge.wallet,
             evidence={"provider": "vercel", "source": _SCHEMA_URL, "session": sanitized, "provider_usd": str(usd)},
         )
 

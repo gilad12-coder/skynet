@@ -1,12 +1,10 @@
 /**
- * Credit-wallet domain model shared by the billing UI surfaces.
+ * Wallet domain model shared by the billing UI surfaces.
  *
- * Skynet runs on pay-as-you-go prepaid credits — the only plan: users buy
- * credit packs and every run spends against them; there is no free allowance.
- * Credits are spendable on any model. A credit is simply a US cent, at par with
- * the dollar — the same model OpenRouter uses: the balance operates in dollars
- * and is called credits because, once bought, it can only be spent inside
- * Skynet. Platform-paid usage (model tokens and sandbox compute) bills at
+ * Skynet runs on a pay-as-you-go prepaid dollar balance — the only plan: users
+ * top up and every run spends against the balance; there is no free allowance.
+ * The balance is spendable on any model. Amounts are stored as integer US cents
+ * and shown to users in dollars. Platform-paid usage (model tokens and sandbox compute) bills at
  * provider cost times the backend's usage markup; a BYOK run is charged only a
  * small platform fee on the at-cost model price; a top-up adds a service fee.
  * Those rates come from the backend (`PricingTerms` on the wallet response).
@@ -17,7 +15,7 @@
  * unavailable seed and never contains demo balances or activity.
  */
 
-/** Where a job's tokens are billed: through Skynet's credits, or the user's own key. */
+/** Where a job's tokens are billed: through the Skynet balance, or the user's own key. */
 export type TokenSourceMode = "managed" | "byok";
 
 /** Coarse health of the wallet, used to theme the balance chip. */
@@ -26,17 +24,17 @@ export type WalletStatus = "healthy" | "low" | "empty";
 /** What a usage-ledger row represents. */
 export type LedgerKind = "run" | "topup" | "grant";
 
-/** Platform value of one credit, in USD. The user-facing "$ equivalent" of a credit balance. */
-export const CREDIT_USD_VALUE = 0.01;
+/** Value of one cent, in USD. */
+export const CENT_USD_VALUE = 0.01;
 
 /**
  * Bounds for a custom (user-chosen) top-up, mirroring the backend's
- * CUSTOM_CREDITS_MIN/MAX. The floor matches the smallest pack so the flat
+ * CUSTOM_CENTS_MIN/MAX. The floor matches the smallest pack so the flat
  * part of the platform fee never dominates a tiny purchase; the ceiling keeps
  * a typo'd amount from becoming a four-figure charge.
  */
-export const CUSTOM_CREDITS_MIN = 500;
-export const CUSTOM_CREDITS_MAX = 100_000;
+export const CUSTOM_CENTS_MIN = 500;
+export const CUSTOM_CENTS_MAX = 100_000;
 
 /** Below this much spendable value the wallet reads as "running low" (calm, not alarming). */
 export const LOW_BALANCE_USD = 0.5;
@@ -50,7 +48,7 @@ export interface PricingTerms {
   usageMarkup: number;
   /** BYOK platform fee, as a fraction of the at-cost model price. */
   byokFeeFraction: number;
-  /** Top-up service fee, as a fraction of the credit value. */
+  /** Top-up service fee, as a fraction of the top-up amount. */
   purchaseFeeRate: number;
   /** Flat top-up service fee, in cents. */
   purchaseFeeFixedCents: number;
@@ -69,30 +67,27 @@ export const DEFAULT_PRICING_TERMS: PricingTerms = {
 };
 
 /**
- * The platform fee for buying `credits`, in USD: the fee rate of the credit value
- * (one credit is one cent) rounded up to the cent, plus the flat fee. Mirrors
- * backend `purchase_fee_cents`. The buyer pays the credit value plus this fee;
- * only the base credits are granted.
+ * The platform fee for topping up `cents`, in USD: the fee rate of the top-up
+ * amount rounded up to the cent, plus the flat fee. Mirrors backend
+ * `purchase_fee_cents`. The buyer pays the top-up amount plus this fee; only the
+ * top-up amount is added to the balance.
  */
-export function purchaseFeeUsd(
-  credits: number,
-  terms: PricingTerms = DEFAULT_PRICING_TERMS,
-): number {
-  return (Math.ceil(credits * terms.purchaseFeeRate) + terms.purchaseFeeFixedCents) / 100;
+export function purchaseFeeUsd(cents: number, terms: PricingTerms = DEFAULT_PRICING_TERMS): number {
+  return (Math.ceil(cents * terms.purchaseFeeRate) + terms.purchaseFeeFixedCents) / 100;
 }
 
-/** What the buyer actually pays for `credits`: the par credit value plus the platform fee. */
+/** What the buyer actually pays for a top-up of `cents`: the amount plus the platform fee. */
 export function purchaseTotalUsd(
-  credits: number,
+  cents: number,
   terms: PricingTerms = DEFAULT_PRICING_TERMS,
 ): number {
-  return creditsToUsd(credits) + purchaseFeeUsd(credits, terms);
+  return centsToUsd(cents) + purchaseFeeUsd(cents, terms);
 }
 
 /** The one-time free grant that lets a new account try the platform. */
 export interface FreeGrant {
-  creditsRemaining: number;
-  creditsTotal: number;
+  centsRemaining: number;
+  centsTotal: number;
 }
 
 /** One row of the usage ledger. `label`/`model` are backend-supplied, not translated. */
@@ -104,15 +99,15 @@ export interface UsageEntry {
   label: string;
   /** Model id involved, or null for non-run entries. Always rendered LTR. */
   model: string | null;
-  /** Signed credit delta: negative for a run (spend), positive for a top-up/grant. */
-  credits: number;
+  /** Signed delta in cents: negative for a run (spend), positive for a top-up/grant. */
+  cents: number;
   kind: LedgerKind;
 }
 
-/** A purchasable prepaid bundle. `usd` is what the user pays; `credits` is what they can spend. */
-export interface CreditPack {
+/** A purchasable prepaid bundle. `usd` is what the user pays; `cents` is what they can spend. */
+export interface TopUpPack {
   id: string;
-  credits: number;
+  cents: number;
   usd: number;
   /** Flagged as the recommended option in the pack grid. */
   popular?: boolean;
@@ -133,9 +128,9 @@ export interface PlanState {
 export const PRO_MONTHLY_USD = 9;
 
 /** The whole wallet as the UI needs it. */
-export interface CreditWallet {
-  /** Purchased credits, on top of the free grant. */
-  paidBalanceCredits: number;
+export interface WalletBalance {
+  /** Purchased balance in cents, on top of the free grant. */
+  paidBalanceCents: number;
   freeGrant: FreeGrant;
   /** Most-recent-first ledger rows. */
   usage: UsageEntry[];
@@ -143,32 +138,32 @@ export interface CreditWallet {
   pricing: PricingTerms;
 }
 
-/** Convert a credit count to its USD platform value. */
-export function creditsToUsd(credits: number): number {
-  return credits * CREDIT_USD_VALUE;
+/** Convert a cent amount to USD. */
+export function centsToUsd(cents: number): number {
+  return cents * CENT_USD_VALUE;
 }
 
-/** Convert a USD amount to whole credits (the inverse of `creditsToUsd`): $2.50 → 250. */
-export function usdToCredits(usd: number): number {
-  return Math.round(usd / CREDIT_USD_VALUE);
+/** Convert a USD amount to whole cents (the inverse of `centsToUsd`): $2.50 → 250. */
+export function usdToCents(usd: number): number {
+  return Math.round(usd / CENT_USD_VALUE);
 }
 
-/** Total spendable credits = free grant remaining + purchased balance. */
-export function totalCredits(wallet: CreditWallet): number {
-  return wallet.freeGrant.creditsRemaining + wallet.paidBalanceCredits;
+/** Total spendable cents = free grant remaining + purchased balance. */
+export function totalCents(wallet: WalletBalance): number {
+  return wallet.freeGrant.centsRemaining + wallet.paidBalanceCents;
 }
 
 /** Derive the chip's health bucket from spendable value. */
-export function walletStatus(wallet: CreditWallet): WalletStatus {
-  const total = totalCredits(wallet);
+export function walletStatus(wallet: WalletBalance): WalletStatus {
+  const total = totalCents(wallet);
   if (total <= 0) return "empty";
-  if (creditsToUsd(total) < LOW_BALANCE_USD) return "low";
+  if (centsToUsd(total) < LOW_BALANCE_USD) return "low";
   return "healthy";
 }
 
-/** Locale-aware integer credit formatting (e.g. `1,240`). */
-export function formatCredits(credits: number, locale: string): string {
-  return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(credits);
+/** Locale-aware integer cent formatting (e.g. `1,240`). */
+export function formatCents(cents: number, locale: string): string {
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(cents);
 }
 
 /**
@@ -186,23 +181,22 @@ export function formatUsd(usd: number, locale: string): string {
 }
 
 /**
- * Locale-aware dollar rendering of a credit balance — the single way every UI
- * surface shows a wallet figure. Credits are a par-USD unit (one credit is one
- * cent), so a balance the API reports in credits is displayed to the user in
- * dollars: `formatCreditsUsd(4512)` → `$45.12`.
+ * Locale-aware dollar rendering of a cent amount — the single way every UI
+ * surface shows a wallet figure. The API reports balances in cents; users see
+ * dollars: `formatCentsUsd(4512)` → `$45.12`.
  */
-export function formatCreditsUsd(credits: number, locale: string): string {
-  return formatUsd(creditsToUsd(credits), locale);
+export function formatCentsUsd(cents: number, locale: string): string {
+  return formatUsd(centsToUsd(cents), locale);
 }
 
 /**
- * Dollar rendering of a server-supplied decimal credit string (the raw values
+ * Dollar rendering of a server-supplied decimal cent string (the raw values
  * on the usage ledger and budget snapshots, e.g. `"116.06994"`). Keeps the
- * fractional value rather than rounding to whole credits first, so a fraction of
+ * fractional value rather than rounding to whole cents first, so a fraction of
  * a cent still reads truthfully through `formatUsd`.
  */
 export function formatBudgetUsd(value: string, locale: string): string {
-  return formatUsd(creditsToUsd(Number(value)), locale);
+  return formatUsd(centsToUsd(Number(value)), locale);
 }
 
 /** Locale-aware medium date (e.g. `Jul 1, 2026`) for ledger/settings date lines. */
@@ -210,17 +204,17 @@ export function formatResetDate(iso: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(iso));
 }
 
-/** Prepaid packs offered on the wallet settings tab. At par — one credit per cent, no bonus subsidy. */
-export const CREDIT_PACKS: CreditPack[] = [
-  { id: "starter", credits: 500, usd: 5 },
-  { id: "plus", credits: 2000, usd: 20, popular: true },
-  { id: "pro", credits: 5000, usd: 50 },
+/** Prepaid packs offered on the wallet settings tab. Pay $N, get $N of balance — no bonus subsidy. */
+export const TOP_UP_PACKS: TopUpPack[] = [
+  { id: "starter", cents: 500, usd: 5 },
+  { id: "plus", cents: 2000, usd: 20, popular: true },
+  { id: "pro", cents: 5000, usd: 50 },
 ];
 
 /** Truthful zero-value seed used until the billing API returns real data. */
-export const EMPTY_WALLET: CreditWallet = {
-  paidBalanceCredits: 0,
-  freeGrant: { creditsRemaining: 0, creditsTotal: 0 },
+export const EMPTY_WALLET: WalletBalance = {
+  paidBalanceCents: 0,
+  freeGrant: { centsRemaining: 0, centsTotal: 0 },
   usage: [],
   plan: { plan: "free", renewsAt: null, cancelAtPeriodEnd: false, available: false },
   pricing: DEFAULT_PRICING_TERMS,

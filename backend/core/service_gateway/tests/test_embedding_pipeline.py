@@ -590,7 +590,7 @@ def _summary_session() -> MagicMock:
 
 
 def test_embed_finished_job_meters_the_summary_to_the_owner() -> None:
-    """An owner with credits gets the LLM summary and is billed for it as managed usage."""
+    """An owner with a funded balance gets the LLM summary and is billed for it as managed usage."""
     store = _FakeJobStore({"job-1": _success_job()})
     lm = object()
 
@@ -601,7 +601,7 @@ def test_embed_finished_job_meters_the_summary_to_the_owner() -> None:
         return "A summary."
 
     billing = MagicMock()
-    billing.return_value.spendable_credits.return_value = 12
+    billing.return_value.spendable_cents.return_value = 12
     with (
         patch.object(pipeline.settings, "embeddings_enabled", True),
         patch.object(pipeline, "get_embedder", return_value=_FakeEmbedder()),
@@ -612,17 +612,15 @@ def test_embed_finished_job_meters_the_summary_to_the_owner() -> None:
     ):
         assert pipeline.embed_finished_job("job-1", job_store=store) is True
 
-    billing.return_value.spendable_credits.assert_called_once_with("alice")
-    meter.assert_called_once_with(
-        store.engine, "alice", [lm], description="Job summary", token_source="managed"
-    )
+    billing.return_value.spendable_cents.assert_called_once_with("alice")
+    meter.assert_called_once_with(store.engine, "alice", [lm], description="Job summary", token_source="managed")
 
 
-def test_embed_finished_job_uses_free_summary_when_owner_has_no_credits() -> None:
+def test_embed_finished_job_uses_free_summary_when_owner_has_no_balance() -> None:
     """A broke owner still gets indexed, via the heuristic summary, and is not billed."""
     store = _FakeJobStore({"job-1": _success_job()})
     billing = MagicMock()
-    billing.return_value.spendable_credits.return_value = 0
+    billing.return_value.spendable_cents.return_value = 0
     with (
         patch.object(pipeline.settings, "embeddings_enabled", True),
         patch.object(pipeline, "get_embedder", return_value=_FakeEmbedder()),

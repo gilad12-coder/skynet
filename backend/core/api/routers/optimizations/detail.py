@@ -26,10 +26,10 @@ from typing import Annotated, Literal
 import dspy
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import AliasChoices, BaseModel, Field, ValidationError
 
 from ....billing import ProviderKeyVault, resolve_byok_model_config
-from ....billing.budget_amounts import MAX_CREDITS
+from ....billing.budget_amounts import MAX_CENTS
 from ....billing.budgets import BudgetService
 from ....config import settings
 from ....constants import (
@@ -156,12 +156,13 @@ class EvaluateExamplesRequest(BaseModel):
         default="optimized",
         description="Which program to run: the optimized result or the baseline.",
     )
-    max_cost_credits: int | None = Field(
+    max_cost_cents: int | None = Field(
+        validation_alias=AliasChoices("max_cost_cents", "max_cost_credits"),
         default=None,
         ge=1,
-        le=MAX_CREDITS,
+        le=MAX_CENTS,
         strict=True,
-        description="Optional cap on credits for this one evaluation request; omitted, it draws on the account balance.",
+        description="Optional cap in cents for this one evaluation request; omitted, it draws on the account balance.",
     )
 
 
@@ -316,7 +317,7 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
                 BudgetService(engine=job_store.engine).get(job_data["execution_budget_id"], job_data["username"])
             )
             execution_budget.pop("username", None)
-            execution_budget.pop("account_available_credits", None)
+            execution_budget.pop("account_available_cents", None)
         response_data = OptimizationStatusResponse(
             optimization_id=optimization_id,
             status=status,
@@ -524,9 +525,7 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
             if not isinstance(payload, dict):
                 raise DomainError("optimization.no_payload", status=404)
             overview = parse_overview(job_data)
-            model_settings = payload.get("model_config") or overview.get(
-                PAYLOAD_OVERVIEW_MODEL_SETTINGS, {}
-            )
+            model_settings = payload.get("model_config") or overview.get(PAYLOAD_OVERVIEW_MODEL_SETTINGS, {})
             model_name = str(overview.get(PAYLOAD_OVERVIEW_MODEL_NAME) or "")
             if model_settings:
                 model_config = ModelConfig.model_validate(model_settings)
@@ -548,15 +547,9 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
                 "dataset": payload.get("dataset") or [],
                 "column_mapping": payload.get("column_mapping") or {},
                 "metric_code": payload.get("metric_code") or "",
-                "signature_code": payload.get("signature_code")
-                or overview.get(PAYLOAD_OVERVIEW_SIGNATURE_CODE)
-                or "",
-                "module_name": payload.get("module_name")
-                or overview.get(PAYLOAD_OVERVIEW_MODULE_NAME)
-                or "predict",
-                "module_kwargs": payload.get("module_kwargs")
-                or overview.get(PAYLOAD_OVERVIEW_MODULE_KWARGS)
-                or {},
+                "signature_code": payload.get("signature_code") or overview.get(PAYLOAD_OVERVIEW_SIGNATURE_CODE) or "",
+                "module_name": payload.get("module_name") or overview.get(PAYLOAD_OVERVIEW_MODULE_NAME) or "predict",
+                "module_kwargs": payload.get("module_kwargs") or overview.get(PAYLOAD_OVERVIEW_MODULE_KWARGS) or {},
                 "model_config": model_config.model_dump(mode="json"),
                 "token_source": model_config.token_source or TOKEN_SOURCE_MANAGED,
                 "payload_overview": overview,
@@ -573,7 +566,7 @@ def register_detail_routes(router: APIRouter, *, job_store) -> None:
             result = run_protected_interaction(
                 interaction_payload,
                 kind="evaluate",
-                max_cost_credits=req.max_cost_credits,
+                max_cost_cents=req.max_cost_cents,
                 idempotency_key=key,
                 user=current_user,
                 job_store=job_store,

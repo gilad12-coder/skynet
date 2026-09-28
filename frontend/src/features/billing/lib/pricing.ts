@@ -1,9 +1,9 @@
 /**
- * Per-model credit pricing — the frontend mirror of backend `core.billing.pricing`.
+ * Per-model pricing — the frontend mirror of backend `core.billing.pricing`.
  *
- * A run's credit cost is the provider cost of its tokens (per-model input/output
- * rates from the catalog) times the backend's usage markup, converted to credits
- * at `CREDIT_USD_VALUE` — one credit per cent. A BYOK run pays only the platform
+ * A run's cost in cents is the provider cost of its tokens (per-model input/output
+ * rates from the catalog) times the backend's usage markup, converted to cents
+ * at `CENT_USD_VALUE`. A BYOK run pays only the platform
  * fee on the at-cost price. The same function prices a *projected* token volume
  * here (the pre-run estimate) that the backend prices on *measured* tokens (the
  * charge), so the estimate and the bill reconcile by construction.
@@ -13,11 +13,11 @@
  */
 
 import type { CatalogModel } from "@/shared/types/api";
-import { CREDIT_USD_VALUE } from "./credit";
+import { CENT_USD_VALUE } from "./wallet";
 
 // Re-exported so estimate code (and its tests, which resolve the billing barrel
 // to this module) reach the pricing terms through one import.
-export { DEFAULT_PRICING_TERMS, type PricingTerms } from "./credit";
+export { DEFAULT_PRICING_TERMS, type PricingTerms } from "./wallet";
 
 /** Fallback per-token costs (USD) for a model the catalog doesn't price —
  * deliberately high, mirroring the backend's `FALLBACK_*_COST_PER_TOKEN`, so an
@@ -57,23 +57,23 @@ export function rawCostUsd(usages: ModelTokenUsage[]): number {
 }
 
 /**
- * Convert per-model token usage to the credits it costs at `markup`, rounding
- * up. Mirrors backend `credits_for_usage`: any non-zero usage costs at least one
- * credit. Pass `1` for the at-cost value a BYOK fee is taken from.
+ * Convert per-model token usage to the cents it costs at `markup`, rounding
+ * up. Mirrors backend `cents_for_usage`: any non-zero usage costs at least one
+ * cent. Pass `1` for the at-cost value a BYOK fee is taken from.
  */
-export function creditsForUsage(usages: ModelTokenUsage[], markup: number): number {
+export function centsForUsage(usages: ModelTokenUsage[], markup: number): number {
   const cost = rawCostUsd(usages) * markup;
   if (cost <= 0) return 0;
-  return Math.max(1, Math.ceil(cost / CREDIT_USD_VALUE));
+  return Math.max(1, Math.ceil(cost / CENT_USD_VALUE));
 }
 
 /**
- * The BYOK platform fee on a run's at-cost credit value, rounding up — mirrors
- * backend `platform_fee_credits_for_usage`. On a BYOK run the provider tokens are
- * paid on the user's own key, so only this fraction is charged in credits.
+ * The BYOK platform fee on a run's at-cost value in cents, rounding up — mirrors
+ * backend `platform_fee_cents_for_usage`. On a BYOK run the provider tokens are
+ * paid on the user's own key, so only this fraction is charged to the balance.
  */
-export function platformFeeCredits(atCostCredits: number, feeFraction: number): number {
-  const fee = atCostCredits * feeFraction;
+export function platformFeeCents(atCostCents: number, feeFraction: number): number {
+  const fee = atCostCents * feeFraction;
   if (fee <= 0) return 0;
   return Math.max(1, Math.ceil(fee));
 }

@@ -52,4 +52,3 @@ def test_zero_cap_disables_counting(fake_redis: fakeredis.FakeStrictRedis) -> No
     record_spend("groq", 99.0, 0, now=_JAN)
     assert budget_open("groq", 0, now=_JAN)
     assert fake_redis.keys("*") == []
-

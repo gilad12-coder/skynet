@@ -2,7 +2,7 @@
 
 Covers label normalization across the three annotation modes, defensive JSON
 parsing of model output, few-shot example selection (corrections-first,
-exclusions, provenance filtering), instruction compilation, the credit
+exclusions, provenance filtering), instruction compilation, the cost
 estimator, and the synthetic-dataset generator's row normalization and
 slicing.
 """
@@ -27,7 +27,7 @@ from ..tagging import (
     build_data_rows,
     compile_instructions,
     effective_task_config,
-    estimate_credits_for_rows,
+    estimate_cents_for_rows,
     normalize_dataset_spec,
     normalize_label,
     select_examples,
@@ -183,7 +183,9 @@ def test_synthetic_session_interviews_for_the_data_first() -> None:
     assert summary["row_count"] == 0
     assert "dataset_json" in summary["note"]
     # Once rows exist the flag is off and the regular provisional briefing applies.
-    assert "No dataset exists yet" not in task_description({"mode": "freetext", "modeProvisional": True, "synthetic": True})
+    assert "No dataset exists yet" not in task_description(
+        {"mode": "freetext", "modeProvisional": True, "synthetic": True}
+    )
     assert len(InterviewTurnSig.output_fields) == 7
     assert list(InterviewTurnSig.output_fields)[-2:] == ["dataset_json", "session_title"]
 
@@ -339,7 +341,7 @@ def test_predict_rows_stream_merges_batches_into_terminal_event(monkeypatch) -> 
     assert events[-1]["event"] == "predict_done"
     assert all(e["event"] == "prediction" for e in events[:-1])
     assert set(events[-1]["data"]["predictions"]) == {str(i) for i in range(tagging.BATCH_SIZE + 2)}
-    assert events[-1]["data"]["credits"] == 0
+    assert events[-1]["data"]["cents"] == 0
 
 
 def test_summarize_dataset_samples_rows() -> None:
@@ -363,34 +365,34 @@ def test_summarize_dataset_marks_unselected_columns_excluded() -> None:
 def test_estimate_scales_with_rows_and_handles_empty() -> None:
     """More rows cost more; zero rows cost nothing."""
     rows = [{"id": i, "text": "x" * 400} for i in range(50)]
-    small = estimate_credits_for_rows("instructions", rows[:10])
-    large = estimate_credits_for_rows("instructions", rows)
+    small = estimate_cents_for_rows("instructions", rows[:10])
+    large = estimate_cents_for_rows("instructions", rows)
     assert small["rows"] == 10
-    assert large["credits_high"] >= large["credits_low"] >= small["credits_low"] >= 0
-    empty = estimate_credits_for_rows("instructions", [])
+    assert large["cents_high"] >= large["cents_low"] >= small["cents_low"] >= 0
+    empty = estimate_cents_for_rows("instructions", [])
     assert empty == {
         "rows": 0,
         "model": empty["model"],
-        "credits_low": 0,
-        "credits_high": 0,
+        "cents_low": 0,
+        "cents_high": 0,
     }
 
 
 def test_estimate_prices_on_chosen_model() -> None:
     """A chosen tagging model rides the estimate; blank falls back to default."""
     rows = [{"id": 1, "text": "x" * 400}]
-    chosen = estimate_credits_for_rows("instructions", rows, model="openai/gpt-test")
+    chosen = estimate_cents_for_rows("instructions", rows, model="openai/gpt-test")
     assert chosen["model"] == "openai/gpt-test"
-    fallback = estimate_credits_for_rows("instructions", rows, model="  ")
+    fallback = estimate_cents_for_rows("instructions", rows, model="  ")
     assert fallback["model"] == assist_model_name()
 
 
 def test_estimate_applies_byok_platform_fee() -> None:
     """A BYOK estimate charges only the platform-fee share of the same usage."""
     rows = [{"id": i, "text": "x" * 4000} for i in range(100)]
-    managed = estimate_credits_for_rows("instructions", rows, model="openai/gpt-test", token_source="managed")
-    byok = estimate_credits_for_rows("instructions", rows, model="openai/gpt-test", token_source="byok")
-    assert 0 < byok["credits_low"] < managed["credits_low"]
+    managed = estimate_cents_for_rows("instructions", rows, model="openai/gpt-test", token_source="managed")
+    byok = estimate_cents_for_rows("instructions", rows, model="openai/gpt-test", token_source="byok")
+    assert 0 < byok["cents_low"] < managed["cents_low"]
 
 
 def test_effective_task_config_lifts_chosen_model() -> None:
@@ -407,9 +409,7 @@ def test_effective_task_config_lifts_model_params_with_model() -> None:
     merged = effective_task_config(_BINARY, {"model": "openai/gpt-test", "modelParams": params})
     assert merged["modelParams"] == params
     assert "modelParams" not in effective_task_config(_BINARY, {"modelParams": params})
-    assert "modelParams" not in effective_task_config(
-        _BINARY, {"model": "openai/gpt-test", "modelParams": "junk"}
-    )
+    assert "modelParams" not in effective_task_config(_BINARY, {"model": "openai/gpt-test", "modelParams": "junk"})
 
 
 def test_sanitize_model_params_bounds_and_filters() -> None:
@@ -433,9 +433,12 @@ def test_sanitize_model_params_bounds_and_filters() -> None:
     }
     assert tagging._sanitize_model_params(None) == {}
     assert tagging._sanitize_model_params("junk") == {}
-    assert tagging._sanitize_model_params(
-        {"temperature": "hot", "max_tokens": 0, "extra": {"reasoning_effort": "extreme"}}
-    ) == {}
+    assert (
+        tagging._sanitize_model_params(
+            {"temperature": "hot", "max_tokens": 0, "extra": {"reasoning_effort": "extreme"}}
+        )
+        == {}
+    )
 
 
 def test_assist_model_config_preserves_source_without_inline_connection() -> None:
@@ -518,11 +521,11 @@ def test_synthesize_rows_slices_dedupes_and_caps(monkeypatch) -> None:
     monkeypatch.setattr(tagging, "_build_assist_lm", lambda *a, **k: SimpleNamespace())
     monkeypatch.setattr(tagging, "usage_by_model_from_history", lambda lm: {})
     sink: list = []
-    columns, rows, credits = synthesize_rows("support tickets", [], 55, usage_sink=sink)
+    columns, rows, cents = synthesize_rows("support tickets", [], 55, usage_sink=sink)
     assert columns == ["text"]
     assert len(rows) == 55
     assert len({r["text"] for r in rows}) == 55
-    assert credits == 0
+    assert cents == 0
     assert len(sink) == 1
     assert calls[0] == ([], 25, 1, 3)
     assert sorted(calls[1:]) == [(["text"], 5, 3, 3), (["text"], 25, 2, 3)]

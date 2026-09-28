@@ -1,10 +1,10 @@
 """Tests for the worker's billing hooks at run completion.
 
-Covers ``_debit_run_credits`` (the local credit-ledger debit) and
+Covers ``_debit_run_cents`` (the local balance-ledger debit) and
 ``_stamp_billing_outcome`` (the cost receipt on the persisted result). Both
 must never affect job status. The debit is a no-op unless the store exposes a
 SQL engine, the caller is known, and the run reported token usage — Stripe
-configuration is deliberately not required, since the ledger is the credit
+configuration is deliberately not required, since the ledger is the balance
 source of truth even on a key-less deploy.
 """
 
@@ -55,12 +55,12 @@ def _worker(store: _Store) -> BackgroundWorker:
     return BackgroundWorker(job_store=cast(JobStore, store), num_workers=1, poll_interval=1.0)
 
 
-def test_debit_hook_charges_credits_for_successful_run() -> None:
+def test_debit_hook_charges_cents_for_successful_run() -> None:
     """With an engine, a known caller, and tokens present, the run is debited."""
     engine = object()
     worker = _worker(_Store(engine=engine))
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
-        worker._debit_run_credits(
+        worker._debit_run_cents(
             "u@x.com", {"total_tokens": 5000}, run_name="sentiment v3", model="m1", optimization_id="legacy-job"
         )
     billing_cls.assert_called_once_with(engine=engine)
@@ -87,7 +87,7 @@ def test_debit_hook_prices_per_model_usage_when_present() -> None:
         ],
     }
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
-        worker._debit_run_credits("u@x.com", result, run_name="r", model="openai/gpt-4o-mini")
+        worker._debit_run_cents("u@x.com", result, run_name="r", model="openai/gpt-4o-mini")
     billing_cls.return_value.debit_run.assert_called_once_with(
         "u@x.com",
         [
@@ -105,7 +105,7 @@ def test_debit_hook_charges_platform_fee_for_byok_run() -> None:
     engine = object()
     worker = _worker(_Store(engine=engine))
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
-        worker._debit_run_credits("u@x.com", {"total_tokens": 5000}, run_name="r", model="m1", token_source="byok")
+        worker._debit_run_cents("u@x.com", {"total_tokens": 5000}, run_name="r", model="m1", token_source="byok")
     billing_cls.return_value.debit_run.assert_called_once_with(
         "u@x.com",
         [ModelUsage(model="m1", input_tokens=5000, output_tokens=0)],
@@ -121,7 +121,7 @@ def test_debit_hook_runs_without_stripe_configured(monkeypatch: pytest.MonkeyPat
     engine = object()
     worker = _worker(_Store(engine=engine))
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
-        worker._debit_run_credits("u@x.com", {"total_tokens": 5000}, run_name="r", model=None)
+        worker._debit_run_cents("u@x.com", {"total_tokens": 5000}, run_name="r", model=None)
     billing_cls.return_value.debit_run.assert_called_once()
 
 
@@ -129,7 +129,7 @@ def test_debit_hook_noop_without_engine() -> None:
     """A store without a SQL engine (legacy/in-memory) debits nothing."""
     worker = _worker(_Store(engine=None))
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
-        worker._debit_run_credits("u@x.com", {"total_tokens": 5000}, run_name="r", model=None)
+        worker._debit_run_cents("u@x.com", {"total_tokens": 5000}, run_name="r", model=None)
     billing_cls.assert_not_called()
 
 
@@ -137,9 +137,9 @@ def test_debit_hook_noop_without_token_usage() -> None:
     """A run that reported no token total debits nothing."""
     worker = _worker(_Store(engine=object()))
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
-        worker._debit_run_credits("u@x.com", {"total_tokens": None}, run_name="r", model=None)
-        worker._debit_run_credits("u@x.com", {}, run_name="r", model=None)
-        worker._debit_run_credits("u@x.com", None, run_name="r", model=None)
+        worker._debit_run_cents("u@x.com", {"total_tokens": None}, run_name="r", model=None)
+        worker._debit_run_cents("u@x.com", {}, run_name="r", model=None)
+        worker._debit_run_cents("u@x.com", None, run_name="r", model=None)
     billing_cls.assert_not_called()
 
 
@@ -148,16 +148,16 @@ def test_debit_hook_swallows_failures() -> None:
     worker = _worker(_Store(engine=object()))
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
         billing_cls.return_value.debit_run.side_effect = RuntimeError("db down")
-        worker._debit_run_credits("u@x.com", {"total_tokens": 5000}, run_name="r", model=None)
+        worker._debit_run_cents("u@x.com", {"total_tokens": 5000}, run_name="r", model=None)
 
 
 def test_stamp_billing_records_billed_outcome() -> None:
-    """A billed run stamps the charged credits as the cost receipt."""
+    """A billed run stamps the charged cents as the cost receipt."""
     store = _Store(engine=object())
     worker = _worker(store)
     result: dict[str, Any] = {"total_tokens": 5000}
     worker._stamp_billing_outcome("opt-1", result, billed=5)
-    assert result["details"]["billing"] == {"outcome": "billed", "credits": 5}
+    assert result["details"]["billing"] == {"outcome": "billed", "cents": 5}
     assert store.updates == [{"id": "opt-1", "result": result}]
 
 
@@ -167,7 +167,7 @@ def test_stamp_billing_preserves_existing_details() -> None:
     worker = _worker(store)
     result: dict[str, Any] = {"total_tokens": 5000, "details": {"existing": True}}
     worker._stamp_billing_outcome("opt-1", result, billed=5)
-    assert result["details"]["billing"] == {"outcome": "billed", "credits": 5}
+    assert result["details"]["billing"] == {"outcome": "billed", "cents": 5}
     assert result["details"]["existing"] is True
 
 
@@ -179,7 +179,7 @@ def test_stamp_billing_records_estimate_for_reconciliation() -> None:
     worker._stamp_billing_outcome("opt-1", result, billed=7, estimated_low=4, estimated_high=12)
     assert result["details"]["billing"] == {
         "outcome": "billed",
-        "credits": 7,
+        "cents": 7,
         "estimated_low": 4,
         "estimated_high": 12,
     }
@@ -191,11 +191,11 @@ def test_stamp_billing_omits_estimate_when_partial() -> None:
     worker = _worker(store)
     result: dict[str, Any] = {"total_tokens": 5000}
     worker._stamp_billing_outcome("opt-1", result, billed=7, estimated_low=4, estimated_high=None)
-    assert result["details"]["billing"] == {"outcome": "billed", "credits": 7}
+    assert result["details"]["billing"] == {"outcome": "billed", "cents": 7}
 
 
 def test_stamp_billing_noop_when_nothing_charged() -> None:
-    """A free-grant run that cost zero credits stamps nothing."""
+    """A free-grant run that cost nothing stamps nothing."""
     store = _Store(engine=object())
     worker = _worker(store)
     result: dict[str, Any] = {"total_tokens": 0}
@@ -228,7 +228,7 @@ def test_debit_hook_retries_at_fallback_price_after_failure() -> None:
     usages = [ModelUsage(model="m1", input_tokens=5000, output_tokens=0)]
     with patch("core.worker.engine.StripeBillingService") as billing_cls:
         billing_cls.return_value.debit_run.side_effect = [RuntimeError("price lookup failed"), 42]
-        charged = worker._debit_run_credits(
+        charged = worker._debit_run_cents(
             "u@x.com", {"total_tokens": 5000}, run_name="r", model="m1", settlement_key="legacy:j:g1"
         )
     assert charged == 42
@@ -251,7 +251,7 @@ def test_bill_legacy_leg_bills_last_usage_snapshot_when_no_result() -> None:
     """A failed or stopped leg with no result is billed from the child's last usage snapshot."""
     worker = _worker(_Store(engine=object()))
     tracker = {"usage_by_model": [{"model": "m1", "input_tokens": 700, "output_tokens": 30}]}
-    with patch.object(worker, "_debit_run_credits", return_value=9) as debit:
+    with patch.object(worker, "_debit_run_cents", return_value=9) as debit:
         assert worker._bill_legacy_leg("job-1", _OVERVIEW, None, tracker, generation=2) == 9
     args, kwargs = debit.call_args
     assert args == ("u@x.com", {"usage_by_model": tracker["usage_by_model"]})
@@ -264,7 +264,7 @@ def test_bill_legacy_leg_prefers_result_usage_and_skips_when_empty() -> None:
     worker = _worker(_Store(engine=object()))
     result = {"usage_by_model": [{"model": "m1", "input_tokens": 900, "output_tokens": 90}]}
     tracker = {"usage_by_model": [{"model": "m1", "input_tokens": 1, "output_tokens": 1}]}
-    with patch.object(worker, "_debit_run_credits", return_value=5) as debit:
+    with patch.object(worker, "_debit_run_cents", return_value=5) as debit:
         worker._bill_legacy_leg("child", _OVERVIEW, result, tracker, generation=1, commitment_job_id="parent")
         assert worker._bill_legacy_leg("job-2", _OVERVIEW, None, {}, generation=1) == 0
     debit.assert_called_once()

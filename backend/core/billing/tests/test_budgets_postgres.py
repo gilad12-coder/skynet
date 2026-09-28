@@ -22,11 +22,11 @@ from core.storage.models import (
     Base,
     BillingCustomerModel,
     BillingProviderKeyModel,
-    CreditLedgerModel,
     ExecutionBudgetModel,
     ExecutionOperationModel,
     ExecutionUsageEvidenceModel,
     JobModel,
+    WalletLedgerModel,
 )
 from core.storage.preflights import PreflightStore, WizardPreflightModel
 
@@ -49,7 +49,7 @@ def database() -> Iterator[Engine]:
         model.__table__
         for model in (
             BillingCustomerModel,
-            CreditLedgerModel,
+            WalletLedgerModel,
             ExecutionBudgetModel,
             ExecutionOperationModel,
             ExecutionUsageEvidenceModel,
@@ -61,7 +61,7 @@ def database() -> Iterator[Engine]:
         with Session(engine) as session:
             session.add(
                 BillingCustomerModel(
-                    username="alice", stripe_customer_id="fixture", credit_balance=50, grant_remaining=0
+                    username="alice", stripe_customer_id="fixture", balance_cents=50, grant_remaining=0
                 )
             )
             session.commit()
@@ -84,7 +84,7 @@ def _reserve(service: BudgetService, budget_id: str, key: str, maximum: int = 40
         cost_kind="model",
         request_fingerprint="fixture",
         price_snapshot={"version": "fixture-v1"},
-        max_credits=maximum,
+        max_cents=maximum,
     )
 
 
@@ -127,7 +127,7 @@ def test_parallel_duplicate_attempt_has_one_physical_dispatch(database: Engine) 
         outcomes = list(executor.map(run, range(2)))
     assert len({operation_id for operation_id, _ in outcomes}) == 1
     assert sorted(claimed for _, claimed in outcomes) == [False, True]
-    assert service.get(budget.id, "alice").reserved_credits == 40
+    assert service.get(budget.id, "alice").reserved_cents == 40
 
 
 def test_parallel_settlement_replay_debits_once(database: Engine) -> None:
@@ -142,15 +142,15 @@ def test_parallel_settlement_replay_debits_once(database: Engine) -> None:
         """Race two identical completion callbacks against one physical attempt."""
         barrier.wait(timeout=5)
         result = service.settle(
-            operation.id, "alice", evidence_key="provider-event", actual_credits="1.2", evidence={"tokens": 42}
+            operation.id, "alice", evidence_key="provider-event", actual_cents="1.2", evidence={"tokens": 42}
         )
-        return result.budget.billed_credits
+        return result.budget.billed_cents
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         assert list(executor.map(run, range(2))) == [2, 2]
     with Session(database) as session:
-        assert session.get(BillingCustomerModel, "alice").credit_balance == 48
-        assert session.scalar(select(func.count()).select_from(CreditLedgerModel)) == 1
+        assert session.get(BillingCustomerModel, "alice").balance_cents == 48
+        assert session.scalar(select(func.count()).select_from(WalletLedgerModel)) == 1
         assert session.scalar(select(func.count()).select_from(ExecutionUsageEvidenceModel)) == 1
 
 
@@ -168,19 +168,28 @@ def test_migration_applies_from_legacy_credit_ledger_and_is_idempotent(database:
     assert extension_spec.loader is not None
     extension = importlib.util.module_from_spec(extension_spec)
     extension_spec.loader.exec_module(extension)
+    rename_path = path.with_name("d4f6a8c0e2b4_rename_credits_to_cents.py")
+    rename_spec = importlib.util.spec_from_file_location("rename_migration_fixture", rename_path)
+    assert rename_spec is not None
+    assert rename_spec.loader is not None
+    rename = importlib.util.module_from_spec(rename_spec)
+    rename_spec.loader.exec_module(rename)
     with database.begin() as connection, Operations.context(MigrationContext.configure(connection)):
+        rename.downgrade()
         migration.downgrade()
         migration.upgrade()
         migration.upgrade()
         extension.upgrade()
         extension.upgrade()
+        rename.upgrade()
+        rename.upgrade()
     service = BudgetService(engine=database)
     budget = service.create("alice", 10, idempotency_key="migrated")
     assert budget.uncapped is False
     operation = _reserve(service, budget.id, "call", maximum=5)
     service.mark_dispatched(operation.id, "alice")
-    result = service.settle(operation.id, "alice", evidence_key="usage", actual_credits=2, evidence={})
-    assert result.budget.billed_credits == 2
+    result = service.settle(operation.id, "alice", evidence_key="usage", actual_cents=2, evidence={})
+    assert result.budget.billed_cents == 2
 
 
 def test_preflight_claim_and_fencing_are_atomic_on_postgres(database: Engine) -> None:
@@ -235,6 +244,6 @@ def test_preflight_claim_and_fencing_are_atomic_on_postgres(database: Engine) ->
     )
     assert replacement.token is None
     assert replacement.generation == 1
-    assert service.get(budget.id, "alice").reserved_credits == 5
+    assert service.get(budget.id, "alice").reserved_cents == 5
     with pytest.raises(BudgetConflictError):
         store.finish(owner.document["id"], claim_token=owner.token, status="succeeded", result={"checks": []})

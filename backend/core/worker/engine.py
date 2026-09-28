@@ -86,7 +86,7 @@ from .budget_probe import (
     STOP_REASON_BUDGET_PROJECTED,
     planned_calls_from_progress,
     probe_ready,
-    project_total_credits,
+    project_total_cents,
     projection_evidence,
 )
 from .checkpoint_compat import (
@@ -929,9 +929,7 @@ class BackgroundWorker:
                 ):
                     provisioner = OpenRouterKeyProvisioner(engine=byok_engine)
                     if provisioner.enabled:
-                        spendable = StripeBillingService(engine=byok_engine).spendable_credits(
-                            execution_payload.username
-                        )
+                        spendable = StripeBillingService(engine=byok_engine).spendable_cents(execution_payload.username)
                         runtime_key = provisioner.ensure_runtime_key(execution_payload.username, spendable)
                         if runtime_key is not None:
                             inject_provisioned_openrouter_key(
@@ -959,8 +957,8 @@ class BackgroundWorker:
                         )
                     execution_headroom = (
                         (
-                            Decimal(str(recovery_plan["execution_max_credits"])),
-                            Decimal(str(recovery_plan["execution_max_wallet_credits"])),
+                            Decimal(str(recovery_plan["execution_max_cents"])),
+                            Decimal(str(recovery_plan["execution_max_wallet_cents"])),
                         )
                         if recovery_plan is not None
                         else None
@@ -1006,8 +1004,8 @@ class BackgroundWorker:
                     # The wizard leaves the ceiling unset for a budget without a
                     # limit, while the guest's proposer still plans its spend
                     # against one, so the parent hands it the ledger's allowance.
-                    if optimization_type == OPTIMIZATION_TYPE_BLACKBOX and payload_dict.get("max_cost_credits") is None:
-                        payload_dict["max_cost_credits"] = budget_gateway.cost_ceiling_credits()
+                    if optimization_type == OPTIMIZATION_TYPE_BLACKBOX and payload_dict.get("max_cost_cents") is None:
+                        payload_dict["max_cost_cents"] = budget_gateway.cost_ceiling_cents()
                 if has_exposed_execution_credentials(
                     payload_dict,
                     allow_parent_model_routes=budget_gateway is not None,
@@ -1241,7 +1239,7 @@ class BackgroundWorker:
                             else:
                                 self._job_store.delete_gepa_checkpoint(optimization_id)
                     if pair_parent_id is not None:
-                        # Parent-level side effects (user notification, credit
+                        # Parent-level side effects (user notification, balance
                         # debit, billing stamp, embedding) happen ONCE at grid
                         # finalization — a pair child only checks whether it
                         # was the last sibling standing.
@@ -1460,7 +1458,7 @@ class BackgroundWorker:
         try:
             raw = asdict(gateway.runtime.service.get(gateway.runtime.budget_id, gateway.runtime.username))
             raw.pop("username", None)
-            raw.pop("account_available_credits", None)
+            raw.pop("account_available_cents", None)
             snapshot = json.loads(json.dumps(raw, default=str))
             job = self._job_store.get_job(optimization_id)
             evidence = {**(job.get("terminal_evidence") or {}), "execution_budget": snapshot}
@@ -1654,7 +1652,7 @@ class BackgroundWorker:
         """Pause a run whose measured burn projects past its spending limit.
 
         Evaluated once per newly persisted checkpoint, so a pause always has a
-        checkpoint to resume from. The credits settled so far are scaled to the
+        checkpoint to resume from. The cents settled so far are scaled to the
         optimizer's planned evaluation count; a projection above the limit
         closes paid admission, parks the row as ``paused`` with the projection
         as evidence, and unwinds the run exactly like a user pause, so raising
@@ -1684,16 +1682,16 @@ class BackgroundWorker:
         snapshot = runtime.service.get(runtime.budget_id, runtime.username)
         if snapshot.uncapped:
             return
-        projected = project_total_credits(snapshot.setup_spent_credits, snapshot.run_spent_credits, done, planned)
-        if projected <= snapshot.total_credits:
+        projected = project_total_cents(snapshot.setup_spent_cents, snapshot.run_spent_cents, done, planned)
+        if projected <= snapshot.total_cents:
             return
         logger.info(
-            "Optimization %s: %s/%s evaluations project %s credits against a %s-credit limit; pausing",
+            "Optimization %s: %s/%s evaluations project %s cents against a %s-cent limit; pausing",
             optimization_id,
             done,
             planned,
             projected,
-            snapshot.total_credits,
+            snapshot.total_cents,
         )
         runtime.service.stop_admission(runtime.budget_id, runtime.username, reason=STOP_REASON_BUDGET_PROJECTED)
         existing = (self._job_store.get_job(optimization_id) or {}).get("terminal_evidence") or {}
@@ -1705,7 +1703,7 @@ class BackgroundWorker:
             "terminal_evidence": {
                 **existing,
                 "budget_projection": projection_evidence(
-                    snapshot, done_calls=done, planned_calls=planned, projected_credits=projected
+                    snapshot, done_calls=done, planned_calls=planned, projected_cents=projected
                 ),
             },
         }
@@ -1817,7 +1815,7 @@ class BackgroundWorker:
         except Exception:  # isolation boundary: telemetry must never affect a run outcome
             logger.debug("Optimization %s: run outcome telemetry failed", optimization_id, exc_info=True)
 
-    def _debit_run_credits(
+    def _debit_run_cents(
         self,
         username: str,
         result_dict: dict[str, Any] | None,
@@ -1829,16 +1827,16 @@ class BackgroundWorker:
         token_sources_by_model: dict[str, str] | None = None,
         settlement_key: str | None = None,
     ) -> int:
-        """Debit a finished run's credit cost from the account's local ledger.
+        """Debit a finished run's cost from the account's local ledger.
 
         Writes a signed ``run`` row and decrements the account's grant/balance via
         :meth:`StripeBillingService.debit_run`. Runs inline (not on a daemon
         thread) so the wallet visibly reflects the spend the moment the run lands,
         but wrapped so a billing-DB hiccup can never flip job status — the local
-        ledger is the credit source of truth, independent of whether Stripe is
+        ledger is the balance source of truth, independent of whether Stripe is
         configured. A managed run is charged its full per-token cost; a BYOK run is
         charged only Skynet's platform fee (the provider tokens were paid on the
-        user's own key), so credits still meter a BYOK run without double-charging
+        user's own key), so the balance still meters a BYOK run without double-charging
         for inference. A no-op when the store exposes no SQL engine (legacy/in-memory),
         the caller is anonymous, or the run reported no token usage. A failed debit
         is logged at ``ERROR`` (forwarded as an alert) and retried at the fallback
@@ -1858,7 +1856,7 @@ class BackgroundWorker:
                 or re-claimed leg is never charged twice.
 
         Returns:
-            The credits charged (``0`` when nothing was billed or the debit was
+            The cents charged (``0`` when nothing was billed or the debit was
             skipped/failed).
         """
         engine = getattr(self._job_store, "engine", None)
@@ -1883,7 +1881,7 @@ class BackgroundWorker:
             return service.debit_run(username, usages, **billing_kwargs)
         except Exception:  # isolation boundary: a debit failure must never impact job status
             logger.exception(
-                "Credit debit failed for %s (job %s, %s); charging at fallback price: %s",
+                "Balance debit failed for %s (job %s, %s); charging at fallback price: %s",
                 username,
                 optimization_id,
                 run_name or "Run",
@@ -1917,14 +1915,14 @@ class BackgroundWorker:
                 consume; defaults to ``optimization_id``.
 
         Returns:
-            The credits charged.
+            The cents charged.
         """
         source: dict[str, Any] | None = result_dict if _usages_from_result(result_dict, None) else None
         if source is None and usage_tracker.get("usage_by_model"):
             source = {"usage_by_model": usage_tracker["usage_by_model"]}
         if source is None:
             return 0
-        return self._debit_run_credits(
+        return self._debit_run_cents(
             overview.get(PAYLOAD_OVERVIEW_USERNAME, ""),
             source,
             optimization_id=commitment_job_id or optimization_id,
@@ -1946,12 +1944,12 @@ class BackgroundWorker:
     ) -> None:
         """Record the run's billed cost on its result for the result screen.
 
-        Writes ``result['details']['billing']`` — ``{outcome: "billed", credits}``
-        where ``credits`` is the amount charged. When the run was submitted with a
+        Writes ``result['details']['billing']`` — ``{outcome: "billed", cents}``
+        where ``cents`` is the amount charged. When the run was submitted with a
         projected bracket, ``estimated_low``/``estimated_high`` are echoed
         alongside so the estimate can be reconciled against the actual charge.
         Only stamps single-run results (a grid envelope has no per-run
-        ``details``) and only when a credit amount exists, so a free-grant run
+        ``details``) and only when a charged amount exists, so a free-grant run
         that cost nothing adds no row. Re-persists the result via the job store
         because the debit runs after the first completion write; wrapped so a
         store hiccup can never flip job status.
@@ -1959,23 +1957,23 @@ class BackgroundWorker:
         Args:
             optimization_id: The finished run whose result is updated.
             result_dict: The serialized run result; mutated in place and re-saved.
-            billed: Credits charged by :meth:`_debit_run_credits`.
-            estimated_low: Low end of the projected credit bracket, or None when
+            billed: Cents charged by :meth:`_debit_run_cents`.
+            estimated_low: Low end of the projected cost bracket, or None when
                 the run carried no estimate.
-            estimated_high: High end of the projected credit bracket, or None.
+            estimated_high: High end of the projected cost bracket, or None.
         """
         if not isinstance(result_dict, dict) or "pair_results" in result_dict:
             return
         outcome = "billed"
-        credits = billed
-        if credits <= 0:
+        cents = billed
+        if cents <= 0:
             return
         try:
             details = result_dict.get("details")
             if not isinstance(details, dict):
                 details = {}
                 result_dict["details"] = details
-            billing: dict[str, Any] = {"outcome": outcome, "credits": credits}
+            billing: dict[str, Any] = {"outcome": outcome, "cents": cents}
             if estimated_low is not None and estimated_high is not None:
                 billing["estimated_low"] = estimated_low
                 billing["estimated_high"] = estimated_high
@@ -2110,9 +2108,7 @@ class BackgroundWorker:
                         if incumbent is not None:
                             pair_index = metrics.get("pair_index")
                             pair_key = (
-                                pair_index
-                                if isinstance(pair_index, int) and not isinstance(pair_index, bool)
-                                else -1
+                                pair_index if isinstance(pair_index, int) and not isinstance(pair_index, bool) else -1
                             )
                             incumbents = checkpoint_tracker.setdefault("_incumbents", {})
                             previous = incumbents.get(pair_key)
@@ -2591,7 +2587,7 @@ class BackgroundWorker:
         stuck-grid backstop). No-ops unless ALL siblings are terminal and the
         parent is still ``running``. The terminal write is CAS-guarded against
         ``running`` so two racing finalizers (or a finalize racing a cancel)
-        produce exactly one outcome, and the notification + credit debit ride
+        produce exactly one outcome, and the notification + balance debit ride
         the same once-only completion claim as a classic job.
         """
         store = self._job_store
@@ -2667,7 +2663,7 @@ class BackgroundWorker:
             # Billed whatever the grid's outcome: failed and stopped pairs still
             # spent the tokens their recorded results carry.
             if isinstance(result_dict, dict) and not parent.get("execution_budget_id"):
-                billed = self._debit_run_credits(
+                billed = self._debit_run_cents(
                     _username,
                     result_dict,
                     optimization_id=parent_optimization_id,

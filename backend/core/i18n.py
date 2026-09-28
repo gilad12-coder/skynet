@@ -203,5 +203,3 @@ def t(key: str, /, **params: Any) -> str:
         except (KeyError, IndexError, ValueError):
             return template
     return template
-
-

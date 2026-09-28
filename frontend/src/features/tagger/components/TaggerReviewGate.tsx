@@ -11,6 +11,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/shared/ui/primitives/card";
+import { formatCentsUsd } from "@/features/billing";
+import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import type { AutotagEstimate } from "../hooks/use-tagger";
 import type { AssistState, TaggerConfig } from "../lib/types";
@@ -53,8 +55,8 @@ export function TaggerReviewGate({
   const autotagLabel = estimate
     ? formatMsg("tagger.assist.gate.tag_rest_estimate", {
         rows: remainingCount,
-        low: estimate.credits_low,
-        high: estimate.credits_high,
+        low: formatCentsUsd(estimate.cents_low, getActiveIntlLocale()),
+        high: formatCentsUsd(estimate.cents_high, getActiveIntlLocale()),
       })
     : formatMsg("tagger.assist.gate.tag_rest", { rows: remainingCount });
 

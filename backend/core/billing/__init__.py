@@ -1,6 +1,6 @@
-"""Stripe-backed managed-credit billing.
+"""Stripe-backed prepaid-balance billing.
 
-Owns customers, credit-pack checkout, and webhook reconciliation. The rest of
+Owns customers, top-up checkout, and webhook reconciliation. The rest of
 the app reaches billing only through :class:`StripeBillingService`; nothing
 else imports ``stripe``.
 """
@@ -26,24 +26,24 @@ from .openrouter_float import (
     OpenRouterFloatSweeper,
     check_float,
     notify_low_float,
-    read_account_balance_credits,
+    read_account_balance_cents,
     start_openrouter_float_sweeper,
     warn_if_local_key_uncapped,
 )
 from .openrouter_keys import OpenRouterKeyProvisioner, inject_provisioned_openrouter_key
 from .service import (
-    FREE_GRANT_CREDITS,
-    PACK_CREDITS,
+    FREE_GRANT_CENTS,
+    PACK_CENTS,
     LedgerRow,
     StripeBillingService,
     WalletSnapshot,
-    committed_spend_credits,
+    committed_spend_cents,
     cost_ceiling_budget,
 )
 
 __all__ = [
-    "FREE_GRANT_CREDITS",
-    "PACK_CREDITS",
+    "FREE_GRANT_CENTS",
+    "PACK_CENTS",
     "FloatStatus",
     "FundingResult",
     "IssuingFundingSweeper",
@@ -58,7 +58,7 @@ __all__ = [
     "byok_prefix_routable",
     "byok_provider_for_litellm",
     "check_float",
-    "committed_spend_credits",
+    "committed_spend_cents",
     "cost_ceiling_budget",
     "fund_issuing_once",
     "inject_byok_connections",
@@ -66,7 +66,7 @@ __all__ = [
     "notify_low_float",
     "payload_uses_token_source",
     "provider_slug_for_model",
-    "read_account_balance_credits",
+    "read_account_balance_cents",
     "resolve_byok_model_config",
     "start_issuing_funding_sweeper",
     "start_openrouter_float_sweeper",

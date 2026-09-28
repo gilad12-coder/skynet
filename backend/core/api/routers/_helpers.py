@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from ...billing import StripeBillingService
 from ...billing.credential_safety import scrub_model_config
-from ...billing.metering import estimate_run_credits, meter_llm_run
+from ...billing.metering import estimate_run_cents, meter_llm_run
 from ...config import settings
 from ...constants import (
     OPTIMIZATION_TYPE_BLACKBOX,
@@ -166,14 +166,14 @@ def clear_program_cache() -> None:
     _program_cache.clear()
 
 
-def enforce_llm_credits(job_store, username: str) -> None:
+def enforce_llm_balance(job_store, username: str) -> None:
     """Refuse an interactive LLM turn for an account below the minimum turn balance.
 
     The turn-surface twin of the submit gate: agent chats, interview turns and
     tagging predictions spend managed tokens and are billed only after the
     turn, so the account must hold at least
-    ``settings.interactive_min_balance_credits`` (never less than one credit)
-    before the LLM call. Otherwise a 1-credit balance could buy a turn costing
+    ``settings.interactive_min_balance_cents`` (never less than one cent)
+    before the LLM call. Otherwise a 1-cent balance could buy a turn costing
     far more, with the overrun absorbed at the balance floor. A store with no
     SQL engine (legacy/in-memory) skips the gate, matching the submit path.
 
@@ -182,16 +182,16 @@ def enforce_llm_credits(job_store, username: str) -> None:
         username: Account attempting the turn.
 
     Raises:
-        DomainError: 402 when the account's spendable credits are below the
+        DomainError: 402 when the account's spendable balance is below the
             minimum turn balance (including accounts carrying refund debt).
     """
     engine = getattr(job_store, "engine", None)
     if engine is None or not username:
         return
-    floor = max(1, settings.interactive_min_balance_credits)
-    if StripeBillingService(engine=engine).spendable_credits(username) >= floor:
+    floor = max(1, settings.interactive_min_balance_cents)
+    if StripeBillingService(engine=engine).spendable_cents(username) >= floor:
         return
-    raise DomainError("billing.insufficient_credits", status=402)
+    raise DomainError("billing.insufficient_funds", status=402)
 
 
 async def stream_with_llm_metering(
@@ -268,7 +268,7 @@ def _turn_stats(
         first_token_at: ``time.monotonic()`` of the first reply token, if any.
 
     Returns:
-        Token counts (``None`` when untracked), credits and millisecond timings.
+        Token counts (``None`` when untracked), cents and millisecond timings.
     """
     now = time.monotonic()
     breakdown = usage_by_model_from_history(*usage_sink) if usage_sink else None
@@ -277,7 +277,7 @@ def _turn_stats(
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
-        "credits": estimate_run_credits(usage_sink, token_source) if breakdown else None,
+        "cents": estimate_run_cents(usage_sink, token_source) if breakdown else None,
         "duration_ms": round((now - started) * 1000),
         "ttft_ms": round((first_token_at - started) * 1000) if first_token_at is not None else None,
     }

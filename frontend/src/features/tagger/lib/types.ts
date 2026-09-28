@@ -120,8 +120,8 @@ interface AutotagProgress {
   status: "running" | "done" | "failed" | "canceled";
   total: number;
   done: number;
-  /** Credits the bulk job actually spent (server-written, snake_case). */
-  credits_spent?: number;
+  /** Cents the bulk job actually spent (server-written, snake_case). */
+  cents_spent?: number;
 }
 
 /**

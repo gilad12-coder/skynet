@@ -439,12 +439,12 @@ def test_native_without_aggregate_preserves_only_an_existing_seed(
 def test_parent_rpc_checks_cumulative_budget_at_both_boundaries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str
 ) -> None:
-    """A known credit stop propagates even when RPC runs outside DSPy's context."""
+    """A known spending stop propagates even when RPC runs outside DSPy's context."""
     monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
     session = FakeSession()
     ctx = _context(tmp_path, FakeRuntime(session))
     events: list[str] = []
-    failure = CostCeilingExceededError("credits spent")
+    failure = CostCeilingExceededError("balance spent")
 
     def check() -> None:
         """Reject the configured evaluation boundary."""

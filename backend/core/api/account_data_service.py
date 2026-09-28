@@ -9,7 +9,7 @@ keys inside each object tree stay satisfied.
 
 Two deliberate exceptions to "hard delete everything":
 
-* Financial records (``billing_customers``, ``credit_ledger``) and the quota
+* Financial records (``billing_customers``, ``wallet_ledger``) and the quota
   audit trail are *anonymized*, not deleted — their retention has an accounting
   and audit basis, so the identity link is severed to a stable, PII-free
   tombstone token while the rows themselves survive.
@@ -44,7 +44,6 @@ from ..storage.models import (
     BillingOpenRouterKeyModel,
     BillingProviderKeyModel,
     ConversationEmbeddingModel,
-    CreditLedgerModel,
     DatasetBlobModel,
     DatasetModel,
     DatasetShareGrantModel,
@@ -68,6 +67,7 @@ from ..storage.models import (
     UserQuotaAuditModel,
     UserQuotaOverrideModel,
     UserStorageQuotaOverrideModel,
+    WalletLedgerModel,
     WebAuthnChallengeModel,
     WebAuthnCredentialModel,
 )
@@ -157,21 +157,13 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
     registry_row = session.get(PackageRegistryPreferenceModel, username)
     notification_row = session.get(NotificationPreferenceModel, username)
     notification_preferences = {
-        "job_updates_enabled": (
-            bool(notification_row.job_updates_enabled)
-            if notification_row is not None
-            else True
-        ),
+        "job_updates_enabled": (bool(notification_row.job_updates_enabled) if notification_row is not None else True),
         "sharing_updates_enabled": (
-            bool(notification_row.sharing_updates_enabled)
-            if notification_row is not None
-            else True
+            bool(notification_row.sharing_updates_enabled) if notification_row is not None else True
         ),
     }
 
-    jobs = session.scalars(
-        select(JobModel).where(JobModel.username == username).order_by(JobModel.created_at)
-    ).all()
+    jobs = session.scalars(select(JobModel).where(JobModel.username == username).order_by(JobModel.created_at)).all()
     optimizations = [
         {
             "optimization_id": job.optimization_id,
@@ -188,9 +180,7 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
     ]
 
     datasets = session.scalars(
-        select(DatasetModel)
-        .where(DatasetModel.owner_username == username)
-        .order_by(DatasetModel.created_at)
+        select(DatasetModel).where(DatasetModel.owner_username == username).order_by(DatasetModel.created_at)
     ).all()
     datasets_out = [
         {
@@ -257,31 +247,24 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         )
 
     memories = session.scalars(
-        select(AgentMemoryModel)
-        .where(AgentMemoryModel.username == username)
-        .order_by(AgentMemoryModel.seq)
+        select(AgentMemoryModel).where(AgentMemoryModel.username == username).order_by(AgentMemoryModel.seq)
     ).all()
     memories_out = [
-        {"seq": memory.seq, "content": memory.content, "created_at": _iso(memory.created_at)}
-        for memory in memories
+        {"seq": memory.seq, "content": memory.content, "created_at": _iso(memory.created_at)} for memory in memories
     ]
 
     customer = session.get(BillingCustomerModel, username)
     ledger = session.scalars(
-        select(CreditLedgerModel)
-        .where(CreditLedgerModel.username == username)
-        .order_by(CreditLedgerModel.created_at)
+        select(WalletLedgerModel).where(WalletLedgerModel.username == username).order_by(WalletLedgerModel.created_at)
     ).all()
     billing = {
-        "credit_balance": int(customer.credit_balance) if customer is not None else 0,
+        "balance_cents": int(customer.balance_cents) if customer is not None else 0,
         "grant_remaining": (
-            int(customer.grant_remaining)
-            if customer is not None and customer.grant_remaining is not None
-            else None
+            int(customer.grant_remaining) if customer is not None and customer.grant_remaining is not None else None
         ),
         "ledger": [
             {
-                "delta_credits": int(entry.delta_credits),
+                "delta_cents": int(entry.delta_cents),
                 "kind": entry.kind,
                 "description": entry.description,
                 "model": entry.model,
@@ -385,16 +368,10 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
         result = session.execute(statement, execution_options={"synchronize_session": False})
         anonymized += result.rowcount or 0
 
-    owned_job_ids = list(
-        session.scalars(select(JobModel.optimization_id).where(JobModel.username == username))
-    )
+    owned_job_ids = list(session.scalars(select(JobModel.optimization_id).where(JobModel.username == username)))
     child_job_ids = (
         list(
-            session.scalars(
-                select(JobModel.optimization_id).where(
-                    JobModel.parent_optimization_id.in_(owned_job_ids)
-                )
-            )
+            session.scalars(select(JobModel.optimization_id).where(JobModel.parent_optimization_id.in_(owned_job_ids)))
         )
         if owned_job_ids
         else []
@@ -405,91 +382,43 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
         _run_delete(delete(LogEntryModel).where(LogEntryModel.optimization_id.in_(job_ids)))
         _run_delete(delete(GepaCheckpointModel).where(GepaCheckpointModel.optimization_id.in_(job_ids)))
         _run_delete(delete(GridPairResultModel).where(GridPairResultModel.optimization_id.in_(job_ids)))
-        _run_delete(
-            delete(OptimizationShareGrantModel).where(
-                OptimizationShareGrantModel.optimization_id.in_(job_ids)
-            )
-        )
-        _run_delete(
-            delete(OptimizationShareLinkModel).where(
-                OptimizationShareLinkModel.optimization_id.in_(job_ids)
-            )
-        )
+        _run_delete(delete(OptimizationShareGrantModel).where(OptimizationShareGrantModel.optimization_id.in_(job_ids)))
+        _run_delete(delete(OptimizationShareLinkModel).where(OptimizationShareLinkModel.optimization_id.in_(job_ids)))
         _run_delete(delete(JobModel).where(JobModel.optimization_id.in_(job_ids)))
     _run_delete(delete(JobEmbeddingModel).where(JobEmbeddingModel.user_id == username))
-    _run_delete(
-        delete(OptimizationShareLinkModel).where(OptimizationShareLinkModel.created_by == username)
-    )
-    _run_delete(
-        delete(OptimizationShareGrantModel).where(
-            OptimizationShareGrantModel.grantee_username == username
-        )
-    )
-    _run_delete(
-        delete(OptimizationShareGrantModel).where(OptimizationShareGrantModel.created_by == username)
-    )
+    _run_delete(delete(OptimizationShareLinkModel).where(OptimizationShareLinkModel.created_by == username))
+    _run_delete(delete(OptimizationShareGrantModel).where(OptimizationShareGrantModel.grantee_username == username))
+    _run_delete(delete(OptimizationShareGrantModel).where(OptimizationShareGrantModel.created_by == username))
 
-    dataset_ids = list(
-        session.scalars(select(DatasetModel.id).where(DatasetModel.owner_username == username))
-    )
+    dataset_ids = list(session.scalars(select(DatasetModel.id).where(DatasetModel.owner_username == username)))
     if dataset_ids:
         _run_delete(delete(DatasetBlobModel).where(DatasetBlobModel.dataset_id.in_(dataset_ids)))
-        _run_delete(
-            delete(DatasetShareLinkModel).where(DatasetShareLinkModel.dataset_id.in_(dataset_ids))
-        )
-        _run_delete(
-            delete(DatasetShareGrantModel).where(DatasetShareGrantModel.dataset_id.in_(dataset_ids))
-        )
+        _run_delete(delete(DatasetShareLinkModel).where(DatasetShareLinkModel.dataset_id.in_(dataset_ids)))
+        _run_delete(delete(DatasetShareGrantModel).where(DatasetShareGrantModel.dataset_id.in_(dataset_ids)))
         _run_delete(delete(DatasetModel).where(DatasetModel.id.in_(dataset_ids)))
     _run_delete(delete(DatasetShareLinkModel).where(DatasetShareLinkModel.created_by == username))
-    _run_delete(
-        delete(DatasetShareGrantModel).where(DatasetShareGrantModel.grantee_username == username)
-    )
+    _run_delete(delete(DatasetShareGrantModel).where(DatasetShareGrantModel.grantee_username == username))
     _run_delete(delete(DatasetShareGrantModel).where(DatasetShareGrantModel.created_by == username))
 
-    session_ids = list(
-        session.scalars(select(TaggingSessionModel.id).where(TaggingSessionModel.username == username))
-    )
+    session_ids = list(session.scalars(select(TaggingSessionModel.id).where(TaggingSessionModel.username == username)))
     if session_ids:
         _run_delete(
-            delete(TaggingSessionShareLinkModel).where(
-                TaggingSessionShareLinkModel.session_id.in_(session_ids)
-            )
+            delete(TaggingSessionShareLinkModel).where(TaggingSessionShareLinkModel.session_id.in_(session_ids))
         )
         _run_delete(
-            delete(TaggingSessionShareGrantModel).where(
-                TaggingSessionShareGrantModel.session_id.in_(session_ids)
-            )
+            delete(TaggingSessionShareGrantModel).where(TaggingSessionShareGrantModel.session_id.in_(session_ids))
         )
         _run_delete(delete(TaggingSessionModel).where(TaggingSessionModel.id.in_(session_ids)))
-    _run_delete(
-        delete(TaggingSessionShareLinkModel).where(
-            TaggingSessionShareLinkModel.created_by == username
-        )
-    )
-    _run_delete(
-        delete(TaggingSessionShareGrantModel).where(
-            TaggingSessionShareGrantModel.grantee_username == username
-        )
-    )
-    _run_delete(
-        delete(TaggingSessionShareGrantModel).where(
-            TaggingSessionShareGrantModel.created_by == username
-        )
-    )
+    _run_delete(delete(TaggingSessionShareLinkModel).where(TaggingSessionShareLinkModel.created_by == username))
+    _run_delete(delete(TaggingSessionShareGrantModel).where(TaggingSessionShareGrantModel.grantee_username == username))
+    _run_delete(delete(TaggingSessionShareGrantModel).where(TaggingSessionShareGrantModel.created_by == username))
 
     conversation_ids = list(
-        session.scalars(
-            select(AgentConversationModel.id).where(AgentConversationModel.username == username)
-        )
+        session.scalars(select(AgentConversationModel.id).where(AgentConversationModel.username == username))
     )
     if conversation_ids:
-        _run_delete(
-            delete(AgentMessageModel).where(AgentMessageModel.conversation_id.in_(conversation_ids))
-        )
-    _run_delete(
-        delete(ConversationEmbeddingModel).where(ConversationEmbeddingModel.username == username)
-    )
+        _run_delete(delete(AgentMessageModel).where(AgentMessageModel.conversation_id.in_(conversation_ids)))
+    _run_delete(delete(ConversationEmbeddingModel).where(ConversationEmbeddingModel.username == username))
     _run_delete(delete(AgentConversationModel).where(AgentConversationModel.username == username))
 
     _run_delete(delete(ApiTokenModel).where(ApiTokenModel.username == username))
@@ -499,44 +428,22 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(BillingProviderKeyModel).where(BillingProviderKeyModel.username == username))
     _run_delete(delete(BillingOpenRouterKeyModel).where(BillingOpenRouterKeyModel.username == username))
     _run_delete(delete(UserQuotaOverrideModel).where(UserQuotaOverrideModel.username == username))
-    _run_delete(
-        delete(UserStorageQuotaOverrideModel).where(
-            UserStorageQuotaOverrideModel.username == username
-        )
-    )
+    _run_delete(delete(UserStorageQuotaOverrideModel).where(UserStorageQuotaOverrideModel.username == username))
     _run_delete(delete(AgentStagedDatasetModel).where(AgentStagedDatasetModel.username == username))
     _run_delete(delete(AgentMemoryModel).where(AgentMemoryModel.username == username))
     _run_delete(delete(AgentMemorySummaryModel).where(AgentMemorySummaryModel.username == username))
     _run_delete(delete(AgentMemorySettingsModel).where(AgentMemorySettingsModel.username == username))
-    _run_delete(
-        delete(NotificationPreferenceModel).where(
-            NotificationPreferenceModel.username == username
-        )
-    )
+    _run_delete(delete(NotificationPreferenceModel).where(NotificationPreferenceModel.username == username))
 
     _run_delete(delete(PackageRegistryPreferenceModel).where(PackageRegistryPreferenceModel.username == username))
 
     tombstone = _anonymized_username(username)
+    _run_anonymize(update(TelemetryEventModel).where(TelemetryEventModel.username == username).values(username=None))
     _run_anonymize(
-        update(TelemetryEventModel)
-        .where(TelemetryEventModel.username == username)
-        .values(username=None)
+        update(BillingCustomerModel).where(BillingCustomerModel.username == username).values(username=tombstone)
     )
-    _run_anonymize(
-        update(BillingCustomerModel)
-        .where(BillingCustomerModel.username == username)
-        .values(username=tombstone)
-    )
-    _run_anonymize(
-        update(CreditLedgerModel)
-        .where(CreditLedgerModel.username == username)
-        .values(username=tombstone)
-    )
-    _run_anonymize(
-        update(UserQuotaAuditModel)
-        .where(UserQuotaAuditModel.actor == username)
-        .values(actor=tombstone)
-    )
+    _run_anonymize(update(WalletLedgerModel).where(WalletLedgerModel.username == username).values(username=tombstone))
+    _run_anonymize(update(UserQuotaAuditModel).where(UserQuotaAuditModel.actor == username).values(actor=tombstone))
     _run_anonymize(
         update(UserQuotaAuditModel)
         .where(UserQuotaAuditModel.target_username == username)

@@ -223,7 +223,7 @@ def test_auto_run_hands_off_between_engines(
     sink: list[tuple[str, dict[str, Any]]] = []
 
     response = run_blackbox_optimization(
-        _payload(strategy={"mode": "auto"}, budget={"max_scorer_runs": 24}, max_cost_credits=100),
+        _payload(strategy={"mode": "auto"}, budget={"max_scorer_runs": 24}, max_cost_cents=100),
         artifact_id="job-2",
         progress_callback=lambda e, m: sink.append((e, m)),
         gepa_log_dir_path=str(tmp_path),
@@ -573,7 +573,7 @@ def test_unavailable_native_recipe_fails_before_building_a_scorer(
     monkeypatch.setattr(service_mod, "build_scorer", unexpected_scorer)
 
     with pytest.raises(ServiceError, match="missing runtime"):
-        run_blackbox_optimization(_payload(strategy=strategy, max_cost_credits=100), artifact_id="invalid-native")
+        run_blackbox_optimization(_payload(strategy=strategy, max_cost_cents=100), artifact_id="invalid-native")
 
 
 @pytest.mark.parametrize(
@@ -600,7 +600,7 @@ def test_empty_training_split_rejected_only_for_meta_harness_recipes(
     monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
     payload = _payload(
         strategy=strategy,
-        max_cost_credits=100,
+        max_cost_cents=100,
         split_fractions={"train": 0.0, "val": 0.8, "test": 0.2},
     )
     before = payload.model_dump()
@@ -645,7 +645,7 @@ def test_autosaddler_needs_two_visible_cases(
     monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
     payload = _payload(
         strategy={"mode": "single", "engine": "autosaddler"},
-        max_cost_credits=100,
+        max_cost_cents=100,
         cases=cases,
         split_fractions={"train": 1.0, "val": 0.0, "test": 0.0},
     )
@@ -666,7 +666,7 @@ def test_smallest_training_share_keeps_one_case_for_meta_harness(monkeypatch: py
     monkeypatch.setattr(service_mod, "validate_scorer_code", lambda _code: None)
     payload = _payload(
         strategy={"mode": "single", "engine": "meta_harness"},
-        max_cost_credits=100,
+        max_cost_cents=100,
         split_fractions={"train": 0.01, "val": 0.8, "test": 0.19},
     )
     before = payload.model_dump()
@@ -732,7 +732,7 @@ def test_native_model_controls_are_rejected_without_restricting_direct_engines(
     monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
     payload = _payload(
         strategy=strategy,
-        max_cost_credits=100,
+        max_cost_cents=100,
         scorer={"kind": "remote", "url": "https://scorer.example"},
         reflection_model_config={"name": "fake/model", **model_options},
     )
@@ -1215,7 +1215,7 @@ def test_budget_backed_native_run_leaves_its_cost_ceiling_to_the_ledger(
     """
     monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
     validate_blackbox_payload(_payload(strategy=strategy, execution_budget_id="budget-1"), verify_scorer=False)
-    with pytest.raises(ServiceError, match="Set a total credit budget"):
+    with pytest.raises(ServiceError, match="Set a total spending budget"):
         validate_blackbox_payload(_payload(strategy=strategy), verify_scorer=False)
 
 

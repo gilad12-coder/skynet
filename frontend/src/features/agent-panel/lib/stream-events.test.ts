@@ -104,18 +104,21 @@ test("done reports the requested and the served model, blank ones as null", () =
     ["done", { assistant_message: "hi", model: "", served_model: 7 }],
   ]);
   assert.deepEqual(calls, [
-    ["done", { assistant_message: "hi", model: "openrouter/auto", served_model: "vendor/m", stats: null }],
+    [
+      "done",
+      { assistant_message: "hi", model: "openrouter/auto", served_model: "vendor/m", stats: null },
+    ],
     ["done", { assistant_message: "hi", model: null, served_model: null, stats: null }],
   ]);
 });
 
 test("an error carries its code, and falls back to the generic text", () => {
   const calls = dispatch([
-    ["error", { error: "no credit", code: "insufficient_credits" }],
+    ["error", { error: "no credit", code: "insufficient_funds" }],
     ["error", {}],
   ]);
   assert.deepEqual(calls, [
-    ["error", "no credit", "insufficient_credits"],
+    ["error", "no credit", "insufficient_funds"],
     ["error", "unknown failure", undefined],
   ]);
 });

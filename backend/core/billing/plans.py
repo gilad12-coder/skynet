@@ -1,6 +1,6 @@
 """Skynet Pro: the monthly platform plan and the limits it lifts.
 
-Credits pay for usage at cost; Pro pays for the fixed platform behind it
+The prepaid balance pays for usage at cost; Pro pays for the fixed platform behind it
 (storage, job history, concurrent runs). The plan is mirrored from Stripe onto
 ``billing_customers`` by the webhook, and this module is the single place that
 turns that mirrored status into an entitlement.

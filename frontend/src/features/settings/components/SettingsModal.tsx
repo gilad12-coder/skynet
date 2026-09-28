@@ -1472,7 +1472,7 @@ export function SettingsModal() {
   React.useEffect(() => {
     if (!tabs.includes(activeTab)) setActiveTab(isPhone ? "account" : "wizard");
   }, [activeTab, tabs, isPhone]);
-  // Honor a deep-link (e.g. the credit chip → wallet): when something opens the
+  // Honor a deep-link (e.g. the balance chip → wallet): when something opens the
   // modal targeting a tab, jump there once, then clear so a later manual open
   // keeps whatever tab the user last left it on.
   React.useEffect(() => {

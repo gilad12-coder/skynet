@@ -69,8 +69,8 @@ Error codes (all raised as `ToolError`):
 | 402 | no spendable credits on a submit |
 
 **Fidelity note (invented simplification):** submit routes charge **nothing** and
-gate 402 **only** when `spendable_credits <= 0` (`paid_balance_credits +
-free_grant.credits_remaining`). The real backend echoes cost estimates and does
+gate 402 **only** when `spendable_cents <= 0` (`paid_balance_cents +
+free_grant.cents_remaining`). The real backend echoes cost estimates and does
 not reject a submission by comparing an estimate against the balance, so the world
 does not either.
 
@@ -92,7 +92,7 @@ does not either.
 | `models` | list | 12 catalog models (§5) |
 | `endpoints` | dict | discovery probe endpoints keyed by normalized base_url (§5) |
 | `registry` | dict | `modules`, `metrics`, `optimizers` |
-| `wallet` | dict | `paid_balance_credits`, `free_grant`, `ledger` (§5) |
+| `wallet` | dict | `paid_balance_cents`, `free_grant`, `ledger` (§5) |
 | `memory` | dict | `notes`, `summaries`, `settings` (§5) |
 | `search_corpus` | list | 16 public-gallery jobs (14 public + 2 private) (§5) |
 | `blackbox` | dict | engine catalog + Auto-recipe availability (§5) |
@@ -211,8 +211,8 @@ into submissions. Names: `openrouter/openai/gpt-4o-mini`, `.../gpt-4o`,
 
 ### Wallet (`wallet`)
 
-`paid_balance_credits = 2000`, `free_grant = {credits_remaining: 180, credits_total: 500}`,
-so `spendable_credits = 2180`. 10 ledger entries (2 grants/top-ups of +500 & +1500,
+`paid_balance_cents = 2000`, `free_grant = {cents_remaining: 180, cents_total: 500}`,
+so `spendable_cents = 2180`. 10 ledger entries (2 grants/top-ups of +500 & +1500,
 6 run debits, +500 top-up, 1 more debit). **Invariant:** 2000 + 180 == sum of all
 ledger `credits` deltas == 2180. `get_wallet` returns the ledger newest-first,
 capped at 15.
@@ -304,7 +304,7 @@ filters. Averages use only successful runs' improvements.
 
 | tool | M | behavior |
 |------|---|----------|
-| `get_wallet_for_agent` | | balance + free grant + `spendable_credits` + recent ledger |
+| `get_wallet_for_agent` | | balance + free grant + `spendable_cents` + recent ledger |
 | `list_models_for_agent` | | model catalog; optional `query` substring |
 | `discover_models_models_discover_post` | | probe an endpoint; returns `{models, error}` (never raises for a bad endpoint) |
 | `get_registry_snapshot_registry_get` | | sorted modules/metrics/optimizers |
@@ -379,7 +379,7 @@ These hold in `base_state()` and should be preserved by any `setup()`:
 
 - `metric_improvement == round(optimized − baseline, 6)` for every job with both
   metrics (j13 is legitimately negative).
-- Wallet: `paid_balance_credits + free_grant.credits_remaining == sum(ledger.credits)`.
+- Wallet: `paid_balance_cents + free_grant.cents_remaining == sum(ledger.credits)`.
 - Grid `best_pair` is the pair with the max `optimized_test_metric`; the job's
   top-level metrics equal the best pair's; `total_pairs == completed + failed`.
 - Status buckets in analytics/counts match the actual job statuses.
@@ -432,8 +432,8 @@ after building.
 `setup` may mutate `world.s` freely, e.g.:
 
 - Change the caller: `world.s["user"] = {"username": "admin", "is_admin": True}`.
-- Drain credits to force 402: set `paid_balance_credits` and
-  `free_grant.credits_remaining` to 0.
+- Drain credits to force 402: set `paid_balance_cents` and
+  `free_grant.cents_remaining` to 0.
 - Grant/revoke access: set `world.s["jobs"][oid]["grants"] = {"dana": "editor"}`.
 - Pre-seed the wizard: prefer the task's `wizard_state` field, or write
   `world.s["wizard"]`.

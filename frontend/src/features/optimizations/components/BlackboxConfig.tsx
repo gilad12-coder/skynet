@@ -44,7 +44,7 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
 import { perLocale } from "@/shared/lib/per-locale";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import { formatCreditsUsd } from "@/features/billing";
+import { formatCentsUsd } from "@/features/billing";
 import { TERMS } from "@/shared/lib/terms";
 import {
   ConfigCarousel,
@@ -214,12 +214,12 @@ export function BlackboxConfigCard({
       ? payload.token_source
       : null;
   const runtime = command(payload.proposer_runtime);
-  const hasCostCap = "max_cost_credits" in payload || "estimated_credits_low" in payload;
-  const costCap = typeof payload.max_cost_credits === "number" ? payload.max_cost_credits : null;
+  const hasCostCap = "max_cost_cents" in payload || "estimated_cents_low" in payload;
+  const costCap = typeof payload.max_cost_cents === "number" ? payload.max_cost_cents : null;
   const estimateLow =
-    typeof payload.estimated_credits_low === "number" ? payload.estimated_credits_low : null;
+    typeof payload.estimated_cents_low === "number" ? payload.estimated_cents_low : null;
   const estimateHigh =
-    typeof payload.estimated_credits_high === "number" ? payload.estimated_credits_high : null;
+    typeof payload.estimated_cents_high === "number" ? payload.estimated_cents_high : null;
 
   const generalRows: ConfigRow[] = [];
   if (isPrivate != null) {
@@ -249,7 +249,7 @@ export function BlackboxConfigCard({
     generalRows.push({
       label: <HelpTip text={tip("submit.budget")}>{msg("submit.budget.label")}</HelpTip>,
       value:
-        costCap != null ? formatCreditsUsd(costCap, locale) : msg("submit.budget.uncapped_short"),
+        costCap != null ? formatCentsUsd(costCap, locale) : msg("submit.budget.uncapped_short"),
       icon: <Coins />,
     });
   }
@@ -265,8 +265,8 @@ export function BlackboxConfigCard({
       // Isolate "low–high" as one LTR run (U+2066…U+2069) so the dash between
       // the two number groups doesn't flip them under RTL.
       value: formatMsg("submit.summary.estimate_range", {
-        low: `⁦${formatCreditsUsd(estimateLow, locale)}`,
-        high: `${formatCreditsUsd(estimateHigh, locale)}⁩`,
+        low: `⁦${formatCentsUsd(estimateLow, locale)}`,
+        high: `${formatCentsUsd(estimateHigh, locale)}⁩`,
       }),
       icon: <Gauge />,
     });

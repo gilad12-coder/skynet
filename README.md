@@ -16,7 +16,7 @@ Skynet turns "I have a dataset and a task" into an optimized, deployable LLM pro
 - **Agents** — a generalist assistant (Cmd/Ctrl+J) that operates the whole wizard through tools with configurable trust modes, and a code agent that authors signatures, metrics, and multi-step workflow graphs on a visual canvas.
 - **Serving** — every successful run yields a program artifact: inspect the evolved instructions and demos, run inference against it, or export a runnable program.
 - **24 locales, RTL-first** — Hebrew is the base language; Arabic and Persian are first-class; the rest overlay with graceful fallback.
-- **Simple pricing** — credits map to raw provider cost times a 1.50 markup (payment-processing fees, a small infra share, and margin). Bring your own API key and runs are charged only the small platform fee. A "no lift, no charge" guarantee refunds runs that don't beat their baseline. Without Stripe keys, billing is simply off.
+- **Simple pricing** — a prepaid dollar balance; usage is metered at raw provider cost times a 1.50 markup (payment-processing fees, a small infra share, and margin). Bring your own API key and runs are charged only the small platform fee. A "no lift, no charge" guarantee refunds runs that don't beat their baseline. Without Stripe keys, billing is simply off.
 
 ## Quick Start (local)
 
@@ -57,7 +57,7 @@ i18n/       Hebrew base catalog + 23 overlay locales → generated typed catalog
 docs/       operator guides (Stripe setup, design briefs)
 ```
 
-All model traffic flows through a LiteLLM proxy, so any OpenAI-compatible provider works and keys live in one place. Billing (optional) is Stripe: prepaid credit packs, metered usage at $0.01/credit, and a per-user encrypted BYOK vault.
+All model traffic flows through a LiteLLM proxy, so any OpenAI-compatible provider works and keys live in one place. Billing (optional) is Stripe: prepaid balance top-ups, usage metered in cents at cost × markup, and a per-user encrypted BYOK vault.
 
 ## Configuration
 
@@ -112,7 +112,7 @@ The job detail page includes a built-in inference playground and a program expor
 - **Anywhere with Postgres** — the backend migrates its own schema at boot and the worker fleet scales horizontally via DB-lease job claims (no external queue).
 - **Kubernetes** — Helm chart in `deploy/helm`.
 - **Docker** — `cd backend && docker compose up --build` starts API + Postgres.
-- **Billing** — optional; follow `docs/stripe-setup.md` to enable credit packs and metered usage.
+- **Billing** — optional; follow `docs/stripe-setup.md` to enable balance top-ups and metered usage.
 
 ## Extensibility
 

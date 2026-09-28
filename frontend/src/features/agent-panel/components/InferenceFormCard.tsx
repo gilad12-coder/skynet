@@ -224,13 +224,10 @@ export function InferenceFormCard({ call, disabled }: InferenceFormCardProps) {
                     </span>
                   </div>
                 ))}
-                {result.credits_charged != null && (
+                {result.cents_charged != null && (
                   <p className="mt-1 text-[0.6875rem] text-muted-foreground">
                     {formatMsg("optimizations.serve.request_spent", {
-                      credits: formatBudgetUsd(
-                        String(result.credits_charged),
-                        getActiveIntlLocale(),
-                      ),
+                      cents: formatBudgetUsd(String(result.cents_charged), getActiveIntlLocale()),
                     })}
                   </p>
                 )}

@@ -50,7 +50,7 @@ import { formatMsg, msg } from "@/shared/lib/messages";
 import { perLocale } from "@/shared/lib/per-locale";
 import { formatBytes, moduleLabel } from "@/shared/lib/formatters";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
-import { formatCreditsUsd } from "@/features/billing";
+import { formatCentsUsd } from "@/features/billing";
 import { TERMS } from "@/shared/lib/terms";
 import { InfoCard } from "./ui-primitives";
 import { BlackboxConfigCard } from "./BlackboxConfig";
@@ -303,11 +303,10 @@ export function ConfigTab({
   const tokenSource =
     p.token_source === "byok" || p.token_source === "managed" ? p.token_source : null;
   const runtime = nonEmptyString(p.execution_runtime);
-  const hasCostCap = "max_cost_credits" in p || "estimated_credits_low" in p;
-  const costCap = typeof p.max_cost_credits === "number" ? p.max_cost_credits : null;
-  const estimateLow = typeof p.estimated_credits_low === "number" ? p.estimated_credits_low : null;
-  const estimateHigh =
-    typeof p.estimated_credits_high === "number" ? p.estimated_credits_high : null;
+  const hasCostCap = "max_cost_cents" in p || "estimated_cents_low" in p;
+  const costCap = typeof p.max_cost_cents === "number" ? p.max_cost_cents : null;
+  const estimateLow = typeof p.estimated_cents_low === "number" ? p.estimated_cents_low : null;
+  const estimateHigh = typeof p.estimated_cents_high === "number" ? p.estimated_cents_high : null;
   const targetScore = typeof p.target_score === "number" ? p.target_score : null;
 
   const generalRows: ConfigRow[] = [];
@@ -338,7 +337,7 @@ export function ConfigTab({
     generalRows.push({
       label: <HelpTip text={tip("submit.budget")}>{msg("submit.budget.label")}</HelpTip>,
       value:
-        costCap != null ? formatCreditsUsd(costCap, locale) : msg("submit.budget.uncapped_short"),
+        costCap != null ? formatCentsUsd(costCap, locale) : msg("submit.budget.uncapped_short"),
       icon: <Coins />,
     });
   }
@@ -354,8 +353,8 @@ export function ConfigTab({
       // Isolate "low–high" as one LTR run (U+2066…U+2069) so the dash between
       // the two number groups doesn't flip them under RTL.
       value: formatMsg("submit.summary.estimate_range", {
-        low: `⁦${formatCreditsUsd(estimateLow, locale)}`,
-        high: `${formatCreditsUsd(estimateHigh, locale)}⁩`,
+        low: `⁦${formatCentsUsd(estimateLow, locale)}`,
+        high: `${formatCentsUsd(estimateHigh, locale)}⁩`,
       }),
       icon: <Gauge />,
     });

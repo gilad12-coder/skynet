@@ -17,7 +17,7 @@ from core.worker.budget_probe import (
     STOP_REASON_BUDGET_PROJECTED,
     planned_calls_from_progress,
     probe_ready,
-    project_total_credits,
+    project_total_cents,
 )
 from core.worker.constants import EVENT_PROGRESS
 from core.worker.engine import BackgroundWorker, CancellationError
@@ -45,31 +45,31 @@ def test_probe_waits_for_the_larger_of_the_absolute_and_fractional_floors() -> N
 
 def test_projection_scales_run_spend_but_carries_setup_spend_over() -> None:
     """Only per-evaluation spend grows with the plan; the total rounds up."""
-    assert project_total_credits(Decimal(2), Decimal(3), 23, 230) == 32
-    assert project_total_credits(Decimal(0), Decimal("2.5"), 10, 30) == 8
+    assert project_total_cents(Decimal(2), Decimal(3), 23, 230) == 32
+    assert project_total_cents(Decimal(0), Decimal("2.5"), 10, 30) == 8
 
 
-def _settle_run_spend(budgets: BudgetService, budget_id: str, credits: int) -> None:
-    """Settle one run-phase operation for ``credits`` on the funded fixture budget.
+def _settle_run_spend(budgets: BudgetService, budget_id: str, cents: int) -> None:
+    """Settle one run-phase operation for ``cents`` on the funded fixture budget.
 
     Args:
         budgets: Budget service bound to the fixture store.
         budget_id: The funded fixture budget.
-        credits: Whole credits the operation actually cost.
+        cents: Whole cents the operation actually cost.
     """
     operation = budgets.reserve(
         budget_id,
         "resume-owner",
-        operation_key=f"probe-{credits}",
+        operation_key=f"probe-{cents}",
         generation=0,
         phase="run",
         cost_kind="sandbox",
         request_fingerprint="fixture-session",
         price_snapshot={"version": "fixture"},
-        max_credits=credits,
+        max_cents=cents,
     )
     budgets.mark_dispatched(operation.id, "resume-owner", "fixture-session")
-    budgets.settle(operation.id, "resume-owner", evidence_key="closed", actual_credits=credits, evidence={})
+    budgets.settle(operation.id, "resume-owner", evidence_key="closed", actual_cents=cents, evidence={})
 
 
 def _gateway(budgets: BudgetService, budget_id: str) -> SimpleNamespace:
@@ -102,9 +102,9 @@ def test_projection_over_limit_pauses_with_evidence_until_the_limit_is_raised(
     projection = job["terminal_evidence"]["budget_projection"]
     assert projection["planned_calls"] == 230
     assert projection["done_calls"] == 23
-    assert Decimal(projection["spent_credits"]) == 3
-    assert projection["projected_credits"] == 30
-    assert projection["limit_credits"] == 20
+    assert Decimal(projection["spent_cents"]) == 3
+    assert projection["projected_cents"] == 30
+    assert projection["limit_cents"] == 20
     budget = budgets.get(budget_id, "resume-owner")
     assert budget.state == "closed"
     assert budget.blocked_reason == STOP_REASON_BUDGET_PROJECTED
@@ -217,8 +217,8 @@ def test_uncapped_run_resumes_admission_past_its_stored_total(monkeypatch: pytes
     budgets.stop_admission(budget_id, "resume-owner", reason="budget_reached")
     store.update_job("dry", status="stopped", stop_reason="budget_reached")
     budget = budgets.get(budget_id, "resume-owner")
-    assert budget.run_spent_credits == 25
-    assert budget.available_credits == 25
+    assert budget.run_spent_cents == 25
+    assert budget.available_cents == 25
 
     assert store.requeue_for_resume("dry", bump_attempts=False, expected_generation=0, budget_service=budgets) == 0
 

@@ -301,8 +301,8 @@ def test_best_of_n_uses_metered_model_and_propagates_dspy_callbacks(tmp_path: Pa
 
 def test_best_of_n_propagates_model_cost_stop(tmp_path: Path) -> None:
     """Propagate metering errors through the transport instead of reporting a successful seed."""
-    lm = MagicMock(side_effect=CostCeilingExceededError("credit allowance reached"))
-    with pytest.raises(CostCeilingExceededError, match="credit allowance reached"):
+    lm = MagicMock(side_effect=CostCeilingExceededError("spending allowance reached"))
+    with pytest.raises(CostCeilingExceededError, match="spending allowance reached"):
         BestOfNEngine().run(
             Task(seed_candidate="seed"),
             EvalServer(vowel_scorer, max_evals=2),

@@ -45,21 +45,21 @@ import {
   type BillingTransaction,
   type BillingTransactionsResponse,
 } from "@/shared/lib/api";
-import { useCredits } from "../providers/credit-provider";
+import { useBalance } from "../providers/balance-provider";
 import {
-  CREDIT_PACKS,
-  CUSTOM_CREDITS_MAX,
-  CUSTOM_CREDITS_MIN,
-  formatCreditsUsd,
+  TOP_UP_PACKS,
+  CUSTOM_CENTS_MAX,
+  CUSTOM_CENTS_MIN,
+  formatCentsUsd,
   formatResetDate,
   formatUsd,
   PRO_MONTHLY_USD,
   purchaseFeeUsd,
   purchaseTotalUsd,
-  type CreditPack,
-} from "../lib/credit";
+  type TopUpPack,
+} from "../lib/wallet";
 
-// Slide transition for the credit-pack selector's shared-layout pill — matches the
+// Slide transition for the top-up pack selector's shared-layout pill — matches the
 // runs-source segmented control in explore/SearchBar so the two read identically.
 const PILL_TRANSITION = { type: "tween", duration: 0.18, ease: [0.22, 1, 0.36, 1] } as const;
 
@@ -81,42 +81,42 @@ function formatUsdWhole(usd: number, locale: string): string {
 }
 
 /**
- * Inline credit purchase — one pill control holding the pack segments, a
+ * Inline top-up — one pill control holding the pack segments, a
  * free-type custom amount, and the buy action, all in the segmented-control
  * style. Lives directly in the wallet tab now that the standalone /upgrade
- * page is gone: prepaid credits are the only plan, so buying is a settings
+ * page is gone: a prepaid balance is the only plan, so buying is a settings
  * row, not a pricing page.
  */
-function AddCreditsControls() {
+function AddFundsControls() {
   const { locale } = useLocale();
   const [selection, setSelection] = React.useState<string>(
-    () => (CREDIT_PACKS.find((p) => p.popular) ?? CREDIT_PACKS[0]!).id,
+    () => (TOP_UP_PACKS.find((p) => p.popular) ?? TOP_UP_PACKS[0]!).id,
   );
   const [customDraft, setCustomDraft] = React.useState("");
   const [buying, setBuying] = React.useState(false);
-  const { wallet } = useCredits();
+  const { wallet } = useBalance();
 
-  const pack: CreditPack | undefined = CREDIT_PACKS.find((p) => p.id === selection);
-  // The custom field is typed in whole dollars; credits are the par ×100 value
-  // the checkout API is denominated in.
-  const customCredits = Number(customDraft || "0") * 100;
-  const customValid = customCredits >= CUSTOM_CREDITS_MIN && customCredits <= CUSTOM_CREDITS_MAX;
-  // The buy button quotes what the buyer is charged: par credit value plus the
+  const pack: TopUpPack | undefined = TOP_UP_PACKS.find((p) => p.id === selection);
+  // The custom field is typed in whole dollars; the checkout API is denominated
+  // in cents.
+  const customCents = Number(customDraft || "0") * 100;
+  const customValid = customCents >= CUSTOM_CENTS_MIN && customCents <= CUSTOM_CENTS_MAX;
+  // The buy button quotes what the buyer is charged: top-up amount plus the
   // backend's platform fee, itemized as its own line on Stripe checkout. The
   // row description names the fee up front, so the first price shown is all-in.
-  const credits = pack ? pack.credits : customCredits;
-  const usd = purchaseTotalUsd(credits, wallet.pricing);
+  const cents = pack ? pack.cents : customCents;
+  const usd = purchaseTotalUsd(cents, wallet.pricing);
   const priceLabel = Number.isInteger(usd) ? formatUsdWhole(usd, locale) : formatUsd(usd, locale);
 
   const onBuy = async () => {
     setBuying(true);
     track(TelemetryEvent.CheckoutStarted, {
       pack_id: pack ? pack.id : "custom",
-      credits: pack ? pack.credits : customCredits,
+      cents: pack ? pack.cents : customCents,
     });
     try {
       const { url } = await createCheckoutSession(
-        pack ? { packId: pack.id } : { credits: customCredits },
+        pack ? { packId: pack.id } : { cents: customCents },
       );
       window.location.assign(url);
     } catch {
@@ -128,21 +128,21 @@ function AddCreditsControls() {
   const customActive = pack === undefined;
   const description =
     customActive && !customValid
-      ? formatMsg("billing.plans.credits.custom_range", {
-          p1: formatUsdWhole(CUSTOM_CREDITS_MIN / 100, locale),
-          p2: formatUsdWhole(CUSTOM_CREDITS_MAX / 100, locale),
+      ? formatMsg("billing.plans.topup.custom_range", {
+          p1: formatUsdWhole(CUSTOM_CENTS_MIN / 100, locale),
+          p2: formatUsdWhole(CUSTOM_CENTS_MAX / 100, locale),
         })
-      : formatMsg("billing.plans.credits.fee_note", {
-          p1: formatUsd(purchaseFeeUsd(credits, wallet.pricing), locale),
+      : formatMsg("billing.plans.topup.fee_note", {
+          p1: formatUsd(purchaseFeeUsd(cents, wallet.pricing), locale),
         });
   return (
-    <SettingsRow icon={Sparkle} label={msg("billing.action.add_credits")} description={description}>
+    <SettingsRow icon={Sparkle} label={msg("billing.action.add_funds")} description={description}>
       <div
         role="group"
-        aria-label={msg("billing.plans.credits.pack_aria")}
+        aria-label={msg("billing.plans.topup.pack_aria")}
         className="relative flex w-full max-w-full flex-wrap items-center gap-0.5 rounded-lg bg-muted p-0.5 sm:w-auto sm:flex-nowrap"
       >
-        {CREDIT_PACKS.map((p) => {
+        {TOP_UP_PACKS.map((p) => {
           const active = p.id === selection;
           return (
             <button
@@ -193,8 +193,8 @@ function AddCreditsControls() {
             inputMode="numeric"
             maxLength={4}
             dir="ltr"
-            placeholder={msg("billing.plans.credits.custom")}
-            aria-label={msg("billing.plans.credits.custom_amount_aria")}
+            placeholder={msg("billing.plans.topup.custom")}
+            aria-label={msg("billing.plans.topup.custom_amount_aria")}
             className={cn(
               "relative z-10 h-[44px] w-16 rounded-md bg-transparent px-2.5 py-1 text-center text-xs font-medium tabular-nums outline-none transition-colors duration-200 placeholder:font-normal placeholder:text-muted-foreground/90 lg:h-auto [@media(hover:none)_and_(pointer:coarse)]:h-[44px]",
               customActive ? "text-foreground" : "text-foreground/60",
@@ -226,12 +226,12 @@ function AddCreditsControls() {
 }
 
 /**
- * Skynet Pro — the flat monthly platform plan. Credits still pay for usage;
+ * Skynet Pro — the flat monthly platform plan. The balance still pays for usage;
  * Pro lifts the storage, saved-job, and concurrent-run limits. Upgrading goes
  * through Stripe Checkout; managing or cancelling goes through the portal.
  */
 function ProPlanRow() {
-  const { wallet } = useCredits();
+  const { wallet } = useBalance();
   const { locale } = useLocale();
   const [pending, setPending] = React.useState(false);
   const { plan } = wallet;
@@ -241,7 +241,7 @@ function ProPlanRow() {
 
   const onUpgrade = async () => {
     setPending(true);
-    track(TelemetryEvent.CheckoutStarted, { pack_id: "pro_monthly", credits: 0 });
+    track(TelemetryEvent.CheckoutStarted, { pack_id: "pro_monthly", cents: 0 });
     try {
       const { url } = await createSubscriptionCheckout();
       window.location.assign(url);
@@ -409,10 +409,10 @@ function TransactionHistory() {
                 </span>
                 <span className="flex min-w-36 flex-1 flex-col gap-0.5">
                   <span className="text-sm font-medium text-foreground">
-                    {transaction.credits == null
+                    {transaction.cents == null
                       ? msg("billing.transactions.purchase")
-                      : formatMsg("billing.transactions.credits", {
-                          p1: formatCreditsUsd(transaction.credits, locale),
+                      : formatMsg("billing.transactions.balance", {
+                          p1: formatCentsUsd(transaction.cents, locale),
                         })}
                   </span>
                   <span dir="ltr" className="text-xs text-muted-foreground">
@@ -898,12 +898,11 @@ function BillingDetails() {
  * Wallet — the `billing` settings tab.
  *
  * A calm, left-aligned balance block (not a centered hero metric) and the
- * add-credits row. Billing details, payment methods, and transaction history
- * follow below. Balances read in dollars — credits are a par-USD unit shown to
- * the user as their dollar value.
+ * add-funds row. Billing details, payment methods, and transaction history
+ * follow below. Balances are stored in cents and read in dollars.
  */
 export function WalletTab() {
-  const { totalCredits, status, syncing, loading, available, loadError, refresh } = useCredits();
+  const { totalCents, status, syncing, loading, available, loadError, refresh } = useBalance();
   const { locale } = useLocale();
 
   return (
@@ -945,7 +944,7 @@ export function WalletTab() {
                   syncing && "animate-pulse text-muted-foreground",
                 )}
               >
-                {available ? formatCreditsUsd(totalCredits, locale) : "—"}
+                {available ? formatCentsUsd(totalCents, locale) : "—"}
               </span>
             </div>
             {/* Low balance stays an operational metric here too — same calm line as
@@ -959,7 +958,7 @@ export function WalletTab() {
         </div>
 
         <div>
-          <AddCreditsControls />
+          <AddFundsControls />
           <ProPlanRow />
         </div>
       </section>

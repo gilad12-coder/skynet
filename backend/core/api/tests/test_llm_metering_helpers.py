@@ -1,6 +1,6 @@
 """Tests for the interactive-turn billing helpers in ``routers._helpers``.
 
-Covers the 402 credit gate (``enforce_llm_credits``) and the SSE metering
+Covers the 402 balance gate (``enforce_llm_balance``) and the SSE metering
 wrapper (``stream_with_llm_metering``) — including the early-teardown path,
 where the client drops the stream before the terminal event and the turn must
 still be billed from the sink.
@@ -18,9 +18,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from ...config import settings
-from ...storage.models import Base, BillingCustomerModel, CreditLedgerModel
+from ...storage.models import Base, BillingCustomerModel, WalletLedgerModel
 from ..errors import DomainError
-from ..routers._helpers import enforce_llm_credits, stream_with_llm_metering
+from ..routers._helpers import enforce_llm_balance, stream_with_llm_metering
 
 
 class _StubStore:
@@ -47,15 +47,15 @@ def _deplete(engine: Engine, username: str) -> None:
             BillingCustomerModel(
                 username=username,
                 stripe_customer_id=f"cus_{username}",
-                credit_balance=0,
+                balance_cents=0,
                 grant_remaining=0,
             )
         )
         session.commit()
 
 
-def _fund(engine: Engine, username: str, credits: int = 100_000) -> None:
-    """Seed a billing row with a paid balance so a metered turn has credit to draw.
+def _fund(engine: Engine, username: str, cents: int = 100_000) -> None:
+    """Seed a billing row with a paid balance so a metered turn has funds to draw.
 
     The clamped debit charges at most what the account holds, so a test that
     asserts a debit landed must start from a funded balance.
@@ -65,7 +65,7 @@ def _fund(engine: Engine, username: str, credits: int = 100_000) -> None:
             BillingCustomerModel(
                 username=username,
                 stripe_customer_id=f"cus_{username}",
-                credit_balance=credits,
+                balance_cents=cents,
                 grant_remaining=0,
             )
         )
@@ -81,81 +81,81 @@ class _FakeLm:
         self.model = model
 
 
-def test_enforce_llm_credits_rejects_fresh_account(engine: Engine) -> None:
+def test_enforce_llm_balance_rejects_fresh_account(engine: Engine) -> None:
     """A brand-new account has no free allowance and is refused with a 402."""
     with pytest.raises(DomainError) as err:
-        enforce_llm_credits(_StubStore(engine), "new@x.io")
+        enforce_llm_balance(_StubStore(engine), "new@x.io")
     assert err.value.status_code == 402
 
 
-def test_enforce_llm_credits_passes_funded_account(engine: Engine) -> None:
+def test_enforce_llm_balance_passes_funded_account(engine: Engine) -> None:
     """An account with a purchased balance rides through the gate."""
     with Session(engine) as session:
         session.add(
             BillingCustomerModel(
                 username="rich@x.io",
                 stripe_customer_id="cus_rich",
-                credit_balance=500,
+                balance_cents=500,
                 grant_remaining=0,
             )
         )
         session.commit()
-    enforce_llm_credits(_StubStore(engine), "rich@x.io")
+    enforce_llm_balance(_StubStore(engine), "rich@x.io")
 
 
-def test_enforce_llm_credits_rejects_depleted_account(engine: Engine) -> None:
-    """A zero-balance account is refused with the 402 insufficient-credits code."""
+def test_enforce_llm_balance_rejects_depleted_account(engine: Engine) -> None:
+    """A zero-balance account is refused with the 402 insufficient-balance code."""
     _deplete(engine, "broke@x.io")
     with pytest.raises(DomainError) as err:
-        enforce_llm_credits(_StubStore(engine), "broke@x.io")
+        enforce_llm_balance(_StubStore(engine), "broke@x.io")
     assert err.value.status_code == 402
 
 
-def test_enforce_llm_credits_requires_the_minimum_turn_balance(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enforce_llm_balance_requires_the_minimum_turn_balance(engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
     """A turn is billed after it runs, so a balance below the per-turn floor is refused up front."""
-    monkeypatch.setattr(settings, "interactive_min_balance_credits", 5)
-    _fund(engine, "low@x.io", credits=4)
-    _fund(engine, "ok@x.io", credits=5)
+    monkeypatch.setattr(settings, "interactive_min_balance_cents", 5)
+    _fund(engine, "low@x.io", cents=4)
+    _fund(engine, "ok@x.io", cents=5)
     with pytest.raises(DomainError) as err:
-        enforce_llm_credits(_StubStore(engine), "low@x.io")
+        enforce_llm_balance(_StubStore(engine), "low@x.io")
     assert err.value.status_code == 402
-    enforce_llm_credits(_StubStore(engine), "ok@x.io")
+    enforce_llm_balance(_StubStore(engine), "ok@x.io")
 
 
-def test_enforce_llm_credits_zero_floor_still_requires_a_positive_balance(
+def test_enforce_llm_balance_zero_floor_still_requires_a_positive_balance(
     engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Disabling the floor falls back to the old one-credit minimum, never a free turn."""
-    monkeypatch.setattr(settings, "interactive_min_balance_credits", 0)
+    """Disabling the floor falls back to the old one-cent minimum, never a free turn."""
+    monkeypatch.setattr(settings, "interactive_min_balance_cents", 0)
     _deplete(engine, "broke@x.io")
-    _fund(engine, "one@x.io", credits=1)
+    _fund(engine, "one@x.io", cents=1)
     with pytest.raises(DomainError):
-        enforce_llm_credits(_StubStore(engine), "broke@x.io")
-    enforce_llm_credits(_StubStore(engine), "one@x.io")
+        enforce_llm_balance(_StubStore(engine), "broke@x.io")
+    enforce_llm_balance(_StubStore(engine), "one@x.io")
 
 
-def test_enforce_llm_credits_rejects_account_in_refund_debt(engine: Engine) -> None:
+def test_enforce_llm_balance_rejects_account_in_refund_debt(engine: Engine) -> None:
     """An account carrying refund/chargeback debt has zero balances and is refused."""
     with Session(engine) as session:
         session.add(
             BillingCustomerModel(
                 username="debt@x.io",
                 stripe_customer_id="cus_debt",
-                credit_balance=0,
+                balance_cents=0,
                 grant_remaining=0,
-                debt_credits=300,
+                debt_cents=300,
             )
         )
         session.commit()
     with pytest.raises(DomainError) as err:
-        enforce_llm_credits(_StubStore(engine), "debt@x.io")
-    assert err.value.code == "billing.insufficient_credits"
+        enforce_llm_balance(_StubStore(engine), "debt@x.io")
+    assert err.value.code == "billing.insufficient_funds"
 
 
-def test_enforce_llm_credits_skips_engineless_store(engine: Engine) -> None:
+def test_enforce_llm_balance_skips_engineless_store(engine: Engine) -> None:
     """A store without a SQL engine streams ungated, matching the submit path."""
-    enforce_llm_credits(_StubStore(None), "anyone@x.io")
-    enforce_llm_credits(_StubStore(engine), "")
+    enforce_llm_balance(_StubStore(None), "anyone@x.io")
+    enforce_llm_balance(_StubStore(engine), "")
 
 
 async def test_stream_with_llm_metering_bills_on_completion(engine: Engine) -> None:
@@ -180,9 +180,9 @@ async def test_stream_with_llm_metering_bills_on_completion(engine: Engine) -> N
     ]
     assert [e["event"] for e in events] == ["message_patch", "done"]
     with Session(engine) as session:
-        row = session.query(CreditLedgerModel).one()
+        row = session.query(WalletLedgerModel).one()
     assert row.description == "Agent chat"
-    assert row.delta_credits < 0
+    assert row.delta_cents < 0
     assert row.input_tokens == 100_000
 
 
@@ -233,8 +233,8 @@ async def test_stream_with_llm_metering_bills_on_early_teardown(engine: Engine) 
     assert (await anext(stream))["event"] == "message_patch"
     await stream.aclose()
     with Session(engine) as session:
-        row = session.query(CreditLedgerModel).one()
-    assert row.delta_credits < 0
+        row = session.query(WalletLedgerModel).one()
+    assert row.delta_cents < 0
 
 
 async def test_stream_with_llm_metering_skips_empty_sink(engine: Engine) -> None:
@@ -256,4 +256,4 @@ async def test_stream_with_llm_metering_skips_empty_sink(engine: Engine) -> None
     ]
     assert [e["event"] for e in events] == ["error"]
     with Session(engine) as session:
-        assert session.query(CreditLedgerModel).count() == 0
+        assert session.query(WalletLedgerModel).count() == 0

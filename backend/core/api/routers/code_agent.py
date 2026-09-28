@@ -23,7 +23,7 @@ from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort
 from ..model_router import effective_reasoning_effort, route_menu_model
-from ._helpers import enforce_llm_credits, sse_from_events, stream_with_llm_metering
+from ._helpers import enforce_llm_balance, sse_from_events, stream_with_llm_metering
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,9 @@ class BlackboxAuthoringContext(BaseModel):
     recipe: Literal["prompt", "code", "anything"] = Field(..., description="What is being optimized.")
     # Blank while the interview is still asking for it: the interviewer reports
     # what it captures, and the wizard withholds the agent until it has one.
-    objective: str = Field(default="", description="What a better version achieves, in the user's words; blank until known.")
+    objective: str = Field(
+        default="", description="What a better version achieves, in the user's words; blank until known."
+    )
     background: str = Field(default="", description="Free-form context: domain, constraints, examples.")
     target_kind: Literal["text", "agent"] = Field(
         default="text",
@@ -164,10 +166,7 @@ class CodeAgentRequest(BaseModel):
     )
     reasoning_effort: ReasoningEffort | None = Field(
         default=None,
-        description=(
-            "Explicit reasoning-effort level for the chosen model; absent "
-            "keeps the model's default."
-        ),
+        description=("Explicit reasoning-effort level for the chosen model; absent keeps the model's default."),
     )
     blackbox: BlackboxAuthoringContext | None = Field(
         default=None,
@@ -236,10 +235,7 @@ class CodeInterviewRequest(BaseModel):
     )
     reasoning_effort: ReasoningEffort | None = Field(
         default=None,
-        description=(
-            "Explicit reasoning-effort level for the chosen model; absent "
-            "keeps the model's default."
-        ),
+        description=("Explicit reasoning-effort level for the chosen model; absent keeps the model's default."),
     )
     blackbox: BlackboxAuthoringContext | None = Field(
         default=None,
@@ -318,7 +314,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
     """Mount the ``POST /optimizations/ai-generate-code`` SSE endpoint.
 
     Args:
-        job_store: Optional job-store whose engine backs the credit gate and
+        job_store: Optional job-store whose engine backs the balance gate and
             per-turn usage metering. When ``None``, turns stream unmetered
             (legacy behavior).
 
@@ -361,7 +357,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         Returns:
             A :class:`StreamingResponse` of Server-Sent Events.
         """
-        await asyncio.to_thread(enforce_llm_credits, job_store, current_user.username)
+        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
         model = route_menu_model(req.model)
         usage_sink: list = []
         source = run_code_agent(
@@ -435,7 +431,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         Returns:
             A :class:`StreamingResponse` of Server-Sent Events.
         """
-        await asyncio.to_thread(enforce_llm_credits, job_store, current_user.username)
+        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
         model = route_menu_model(req.model)
         usage_sink: list = []
 
@@ -502,7 +498,7 @@ def create_code_agent_router(*, job_store=None) -> APIRouter:
         Raises:
             DomainError: 502 when the code agent emits an ``error`` event.
         """
-        await asyncio.to_thread(enforce_llm_credits, job_store, current_user.username)
+        await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
         final_signature = req.current_signature
         final_metric = req.current_metric
         assistant_message = ""

@@ -4,7 +4,7 @@ import { StorageUsageBar } from "@/shared/ui/progress-bar";
 import { Fragment, type ReactElement, type ReactNode } from "react";
 import Link from "next/link";
 import { CaretRight, Coins, Database, Tag } from "@/shared/ui/icons";
-import { formatCreditsUsd, useCredits } from "@/features/billing";
+import { formatCentsUsd, useBalance } from "@/features/billing";
 import { useSettingsModal } from "@/features/settings";
 import { formatBytes } from "@/shared/lib/formatters";
 import { formatMsg, msg } from "@/shared/lib/messages";
@@ -122,7 +122,7 @@ function SectionSkeleton({ children }: { children: ReactNode }) {
   );
 }
 
-function CreditsSectionSkeleton() {
+function BalanceSectionSkeleton() {
   return (
     <SectionSkeleton>
       <div className="flex items-baseline gap-1.5">
@@ -140,7 +140,7 @@ function CreditsSectionSkeleton() {
  * The workspace band of the dashboard's summary card (rendered under the
  * KPI band), surfacing the surfaces the run-centric dashboard predates:
  * labeling sessions, the dataset library (with its storage meter), and the
- * credit wallet, as divider-separated sections. Every section is one cheap,
+ * wallet balance, as divider-separated sections. Every section is one cheap,
  * mostly-cached call — the band renders nothing for a section whose fetch
  * failed rather than blocking the page. While a fetch is in flight the band
  * shows section skeletons at the loaded geometry, so values fill in place
@@ -148,7 +148,7 @@ function CreditsSectionSkeleton() {
  */
 export function WorkspaceStrip() {
   const { tagging, datasets, loading } = useWorkspaceSummary();
-  const { wallet, loading: walletLoading } = useCredits();
+  const { wallet, loading: walletLoading } = useBalance();
   const { openTo } = useSettingsModal();
   const locale = getActiveIntlLocale();
 
@@ -169,7 +169,7 @@ export function WorkspaceStrip() {
           </div>
         </SectionSkeleton>
         <SectionDivider />
-        <CreditsSectionSkeleton />
+        <BalanceSectionSkeleton />
       </div>
     );
   }
@@ -181,7 +181,7 @@ export function WorkspaceStrip() {
         Math.round((datasets.usage.used_bytes / Math.max(1, datasets.usage.quota_bytes)) * 100),
       )
     : 0;
-  const walletTotal = wallet.paidBalanceCredits + wallet.freeGrant.creditsRemaining;
+  const walletTotal = wallet.paidBalanceCents + wallet.freeGrant.centsRemaining;
 
   const sections: ReactElement[] = [];
   if (tagging) {
@@ -244,13 +244,13 @@ export function WorkspaceStrip() {
     );
   }
   if (walletLoading) {
-    sections.push(<CreditsSectionSkeleton key="credits" />);
+    sections.push(<BalanceSectionSkeleton key="balance" />);
   } else {
     sections.push(
       <WorkspaceSection
-        key="credits"
+        key="balance"
         icon={<Coins className="size-3.5" aria-hidden="true" />}
-        title={msg("dashboard.workspace.credits.title")}
+        title={msg("dashboard.workspace.balance.title")}
         onOpen={() => openTo("billing")}
       >
         <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
@@ -258,11 +258,11 @@ export function WorkspaceStrip() {
             dir="ltr"
             className="text-xl font-bold leading-none tracking-tight text-foreground tabular-nums"
           >
-            {formatCreditsUsd(walletTotal, locale)}
+            {formatCentsUsd(walletTotal, locale)}
           </span>
         </div>
         {wallet.usage.length === 0 ? (
-          <EmptyHint text={msg("dashboard.workspace.credits.cta")} />
+          <EmptyHint text={msg("dashboard.workspace.balance.cta")} />
         ) : (
           wallet.usage.slice(0, 3).map((entry) => (
             <div key={entry.id} className="flex items-baseline justify-between gap-3 text-xs">
@@ -272,12 +272,12 @@ export function WorkspaceStrip() {
               <span
                 className={cn(
                   "shrink-0 tabular-nums",
-                  entry.credits > 0 ? "text-[var(--success)]" : "text-muted-foreground",
+                  entry.cents > 0 ? "text-[var(--success)]" : "text-muted-foreground",
                 )}
                 dir="ltr"
               >
-                {entry.credits > 0 ? "+" : ""}
-                {formatCreditsUsd(entry.credits, locale)}
+                {entry.cents > 0 ? "+" : ""}
+                {formatCentsUsd(entry.cents, locale)}
               </span>
             </div>
           ))

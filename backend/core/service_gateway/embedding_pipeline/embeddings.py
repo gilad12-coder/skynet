@@ -6,8 +6,8 @@ OpenAI-compatible embeddings endpoint and model id; this adapter sends text
 to that endpoint, truncates the returned vector to the configured schema
 dimension, and L2-normalizes it before storage.
 
-Embedding calls run on the platform's key and are not billed to user credits
-(a call costs a small fraction of a credit), so their tokens count against a
+Embedding calls run on the platform's key and are not billed to user balances
+(a call costs a small fraction of a cent), so their tokens count against a
 platform-wide monthly cap (``EMBEDDINGS_MONTHLY_TOKEN_CAP``) and a per-user one
 (``EMBEDDINGS_USER_MONTHLY_TOKEN_CAP``) so a single account cannot drain the
 shared budget. Past either, ``encode`` returns ``None`` exactly as it does when
@@ -54,9 +54,7 @@ class _EmbeddingApiClient:
         if self._failed:
             return False
         if not self._base_url or not self._model:
-            logger.warning(
-                "Embedding API is not configured. Set EMBEDDINGS_BASE_URL and EMBEDDINGS_MODEL."
-            )
+            logger.warning("Embedding API is not configured. Set EMBEDDINGS_BASE_URL and EMBEDDINGS_MODEL.")
             self._failed = True
             return False
         return True

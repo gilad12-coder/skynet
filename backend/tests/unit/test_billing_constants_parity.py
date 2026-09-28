@@ -1,7 +1,7 @@
 """Pin the frontend's copies of billing constants to the backend's.
 
 The wallet endpoint serves the usage markup and fee terms, but the frontend
-seeds its first paint from ``DEFAULT_PRICING_TERMS``; credit packs, the Pro
+seeds its first paint from ``DEFAULT_PRICING_TERMS``; top-up packs, the Pro
 price and the fallback token rates are hand-copied outright. The backend
 charges the real amounts; this test parses the frontend sources and fails the
 moment a copy drifts, so the UI never quotes a price it will not charge.
@@ -45,36 +45,36 @@ def test_pricing_constants_match_backend() -> None:
 
 def test_default_pricing_terms_match_backend_defaults() -> None:
     """``DEFAULT_PRICING_TERMS`` equals the terms the wallet serves when nothing is overridden."""
-    source = (_BILLING_LIB / "credit.ts").read_text(encoding="utf-8")
+    source = (_BILLING_LIB / "wallet.ts").read_text(encoding="utf-8")
     block = re.search(r"DEFAULT_PRICING_TERMS: PricingTerms = \{([^}]*)\}", source)
     assert block is not None
     terms = {name: float(value) for name, value in re.findall(r"(\w+):\s*([0-9.]+)", block.group(1))}
     assert terms["usageMarkup"] == pytest.approx(Settings.model_fields["usage_markup"].default)
     assert terms["byokFeeFraction"] == pytest.approx(pricing.PLATFORM_FEE_FRACTION)
-    assert terms["purchaseFeeRate"] == pytest.approx(service.CREDIT_PURCHASE_FEE_RATE)
-    assert terms["purchaseFeeFixedCents"] == service.CREDIT_PURCHASE_FEE_FIXED_CENTS
+    assert terms["purchaseFeeRate"] == pytest.approx(service.PURCHASE_FEE_RATE)
+    assert terms["purchaseFeeFixedCents"] == service.PURCHASE_FEE_FIXED_CENTS
 
 
-def test_credit_constants_match_backend() -> None:
-    """Credit value and custom top-up bounds equal the backend's."""
-    ts = _ts_number_constants("credit.ts")
-    assert ts["CREDIT_USD_VALUE"] == pytest.approx(pricing.CREDIT_USD_VALUE)
-    assert ts["CUSTOM_CREDITS_MIN"] == service.CUSTOM_CREDITS_MIN
-    assert ts["CUSTOM_CREDITS_MAX"] == service.CUSTOM_CREDITS_MAX
+def test_money_constants_match_backend() -> None:
+    """Cent value and custom top-up bounds equal the backend's."""
+    ts = _ts_number_constants("wallet.ts")
+    assert ts["CENT_USD_VALUE"] == pytest.approx(pricing.CENT_USD_VALUE)
+    assert ts["CUSTOM_CENTS_MIN"] == service.CUSTOM_CENTS_MIN
+    assert ts["CUSTOM_CENTS_MAX"] == service.CUSTOM_CENTS_MAX
 
 
-def test_credit_packs_match_backend() -> None:
-    """``CREDIT_PACKS`` lists the backend's packs, each priced at its credit value."""
-    source = (_BILLING_LIB / "credit.ts").read_text(encoding="utf-8")
-    packs = re.findall(r'\{\s*id:\s*"(\w+)",\s*credits:\s*(\d+),\s*usd:\s*([0-9.]+)', source)
-    assert {pack_id: int(credits) for pack_id, credits, _ in packs} == service.PACK_CREDITS
-    for _, credits, usd in packs:
-        assert float(usd) == pytest.approx(int(credits) * pricing.CREDIT_USD_VALUE)
+def test_top_up_packs_match_backend() -> None:
+    """``TOP_UP_PACKS`` lists the backend's packs, each priced at its cent value."""
+    source = (_BILLING_LIB / "wallet.ts").read_text(encoding="utf-8")
+    packs = re.findall(r'\{\s*id:\s*"(\w+)",\s*cents:\s*(\d+),\s*usd:\s*([0-9.]+)', source)
+    assert {pack_id: int(cents) for pack_id, cents, _ in packs} == service.PACK_CENTS
+    for _, cents, usd in packs:
+        assert float(usd) == pytest.approx(int(cents) * pricing.CENT_USD_VALUE)
 
 
 def test_pro_monthly_price_matches_stripe_provisioning() -> None:
     """``PRO_MONTHLY_USD`` equals the amount the Stripe Pro price is provisioned at."""
-    ts = _ts_number_constants("credit.ts")
+    ts = _ts_number_constants("wallet.ts")
     match = re.search(r"_PRO_MONTHLY\b[^=]*=\s*\([^)]*?(\d+)\s*\)", _PROVISION_STRIPE.read_text(encoding="utf-8"))
     assert match is not None
     assert round(ts["PRO_MONTHLY_USD"] * 100) == int(match.group(1))

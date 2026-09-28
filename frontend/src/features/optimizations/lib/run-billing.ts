@@ -19,7 +19,7 @@ export function readBilling(
   if (
     billing &&
     typeof billing === "object" &&
-    "credits" in billing &&
+    "cents" in billing &&
     (billing as RunBillingOutcome).outcome === "billed"
   ) {
     return billing as RunBillingOutcome;

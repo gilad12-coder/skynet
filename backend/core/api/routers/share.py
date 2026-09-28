@@ -127,9 +127,7 @@ _USER_FACING_OPTIMIZATION_TYPES = frozenset(
 
 AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_user)]
 
-_INFER_ROLES: frozenset[ShareRole] = frozenset(
-    {ShareRole.viewer, ShareRole.editor, ShareRole.owner}
-)
+_INFER_ROLES: frozenset[ShareRole] = frozenset({ShareRole.viewer, ShareRole.editor, ShareRole.owner})
 _GENERAL_ACCESS_VALUES = (GENERAL_ACCESS_RESTRICTED, GENERAL_ACCESS_ANYONE)
 _LINK_ROLE_VALUES = tuple(sorted(LINK_ROLES))
 # Cap for the username-autocomplete result set (contract: at most 10).
@@ -1318,9 +1316,7 @@ def create_share_router(*, job_store) -> APIRouter:
             PAYLOAD_OVERVIEW_SIGNATURE_CODE: (
                 overview.get(PAYLOAD_OVERVIEW_SIGNATURE_CODE) or stored.get("signature_code")
             ),
-            PAYLOAD_OVERVIEW_MODULE_NAME: (
-                overview.get(PAYLOAD_OVERVIEW_MODULE_NAME) or stored.get("module_name")
-            ),
+            PAYLOAD_OVERVIEW_MODULE_NAME: (overview.get(PAYLOAD_OVERVIEW_MODULE_NAME) or stored.get("module_name")),
             PAYLOAD_OVERVIEW_MODULE_KWARGS: (
                 overview.get(PAYLOAD_OVERVIEW_MODULE_KWARGS) or stored.get("module_kwargs", {})
             ),
@@ -1329,9 +1325,7 @@ def create_share_router(*, job_store) -> APIRouter:
         interaction_payload = {
             "model_config": model_config.model_dump(mode="json"),
             "token_source": model_config.token_source or TOKEN_SOURCE_MANAGED,
-            "program_artifact": (
-                artifact.model_dump(mode="json") if hasattr(artifact, "model_dump") else artifact
-            ),
+            "program_artifact": (artifact.model_dump(mode="json") if hasattr(artifact, "model_dump") else artifact),
             "payload_overview": effective_overview,
             "inputs": filtered_inputs,
             "_interaction": {
@@ -1347,13 +1341,12 @@ def create_share_router(*, job_store) -> APIRouter:
         result = run_protected_interaction(
             interaction_payload,
             kind="shared_serve",
-            max_cost_credits=req.max_cost_credits,
+            max_cost_cents=req.max_cost_cents,
             idempotency_key=key,
             user=current_user,
             job_store=job_store,
             credential_owner=owner,
-            credential_binding_id=job_data.get("execution_budget_id")
-            or stored.get("execution_budget_id"),
+            credential_binding_id=job_data.get("execution_budget_id") or stored.get("execution_budget_id"),
         )
         if result.get("error"):
             raise DomainError("serve.protected_interaction_failed", status=502, error=result["error"])

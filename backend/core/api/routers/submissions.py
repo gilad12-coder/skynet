@@ -50,7 +50,7 @@ from ...constants import (
     PAYLOAD_OVERVIEW_ESTIMATED_LOW,
     PAYLOAD_OVERVIEW_GENERATION_MODELS,
     PAYLOAD_OVERVIEW_IS_PRIVATE,
-    PAYLOAD_OVERVIEW_MAX_COST_CREDITS,
+    PAYLOAD_OVERVIEW_MAX_COST_CENTS,
     PAYLOAD_OVERVIEW_MODEL_NAME,
     PAYLOAD_OVERVIEW_MODEL_SETTINGS,
     PAYLOAD_OVERVIEW_MODULE_KWARGS,
@@ -150,8 +150,8 @@ def _ensure_api_budget(
     try:
         budget = service.find_by_creation_key(user.username, budget_creation_key) if recover_existing else None
         if budget is None:
-            spendable = _enforce_credit_balance(job_store, user.username, payload.token_source)
-            total = payload.max_cost_credits
+            spendable = _enforce_balance(job_store, user.username, payload.token_source)
+            total = payload.max_cost_cents
             if total is None:
                 total = cost_ceiling_budget(spendable or 0, payload.token_source)
             budget = service.create(user.username, total, idempotency_key=budget_creation_key)
@@ -159,7 +159,7 @@ def _ensure_api_budget(
         raise budget_http_error(error) from error
     payload.execution_budget_id = budget.id
     payload.execution_budget_revision = budget.revision
-    payload.max_cost_credits = budget.total_credits
+    payload.max_cost_cents = budget.total_cents
     if payload.seed is None:
         payload.seed = setup_seed(budget.id)
     checked = run_preflight(
@@ -548,18 +548,18 @@ def _expand_catalog_grid_payload(payload: GridSearchRequest) -> None:
 
 
 # Statuses whose runs hold a live claim on the balance: queued/leased work,
-# plus paused runs — resume re-enqueues those without a fresh credit gate.
+# plus paused runs — resume re-enqueues those without a fresh balance gate.
 _COMMITTED_JOB_STATUSES = ("pending", "validating", "running", "paused")
 
 
-def _enforce_credit_balance(job_store, username: str, token_source: str) -> int | None:
+def _enforce_balance(job_store, username: str, token_source: str) -> int | None:
     """Block a depleted account from starting a run, and report its free balance.
 
-    Reads spendable credits after StripeBillingService has subtracted both
+    Reads the spendable balance after StripeBillingService has subtracted both
     authoritative operation holds and database-backed legacy job commitments.
     Subtracting the legacy ceilings again would reject funded submissions.
     Concurrent dispatch is serialized by the shared ledger. There is no free
-    allowance — a brand-new account is gated until it buys credits. Both run
+    allowance — a brand-new account is gated until it tops up. Both run
     modes are gated: a managed run spends its full per-token cost, and a BYOK
     run still spends Skynet's platform fee (the provider tokens are on the
     user's own key), so a zero balance can cover neither. The returned balance
@@ -572,27 +572,27 @@ def _enforce_credit_balance(job_store, username: str, token_source: str) -> int 
         token_source: ``"managed"`` or ``"byok"`` — carried to the cost-ceiling cap.
 
     Returns:
-        The account's uncommitted spendable credits, or ``None`` for a store
+        The account's uncommitted spendable cents, or ``None`` for a store
         with no SQL engine (legacy/in-memory).
 
     Raises:
-        DomainError: 402 when the account has no spendable credits, or every
-            remaining credit is already committed to active runs.
+        DomainError: 402 when the account has no spendable balance, or every
+            remaining cent is already committed to active runs.
     """
     engine = getattr(job_store, "engine", None)
     if engine is None or not username:
         return None
     service = StripeBillingService(engine=engine)
-    spendable = service.spendable_credits(username)
+    spendable = service.spendable_cents(username)
     if spendable <= 0:
-        raise DomainError("billing.insufficient_credits", status=402)
+        raise DomainError("billing.insufficient_funds", status=402)
     return spendable
 
 
 def _enforce_global_daily_spend_ceiling(job_store) -> None:
     """Refuse a submission once platform-wide 24h spend hits the configured ceiling.
 
-    A cost backstop that sits above the per-user credit gate: it caps the whole
+    A cost backstop that sits above the per-user balance gate: it caps the whole
     platform's trailing-24h run spend, so a spike in traffic (or an abusive
     fleet of funded accounts) cannot run the shared provider float dry. No-op
     when the ceiling is unset (``0``) or the store has no SQL engine. Tripping
@@ -607,19 +607,19 @@ def _enforce_global_daily_spend_ceiling(job_store) -> None:
             spend is at or above the ceiling. The message is deliberately generic
             so internal budget figures are not leaked to callers.
     """
-    ceiling = settings.global_daily_spend_ceiling_credits
+    ceiling = settings.global_daily_spend_ceiling_cents
     if ceiling <= 0:
         return
     engine = getattr(job_store, "engine", None)
     if engine is None:
         return
     service = StripeBillingService(engine=engine)
-    spent = service.credits_spent_since(datetime.now(UTC) - timedelta(hours=24))
+    spent = service.cents_spent_since(datetime.now(UTC) - timedelta(hours=24))
     if spent >= ceiling:
         # ERROR (not WARNING) so AlertLogHandler pages an operator: every new
         # submission is refused until spend ages out or the ceiling is raised.
         logger.error(
-            "Global daily spend ceiling reached: %d credits spent in 24h (ceiling %d); refusing new submissions",
+            "Global daily spend ceiling reached: %d cents spent in 24h (ceiling %d); refusing new submissions",
             spent,
             ceiling,
         )
@@ -671,11 +671,11 @@ def _enforce_submission_admission(job_store, username: str) -> None:
 def _cap_cost_ceiling_to_balance(
     payload: _OptimizationRequestBase | BlackboxRunRequest, spendable: int | None, token_source: str
 ) -> None:
-    """Pin a run's cost ceiling to what the account's spendable credits can back.
+    """Pin a run's cost ceiling to what the account's spendable balance can back.
 
-    With model-tier gating gone, any model is runnable and credits are the only
+    With model-tier gating gone, any model is runnable and the balance is the only
     thing between a user and an expensive one — so a run must not be allowed to
-    spend more credits than the account holds. This clamps ``max_cost_credits`` to
+    spend more than the account holds. This clamps ``max_cost_cents`` to
     the balance-backed budget: a user-set cap still wins when it is tighter, but an
     absent or larger cap is lowered to the budget. For a managed run the budget is
     the spendable balance; for a BYOK run it is proportionally larger, since the run
@@ -685,16 +685,16 @@ def _cap_cost_ceiling_to_balance(
     balance negative. A no-op for engine-less stores, where ``spendable`` is ``None``.
 
     Args:
-        payload: The submission whose ``max_cost_credits`` is clamped in place.
-        spendable: The account's spendable credits from
-            :func:`_enforce_credit_balance`, or ``None`` to leave the cap as-is.
+        payload: The submission whose ``max_cost_cents`` is clamped in place.
+        spendable: The account's spendable cents from
+            :func:`_enforce_balance`, or ``None`` to leave the cap as-is.
         token_source: ``"managed"`` or ``"byok"`` — sets the balance→budget conversion.
     """
     if spendable is None:
         return
     budget = cost_ceiling_budget(spendable, token_source)
-    current = payload.max_cost_credits
-    payload.max_cost_credits = budget if current is None else min(current, budget)
+    current = payload.max_cost_cents
+    payload.max_cost_cents = budget if current is None else min(current, budget)
 
 
 def _enforce_byok_connections(job_store, username: str, model_configs: list[ModelConfig]) -> None:
@@ -704,8 +704,8 @@ def _enforce_byok_connections(job_store, username: str, model_configs: list[Mode
     resolved from the encrypt-at-rest vault at run time. If the account saved no
     connection for a model's provider, the run would have nothing to authenticate
     with, so reject it at submit with a clear, translated error rather than
-    letting the job fail mid-run. Managed runs are exempt (they spend platform
-    credits). Models with no ``provider/`` prefix are skipped — there is no
+    letting the job fail mid-run. Managed runs are exempt (they spend the
+    account balance). Models with no ``provider/`` prefix are skipped — there is no
     provider to resolve a key for. A no-op when the store exposes no SQL engine.
 
     Args:
@@ -843,7 +843,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         _enforce_submission_admission(job_store, payload.username)
 
         _run_model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-        _spendable = _enforce_credit_balance(job_store, payload.username, payload.token_source)
+        _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
         if payload.execution_budget_id is None:
             _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
         _enforce_byok_connections(job_store, payload.username, _run_model_configs)
@@ -939,9 +939,9 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                 PAYLOAD_OVERVIEW_TASK_FINGERPRINT: task_fingerprint,
                 PAYLOAD_OVERVIEW_TOKEN_SOURCE: payload.token_source,
                 PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL: _token_sources_by_model,
-                PAYLOAD_OVERVIEW_MAX_COST_CREDITS: payload.max_cost_credits,
-                PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_credits_low,
-                PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_credits_high,
+                PAYLOAD_OVERVIEW_MAX_COST_CENTS: payload.max_cost_cents,
+                PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_cents_low,
+                PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_cents_high,
                 PAYLOAD_OVERVIEW_IS_PRIVATE: payload.is_private,
                 PAYLOAD_OVERVIEW_SOURCE_DATASET_ID: source_dataset_id,
                 PAYLOAD_OVERVIEW_WORKFLOW: payload.workflow.model_dump() if payload.workflow else None,
@@ -1039,7 +1039,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         _enforce_submission_admission(job_store, payload.username)
 
         _grid_model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-        _spendable = _enforce_credit_balance(job_store, payload.username, payload.token_source)
+        _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
         if payload.execution_budget_id is None:
             _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
         _enforce_byok_connections(job_store, payload.username, _grid_model_configs)
@@ -1117,9 +1117,9 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                 PAYLOAD_OVERVIEW_TASK_FINGERPRINT: task_fingerprint,
                 PAYLOAD_OVERVIEW_TOKEN_SOURCE: payload.token_source,
                 PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL: _token_sources_by_model,
-                PAYLOAD_OVERVIEW_MAX_COST_CREDITS: payload.max_cost_credits,
-                PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_credits_low,
-                PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_credits_high,
+                PAYLOAD_OVERVIEW_MAX_COST_CENTS: payload.max_cost_cents,
+                PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_cents_low,
+                PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_cents_high,
                 PAYLOAD_OVERVIEW_IS_PRIVATE: payload.is_private,
                 PAYLOAD_OVERVIEW_SOURCE_DATASET_ID: source_dataset_id,
             },
@@ -1186,7 +1186,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
 
         Raises:
             DomainError: 400 (unknown engine / scorer code does not load),
-                402 (no credits), 409 (quota), 422 (malformed).
+                402 (no balance), 409 (quota), 422 (malformed).
         """
         payload.username = current_user.username
         # Resolved before the replay key is derived so a by-reference submit
@@ -1227,7 +1227,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
         _enforce_submission_admission(job_store, payload.username)
 
         _model_configs, _token_sources_by_model = normalize_model_token_sources(payload)
-        _spendable = _enforce_credit_balance(job_store, payload.username, payload.token_source)
+        _spendable = _enforce_balance(job_store, payload.username, payload.token_source)
         if payload.execution_budget_id is None:
             _cap_cost_ceiling_to_balance(payload, _spendable, payload.token_source)
         _enforce_byok_connections(job_store, payload.username, _model_configs)
@@ -1284,9 +1284,9 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                 PAYLOAD_OVERVIEW_SEED: payload.seed,
                 PAYLOAD_OVERVIEW_TOKEN_SOURCE: payload.token_source,
                 PAYLOAD_OVERVIEW_TOKEN_SOURCES_BY_MODEL: _token_sources_by_model,
-                PAYLOAD_OVERVIEW_MAX_COST_CREDITS: payload.max_cost_credits,
-                PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_credits_low,
-                PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_credits_high,
+                PAYLOAD_OVERVIEW_MAX_COST_CENTS: payload.max_cost_cents,
+                PAYLOAD_OVERVIEW_ESTIMATED_LOW: payload.estimated_cents_low,
+                PAYLOAD_OVERVIEW_ESTIMATED_HIGH: payload.estimated_cents_high,
                 PAYLOAD_OVERVIEW_IS_PRIVATE: payload.is_private,
             },
         )
@@ -1358,7 +1358,7 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
     ) -> ScorerDryRunResponse:
         """Run the scorer once so a broken one fails here, not in the job.
 
-        Model and sandbox operations reserve shared setup credits before
+        Model and sandbox operations reserve shared setup funds before
         dispatch. Scorer failures remain renderable results, and uncertain
         usage retains its coverage in the returned budget.
 

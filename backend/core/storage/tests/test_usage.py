@@ -124,9 +124,7 @@ def test_compute_user_storage_is_owner_scoped(store: _SQLiteJobStore) -> None:
     assert alice.total == alice.breakdown["optimizations"]
 
 
-def test_byproducts_fold_into_optimization_footprint(
-    store: _SQLiteJobStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_byproducts_fold_into_optimization_footprint(store: _SQLiteJobStore, monkeypatch: pytest.MonkeyPatch) -> None:
     """Logs and embeddings count toward the owning optimization, not a category of their own."""
     # job_embeddings exists (and thus has rows to count) only on the semantic
     # backend; usage accounting now skips it when embeddings are disabled, so
@@ -217,9 +215,7 @@ def test_storage_items_are_owner_scoped(store: _SQLiteJobStore) -> None:
 def test_storage_items_honours_limit(store: _SQLiteJobStore) -> None:
     """The merged ranking is capped at ``limit`` items."""
     for index in range(5):
-        _insert_dataset(
-            store, dataset_id=f"ds-{index}", owner="alice", name=f"Set {index}", byte_size=(index + 1) * 10
-        )
+        _insert_dataset(store, dataset_id=f"ds-{index}", owner="alice", name=f"Set {index}", byte_size=(index + 1) * 10)
 
     items = compute_user_storage_items(store.engine, "alice", limit=2)
     assert len(items) == 2
@@ -353,7 +349,9 @@ def test_storage_quota_override_replaces_default(store: _SQLiteJobStore) -> None
     assert store.get_effective_user_storage_quota("alice") == five_gb
 
     rows = store.list_user_storage_quota_overrides()
-    assert rows == [{"username": "alice", "quota_bytes": five_gb, "updated_at": rows[0]["updated_at"], "updated_by": "admin"}]
+    assert rows == [
+        {"username": "alice", "quota_bytes": five_gb, "updated_at": rows[0]["updated_at"], "updated_by": "admin"}
+    ]
     assert rows[0]["updated_at"] is not None
 
 
@@ -397,7 +395,7 @@ def _set_subscription_status(
             BillingCustomerModel(
                 username=username,
                 stripe_customer_id=f"cus_{username}",
-                credit_balance=0,
+                balance_cents=0,
                 subscription_status=status,
                 subscription_past_due_since=past_due_since,
             )

@@ -31,7 +31,7 @@ export interface ReactServeChatHandlers {
   onDone: (result: {
     assistant_message: string;
     model: string | null;
-    credits_charged: string | null;
+    cents_charged: string | null;
   }) => void;
   onError: (message: string) => void;
   signal?: AbortSignal;
@@ -122,7 +122,7 @@ export async function streamReactServeChat(
         handlers.onDone({
           assistant_message: String(data.assistant_message ?? ""),
           model: typeof rawModel === "string" && rawModel.length > 0 ? rawModel : null,
-          credits_charged: typeof data.credits_charged === "string" ? data.credits_charged : null,
+          cents_charged: typeof data.cents_charged === "string" ? data.cents_charged : null,
         });
         break;
       }

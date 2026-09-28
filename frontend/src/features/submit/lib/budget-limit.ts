@@ -6,7 +6,7 @@ export interface BudgetChoice {
   uncapped: boolean;
   /** The spending limit, or null while it is unset. */
   limit: number | null;
-  /** The account's spendable credits, or null while they have not loaded. */
+  /** The account's spendable balance in cents, or null while they have not loaded. */
   balance: number | null;
 }
 
@@ -22,7 +22,7 @@ export interface BudgetShortfall {
  * which starts at the hold the run's box takes the moment it opens.
  */
 export function limitFloor(bracket: CostBracket, mode: TokenSourceMode): number {
-  return chargeableBracket(bracket, mode).lowCredits;
+  return chargeableBracket(bracket, mode).lowCents;
 }
 
 /**

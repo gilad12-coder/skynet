@@ -348,9 +348,9 @@ def test_resume_budget_projected_pause_requires_a_limit_above_the_projection(
             "budget_projection": {
                 "planned_calls": 230,
                 "done_calls": 23,
-                "spent_credits": "3",
-                "projected_credits": 30,
-                "limit_credits": 20,
+                "spent_cents": "3",
+                "projected_cents": 30,
+                "limit_cents": 20,
             }
         },
     )
@@ -361,7 +361,7 @@ def test_resume_budget_projected_pause_requires_a_limit_above_the_projection(
 
     blocked = client.post("/optimizations/pp/resume")
     assert blocked.status_code == 409, blocked.text
-    assert "above 30 credits" in blocked.text
+    assert "about $0.30, above its $0.20 limit" in blocked.text
     assert store.get_job("pp")["status"] == "paused"
 
     budget = budgets.get(budget_id, "resume-owner")

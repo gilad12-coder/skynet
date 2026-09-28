@@ -38,13 +38,13 @@ from core.models import BlackboxRunRequest
 from core.storage.models import (
     Base,
     BillingCustomerModel,
-    CreditLedgerModel,
     ExecutionBudgetModel,
     ExecutionOperationModel,
     ExecutionUsageEvidenceModel,
     JobModel,
     OptimizationShareGrantModel,
     ProtectedCredentialModel,
+    WalletLedgerModel,
 )
 from core.storage.preflights import PreflightStore, WizardPreflightModel
 from core.storage.remote import RemoteDBJobStore
@@ -119,7 +119,7 @@ class _Harness:
         def dispatch() -> PaidResult[None]:
             """Assert real coverage exists before reporting one synthetic provider receipt."""
             snapshot = runtime.service.get(runtime.budget_id, runtime.username)
-            assert snapshot.reserved_credits == 2
+            assert snapshot.reserved_cents == 2
             assert snapshot.pending_operations == 1
             self.calls.append({"budget_id": runtime.budget_id, "identity": identity, "payload": payload})
             return PaidResult(
@@ -155,7 +155,7 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Harnes
     with Session(store.engine) as session:
         session.add_all(
             BillingCustomerModel(
-                username=name, stripe_customer_id=f"fixture-{name}", credit_balance=100, grant_remaining=0
+                username=name, stripe_customer_id=f"fixture-{name}", balance_cents=100, grant_remaining=0
             )
             for name in ("alice", "bob")
         )
@@ -179,7 +179,7 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Harnes
     monkeypatch.setattr(submissions.settings, "worker_enabled", False)
     monkeypatch.setattr(submissions.settings, "submissions_paused", False)
     monkeypatch.setattr(submissions.settings, "max_concurrent_jobs_per_user", 0)
-    monkeypatch.setattr(submissions.settings, "global_daily_spend_ceiling_credits", 0)
+    monkeypatch.setattr(submissions.settings, "global_daily_spend_ceiling_cents", 0)
     monkeypatch.setattr(submissions.settings, "rate_limit_submissions_per_minute", 0)
     monkeypatch.setattr(submissions.settings, "openrouter_api_key", SecretStr("fixture-only"))
     monkeypatch.setattr(submissions.settings, "byok_vault_key", SecretStr(Fernet.generate_key().decode()))
@@ -212,7 +212,7 @@ def _payload(route: str, *, total: int = 20) -> dict[str, Any]:
             "scorer": {"kind": "python", "metric_code": "def score(candidate): return 1.0"},
             "reflection_model_config": {"name": "fixture/text"},
             "strategy": {"mode": "single", "engine": "gepa"},
-            "max_cost_credits": total,
+            "max_cost_cents": total,
         }
     payload = {
         "username": "spoofed-owner",
@@ -222,7 +222,7 @@ def _payload(route: str, *, total: int = 20) -> dict[str, Any]:
         "optimizer_name": "gepa",
         "dataset": [{"question": f"Q{index}?", "answer": "A"} for index in range(10)],
         "column_mapping": {"inputs": {"q": "question"}, "outputs": {"a": "answer"}},
-        "max_cost_credits": total,
+        "max_cost_cents": total,
     }
     if route == "/grid-search":
         payload.update(generation_models=[{"name": "fixture/task"}], reflection_models=[{"name": "fixture/text"}])
@@ -285,14 +285,14 @@ def test_legacy_submission_attaches_paid_setup_once(harness: _Harness, route: st
     assert budget.job_id == identity
     assert budget.generation == job["execution_budget_generation"] == job["payload"]["execution_budget_generation"]
     assert budget.id == job["payload"]["execution_budget_id"] == harness.calls[0]["budget_id"]
-    assert budget.setup_spent_credits == 1
-    assert budget.run_spent_credits == budget.reserved_credits == 0
-    assert budget.available_credits == 19
-    assert budget.billed_credits == 1
+    assert budget.setup_spent_cents == 1
+    assert budget.run_spent_cents == budget.reserved_cents == 0
+    assert budget.available_cents == 19
+    assert budget.billed_cents == 1
     assert job["username"] == job["payload"]["username"] == "alice"
     assert job["status"] == "pending"
     assert harness.count(JobModel) == harness.count(ExecutionBudgetModel) == harness.count(WizardPreflightModel) == 1
-    assert harness.count(ExecutionOperationModel) == harness.count(CreditLedgerModel) == 1
+    assert harness.count(ExecutionOperationModel) == harness.count(WalletLedgerModel) == 1
     assert harness.count(ExecutionUsageEvidenceModel) >= 1
     replay = harness.client.post(route, json=_payload(route), headers={"Idempotency-Key": "legacy-submit"})
     assert replay.status_code == 201, replay.text
@@ -308,7 +308,7 @@ def test_legacy_submission_attaches_paid_setup_once(harness: _Harness, route: st
             operation_key="late-setup",
             request_fingerprint="late",
             price_snapshot={"version": "fixture-v1"},
-            max_credits=1,
+            max_cents=1,
         )
 
 
@@ -382,7 +382,7 @@ def test_keyless_uncertain_retry_does_not_repeat_paid_preflight(harness: _Harnes
     """
     harness.usage_final = False
     payload = _payload(route)
-    payload.pop("max_cost_credits")
+    payload.pop("max_cost_cents")
 
     first = harness.client.post(route, json=payload)
     repeated = harness.client.post(route, json=payload)
@@ -395,9 +395,9 @@ def test_keyless_uncertain_retry_does_not_repeat_paid_preflight(harness: _Harnes
     assert harness.count(WizardPreflightModel) == 1
     assert harness.count(ExecutionOperationModel) == 1
     budget = harness.budgets.get(harness.calls[0]["budget_id"], "alice")
-    assert budget.total_credits == 100
+    assert budget.total_cents == 100
     assert budget.pending_operations == 1
-    assert budget.reserved_credits == 2
+    assert budget.reserved_cents == 2
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -641,7 +641,7 @@ def test_protected_dspy_submission_keeps_authored_modules_out_of_api_parent(
         "column_mapping": {"inputs": {"question": "question"}, "outputs": {"answer": "answer"}},
         "model_config": {"name": "fixture/task"},
         "reflection_model_config": {"name": "fixture/text"},
-        "max_cost_credits": 20,
+        "max_cost_cents": 20,
     }
     try:
         response = harness.client.post("/run", json=payload)
@@ -699,8 +699,8 @@ def test_failed_or_uncertain_paid_setup_never_queues(harness: _Harness, pending_
     assert harness.count(JobModel) == 0
     budget = harness.budgets.get(harness.calls[0]["budget_id"], "alice")
     assert budget.job_id is None
-    assert budget.reserved_credits == (2 if pending_usage else 0)
-    assert budget.setup_spent_credits == (0 if pending_usage else 1)
+    assert budget.reserved_cents == (2 if pending_usage else 0)
+    assert budget.setup_spent_cents == (0 if pending_usage else 1)
 
 
 def test_attachment_rolls_back_job_when_budget_already_attached(harness: _Harness) -> None:
@@ -772,11 +772,11 @@ def test_run_admission_cannot_dispatch_beyond_remaining_coverage(harness: _Harne
             operation_key="other-usage",
             request_fingerprint="other",
             price_snapshot={"version": "fixture-v1"},
-            max_credits=90,
+            max_cents=90,
         )
         harness.budgets.mark_dispatched(operation.id, "alice", "other-provider-request")
         harness.budgets.settle(
-            operation.id, "alice", evidence_key="other-final", actual_credits=90, evidence={"measured_credits": 90}
+            operation.id, "alice", evidence_key="other-final", actual_cents=90, evidence={"measured_cents": 90}
         )
         with pytest.raises(BudgetReached):
             runtime.execute(quote, policy, dispatch, operation_key="run", cost_kind="sandbox")
@@ -784,15 +784,15 @@ def test_run_admission_cannot_dispatch_beyond_remaining_coverage(harness: _Harne
     else:
         assert runtime.execute(quote, policy, dispatch, operation_key="run", cost_kind="sandbox") == "actual result"
         budget = harness.budgets.get(runtime.budget_id, "alice")
-        assert budget.setup_spent_credits == 1
-        assert budget.run_spent_credits == 18
-        assert budget.available_credits == 1
-        assert budget.billed_credits == 19
-        assert StripeBillingService(engine=harness.store.engine).spendable_credits("alice") == 81
+        assert budget.setup_spent_cents == 1
+        assert budget.run_spent_cents == 18
+        assert budget.available_cents == 1
+        assert budget.billed_cents == 19
+        assert StripeBillingService(engine=harness.store.engine).spendable_cents("alice") == 81
         with pytest.raises(BudgetReached):
             runtime.execute(quote, policy, dispatch, operation_key="next", cost_kind="sandbox")
         assert len(dispatched) == 1
-    assert harness.budgets.get(runtime.budget_id, "alice").reserved_credits == 0
+    assert harness.budgets.get(runtime.budget_id, "alice").reserved_cents == 0
 
 
 def test_attachment_uses_current_generation_and_fences_old_setup(harness: _Harness) -> None:
@@ -818,7 +818,7 @@ def test_attachment_uses_current_generation_and_fences_old_setup(harness: _Harne
             operation_key="stale-worker",
             request_fingerprint="old",
             price_snapshot={"version": "fixture-v1"},
-            max_credits=1,
+            max_cents=1,
         )
 
 
@@ -875,15 +875,15 @@ def test_paid_setup_does_not_rewrite_the_approved_total(harness: _Harness, route
         route: Each public submission endpoint using the shared budget.
     """
     with Session(harness.store.engine) as session:
-        session.get(BillingCustomerModel, "alice").credit_balance = 20
+        session.get(BillingCustomerModel, "alice").balance_cents = 20
         session.commit()
     response = harness.client.post(route, json=_payload(route))
     assert response.status_code == 201, response.text
     job = harness.store.get_job(response.json()["optimization_id"], include_payload=True)
     budget = harness.budgets.get(job["execution_budget_id"], "alice")
-    assert budget.total_credits == 20
-    assert budget.setup_spent_credits == 1
-    assert job["payload"]["max_cost_credits"] == budget.total_credits
+    assert budget.total_cents == 20
+    assert budget.setup_spent_cents == 1
+    assert job["payload"]["max_cost_cents"] == budget.total_cents
 
 
 def test_legacy_commitment_is_counted_once_during_protected_submission(harness: _Harness) -> None:
@@ -893,10 +893,10 @@ def test_legacy_commitment_is_counted_once_during_protected_submission(harness: 
         harness: Real wallet, one active legacy job, and the protected API.
     """
     harness.store.create_job("legacy", username="alice")
-    harness.store.set_payload_overview("legacy", {"max_cost_credits": 60, "token_source": "managed"})
-    assert StripeBillingService(engine=harness.store.engine).spendable_credits("alice") == 40
+    harness.store.set_payload_overview("legacy", {"max_cost_cents": 60, "token_source": "managed"})
+    assert StripeBillingService(engine=harness.store.engine).spendable_cents("alice") == 40
     response = harness.client.post("/run", json=_payload("/run"))
     assert response.status_code == 201, response.text
     job = harness.store.get_job(response.json()["optimization_id"])
     assert job["execution_budget_id"] is not None
-    assert StripeBillingService(engine=harness.store.engine).spendable_credits("alice") == 39
+    assert StripeBillingService(engine=harness.store.engine).spendable_cents("alice") == 39

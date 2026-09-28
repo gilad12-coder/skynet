@@ -11,21 +11,21 @@ import {
 
 const budget = {
   id: "budget",
-  total_credits: 20,
+  total_cents: 20,
   revision: 1,
   generation: 0,
   state: "open",
   job_id: null,
-  setup_spent_credits: "1",
-  run_spent_credits: "0",
-  reserved_credits: "0",
-  available_credits: "19",
-  billed_credits: 1,
-  wallet_setup_spent_credits: "1",
-  wallet_run_spent_credits: "0",
-  wallet_reserved_credits: 0,
-  account_available_credits: 99,
-  external_spent_credits: "0",
+  setup_spent_cents: "1",
+  run_spent_cents: "0",
+  reserved_cents: "0",
+  available_cents: "19",
+  billed_cents: 1,
+  wallet_setup_spent_cents: "1",
+  wallet_run_spent_cents: "0",
+  wallet_reserved_cents: 0,
+  account_available_cents: 99,
+  external_spent_cents: "0",
   pending_operations: 0,
   blocked_reason: null,
 };
@@ -71,11 +71,12 @@ test("a settled outcome is reusable for the same config; a pending one is not", 
   const succeeded = response("succeeded", true);
   const failed = response("failed", false);
   const pending = response("pending", false, "usage_reconciliation");
-  const terminal = (
-    stored: WizardPreflightResponse,
-    scope: PreflightScope,
-    identity: string,
-  ) => reusableTerminalPreflight({ execution: { identity: "current", response: stored } }, scope, identity);
+  const terminal = (stored: WizardPreflightResponse, scope: PreflightScope, identity: string) =>
+    reusableTerminalPreflight(
+      { execution: { identity: "current", response: stored } },
+      scope,
+      identity,
+    );
 
   assert.equal(terminal(succeeded, "execution", "current"), succeeded);
   assert.equal(terminal(failed, "execution", "current"), failed);

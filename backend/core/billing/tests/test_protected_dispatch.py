@@ -54,7 +54,7 @@ def database(tmp_path: Path) -> Iterator[Engine]:
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         session.add(
-            BillingCustomerModel(username="alice", stripe_customer_id="fixture", credit_balance=100, grant_remaining=0)
+            BillingCustomerModel(username="alice", stripe_customer_id="fixture", balance_cents=100, grant_remaining=0)
         )
         session.commit()
     yield engine
@@ -108,7 +108,7 @@ def test_paid_provider_failure_settles_and_is_not_replayed(database: Engine) -> 
         if request.method == "GET":
             return httpx.Response(200, json={"data": CATALOG})
         calls.append(request)
-        assert runtime.service.get(runtime.budget_id, "alice").reserved_credits == Decimal("1.785")
+        assert runtime.service.get(runtime.budget_id, "alice").reserved_cents == Decimal("1.785")
         return httpx.Response(
             500, json={"id": "gen-one", "error": "failed after inference", "usage": {"cost": "0.004"}}
         )
@@ -126,9 +126,9 @@ def test_paid_provider_failure_settles_and_is_not_replayed(database: Engine) -> 
     assert result.status == 500
     snapshot = runtime.service.get(runtime.budget_id, "alice")
     assert len(calls) == 1
-    assert snapshot.setup_spent_credits == Decimal("0.4")
-    assert snapshot.billed_credits == 1
-    assert snapshot.reserved_credits == 0
+    assert snapshot.setup_spent_cents == Decimal("0.4")
+    assert snapshot.billed_cents == 1
+    assert snapshot.reserved_cents == 0
 
 
 def test_each_physical_retry_has_separate_coverage_and_delivery_replay_is_deduplicated(database: Engine) -> None:
@@ -142,7 +142,7 @@ def test_each_physical_retry_has_separate_coverage_and_delivery_replay_is_dedupl
         if request.method == "GET":
             return httpx.Response(200, json={"data": CATALOG})
         posts.append(request)
-        held_before_dispatch.append(runtime.service.get(runtime.budget_id, "alice").reserved_credits)
+        held_before_dispatch.append(runtime.service.get(runtime.budget_id, "alice").reserved_cents)
         number = len(posts)
         return httpx.Response(
             503 if number == 1 else 200,
@@ -173,8 +173,8 @@ def test_each_physical_retry_has_separate_coverage_and_delivery_replay_is_dedupl
     assert len(posts) == 2
     assert held_before_dispatch == [Decimal("1.785"), Decimal("1.785")]
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.setup_spent_credits == Decimal("0.6")
-    assert snapshot.reserved_credits == 0
+    assert snapshot.setup_spent_cents == Decimal("0.6")
+    assert snapshot.reserved_cents == 0
     with Session(database) as session:
         operations = session.scalars(select(ExecutionOperationModel).order_by(ExecutionOperationModel.attempt)).all()
     assert [(operation.attempt, operation.state) for operation in operations] == [(0, "settled"), (1, "settled")]
@@ -227,8 +227,8 @@ def test_missing_usage_remains_reserved_without_a_fake_zero_charge(database: Eng
         with pytest.raises(UsagePendingError):
             dispatcher.dispatch("/chat/completions", REQUEST)
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.reserved_credits == Decimal("1.785")
-    assert snapshot.setup_spent_credits == 0
+    assert snapshot.reserved_cents == Decimal("1.785")
+    assert snapshot.setup_spent_cents == 0
     assert snapshot.pending_operations == 1
     with Session(database) as session:
         operation = session.scalar(select(ExecutionOperationModel))
@@ -279,7 +279,7 @@ def test_responses_dispatch_reserves_the_actual_protocol_body(database: Engine) 
         assert "messages" not in sent
         assert "max_tokens" not in sent
         assert sent["provider"]["allow_fallbacks"] is False
-        assert runtime.service.get(runtime.budget_id, "alice").reserved_credits > 0
+        assert runtime.service.get(runtime.budget_id, "alice").reserved_cents > 0
         return httpx.Response(
             200,
             json={
@@ -310,8 +310,8 @@ def test_responses_dispatch_reserves_the_actual_protocol_body(database: Engine) 
     assert response.status == 200
     assert len(calls) == 1
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.setup_spent_credits == Decimal("0.2")
-    assert snapshot.reserved_credits == 0
+    assert snapshot.setup_spent_cents == Decimal("0.2")
+    assert snapshot.reserved_cents == 0
 
 
 def _refusing_dispatcher(database: Engine, kind: str, headers: dict[str, str], calls: list) -> tuple:
@@ -357,8 +357,8 @@ def test_funds_refusal_is_named_uncharged_and_not_resent(
     assert second.body == first.body
     assert len(calls) == 1
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.billed_credits == 0
-    assert snapshot.reserved_credits == 0
+    assert snapshot.billed_cents == 0
+    assert snapshot.reserved_cents == 0
     assert alerts == (["fixture/text"] if code == MANAGED_FUNDS_EXHAUSTED else [])
 
 

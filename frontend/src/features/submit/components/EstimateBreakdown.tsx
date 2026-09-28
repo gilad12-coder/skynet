@@ -3,12 +3,7 @@
 import { useId } from "react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
-import {
-  creditsToUsd,
-  formatBudgetUsd,
-  formatUsd,
-  type TokenSourceMode,
-} from "@/features/billing";
+import { centsToUsd, formatBudgetUsd, formatUsd, type TokenSourceMode } from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { cn } from "@/shared/lib/utils";
@@ -104,15 +99,14 @@ export function buildEstimateSections(
   const runtimeAtCost =
     bracket.runtimeBillingBasis === "at_cost" &&
     bracket.expectedRuntimeSessions > 0 &&
-    bracket.runtimeSessionHighCredits > 0;
+    bracket.runtimeSessionHighCents > 0;
   const runtimeIncluded = bracket.runtimeBillingBasis === "included_in_model_markup";
   const hasByok = charge.byokFullHigh > 0;
   const hasManaged = charge.managedHigh > 0;
 
   const isolate = (value: string) => `${ISOLATE_START}${value}${ISOLATE_END}`;
-  // Charges live in credits internally; every figure is shown in dollars (a
-  // credit is one cent at par), so a credit count renders as its USD value.
-  const credits = (value: number) => isolate(formatUsd(creditsToUsd(value), locale));
+  // Charges live in cents internally; every figure is shown in dollars.
+  const cents = (value: number) => isolate(formatUsd(centsToUsd(value), locale));
   const count = (value: number) =>
     isolate(new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(value));
   const factor = (value: number) =>
@@ -123,9 +117,9 @@ export function buildEstimateSections(
     );
   const usd = (value: number) => isolate(formatUsd(value, locale));
   const usdRange = (low: number, high: number) => `${usd(low)}–${usd(high)}`;
-  const creditSpan = (low: number, high: number) => `${credits(low)}–${credits(high)}`;
-  const creditRange = (low: number, high: number) =>
-    formatMsg("submit.summary.estimate_range", { low: credits(low), high: credits(high) });
+  const centSpan = (low: number, high: number) => `${cents(low)}–${cents(high)}`;
+  const centRange = (low: number, high: number) =>
+    formatMsg("submit.summary.estimate_range", { low: cents(low), high: cents(high) });
   const times = { op: "×" };
   const plus = { op: "+" };
   const equals = { op: "=" };
@@ -217,13 +211,13 @@ export function buildEstimateSections(
       .filter((role) => role.tokenSource === source)
       .reduce((sum, role) => sum + role[end], 0);
   const conversion = (low: number, high: number) =>
-    formatMsg("submit.budget.calc.credits_conversion", {
+    formatMsg("submit.budget.calc.cents_conversion", {
       cost: usdRange(low, high),
     });
   // A markup of 1.15 reads as "15%": the share added on top of provider cost.
   const markupShare = percent(bracket.usageMarkup - 1);
   const markedUpConversion = (low: number, high: number) =>
-    formatMsg("submit.budget.calc.credits_conversion_markup", {
+    formatMsg("submit.budget.calc.cents_conversion_markup", {
       cost: usdRange(low, high),
       markup: markupShare,
     });
@@ -306,7 +300,7 @@ export function buildEstimateSections(
                 roleUsd("managed", "highUsd"),
               ),
               why: formatMsg("submit.budget.calc.managed_why", { markup: markupShare }),
-              value: creditRange(charge.managedLow, charge.managedHigh),
+              value: centRange(charge.managedLow, charge.managedHigh),
               result: true,
             },
           ]
@@ -317,7 +311,7 @@ export function buildEstimateSections(
               label: msg("submit.budget.calc.byok_full"),
               equation: roleAddends("byok"),
               formula: conversion(roleUsd("byok", "lowUsd"), roleUsd("byok", "highUsd")),
-              value: creditRange(charge.byokFullLow, charge.byokFullHigh),
+              value: centRange(charge.byokFullLow, charge.byokFullHigh),
             },
             {
               label: msg("submit.budget.calc.byok_fee"),
@@ -328,13 +322,13 @@ export function buildEstimateSections(
                 },
                 times,
                 {
-                  value: creditSpan(charge.byokFullLow, charge.byokFullHigh),
+                  value: centSpan(charge.byokFullLow, charge.byokFullHigh),
                   caption: msg("submit.budget.calc.term.byok_cost"),
                 },
               ],
               formula: msg("submit.budget.calc.rounded_up_cent"),
               why: msg("submit.budget.calc.byok_fee_why"),
-              value: creditRange(charge.byokFeeLow, charge.byokFeeHigh),
+              value: centRange(charge.byokFeeLow, charge.byokFeeHigh),
               result: true,
             },
           ]
@@ -349,9 +343,7 @@ export function buildEstimateSections(
             label: msg("submit.runtime.vercel"),
             equation: [
               {
-                value: isolate(
-                  formatBudgetUsd(bracket.runtimeSessionHighCredits.toFixed(9), locale),
-                ),
+                value: isolate(formatBudgetUsd(bracket.runtimeSessionHighCents.toFixed(9), locale)),
                 caption: msg("submit.budget.calc.term.per_session_max"),
               },
               times,
@@ -361,10 +353,10 @@ export function buildEstimateSections(
               },
             ],
             formula: formatMsg("submit.budget.calc.runtime_hold", {
-              hold: credits(runtimeStartHold(bracket)),
+              hold: cents(runtimeStartHold(bracket)),
             }),
             why: msg("submit.budget.calc.runtime_why"),
-            value: creditRange(charge.runtimeLow, charge.runtimeHigh),
+            value: centRange(charge.runtimeLow, charge.runtimeHigh),
             result: true,
           },
         ],
@@ -387,7 +379,7 @@ export function buildEstimateSections(
     ...(hasManaged
       ? [
           {
-            value: creditSpan(charge.managedLow, charge.managedHigh),
+            value: centSpan(charge.managedLow, charge.managedHigh),
             caption: msg("submit.budget.calc.term.models"),
           },
         ]
@@ -395,7 +387,7 @@ export function buildEstimateSections(
     ...(hasByok
       ? [
           {
-            value: creditSpan(charge.byokFeeLow, charge.byokFeeHigh),
+            value: centSpan(charge.byokFeeLow, charge.byokFeeHigh),
             caption: msg("submit.budget.calc.term.fee_rate"),
           },
         ]
@@ -403,7 +395,7 @@ export function buildEstimateSections(
     ...(runtimeAtCost
       ? [
           {
-            value: creditSpan(charge.runtimeLow, charge.runtimeHigh),
+            value: centSpan(charge.runtimeLow, charge.runtimeHigh),
             caption: msg("submit.budget.calc.term.runtime"),
           },
         ]
@@ -413,7 +405,7 @@ export function buildEstimateSections(
   // With a single addend the total is that line over again; the stage only
   // earns its place when it sums several lines or the one-cent floor binds.
   const totalSection: CalcSection | null =
-    addends.length > 1 || bracket.lowCredits <= 1
+    addends.length > 1 || bracket.lowCents <= 1
       ? {
           title: msg("submit.budget.calc.total"),
           steps: [
@@ -421,8 +413,8 @@ export function buildEstimateSections(
               label: msg("submit.budget.calc.total_range"),
               equation: addends.length > 1 ? addends : undefined,
               // The one-cent floor only matters when it is what set the low end.
-              formula: bracket.lowCredits <= 1 ? msg("submit.budget.calc.total_floor") : undefined,
-              value: creditRange(bracket.lowCredits, bracket.highCredits),
+              formula: bracket.lowCents <= 1 ? msg("submit.budget.calc.total_floor") : undefined,
+              value: centRange(bracket.lowCents, bracket.highCents),
               result: true,
             },
           ],
@@ -434,20 +426,20 @@ export function buildEstimateSections(
       {
         label: msg("submit.budget.calc.suggested_limit_default"),
         equation: [
-          { value: credits(ceiling.highCredits), caption: msg("submit.budget.calc.term.high_end") },
+          { value: cents(ceiling.highCents), caption: msg("submit.budget.calc.term.high_end") },
           times,
           {
             value: factor(ceiling.headroomFactor),
             caption: msg("submit.budget.calc.term.headroom"),
           },
           equals,
-          { value: credits(ceiling.withHeadroomCredits) },
+          { value: cents(ceiling.withHeadroomCents) },
         ],
         formula: formatMsg("submit.budget.calc.suggested_limit_rounding", {
-          step: credits(ceiling.stepCredits),
+          step: cents(ceiling.stepCents),
         }),
         why: msg("submit.budget.calc.suggested_limit_why"),
-        value: credits(ceiling.ceilingCredits),
+        value: cents(ceiling.ceilingCents),
       },
     ],
   };

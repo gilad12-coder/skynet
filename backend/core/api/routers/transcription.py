@@ -11,8 +11,8 @@ The ``language`` field is accepted for wire compatibility but never
 forwarded: Whisper treats the param as a directive, and the UI locale isn't
 necessarily the spoken language.
 
-Dictation is paid from the platform's Groq key, not from user credits, so it
-is open only to accounts with skin in the game: a positive purchased credit
+Dictation is paid from the platform's Groq key, not from user balances, so it
+is open only to accounts with skin in the game: a positive purchased
 balance, an active Skynet Pro plan, or a verified BYOK key (the one-time free
 grant alone does not qualify, or throwaway sign-ups could farm it). A caller
 with a verified Groq BYOK key is transcribed on that key instead. Two limits
@@ -72,9 +72,7 @@ class TranscriptionResponse(BaseModel):
     provider: str
 
 
-async def _groq_transcribe(
-    client: httpx.AsyncClient, audio: bytes, filename: str, api_key: str
-) -> tuple[str, float]:
+async def _groq_transcribe(client: httpx.AsyncClient, audio: bytes, filename: str, api_key: str) -> tuple[str, float]:
     """Transcribe one clip via Whisper large-v3-turbo on Groq.
 
     Args:
@@ -143,7 +141,7 @@ def _eligible_for_platform_dictation(job_store: Any, username: str) -> bool:
         return True
     with Session(engine) as session:
         customer = session.get(BillingCustomerModel, username)
-        if customer is not None and int(customer.credit_balance) > 0:
+        if customer is not None and int(customer.balance_cents) > 0:
             return True
     has_pro_plan = getattr(job_store, "has_pro_plan", None)
     if callable(has_pro_plan) and has_pro_plan(username):

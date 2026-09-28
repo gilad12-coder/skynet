@@ -29,7 +29,7 @@ import { cn } from "@/shared/lib/utils";
 import { ModelChip } from "@/shared/ui/model-chip";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { readOnlyEditorHeight } from "@/shared/ui/code-editor-height";
-import { formatCreditsUsd } from "@/features/billing";
+import { formatCentsUsd } from "@/features/billing";
 import { harnessLabel } from "@/shared/lib/blackbox-harness";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { tip } from "@/shared/lib/tooltips";
@@ -604,8 +604,8 @@ export function BlackboxSummaryStep({ w }: { w: BlackboxWizardContext }) {
                     <Figure
                       label={estimateLabel}
                       value={formatMsg("submit.summary.estimate_range", {
-                        low: `⁦${formatCreditsUsd(estimate.lowCredits, locale)}`,
-                        high: `${formatCreditsUsd(estimate.highCredits, locale)}⁩`,
+                        low: `⁦${formatCentsUsd(estimate.lowCents, locale)}`,
+                        high: `${formatCentsUsd(estimate.highCents, locale)}⁩`,
                       })}
                       sections={estimateSections}
                       intro={estimateIntro}

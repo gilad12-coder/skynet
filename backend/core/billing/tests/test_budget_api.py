@@ -27,7 +27,7 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         session.add_all(
             [
                 BillingCustomerModel(
-                    username=name, stripe_customer_id=f"local-{name}", credit_balance=50, grant_remaining=0
+                    username=name, stripe_customer_id=f"local-{name}", balance_cents=50, grant_remaining=0
                 )
                 for name in ("alice", "bob")
             ]
@@ -43,22 +43,22 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
 
 def test_budget_api_replays_create_and_preserves_revision(client: TestClient) -> None:
     """Keep a network retry on one budget and reject stale total edits."""
-    first = client.post("/execution-budgets", json={"total_credits": 20}, headers={"Idempotency-Key": "draft"})
+    first = client.post("/execution-budgets", json={"total_cents": 20}, headers={"Idempotency-Key": "draft"})
     assert first.status_code == 200
     body = first.json()
-    replay = client.post("/execution-budgets", json={"total_credits": 20}, headers={"Idempotency-Key": "draft"})
+    replay = client.post("/execution-budgets", json={"total_cents": 20}, headers={"Idempotency-Key": "draft"})
     assert replay.json()["id"] == body["id"]
     assert "username" not in body
-    assert body["setup_spent_credits"] == "0"
+    assert body["setup_spent_cents"] == "0"
     updated = client.patch(
-        f"/execution-budgets/{body['id']}", json={"total_credits": 30, "expected_revision": body["revision"]}
+        f"/execution-budgets/{body['id']}", json={"total_cents": 30, "expected_revision": body["revision"]}
     )
     assert updated.status_code == 200
     stale = client.patch(
-        f"/execution-budgets/{body['id']}", json={"total_credits": 40, "expected_revision": body["revision"]}
+        f"/execution-budgets/{body['id']}", json={"total_cents": 40, "expected_revision": body["revision"]}
     )
     assert stale.status_code == 409
-    assert client.get(f"/execution-budgets/{body['id']}").json()["total_credits"] == 30
+    assert client.get(f"/execution-budgets/{body['id']}").json()["total_cents"] == 30
 
 
 def test_budget_total_conflict_carries_authoritative_rollback_values() -> None:
@@ -66,23 +66,23 @@ def test_budget_total_conflict_carries_authoritative_rollback_values() -> None:
     error = budget_http_error(
         BudgetTotalConflictError(
             "rejected",
-            current_total_credits=30,
-            minimum_total_credits=12,
+            current_total_cents=30,
+            minimum_total_cents=12,
         )
     )
     assert error.status_code == 409
     assert error.code == "budget.conflict"
-    assert error.params == {"current_total_credits": 30, "minimum_total_credits": 12}
+    assert error.params == {"current_total_cents": 30, "minimum_total_cents": 12}
 
 
 def test_budget_api_hides_another_accounts_budget(client: TestClient) -> None:
     """Require ownership on restoration and mutations, not just a valid UUID."""
-    created = client.post("/execution-budgets", json={"total_credits": 20}, headers={"Idempotency-Key": "draft"}).json()
+    created = client.post("/execution-budgets", json={"total_cents": 20}, headers={"Idempotency-Key": "draft"}).json()
     client.app.dependency_overrides[get_authenticated_user] = lambda: AuthenticatedUser("bob", "user", ())
     assert client.get(f"/execution-budgets/{created['id']}").status_code == 404
     assert (
         client.patch(
-            f"/execution-budgets/{created['id']}", json={"total_credits": 30, "expected_revision": 1}
+            f"/execution-budgets/{created['id']}", json={"total_cents": 30, "expected_revision": 1}
         ).status_code
         == 404
     )
@@ -90,14 +90,14 @@ def test_budget_api_hides_another_accounts_budget(client: TestClient) -> None:
 
 def test_budget_api_requires_idempotency_and_does_not_promise_wallet_funding(client: TestClient) -> None:
     """Validate the chosen total while showing actual account funding separately."""
-    assert client.post("/execution-budgets", json={"total_credits": 20}).status_code == 422
+    assert client.post("/execution-budgets", json={"total_cents": 20}).status_code == 422
     assert (
         client.post(
-            "/execution-budgets", json={"total_credits": 1.5}, headers={"Idempotency-Key": "fractional"}
+            "/execution-budgets", json={"total_cents": 1.5}, headers={"Idempotency-Key": "fractional"}
         ).status_code
         == 422
     )
-    large = client.post("/execution-budgets", json={"total_credits": 100}, headers={"Idempotency-Key": "larger-limit"})
+    large = client.post("/execution-budgets", json={"total_cents": 100}, headers={"Idempotency-Key": "larger-limit"})
     assert large.status_code == 200
-    assert large.json()["account_available_credits"] == 50
-    assert large.json()["total_credits"] == 100
+    assert large.json()["account_available_cents"] == 50
+    assert large.json()["total_cents"] == 100

@@ -2,7 +2,7 @@
 
 Drives the tagger's assist modes on top of the persisted session rows:
 the dataset interview (rubric distillation), batched label predictions for
-calibration and review rounds, pre-run credit estimates, the bulk auto-tag
+calibration and review rounds, pre-run cost estimates, the bulk auto-tag
 job — and, on sessions created without data, the synthetic-dataset generator
 that writes the rows from the specification the interview derived.
 
@@ -54,7 +54,7 @@ from ..model_catalog import ReasoningEffort, get_catalog_cached, is_hidden_model
 from ..model_router import effective_reasoning_effort, route_menu_model
 from ..sharing_access import ShareRole
 from ..tagging_session_access import require_role
-from ._helpers import enforce_llm_credits, sse_from_events, stream_with_llm_metering
+from ._helpers import enforce_llm_balance, sse_from_events, stream_with_llm_metering
 
 logger = logging.getLogger(__name__)
 
@@ -94,10 +94,7 @@ class InterviewRequest(BaseModel):
     )
     reasoning_effort: ReasoningEffort | None = Field(
         default=None,
-        description=(
-            "Explicit reasoning-effort level for the chosen model; absent "
-            "keeps the model's default."
-        ),
+        description=("Explicit reasoning-effort level for the chosen model; absent keeps the model's default."),
     )
 
 
@@ -127,19 +124,19 @@ class PredictRequest(BaseModel):
 
 
 class PredictResponse(BaseModel):
-    """Per-row predictions plus the credit cost of the calls made."""
+    """Per-row predictions plus the cost of the calls made, in cents."""
 
     predictions: dict[str, dict[str, Any]]
-    credits: int
+    cents: int
 
 
 class EstimateResponse(BaseModel):
-    """Credit estimate for auto-tagging every currently-unlabeled row."""
+    """Cost estimate for auto-tagging every currently-unlabeled row."""
 
     rows: int
     model: str
-    credits_low: int
-    credits_high: int
+    cents_low: int
+    cents_high: int
 
 
 class AutotagStartResponse(BaseModel):
@@ -154,7 +151,7 @@ class AutotagStatusResponse(BaseModel):
     status: str
     total: int
     done: int
-    credits_spent: int = 0
+    cents_spent: int = 0
     live: bool = Field(
         description="False when the session claims 'running' but the worker fleet "
         "no longer owns an active job for it — the client should offer a resume."
@@ -182,7 +179,7 @@ class SynthesizeResponse(BaseModel):
 
     columns: list[str]
     rows: list[dict[str, Any]]
-    credits: int
+    cents: int
     model: str
 
 
@@ -236,7 +233,7 @@ def _require_known_model(assist: dict[str, Any]) -> None:
     """Reject a session whose chosen tagging model is not in the catalog.
 
     The client only offers catalog models, but ``assist`` is a free-form JSON
-    column any API caller can write — and tagging spends platform credits, so
+    column any API caller can write — and tagging spends the account balance, so
     the curated catalog stays the boundary of what a session may run on.
 
     Args:
@@ -352,7 +349,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
         Returns:
             The assistant turn; ``rubric`` is populated once ``done`` is true.
         """
-        enforce_llm_credits(job_store, user.username)
+        enforce_llm_balance(job_store, user.username)
         with Session(job_store.engine) as db:
             row = _load_for_role(db, session_id, user)
             config = _interview_config(row)
@@ -376,9 +373,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             raise DomainError("tagger.assist.llm_failed", status=502) from exc
         finally:
             # A failed turn's retries still consumed tokens; bill what ran.
-            meter_llm_run(
-                job_store.engine, user.username, usage_sink, description="Tagging interview"
-            )
+            meter_llm_run(job_store.engine, user.username, usage_sink, description="Tagging interview")
         return InterviewResponse(**turn)
 
     @router.post(
@@ -405,7 +400,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
         Returns:
             A ``text/event-stream`` response.
         """
-        await asyncio.to_thread(enforce_llm_credits, job_store, user.username)
+        await asyncio.to_thread(enforce_llm_balance, job_store, user.username)
         with Session(job_store.engine) as db:
             row = _load_for_role(db, session_id, user)
             config = _interview_config(row)
@@ -467,8 +462,8 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             user: Authenticated caller; must own the session.
 
         Returns:
-            The ``{row_id: {value, confidence, reason}}`` map and the credit
-            cost of the calls made.
+            The ``{row_id: {value, confidence, reason}}`` map and the cost
+            of the calls made, in cents.
         """
         with Session(job_store.engine) as db:
             row = _load_for_role(db, session_id, user)
@@ -481,13 +476,13 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
         rows = [r for r in data if str(r.get("id")) in wanted]
         if not rows:
             raise DomainError("tagger.assist.rows_not_found", status=404)
-        enforce_llm_credits(job_store, user.username)
+        enforce_llm_balance(job_store, user.username)
         rubric = [str(r) for r in assist.get("rubric") or []]
         examples = tagging.select_examples(config, data, annotations, assist, exclude_ids=wanted)
         instructions = tagging.compile_instructions(config, rubric, examples)
         usage_sink: list = []
         try:
-            predictions, credits = tagging.predict_rows(
+            predictions, cents = tagging.predict_rows(
                 config,
                 instructions,
                 rows,
@@ -506,7 +501,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                 description="Tagging predictions",
                 token_source=model_config.token_source or TOKEN_SOURCE_MANAGED,
             )
-        return PredictResponse(predictions=predictions, credits=credits)
+        return PredictResponse(predictions=predictions, cents=cents)
 
     @router.post(
         "/tagging-sessions/{session_id}/assist/predict/stream",
@@ -520,7 +515,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
         The streaming twin of the predict route — same few-shot compilation
         and row lookup — emitting a ``prediction`` event per row the moment
         its label lands, a terminal ``predict_done`` with the merged map and
-        credit cost, and ``error`` on total failure.
+        cost in cents, and ``error`` on total failure.
 
         Args:
             session_id: UUID of the tagger session.
@@ -530,7 +525,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
         Returns:
             A ``text/event-stream`` response.
         """
-        await asyncio.to_thread(enforce_llm_credits, job_store, user.username)
+        await asyncio.to_thread(enforce_llm_balance, job_store, user.username)
         with Session(job_store.engine) as db:
             row = _load_for_role(db, session_id, user)
             config = _effective_config(row)
@@ -583,17 +578,17 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
     @router.post(
         "/tagging-sessions/{session_id}/assist/estimate",
         response_model=EstimateResponse,
-        summary="Estimate the credit cost of auto-tagging the remaining rows",
+        summary="Estimate the cost of auto-tagging the remaining rows",
     )
     def assist_estimate(session_id: str, user: AuthenticatedUserDep) -> EstimateResponse:
-        """Estimate credits for tagging every currently-unlabeled row.
+        """Estimate the cost of tagging every currently-unlabeled row.
 
         Args:
             session_id: UUID of the tagger session.
             user: Authenticated caller; needs at least ``viewer`` access.
 
         Returns:
-            Row count, model id and a low/high credit range.
+            Row count, model id and a low/high cost range in cents.
         """
         with Session(job_store.engine) as db:
             row = _load_for_role(db, session_id, user, ShareRole.viewer)
@@ -607,7 +602,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
         instructions = tagging.compile_instructions(config, rubric, examples)
         pending = untagged_rows(data, annotations)
         return EstimateResponse(
-            **tagging.estimate_credits_for_rows(
+            **tagging.estimate_cents_for_rows(
                 instructions,
                 pending,
                 model=model_config.name,
@@ -639,7 +634,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                 or 422 when every row is already labeled.
         """
         worker = get_worker_ref()
-        enforce_llm_credits(job_store, user.username)
+        enforce_llm_balance(job_store, user.username)
         job_id = str(uuid4())
         with Session(job_store.engine) as db:
             row = _load_for_role(db, session_id, user)
@@ -662,7 +657,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                 "status": "running",
                 "total": len(pending),
                 "done": 0,
-                "credits_spent": int(prior.get("credits_spent", 0)),
+                "cents_spent": int(prior.get("cents_spent", 0)),
                 "job_id": job_id,
             }
             row.assist = cast(Any, state)
@@ -707,7 +702,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             user: Authenticated caller; must own the session.
 
         Returns:
-            Status, done/total counters, credits spent, and ``live``.
+            Status, done/total counters, cents spent, and ``live``.
         """
         with Session(job_store.engine) as db:
             row = _load_for_role(db, session_id, user, ShareRole.viewer)
@@ -727,7 +722,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             status=status,
             total=int(autotag.get("total", 0)),
             done=int(autotag.get("done", 0)),
-            credits_spent=int(autotag.get("credits_spent", 0)),
+            cents_spent=int(autotag.get("cents_spent", 0)),
             live=live if status == "running" else False,
         )
 
@@ -795,7 +790,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             user: Authenticated caller; needs at least ``editor`` access.
 
         Returns:
-            The settled columns, the stored rows and the credit cost.
+            The settled columns, the stored rows and the cost in cents.
 
         Raises:
             DomainError: 409 when the session was not created as synthetic or
@@ -803,7 +798,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
                 catalog, 400 when a BYOK pick lacks a verified connection, 502
                 when the model produced no usable rows.
         """
-        enforce_llm_credits(job_store, user.username)
+        enforce_llm_balance(job_store, user.username)
         with Session(job_store.engine) as db:
             row = _load_for_role(db, session_id, user)
             config = cast("dict[str, Any]", row.config)
@@ -813,7 +808,7 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
         model_config = _resolve_assist_model(job_store, user.username, assist)
         usage_sink: list = []
         try:
-            columns, rows, credits = tagging.synthesize_rows(
+            columns, rows, cents = tagging.synthesize_rows(
                 req.brief,
                 req.columns,
                 req.rows,
@@ -841,6 +836,6 @@ def create_tagger_assist_router(*, job_store, get_worker_ref: Callable[[], Any])
             row.row_count = cast(Any, len(data))
             row.updated_at = cast(Any, datetime.now(UTC))
             db.commit()
-        return SynthesizeResponse(columns=columns, rows=data, credits=credits, model=model_config.name)
+        return SynthesizeResponse(columns=columns, rows=data, cents=cents, model=model_config.name)
 
     return router

@@ -26,8 +26,8 @@ export interface AgentMessage {
 export interface TurnStats {
   inputTokens: number | null;
   outputTokens: number | null;
-  /** Billed cost in credits (one credit is one US cent). */
-  credits: number | null;
+  /** Billed cost in US cents. */
+  cents: number | null;
   durationMs: number | null;
   /** Time to the first reply token. */
   ttftMs: number | null;

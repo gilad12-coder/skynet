@@ -861,14 +861,14 @@ def test_serve_allowed_for_editor_member() -> None:
                 "input_fields": ["question"],
                 "output_fields": ["answer"],
                 "model_used": "openai/gpt-5.4-nano",
-                "credits_charged": "1.5",
+                "cents_charged": "1.5",
                 "budget": {},
             },
         )
         editor = _client(store, user="erin")
         resp = editor.post(
             f"/share/{token}/serve",
-            json={"inputs": {"question": "hi"}, "max_cost_credits": 10},
+            json={"inputs": {"question": "hi"}, "max_cost_cents": 10},
             headers={"Idempotency-Key": "editor-call"},
         )
 
@@ -972,7 +972,7 @@ def test_signed_in_stranger_gets_editor_link_role_and_can_serve() -> None:
         )
         served = stranger.post(
             f"/share/{token}/serve",
-            json={"inputs": {"question": "hi"}, "max_cost_credits": 10},
+            json={"inputs": {"question": "hi"}, "max_cost_cents": 10},
             headers={"Idempotency-Key": "link-editor-call"},
         )
     assert served.status_code == 200

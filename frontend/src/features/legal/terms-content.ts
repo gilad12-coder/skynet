@@ -1,8 +1,8 @@
 /**
  * Terms of Service copy for the hosted Skynet service.
  *
- * Original prose tailored to Skynet's real mechanics (prepaid credits via
- * Stripe, bring-your-own-key runs, third-party LLM providers, AGPL software vs.
+ * Original prose tailored to Skynet's real mechanics (a prepaid dollar balance
+ * via Stripe, bring-your-own-key runs, third-party LLM providers, AGPL software vs.
  * hosted service). This is a launch-ready draft, not legal advice — have
  * counsel review it before relying on it. Operator-specific values (entity,
  * governing law and contact emails) live in legal-config.ts.
@@ -159,18 +159,18 @@ export const TERMS_OF_SERVICE: LegalDocument = {
       ],
     },
     {
-      heading: "Credits, billing, and refunds",
+      heading: "Balance, billing, and refunds",
       blocks: [
         {
           kind: "list",
           items: [
-            "The Service uses a prepaid credit model. You purchase credit packs, and credits are consumed as you run jobs. Prices and the credit cost of features are shown in the Service and may change.",
-            "Each credit purchase includes a platform fee on top of the credits you buy. The fee is shown in the price before you pay, is the same for every payment method, and is not converted into credits.",
+            "The Service uses a prepaid balance held in US dollars. You add funds to your balance, and the cost of each job is deducted from it as you run jobs. Prices and the cost of features are shown in the Service and may change.",
+            "Each top-up includes a platform fee on top of the amount added to your balance. The fee is shown in the price before you pay, is the same for every payment method, and is not added to your balance.",
             "Payments are processed by our payment processor, Stripe. We do not receive or store your full card details. Your purchases are also subject to Stripe's terms.",
-            `Within 30 days of a credit purchase, you may ask for a refund of the credits from that purchase you have not yet used by writing to ${C.contactEmail}. We refund those credits to your original payment method; the platform fee is not refunded. Free or promotional credits are not refundable.`,
-            "Except as stated above or where required by law, credit purchases are final. If a charge is refunded, reversed, or disputed (including chargebacks), we may deduct the corresponding credits from your balance and may suspend access while the matter is resolved.",
+            `Within 30 days of a top-up, you may ask for a refund of the part of that top-up you have not yet used by writing to ${C.contactEmail}. We refund that amount to your original payment method; the platform fee is not refunded. Free or promotional balance is not refundable.`,
+            "Except as stated above or where required by law, top-ups are final. If a charge is refunded, reversed, or disputed (including chargebacks), we may deduct the corresponding amount from your balance and may suspend access while the matter is resolved.",
             "You are responsible for any taxes associated with your purchases, other than taxes based on our net income.",
-            "Free or promotional credits have no cash value and may expire or be revoked.",
+            "Free or promotional balance has no cash value and may expire or be revoked.",
           ],
         },
       ],

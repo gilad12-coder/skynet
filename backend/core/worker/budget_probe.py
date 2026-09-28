@@ -1,8 +1,8 @@
-"""Measure a run's real credit burn and decide whether it outgrows its limit.
+"""Measure a run's real spend and decide whether it outgrows its limit.
 
 The wizard's spending limit is an estimate made before any model call. The
 run itself is the accurate sample: once enough evaluations have settled, the
-credits they cost are scaled to the optimizer's planned evaluation count. A
+cents they cost are scaled to the optimizer's planned evaluation count. A
 projection above the limit pauses the run at its last checkpoint so the user
 can raise the limit and continue, instead of the hard stop at the limit
 discarding the remaining work.
@@ -56,27 +56,27 @@ def probe_ready(done_calls: int, planned_calls: int) -> bool:
     return done_calls >= max(PROBE_MIN_CALLS, math.ceil(planned_calls * PROBE_MIN_FRACTION))
 
 
-def project_total_credits(setup_spent: Decimal, run_spent: Decimal, done_calls: int, planned_calls: int) -> int:
-    """Scale the credits spent so far to the planned evaluation count.
+def project_total_cents(setup_spent: Decimal, run_spent: Decimal, done_calls: int, planned_calls: int) -> int:
+    """Scale the cents spent so far to the planned evaluation count.
 
     Setup spend (environment build, seed evaluation) is a one-off carried over
     unscaled; only the per-evaluation run spend grows with the plan.
 
     Args:
-        setup_spent: Credits settled during the setup phase.
-        run_spent: Credits settled during the run phase over ``done_calls``.
+        setup_spent: Cents settled during the setup phase.
+        run_spent: Cents settled during the run phase over ``done_calls``.
         done_calls: Metric calls completed so far; must be positive.
         planned_calls: Metric calls the optimizer intends to make in total.
 
     Returns:
-        The projected whole-credit total, rounded up.
+        The projected whole-cent total, rounded up.
     """
     projected = Decimal(setup_spent) + Decimal(run_spent) * Decimal(planned_calls) / Decimal(done_calls)
     return math.ceil(projected)
 
 
 def projection_evidence(
-    snapshot: BudgetSnapshot, *, done_calls: int, planned_calls: int, projected_credits: int
+    snapshot: BudgetSnapshot, *, done_calls: int, planned_calls: int, projected_cents: int
 ) -> dict[str, Any]:
     """Build the ``terminal_evidence.budget_projection`` record for a paused run.
 
@@ -84,7 +84,7 @@ def projection_evidence(
         snapshot: The budget at the moment of the decision.
         done_calls: Metric calls completed so far.
         planned_calls: Metric calls the optimizer intends to make in total.
-        projected_credits: Result of :func:`project_total_credits`.
+        projected_cents: Result of :func:`project_total_cents`.
 
     Returns:
         A JSON-serializable record the API surfaces to the client.
@@ -92,7 +92,7 @@ def projection_evidence(
     return {
         "planned_calls": planned_calls,
         "done_calls": done_calls,
-        "spent_credits": str(snapshot.setup_spent_credits + snapshot.run_spent_credits),
-        "projected_credits": projected_credits,
-        "limit_credits": snapshot.total_credits,
+        "spent_cents": str(snapshot.setup_spent_cents + snapshot.run_spent_cents),
+        "projected_cents": projected_cents,
+        "limit_cents": snapshot.total_cents,
     }

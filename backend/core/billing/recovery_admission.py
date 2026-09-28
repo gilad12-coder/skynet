@@ -20,13 +20,13 @@ class RecoveryAdmissionError(ValueError):
 
 
 def _amount(value: Any) -> Decimal:
-    """Read a finite nonnegative credit amount from persisted evidence."""
+    """Read a finite nonnegative cent amount from persisted evidence."""
     try:
         amount = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as error:
-        raise RecoveryAdmissionError("Recovery admission contains an invalid credit bound.") from error
+        raise RecoveryAdmissionError("Recovery admission contains an invalid spend bound.") from error
     if not amount.is_finite() or amount < 0:
-        raise RecoveryAdmissionError("Recovery admission contains an invalid credit bound.")
+        raise RecoveryAdmissionError("Recovery admission contains an invalid spend bound.")
     return amount
 
 
@@ -46,7 +46,7 @@ def model_call_bound(role: str, model: str, quote: OperationQuote, *, count: int
         count: Maximum calls permitted under this bound.
 
     Returns:
-        Prompt-free pricing, model, call-count, and credit-bound evidence.
+        Prompt-free pricing, model, call-count, and spend-bound evidence.
     """
     if count <= 0:
         raise RecoveryAdmissionError("Recovery model call bounds require a positive count.")
@@ -54,8 +54,8 @@ def model_call_bound(role: str, model: str, quote: OperationQuote, *, count: int
         "role": role,
         "model": model,
         "count": count,
-        "max_credits": str(quote.maximum.total),
-        "max_wallet_credits": str(quote.maximum.wallet),
+        "max_cents": str(quote.maximum.total),
+        "max_wallet_cents": str(quote.maximum.wallet),
         "price_binding": _price_binding(quote.price_snapshot),
         "price_snapshot": copy.deepcopy(dict(quote.price_snapshot)),
     }
@@ -77,8 +77,8 @@ def quote_fits_bound(bound: Mapping[str, Any], role: str, model: str, quote: Ope
         bound.get("role") == role
         and bound.get("model") == model
         and bound.get("price_binding") == _price_binding(quote.price_snapshot)
-        and quote.maximum.total <= _amount(bound.get("max_credits"))
-        and quote.maximum.wallet <= _amount(bound.get("max_wallet_credits"))
+        and quote.maximum.total <= _amount(bound.get("max_cents"))
+        and quote.maximum.wallet <= _amount(bound.get("max_wallet_cents"))
     )
 
 
@@ -110,8 +110,8 @@ def _validate_model_bound(bound: Any) -> Mapping[str, Any]:
         or bound.get("price_binding") != _price_binding(snapshot)
     ):
         raise RecoveryAdmissionError("Recovery admission contains an invalid model call bound.")
-    _amount(bound.get("max_credits"))
-    _amount(bound.get("max_wallet_credits"))
+    _amount(bound.get("max_cents"))
+    _amount(bound.get("max_wallet_cents"))
     return bound
 
 
@@ -123,7 +123,7 @@ def runtime_bound(kind: str, descriptor: Mapping[str, Any] | None) -> dict[str, 
         descriptor: Parent-owned Vercel image and lifetime profile.
 
     Returns:
-        Runtime identity, enforced resources, price evidence, and maximum credits.
+        Runtime identity, enforced resources, price evidence, and maximum cents.
     """
     if kind != "vercel" or not isinstance(descriptor, Mapping):
         raise RecoveryAdmissionError("Recovery requires a recognized bounded sandbox runtime.")
@@ -140,8 +140,8 @@ def runtime_bound(kind: str, descriptor: Mapping[str, Any] | None) -> dict[str, 
         "kind": "vercel",
         "request": request,
         "request_fingerprint": quote.request_fingerprint,
-        "max_credits": str(quote.maximum.total),
-        "max_wallet_credits": str(quote.maximum.wallet),
+        "max_cents": str(quote.maximum.total),
+        "max_wallet_cents": str(quote.maximum.wallet),
         "price_snapshot": copy.deepcopy(dict(quote.price_snapshot)),
     }
 
@@ -186,25 +186,23 @@ def build_recovery_plan(
         base.update(eligible=False, reason=reason)
     else:
         seed_total = sum(
-            (_amount(item.get("max_credits")) * int(item.get("count", 0)) for item in seed_bounds),
+            (_amount(item.get("max_cents")) * int(item.get("count", 0)) for item in seed_bounds),
             Decimal(0),
         )
         seed_wallet = sum(
-            (_amount(item.get("max_wallet_credits")) * int(item.get("count", 0)) for item in seed_bounds),
+            (_amount(item.get("max_wallet_cents")) * int(item.get("count", 0)) for item in seed_bounds),
             Decimal(0),
         )
-        total = _amount(runtime.get("max_credits")) + seed_total + _amount(execution_bound.get("max_credits"))
+        total = _amount(runtime.get("max_cents")) + seed_total + _amount(execution_bound.get("max_cents"))
         wallet = (
-            _amount(runtime.get("max_wallet_credits"))
-            + seed_wallet
-            + _amount(execution_bound.get("max_wallet_credits"))
+            _amount(runtime.get("max_wallet_cents")) + seed_wallet + _amount(execution_bound.get("max_wallet_cents"))
         )
         base.update(
             eligible=True,
-            max_credits=str(total),
-            max_wallet_credits=str(wallet),
-            execution_max_credits=str(_amount(execution_bound.get("max_credits"))),
-            execution_max_wallet_credits=str(_amount(execution_bound.get("max_wallet_credits"))),
+            max_cents=str(total),
+            max_wallet_cents=str(wallet),
+            execution_max_cents=str(_amount(execution_bound.get("max_cents"))),
+            execution_max_wallet_cents=str(_amount(execution_bound.get("max_wallet_cents"))),
         )
     base["fingerprint"] = json_fingerprint(base)
     return base
@@ -248,8 +246,8 @@ def validate_recovery_plan(plan: Any, manifest: Mapping[str, Any]) -> dict[str, 
             "kind": "vercel",
             "request": copy.deepcopy(dict(request)),
             "request_fingerprint": quote.request_fingerprint,
-            "max_credits": str(quote.maximum.total),
-            "max_wallet_credits": str(quote.maximum.wallet),
+            "max_cents": str(quote.maximum.total),
+            "max_wallet_cents": str(quote.maximum.wallet),
             "price_snapshot": copy.deepcopy(dict(quote.price_snapshot)),
         }
         validate_recovery_runtime({"runtime": runtime}, verified_runtime)
@@ -266,19 +264,17 @@ def validate_recovery_plan(plan: Any, manifest: Mapping[str, Any]) -> dict[str, 
     seed_wallet = Decimal(0)
     for bound in seed["model_calls"]:
         bound = _validate_model_bound(bound)
-        seed_total += _amount(bound.get("max_credits")) * bound["count"]
-        seed_wallet += _amount(bound.get("max_wallet_credits")) * bound["count"]
-    execution_scope = max(_amount(_validate_model_bound(bound).get("max_credits")) for bound in execution_calls)
-    execution_wallet = max(_amount(_validate_model_bound(bound).get("max_wallet_credits")) for bound in execution_calls)
-    if execution_scope != _amount(execution.get("max_credits")) or execution_wallet != _amount(
-        execution.get("max_wallet_credits")
+        seed_total += _amount(bound.get("max_cents")) * bound["count"]
+        seed_wallet += _amount(bound.get("max_wallet_cents")) * bound["count"]
+    execution_scope = max(_amount(_validate_model_bound(bound).get("max_cents")) for bound in execution_calls)
+    execution_wallet = max(_amount(_validate_model_bound(bound).get("max_wallet_cents")) for bound in execution_calls)
+    if execution_scope != _amount(execution.get("max_cents")) or execution_wallet != _amount(
+        execution.get("max_wallet_cents")
     ):
         raise RecoveryAdmissionError("Recovery admission execution aggregate does not match its model bounds.")
-    total = _amount(runtime.get("max_credits")) + seed_total + _amount(execution.get("max_credits"))
-    wallet = _amount(runtime.get("max_wallet_credits")) + seed_wallet + _amount(
-        execution.get("max_wallet_credits")
-    )
-    if total != _amount(document.get("max_credits")) or wallet != _amount(document.get("max_wallet_credits")):
+    total = _amount(runtime.get("max_cents")) + seed_total + _amount(execution.get("max_cents"))
+    wallet = _amount(runtime.get("max_wallet_cents")) + seed_wallet + _amount(execution.get("max_wallet_cents"))
+    if total != _amount(document.get("max_cents")) or wallet != _amount(document.get("max_wallet_cents")):
         raise RecoveryAdmissionError("Recovery admission aggregate does not match its operation bounds.")
     document["fingerprint"] = fingerprint
     return document

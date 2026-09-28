@@ -9,7 +9,7 @@ server-trusted ``username`` and (best-effort) the user's last-known browser
 ``anonymous_id`` so the PostHog distinct id lines up with the browser events.
 
 Everything in this module is best-effort: a telemetry failure must never turn
-a credited purchase or a finished run into an error.
+a completed top-up or a finished run into an error.
 """
 
 from __future__ import annotations

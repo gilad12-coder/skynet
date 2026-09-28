@@ -197,10 +197,10 @@ export function useReactServeChat(
             if (controller.signal.aborted) return;
             setStatus("done");
             setStatusLabel("");
-            if (result.credits_charged != null) {
+            if (result.cents_charged != null) {
               toast.success(
                 formatMsg("optimizations.serve.request_spent", {
-                  credits: formatBudgetUsd(String(result.credits_charged), getActiveIntlLocale()),
+                  cents: formatBudgetUsd(String(result.cents_charged), getActiveIntlLocale()),
                 }),
               );
             }

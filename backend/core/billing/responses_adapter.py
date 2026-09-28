@@ -118,7 +118,7 @@ def price_responses_request(
     Args:
         request: Final unchanged harness payload before physical provider dispatch.
         catalog: Fresh prices and limits for its exact selected model.
-        policy: Approved managed or external credit conversion.
+        policy: Approved managed or external cent conversion.
 
     Returns:
         Original protocol body with enforced output/routing caps and its immutable quote.

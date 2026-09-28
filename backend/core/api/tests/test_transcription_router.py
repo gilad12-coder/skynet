@@ -231,7 +231,7 @@ def test_free_grant_only_account_is_not_eligible(monkeypatch: pytest.MonkeyPatch
 def test_paid_balance_makes_account_eligible(monkeypatch: pytest.MonkeyPatch, billing_engine: Any) -> None:
     """A positive purchased balance unlocks platform-paid dictation."""
     with Session(billing_engine) as session:
-        session.add(BillingCustomerModel(username=_USER.username, stripe_customer_id="cus_1", credit_balance=5))
+        session.add(BillingCustomerModel(username=_USER.username, stripe_customer_id="cus_1", balance_cents=5))
         session.commit()
     keys = _seen_keys(monkeypatch)
     assert _post_audio(_client(_BillingStore(billing_engine))).status_code == 200
@@ -265,4 +265,3 @@ def test_own_groq_key_is_used_and_skips_platform_budget(
     assert [_post_audio(client).status_code for _ in range(2)] == [200, 200]
     assert keys == ["gsk-own", "gsk-own"]
     assert not list(redis_double.scan_iter("skynet:platform-budget:groq*"))
-

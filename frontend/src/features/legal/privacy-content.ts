@@ -39,8 +39,8 @@ export const PRIVACY_POLICY: LegalDocument = {
         {
           kind: "list",
           items: [
-            "Billing and transaction data: your credit balance, purchase history, and the amount of a purchase. Card payments are processed by Stripe; we receive confirmation and limited metadata (such as the last four digits and card brand) but never your full card number.",
-            "Usage and job telemetry: records of the jobs you run, credits consumed, timestamps, feature usage, and error and performance logs used to operate, secure, and debug the Service.",
+            "Billing and transaction data: your balance, top-up history, and the amount of a purchase. Card payments are processed by Stripe; we receive confirmation and limited metadata (such as the last four digits and card brand) but never your full card number.",
+            "Usage and job telemetry: records of the jobs you run, amounts spent, timestamps, feature usage, and error and performance logs used to operate, secure, and debug the Service.",
             "Device and connection data: IP address, browser and device type, and similar technical information, including data used for rate limiting and abuse prevention.",
             "Cookies: we use strictly necessary cookies to keep you signed in and to keep the Service secure. See “Cookies” below.",
           ],
@@ -87,7 +87,7 @@ export const PRIVACY_POLICY: LegalDocument = {
           kind: "list",
           items: [
             "Provide, maintain, and improve the Service, including running your optimization jobs and returning results (legal basis: performance of a contract).",
-            "Process payments, manage credit balances, and prevent payment fraud (legal basis: performance of a contract and legitimate interests).",
+            "Process payments, manage account balances, and prevent payment fraud (legal basis: performance of a contract and legitimate interests).",
             "Authenticate you, secure accounts, and enforce usage limits and our Terms, including rate limiting and abuse prevention (legal basis: legitimate interests and legal obligation).",
             "Communicate with you about the Service, including security notices, transactional messages, and support (legal basis: performance of a contract and legitimate interests).",
             "Monitor, debug, and analyze the Service to keep it reliable and secure (legal basis: legitimate interests).",

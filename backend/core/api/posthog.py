@@ -43,7 +43,7 @@ _EVENT_NAMES = {
     "share_created",
 }
 _PROPERTY_KEYS = {
-    "credits",
+    "cents",
     "engine",
     "generation_models",
     "has_cases",

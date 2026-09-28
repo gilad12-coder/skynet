@@ -22,7 +22,7 @@ error, quota) we fall back to a heuristic text composed from the title and
 description — the pipeline keeps working, just with weaker signal.
 
 The LLM call is billed to the job's owner: callers pass ``use_llm=False`` when
-the owner has no credits (the free heuristic still indexes the job) and a
+the owner has an empty balance (the free heuristic still indexes the job) and a
 ``usage_sink`` that collects the LM so they can meter it afterwards.
 """
 
@@ -148,9 +148,7 @@ def _build_lm() -> dspy.LM | None:
     if not model_id:
         return None
     try:
-        return build_language_model(
-            ModelConfig(name=model_id, max_tokens=1024, temperature=0.0)
-        )
+        return build_language_model(ModelConfig(name=model_id, max_tokens=1024, temperature=0.0))
     except Exception as exc:
         logger.warning("Could not build summariser LM (%s): %s", model_id, exc)
         return None
@@ -197,9 +195,7 @@ def summarize_task(
             out = predictor(
                 title=_truncate((title or "").strip(), 500, label="title"),
                 description=_truncate((description or "").strip(), 4000, label="description"),
-                dataset_sample=_truncate(
-                    json.dumps(sample_rows, ensure_ascii=False), 6000, label="dataset_sample"
-                ),
+                dataset_sample=_truncate(json.dumps(sample_rows, ensure_ascii=False), 6000, label="dataset_sample"),
             )
         text = (out.task_description or "").strip()
         return text or fallback

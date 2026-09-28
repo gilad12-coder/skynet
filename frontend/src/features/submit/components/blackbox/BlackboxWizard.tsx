@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import { ValidationFrame, ValidationGate, ValidationPlan } from "../ValidationFrame";
 import { msg } from "@/shared/lib/messages";
-import { useCredits } from "@/features/billing";
+import { useBalance } from "@/features/billing";
 import { registerTutorialHook } from "@/features/tutorial";
 import { SubmitSplashOverlay } from "@/shared/ui/submit-splash-overlay";
 import { TERMS } from "@/shared/lib/terms";
@@ -53,7 +53,7 @@ export function BlackboxWizard({
   initialRecipe: BlackboxRecipe;
 }) {
   const w = useBlackboxWizard(initialRecipe);
-  const wallet = useCredits();
+  const wallet = useBalance();
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);
   const [evaluationPart, setEvaluationPart] = useState(0);
@@ -158,8 +158,8 @@ export function BlackboxWizard({
 
   const shortfall = budgetShortfall(w.costBracket, w.tokenSource, {
     uncapped: w.budgetUncapped,
-    limit: w.maxCostCredits,
-    balance: wallet.available ? wallet.totalCredits : null,
+    limit: w.maxCostCents,
+    balance: wallet.available ? wallet.totalCents : null,
   });
   const handleEvaluationNext = async () => {
     if (activeEvaluationStep === "budget" && shortfall) {

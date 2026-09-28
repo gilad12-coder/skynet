@@ -12,7 +12,7 @@ import ast
 from typing import Any
 
 from bench.fixtures import make_job
-from bench.handlers._common import current_username, new_job_id, require_credits
+from bench.handlers._common import current_username, new_job_id, require_balance
 from bench.world import ToolError, World, tool
 
 
@@ -38,7 +38,9 @@ def blackbox_engines(w: World, args: dict[str, Any]) -> dict[str, Any]:
         "auto_engines": list(catalog["auto_engines"]),
         "auto_available": catalog["auto_available"],
         "auto_unavailable_reason": catalog["auto_unavailable_reason"],
-        "auto_checkpoint_recovery_supported": catalog["auto_checkpoint_recovery_supported"],
+        "auto_checkpoint_recovery_supported": catalog[
+            "auto_checkpoint_recovery_supported"
+        ],
         "auto_checkpoint_recovery_reason": catalog["auto_checkpoint_recovery_reason"],
         "proposer_runtimes": [dict(r) for r in catalog["proposer_runtimes"]],
         "upstream_revision": catalog["upstream_revision"],
@@ -75,7 +77,9 @@ def blackbox_scorer_dry_run(w: World, args: dict[str, Any]) -> dict[str, Any]:
             if function_name is None:
                 errors.append("scorer code defines no top-level function")
         except SyntaxError as exc:
-            errors.append(f"scorer code has a syntax error: {exc.msg} (line {exc.lineno})")
+            errors.append(
+                f"scorer code has a syntax error: {exc.msg} (line {exc.lineno})"
+            )
     elif kind == "python":
         errors.append("python scorer requires metric_code")
     if args.get("candidate") in (None, "", {}):
@@ -112,7 +116,7 @@ def submit_blackbox_run(w: World, args: dict[str, Any]) -> dict[str, Any]:
     if not args.get("reflection_model_config"):
         raise ToolError(422, "reflection_model_config is required")
     _check_engine(w, args.get("strategy"))
-    require_credits(w)
+    require_balance(w)
     reflection = args["reflection_model_config"]
     oid = new_job_id(w)
     job = make_job(
@@ -126,13 +130,23 @@ def submit_blackbox_run(w: World, args: dict[str, Any]) -> dict[str, Any]:
         optimizer_name=(args.get("strategy") or {}).get("engine") or "gepa",
         model_name=(args.get("task_model_config") or {}).get("name"),
         model_settings=args.get("task_model_config"),
-        reflection_model_name=reflection.get("name") if isinstance(reflection, dict) else None,
+        reflection_model_name=reflection.get("name")
+        if isinstance(reflection, dict)
+        else None,
         column_mapping=None,
         created_at=w.s["now"],
         seed=args.get("seed", 42),
         shuffle=bool(args.get("shuffle", True)),
         payload=dict(args),
-        logs=[{"timestamp": w.s["now"], "level": "INFO", "logger": "worker", "message": "Blackbox run queued", "pair_index": None}],
+        logs=[
+            {
+                "timestamp": w.s["now"],
+                "level": "INFO",
+                "logger": "worker",
+                "message": "Blackbox run queued",
+                "pair_index": None,
+            }
+        ],
     )
     if args.get("is_private"):
         job["is_private"] = True
@@ -158,9 +172,17 @@ def _check_engine(w: World, strategy: dict[str, Any] | None) -> None:
         if spec is None:
             raise ToolError(422, f"unknown blackbox engine '{engine}'")
         if not spec["available"]:
-            raise ToolError(422, spec.get("unavailable_reason") or f"blackbox engine '{engine}' is not available")
+            raise ToolError(
+                422,
+                spec.get("unavailable_reason")
+                or f"blackbox engine '{engine}' is not available",
+            )
     elif strategy.get("mode") == "auto" and not catalog["auto_available"]:
-        raise ToolError(422, catalog.get("auto_unavailable_reason") or "the Auto recipe is not available")
+        raise ToolError(
+            422,
+            catalog.get("auto_unavailable_reason")
+            or "the Auto recipe is not available",
+        )
 
 
 def _summary(w: World, job: dict[str, Any]) -> dict[str, Any]:

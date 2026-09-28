@@ -96,7 +96,7 @@ def _payload(marker: Path, runtime: str) -> dict[str, Any]:
         "execution_budget_id": "budget",
         "execution_budget_revision": 1,
         "execution_budget_generation": 0,
-        "max_cost_credits": 20,
+        "max_cost_cents": 20,
     }
 
 

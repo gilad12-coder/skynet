@@ -308,14 +308,14 @@ def _budget_for_preview(service: BudgetService, engine: Engine, payload: dict, u
         )
     if existing is not None:
         return service.get(existing, username)
-    available = StripeBillingService(engine=engine).spendable_credits(username)
+    available = StripeBillingService(engine=engine).spendable_cents(username)
     if available <= 0:
-        raise BudgetInsufficientError("The account has no available credits for a preview.")
+        raise BudgetInsufficientError("The account has no available funds for a preview.")
     return service.create(username, available, idempotency_key=creation_key)
 
 
 def _charged(engine: Engine, budget_id: str, identity: str) -> int:
-    """Read credits actually debited for this preview from immutable usage receipts.
+    """Read the cents actually debited for this preview from immutable usage receipts.
 
     Args:
         engine: Authoritative usage-evidence database.
@@ -328,7 +328,7 @@ def _charged(engine: Engine, budget_id: str, identity: str) -> int:
     with Session(engine) as session:
         return int(
             session.scalar(
-                select(func.coalesce(func.sum(ExecutionUsageEvidenceModel.billed_credits), 0))
+                select(func.coalesce(func.sum(ExecutionUsageEvidenceModel.billed_cents), 0))
                 .join(ExecutionOperationModel, ExecutionOperationModel.id == ExecutionUsageEvidenceModel.operation_id)
                 .where(
                     ExecutionOperationModel.budget_id == budget_id,
@@ -358,7 +358,7 @@ def run_protected_preview(
         on_token: Optional receiver for actual workflow output chunks.
 
     Returns:
-        Existing preview fields plus current budget, pending state, and confirmed charged credits.
+        Existing preview fields plus current budget, pending state, and confirmed charged cents.
     """
     engine = getattr(job_store, "engine", None)
     if engine is None:
@@ -476,7 +476,7 @@ def run_protected_preview(
             result.setdefault("error", "The preview is awaiting completion or confirmed usage.")
         return {
             **result,
-            "credits_charged": _charged(engine, budget.id, document["id"]),
+            "cents_charged": _charged(engine, budget.id, document["id"]),
             "budget": budget_response(service.get(budget.id, user.username)).model_dump(mode="json"),
             "preview_status": document["status"],
             "preflight_id": document["id"],

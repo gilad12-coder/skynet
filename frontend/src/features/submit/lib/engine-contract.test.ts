@@ -30,8 +30,8 @@ const catalog: BlackboxEngineCatalogResponse = {
       unavailable_reason: null,
       cost: {
         billing_basis: "at_cost",
-        minimum_session_credits: "1",
-        maximum_session_credits: "12",
+        minimum_session_cents: "1",
+        maximum_session_cents: "12",
         maximum_lifetime_seconds: 3600,
         vcpus: 2,
       },

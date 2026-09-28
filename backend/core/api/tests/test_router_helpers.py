@@ -817,4 +817,3 @@ def test_enforce_job_quota_counts_every_incoming_job() -> None:
 def test_enforce_job_quota_skips_an_unlimited_override() -> None:
     """An admin override of ``None`` means no cap."""
     enforce_job_quota(_QuotaStore(count=10_000, quota=None), "alice")
-

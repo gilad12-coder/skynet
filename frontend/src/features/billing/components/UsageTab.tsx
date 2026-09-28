@@ -2,13 +2,7 @@
 
 import { ProgressBar } from "@/shared/ui/progress-bar";
 import * as React from "react";
-import {
-  ArrowsClockwise,
-  ChartBar,
-  Coins,
-  Sparkle,
-  type Icon,
-} from "@/shared/ui/icons";
+import { ArrowsClockwise, ChartBar, Coins, Sparkle, type Icon } from "@/shared/ui/icons";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartTooltip, ChartEmptyState } from "@/shared/charts/chart-utils";
 import { ChartTable } from "@/shared/charts/chart-table";
@@ -24,8 +18,8 @@ import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { Segmented } from "@/shared/ui/segmented";
 import { PanelHeading } from "@/shared/ui/panel-heading";
 import { Button } from "@/shared/ui/primitives/button";
-import { useCredits } from "../providers/credit-provider";
-import { formatCredits, formatCreditsUsd, formatResetDate, type UsageEntry } from "../lib/credit";
+import { useBalance } from "../providers/balance-provider";
+import { formatCents, formatCentsUsd, formatResetDate, type UsageEntry } from "../lib/wallet";
 
 /** A fixed look-back preset. `all` drops the lower bound. */
 type PresetRange = "7d" | "30d" | "90d" | "all";
@@ -65,7 +59,7 @@ const BILLED_FILL = "var(--color-chart-1)";
 
 const ENTRY_CAP = 200;
 
-/** A spend-over-time bucket: billed credits under one axis label. */
+/** A spend-over-time bucket: billed cents under one axis label. */
 interface Bucket {
   key: string;
   label: string;
@@ -127,30 +121,30 @@ function deriveUsage(
   let billed = 0;
   let runs = 0;
   const perDay = new Map<string, number>();
-  const perModel = new Map<string | null, { credits: number; runs: number }>();
+  const perModel = new Map<string | null, { cents: number; runs: number }>();
   for (const entry of inRange) {
-    if (entry.kind !== "run" || entry.credits >= 0) continue;
-    const spent = -entry.credits;
+    if (entry.kind !== "run" || entry.cents >= 0) continue;
+    const spent = -entry.cents;
     billed += spent;
     runs += 1;
     const day = entry.at.slice(0, 10);
     perDay.set(day, (perDay.get(day) ?? 0) + spent);
-    const model = perModel.get(entry.model) ?? { credits: 0, runs: 0 };
-    model.credits += spent;
+    const model = perModel.get(entry.model) ?? { cents: 0, runs: 0 };
+    model.cents += spent;
     model.runs += 1;
     perModel.set(entry.model, model);
   }
   return {
     start: startIso,
     end: endIso,
-    billed_credits: billed,
+    billed_cents: billed,
     runs,
     by_day: [...perDay.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, value]) => ({ date, billed_credits: value })),
+      .map(([date, value]) => ({ date, billed_cents: value })),
     by_model: [...perModel.entries()]
-      .sort(([, a], [, b]) => b.credits - a.credits)
-      .map(([model, value]) => ({ model, credits: value.credits, runs: value.runs })),
+      .sort(([, a], [, b]) => b.cents - a.cents)
+      .map(([model, value]) => ({ model, cents: value.cents, runs: value.runs })),
     entries: inRange.slice(0, ENTRY_CAP),
   };
 }
@@ -179,7 +173,7 @@ function bucketDays(
   const map = new Map<string, number>();
   for (const day of byDay) {
     const key = mode === "week" ? weekKey(day.date) : day.date;
-    map.set(key, (map.get(key) ?? 0) + day.billed_credits);
+    map.set(key, (map.get(key) ?? 0) + day.billed_cents);
   }
   return [...map.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -201,9 +195,9 @@ function StatCard({ icon: Icon, label, value }: { icon: Icon; label: string; val
 }
 
 /**
- * Billed spend over time, shown in dollars. The bucket values stay in credits
+ * Billed spend over time, shown in dollars. The bucket values stay in cents
  * (the ledger's unit); every display path — Y-axis ticks, tooltip, and the Lite
- * table — renders them through `formatCreditsUsd` so the chart reads in the same
+ * table — renders them through `formatCentsUsd` so the chart reads in the same
  * dollars as the "Spent" stat above it. Lite mode falls back to a table.
  */
 function SpendChart({ buckets, locale }: { buckets: Bucket[]; locale: string }) {
@@ -219,7 +213,7 @@ function SpendChart({ buckets, locale }: { buckets: Bucket[]; locale: string }) 
             key: "billed",
             label: msg("usage.series.billed"),
             align: "end",
-            format: (value) => formatCreditsUsd(value as number, locale),
+            format: (value) => formatCentsUsd(value as number, locale),
           },
         ]}
       />
@@ -246,10 +240,10 @@ function SpendChart({ buckets, locale }: { buckets: Bucket[]; locale: string }) 
             className="fill-muted-foreground"
             allowDecimals={false}
             width={52}
-            tickFormatter={(value: number) => formatCreditsUsd(value, locale)}
+            tickFormatter={(value: number) => formatCentsUsd(value, locale)}
           />
           <Tooltip
-            content={<ChartTooltip formatValue={(value) => formatCreditsUsd(value, locale)} />}
+            content={<ChartTooltip formatValue={(value) => formatCentsUsd(value, locale)} />}
             cursor={{ fill: "var(--color-chart-5)", opacity: 0.35 }}
           />
           <Bar
@@ -295,20 +289,20 @@ function ModelBreakdown({
       <ChartTable
         rows={rows.map((row) => ({
           model: row.model ? modelDisplayName(row.model) : msg("usage.model.unknown"),
-          credits: formatCreditsUsd(row.credits, locale),
+          cents: formatCentsUsd(row.cents, locale),
           runs: row.runs,
           tokens: rowTokens(row) > 0 ? formatTokens(rowTokens(row), locale) : "—",
         }))}
         columns={[
           { key: "model", label: msg("usage.col.model") },
-          { key: "credits", label: msg("usage.col.credits"), align: "end" },
+          { key: "cents", label: msg("usage.col.amount"), align: "end" },
           { key: "runs", label: msg("usage.col.runs"), align: "end" },
           { key: "tokens", label: msg("usage.col.tokens"), align: "end" },
         ]}
       />
     );
   }
-  const max = Math.max(...rows.map((row) => row.credits), 1);
+  const max = Math.max(...rows.map((row) => row.cents), 1);
   return (
     <ul className="flex flex-col gap-2.5">
       {rows.slice(0, 6).map((row, index) => {
@@ -338,12 +332,12 @@ function ModelBreakdown({
                   </span>
                 )}
                 <span dir="ltr" className="text-xs font-medium tabular-nums text-foreground">
-                  {formatCreditsUsd(row.credits, locale)}
+                  {formatCentsUsd(row.cents, locale)}
                 </span>
               </span>
             </div>
             <ProgressBar
-              value={Math.round((row.credits / max) * 100)}
+              value={Math.round((row.cents / max) * 100)}
               color={MODEL_RAMP[index % MODEL_RAMP.length]}
             />
           </li>
@@ -356,8 +350,8 @@ function ModelBreakdown({
 /** The window's costliest runs, biggest spend first. */
 function RunBreakdown({ entries, locale }: { entries: BillingUsageEntry[]; locale: string }) {
   const runs = entries
-    .filter((entry) => entry.kind === "run" && entry.credits < 0)
-    .sort((a, b) => a.credits - b.credits)
+    .filter((entry) => entry.kind === "run" && entry.cents < 0)
+    .sort((a, b) => a.cents - b.cents)
     .slice(0, 6);
   if (runs.length === 0) {
     return <EmptyState variant="list" title={msg("usage.empty.title")} />;
@@ -380,7 +374,7 @@ function RunBreakdown({ entries, locale }: { entries: BillingUsageEntry[]; local
             )}
           </span>
           <span dir="ltr" className="shrink-0 text-sm font-medium tabular-nums text-foreground">
-            −{formatCreditsUsd(-run.credits, locale)}
+            −{formatCentsUsd(-run.cents, locale)}
           </span>
         </li>
       ))}
@@ -390,8 +384,8 @@ function RunBreakdown({ entries, locale }: { entries: BillingUsageEntry[]; local
 
 /** One activity-list row. Numerals and model ids stay LTR-islanded. */
 function LedgerRow({ entry, locale }: { entry: BillingUsageEntry; locale: string }) {
-  const credited = entry.credits > 0;
-  const free = entry.credits === 0;
+  const credited = entry.cents > 0;
+  const free = entry.cents === 0;
   return (
     <li className="flex items-center gap-3 border-b border-border/40 py-3 last:border-b-0">
       <span className="flex min-w-0 flex-1 flex-col">
@@ -418,7 +412,7 @@ function LedgerRow({ entry, locale }: { entry: BillingUsageEntry; locale: string
             )}
           >
             {credited ? "+" : "−"}
-            {formatCreditsUsd(Math.abs(entry.credits), locale)}
+            {formatCentsUsd(Math.abs(entry.cents), locale)}
           </span>
         )}
         <span dir="ltr" className="text-[0.6875rem] text-muted-foreground/70">
@@ -432,7 +426,7 @@ function LedgerRow({ entry, locale }: { entry: BillingUsageEntry; locale: string
 /**
  * Usage — the `usage` settings tab.
  *
- * A full personal spend dashboard over the managed-credit ledger: a date-ranged
+ * A full personal spend dashboard over the balance ledger: a date-ranged
  * window, headline stats (spent · runs), a billed-spend time series, per-model
  * and per-run breakdowns, and the raw activity list. Data
  * comes from the backend `GET /billing/usage` rollup; if that read fails the tab
@@ -440,7 +434,7 @@ function LedgerRow({ entry, locale }: { entry: BillingUsageEntry; locale: string
  * surface still renders.
  */
 export function UsageTab() {
-  const { wallet } = useCredits();
+  const { wallet } = useBalance();
   const { locale } = useLocale();
   const [range, setRange] = React.useState<RangeKey>("30d");
   const [customFrom, setCustomFrom] = React.useState<string | null>(null);
@@ -526,13 +520,13 @@ export function UsageTab() {
             iconOnly
             disabled={entries.length === 0}
             getData={() => ({
-              columns: ["date", "label", "model", "kind", "credits"],
+              columns: ["date", "label", "model", "kind", "cents"],
               rows: entries.map((entry) => ({
                 date: entry.at,
                 label: entry.label,
                 model: entry.model,
                 kind: entry.kind,
-                credits: entry.credits,
+                cents: entry.cents,
               })),
               filename: "skynet-usage",
             })}
@@ -582,7 +576,7 @@ export function UsageTab() {
     );
   }
 
-  const totallyEmpty = !loading && entries.length === 0 && data.billed_credits === 0;
+  const totallyEmpty = !loading && entries.length === 0 && data.billed_cents === 0;
 
   if (totallyEmpty) {
     return (
@@ -609,12 +603,12 @@ export function UsageTab() {
         <StatCard
           icon={Coins}
           label={msg("usage.stat.spent")}
-          value={formatCreditsUsd(data.billed_credits, locale)}
+          value={formatCentsUsd(data.billed_cents, locale)}
         />
         <StatCard
           icon={Sparkle}
           label={msg("usage.stat.runs")}
-          value={formatCredits(data.runs, locale)}
+          value={formatCents(data.runs, locale)}
         />
       </div>
 

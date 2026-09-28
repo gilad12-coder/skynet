@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { creditsToBudgetText, parseBudgetInput } from "./budget-input.ts";
+import { centsToBudgetText, parseBudgetInput } from "./budget-input.ts";
 
 const value = (text: string, locale = "en") => parseBudgetInput(text, locale);
 
-test("parseBudgetInput reads whole dollars as credits with locale grouping", () => {
+test("parseBudgetInput reads whole dollars as cents with locale grouping", () => {
   assert.deepEqual(value("120"), { kind: "value", value: 12000 });
   assert.deepEqual(value(" 1,200 "), { kind: "value", value: 120000 });
   assert.deepEqual(value("+120"), { kind: "value", value: 12000 });
@@ -69,24 +69,24 @@ test("parseBudgetInput treats blank text as unset", () => {
   assert.deepEqual(value("‎"), { kind: "empty" });
 });
 
-test("creditsToBudgetText renders credits as dollar text", () => {
-  assert.equal(creditsToBudgetText(250, "en"), "2.50");
-  assert.equal(creditsToBudgetText(1000, "en"), "10");
-  assert.equal(creditsToBudgetText(10, "en"), "0.10");
-  assert.equal(creditsToBudgetText(1, "en"), "0.01");
-  assert.equal(creditsToBudgetText(12050, "en"), "120.50");
-  assert.equal(creditsToBudgetText(150, "de"), "1,50");
+test("centsToBudgetText renders cents as dollar text", () => {
+  assert.equal(centsToBudgetText(250, "en"), "2.50");
+  assert.equal(centsToBudgetText(1000, "en"), "10");
+  assert.equal(centsToBudgetText(10, "en"), "0.10");
+  assert.equal(centsToBudgetText(1, "en"), "0.01");
+  assert.equal(centsToBudgetText(12050, "en"), "120.50");
+  assert.equal(centsToBudgetText(150, "de"), "1,50");
 });
 
-test("creditsToBudgetText round-trips through parseBudgetInput", () => {
-  for (const credits of [1, 10, 99, 100, 150, 250, 1000, 12050, 120000]) {
-    assert.deepEqual(parseBudgetInput(creditsToBudgetText(credits, "en"), "en"), {
+test("centsToBudgetText round-trips through parseBudgetInput", () => {
+  for (const cents of [1, 10, 99, 100, 150, 250, 1000, 12050, 120000]) {
+    assert.deepEqual(parseBudgetInput(centsToBudgetText(cents, "en"), "en"), {
       kind: "value",
-      value: credits,
+      value: cents,
     });
-    assert.deepEqual(parseBudgetInput(creditsToBudgetText(credits, "de"), "de"), {
+    assert.deepEqual(parseBudgetInput(centsToBudgetText(cents, "de"), "de"), {
       kind: "value",
-      value: credits,
+      value: cents,
     });
   }
 });

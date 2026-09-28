@@ -48,7 +48,7 @@ _SESSION_FIELDS = (
 )
 
 
-def vercel_sandbox_credit_range(request: Mapping[str, Any]) -> tuple[Decimal, Decimal]:
+def vercel_sandbox_cost_range(request: Mapping[str, Any]) -> tuple[Decimal, Decimal]:
     """Return the current marked-up session floor and enforceable request bound.
 
     Args:
@@ -57,7 +57,7 @@ def vercel_sandbox_credit_range(request: Mapping[str, Any]) -> tuple[Decimal, De
 
     Returns:
         The smallest published creation-plus-memory charge and the request's
-        maximum covered credit amount, both including the usage markup.
+        maximum covered amount in cents, both including the usage markup.
 
     Raises:
         UnpricedOperationError: When the request cannot be bounded.
@@ -392,8 +392,8 @@ class VercelUsageReservation:
                 self.operation.id,
                 self.runtime.username,
                 evidence_key=f"vercel-stop:{self.session_id}",
-                actual_credits=charge.total,
-                actual_wallet_credits=charge.wallet,
+                actual_cents=charge.total,
+                actual_wallet_cents=charge.wallet,
                 evidence={"provider": "vercel", "source": _SCHEMA_URL, "session": session, "provider_usd": str(usd)},
             )
         except BaseException:
@@ -402,7 +402,7 @@ class VercelUsageReservation:
 
 
 def vercel_charge_policy(price_snapshot: Mapping[str, Any]) -> ChargePolicy:
-    """Recover the admitted credit conversion without applying newer defaults.
+    """Recover the admitted cent conversion without applying newer defaults.
 
     Snapshots recorded before the usage markup existed carry a markup of 1.0 and
     keep settling at cost.
@@ -422,12 +422,12 @@ def vercel_charge_policy(price_snapshot: Mapping[str, Any]) -> ChargePolicy:
         or policy.get("kind") != "sandbox"
         or policy.get("version") != "skynet-operation-pricing-v1"
     ):
-        raise UsagePendingError("The Vercel operation has no supported credit conversion policy.")
+        raise UsagePendingError("The Vercel operation has no supported cent conversion policy.")
     try:
-        credit_usd = exact_nonnegative(policy.get("credit_usd"))
-        if credit_usd <= 0:
-            raise ValueError("Missing positive credit conversion")
+        cent_usd = exact_nonnegative(policy.get("cent_usd"))
+        if cent_usd <= 0:
+            raise ValueError("Missing positive cent conversion")
         markup = exact_nonnegative(policy.get("model_markup", "1"))
-        return ChargePolicy("sandbox", credit_usd=credit_usd, model_markup=markup)
+        return ChargePolicy("sandbox", cent_usd=cent_usd, model_markup=markup)
     except ValueError as error:
-        raise UsagePendingError("The Vercel operation has no usable historical credit conversion.") from error
+        raise UsagePendingError("The Vercel operation has no usable historical cent conversion.") from error

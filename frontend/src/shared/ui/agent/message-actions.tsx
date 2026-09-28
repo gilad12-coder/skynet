@@ -47,10 +47,10 @@ function formatSeconds(ms: number, locale: string): string {
   return `${seconds}${msg("shared.agent.seconds_short")}`;
 }
 
-function formatCost(credits: number, locale: string): string {
+function formatCost(cents: number, locale: string): string {
   const usd = new Intl.NumberFormat(locale, { style: "currency", currency: "USD" });
-  // One credit is one cent, so a cheap turn prices to zero whole credits.
-  return credits > 0 ? usd.format(credits / 100) : `< ${usd.format(0.01)}`;
+  // Cost is billed in whole cents, so a cheap turn can price to zero.
+  return cents > 0 ? usd.format(cents / 100) : `< ${usd.format(0.01)}`;
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -90,15 +90,20 @@ export function MessageActions({
     rows.push({ label: msg("shared.agent.info.routed_to"), value: servedModel });
   }
   if (stats?.inputTokens != null) {
-    rows.push({ label: msg("shared.agent.info.input_tokens"), value: count.format(stats.inputTokens) });
+    rows.push({
+      label: msg("shared.agent.info.input_tokens"),
+      value: count.format(stats.inputTokens),
+    });
   }
   if (stats?.outputTokens != null) {
-    rows.push({ label: msg("shared.agent.info.output_tokens"), value: count.format(stats.outputTokens) });
+    rows.push({
+      label: msg("shared.agent.info.output_tokens"),
+      value: count.format(stats.outputTokens),
+    });
   }
   // Generation time excludes the wait for the first token, so the rate
   // reflects how fast the model wrote rather than how long it queued.
-  const generationMs =
-    stats?.durationMs != null ? stats.durationMs - (stats.ttftMs ?? 0) : null;
+  const generationMs = stats?.durationMs != null ? stats.durationMs - (stats.ttftMs ?? 0) : null;
   if (stats?.outputTokens && generationMs && generationMs > 0) {
     const perSecond = stats.outputTokens / (generationMs / 1000);
     rows.push({
@@ -109,13 +114,19 @@ export function MessageActions({
     });
   }
   if (stats?.ttftMs != null) {
-    rows.push({ label: msg("shared.agent.info.first_token"), value: formatSeconds(stats.ttftMs, locale) });
+    rows.push({
+      label: msg("shared.agent.info.first_token"),
+      value: formatSeconds(stats.ttftMs, locale),
+    });
   }
   if (stats?.durationMs != null) {
-    rows.push({ label: msg("shared.agent.info.total_time"), value: formatSeconds(stats.durationMs, locale) });
+    rows.push({
+      label: msg("shared.agent.info.total_time"),
+      value: formatSeconds(stats.durationMs, locale),
+    });
   }
-  if (stats?.credits != null) {
-    rows.push({ label: msg("shared.agent.info.cost"), value: formatCost(stats.credits, locale) });
+  if (stats?.cents != null) {
+    rows.push({ label: msg("shared.agent.info.cost"), value: formatCost(stats.cents, locale) });
   }
 
   return (

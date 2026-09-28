@@ -74,9 +74,9 @@ def test_truncated_stream_retains_charge_until_original_generation_settles(datab
             operation = session.scalar(select(ExecutionOperationModel))
             operation_id = operation.id
         snapshot = runtime.service.get(runtime.budget_id, "alice")
-        assert snapshot.setup_spent_credits == 0
+        assert snapshot.setup_spent_cents == 0
         assert snapshot.pending_operations == 1
-        assert snapshot.reserved_credits > 0
+        assert snapshot.reserved_cents > 0
         reconciler = OpenRouterUsageReconciler(runtime.service, lambda owner, digest: "private")
         confirmed = True
         assert reconciler.reconcile(operation_id, "alice", client=client).state == "settled"
@@ -84,8 +84,8 @@ def test_truncated_stream_retains_charge_until_original_generation_settles(datab
         reconciler.reconcile(operation_id, "alice", client=client)
         assert len(calls) == read_count
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert snapshot.setup_spent_credits == Decimal("0.4")
-    assert snapshot.reserved_credits == 0
+    assert snapshot.setup_spent_cents == Decimal("0.4")
+    assert snapshot.reserved_cents == 0
     assert len([call for call in calls if call.method == "POST"]) == 1
 
 
@@ -150,7 +150,7 @@ def test_refused_request_releases_its_hold_instead_of_waiting_for_a_receipt(data
         response = dispatcher.dispatch("/chat/completions", REQUEST)
     assert response.status == 429
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert (snapshot.pending_operations, snapshot.reserved_credits, snapshot.setup_spent_credits) == (0, 0, 0)
+    assert (snapshot.pending_operations, snapshot.reserved_cents, snapshot.setup_spent_cents) == (0, 0, 0)
     with Session(database) as session:
         assert session.scalar(select(ExecutionOperationModel.state)) == "released"
         evidence = session.scalar(select(ExecutionUsageEvidenceModel))
@@ -185,7 +185,7 @@ def test_sweep_releases_a_refusal_that_earlier_runtimes_parked_as_pending(databa
     page = reconciler.sweep(limit=4)
     assert [result.state for result in page.results] == ["released"]
     snapshot = runtime.service.get(runtime.budget_id, "alice")
-    assert (snapshot.pending_operations, snapshot.reserved_credits) == (0, 0)
+    assert (snapshot.pending_operations, snapshot.reserved_cents) == (0, 0)
     assert reconciler.sweep(limit=4).results == ()
 
 

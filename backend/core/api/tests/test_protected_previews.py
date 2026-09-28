@@ -74,7 +74,7 @@ def previews(harness: _Harness, monkeypatch: pytest.MonkeyPatch) -> tuple[_Harne
         def dispatch() -> PaidResult[None]:
             """Verify physical provider dispatch is covered by the actual setup ledger."""
             budget = runtime.service.get(runtime.budget_id, runtime.username)
-            assert budget.reserved_credits >= 2
+            assert budget.reserved_cents >= 2
             state["calls"].append({"payload": payload, "kind": kind})
             return PaidResult(None, Decimal("0.01"), {"actual_usd": "0.01"})
 
@@ -151,8 +151,8 @@ def test_preview_creates_budget_and_replays_without_spending_again(previews, kin
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["preview_status"] == "succeeded"
-    assert result["credits_charged"] == 1
-    assert result["budget"]["setup_spent_credits"] == "1"
+    assert result["cents_charged"] == 1
+    assert result["budget"]["setup_spent_cents"] == "1"
     assert result["usage_by_model"][0]["input_tokens"] == 10
     assert harness.count(JobModel) == 0
     if kind == "scorer":
@@ -177,8 +177,8 @@ def test_preview_uses_shared_budget_and_rejects_changed_idempotency_input(previe
     second = harness.client.post("/blackbox/scorer/dry-run", json=payload, headers={"Idempotency-Key": "another"})
     assert second.status_code == 200, second.text
     assert second.json()["budget"]["id"] == budget.id
-    assert second.json()["budget"]["setup_spent_credits"] == "2"
-    assert second.json()["credits_charged"] == 1
+    assert second.json()["budget"]["setup_spent_cents"] == "2"
+    assert second.json()["cents_charged"] == 1
     changed = {**payload, "candidate": "different"}
     refused = harness.client.post("/blackbox/scorer/dry-run", json=changed, headers={"Idempotency-Key": "same"})
     assert refused.status_code == 409, refused.text
@@ -195,9 +195,9 @@ def test_preview_retains_completed_output_while_usage_is_pending(previews, kind:
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["preview_status"] == "pending"
-    assert body["budget"]["reserved_credits"] == "1"
+    assert body["budget"]["reserved_cents"] == "1"
     assert body["budget"]["pending_operations"] == 1
-    assert body["credits_charged"] == 1
+    assert body["cents_charged"] == 1
     assert body["score"] == 0.75 if kind == "scorer" else body["outputs"] == {"question": "explicit debug value"}
 
 
@@ -213,7 +213,7 @@ def test_failed_preview_replay_preserves_error_and_single_charge(previews, kind:
     assert first.status_code == second.status_code == 200
     assert first.json()["preview_status"] == "failed"
     assert first.json()["error"] == second.json()["error"]
-    assert second.json()["credits_charged"] == 1
+    assert second.json()["cents_charged"] == 1
     assert len(state["calls"]) == 1
 
 
@@ -225,7 +225,7 @@ def test_stream_retains_tokens_final_traces_and_budget(previews) -> None:
     assert "event: token" in response.text
     assert "event: final" in response.text
     assert "explicit debug value" in response.text
-    assert '"credits_charged": 1' in response.text
+    assert '"cents_charged": 1' in response.text
     assert '"node_traces"' in response.text
     assert len(state["calls"]) == len(state["bound"]) == 1
 
@@ -244,7 +244,7 @@ def test_unfunded_or_foreign_preview_never_dispatches(previews) -> None:
     )
     assert response.status_code == 404
     with Session(harness.store.engine) as session:
-        session.get(BillingCustomerModel, "alice").credit_balance = 0
+        session.get(BillingCustomerModel, "alice").balance_cents = 0
         session.commit()
     response = harness.client.post("/workflows/dry-run", json=_workflow_payload())
     assert response.status_code == 402
@@ -292,7 +292,7 @@ def test_unaffordable_preview_is_rejected_before_physical_dispatch(previews) -> 
     assert response.status_code == 200, response.text
     assert response.json()["ok"] is False
     assert response.json()["preview_status"] == "failed"
-    assert response.json()["credits_charged"] == 0
+    assert response.json()["cents_charged"] == 0
     assert not state["calls"]
     assert harness.count(ExecutionOperationModel) == 0
 
@@ -307,5 +307,5 @@ def test_pending_preview_replay_does_not_open_another_runtime(previews) -> None:
     assert first.status_code == replay.status_code == 200
     assert replay.json()["preflight_id"] == first.json()["preflight_id"]
     assert replay.json()["score"] == 0.75
-    assert replay.json()["budget"]["reserved_credits"] == "1"
+    assert replay.json()["budget"]["reserved_cents"] == "1"
     assert len(state["calls"]) == len(state["bound"]) == 1

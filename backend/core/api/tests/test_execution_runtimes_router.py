@@ -16,8 +16,8 @@ def test_runtime_catalog_separates_runtime_capability_from_run_eligibility(monke
         "runtime_cost_profile",
         lambda _settings, _workflow, _runtime: {
             "billing_basis": "at_cost",
-            "minimum_session_credits": "0.1",
-            "maximum_session_credits": "10",
+            "minimum_session_cents": "0.1",
+            "maximum_session_cents": "10",
             "maximum_lifetime_seconds": 2700,
             "vcpus": 2,
         },

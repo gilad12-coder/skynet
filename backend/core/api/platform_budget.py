@@ -1,7 +1,7 @@
 """Monthly spend caps for the platform-paid services users never pay for directly.
 
 Dictation (Groq Whisper) and embeddings run on the platform's own keys and are
-not metered against user credits, so nothing else bounds what a bug, a runaway
+not metered against user balances, so nothing else bounds what a bug, a runaway
 client or an abusive account can spend on them. Each service gets a counter in
 Redis keyed by calendar month (UTC); callers check :func:`budget_open` before a
 paid call and add the call's cost with :func:`record_spend` after it. The unit

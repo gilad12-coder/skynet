@@ -112,7 +112,7 @@ class CatalogModel(BaseModel):
             "Provider input (prompt) cost per token in USD, before the usage markup: "
             "the provider's live listing when probed, else LiteLLM's price table. "
             "None when unpriced; the client falls back to a conservative rate. "
-            "Drives the per-model pre-run credit estimate."
+            "Drives the per-model pre-run cost estimate."
         ),
     )
     output_cost_per_token: float | None = Field(
@@ -1702,7 +1702,7 @@ def require_known_model(model: str | None) -> None:
     """Reject a model id that is not in the curated catalog.
 
     Guards every endpoint that lets the client pick the LM for a
-    platform-billed call: only catalog models may spend platform credits.
+    platform-billed call: only catalog models may spend the account balance.
 
     Args:
         model: LiteLLM model id; empty/None passes (the server default runs).

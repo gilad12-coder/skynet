@@ -1,8 +1,8 @@
 /**
  * Parsing for the spending-limit field. The field is typed in dollars — the
  * user writes "3" for $3.00 or "1.20" for $1.20 — and the server bills in
- * credits, one credit to the cent, so a parsed amount is returned as whole
- * credits (dollars × 100). Because a credit is a whole cent, "1.205" is finer
+ * cents, so a parsed amount is returned as whole cents (dollars × 100). Because
+ * the smallest unit is a whole cent, "1.205" is finer
  * than the wallet can hold and is reported as a specific problem rather than
  * being rounded into a number the user never typed; "-1" is likewise reported
  * rather than flipped to 1. Group separators, whitespace and any script's
@@ -10,7 +10,7 @@
  *
  * This module is imported by a `node --test` suite that cannot resolve `@/`
  * aliases, so it stays import-free. `CENTS_PER_DOLLAR` is the inverse of
- * billing's `CREDIT_USD_VALUE` (0.01): one dollar is a hundred credits.
+ * billing's `CENT_USD_VALUE` (0.01): one dollar is a hundred cents.
  */
 
 const CENTS_PER_DOLLAR = 100;
@@ -90,28 +90,28 @@ export function parseBudgetInput(text: string, locale: string): BudgetInputResul
     return { kind: "invalid" };
   }
   // The dollar amount carries at most two decimals — a whole number of cents.
-  // A third decimal digit asks for a fraction of a credit the wallet cannot hold.
+  // A third decimal digit asks for a fraction of a cent the wallet cannot hold.
   if (fraction != null && fraction.length > 2) return { kind: "fraction" };
   const dollars = Number(whole);
-  const cents = fraction ? Number(fraction.padEnd(2, "0")) : 0;
-  const value = dollars * CENTS_PER_DOLLAR + cents;
+  const fractionCents = fraction ? Number(fraction.padEnd(2, "0")) : 0;
+  const value = dollars * CENTS_PER_DOLLAR + fractionCents;
   if (negative || value < 1) return { kind: "below_one" };
   if (!Number.isSafeInteger(value)) return { kind: "invalid" };
   return { kind: "value", value };
 }
 
 /**
- * Render a stored credit amount as the dollar text the spending-limit field
+ * Render a stored cent amount as the dollar text the spending-limit field
  * shows: `250` → "2.50", `1000` → "10", `10` → "0.10", `1` → "0.01". Cents are
  * dropped when zero and always padded to two digits otherwise, and the locale's
  * decimal separator is used so the text round-trips back through
  * `parseBudgetInput` in the same locale. Digits stay ASCII (universally typed
  * and normalised on the way in) and grouping is omitted, as an input field wants.
  */
-export function creditsToBudgetText(credits: number, locale: string): string {
-  const whole = Math.floor(credits / CENTS_PER_DOLLAR);
-  const cents = credits % CENTS_PER_DOLLAR;
-  if (cents === 0) return String(whole);
+export function centsToBudgetText(cents: number, locale: string): string {
+  const whole = Math.floor(cents / CENTS_PER_DOLLAR);
+  const fractionCents = cents % CENTS_PER_DOLLAR;
+  if (fractionCents === 0) return String(whole);
   const { decimal } = numberSymbols(locale);
-  return `${whole}${decimal}${String(cents).padStart(2, "0")}`;
+  return `${whole}${decimal}${String(fractionCents).padStart(2, "0")}`;
 }

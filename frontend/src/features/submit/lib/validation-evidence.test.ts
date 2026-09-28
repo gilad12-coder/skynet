@@ -79,7 +79,7 @@ test("evidenceStatus reports running, passed, failed, stale and idle", () => {
     error: null,
     checkedAt: 1,
     modelName: null,
-    creditsCharged: 0,
+    centsCharged: 0,
   };
   assert.equal(evidenceStatus(null, null, "a"), "idle");
   assert.equal(evidenceStatus(null, "a", "a"), "running");

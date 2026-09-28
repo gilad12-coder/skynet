@@ -57,9 +57,7 @@ def test_dataset_ready_unlocks_diagnostics_but_not_code_without_name() -> None:
 
 def test_named_dataset_ready_unlocks_code_authoring() -> None:
     """Naming the run (with the dataset ready) opens the Signature/Metric step."""
-    allowed = tools_for(
-        WizardState(job_name="Sentiment run", dataset_ready=True, columns_configured=True)
-    )
+    allowed = tools_for(WizardState(job_name="Sentiment run", dataset_ready=True, columns_configured=True))
     assert "request_code_authoring" in allowed
     assert "submit_job_run_post" not in allowed
 
@@ -99,9 +97,7 @@ def test_workflow_ready_unlocks_submit() -> None:
     # No graph (or an empty one) is not an authored program — submit stays locked
     # even though there is no Signature to satisfy the single-module gate.
     assert "submit_job_run_post" not in tools_for(cast(WizardState, base))
-    assert "submit_job_run_post" not in tools_for(
-        cast(WizardState, {**base, "workflow": {"nodes": [], "edges": []}})
-    )
+    assert "submit_job_run_post" not in tools_for(cast(WizardState, {**base, "workflow": {"nodes": [], "edges": []}}))
     ready = {**base, "workflow": {"nodes": [{"id": "input"}, {"id": "out"}], "edges": []}}
     assert "submit_job_run_post" in tools_for(cast(WizardState, ready))
 
@@ -159,9 +155,9 @@ def test_gepa_without_reflection_model_keeps_submit_locked() -> None:
         dataset_ready=True,
         columns_configured=True,
         signature_code=(
-            'class Sentiment(dspy.Signature):\n'
-            '    review: str = dspy.InputField()\n'
-            '    label: str = dspy.OutputField()\n'
+            "class Sentiment(dspy.Signature):\n"
+            "    review: str = dspy.InputField()\n"
+            "    label: str = dspy.OutputField()\n"
         ),
         metric_code="def metric(gold, pred, trace=None): return 1.0",
         model_config={"name": "openai/gpt-4o-mini"},
@@ -176,20 +172,20 @@ def test_gepa_without_reflection_model_keeps_submit_locked() -> None:
 # fallback branch with no columns mapped). Submitting these triggers the
 # server's "Missing inputs: ['input_field']" 400, so the gate must reject them.
 _PLACEHOLDER_SIGNATURE = (
-    'class MySignature(dspy.Signature):\n'
+    "class MySignature(dspy.Signature):\n"
     '    """Describe the task here."""\n\n'
-    '    # inputs\n'
+    "    # inputs\n"
     '    input_field: str = dspy.InputField(desc="")\n\n'
-    '    # outputs\n'
+    "    # outputs\n"
     '    output_field: str = dspy.OutputField(desc="")\n'
 )
 _PLACEHOLDER_METRIC = (
-    'def metric(gold: dspy.Example, pred: dspy.Prediction, trace: bool = None,'
-    ' pred_name: str = None, pred_trace: list = None) -> dspy.Prediction:\n'
+    "def metric(gold: dspy.Example, pred: dspy.Prediction, trace: bool = None,"
+    " pred_name: str = None, pred_trace: list = None) -> dspy.Prediction:\n"
     '    fields = ["output_field"]\n'
-    '    total = len(fields)\n'
-    '    correct = 0\n'
-    '    return dspy.Prediction(score=correct / total if total else 0.0)\n'
+    "    total = len(fields)\n"
+    "    correct = 0\n"
+    "    return dspy.Prediction(score=correct / total if total else 0.0)\n"
 )
 
 
@@ -221,14 +217,14 @@ def test_authored_code_unlocks_submit() -> None:
             dataset_ready=True,
             columns_configured=True,
             signature_code=(
-                'class Sentiment(dspy.Signature):\n'
+                "class Sentiment(dspy.Signature):\n"
                 '    """Classify the sentiment of a review."""\n\n'
                 '    review: str = dspy.InputField(desc="the review text")\n'
                 '    label: str = dspy.OutputField(desc="positive or negative")\n'
             ),
             metric_code=(
-                'def metric(gold, pred, trace=None):\n'
-                '    return float(gold.label.strip().lower() == str(pred.label).strip().lower())\n'
+                "def metric(gold, pred, trace=None):\n"
+                "    return float(gold.label.strip().lower() == str(pred.label).strip().lower())\n"
             ),
             model_configured=True,
             reflection_model_config={"name": "openai/gpt-4o-mini"},
@@ -253,15 +249,15 @@ def test_column_mapped_template_unlocks_submit() -> None:
             dataset_ready=True,
             columns_configured=True,
             signature_code=(
-                'class MySignature(dspy.Signature):\n'
+                "class MySignature(dspy.Signature):\n"
                 '    """Describe the task here."""\n\n'
-                '    # inputs\n'
+                "    # inputs\n"
                 '    question: str = dspy.InputField(desc="")\n\n'
-                '    # outputs\n'
+                "    # outputs\n"
                 '    answer: str = dspy.OutputField(desc="")\n'
             ),
             metric_code=(
-                'def metric(gold, pred, trace=None):\n'
+                "def metric(gold, pred, trace=None):\n"
                 '    fields = ["answer"]\n'
                 '    return float(getattr(pred, "answer", None) == gold.answer)\n'
             ),
@@ -315,9 +311,7 @@ def test_order_allows_name_first() -> None:
 
 def test_order_rejects_dataset_roles_before_name() -> None:
     """Column roles (Data) require the run to be named first (Basics)."""
-    err = validate_wizard_patch_order(
-        {"column_roles": {"q": "input", "a": "output"}}, WizardState()
-    )
+    err = validate_wizard_patch_order({"column_roles": {"q": "input", "a": "output"}}, WizardState())
     assert err is not None
     assert "Basics" in err
 
@@ -330,9 +324,7 @@ def test_order_allows_name_and_dataset_in_one_patch() -> None:
 
 def test_order_rejects_params_before_dataset() -> None:
     """Params can't be set before the dataset is ready, even with a name set."""
-    err = validate_wizard_patch_order(
-        {"optimizer_name": "gepa"}, WizardState(job_name="My run")
-    )
+    err = validate_wizard_patch_order({"optimizer_name": "gepa"}, WizardState(job_name="My run"))
     assert err is not None
     assert "Data" in err
 
@@ -354,10 +346,7 @@ def test_order_allows_model_after_code() -> None:
         signature_code="class S(dspy.Signature): ...",
         metric_code="def m(): return 1.0",
     )
-    assert (
-        validate_wizard_patch_order({"model_config": {"name": "openai/gpt-4o"}}, state)
-        is None
-    )
+    assert validate_wizard_patch_order({"model_config": {"name": "openai/gpt-4o"}}, state) is None
 
 
 def test_order_allows_model_after_column_mapped_template() -> None:
@@ -372,17 +361,14 @@ def test_order_allows_model_after_column_mapped_template() -> None:
         dataset_ready=True,
         columns_configured=True,
         signature_code=(
-            'class MySignature(dspy.Signature):\n'
+            "class MySignature(dspy.Signature):\n"
             '    """Describe the task here."""\n\n'
             '    question: str = dspy.InputField(desc="")\n'
             '    answer: str = dspy.OutputField(desc="")\n'
         ),
         metric_code='def metric(gold, pred, trace=None):\n    fields = ["answer"]\n    return 1.0\n',
     )
-    assert (
-        validate_wizard_patch_order({"model_config": {"name": "openai/gpt-5.4-nano"}}, state)
-        is None
-    )
+    assert validate_wizard_patch_order({"model_config": {"name": "openai/gpt-5.4-nano"}}, state) is None
 
 
 def test_order_ignores_unmapped_fields() -> None:
@@ -445,6 +431,7 @@ def test_auto_safe_gates_only_destructive() -> None:
 
 def _make_fake_tool(name: str, return_value: str = "ok") -> dspy.Tool:
     """Build a ``dspy.Tool`` whose async ``func`` returns the given value."""
+
     async def func(**kwargs):
         return return_value
 
@@ -570,9 +557,7 @@ async def test_submit_injects_validated_code_over_agent_supplied() -> None:
         metric_code="def m(example, prediction, trace): return 1.0",
     )
     assert seen["signature_code"] == "class Good(dspy.Signature): ..."
-    assert seen["metric_code"] == (
-        "def good(gold, pred, trace, pred_name, pred_trace): return 1.0"
-    )
+    assert seen["metric_code"] == ("def good(gold, pred, trace, pred_name, pred_trace): return 1.0")
     assert seen["staged_dataset_id"] == "ds_123"
 
 
@@ -772,9 +757,7 @@ async def test_profile_inline_dataset_not_overridden_by_staged_id() -> None:
         staged_dataset_id="ds_123",
         wizard_state=cast(WizardState, {}),
     )
-    await tool.func._async_body(
-        dataset=[{"q": "x"}], column_mapping={"inputs": {}, "outputs": {}}
-    )
+    await tool.func._async_body(dataset=[{"q": "x"}], column_mapping={"inputs": {}, "outputs": {}})
     assert "staged_dataset_id" not in seen
 
 
@@ -808,9 +791,7 @@ def test_submit_arg_extractor_ignores_non_submit_calls() -> None:
     ext = _SubmitArgExtractor("assistant_message")
     assert ext.feed('{"tool_calls": [{"name": "list_models", "args": {}}]}') is None
     ext.reset()
-    delta = ext.feed(
-        '{"tool_calls": [{"name": "submit", "args": {"assistant_message": "Done!"}}]}'
-    )
+    delta = ext.feed('{"tool_calls": [{"name": "submit", "args": {"assistant_message": "Done!"}}]}')
     assert delta == "Done!"
 
 
@@ -823,10 +804,7 @@ def test_submit_arg_extractor_handles_malformed_json() -> None:
 def test_submit_arg_extractor_picks_submit_among_parallel_calls() -> None:
     """Parallel tool calls including submit still resolve to the submit arg."""
     ext = _SubmitArgExtractor("reply")
-    parallel = (
-        '{"tool_calls": [{"name": "foo", "args": {}}, '
-        '{"name": "submit", "args": {"reply": "yo"}}]}'
-    )
+    parallel = '{"tool_calls": [{"name": "foo", "args": {}}, {"name": "submit", "args": {"reply": "yo"}}]}'
     assert ext.feed(parallel) == "yo"
 
 
@@ -904,9 +882,7 @@ def test_system_prompt_forbids_submit_in_authoring_turn() -> None:
 
 def _approval_engine():
     """In-memory shared-across-threads SQLite engine with the ORM schema."""
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     return engine
 
@@ -971,8 +947,7 @@ def test_agent_error_payload_flags_litellm_context_overflow() -> None:
 def test_agent_error_payload_flags_provider_overflow_message() -> None:
     """An untyped provider 400 mentioning context length is classified too."""
     exc = RuntimeError(
-        "BadRequestError: This model's maximum context length is 128000 tokens, "
-        "however you requested 191694 tokens"
+        "BadRequestError: This model's maximum context length is 128000 tokens, however you requested 191694 tokens"
     )
     assert _agent_error_payload(exc)["code"] == "context_too_long"
 
@@ -1035,7 +1010,7 @@ def test_new_always_and_lifecycle_tools_are_reachable() -> None:
 
 
 def test_trust_gating_of_lifecycle_and_blackbox_tools() -> None:
-    """Credit-spending tools gate in auto-safe; pause, samples and the dry run only gate in ask."""
+    """Balance-spending tools gate in auto-safe; pause, samples and the dry run only gate in ask."""
     for tool in ("resume_job_optimizations", "restart_job_optimizations", _BLACKBOX_SUBMIT):
         assert _needs_approval(tool, "auto_safe") is True
         assert _needs_approval(tool, "yolo") is False
@@ -1278,9 +1253,7 @@ async def test_blackbox_submit_allowed_after_passing_dry_run() -> None:
     passing = wrap(_make_fake_tool(_BLACKBOX_DRY_RUN, return_value='{"ok": true, "score": 1.0}'))
     await passing.func._async_body(candidate="s", scorer=_SCORER)
     other = {"kind": "python", "metric_code": "def score(candidate, case=None):\n    return 0.0"}
-    assert (await submit.func._async_body(objective="o", seed_candidate="s", scorer=other)).startswith(
-        "Submit blocked"
-    )
+    assert (await submit.func._async_body(objective="o", seed_candidate="s", scorer=other)).startswith("Submit blocked")
     assert seen == {}
     assert await submit.func._async_body(objective="o", seed_candidate="s", scorer=_SCORER) == "ok"
     assert seen["scorer"] == _SCORER
@@ -1343,7 +1316,6 @@ def test_system_prompt_covers_new_capabilities() -> None:
         assert needle in prompt
 
 
-
 class _ScriptedLM(dspy.BaseLM):
     """An LM that records every request and answers with scripted native tool calls."""
 
@@ -1380,7 +1352,11 @@ class _ScriptedLM(dspy.BaseLM):
         """
         self.requests.append({"messages": messages, **kwargs})
         name, args = self._script.pop(0)
-        call = {"id": f"call_{len(self.requests)}", "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}
+        call = {
+            "id": f"call_{len(self.requests)}",
+            "type": "function",
+            "function": {"name": name, "arguments": json.dumps(args)},
+        }
         message = {"role": "assistant", "content": None, "tool_calls": [call]}
         return litellm.ModelResponse(
             model="scripted",
@@ -1489,4 +1465,3 @@ async def test_turn_replays_history_natively_and_streams_the_submit(monkeypatch:
     assert events[0]["event"] == "turn_metadata"
     assert events[0]["data"]["allowed_tools"] == ["list_models_for_agent"]
     assert [e["event"] for e in events if e["event"] in ("tool_start", "tool_end")] == ["tool_start", "tool_end"]
-

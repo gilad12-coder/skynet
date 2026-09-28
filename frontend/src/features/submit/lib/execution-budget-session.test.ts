@@ -11,28 +11,28 @@ import type { StoredPreflightEvidence } from "./preflight-outcome.ts";
 
 const snapshot = (total = 20, revision = 1): ExecutionBudget => ({
   id: "budget-1",
-  total_credits: total,
+  total_cents: total,
   revision,
   generation: 0,
   state: "open",
   job_id: null,
-  setup_spent_credits: "1.25",
-  run_spent_credits: "0",
-  reserved_credits: "2.50",
-  available_credits: String(total - 3.75),
-  billed_credits: 2,
-  wallet_setup_spent_credits: "1.25",
-  wallet_run_spent_credits: "0",
-  wallet_reserved_credits: 3,
-  account_available_credits: 100,
-  external_spent_credits: "0",
+  setup_spent_cents: "1.25",
+  run_spent_cents: "0",
+  reserved_cents: "2.50",
+  available_cents: String(total - 3.75),
+  billed_cents: 2,
+  wallet_setup_spent_cents: "1.25",
+  wallet_run_spent_cents: "0",
+  wallet_reserved_cents: 3,
+  account_available_cents: 100,
+  external_spent_cents: "0",
   pending_operations: 0,
   blocked_reason: null,
   uncapped: false,
 });
 function fixture(
   overrides: Partial<BudgetSessionDependencies> = {},
-  draft: WizardBudgetDraft = { budgetTotalCredits: 20 },
+  draft: WizardBudgetDraft = { budgetTotalCents: 20 },
 ) {
   const saved: WizardBudgetDraft[] = [];
   let nextKey = 0;
@@ -93,7 +93,7 @@ test("uncertain creation survives refresh with the original key and amount befor
         return snapshot(total, revision + 1);
       },
     },
-    { ...saved, budgetTotalCredits: 30 },
+    { ...saved, budgetTotalCents: 30 },
   ).session;
   const result = await resumed.ensure();
   assert.deepEqual(calls, [
@@ -101,7 +101,7 @@ test("uncertain creation survives refresh with the original key and amount befor
     [20, "key-1"],
     ["update", 30, 1],
   ]);
-  assert.equal(result.available_credits, "26.25");
+  assert.equal(result.available_cents, "26.25");
   assert.deepEqual(resumed.draft.executionBudgetRef, { id: "budget-1", revision: 2 });
 });
 
@@ -117,14 +117,14 @@ test("Continue waits for restored server state then applies the desired total wi
             })
           : snapshot(20, 3),
     },
-    { executionBudgetRef: { id: "budget-1", revision: 1 }, budgetTotalCredits: 30 },
+    { executionBudgetRef: { id: "budget-1", revision: 1 }, budgetTotalCents: 30 },
   );
   const refresh = session.refresh();
   const ensure = session.ensure();
   resolve(snapshot(20, 3));
   await refresh;
   assert.equal((await ensure).revision, 4);
-  assert.equal(session.budget?.total_credits, 30);
+  assert.equal(session.budget?.total_cents, 30);
 });
 
 test("an account or Start new detachment fences late server results", async () => {
@@ -136,7 +136,7 @@ test("an account or Start new detachment fences late server results", async () =
           resolve = done;
         }),
     },
-    { executionBudgetRef: { id: "budget-1", revision: 1 }, budgetTotalCredits: 20 },
+    { executionBudgetRef: { id: "budget-1", revision: 1 }, budgetTotalCents: 20 },
   );
   const refresh = session.refresh();
   session.detach();
@@ -156,7 +156,7 @@ test("submission retry retains its key while a different server fingerprint star
 
 test("a rejected decrease restores the accepted total and exposes the funded minimum", async () => {
   const conflict = Object.assign(new Error("budget.conflict"), {
-    params: { current_total_credits: 20, minimum_total_credits: 12 },
+    params: { current_total_cents: 20, minimum_total_cents: 12 },
   });
   let reads = 0;
   const { session, saved } = fixture(
@@ -169,19 +169,22 @@ test("a rejected decrease restores the accepted total and exposes the funded min
         throw conflict;
       },
     },
-    { executionBudgetRef: { id: "budget-1", revision: 1 }, budgetTotalCredits: 5 },
+    { executionBudgetRef: { id: "budget-1", revision: 1 }, budgetTotalCents: 5 },
   );
 
   await assert.rejects(session.ensure(), /budget.conflict/);
   assert.equal(reads, 2);
-  assert.equal(session.draft.budgetTotalCredits, 20);
-  assert.equal(session.budget?.total_credits, 20);
-  assert.equal(session.minimumTotalCredits, 12);
-  assert.equal(saved.at(-1)?.budgetTotalCredits, 20);
+  assert.equal(session.draft.budgetTotalCents, 20);
+  assert.equal(session.budget?.total_cents, 20);
+  assert.equal(session.minimumTotalCents, 12);
+  assert.equal(saved.at(-1)?.budgetTotalCents, 20);
 });
 
 const evidence = (identity: string, budgetId = "budget-1"): StoredPreflightEvidence =>
-  ({ identity, response: { budget: { id: budgetId }, status: "succeeded" } }) as StoredPreflightEvidence;
+  ({
+    identity,
+    response: { budget: { id: budgetId }, status: "succeeded" },
+  }) as StoredPreflightEvidence;
 
 test("a passed check is stored beside its budget, persisted, and never re-persisted for the same identity", async () => {
   const { session, saved } = fixture();
