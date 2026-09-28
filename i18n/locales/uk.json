@@ -125,6 +125,8 @@
     "billing.openrouter_oauth_failed": "Вхід через OpenRouter не завершено. Спробуйте ще раз.",
     "billing.openrouter_oauth_state_invalid": "Посилання для входу через OpenRouter недійсне або застаріле. Почніть спочатку.",
     "billing.openrouter_unreachable": "Не вдалося зв'язатися з OpenRouter. Спробуйте ще раз за мить.",
+    "billing.payment_method_invalid": "Stripe не прийняв ці дані способу оплати.",
+    "billing.payment_method_not_found": "Цей спосіб оплати не збережено у вашому обліковому записі.",
     "workflow.validation_failed": "Перевірка робочого процесу не пройдена: {error}",
     "accounts.email_taken": "Ця адреса електронної пошти вже зареєстрована.",
     "accounts.invalid_credentials": "Неправильна електронна пошта або пароль.",

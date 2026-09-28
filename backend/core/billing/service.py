@@ -241,6 +241,7 @@ class PaymentMethodSnapshot:
     exp_month: int | None
     exp_year: int | None
     is_default: bool
+    holder_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -737,6 +738,7 @@ class StripeBillingService:
                     exp_month=_stripe_value(details, "exp_month"),
                     exp_year=_stripe_value(details, "exp_year"),
                     is_default=method_id == default_method_id,
+                    holder_name=_stripe_value(_stripe_value(method, "billing_details", {}), "name"),
                 )
             )
 
@@ -757,6 +759,101 @@ class StripeBillingService:
             ),
             payment_methods=payment_methods,
         )
+
+    def _owned_payment_method(self, stripe_mod: Any, username: str, payment_method_id: str) -> tuple[str, Any]:
+        """Retrieve a saved payment method and confirm it belongs to the account.
+
+        Args:
+            stripe_mod: The configured ``stripe`` module.
+            username: Authenticated account that must own the payment method.
+            payment_method_id: Stripe ``pm_...`` id sent by the client.
+
+        Returns:
+            The account's Stripe customer id and the payment method object.
+
+        Raises:
+            DomainError: 404 when the method is unknown or attached to another
+                customer, so ids cannot be probed across accounts; 502 when
+                Stripe cannot serve the read.
+        """
+        customer_id = self._existing_customer_id(username)
+        if customer_id is None:
+            raise DomainError("billing.payment_method_not_found", status=404)
+        try:
+            method = stripe_mod.PaymentMethod.retrieve(payment_method_id)
+        except stripe.InvalidRequestError as exc:
+            raise DomainError("billing.payment_method_not_found", status=404) from exc
+        except stripe.StripeError as exc:
+            raise DomainError("billing.provider_unavailable", status=502) from exc
+        if _stripe_id(_stripe_value(method, "customer")) != customer_id:
+            raise DomainError("billing.payment_method_not_found", status=404)
+        return customer_id, method
+
+    def update_payment_method(
+        self,
+        username: str,
+        payment_method_id: str,
+        *,
+        exp_month: int | None = None,
+        exp_year: int | None = None,
+        holder_name: str | None = None,
+        make_default: bool = False,
+    ) -> None:
+        """Edit a saved payment method's expiry and holder name, or make it the default.
+
+        Args:
+            username: Authenticated account that owns the payment method.
+            payment_method_id: Stripe ``pm_...`` id to edit.
+            exp_month: New card expiry month; sent together with ``exp_year``.
+            exp_year: New four-digit card expiry year.
+            holder_name: New cardholder name; ``None`` leaves it unchanged.
+            make_default: Make this the customer's default payment method.
+
+        Raises:
+            DomainError: 400 when Stripe rejects the new details or expiry is
+                sent for a non-card method; 404 when the method is not the
+                account's; 502 when Stripe is unavailable; 503 when Stripe is
+                not configured.
+        """
+        stripe_mod = self._stripe()
+        customer_id, method = self._owned_payment_method(stripe_mod, username, payment_method_id)
+        changes: dict[str, Any] = {}
+        if exp_month is not None and exp_year is not None:
+            if _stripe_value(method, "type") != "card":
+                raise DomainError("billing.payment_method_invalid", status=400)
+            changes["card"] = {"exp_month": exp_month, "exp_year": exp_year}
+        if holder_name is not None:
+            changes["billing_details"] = {"name": holder_name.strip() or None}
+        try:
+            if changes:
+                stripe_mod.PaymentMethod.modify(payment_method_id, **changes)
+            if make_default:
+                stripe_mod.Customer.modify(
+                    customer_id,
+                    invoice_settings={"default_payment_method": payment_method_id},
+                )
+        except (stripe.InvalidRequestError, stripe.CardError) as exc:
+            raise DomainError("billing.payment_method_invalid", status=400) from exc
+        except stripe.StripeError as exc:
+            raise DomainError("billing.provider_unavailable", status=502) from exc
+
+    def remove_payment_method(self, username: str, payment_method_id: str) -> None:
+        """Detach a saved payment method from the account's Stripe customer.
+
+        Args:
+            username: Authenticated account that owns the payment method.
+            payment_method_id: Stripe ``pm_...`` id to remove.
+
+        Raises:
+            DomainError: 404 when the method is not the account's; 502 when
+                Stripe is unavailable; 503 when Stripe is not configured.
+        """
+        stripe_mod = self._stripe()
+        self._owned_payment_method(stripe_mod, username, payment_method_id)
+        try:
+            stripe_mod.PaymentMethod.detach(payment_method_id)
+        except stripe.StripeError as exc:
+            raise DomainError("billing.provider_unavailable", status=502) from exc
 
     def get_transactions(self, username: str, start: datetime, end: datetime) -> BillingTransactionsSnapshot:
         """Return completed Checkout purchases for a date window from Stripe.

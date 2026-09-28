@@ -13,6 +13,7 @@ import {
   PencilSimple,
   Plus,
   Sparkle,
+  Trash,
 } from "@/shared/ui/icons";
 import { toast } from "react-toastify";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
@@ -24,6 +25,12 @@ import { Button } from "@/shared/ui/primitives/button";
 import { RetryIconButton } from "@/shared/ui/retry-icon-button";
 import { StatusPill } from "@/shared/ui/status-badge";
 import { Badge } from "@/shared/ui/primitives/badge";
+import { Dialog, DialogContent, DialogFooter } from "@/shared/ui/primitives/dialog";
+import { Input } from "@/shared/ui/primitives/input";
+import { Label } from "@/shared/ui/primitives/label";
+import { Switch } from "@/shared/ui/primitives/switch";
+import { DialogTitleRow } from "@/shared/ui/dialog-title-row";
+import { TOUCH_FIELD } from "@/shared/ui/touch";
 import { TooltipButton } from "@/shared/ui/tooltip-button";
 import {
   createBillingPortalSession,
@@ -31,6 +38,8 @@ import {
   createSubscriptionCheckout,
   getBillingProfile,
   getBillingTransactions,
+  removePaymentMethod,
+  updatePaymentMethod,
   type BillingAddressResponse,
   type BillingProfileResponse,
   type BillingTransaction,
@@ -445,11 +454,245 @@ function TransactionHistory() {
   );
 }
 
+type PaymentMethod = BillingProfileResponse["payment_methods"][number];
+
+/** "Visa •••• 4242" — the label a payment method goes by in dialogs. */
+function paymentMethodLabel(method: PaymentMethod): string {
+  const name = method.brand
+    ? method.brand.charAt(0).toUpperCase() + method.brand.slice(1)
+    : method.type.replaceAll("_", " ");
+  return method.last4 ? `${name} •••• ${method.last4}` : name;
+}
+
+/** Edit a saved card's holder name and expiry, or make it the default. */
+function EditPaymentMethodDialog({
+  method,
+  onClose,
+  onSaved,
+}: {
+  method: PaymentMethod | null;
+  onClose: () => void;
+  onSaved: (profile: BillingProfileResponse) => void;
+}) {
+  const [holderName, setHolderName] = React.useState("");
+  const [month, setMonth] = React.useState("");
+  const [year, setYear] = React.useState("");
+  const [makeDefault, setMakeDefault] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (method == null) return;
+    setHolderName(method.holder_name ?? "");
+    setMonth(method.exp_month != null ? String(method.exp_month) : "");
+    setYear(method.exp_year != null ? String(method.exp_year) : "");
+    setMakeDefault(false);
+    setBusy(false);
+  }, [method]);
+
+  if (method == null) return null;
+
+  const isCard = method.type === "card";
+  const monthNumber = Number(month);
+  const yearNumber = Number(year);
+  const thisYear = new Date().getFullYear();
+  const expiryValid =
+    !isCard ||
+    (Number.isInteger(monthNumber) &&
+      monthNumber >= 1 &&
+      monthNumber <= 12 &&
+      Number.isInteger(yearNumber) &&
+      yearNumber >= thisYear &&
+      yearNumber <= thisYear + 30);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (method == null || !expiryValid) return;
+    const changes: Parameters<typeof updatePaymentMethod>[1] = {};
+    if (holderName.trim() !== (method.holder_name ?? "")) changes.holder_name = holderName.trim();
+    if (isCard && (monthNumber !== method.exp_month || yearNumber !== method.exp_year)) {
+      changes.exp_month = monthNumber;
+      changes.exp_year = yearNumber;
+    }
+    if (makeDefault) changes.make_default = true;
+    if (Object.keys(changes).length === 0) {
+      onClose();
+      return;
+    }
+    setBusy(true);
+    try {
+      onSaved(await updatePaymentMethod(method.id, changes));
+      toast.success(msg("billing.payment_methods.updated"));
+      onClose();
+    } catch {
+      setBusy(false);
+      toast.error(msg("billing.payment_methods.update_error"));
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && !busy && onClose()}>
+      <DialogContent
+        data-settings-text-buttons
+        className="w-[min(28rem,92vw)] max-w-[min(28rem,92vw)] sm:max-w-md"
+      >
+        <DialogTitleRow
+          title={msg("billing.payment_methods.edit_title")}
+          description={<span dir="ltr">{paymentMethodLabel(method)}</span>}
+        />
+        <form onSubmit={save} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="payment-method-holder" className="text-xs text-muted-foreground">
+              {msg("billing.payment_methods.holder_name")}
+            </Label>
+            <Input
+              id="payment-method-holder"
+              value={holderName}
+              onChange={(e) => setHolderName(e.target.value)}
+              maxLength={200}
+              autoComplete="cc-name"
+              dir="auto"
+              className={TOUCH_FIELD}
+            />
+          </div>
+          {isCard && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="payment-method-month" className="text-xs text-muted-foreground">
+                  {msg("billing.payment_methods.expiry_month")}
+                </Label>
+                <Input
+                  id="payment-method-month"
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value.replace(/\D/g, "").slice(0, 2))}
+                  placeholder="MM"
+                  inputMode="numeric"
+                  autoComplete="cc-exp-month"
+                  dir="ltr"
+                  aria-invalid={!expiryValid || undefined}
+                  className={cn(TOUCH_FIELD, "text-left")}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="payment-method-year" className="text-xs text-muted-foreground">
+                  {msg("billing.payment_methods.expiry_year")}
+                </Label>
+                <Input
+                  id="payment-method-year"
+                  value={year}
+                  onChange={(e) => setYear(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  placeholder="YYYY"
+                  inputMode="numeric"
+                  autoComplete="cc-exp-year"
+                  dir="ltr"
+                  aria-invalid={!expiryValid || undefined}
+                  className={cn(TOUCH_FIELD, "text-left")}
+                />
+              </div>
+            </div>
+          )}
+          {!method.is_default && (
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="payment-method-default" className="text-sm text-foreground">
+                {msg("billing.payment_methods.make_default")}
+              </Label>
+              <Switch
+                id="payment-method-default"
+                checked={makeDefault}
+                onCheckedChange={setMakeDefault}
+              />
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+              {msg("billing.payment_methods.cancel")}
+            </Button>
+            <Button type="submit" disabled={busy || !expiryValid} aria-busy={busy || undefined}>
+              {busy && (
+                <CircleNotch
+                  className="animate-spin motion-reduce:animate-none"
+                  aria-hidden="true"
+                />
+              )}
+              {msg("billing.payment_methods.save")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Confirm, then detach, a saved payment method. */
+function RemovePaymentMethodDialog({
+  method,
+  onClose,
+  onRemoved,
+}: {
+  method: PaymentMethod | null;
+  onClose: () => void;
+  onRemoved: (profile: BillingProfileResponse) => void;
+}) {
+  const [busy, setBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    setBusy(false);
+  }, [method]);
+
+  async function remove() {
+    if (method == null) return;
+    setBusy(true);
+    try {
+      onRemoved(await removePaymentMethod(method.id));
+      toast.success(msg("billing.payment_methods.removed"));
+      onClose();
+    } catch {
+      setBusy(false);
+      toast.error(msg("billing.payment_methods.remove_error"));
+    }
+  }
+
+  return (
+    <Dialog open={method != null} onOpenChange={(open) => !open && !busy && onClose()}>
+      <DialogContent
+        data-settings-text-buttons
+        className="w-[min(28rem,92vw)] max-w-[min(28rem,92vw)] sm:max-w-md"
+      >
+        <DialogTitleRow
+          title={msg("billing.payment_methods.remove_title")}
+          description={
+            method &&
+            formatMsg("billing.payment_methods.remove_hint", { p1: paymentMethodLabel(method) })
+          }
+        />
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+            {msg("billing.payment_methods.cancel")}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={busy}
+            aria-busy={busy || undefined}
+            onClick={() => void remove()}
+          >
+            {busy && (
+              <CircleNotch className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            )}
+            {msg("billing.payment_methods.remove")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** Stripe-backed billing identity and masked saved payment methods. */
 function BillingDetails() {
   const [profile, setProfile] = React.useState<BillingProfileResponse | null>(null);
   const [loadError, setLoadError] = React.useState(false);
   const [portalFlow, setPortalFlow] = React.useState<"manage" | "payment_method" | null>(null);
+  const [editing, setEditing] = React.useState<PaymentMethod | null>(null);
+  const [removing, setRemoving] = React.useState<PaymentMethod | null>(null);
 
   const loadProfile = React.useCallback(() => {
     setLoadError(false);
@@ -606,11 +849,47 @@ function BillingDetails() {
                     </span>
                   )}
                 </span>
+                <span className="flex shrink-0 items-center gap-0.5">
+                  <TooltipButton tooltip={msg("billing.payment_methods.edit")}>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={unavailable}
+                      onClick={() => setEditing(method)}
+                      className="text-muted-foreground hover:text-foreground"
+                      aria-label={`${msg("billing.payment_methods.edit")} ${paymentMethodLabel(method)}`}
+                    >
+                      <PencilSimple className="size-4" aria-hidden="true" />
+                    </Button>
+                  </TooltipButton>
+                  <TooltipButton tooltip={msg("billing.payment_methods.remove")}>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={unavailable}
+                      onClick={() => setRemoving(method)}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label={`${msg("billing.payment_methods.remove")} ${paymentMethodLabel(method)}`}
+                    >
+                      <Trash className="size-4" aria-hidden="true" />
+                    </Button>
+                  </TooltipButton>
+                </span>
               </li>
             ))}
           </ul>
         )}
       </section>
+      <EditPaymentMethodDialog
+        method={editing}
+        onClose={() => setEditing(null)}
+        onSaved={setProfile}
+      />
+      <RemovePaymentMethodDialog
+        method={removing}
+        onClose={() => setRemoving(null)}
+        onRemoved={setProfile}
+      />
     </div>
   );
 }

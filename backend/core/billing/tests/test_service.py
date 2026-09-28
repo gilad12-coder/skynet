@@ -937,6 +937,99 @@ def test_payment_method_portal_deep_links_and_returns_to_billing(
     assert kwargs["flow_data"]["after_completion"]["redirect"]["return_url"].endswith("/?settings=billing")
 
 
+def test_update_payment_method_edits_card_and_sets_default(engine: object, configured: None) -> None:
+    """Editing a card sends the new expiry and name, then makes it the customer's default."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    method = {"id": "pm_1", "type": "card", "customer": "cus_u@x.com"}
+    with (
+        patch("stripe.PaymentMethod.retrieve", return_value=method),
+        patch("stripe.PaymentMethod.modify") as modify,
+        patch("stripe.Customer.modify") as customer_modify,
+    ):
+        service.update_payment_method(
+            "u@x.com", "pm_1", exp_month=4, exp_year=2031, holder_name=" Card Holder ", make_default=True
+        )
+    modify.assert_called_once_with(
+        "pm_1", card={"exp_month": 4, "exp_year": 2031}, billing_details={"name": "Card Holder"}
+    )
+    customer_modify.assert_called_once_with("cus_u@x.com", invoice_settings={"default_payment_method": "pm_1"})
+
+
+def test_update_payment_method_rejects_expiry_on_non_card(engine: object, configured: None) -> None:
+    """Expiry only exists on cards, so sending it for another method type is a 400."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    method = {"id": "pm_1", "type": "us_bank_account", "customer": "cus_u@x.com"}
+    with (
+        patch("stripe.PaymentMethod.retrieve", return_value=method),
+        patch("stripe.PaymentMethod.modify") as modify,
+        pytest.raises(DomainError) as exc,
+    ):
+        service.update_payment_method("u@x.com", "pm_1", exp_month=4, exp_year=2031)
+    assert exc.value.status_code == 400
+    modify.assert_not_called()
+
+
+def test_update_payment_method_maps_stripe_rejection_to_400(engine: object, configured: None) -> None:
+    """A past expiry Stripe refuses surfaces as an invalid-details error, not an outage."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    method = {"id": "pm_1", "type": "card", "customer": "cus_u@x.com"}
+    with (
+        patch("stripe.PaymentMethod.retrieve", return_value=method),
+        patch("stripe.PaymentMethod.modify", side_effect=stripe.InvalidRequestError("expired", "exp_year")),
+        pytest.raises(DomainError) as exc,
+    ):
+        service.update_payment_method("u@x.com", "pm_1", exp_month=1, exp_year=2001)
+    assert exc.value.code == "billing.payment_method_invalid"
+    assert exc.value.status_code == 400
+
+
+def test_remove_payment_method_detaches_owned_method(engine: object, configured: None) -> None:
+    """Removing a card the account owns detaches it from the Stripe customer."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    method = {"id": "pm_1", "type": "card", "customer": "cus_u@x.com"}
+    with (
+        patch("stripe.PaymentMethod.retrieve", return_value=method),
+        patch("stripe.PaymentMethod.detach") as detach,
+    ):
+        service.remove_payment_method("u@x.com", "pm_1")
+    detach.assert_called_once_with("pm_1")
+
+
+@pytest.mark.parametrize("owner", ["cus_other@x.com", None])
+def test_payment_method_changes_refuse_methods_of_other_customers(
+    engine: object, configured: None, owner: str | None
+) -> None:
+    """A method attached elsewhere, or to nobody, reads as not found and is never touched."""
+    _seed_customer(engine, "u@x.com")
+    service = StripeBillingService(engine=engine)
+    method = {"id": "pm_1", "type": "card", "customer": owner}
+    with (
+        patch("stripe.PaymentMethod.retrieve", return_value=method),
+        patch("stripe.PaymentMethod.detach") as detach,
+        patch("stripe.PaymentMethod.modify") as modify,
+    ):
+        with pytest.raises(DomainError) as removed:
+            service.remove_payment_method("u@x.com", "pm_1")
+        with pytest.raises(DomainError) as edited:
+            service.update_payment_method("u@x.com", "pm_1", make_default=True)
+    assert removed.value.status_code == edited.value.status_code == 404
+    detach.assert_not_called()
+    modify.assert_not_called()
+
+
+def test_payment_method_changes_need_a_stripe_customer(engine: object, configured: None) -> None:
+    """A customerless account has no saved methods, so any id is not found."""
+    service = StripeBillingService(engine=engine)
+    with patch("stripe.PaymentMethod.retrieve") as retrieve, pytest.raises(DomainError) as exc:
+        service.remove_payment_method("new@x.com", "pm_1")
+    assert exc.value.status_code == 404
+    retrieve.assert_not_called()
+
+
 def _deliver(service: StripeBillingService, event: dict) -> None:
     """Deliver a prebuilt event dict through the webhook with signature verification stubbed."""
     with patch("stripe.Webhook.construct_event", return_value=event):
