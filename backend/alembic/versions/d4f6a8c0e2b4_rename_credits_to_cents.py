@@ -186,7 +186,20 @@ def _rename_relations(old: str, new: str) -> None:
     Args:
         old: Table name before the rename.
         new: Table name after the rename.
+
+    Raises:
+        sqlalchemy.exc.InternalError: Both tables exist and ``new`` already holds rows.
     """
+    # Boot runs create_all before Alembic, so the new code has already created an
+    # empty ``new`` table beside the real ``old`` one; its sequence and indexes
+    # would collide with the renamed ones. Drop it only while it is still empty.
+    op.execute(
+        f"DO $$ BEGIN "
+        f"IF to_regclass('{old}') IS NOT NULL AND to_regclass('{new}') IS NOT NULL THEN "
+        f"IF EXISTS (SELECT 1 FROM {new}) THEN "
+        f"RAISE EXCEPTION '{old} and {new} both exist and {new} is not empty'; END IF; "
+        f"DROP TABLE {new}; END IF; END $$"
+    )
     op.execute(
         f"DO $$ DECLARE r record; BEGIN "
         f"IF to_regclass('{old}') IS NOT NULL AND to_regclass('{new}') IS NULL "
