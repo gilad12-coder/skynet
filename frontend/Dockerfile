@@ -52,7 +52,7 @@ ARG SENTRY_ORG
 ARG SENTRY_PROJECT
 ARG SENTRY_AUTH_TOKEN
 ARG RAILWAY_GIT_COMMIT_SHA
-RUN npm run build
+RUN node scripts/generate-third-party-licenses.mjs && npm run build
 
 FROM base AS runner
 WORKDIR /app

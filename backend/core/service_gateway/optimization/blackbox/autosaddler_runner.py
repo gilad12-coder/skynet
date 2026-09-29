@@ -8,6 +8,10 @@ parent-owned budget over the same filesystem mailbox the other native engines
 use, an evidence builder that surfaces the scorer's per-case feedback, and a
 prompt pack composed from the upstream methodology plus the Skynet plugin.
 The engine loop, policies, run store and Claude provider are upstream's own.
+
+The prompt-pack wiring and plugin prompts are adapted from microsoft/AutoSaddler
+under the MIT License; see ``autosaddler_plugin/NOTICE.md`` and
+``autosaddler_plugin/LICENSE``.
 """
 
 from __future__ import annotations

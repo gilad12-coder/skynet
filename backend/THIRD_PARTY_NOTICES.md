@@ -1,0 +1,44 @@
+# Third-party notices for the Skynet backend
+
+Skynet is licensed under the GNU Affero General Public License v3 (`LICENSE`).
+This file lists third-party material that is copied into the source tree or
+bundled into the backend and worker image. Python dependencies ship their own
+license files in their `*.dist-info/` directories inside the image.
+
+## Copied or adapted source
+
+| Material | Location | Upstream | License |
+| --- | --- | --- | --- |
+| Meta-Harness proposer skill | `core/service_gateway/optimization/blackbox/upstream_prompts/meta_harness/` | stanford-iris-lab/meta-harness@0cbc31e9, Copyright (c) 2026 Yoonho Lee | MIT, `LICENSE` beside it |
+| AutoResearch program | `core/service_gateway/optimization/blackbox/upstream_prompts/autoresearch/` | karpathy/autoresearch@228791fb, Andrej Karpathy | MIT, `LICENSE` beside it |
+| AutoSaddler plugin and prompt-pack wiring | `core/service_gateway/optimization/blackbox/autosaddler_plugin/`, `autosaddler_runner.py` | microsoft/AutoSaddler@9df6d2e3 | MIT, `LICENSE` beside it |
+| Meta-Harness and AutoResearch loop structure | `core/service_gateway/optimization/blackbox/native_engines.py` | as above | MIT |
+| GEPA sources sent to sandboxes | archived at run time with `gepa/LICENSE` | gepa-ai/gepa@0632cdb5, Copyright (c) 2025 Lakshya A Agrawal | MIT |
+| Scalar API reference bundle | `core/api/static/scalar/` | scalar/scalar, Copyright (c) 2023-present Scalar | MIT, `LICENSE` beside it |
+| Inter and JetBrains Mono web fonts | `core/api/static/scalar/fonts/` | rsms/inter, JetBrains/JetBrainsMono | OFL-1.1, `OFL.txt` beside them |
+| Common password list | `core/api/data/common_passwords.txt` | danielmiessler/SecLists, Copyright (c) 2018 Daniel Miessler | MIT, `common_passwords.LICENSE` |
+
+## Bundled runtimes and tools
+
+| Component | Version | License | Notice |
+| --- | --- | --- | --- |
+| Node.js | 22.22.0 | MIT and bundled third-party licenses | `licenses/node.LICENSE` |
+| Deno | 2.6.6 | MIT | `licenses/deno.LICENSE` |
+| Pyodide (Deno npm cache) | 0.29.4 | MPL-2.0 | source: https://github.com/pyodide/pyodide/tree/0.29.4 |
+| OpenAI Codex CLI | see `sandbox-runtime/package-lock.json` | Apache-2.0 | `licenses/openai-codex.LICENSE`, `licenses/openai-codex.NOTICE` |
+| Pi coding agent | see `sandbox-runtime/package-lock.json` | MIT | `licenses/pi-coding-agent.LICENSE` |
+| OpenCode | see `sandbox-runtime/package-lock.json` | MIT | `LICENSE` inside the package |
+
+Claude Code (`@anthropic-ai/claude-code`) is proprietary Anthropic software. It
+is installed only in images Skynet runs itself; images delivered to third
+parties are built with `INCLUDE_CLAUDE_CODE=false` and do not contain it.
+
+## LGPL Python dependencies
+
+These are installed unmodified as separate packages and may be replaced with
+any compatible version. Their license texts are in their `dist-info` folders.
+
+| Package | License | Source |
+| --- | --- | --- |
+| ldap3 2.9.1 | LGPL-3.0 | https://github.com/cannatag/ldap3/tree/v2.9.1 |
+| psycopg2-binary 2.9.11 | LGPL-3.0 with OpenSSL exception | https://github.com/psycopg/psycopg2/tree/2.9.11 |

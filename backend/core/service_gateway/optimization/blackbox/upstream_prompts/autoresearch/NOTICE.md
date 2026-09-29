@@ -3,7 +3,8 @@
 `program.md` is the unmodified agent brief from
 https://github.com/karpathy/autoresearch at revision
 `228791fb499afffb54b46200aca536f79142f117`. The upstream repository declares the
-MIT License in its README without shipping a separate license file.
+MIT License in its README without shipping a separate license file, so `LICENSE`
+reproduces the standard MIT text with the repository owner as copyright holder.
 
 `native_engines.py` derives the sandbox brief from this file at run time through
 exact-snippet substitutions that only swap the nanochat specifics (`train.py`,

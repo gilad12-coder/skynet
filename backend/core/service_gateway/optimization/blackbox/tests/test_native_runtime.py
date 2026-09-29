@@ -649,6 +649,8 @@ def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
     assert set(files) == {
         "autosaddler_runner.py",
         "harness_bridge.py",
+        "autosaddler_plugin/LICENSE",
+        "autosaddler_plugin/NOTICE.md",
         "autosaddler_plugin/SYSTEM.md",
         "autosaddler_plugin/prompts/diagnose_patch.md",
         "autosaddler_plugin/prompts/evolve.md",
@@ -666,6 +668,7 @@ def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
         "upstream_prompts/meta_harness/NOTICE.md",
         "upstream_prompts/autoresearch/program.md",
         "upstream_prompts/autoresearch/NOTICE.md",
+        "upstream_prompts/autoresearch/LICENSE",
     }
 
 

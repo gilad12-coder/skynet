@@ -3,12 +3,18 @@
 This standalone module is copied into the selected runtime beside
 ``native_runner.py``. The upstream repositories are research scripts locked to
 their own domains (memory systems for text classification; nanochat training
-runs), so they cannot be imported as libraries. This module mirrors their loop
-structure, state files and proposer prompts one-to-one, swapping only the
-domain-specific evaluation for the gepa.oa ``EvalServer`` the run scores with.
+runs), so they cannot be imported as libraries. This module reimplements their
+loop structure, state files and proposer prompts, swapping the domain-specific
+evaluation for the gepa.oa ``EvalServer`` the run scores with.
 The prompts are derived at run time from the verbatim upstream files under
 ``upstream_prompts/`` through exact-snippet substitutions, so a pin bump that
 changes the upstream wording fails loudly instead of drifting silently.
+
+Attribution, all MIT-licensed: Meta-Harness, Copyright (c) 2026 Yoonho Lee
+(stanford-iris-lab/meta-harness); AutoResearch by Andrej Karpathy
+(karpathy/autoresearch); gepa.oa, Copyright (c) 2025 Lakshya A Agrawal
+(gepa-ai/gepa). License texts ship in ``upstream_prompts/``
+and ``backend/THIRD_PARTY_NOTICES.md``.
 """
 
 from __future__ import annotations
