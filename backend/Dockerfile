@@ -12,8 +12,16 @@ ARG NPM_CONFIG_REGISTRY
 # Images delivered to a third party (air-gap bundles, customer registries) must
 # build with INCLUDE_CLAUDE_CODE=false; only our own hosted deployment keeps it.
 ARG INCLUDE_CLAUDE_CODE=true
+# Prime Agent's tarballs come from its own release host, which
+# NPM_CONFIG_REGISTRY cannot redirect. Air-gap builds point this at a mirror of
+# <host>/releases; the lockfile integrity hashes still pin the content.
+ARG PRIME_AGENT_RELEASE_MIRROR
 COPY sandbox-runtime/package.json sandbox-runtime/package-lock.json /usr/local/lib/skynet-harnesses/
-RUN npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
+RUN if [ -n "$PRIME_AGENT_RELEASE_MIRROR" ]; then \
+        sed -i "s|https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/releases|${PRIME_AGENT_RELEASE_MIRROR%/}|g" \
+            /usr/local/lib/skynet-harnesses/package.json /usr/local/lib/skynet-harnesses/package-lock.json; \
+    fi \
+    && npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
         ${NPM_CONFIG_REGISTRY:+--registry "$NPM_CONFIG_REGISTRY"} \
     && rm -rf \
         /usr/local/lib/skynet-harnesses/node_modules/@anthropic-ai/claude-code-linux-x64-musl \
@@ -24,10 +32,18 @@ RUN npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnes
         /opt/skynet-harness-layers/codex \
         /opt/skynet-harness-layers/opencode \
         /opt/skynet-harness-layers/pi \
+        /opt/skynet-harness-layers/prime/@earendil-works \
     && mv /usr/local/lib/skynet-harnesses/node_modules/@anthropic-ai \
         /opt/skynet-harness-layers/anthropic/ \
     && mv /usr/local/lib/skynet-harnesses/node_modules/@openai \
         /opt/skynet-harness-layers/codex/ \
+    && mv /usr/local/lib/skynet-harnesses/node_modules/prime-agent \
+        /opt/skynet-harness-layers/prime/ \
+    && mv \
+        /usr/local/lib/skynet-harnesses/node_modules/@earendil-works/pi-agent-core \
+        /usr/local/lib/skynet-harnesses/node_modules/@earendil-works/pi-ai \
+        /usr/local/lib/skynet-harnesses/node_modules/@earendil-works/pi-tui \
+        /opt/skynet-harness-layers/prime/@earendil-works/ \
     && mv /usr/local/lib/skynet-harnesses/node_modules/@earendil-works \
         /opt/skynet-harness-layers/pi/ \
     && mv \
@@ -81,7 +97,8 @@ COPY --from=harness-deps /opt/skynet-harness-layers/anthropic/ /usr/local/lib/sk
 COPY --from=harness-deps /opt/skynet-harness-layers/codex/ /usr/local/lib/skynet-harnesses/node_modules/
 COPY --from=harness-deps /opt/skynet-harness-layers/opencode/ /usr/local/lib/skynet-harnesses/node_modules/
 COPY --from=harness-deps /opt/skynet-harness-layers/pi/ /usr/local/lib/skynet-harnesses/node_modules/
-RUN for CLI in claude pi codex opencode; do \
+COPY --from=harness-deps /opt/skynet-harness-layers/prime/ /usr/local/lib/skynet-harnesses/node_modules/
+RUN for CLI in claude pi codex opencode prime-agent; do \
         if [ -e "/usr/local/lib/skynet-harnesses/node_modules/.bin/$CLI" ]; then \
             ln -s "/usr/local/lib/skynet-harnesses/node_modules/.bin/$CLI" "/usr/local/bin/$CLI"; \
         fi; \
@@ -132,6 +149,19 @@ RUN if [ "$PKG_MANAGER" = "pip" ]; then \
            UV_PYTHON_DOWNLOADS=never \
            uv sync --frozen --no-install-project; \
     fi
+
+# Prime Agent runs model code in a Python kernel it normally bootstraps on
+# first use by downloading uv, Python and packages. Protected sandboxes have no
+# network, so build that kernel here; the Prime launch uses it read-only when
+# present (harness.PRIME_AGENT_IMAGE_KERNEL).
+COPY sandbox-runtime/prime-agent-kernel.txt /opt/prime-agent/requirements.txt
+RUN python -m venv /opt/prime-agent/kernel-venv \
+    && /opt/prime-agent/kernel-venv/bin/python -m pip install --no-cache-dir --no-deps \
+        ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
+        ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
+        -r /opt/prime-agent/requirements.txt \
+        /usr/local/lib/skynet-harnesses/node_modules/prime-agent/dist/prime-agent-runtime \
+    && /opt/prime-agent/kernel-venv/bin/python -c "import rlm, dill, yaml, dotenv, pandas, scipy, bs4, lxml, pydantic, tyro"
 
 # dspy.Flex serve-time dependency. An optimized Flex program ALWAYS executes
 # its generated Python in a Deno/Pyodide WASM sandbox (dspy.PythonInterpreter

@@ -351,6 +351,7 @@ cmd_build_images() {
   [[ -n "${PIP_INDEX_URL:-}" ]] && backend_args+=(--build-arg "PIP_INDEX_URL=$PIP_INDEX_URL")
   [[ -n "${PIP_TRUSTED_HOST:-}" ]] && backend_args+=(--build-arg "PIP_TRUSTED_HOST=$PIP_TRUSTED_HOST")
   [[ -n "${GEPA_GIT_MIRROR:-}" ]] && backend_args+=(--build-arg "GEPA_GIT_MIRROR=$GEPA_GIT_MIRROR")
+  [[ -n "${PRIME_AGENT_RELEASE_MIRROR:-}" ]] && backend_args+=(--build-arg "PRIME_AGENT_RELEASE_MIRROR=$PRIME_AGENT_RELEASE_MIRROR")
   [[ -n "${NPM_CONFIG_REGISTRY:-${NPM_REGISTRY:-}}" ]] && backend_args+=(--build-arg "NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY:-$NPM_REGISTRY}")
   local frontend_args=()
   [[ -n "${BASE_IMAGE:-}" ]] && frontend_args+=(--build-arg "BASE_IMAGE=$BASE_IMAGE")

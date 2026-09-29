@@ -30,6 +30,7 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL-}
         GEPA_GIT_MIRROR: ${GEPA_GIT_MIRROR-}
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY-}
+        PRIME_AGENT_RELEASE_MIRROR: ${PRIME_AGENT_RELEASE_MIRROR-}
         DENO_DOWNLOAD_BASE: ${DENO_DOWNLOAD_BASE:-https://github.com/denoland/deno/releases/download}
         GIT_SHA: ${GIT_SHA:-unknown}
     container_name: skynet-api

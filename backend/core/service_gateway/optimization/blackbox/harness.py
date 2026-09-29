@@ -93,6 +93,9 @@ PRIME_AGENT_TARBALL = (
 # Its config dir; the run points ``PRIME_AGENT_CODING_AGENT_DIR`` here so the
 # models.json the box receives is the one it reads.
 _PRIME_AGENT_DIR = ".skynet/prime"
+# The sandbox image ships a prebuilt kernel here because protected sandboxes
+# cannot download one; elsewhere it is absent and Prime Agent bootstraps its own.
+PRIME_AGENT_IMAGE_KERNEL = "/opt/prime-agent/kernel-venv/bin/python"
 _PINNED_HARNESSES = {
     BLACKBOX_HARNESS_PI: ("pi", PI_VERSION),
     BLACKBOX_HARNESS_CODEX: ("codex", CODEX_VERSION),
@@ -395,9 +398,11 @@ def _opencode_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
 def _prime_agent_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     """Build the launch for Prime Agent (:data:`PRIME_AGENT_TARBALL`, pinned to :data:`PRIME_AGENT_VERSION`).
 
-    Prime Agent works through a Python kernel it bootstraps with uv on first
-    use; ``PRIME_AGENT_INSTALL_UV`` lets that happen without a terminal to
-    confirm on. Its JSON stream has Pi's shape, so Pi's parser reads it.
+    Prime Agent works through a Python kernel. The sandbox image's prebuilt
+    :data:`PRIME_AGENT_IMAGE_KERNEL` is used when present; an empty
+    ``PRIME_AGENT_KERNEL_PYTHON`` otherwise lets it bootstrap one with uv, and
+    ``PRIME_AGENT_INSTALL_UV`` lets that happen without a terminal to confirm
+    on. Its JSON stream has Pi's shape, so Pi's parser reads it.
 
     Args:
         model: Target model id.
@@ -415,6 +420,7 @@ def _prime_agent_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
         files={f"{_PRIME_AGENT_DIR}/models.json": json.dumps(models_json, indent=2)},
         run_command=(
             f'PRIME_AGENT_CODING_AGENT_DIR="$PWD/{_PRIME_AGENT_DIR}" '
+            f'PRIME_AGENT_KERNEL_PYTHON="$([ -x {PRIME_AGENT_IMAGE_KERNEL} ] && echo {PRIME_AGENT_IMAGE_KERNEL})" '
             f"prime-agent --mode json --no-session --provider {PROVIDER} --model {model_arg} {_PROMPT_ARG}"
         ),
         env=env,

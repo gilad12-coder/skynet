@@ -23,6 +23,7 @@ from core.models.blackbox import (
 
 from ..harness import (
     ANSWER_FILE,
+    PRIME_AGENT_IMAGE_KERNEL,
     PRIME_AGENT_TARBALL,
     PRIME_AGENT_VERSION,
     PROMPT_FILE,
@@ -206,7 +207,8 @@ def test_prime_agent_launch_reuses_the_pi_gateway_config_in_its_own_agent_dir() 
     assert provider["api"] == "openai-completions"
     assert provider["apiKey"] == "!printenv SKYNET_API_KEY"
     assert provider["models"][0]["id"] == "target-model"
-    assert launch.run_command.startswith('PRIME_AGENT_CODING_AGENT_DIR="$PWD/.skynet/prime" prime-agent --mode json')
+    assert launch.run_command.startswith('PRIME_AGENT_CODING_AGENT_DIR="$PWD/.skynet/prime" ')
+    assert " prime-agent --mode json" in launch.run_command
     assert '--no-session --provider skynet --model "$SKYNET_MODEL"' in launch.run_command
     assert launch.parse_output is parse_pi_output
 
@@ -223,6 +225,23 @@ def test_prime_agent_launch_pins_the_release_tarball_and_bootstraps_the_kernel()
     assert launch.env["PRIME_AGENT_TELEMETRY"] == "0"
     assert launch.env["PI_SKIP_VERSION_CHECK"] == "1"
     assert launch.env["SKYNET_MODEL"] == "target-model"
+
+
+@pytest.mark.parametrize("image_kernel", [True, False])
+def test_prime_agent_launch_uses_the_image_kernel_only_when_present(tmp_path: Path, image_kernel: bool) -> None:
+    """The prebuilt kernel is selected when the image has it; otherwise the override is empty so Prime Agent bootstraps."""
+    kernel = tmp_path / "python"
+    if image_kernel:
+        kernel.write_text("")
+        kernel.chmod(0o755)
+    launch = build_launch(_target(BLACKBOX_HARNESS_PRIME), _GATEWAY)
+    command = launch.run_command.replace(PRIME_AGENT_IMAGE_KERNEL, str(kernel)).replace(
+        "prime-agent --mode json", "printenv PRIME_AGENT_KERNEL_PYTHON #"
+    )
+
+    selected = subprocess.run(["bash", "-c", command], capture_output=True, text=True, check=True).stdout.strip()
+
+    assert selected == (str(kernel) if image_kernel else "")
 
 
 def test_prime_agent_launch_bounds_reasoning_behind_openrouter() -> None:
