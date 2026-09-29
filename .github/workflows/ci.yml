@@ -41,7 +41,7 @@ jobs:
       # server; the `tests/` integration tier (DB + paid LLM) is a separate,
       # nightly concern and is intentionally not gated here.
       - name: Core test suite
-        run: uv run pytest core/ -q
+        run: uv run pytest core/ -q -n auto
       - name: PostgreSQL budget concurrency and migration gates
         env:
           SKYNET_BUDGET_TEST_DB_URL: postgresql+psycopg2://budget_test:budget_test@127.0.0.1:5432/budget_test
