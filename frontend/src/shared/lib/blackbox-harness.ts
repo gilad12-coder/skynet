@@ -8,9 +8,12 @@ export const BLACKBOX_HARNESSES: readonly BlackboxHarness[] = [
   "codex",
   "claude_code",
   "opencode",
-  "prime",
 ];
 
 export function harnessLabel(harness: BlackboxHarness): string {
-  return msg(`submit.blackbox.start.harness.${harness}`);
+  const key = `submit.blackbox.start.harness.${harness}` as const;
+  const label = msg(key);
+  // Stored jobs can name a harness that has since been retired; show its id
+  // rather than the unresolved message key.
+  return label === key ? harness : label;
 }
