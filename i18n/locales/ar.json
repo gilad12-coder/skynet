@@ -110,6 +110,7 @@
     "quota.concurrent_reached": "لديك بالفعل {limit, plural, zero {0 عملية تشغيل} one {عملية تشغيل واحدة} two {عمليتا تشغيل} few {# عمليات تشغيل} many {# عملية تشغيل} other {# عملية تشغيل}} قيد التنفيذ. انتظر انتهاء إحداها قبل بدء عملية أخرى.",
     "rate_limit.exceeded": "طلبات كثيرة جدًا. يُرجى الانتظار {retry_after, plural, zero {0 ثانية} one {ثانية واحدة} two {ثانيتين} few {# ثوانٍ} many {# ثانية} other {# ثانية}} ثم المحاولة مجددًا.",
     "submission.capacity_reached": "بلغ Skynet سعته القصوى في الوقت الحالي. يُرجى المحاولة مرة أخرى بعد قليل.",
+    "submission.claude_code_unavailable": "Claude Code غير متاح مؤقتًا. اختر وكيلًا آخر، مثل Codex.",
     "webauthn.challenge_expired": "انتهت صلاحية طلب مفتاح المرور — يُرجى المحاولة مرة أخرى.",
     "webauthn.invalid_credential": "تعذّر التحقق من مفتاح المرور هذا.",
     "webauthn.not_found": "لم يتم العثور على مفتاح المرور.",

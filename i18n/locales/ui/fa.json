@@ -487,6 +487,7 @@
   "submit.blackbox.start.background_toggle": "پیش‌زمینه و محدودیت‌ها",
   "submit.blackbox.start.desc": "چه چیزی بهینه می‌شود و موفقیت چه شکلی است.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.claude_code_unavailable": "موقتاً در دسترس نیست",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "دستور سفارشی",
   "submit.blackbox.start.harness.opencode": "OpenCode",

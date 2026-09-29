@@ -110,6 +110,7 @@
     "quota.concurrent_reached": "Zaten devam eden {limit, plural, one {1 çalıştırmanız} other {# çalıştırmanız}} var. Yenisini başlatmadan önce birinin bitmesini bekleyin.",
     "rate_limit.exceeded": "Çok fazla istek. Lütfen {retry_after, plural, one {1 saniye} other {# saniye}} bekleyip tekrar deneyin.",
     "submission.capacity_reached": "Skynet şu anda tam kapasiteye ulaştı. Lütfen kısa bir süre sonra tekrar deneyin.",
+    "submission.claude_code_unavailable": "Claude Code geçici olarak kullanılamıyor. Codex gibi başka bir ajan seçin.",
     "webauthn.challenge_expired": "Geçiş anahtarı isteğinin süresi doldu — tekrar deneyin.",
     "webauthn.invalid_credential": "Bu geçiş anahtarı doğrulanamadı.",
     "webauthn.not_found": "Geçiş anahtarı bulunamadı.",

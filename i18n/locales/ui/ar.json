@@ -487,6 +487,7 @@
   "submit.blackbox.start.background_toggle": "الخلفية والقيود",
   "submit.blackbox.start.desc": "ما الذي يخضع للتحسين وكيف يبدو النجاح.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.claude_code_unavailable": "غير متاح مؤقتًا",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "أمر مخصّص",
   "submit.blackbox.start.harness.opencode": "OpenCode",

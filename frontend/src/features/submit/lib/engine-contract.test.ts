@@ -191,6 +191,7 @@ test("proposer knobs follow the engine that reads them, and Auto exposes them al
 test("submitted proposer resets every knob the form hides for the engine", () => {
   const tuned = {
     ...DEFAULT_PROPOSER,
+    harness: "claude_code" as const,
     effort: "high" as const,
     max_candidates_per_iter: 4,
     ralph: false,

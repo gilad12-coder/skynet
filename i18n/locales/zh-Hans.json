@@ -110,6 +110,7 @@
     "quota.concurrent_reached": "您已有 {limit, plural, other {# 次运行}}正在进行中。请等待其中一个完成后再开始新的运行。",
     "rate_limit.exceeded": "请求过多。请等待 {retry_after, plural, other {# 秒}}后再试。",
     "submission.capacity_reached": "Skynet 当前负载已满。请稍后重试。",
+    "submission.claude_code_unavailable": "Claude Code 暂时不可用。请选择其他代理，例如 Codex。",
     "webauthn.challenge_expired": "通行密钥请求已过期 — 请重试。",
     "webauthn.invalid_credential": "无法验证此通行密钥。",
     "webauthn.not_found": "未找到通行密钥。",

@@ -1219,6 +1219,39 @@ def test_budget_backed_native_run_leaves_its_cost_ceiling_to_the_ledger(
         validate_blackbox_payload(_payload(strategy=strategy), verify_scorer=False)
 
 
+@pytest.mark.parametrize(
+    "strategy",
+    [{"mode": "auto"}, {"mode": "single", "engine": "meta_harness"}, {"mode": "single", "engine": "autosaddler"}],
+)
+def test_validate_payload_refuses_a_claude_code_proposer(
+    monkeypatch: pytest.MonkeyPatch, strategy: dict[str, str]
+) -> None:
+    """Refuse every native recipe driven by Claude Code, including stored jobs the worker resumes.
+
+    Args:
+        monkeypatch: Pytest fixture for deterministic runtime capabilities.
+        strategy: Upstream recipe being validated.
+    """
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    request = _payload(strategy=strategy, execution_budget_id="budget-1", proposer={"harness": "claude_code"})
+    assert service_mod.claude_code_in_use(request)
+    with pytest.raises(ServiceError, match="Claude Code is temporarily unavailable"):
+        validate_blackbox_payload(request, verify_scorer=False)
+
+
+def test_validate_payload_refuses_a_claude_code_agent_target() -> None:
+    """Refuse an agent target that would launch Claude Code before any sandbox capability check."""
+    request = _payload(target={**_AGENT_TARGET, "harness": "claude_code"})
+    assert service_mod.claude_code_in_use(request)
+    with pytest.raises(ServiceError, match="Claude Code is temporarily unavailable"):
+        validate_blackbox_payload(request)
+
+
+def test_claude_code_proposer_is_ignored_by_engines_that_never_launch_it() -> None:
+    """Leave GEPA jobs alone when their unused proposer block still names Claude Code."""
+    assert not service_mod.claude_code_in_use(_payload(proposer={"harness": "claude_code"}))
+
+
 def test_proposer_accepts_any_offered_harness_and_rejects_unlaunchable_ones() -> None:
     """Let the request pick the proposer harness and engine knobs while refusing shapes the sandbox cannot run."""
     request = _payload(proposer={"harness": "pi", "effort": "high", "max_candidates_per_iter": 2, "ralph": False})
@@ -1226,7 +1259,7 @@ def test_proposer_accepts_any_offered_harness_and_rejects_unlaunchable_ones() ->
     assert request.proposer.effort == "high"
     assert request.proposer.max_candidates_per_iter == 2
     assert request.proposer.ralph is False
-    assert _payload().proposer.harness == "claude_code"
+    assert _payload().proposer.harness == "codex"
     custom = _payload(proposer={"harness": "custom", "run_command": "my-agent {prompt_file}"})
     assert custom.proposer.run_command == "my-agent {prompt_file}"
     with pytest.raises(ValueError, match="harness"):

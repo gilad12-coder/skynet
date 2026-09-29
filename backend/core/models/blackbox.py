@@ -154,7 +154,7 @@ BLACKBOX_PROPOSER_EFFORTS = ("low", "medium", "high", "max")
 # Skynet offers for agent targets can be the proposer; the engine knobs mirror
 # the upstream engine configs and are ignored by engines that lack them.
 class BlackboxProposer(BaseModel):
-    harness: str = BLACKBOX_HARNESS_CLAUDE_CODE
+    harness: str = BLACKBOX_HARNESS_CODEX
     install_command: str | None = None
     run_command: str | None = None
     effort: str | None = None

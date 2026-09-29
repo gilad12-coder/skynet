@@ -110,6 +110,7 @@
     "quota.concurrent_reached": "すでに {limit, plural, other {# 件}} が実行中です。別の実行を開始する前に、いずれかが完了するのをお待ちください。",
     "rate_limit.exceeded": "リクエストが多すぎます。{retry_after, plural, other {# 秒}}待ってから再試行してください。",
     "submission.capacity_reached": "Skynet は現在容量の上限に達しています。しばらくしてからもう一度お試しください。",
+    "submission.claude_code_unavailable": "Claude Code は一時的に利用できません。Codex など別のエージェントを選択してください。",
     "webauthn.challenge_expired": "パスキーのリクエストの有効期限が切れました。もう一度お試しください。",
     "webauthn.invalid_credential": "このパスキーを検証できませんでした。",
     "webauthn.not_found": "パスキーが見つかりません。",

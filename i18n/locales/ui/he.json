@@ -2618,6 +2618,7 @@
   "submit.blackbox.start.background_toggle": "רקע ואילוצים",
   "submit.blackbox.start.desc": "מה משפרים ואיך נראית הצלחה.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.claude_code_unavailable": "לא זמין כרגע",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "פקודה מותאמת אישית",
   "submit.blackbox.start.harness.opencode": "OpenCode",

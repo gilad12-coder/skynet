@@ -487,6 +487,7 @@
   "submit.blackbox.start.background_toggle": "Контекст и ограничения",
   "submit.blackbox.start.desc": "Что оптимизируется и как выглядит успех.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.claude_code_unavailable": "Временно недоступно",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "Своя команда",
   "submit.blackbox.start.harness.opencode": "OpenCode",

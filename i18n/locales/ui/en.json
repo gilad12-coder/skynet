@@ -3334,6 +3334,7 @@
   "submit.blackbox.start.title": "Starting point",
   "submit.blackbox.start.desc": "What gets optimized and what success looks like.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.claude_code_unavailable": "Temporarily unavailable",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "Custom command",
   "submit.blackbox.start.harness.opencode": "OpenCode",

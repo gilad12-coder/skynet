@@ -205,6 +205,7 @@
     "serve.no_declared_inputs": "Artifact has no declared input fields; cannot safely validate inputs.",
     "serve.no_model_config": "No model config found for the run. Provide model_config_override.",
     "submission.capacity_reached": "Skynet is at capacity right now. Please try again shortly.",
+    "submission.claude_code_unavailable": "Claude Code is temporarily unavailable. Choose another agent harness, such as Codex.",
     "submission.module_resolve_failed": "Module load failed: {error}",
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' not found for this user — re-upload the dataset and retry.",
     "submission.validation_failed": "Payload validation failed. Check the optimizer, module, and column mapping.",

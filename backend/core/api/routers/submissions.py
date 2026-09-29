@@ -95,7 +95,11 @@ from ...models.workflow import WORKFLOW_MODULE_NAME
 from ...notifications import notify_job_started
 from ...registry import RegistryError
 from ...service_gateway import ServiceError
-from ...service_gateway.optimization.blackbox.service import engine_catalog, validate_blackbox_payload
+from ...service_gateway.optimization.blackbox.service import (
+    claude_code_in_use,
+    engine_catalog,
+    validate_blackbox_payload,
+)
 from ...service_gateway.safe_exec import validate_signature_code
 from ...storage.dataset_library import DatasetLibraryStore, PostgresDatasetBlobStore
 from ...storage.preflights import PreflightStore, setup_seed
@@ -1223,6 +1227,11 @@ def create_submissions_router(*, service, job_store) -> APIRouter:
                         payload.username,
                     )
                     return cached
+
+        # Refused before any budget is reserved; the protected path below never
+        # reaches ``validate_blackbox_payload`` here.
+        if claude_code_in_use(payload):
+            raise DomainError("submission.claude_code_unavailable", status=400)
 
         _enforce_submission_admission(job_store, payload.username)
 

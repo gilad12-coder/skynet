@@ -1929,6 +1929,26 @@ def test_submit_blackbox_run_overrides_posted_username(monkeypatch: pytest.Monke
     assert resp.json()["username"] != "mallory"
 
 
+def test_submit_blackbox_run_refuses_claude_code_before_reserving_a_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Refuse a Claude Code proposer with its own translated code, before any budget or job exists."""
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+
+    def _no_budget(*_args: Any, **_kwargs: Any) -> None:
+        """Fail the test if the refusal comes after budget reservation."""
+        raise AssertionError("Claude Code must be refused before a budget is reserved.")
+
+    monkeypatch.setattr(_sub_mod, "_ensure_api_budget", _no_budget)
+    payload = _blackbox_payload()
+    payload["proposer"] = {"harness": "claude_code"}
+
+    resp = client.post("/blackbox/run", json=payload)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "submission.claude_code_unavailable"
+    assert store.created_ids() == []
+
+
 def test_submit_blackbox_run_returns_409_when_preflight_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Refuse submission after a failed black-box setup check without exposing internal detail."""
     store = _FakeJobStore()

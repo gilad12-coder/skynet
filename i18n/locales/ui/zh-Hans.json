@@ -487,6 +487,7 @@
   "submit.blackbox.start.background_toggle": "背景与约束",
   "submit.blackbox.start.desc": "要优化什么，以及成功的标准是什么。",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.claude_code_unavailable": "暂时不可用",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "自定义命令",
   "submit.blackbox.start.harness.opencode": "OpenCode",

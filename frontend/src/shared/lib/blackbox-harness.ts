@@ -10,6 +10,10 @@ export const BLACKBOX_HARNESSES: readonly BlackboxHarness[] = [
   "opencode",
 ];
 
+// Claude Code stays listed so users can see it, but the backend refuses it
+// until it can run on the user's own Anthropic key.
+export const UNAVAILABLE_HARNESSES: readonly BlackboxHarness[] = ["claude_code"];
+
 export function harnessLabel(harness: BlackboxHarness): string {
   const key = `submit.blackbox.start.harness.${harness}` as const;
   const label = msg(key);

@@ -487,6 +487,7 @@
   "submit.blackbox.start.background_toggle": "पृष्ठभूमि और सीमाएँ",
   "submit.blackbox.start.desc": "क्या ऑप्टिमाइज़ होता है और सफलता कैसी दिखती है।",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.claude_code_unavailable": "अस्थायी रूप से अनुपलब्ध",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "कस्टम कमांड",
   "submit.blackbox.start.harness.opencode": "OpenCode",
