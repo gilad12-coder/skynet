@@ -111,6 +111,8 @@
     "rate_limit.exceeded": "अत्यधिक अनुरोध। कृपया {retry_after, plural, one {1 सेकंड} other {# सेकंड}} प्रतीक्षा करें और पुनः प्रयास करें।",
     "submission.capacity_reached": "Skynet की क्षमता अभी पूरी हो चुकी है। कृपया थोड़ी देर में पुनः प्रयास करें।",
     "submission.claude_code_unavailable": "Claude Code अस्थायी रूप से अनुपलब्ध है। कोई दूसरा एजेंट चुनें, जैसे Codex।",
+    "submission.claude_code_model_unsupported": "Claude Code केवल Anthropic Claude मॉडल चलाता है। कोई anthropic/claude-* मॉडल चुनें।",
+    "submission.claude_code_needs_anthropic_key": "Claude Code को आपकी अपनी सत्यापित Anthropic कुंजी चाहिए। इसे सेटिंग्स में जोड़ें, फिर दोबारा कोशिश करें।",
     "webauthn.challenge_expired": "पासकी अनुरोध की समय सीमा समाप्त हो गई — पुनः प्रयास करें।",
     "webauthn.invalid_credential": "इस पासकी को सत्यापित नहीं किया जा सका।",
     "webauthn.not_found": "पासकी नहीं मिली।",

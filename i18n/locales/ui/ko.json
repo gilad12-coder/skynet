@@ -488,6 +488,7 @@
   "submit.blackbox.start.desc": "무엇을 최적화하고 성공이 어떤 모습인지 정의합니다.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
   "submit.blackbox.start.harness.claude_code_unavailable": "일시적으로 사용할 수 없음",
+  "submit.blackbox.start.harness.claude_code_needs_key": "Anthropic 키가 필요합니다",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "사용자 지정 명령",
   "submit.blackbox.start.harness.opencode": "OpenCode",

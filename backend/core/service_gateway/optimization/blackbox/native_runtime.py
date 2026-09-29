@@ -130,6 +130,9 @@ class NativeOptions:
     proposer: BlackboxProposer = field(default_factory=BlackboxProposer)
     budget_route: dict[str, str] | None = field(default=None, repr=False)
     sandbox_runtime: SandboxRuntime | None = None
+    # Claude Code talks to Anthropic on the run owner's key, added at the network
+    # edge by the parent, instead of through the model gateway.
+    direct_anthropic: bool = False
     usage_by_model: dict[str, dict[str, int]] = field(default_factory=dict)
     usage_lock: Any = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -680,6 +683,8 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         raise ServiceError("Native optimizers require a positive timeout.")
     if not options.gateway.url or not options.gateway.api_key:
         raise ServiceError("Native optimizers require a configured model gateway.")
+    if options.direct_anthropic and options.budget_route is None:
+        raise ServiceError("Claude Code on your own Anthropic key requires the protected sandbox.")
     runtime = _selected_runtime(options)
     nonce = uuid.uuid4().hex
     artifacts_dir = Path(ctx.run_dir) / f"{engine_id}-native-{nonce[:8]}"
@@ -712,6 +717,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
         env={"PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
         name=unique_sandbox_name(f"skynet-{engine_id}"),
         inject_headers=headers,
+        allowed_hosts=(harness_bridge.ANTHROPIC_HOST,) if options.direct_anthropic else (),
     )
     session = runtime.open(spec)
     final_result: Result | None = None
@@ -787,6 +793,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
             "CI": "1",
             "NO_COLOR": "1",
             **({"SKYNET_BUDGET_RELAY_URL": relay} if relay else {}),
+            **({harness_bridge.DIRECT_ANTHROPIC_ENV: "1"} if options.direct_anthropic else {}),
         }
         command = (
             'export HOME="$PWD"; export PATH="$HOME/.local/bin:$PATH"; '

@@ -182,6 +182,8 @@ class I18nKey(StrEnum):
     SERVE_NO_MODEL_CONFIG = 'serve.no_model_config'
     SERVE_PROTECTED_INTERACTION_FAILED = 'serve.protected_interaction_failed'
     SUBMISSION_CAPACITY_REACHED = 'submission.capacity_reached'
+    SUBMISSION_CLAUDE_CODE_MODEL_UNSUPPORTED = 'submission.claude_code_model_unsupported'
+    SUBMISSION_CLAUDE_CODE_NEEDS_ANTHROPIC_KEY = 'submission.claude_code_needs_anthropic_key'
     SUBMISSION_CLAUDE_CODE_UNAVAILABLE = 'submission.claude_code_unavailable'
     SUBMISSION_MODULE_RESOLVE_FAILED = 'submission.module_resolve_failed'
     SUBMISSION_STAGED_DATASET_NOT_FOUND = 'submission.staged_dataset_not_found'

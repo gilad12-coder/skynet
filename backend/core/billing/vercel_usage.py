@@ -32,6 +32,11 @@ _REGIONAL_RATES = {
     "sfo1": (Decimal("0.177"), Decimal("0.0294")),
 }
 _CREATION_USD = Decimal("0.0000006")
+_NETWORK_GB_USD = Decimal("0.15")
+_BYTES_PER_GB = Decimal(1_000_000_000)
+# Vercel cannot cap a box's transfer, so this is the most a networked box is
+# funded for; a box that moves more stays pending for manual reconciliation.
+SANDBOX_NETWORK_BYTES_CAP = 2_000_000_000
 _MS_PER_HOUR = Decimal(3_600_000)
 _IMMUTABLE_IMAGE = re.compile(r".+@sha256:[0-9a-f]{64}\Z")
 _SESSION_FIELDS = (
@@ -93,14 +98,50 @@ def _memory_ms(duration_ms: int) -> int:
     return max(60_000, ((duration_ms + 59_999) // 60_000) * 60_000)
 
 
-def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
-    """Price an immutable offline sandbox before allocating any provider resources.
+def _network_cap(request: Mapping[str, Any]) -> int:
+    """Return the billable transfer a sandbox request admits.
 
     Args:
-        request: Final create parameters with lifetime_ms, vcpus, and immutable image.
+        request: Final create parameters.
 
     Returns:
-        Coverage for creation, maximum active CPU, and rounded memory lifetime.
+        0 for a deny-all box, or the byte cap of a box limited to named hosts.
+
+    Raises:
+        UnpricedOperationError: When the network, ports, or persistence are unbounded.
+    """
+    if request.get("ports") == [] and request.get("persistent") is False:
+        if request.get("network_disabled") is True and "allowed_hosts" not in request:
+            return 0
+        hosts = request.get("allowed_hosts")
+        cap = request.get("network_bytes_cap")
+        if (
+            request.get("network_disabled") is False
+            and isinstance(hosts, list)
+            and hosts
+            and all(isinstance(host, str) and host and host != "*" for host in hosts)
+            and hosts == sorted(set(hosts))
+            and not isinstance(cap, bool)
+            and isinstance(cap, int)
+            and 0 < cap <= SANDBOX_NETWORK_BYTES_CAP
+        ):
+            return cap
+    raise UnpricedOperationError(
+        "Protected Vercel runs require deny-all networking or a capped host allowlist, no ports, and no persistence."
+    )
+
+
+def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
+    """Price an immutable sandbox before allocating any provider resources.
+
+    Args:
+        request: Final create parameters with lifetime_ms, vcpus, immutable image, and
+            either deny-all networking or a sorted ``allowed_hosts`` list with a
+            ``network_bytes_cap``.
+
+    Returns:
+        Coverage for creation, maximum active CPU, rounded memory lifetime, and
+        capped transfer.
 
     Raises:
         UnpricedOperationError: When the image, lifetime, or network is unbounded.
@@ -118,12 +159,7 @@ def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
         raise UnpricedOperationError("Vercel requires a bounded lifetime and explicit supported CPU allocation.")
     if not _IMMUTABLE_IMAGE.fullmatch(str(request.get("image", ""))):
         raise UnpricedOperationError("Protected Vercel runs require an immutable prebuilt image digest.")
-    if (
-        request.get("network_disabled") is not True
-        or request.get("ports") != []
-        or request.get("persistent") is not False
-    ):
-        raise UnpricedOperationError("Protected Vercel runs require deny-all networking, no ports, and no persistence.")
+    network_cap = _network_cap(request)
     # Python SDK 0.4.0 cannot select a region. Cover every currently supported
     # region and settle against the region in the final provider receipt.
     max_cpu = max(rates[0] for rates in _REGIONAL_RATES.values())
@@ -132,6 +168,7 @@ def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
         _CREATION_USD
         + Decimal(lifetime_ms * vcpus) * max_cpu / _MS_PER_HOUR
         + Decimal(_memory_ms(lifetime_ms) * vcpus * 2) * max_memory / _MS_PER_HOUR
+        + Decimal(network_cap) * _NETWORK_GB_USD / _BYTES_PER_GB
     )
     return operation_quote(
         request,
@@ -146,9 +183,13 @@ def quote_vercel_sandbox(request: Mapping[str, Any]) -> OperationQuote:
                 for region, (cpu, memory) in _REGIONAL_RATES.items()
             },
             "creation_usd": str(_CREATION_USD),
-            "network_gb_usd": "0.15",
-            "maximum_billable_network_bytes": 0,
-            "network_basis": "deny-all/no-exposed-ports; control-plane exclusion inferred from published billing categories",
+            "network_gb_usd": str(_NETWORK_GB_USD),
+            "maximum_billable_network_bytes": network_cap,
+            "network_basis": (
+                "allowlisted-hosts/no-exposed-ports; ingress and egress both charged, control plane included"
+                if network_cap
+                else "deny-all/no-exposed-ports; control-plane exclusion inferred from published billing categories"
+            ),
             "memory_increment_ms": 60_000,
             "request": dict(request),
         },
@@ -170,6 +211,24 @@ def _offline_admission(price_snapshot: Mapping[str, Any] | None) -> bool:
     return isinstance(request, Mapping) and request.get("network_disabled") is True and request.get("ports") == []
 
 
+def _admitted_network_cap(price_snapshot: Mapping[str, Any] | None) -> int:
+    """Return the transfer an admission funded, or 0 when it funded none.
+
+    Args:
+        price_snapshot: Original admission, absent for standalone pricing checks.
+
+    Returns:
+        The admitted byte cap of a box limited to named hosts, otherwise 0.
+    """
+    if price_snapshot is None:
+        return 0
+    request = price_snapshot.get("request")
+    cap = price_snapshot.get("maximum_billable_network_bytes")
+    if not isinstance(request, Mapping) or request.get("network_disabled") is not False:
+        return 0
+    return cap if isinstance(cap, int) and not isinstance(cap, bool) and cap > 0 else 0
+
+
 def vercel_actual_usd(
     session: Mapping[str, Any], *, session_id: str, vcpus: int, price_snapshot: Mapping[str, Any] | None = None
 ) -> Decimal:
@@ -182,7 +241,8 @@ def vercel_actual_usd(
         price_snapshot: Original admission rates; current rates only for standalone pricing checks.
 
     Returns:
-        Creation plus measured CPU and provisioned memory at the regional rate.
+        Creation plus measured CPU and provisioned memory at the regional rate, plus
+        transfer when the admission allowed named hosts.
 
     Raises:
         UsagePendingError: When final usage or its billing classification is uncertain.
@@ -217,17 +277,23 @@ def vercel_actual_usd(
     # deny-all sandbox with no exposed ports, which the admitted quote already
     # excludes from billing. Only an unknown admission leaves the transfer
     # unclassified, and charging it as paid egress would overcharge.
-    if (ingress or egress) and not _offline_admission(price_snapshot):
+    network_cap = _admitted_network_cap(price_snapshot)
+    if (ingress or egress) and not network_cap and not _offline_admission(price_snapshot):
         raise UsagePendingError("Offline Vercel transfer needs provider billing classification before settlement.")
+    # A networked box pays for every byte, control plane included: Vercel's
+    # counters do not separate the two, and undercharging is the worse error.
+    if network_cap and ingress + egress > network_cap:
+        raise UsagePendingError("Vercel transfer exceeded the admitted network allowance.")
     try:
         regional = rates[region]
         cpu_rate = exact_nonnegative(regional["cpu_hour_usd"])
         memory_rate = exact_nonnegative(regional["memory_gb_hour_usd"])
         creation = exact_nonnegative(price_snapshot["creation_usd"]) if price_snapshot is not None else _CREATION_USD
+        network_rate = exact_nonnegative(price_snapshot["network_gb_usd"]) if network_cap else _NETWORK_GB_USD
         if price_snapshot is not None and (
             price_snapshot.get("provider") != "vercel"
             or price_snapshot.get("memory_increment_ms") != 60_000
-            or price_snapshot.get("maximum_billable_network_bytes") != 0
+            or price_snapshot.get("maximum_billable_network_bytes") != network_cap
         ):
             raise ValueError("Unsupported historical billing policy")
     except (KeyError, TypeError, ValueError) as error:
@@ -236,6 +302,7 @@ def vercel_actual_usd(
         creation
         + Decimal(cpu_ms) * cpu_rate / _MS_PER_HOUR
         + Decimal(_memory_ms(stopped - started) * vcpus * 2) * memory_rate / _MS_PER_HOUR
+        + (Decimal(ingress + egress) * network_rate / _BYTES_PER_GB if network_cap else Decimal(0))
     )
 
 

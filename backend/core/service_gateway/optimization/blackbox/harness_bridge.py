@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -37,6 +37,14 @@ KEY_ENV = "SKYNET_API_KEY"
 # The serialized launch travels through the sandbox input file, so the gateway
 # key is replaced by this token and only restored from the process environment.
 KEY_TOKEN = "__SKYNET_API_KEY__"
+# Set in the guest when Claude Code talks to Anthropic directly on the run
+# owner's key, which Vercel's egress proxy adds; the box itself never sees it.
+DIRECT_ANTHROPIC_ENV = "SKYNET_CLAUDE_DIRECT"
+ANTHROPIC_HOST = "api.anthropic.com"
+# Only makes the CLI send an x-api-key header for the edge to replace.
+ANTHROPIC_KEY_PLACEHOLDER = "sk-ant-skynet-edge-injected"
+# Where Vercel's egress proxy leaves its CA when a network policy rewrites headers.
+PROXY_CA_PATH = "/usr/local/share/ca-certificates/vercel-proxy-ca.crt"
 SHIM_DIR = ".local/skynet-bin"
 SESSIONS_DIR = ".skynet-bridge"
 _SLUG_RE = re.compile(r"[^A-Za-z0-9-]")
@@ -53,6 +61,24 @@ _RESUME_NOTE = (
     "\n\n---\n\nA previous session already worked on this task in this directory. Its files and progress are "
     "still here; continue from the current workspace state.\n\n"
 )
+
+
+def use_direct_anthropic(env: MutableMapping[str, str]) -> None:
+    """Point Claude Code at Anthropic itself when this run holds its owner's key.
+
+    The model mailbox points every Anthropic client at the parent for the whole
+    command, so the runner overrides that here before Claude starts.
+
+    Args:
+        env: The environment Claude will inherit, changed in place.
+    """
+    if env.get(DIRECT_ANTHROPIC_ENV) != "1":
+        return
+    env["ANTHROPIC_BASE_URL"] = f"https://{ANTHROPIC_HOST}"
+    env["ANTHROPIC_API_KEY"] = ANTHROPIC_KEY_PLACEHOLDER
+    env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    if Path(PROXY_CA_PATH).is_file():
+        env["NODE_EXTRA_CA_CERTS"] = PROXY_CA_PATH
 
 
 def _json_lines(stdout: str) -> Iterator[dict[str, Any]]:

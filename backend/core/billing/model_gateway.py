@@ -559,13 +559,17 @@ class ModelGateway:
             for token, route in self._routes.items()
         ]
 
-    def bind_sandbox(self, broker: SandboxControl, *, image: str, lifetime_seconds: float) -> None:
+    def bind_sandbox(
+        self, broker: SandboxControl, *, image: str, lifetime_seconds: float, allowed_hosts: tuple[str, ...] = ()
+    ) -> None:
         """Bind the trusted runtime before passing a scoped descriptor to its child.
 
         Args:
             broker: Parent-owned sandbox credentials and cost accounting.
             image: Immutable deployment profile used for this workload.
             lifetime_seconds: Maximum already bounded by the configured runtime profile.
+            allowed_hosts: Hosts the broker lets this run's boxes reach, which
+                recovery must fund too.
         """
         if self._sandbox is not None:
             raise ValueError("This gateway already owns a sandbox broker.")
@@ -575,6 +579,7 @@ class ModelGateway:
             "control_token": self._control_token,
             "image": image,
             "lifetime_seconds": lifetime_seconds,
+            **({"allowed_hosts": sorted(allowed_hosts)} if allowed_hosts else {}),
         }
 
     def dispatch_guest(

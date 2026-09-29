@@ -1195,6 +1195,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     )
     proposer = payload.get("proposer") or {"harness": "claude_code"}
     if proposer.get("harness") == "claude_code":
+        harness_bridge.use_direct_anthropic(os.environ)
         inner = ClaudeAgentProvider(
             ClaudeProviderConfig(
                 model=model,

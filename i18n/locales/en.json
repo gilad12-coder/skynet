@@ -206,6 +206,8 @@
     "serve.no_model_config": "No model config found for the run. Provide model_config_override.",
     "submission.capacity_reached": "Skynet is at capacity right now. Please try again shortly.",
     "submission.claude_code_unavailable": "Claude Code is temporarily unavailable. Choose another agent harness, such as Codex.",
+    "submission.claude_code_model_unsupported": "Claude Code runs only Anthropic Claude models. Choose an anthropic/claude-* model.",
+    "submission.claude_code_needs_anthropic_key": "Claude Code needs your own verified Anthropic key. Add it in Settings, then try again.",
     "submission.module_resolve_failed": "Module load failed: {error}",
     "submission.staged_dataset_not_found": "staged_dataset_id '{staged_dataset_id}' not found for this user — re-upload the dataset and retry.",
     "submission.validation_failed": "Payload validation failed. Check the optimizer, module, and column mapping.",

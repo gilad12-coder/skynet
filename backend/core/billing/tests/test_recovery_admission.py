@@ -114,3 +114,17 @@ def test_plan_rejects_changed_runtime_and_malformed_execution_cap() -> None:
     malformed["fingerprint"] = json_fingerprint(malformed)
     with pytest.raises(RecoveryAdmissionError, match="next-operation"):
         validate_recovery_plan(malformed, manifest)
+
+
+def test_recovery_funds_the_network_allowance_of_a_run_that_reaches_anthropic() -> None:
+    """Hold transfer headroom only when the run's boxes may reach Anthropic, leaving offline ceilings unchanged."""
+    offline = _runtime()
+    networked = runtime_bound(
+        "vercel",
+        {"image": "fixture@sha256:" + "a" * 64, "lifetime_seconds": 60, "allowed_hosts": ["api.anthropic.com"]},
+    )
+    assert offline["request"]["network_disabled"] is True
+    assert "allowed_hosts" not in offline["request"]
+    assert networked["request"]["network_disabled"] is False
+    assert networked["request"]["allowed_hosts"] == ["api.anthropic.com"]
+    assert Decimal(networked["max_cents"]) > Decimal(offline["max_cents"])

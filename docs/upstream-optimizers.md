@@ -18,7 +18,39 @@ Skynet owns input validation, model routing, execution transport, outer accounti
 
 The [pinned omni example](https://github.com/gepa-ai/gepa/blob/0632cdb5dcc052e690eab439e1b4a7e3e9cfe407/docs/docs/blog/posts/2026-07-22-optimize-anything-omni/index.md) runs three equal exploration allocations through `optimize_best_of`, then a fresh GEPA continuation. Skynet assigns a quarter of the proposer allowance to each phase, partitions scorer calls into four allocations (integer remainder to continuation), and requires at least four scorer calls. Best-of-N is an independent selectable baseline, not a substitute exploration lane. Missing native capability blocks the recipe instead of silently reducing it.
 
-The proposer harness defaults to Codex. Claude Code is temporarily unavailable as a proposer or an agent target: `validate_blackbox_payload` refuses it, so submission (`submission.claude_code_unavailable`), preflight, and worker resume or recovery of a stored Claude Code job all stop before a sandbox opens. It will return once it can run on the user's own Anthropic key instead of the Skynet gateway. The image still carries the pinned `claude` CLI because the upstream engines call that command, which the harness shim fronts for the other harnesses.
+The proposer harness defaults to Codex. Claude Code is temporarily unavailable as a proposer or an agent target: `validate_blackbox_payload` refuses it, so submission (`submission.claude_code_unavailable`), preflight, and worker resume or recovery of a stored Claude Code job all stop before a sandbox opens. It never runs on the Skynet gateway. The image still carries the pinned `claude` CLI because the upstream engines call that command, which the harness shim fronts for the other harnesses.
+
+### Claude Code on the user's own Anthropic key (`CLAUDE_CODE_BYOK_EGRESS`)
+
+With `CLAUDE_CODE_BYOK_EGRESS=true`, a protected native run may use Claude Code as its **proposer**. An agent target on the Claude Code harness stays refused, because its calls would still go through the gateway.
+
+- **Submit.** `/blackbox/run` refuses Claude Code unless the reflection model is an `anthropic/claude-*` id (`submission.claude_code_model_unsupported`) and the user has a verified Anthropic key in the BYOK vault (`submission.claude_code_needs_anthropic_key`). The model is mapped to Anthropic's bare id: `anthropic/claude-sonnet-4.5` becomes `claude-sonnet-4-5`. The engine catalog reports `claude_code_proposer_available`. The picker enables Claude Code only when that flag is on and the user's Anthropic key is verified. Saved drafts and clones still open on Codex.
+- **Key.** The worker parent resolves the key (`claude_code_anthropic_key`: verified only, Anthropic's own endpoint only) and hands it to the parent's `SandboxBroker`. The key never enters the child process, the payload, the sandbox or the price snapshot.
+- **Network.** The child asks the broker for a box that may reach `api.anthropic.com`. The broker allows only that host, and only when it holds a key. Vercel's network policy is an allowlist with no `*` entry, so every other destination is denied. A header transform on that host adds `x-api-key` at Vercel's egress proxy.
+- **Guest.** The runner sets `SKYNET_CLAUDE_DIRECT=1`. For each Claude process, `use_direct_anthropic` sets `ANTHROPIC_BASE_URL=https://api.anthropic.com` and a placeholder `ANTHROPIC_API_KEY`, drops the gateway token, and points `NODE_EXTRA_CA_CERTS` at the Vercel proxy CA when that file exists.
+- **Billing.** Skynet makes no model charge for these calls; the user's Anthropic account pays. The box's network transfer is billed at $0.15/GB, ingress and egress, with no control-plane exclusion.
+  - Admission funds up to `SANDBOX_NETWORK_BYTES_CAP` (2 GB) per box, and recovery headroom funds the same.
+  - A box that moves more stays pending for reconciliation instead of settling.
+  - Offline boxes keep their previous quote and snapshot exactly.
+- **Spend limit.** Proposer spend is limited by the CLI's `--max-budget-usd`, derived from the run allowance, because Skynet no longer meters these calls.
+
+**Unverified until a deployment smoke test on the Vercel team**, which is why the setting defaults to off:
+
+1. Whether the header transform replaces the placeholder `x-api-key` rather than adding a second value.
+2. Whether the proxy CA path exists, and whether Node trusts it through `NODE_EXTRA_CA_CERTS`.
+3. How Vercel counts transfer for allowlisted boxes.
+4. Whether the Autosaddler provider honours the base URL.
+
+To verify:
+
+1. Enable the flag on a staging deployment.
+2. Add a real Anthropic key.
+3. Run a single Meta-Harness job with Claude Code.
+4. Confirm that:
+   - the run succeeds;
+   - the Anthropic console shows usage on that key;
+   - no Skynet model charge appears;
+   - the sandbox session's `networkTransfer` was settled on the ledger.
 
 The Meta-Harness and AutoResearch prompts are vendored verbatim under `upstream_prompts/` with SHA-256 pins; `native_engines.py` derives the sandbox prompts through exact single-match substitutions (domain files, evaluator command, budget wording), so a pin bump that changes upstream wording fails readiness instead of drifting. This establishes execution fidelity to the pinned implementations. It does not establish numerical reproduction of the Meta-Harness paper's experiments; dataset, evaluator, model and budget differences remain relevant.
 

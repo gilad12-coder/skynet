@@ -1949,6 +1949,75 @@ def test_submit_blackbox_run_refuses_claude_code_before_reserving_a_budget(monke
     assert store.created_ids() == []
 
 
+class _KeyVault:
+    """Stand in for the BYOK vault with a fixed verified-key answer."""
+
+    verified = False
+
+    def __init__(self, engine: Any) -> None:
+        """Accept the store's engine like the real vault.
+
+        Args:
+            engine: Ignored.
+        """
+
+    def has_verified_connection(self, username: str, provider: str) -> bool:
+        """Report the configured answer for Anthropic only.
+
+        Args:
+            username: Ignored.
+            provider: Provider slug checked.
+
+        Returns:
+            Whether a verified key is on file.
+        """
+        return provider == "anthropic" and self.verified
+
+
+@pytest.mark.parametrize(
+    ("model", "verified", "code"),
+    [
+        ("gpt-4o", True, "submission.claude_code_model_unsupported"),
+        ("anthropic/claude-sonnet-4.5", False, "submission.claude_code_needs_anthropic_key"),
+    ],
+)
+def test_submit_blackbox_run_needs_an_anthropic_model_and_key_for_claude_code(
+    monkeypatch: pytest.MonkeyPatch, model: str, verified: bool, code: str
+) -> None:
+    """With direct Anthropic egress on, refuse Claude Code without a Claude model or the user's own key."""
+    monkeypatch.setattr(_sub_mod.settings, "claude_code_byok_egress", True)
+    monkeypatch.setattr(_KeyVault, "verified", verified)
+    monkeypatch.setattr(_sub_mod, "ProviderKeyVault", _KeyVault)
+    store = _FakeJobStore()
+    store.engine = object()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    payload = _blackbox_payload()
+    payload["proposer"] = {"harness": "claude_code"}
+    payload["reflection_model_config"] = {"name": model}
+
+    resp = client.post("/blackbox/run", json=payload)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == code
+    assert store.created_ids() == []
+
+
+def test_submit_blackbox_run_still_refuses_a_claude_code_agent_target_with_egress_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep refusing a Claude Code agent target, which would bill Skynet's gateway."""
+    monkeypatch.setattr(_sub_mod.settings, "claude_code_byok_egress", True)
+    store = _FakeJobStore()
+    client = _make_client(_FakeService(), store, monkeypatch=monkeypatch)
+    payload = _blackbox_payload()
+    payload["target"] = {"kind": "agent", "harness": "claude_code", "model": "anthropic/claude-sonnet-4.5"}
+
+    resp = client.post("/blackbox/run", json=payload)
+
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "submission.claude_code_unavailable"
+
+
 def test_submit_blackbox_run_returns_409_when_preflight_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Refuse submission after a failed black-box setup check without exposing internal detail."""
     store = _FakeJobStore()

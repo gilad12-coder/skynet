@@ -488,6 +488,7 @@
   "submit.blackbox.start.desc": "O que é otimizado e o que significa sucesso.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
   "submit.blackbox.start.harness.claude_code_unavailable": "Temporariamente indisponível",
+  "submit.blackbox.start.harness.claude_code_needs_key": "Requer sua chave da Anthropic",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "Comando personalizado",
   "submit.blackbox.start.harness.opencode": "OpenCode",

@@ -1252,6 +1252,52 @@ def test_claude_code_proposer_is_ignored_by_engines_that_never_launch_it() -> No
     assert not service_mod.claude_code_in_use(_payload(proposer={"harness": "claude_code"}))
 
 
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("anthropic/claude-sonnet-4.5", "claude-sonnet-4-5"),
+        ("openrouter/anthropic/claude-opus-4.1", "claude-opus-4-1"),
+        ("claude-sonnet-4-5", None),
+        ("anthropic/other-model", None),
+        ("openai/gpt-5", None),
+    ],
+)
+def test_claude_code_model_maps_only_anthropic_claude_ids(name: str, expected: str | None) -> None:
+    """Map Skynet's Anthropic ids to Anthropic's own spelling and nothing else.
+
+    Args:
+        name: Submitted model id.
+        expected: The bare Anthropic id, or None when refused.
+    """
+    assert service_mod.claude_code_model(name) == expected
+
+
+def test_claude_code_proposer_runs_on_a_claude_model_once_egress_is_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Accept a Claude Code proposer on a Claude model, refuse other models, and keep refusing agent targets.
+
+    Args:
+        monkeypatch: Pytest fixture for the deployment flag and runtime capabilities.
+    """
+    monkeypatch.setattr(service_mod, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
+    monkeypatch.setattr(service_mod.settings, "claude_code_byok_egress", True)
+    strategy = {"mode": "single", "engine": "meta_harness"}
+    request = _payload(
+        strategy=strategy,
+        execution_budget_id="budget-1",
+        proposer={"harness": "claude_code"},
+        reflection_model_config={"name": "anthropic/claude-sonnet-4.5"},
+    )
+    validate_blackbox_payload(request, verify_scorer=False)
+    assert service_mod.engine_catalog("text").claude_code_proposer_available is True
+    with pytest.raises(ServiceError, match="only Anthropic Claude models"):
+        validate_blackbox_payload(
+            _payload(strategy=strategy, execution_budget_id="budget-1", proposer={"harness": "claude_code"}),
+            verify_scorer=False,
+        )
+    with pytest.raises(ServiceError, match="Claude Code is temporarily unavailable"):
+        validate_blackbox_payload(_payload(target={**_AGENT_TARGET, "harness": "claude_code"}))
+
+
 def test_proposer_accepts_any_offered_harness_and_rejects_unlaunchable_ones() -> None:
     """Let the request pick the proposer harness and engine knobs while refusing shapes the sandbox cannot run."""
     request = _payload(proposer={"harness": "pi", "effort": "high", "max_candidates_per_iter": 2, "ralph": False})

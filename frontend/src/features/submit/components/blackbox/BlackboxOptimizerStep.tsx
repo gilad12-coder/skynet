@@ -21,6 +21,7 @@ import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { msg } from "@/shared/lib/messages";
 import { Carousel } from "@/features/agent-panel";
+import { useByokKeys } from "@/features/billing";
 import { DEFAULT_PROPOSER, proposerKnobs, proposerTunesReasoning } from "../../lib/engine-contract";
 
 import type { BlackboxHarness, BlackboxProposerEffort } from "@/shared/types/api";
@@ -73,6 +74,12 @@ export function BlackboxOptimizerStep({
     economyMode,
     setEconomyMode,
   } = w;
+  const { keyFor } = useByokKeys();
+  // Claude Code proposes only on the user's own verified Anthropic key, and
+  // only where the deployment lets its sandbox reach Anthropic.
+  const claudeCodeReady =
+    engineCatalog?.claude_code_proposer_available === true &&
+    keyFor("anthropic")?.status === "verified";
 
   const engines = engineCatalog?.engines ?? [];
   const single = strategyMode === "single";
@@ -174,7 +181,7 @@ export function BlackboxOptimizerStep({
                   </SelectTrigger>
                   <SelectContent>
                     {BLACKBOX_HARNESSES.map((h) => {
-                      const unavailable = UNAVAILABLE_HARNESSES.includes(h);
+                      const unavailable = UNAVAILABLE_HARNESSES.includes(h) && !claudeCodeReady;
                       return (
                         <SelectItem key={h} value={h} disabled={unavailable}>
                           <span className="flex items-center gap-2">
@@ -182,7 +189,9 @@ export function BlackboxOptimizerStep({
                             <span>{harnessLabel(h)}</span>
                             {unavailable && (
                               <span className="text-xs text-muted-foreground">
-                                {msg("submit.blackbox.start.harness.claude_code_unavailable")}
+                                {engineCatalog?.claude_code_proposer_available
+                                  ? msg("submit.blackbox.start.harness.claude_code_needs_key")
+                                  : msg("submit.blackbox.start.harness.claude_code_unavailable")}
                               </span>
                             )}
                           </span>

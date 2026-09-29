@@ -181,12 +181,27 @@ def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
         auto_unavailable_reason=auto_reason,
         auto_checkpoint_recovery_supported=False,
         auto_checkpoint_recovery_reason="The Auto recipe cannot restore its multi-engine search from one checkpoint.",
+        claude_code_proposer_available=settings.claude_code_byok_egress,
         proposer_runtimes=runtimes,
         upstream_revision=GEPA_REVISION,
     )
 
 
 CLAUDE_CODE_UNAVAILABLE = "Claude Code is temporarily unavailable. Choose another agent harness."
+CLAUDE_CODE_MODEL_UNSUPPORTED = "Claude Code runs only Anthropic Claude models. Choose an anthropic/claude-* model."
+
+
+def claude_code_proposes(payload: BlackboxRunRequest) -> bool:
+    """Report whether a job would launch Claude Code as its native proposer.
+
+    Args:
+        payload: The submitted or stored job.
+
+    Returns:
+        True when a native engine runs with the Claude Code harness.
+    """
+    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in NATIVE_ENGINES
+    return needs_native and payload.proposer.harness == BLACKBOX_HARNESS_CLAUDE_CODE
 
 
 def claude_code_in_use(payload: BlackboxRunRequest) -> bool:
@@ -198,12 +213,47 @@ def claude_code_in_use(payload: BlackboxRunRequest) -> bool:
     Returns:
         True when Claude Code would run for this job.
     """
-    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in NATIVE_ENGINES
-    proposes_with_claude = needs_native and payload.proposer.harness == BLACKBOX_HARNESS_CLAUDE_CODE
     targets_claude = (
         payload.target.kind == BLACKBOX_TARGET_AGENT and payload.target.harness == BLACKBOX_HARNESS_CLAUDE_CODE
     )
-    return proposes_with_claude or targets_claude
+    return claude_code_proposes(payload) or targets_claude
+
+
+def claude_code_available(payload: BlackboxRunRequest) -> bool:
+    """Report whether this deployment runs the job's Claude Code, if it uses any.
+
+    Only the proposer can run on the owner's key, and only once direct
+    Anthropic egress is switched on; an agent target would still bill Skynet.
+
+    Args:
+        payload: The submitted or stored job.
+
+    Returns:
+        False when the job uses Claude Code in a way this deployment refuses.
+    """
+    if not claude_code_in_use(payload):
+        return True
+    targets_claude = (
+        payload.target.kind == BLACKBOX_TARGET_AGENT and payload.target.harness == BLACKBOX_HARNESS_CLAUDE_CODE
+    )
+    return settings.claude_code_byok_egress and not targets_claude
+
+
+def claude_code_model(name: str) -> str | None:
+    """Map a Skynet Anthropic model id to the bare id Anthropic's API expects.
+
+    Args:
+        name: Model id such as ``anthropic/claude-sonnet-4.5``, optionally
+            under ``openrouter/``.
+
+    Returns:
+        The bare id, such as ``claude-sonnet-4-5``, or None for any other model.
+    """
+    bare = name.strip().removeprefix("openrouter/").removeprefix("anthropic/")
+    if bare == name.strip().removeprefix("openrouter/") or not bare.startswith("claude-"):
+        return None
+    # OpenRouter spells versions with dots; Anthropic's ids use dashes.
+    return bare.replace(".", "-")
 
 
 def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: bool = True) -> None:
@@ -215,15 +265,18 @@ def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: boo
             executable code inside the managed runtime.
 
     Raises:
-        ServiceError: When the job would launch Claude Code, the job has an
+        ServiceError: When the job would launch Claude Code in a way this
+            deployment refuses or on a non-Anthropic model, the job has an
             agent target but this deployment cannot run agents, the chosen engine is unknown/unavailable, or
             the python scorer code does not load.
     """
-    # Claude Code can only reach Anthropic through the Skynet gateway today,
-    # which bills the run to Skynet; until it runs on the user's own key, every
-    # path that launches it (submit, preflight, resume and recovery) stops here.
-    if claude_code_in_use(payload):
+    # Claude Code must never reach Anthropic through the Skynet gateway, which
+    # would bill Skynet; only a proposer on the owner's key may run, and every
+    # path that launches it (submit, preflight, resume and recovery) checks here.
+    if not claude_code_available(payload):
         raise ServiceError(CLAUDE_CODE_UNAVAILABLE)
+    if claude_code_proposes(payload) and claude_code_model(payload.reflection_model_settings.name) is None:
+        raise ServiceError(CLAUDE_CODE_MODEL_UNSUPPORTED)
     caps = engine_capabilities(payload.target)
     if caps.agent_target and not caps.sandbox:
         raise ServiceError(f"Agent targets cannot run on this deployment: {caps.sandbox_reason}")
@@ -775,10 +828,14 @@ def _run_job(
         if gateway is None or token_budget is None:
             raise ServiceError("The upstream proposer needs a gateway and a total spending budget.")
         active_runtime = current_sandbox_runtime()
+        direct_model = (
+            claude_code_model(payload.reflection_model_settings.name) if claude_code_proposes(payload) else None
+        )
         native_options = NativeOptions(
             runtime=payload.proposer_runtime,
             sandbox_runtime=active_runtime,
-            model=budget_route["model"] if budget_route else payload.reflection_model_settings.name,
+            model=direct_model or (budget_route["model"] if budget_route else payload.reflection_model_settings.name),
+            direct_anthropic=direct_model is not None,
             gateway=gateway,
             budget_route=budget_route,
             max_token_cost=token_budget,

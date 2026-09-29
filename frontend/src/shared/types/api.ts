@@ -784,6 +784,7 @@ export interface BlackboxEngineCatalogResponse {
   auto_unavailable_reason: string | null;
   auto_checkpoint_recovery_supported: boolean;
   auto_checkpoint_recovery_reason: string | null;
+  claude_code_proposer_available: boolean;
   upstream_revision: string;
   run_recovery_eligibility: string;
   proposer_runtimes: Array<{
