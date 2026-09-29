@@ -230,6 +230,6 @@ test("submitted proposer resets every knob the form hides for the engine", () =>
 
 test("reasoning knobs appear only for the Claude Code proposer", () => {
   assert.equal(proposerTunesReasoning("claude_code"), true);
-  for (const harness of ["pi", "codex", "opencode"] as const)
+  for (const harness of ["pi", "codex", "opencode", "prime"] as const)
     assert.equal(proposerTunesReasoning(harness), false);
 });

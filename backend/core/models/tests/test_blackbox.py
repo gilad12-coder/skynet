@@ -94,16 +94,6 @@ def test_unknown_proposer_runtime_is_rejected() -> None:
         BlackboxRunRequest.model_validate(_payload(proposer_runtime="local"))
 
 
-def test_retired_prime_harness_is_rejected_for_target_and_proposer() -> None:
-    """Refuse new requests naming the removed Prime Agent harness."""
-    with pytest.raises(ValidationError, match="Unknown harness 'prime'"):
-        BlackboxRunRequest.model_validate(
-            _payload(cases=[{"task": "fix it"}], target={"kind": "agent", "harness": "prime", "model": "m"})
-        )
-    with pytest.raises(ValidationError, match="Unknown proposer harness 'prime'"):
-        BlackboxRunRequest.model_validate(_payload(proposer={"harness": "prime"}))
-
-
 def test_agent_target_carries_one_matching_billable_task_model() -> None:
     """Preserve the full task-model billing role while retaining the harness model id."""
     request = BlackboxRunRequest.model_validate(
