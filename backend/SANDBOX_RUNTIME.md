@@ -23,7 +23,7 @@ Each paid Continue check and each submitted run creates exactly one outer Vercel
 | pip, for scorer wheel resolution | `26.2.1` |
 | Node | `22.22.0` |
 | Claude Code | `@anthropic-ai/claude-code@2.1.259` |
-| Pi | `@earendil-works/pi-coding-agent@0.84.1` |
+| Pi | `@earendil-works/pi-coding-agent@0.87.1` |
 | Codex | `@openai/codex@0.153.0` |
 | OpenCode | `opencode-ai@1.18.27` |
 | Deno, for the Flex-capable profile | `2.6.6`, with the prewarmed `/app/.deno` Pyodide cache |
