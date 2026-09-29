@@ -754,6 +754,7 @@
   "export.table.empty": "داده‌ای برای برون‌بری وجود ندارد",
   "export.table.failed": "برون‌بری ناموفق بود",
   "legal.privacy_link": "سیاست حفظ حریم خصوصی",
+  "legal.source_link": "کد منبع (AGPL-3.0)",
   "legal.terms_link": "شرایط استفاده از خدمات",
   "mobile.nav.account": "حساب کاربری",
   "mobile.nav.aria": "ناوبری اصلی",

@@ -754,6 +754,7 @@
   "export.table.empty": "내보낼 데이터가 없습니다",
   "export.table.failed": "내보내기 실패",
   "legal.privacy_link": "개인정보 처리방침",
+  "legal.source_link": "소스 코드 (AGPL-3.0)",
   "legal.terms_link": "서비스 이용약관",
   "mobile.nav.account": "계정",
   "mobile.nav.aria": "기본 탐색",

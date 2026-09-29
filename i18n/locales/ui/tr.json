@@ -754,6 +754,7 @@
   "export.table.empty": "Dışa aktarılacak veri yok",
   "export.table.failed": "Dışa aktarma başarısız oldu",
   "legal.privacy_link": "Gizlilik Politikası",
+  "legal.source_link": "Kaynak kodu (AGPL-3.0)",
   "legal.terms_link": "Hizmet Şartları",
   "mobile.nav.account": "Hesap",
   "mobile.nav.aria": "Ana gezinme",
