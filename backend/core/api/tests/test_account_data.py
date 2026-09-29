@@ -24,7 +24,6 @@ from sqlalchemy.pool import StaticPool
 
 from ...config import settings
 from ...storage.models import (
-    AgentMemoryModel,
     ApiTokenModel,
     Base,
     BillingCustomerModel,
@@ -74,7 +73,6 @@ def _seed_user_data(engine: Any, username: str, stripe_id: str) -> None:
                 ),
                 WalletLedgerModel(username=username, delta_cents=500, kind="grant", description="welcome"),
                 ApiTokenModel(username=username, token_hash=f"hash-{username}", last4="abcd"),
-                AgentMemoryModel(username=username, seq=0, content="remembers a thing"),
                 TelemetryEventModel(event_name=f"view-{username}", username=username, received_at=now),
                 BillingCustomerModel(username=username, stripe_customer_id=stripe_id),
                 NotificationPreferenceModel(
@@ -145,7 +143,6 @@ def test_export_returns_owned_data_without_secrets(harness: SimpleNamespace) -> 
     assert body["billing"]["ledger"][0]["kind"] == "grant"
     assert body["api_token"]["last4"] == "abcd"
     assert "token_hash" not in body["api_token"]
-    assert [m["content"] for m in body["agent_memories"]] == ["remembers a thing"]
     assert body["notification_preferences"] == {
         "job_updates_enabled": False,
         "sharing_updates_enabled": True,

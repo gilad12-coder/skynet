@@ -1,6 +1,6 @@
 """In-memory simulation of the Skynet backend that the benchmark tools act on.
 
-A ``World`` holds one task's state (jobs, datasets, wallet, wizard, memory, ...)
+A ``World`` holds one task's state (jobs, datasets, wallet, wizard, ...)
 and dispatches tool calls to handler functions registered with :func:`tool`.
 Every call is logged so a task's checks can inspect both what the agent did
 and the state it left behind.
@@ -45,7 +45,7 @@ def tool(name: str, *, mutates: bool = False) -> Callable[[Handler], Handler]:
     Args:
         name: Exact tool name from ``tools.json``.
         mutates: True when the tool changes server-side state (jobs, wallet,
-            memory, datasets). Wizard-patch and UI-card tools are NOT mutating.
+            datasets). Wizard-patch and UI-card tools are NOT mutating.
 
     Returns:
         The decorator that records the handler.

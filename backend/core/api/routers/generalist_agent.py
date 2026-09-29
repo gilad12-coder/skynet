@@ -38,7 +38,6 @@ from ...service_gateway.agents.generalist import (
 )
 from ...service_gateway.embedding_pipeline import queue_conversation_embed
 from ...storage.models import AgentConversationModel, AgentMessageModel
-from ..agent_memory import wake_document
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..model_catalog import ReasoningEffort
@@ -52,8 +51,7 @@ AuthenticatedUserDep = Annotated[AuthenticatedUser, Depends(get_authenticated_us
 TITLE_MAX_CHARS = 40
 
 # The history is re-sent in full every turn, so an unbounded thread grows the
-# prompt without limit. Recent turns carry the working context; the permanent
-# memory covers what scrolls out.
+# prompt without limit. Recent turns carry the working context.
 HISTORY_MAX_TURNS = 24
 HISTORY_TURN_MAX_CHARS = 4000
 HISTORY_MAX_TOOL_CALLS = 8
@@ -603,28 +601,8 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
                 return None, None
             return cid, ttl
 
-        def _wake_memory() -> str:
-            """Render the caller's permanent-memory context off the event loop.
-
-            Memory must never break a chat turn: with no ``job_store`` the
-            context is simply blank, and any render failure is logged and
-            swallowed the same way persistence failures are.
-
-            Returns:
-                The wake document, or ``""`` when unavailable.
-            """
-            if job_store is None:
-                return ""
-            try:
-                with Session(job_store.engine) as session:
-                    return wake_document(session, current_user.username)
-            except Exception:
-                logger.exception("Failed to wake agent memory")
-                return ""
-
         await asyncio.to_thread(enforce_llm_balance, job_store, current_user.username)
         conversation_id, title = await asyncio.to_thread(_setup_turn)
-        memory_context = await asyncio.to_thread(_wake_memory)
 
         wizard_state: WizardState = {**req.wizard_state}  # type: ignore[typeddict-item]
         model_config = route_agent_model(req.model)
@@ -636,7 +614,6 @@ def create_generalist_agent_router(*, job_store=None) -> APIRouter:
             wizard_state=wizard_state,
             chat_history=history_for_agent(req.chat_history),
             user_message=req.user_message,
-            memory_context=memory_context,
             trust_mode=req.trust_mode,
             auth_header=authorization,
             approval_owner=current_user.username,

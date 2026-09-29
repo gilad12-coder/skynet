@@ -1,7 +1,7 @@
 # The Benchmark World
 
 This document describes the simulated Skynet backend that the agent-harness
-benchmark drives. It is the reference for what state exists, what each of the 53
+benchmark drives. It is the reference for what state exists, what each of the 49
 tools does, and how to write a task `setup()` that shapes the world for a
 scenario.
 
@@ -38,8 +38,8 @@ produce byte-identical state.
 asserts that **no call in the log** is in `MUTATING` — it inspects the call log,
 not a state diff. Consequences:
 
-- Server-state-changing tools (job lifecycle, bulk ops, submits, `memory_note`,
-  `memory_nap`) are `mutates=True`.
+- Server-state-changing tools (job lifecycle, bulk ops, submits) are
+  `mutates=True`.
 - Wizard-patch tools (`update_wizard_state`, `stage_sample_dataset`,
   `profile_datasets`, `validate_datasets`, `set_column_roles`), all `request_*`
   UI-card tools, `update_user_preferences`, and every read-only tool are
@@ -93,7 +93,6 @@ does not either.
 | `endpoints` | dict | discovery probe endpoints keyed by normalized base_url (§5) |
 | `registry` | dict | `modules`, `metrics`, `optimizers` |
 | `wallet` | dict | `paid_balance_cents`, `free_grant`, `ledger` (§5) |
-| `memory` | dict | `notes`, `summaries`, `settings` (§5) |
 | `search_corpus` | list | 16 public-gallery jobs (14 public + 2 private) (§5) |
 | `blackbox` | dict | engine catalog + Auto-recipe availability (§5) |
 | `tagging_sessions` | list | 3 sessions (§5) |
@@ -217,16 +216,6 @@ so `spendable_cents = 2180`. 10 ledger entries (2 grants/top-ups of +500 & +1500
 ledger `credits` deltas == 2180. `get_wallet` returns the ledger newest-first,
 capped at 15.
 
-### Memory (`memory`)
-
-12 dense notes (`seq` 0–11, each `{seq, date, text}`), a `summaries` map, and
-`settings = {wake_lines: 64, entry_chars: 280, recall_chars: 4000}`.
-
-The summaries form a binary tree over note spans: pairs `0-1 … 10-11`, quads
-`0-3, 4-7, 8-11` — all present. The oct span **`0-7` is ready but has no summary**:
-it is the one pending compression. `memory_note` surfaces `0-7` as its
-`compression_request` until `memory_nap("0-7", …)` records it.
-
 ### Public search corpus (`search_corpus`)
 
 16 gallery jobs `pub_0001`..`pub_0016`. 14 are public; `pub_0015` (dana) and
@@ -261,7 +250,7 @@ unknown keys (422).
 
 ## 6. Tools
 
-All 53 tools, grouped by handler module. "M" = registered `mutates=True`.
+All 49 tools, grouped by handler module. "M" = registered `mutates=True`.
 
 ### `jobs.py` — optimizations (23)
 
@@ -342,15 +331,6 @@ filters. Averages use only successful runs' improvements.
 | `blackbox_scorer_dry_run_blackbox_scorer_dry_run_post` | | **AST-only** parse of the scorer's `metric_code`; `score` is always `null` (never executed); 422 if no scorer |
 | `submit_blackbox_run_blackbox_run_post` | M | queue a blackbox run (needs `scorer` + `reflection_model_config`); rejects an unavailable engine (422); 402 on empty credits |
 
-### `memory.py` — OptMem-style memory (4)
-
-| tool | M | behavior |
-|------|---|----------|
-| `memory_note` | M | append a note; returns the next ready-but-unsummarized span as `compression_request` (with its raw notes); 422 empty text |
-| `memory_nap` | M | record a span summary (`block` like `"0-7"` + `summary`); 422 malformed block/empty summary, 404 span beyond notes |
-| `memory_recall` | | regex search over note text (+ summaries), newest first; 422 bad regex |
-| `memory_zoom` | | open a span into its two halves down to raw notes; 422 malformed, 404 beyond notes |
-
 ### `search.py` — public gallery (1)
 
 `public_search_dashboard_search_post` — lexical search over **public** corpus jobs
@@ -383,8 +363,6 @@ These hold in `base_state()` and should be preserved by any `setup()`:
 - Grid `best_pair` is the pair with the max `optimized_test_metric`; the job's
   top-level metrics equal the best pair's; `total_pairs == completed + failed`.
 - Status buckets in analytics/counts match the actual job statuses.
-- Memory summary tree: every full span except the single pending `0-7` has a
-  summary.
 
 ---
 

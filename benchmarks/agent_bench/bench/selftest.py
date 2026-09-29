@@ -165,10 +165,6 @@ def _success_cases() -> list[tuple[str, dict[str, Any]]]:
                 "strategy": {"mode": "single", "engine": "gepa"},
             },
         ),
-        ("memory_note", {"text": "a fresh insight worth keeping"}),
-        ("memory_nap", {"block": "0-7", "summary": "condensed the first eight notes"}),
-        ("memory_recall", {"pattern": "hebrew|blackbox"}),
-        ("memory_zoom", {"block": "0-7"}),
         (
             "public_search_dashboard_search_post",
             {"query": "classifier", "sort": "relevance"},
@@ -318,9 +314,6 @@ def _error_cases() -> list[tuple[str, dict[str, Any], int, str]]:
             409,
             "pair inference on non-grid",
         ),
-        ("memory_nap", {"block": "bad", "summary": "x"}, 422, "malformed memory block"),
-        ("memory_zoom", {"block": "40-47"}, 404, "zoom beyond notes"),
-        ("memory_note", {"text": "  "}, 422, "empty note"),
     ]
 
 

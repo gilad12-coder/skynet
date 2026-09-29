@@ -34,9 +34,6 @@ from sqlalchemy.orm import Session
 
 from ..storage.models import (
     AgentConversationModel,
-    AgentMemoryModel,
-    AgentMemorySettingsModel,
-    AgentMemorySummaryModel,
     AgentMessageModel,
     AgentStagedDatasetModel,
     ApiTokenModel,
@@ -246,13 +243,6 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
             }
         )
 
-    memories = session.scalars(
-        select(AgentMemoryModel).where(AgentMemoryModel.username == username).order_by(AgentMemoryModel.seq)
-    ).all()
-    memories_out = [
-        {"seq": memory.seq, "content": memory.content, "created_at": _iso(memory.created_at)} for memory in memories
-    ]
-
     customer = session.get(BillingCustomerModel, username)
     ledger = session.scalars(
         select(WalletLedgerModel).where(WalletLedgerModel.username == username).order_by(WalletLedgerModel.created_at)
@@ -320,7 +310,6 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         "datasets": datasets_out,
         "tagging_sessions": tagging_out,
         "agent_conversations": conversations_out,
-        "agent_memories": memories_out,
         "billing": billing,
         "api_token": api_token,
         "provider_keys": provider_keys_out,
@@ -430,9 +419,6 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(UserQuotaOverrideModel).where(UserQuotaOverrideModel.username == username))
     _run_delete(delete(UserStorageQuotaOverrideModel).where(UserStorageQuotaOverrideModel.username == username))
     _run_delete(delete(AgentStagedDatasetModel).where(AgentStagedDatasetModel.username == username))
-    _run_delete(delete(AgentMemoryModel).where(AgentMemoryModel.username == username))
-    _run_delete(delete(AgentMemorySummaryModel).where(AgentMemorySummaryModel.username == username))
-    _run_delete(delete(AgentMemorySettingsModel).where(AgentMemorySettingsModel.username == username))
     _run_delete(delete(NotificationPreferenceModel).where(NotificationPreferenceModel.username == username))
 
     _run_delete(delete(PackageRegistryPreferenceModel).where(PackageRegistryPreferenceModel.username == username))
