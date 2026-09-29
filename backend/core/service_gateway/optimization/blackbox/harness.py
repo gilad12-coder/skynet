@@ -85,7 +85,7 @@ OPENCODE_VERSION = "1.18.27"
 CLAUDE_CODE_VERSION = "2.1.259"
 # Prime Agent is a Pi fork that ships as a versioned npm tarball on its own
 # release CDN (``<base>/latest.json`` names the current one), not on npm.
-PRIME_AGENT_VERSION = "0.9.1"
+PRIME_AGENT_VERSION = "0.9.7"
 PRIME_AGENT_TARBALL = (
     "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev"
     f"/releases/v{PRIME_AGENT_VERSION}/prime-agent-{PRIME_AGENT_VERSION}.tgz"
