@@ -27,6 +27,8 @@ license files in their `*.dist-info/` directories inside the image.
 | Pyodide (Deno npm cache) | 0.29.4 | MPL-2.0 | source: https://github.com/pyodide/pyodide/tree/0.29.4 |
 | OpenAI Codex CLI | see `sandbox-runtime/package-lock.json` | Apache-2.0 | `licenses/openai-codex.LICENSE`, `licenses/openai-codex.NOTICE` |
 | Pi coding agent | see `sandbox-runtime/package-lock.json` | MIT | `licenses/pi-coding-agent.LICENSE` |
+| Prime Agent | see `sandbox-runtime/package-lock.json` | MIT | `licenses/prime-agent.LICENSE` |
+| Prime Agent kernel Python packages | unpinned, in `/opt/prime-agent/kernel-venv` | MIT, BSD, Apache-2.0; certifi is MPL-2.0 | license texts in their `dist-info` folders |
 | OpenCode | see `sandbox-runtime/package-lock.json` | MIT | `LICENSE` inside the package |
 
 Claude Code (`@anthropic-ai/claude-code`) is proprietary Anthropic software. It
