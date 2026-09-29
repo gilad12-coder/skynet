@@ -754,6 +754,7 @@
   "export.table.empty": "エクスポートするデータがありません",
   "export.table.failed": "エクスポートに失敗しました",
   "legal.privacy_link": "プライバシーポリシー",
+  "legal.source_link": "ソースコード (AGPL-3.0)",
   "legal.terms_link": "利用規約",
   "mobile.nav.account": "アカウント",
   "mobile.nav.aria": "メインナビゲーション",

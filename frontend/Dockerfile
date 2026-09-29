@@ -52,6 +52,8 @@ ARG SENTRY_ORG
 ARG SENTRY_PROJECT
 ARG SENTRY_AUTH_TOKEN
 ARG RAILWAY_GIT_COMMIT_SHA
+# The footer's AGPL source link points at this commit (legal-config.ts).
+ENV NEXT_PUBLIC_SOURCE_COMMIT=$RAILWAY_GIT_COMMIT_SHA
 RUN node scripts/generate-third-party-licenses.mjs && npm run build
 
 FROM base AS runner

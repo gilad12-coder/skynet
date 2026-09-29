@@ -754,6 +754,7 @@
   "export.table.empty": "Нет данных для экспорта",
   "export.table.failed": "Ошибка экспорта",
   "legal.privacy_link": "Политика конфиденциальности",
+  "legal.source_link": "Исходный код (AGPL-3.0)",
   "legal.terms_link": "Условия использования",
   "mobile.nav.account": "Аккаунт",
   "mobile.nav.aria": "Основная навигация",

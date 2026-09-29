@@ -754,6 +754,7 @@
   "export.table.empty": "无导出数据",
   "export.table.failed": "导出失败",
   "legal.privacy_link": "隐私政策",
+  "legal.source_link": "源代码 (AGPL-3.0)",
   "legal.terms_link": "服务条款",
   "mobile.nav.account": "账户",
   "mobile.nav.aria": "主导航",

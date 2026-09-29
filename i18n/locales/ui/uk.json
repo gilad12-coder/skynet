@@ -754,6 +754,7 @@
   "export.table.empty": "Немає даних для експорту",
   "export.table.failed": "Не вдалося виконати експорт",
   "legal.privacy_link": "Політика конфіденційності",
+  "legal.source_link": "Вихідний код (AGPL-3.0)",
   "legal.terms_link": "Умови використання",
   "mobile.nav.account": "Обліковий запис",
   "mobile.nav.aria": "Головна навігація",

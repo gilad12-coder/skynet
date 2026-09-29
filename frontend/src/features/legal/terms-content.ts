@@ -8,7 +8,7 @@
  * governing law and contact emails) live in legal-config.ts.
  */
 
-import { LEGAL_CONFIG as C } from "./legal-config";
+import { LEGAL_CONFIG as C, SOURCE_CODE_URL } from "./legal-config";
 import type { LegalDocument } from "./types";
 
 export const TERMS_OF_SERVICE: LegalDocument = {
@@ -36,7 +36,8 @@ export const TERMS_OF_SERVICE: LegalDocument = {
             `The underlying ${C.serviceName} software is open source under the GNU Affero General ` +
             `Public License v3 (AGPL v3). These Terms govern the hosted Service we operate, which is ` +
             `separate from, and additional to, that software license. If you run your own copy of the ` +
-            `software, these Terms do not apply to your deployment.`,
+            `software, these Terms do not apply to your deployment. The complete source code of the ` +
+            `version we run is available at ${SOURCE_CODE_URL}.`,
         },
       ],
     },

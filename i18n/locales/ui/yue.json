@@ -2411,6 +2411,7 @@
   "export.table.empty": "冇資料可以匯出",
   "export.table.failed": "匯出失敗",
   "legal.privacy_link": "私隱政策",
+  "legal.source_link": "原始碼 (AGPL-3.0)",
   "legal.terms_link": "服務條款",
   "mobile.nav.account": "帳戶",
   "mobile.nav.aria": "主導覽",

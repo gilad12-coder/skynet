@@ -2,9 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { DotsThree, FileText, Gear, ShieldCheck, SignOut } from "@/shared/ui/icons";
+import { Code, DotsThree, FileText, Gear, ShieldCheck, SignOut } from "@/shared/ui/icons";
 import { signOut, useSession } from "next-auth/react";
-import { LEGAL_LINKS } from "@/features/legal/legal-config";
+import { LEGAL_LINKS, SOURCE_CODE_URL } from "@/features/legal/legal-config";
 import { msg } from "@/shared/lib/messages";
 import { cn } from "@/shared/lib/utils";
 import {
@@ -203,6 +203,16 @@ export function AccountMenu({
           <ShieldCheck className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
           {msg("legal.privacy_link")}
         </Link>
+        <a
+          href={SOURCE_CODE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={close}
+          className={COMPACT_POPOVER_ITEM_CLASS}
+        >
+          <Code className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
+          {msg("legal.source_link")}
+        </a>
 
         <div role="separator" className="my-1 h-px bg-border/60" />
 

@@ -754,6 +754,7 @@
   "export.table.empty": "لا توجد بيانات لتصديرها",
   "export.table.failed": "فشل التصدير",
   "legal.privacy_link": "سياسة الخصوصية",
+  "legal.source_link": "الشيفرة المصدرية (AGPL-3.0)",
   "legal.terms_link": "شروط الخدمة",
   "mobile.nav.account": "الحساب",
   "mobile.nav.aria": "التنقل الرئيسي",

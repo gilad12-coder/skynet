@@ -754,6 +754,7 @@
   "export.table.empty": "Não há dados para exportar",
   "export.table.failed": "A exportação falhou",
   "legal.privacy_link": "Política de Privacidade",
+  "legal.source_link": "Código-fonte (AGPL-3.0)",
   "legal.terms_link": "Termos de Serviço",
   "mobile.nav.account": "Conta",
   "mobile.nav.aria": "Navegação principal",
