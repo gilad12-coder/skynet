@@ -77,6 +77,7 @@ export interface AnythingDraftData {
   jobName: string;
   jobDescription: string;
   isPrivate: boolean;
+  economyMode?: boolean;
   recipe: BlackboxRecipe;
   codeAssistMode: "auto" | "manual";
   seedMode: SeedMode;

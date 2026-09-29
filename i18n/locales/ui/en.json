@@ -3932,6 +3932,7 @@
   "billing.plans.topup.custom_range": "Enter an amount from {p1} to {p2}.",
   "submit.economy.label": "Half price, slower",
   "submit.economy.hint": "Managed model calls go through the provider's batch queue at half price. Each round can take minutes to hours.",
+  "submit.blackbox.economy.native_hint": "This proposer is a coding agent, so its own calls stay at full price. Scoring model calls still get the discount.",
   "submit.economy.summary_off": "Standard speed",
   "submit.economy.summary_label": "Economy mode",
   "tooltip.submit.economy": "Sends your run's managed model calls in batches at half the price. Batches can take up to a day, so the run is much slower. Calls on your own key run at normal speed."

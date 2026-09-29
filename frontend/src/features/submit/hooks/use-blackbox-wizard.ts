@@ -218,6 +218,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
   const [jobNameTouched, setJobNameTouched] = useState(false);
   const [jobDescription, setJobDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(true);
+  const [economyMode, setEconomyMode] = useState(false);
 
   // Execution intent comes from the entry point, draft or clone, never from
   // syntax detection: code-shaped text may be a config or a prompt example.
@@ -579,6 +580,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setJobNameTouched(d.jobName.trim() !== "" && d.jobName !== suggestedRunName(d.objective));
     setJobDescription(d.jobDescription);
     setIsPrivate(d.isPrivate);
+    setEconomyMode(d.economyMode ?? false);
     setRecipeState(d.recipe);
     setCodeAssistMode(d.codeAssistMode);
     const singlePart = d.seedMode === "parts" && d.seedParts.length === 1 ? d.seedParts[0] : null;
@@ -682,6 +684,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
         if (basics.isPrivate != null) setIsPrivate(basics.isPrivate);
 
         if (source) {
+          setEconomyMode(source.economy_mode === true);
           if (source.recipe) setRecipeState(wizardRecipe(source.recipe));
           if (source.objective) setObjective(source.objective);
           if (source.background) setBackground(source.background);
@@ -897,6 +900,9 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       modelRoles,
       runtime: runtimeCostProjection(selectedRuntime?.cost, scorerKind === "python" ? 4 : 3),
       pricing,
+      // Coding-agent proposers stream their calls, which never batch, so their
+      // estimate keeps full price.
+      economyMode: economyMode && !nativeProposer,
     });
   }, [
     effectiveReflectionModel,
@@ -908,6 +914,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     scorerKind,
     parsedCases?.rowCount,
     pricing,
+    economyMode,
+    nativeProposer,
   ]);
   const tokenSource = aggregateTokenSource([
     effectiveReflectionModel,
@@ -946,6 +954,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       reflection_model_config: reflection,
       token_source: tokenSource,
       is_private: isPrivate,
+      ...(economyMode && { economy_mode: true }),
       max_cost_cents: budgetUncapped ? undefined : (maxCostCents ?? undefined),
       estimated_cents_low: estimate.lowCents,
       estimated_cents_high: estimate.highCents,
@@ -1632,6 +1641,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       jobName,
       jobDescription,
       isPrivate,
+      economyMode,
       recipe,
       codeAssistMode,
       seedMode,
@@ -1718,6 +1728,8 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     setJobDescription,
     isPrivate,
     setIsPrivate,
+    economyMode,
+    setEconomyMode,
     codeAssistMode,
     setCodeAssistMode,
     seedMode,
