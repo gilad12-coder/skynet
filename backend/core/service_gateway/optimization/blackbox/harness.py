@@ -1,8 +1,8 @@
 """Harness catalog: how each coding agent is installed, pointed at the gateway and run.
 
 A harness is the program that turns a model into a coding agent — Pi,
-Codex, Claude Code, OpenCode, or a user-supplied command. Every entry knows
-the file its instructions live in (that file is the text under
+Codex, Claude Code, OpenCode, Prime Agent, or a user-supplied command. Every entry
+knows the file its instructions live in (that file is the text under
 optimization), how to install itself, the config that routes its model
 calls to Skynet's gateway, the command that runs one case headlessly, and
 how to read the agent's final answer and token usage out of its output.
@@ -25,6 +25,7 @@ from ....models.blackbox import (
     BLACKBOX_HARNESS_CUSTOM,
     BLACKBOX_HARNESS_OPENCODE,
     BLACKBOX_HARNESS_PI,
+    BLACKBOX_HARNESS_PRIME,
     BlackboxTarget,
 )
 from .harness_bridge import (
@@ -82,11 +83,22 @@ PI_VERSION = "0.87.1"
 CODEX_VERSION = "0.153.0"
 OPENCODE_VERSION = "1.18.27"
 CLAUDE_CODE_VERSION = "2.1.259"
+# Prime Agent is a Pi fork that ships as a versioned npm tarball on its own
+# release CDN (``<base>/latest.json`` names the current one), not on npm.
+PRIME_AGENT_VERSION = "0.9.7"
+PRIME_AGENT_TARBALL = (
+    "https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev"
+    f"/releases/v{PRIME_AGENT_VERSION}/prime-agent-{PRIME_AGENT_VERSION}.tgz"
+)
+# Its config dir; the run points ``PRIME_AGENT_CODING_AGENT_DIR`` here so the
+# models.json the box receives is the one it reads.
+_PRIME_AGENT_DIR = ".skynet/prime"
 _PINNED_HARNESSES = {
     BLACKBOX_HARNESS_PI: ("pi", PI_VERSION),
     BLACKBOX_HARNESS_CODEX: ("codex", CODEX_VERSION),
     BLACKBOX_HARNESS_CLAUDE_CODE: ("claude", CLAUDE_CODE_VERSION),
     BLACKBOX_HARNESS_OPENCODE: ("opencode", OPENCODE_VERSION),
+    BLACKBOX_HARNESS_PRIME: ("prime-agent", PRIME_AGENT_VERSION),
 }
 PI_THINKING_LEVEL = "low"
 # The LiteLLM-style routing prefix; the gateway fronts OpenRouter itself and
@@ -111,6 +123,22 @@ def _pi_install() -> str:
     return (
         f'{_PI_PATH}; [ "$(pi --version 2>/dev/null)" = "{PI_VERSION}" ] '
         f"|| npm install -g --prefix {_PI_PREFIX} {PI_PACKAGE}@{PI_VERSION} >/dev/null && pi --version"
+    )
+
+
+def _prime_agent_install() -> str:
+    """Return the command that pins Prime Agent to :data:`PRIME_AGENT_VERSION` and logs the version that will run.
+
+    The tarball's postinstall builds the Python kernel (uv, Python 3.11 and the
+    runtime) when told to, so the first case does not pay for it.
+
+    Returns:
+        The shell command.
+    """
+    return (
+        f'[ "$(prime-agent --version 2>/dev/null)" = "{PRIME_AGENT_VERSION}" ] '
+        "|| PRIME_AGENT_BOOTSTRAP_KERNEL_ON_INSTALL=1 npm install -g --no-fund --no-audit --loglevel=error "
+        f'--progress=false "{PRIME_AGENT_TARBALL}" && prime-agent --version'
     )
 
 
@@ -198,6 +226,8 @@ def _base_env(model: str, gateway: GatewayConfig) -> dict[str, str]:
 
 def _pi_models_json(model: str, gateway: GatewayConfig) -> tuple[dict[str, Any], str]:
     """Build Pi's ``models.json`` for the gateway and the ``--model`` argument that selects the entry.
+
+    Prime Agent is a Pi fork and reads the same file.
 
     Args:
         model: Target model id.
@@ -362,6 +392,36 @@ def _opencode_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
     )
 
 
+def _prime_agent_launch(model: str, gateway: GatewayConfig) -> HarnessLaunch:
+    """Build the launch for Prime Agent (:data:`PRIME_AGENT_TARBALL`, pinned to :data:`PRIME_AGENT_VERSION`).
+
+    Prime Agent works through a Python kernel it bootstraps with uv on first
+    use; ``PRIME_AGENT_INSTALL_UV`` lets that happen without a terminal to
+    confirm on. Its JSON stream has Pi's shape, so Pi's parser reads it.
+
+    Args:
+        model: Target model id.
+        gateway: Gateway URL and key.
+
+    Returns:
+        The launch.
+    """
+    models_json, model_arg = _pi_models_json(model, gateway)
+    env = _base_env(model, gateway)
+    env.update({"PRIME_AGENT_INSTALL_UV": "1", "PRIME_AGENT_TELEMETRY": "0", "PI_SKIP_VERSION_CHECK": "1"})
+    return HarnessLaunch(
+        instructions_file="AGENTS.md",
+        install_command=_prime_agent_install(),
+        files={f"{_PRIME_AGENT_DIR}/models.json": json.dumps(models_json, indent=2)},
+        run_command=(
+            f'PRIME_AGENT_CODING_AGENT_DIR="$PWD/{_PRIME_AGENT_DIR}" '
+            f"prime-agent --mode json --no-session --provider {PROVIDER} --model {model_arg} {_PROMPT_ARG}"
+        ),
+        env=env,
+        parse_output=parse_pi_output,
+    )
+
+
 def _fill(command: str | None, model: str, gateway: GatewayConfig, *, protected: bool = False) -> str | None:
     """Substitute the custom-harness placeholders into ``command``.
 
@@ -393,6 +453,7 @@ _CATALOG: dict[str, Callable[[str, GatewayConfig], HarnessLaunch]] = {
     BLACKBOX_HARNESS_CODEX: _codex_launch,
     BLACKBOX_HARNESS_CLAUDE_CODE: _claude_code_launch,
     BLACKBOX_HARNESS_OPENCODE: _opencode_launch,
+    BLACKBOX_HARNESS_PRIME: _prime_agent_launch,
 }
 
 

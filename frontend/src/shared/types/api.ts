@@ -568,7 +568,7 @@ export type BlackboxEngineId =
   | "autoresearch"
   | "meta_harness"
   | "autosaddler";
-export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "custom";
+export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "prime" | "custom";
 export type BlackboxProposerRuntime = "vercel";
 
 export interface ScorerDependencyLock {
