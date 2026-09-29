@@ -171,7 +171,7 @@ def _source_archive() -> str:
     """Package the installed, verified upstream source without resolving new dependencies.
 
     Returns:
-        Base64 tar archive containing only the installed GEPA Python sources.
+        Base64 tar archive containing the installed GEPA Python sources and its MIT license.
 
     Raises:
         ServiceError: When the worker was not built from the approved commit.
@@ -187,6 +187,10 @@ def _source_archive() -> str:
             if source.is_symlink():
                 raise ServiceError("The pinned GEPA source contains a symbolic link.")
             archive.add(source, arcname=str(Path("gepa") / source.relative_to(root)), recursive=False)
+        license_file = next((f for f in package.files or () if f.name == "LICENSE"), None)
+        if license_file is None:
+            raise ServiceError("The pinned GEPA install is missing its LICENSE file.")
+        archive.add(Path(package.locate_file(license_file)), arcname="gepa/LICENSE", recursive=False)
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
@@ -214,7 +218,7 @@ def _runner_files(engine_id: str) -> dict[str, str]:
     runner = Path(native_runner.__file__).with_name(_AUTOSADDLER_RUNNER_FILE)
     plugin_root = runner.with_name(_AUTOSADDLER_PLUGIN_DIR)
     files = {**bridge, _AUTOSADDLER_RUNNER_FILE: runner.read_text(encoding="utf-8")}
-    for asset in sorted(plugin_root.rglob("*.md")):
+    for asset in sorted([*plugin_root.rglob("*.md"), plugin_root / "LICENSE"]):
         files[f"{_AUTOSADDLER_PLUGIN_DIR}/{asset.relative_to(plugin_root).as_posix()}"] = asset.read_text(
             encoding="utf-8"
         )

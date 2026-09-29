@@ -8,9 +8,12 @@ include = ["core*"]
 [tool.setuptools.package-data]
 "core.api" = [
     "data/*.txt",
+    "data/*.LICENSE",
+    "static/scalar/LICENSE",
     "static/scalar/*.js",
     "static/scalar/*.svg",
     "static/scalar/fonts/*.woff2",
+    "static/scalar/fonts/OFL.txt",
 ]
 "core.i18n_locales" = ["*.json"]
 

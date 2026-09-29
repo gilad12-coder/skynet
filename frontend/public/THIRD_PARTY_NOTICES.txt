@@ -1,0 +1,86 @@
+Third-party notices for the Skynet frontend
+===========================================
+
+This file covers third-party material that is copied into the Skynet source or
+that carries copyleft or attribution terms. License texts of every bundled npm
+package are in THIRD_PARTY_LICENSES.txt, generated at build time.
+
+
+1. shadcn/ui
+------------
+
+The UI primitives under src/shared/ui/primitives are adapted from shadcn/ui
+(https://github.com/shadcn-ui/ui), used under the MIT License:
+
+MIT License
+
+Copyright (c) 2023 shadcn
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+2. libvips (via @img/sharp-libvips-* 1.3.3, used by sharp 0.35.4)
+-----------------------------------------------------------------
+
+The image optimizer loads the prebuilt libvips shared library shipped in
+@img/sharp-libvips-*. libvips and the libraries bundled with it are licensed
+under the GNU Lesser General Public License, version 3 or later. The full
+license texts are in licenses/LGPL-3.0.txt and licenses/GPL-3.0.txt.
+
+Corresponding source:
+  libvips:              https://github.com/libvips/libvips
+  build and patches:    https://github.com/lovell/sharp-libvips/tree/v1.3.3
+  sharp (Apache-2.0):   https://github.com/lovell/sharp/tree/v0.35.4
+
+The library is loaded dynamically and is not modified. You may replace it with
+a compatible build of your own. To obtain the exact source used for this image,
+contact the Skynet maintainers; the offer is valid for three years from the
+date of the image.
+
+
+3. lightningcss 1.31.1
+----------------------
+
+Licensed under the Mozilla Public License 2.0 (licenses/MPL-2.0.txt). Source:
+https://github.com/parcel-bundler/lightningcss/tree/v1.31.1
+
+
+4. caniuse-lite
+---------------
+
+Browser support data from caniuse.com by Alexis Deveria, licensed under
+Creative Commons Attribution 4.0 International
+(https://creativecommons.org/licenses/by/4.0/). Source:
+https://github.com/browserslist/caniuse-lite
+
+
+5. Fonts
+--------
+
+Geist, Heebo, JetBrains Mono, Noto Sans (Arabic, Devanagari, JP, KR, SC) and
+Vazirmatn ship under the SIL Open Font License 1.1, via public/fonts/ and the
+@fontsource-variable packages. Copyright notices and the license text are in
+fonts/OFL.txt.
+
+
+6. Apache-2.0 packages
+----------------------
+
+The Apache License 2.0 text is reproduced in licenses/Apache-2.0.txt. Package
+NOTICE files, where present, are included in THIRD_PARTY_LICENSES.txt.

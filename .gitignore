@@ -78,3 +78,6 @@ logs/
 
 # Machine-local AI-assistant rules
 CLAUDE.local.md
+
+# Generated at frontend build time by scripts/generate-third-party-licenses.mjs
+frontend/public/THIRD_PARTY_LICENSES.txt

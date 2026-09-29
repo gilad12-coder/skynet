@@ -6,3 +6,4 @@ __pycache__
 .git
 *.md
 .env*
+!THIRD_PARTY_NOTICES.md

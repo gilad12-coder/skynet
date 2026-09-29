@@ -454,7 +454,8 @@ function Invoke-BuildImages {
 
     $backendArgs = @('build', (Join-Path $RootDir 'backend'),
                      '-t', "$REGISTRY/$BACKEND_REPOSITORY`:$IMAGE_TAG",
-                     '--build-arg', "REGISTRY_PREFIX=$registryPrefix")
+                     '--build-arg', "REGISTRY_PREFIX=$registryPrefix",
+                     '--build-arg', "INCLUDE_CLAUDE_CODE=$(Get-OrDefault 'INCLUDE_CLAUDE_CODE' 'false')")
     if ($debianMirror)   { $backendArgs += @('--build-arg', "DEBIAN_MIRROR=$debianMirror") }
     if ($pipIndexUrl)    { $backendArgs += @('--build-arg', "PIP_INDEX_URL=$pipIndexUrl") }
     if ($pipTrustedHost) { $backendArgs += @('--build-arg', "PIP_TRUSTED_HOST=$pipTrustedHost") }
