@@ -35,7 +35,7 @@ import httpx
 
 from ....billing.operation_pricing import json_fingerprint
 from ....billing.runtime import BudgetRuntime
-from ....billing.vercel_usage import VercelUsageReservation
+from ....billing.vercel_usage import SANDBOX_NETWORK_BYTES_CAP, VercelUsageReservation
 from ....config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS, Settings
 from ....exceptions import ServiceError
 
@@ -106,6 +106,8 @@ class SandboxSpec:
     # secret reaches a service without ever entering the box.
     inject_headers: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     network_disabled: bool = False
+    # When set, the box reaches only these hosts; every other destination is denied.
+    allowed_hosts: tuple[str, ...] = ()
     vcpus: int = 2
     operation_key: str | None = None
 
@@ -486,6 +488,28 @@ def _network_policy(inject_headers: Mapping[str, Mapping[str, str]]) -> Any:
     return NetworkPolicy.custom(allow={_ANY_HOST: (), **rules})
 
 
+def _allowlist_policy(hosts: tuple[str, ...], inject_headers: Mapping[str, Mapping[str, str]]) -> Any:
+    """Build the policy that reaches only ``hosts``, adding ``inject_headers`` at the edge.
+
+    Args:
+        hosts: The only destinations the box may reach.
+        inject_headers: Host → headers to add to the box's requests to that host.
+
+    Returns:
+        A custom ``NetworkPolicy`` without the any-host entry, so it denies everything else.
+    """
+    return NetworkPolicy.custom(
+        allow={
+            host: (
+                (NetworkPolicyRule(transform=(NetworkPolicyTransform(headers=dict(inject_headers[host])),)),)
+                if inject_headers.get(host)
+                else ()
+            )
+            for host in hosts
+        }
+    )
+
+
 class VercelSandboxRuntime:
     """Sandbox runtime over the Vercel Sandbox SDK."""
 
@@ -523,8 +547,10 @@ class VercelSandboxRuntime:
             raise ServiceError("The sandbox lifetime must be finite and positive.")
         if isinstance(spec.vcpus, bool) or spec.vcpus not in {1, *range(2, 33, 2)}:
             raise ServiceError("The sandbox must use 1 or an even number of vCPUs between 2 and 32.")
-        if spec.network_disabled and spec.inject_headers:
+        if spec.network_disabled and (spec.inject_headers or spec.allowed_hosts):
             raise ServiceError("An offline sandbox cannot inject network credentials.")
+        if spec.allowed_hosts and not set(spec.inject_headers) <= set(spec.allowed_hosts):
+            raise ServiceError("A sandbox can only inject credentials for hosts it may reach.")
         image = spec.image or self._image
         name = spec.name
         usage = None
@@ -544,6 +570,14 @@ class VercelSandboxRuntime:
                     "lifetime_ms": math.ceil(spec.lifetime_seconds * 1000),
                     "vcpus": spec.vcpus,
                     "network_disabled": spec.network_disabled,
+                    **(
+                        {
+                            "allowed_hosts": sorted(set(spec.allowed_hosts)),
+                            "network_bytes_cap": SANDBOX_NETWORK_BYTES_CAP,
+                        }
+                        if spec.allowed_hosts
+                        else {}
+                    ),
                     "ports": [],
                     "persistent": False,
                     "environment_fingerprint": json_fingerprint(dict(spec.env)),
@@ -589,7 +623,11 @@ class VercelSandboxRuntime:
                 ports=[],
                 env=dict(spec.env) or None,
                 network_policy=(
-                    NetworkPolicy.deny_all() if spec.network_disabled else _network_policy(spec.inject_headers)
+                    NetworkPolicy.deny_all()
+                    if spec.network_disabled
+                    else _allowlist_policy(spec.allowed_hosts, spec.inject_headers)
+                    if spec.allowed_hosts
+                    else _network_policy(spec.inject_headers)
                 ),
                 tags={**SANDBOX_TAG, **spec.tags},
             )

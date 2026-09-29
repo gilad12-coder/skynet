@@ -161,6 +161,8 @@
     "billing.payment_method_not_found": "אמצעי התשלום הזה לא שמור בחשבון שלך.",
     "submission.capacity_reached": "המערכת בעומס כרגע. נסו שוב בעוד רגע.",
     "submission.claude_code_unavailable": "Claude Code אינו זמין כרגע. בחרו סוכן אחר, למשל Codex.",
+    "submission.claude_code_model_unsupported": "Claude Code עובד רק עם מודלי Claude של Anthropic. בחרו מודל anthropic/claude-*.",
+    "submission.claude_code_needs_anthropic_key": "Claude Code דורש מפתח Anthropic מאומת משלכם. הוסיפו אותו בהגדרות ונסו שוב.",
     "submission.validation_failed": "אימות ההגדרות נכשל. בדוק/בדקי את האופטימייזר, המודול ומיפוי העמודות.",
     "submission.module_resolve_failed": "טעינת ה{term.module} נכשלה: {error}",
     "submission.staged_dataset_not_found": "הדאטאסט השמור ({staged_dataset_id}) לא נמצא או שייך למשתמש אחר.",

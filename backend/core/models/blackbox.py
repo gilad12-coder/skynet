@@ -511,6 +511,9 @@ class BlackboxEngineCatalogResponse(BaseModel):
     auto_unavailable_reason: str | None = None
     auto_checkpoint_recovery_supported: bool = False
     auto_checkpoint_recovery_reason: str | None = None
+    # Whether this deployment runs Claude Code as the proposer; each user still
+    # needs a verified Anthropic key of their own.
+    claude_code_proposer_available: bool = False
     proposer_runtimes: list[BlackboxProposerRuntimeInfo] = Field(default_factory=list)
     upstream_revision: str | None = None
     run_recovery_eligibility: str = "Requires a supported engine, a compatible saved checkpoint, and funded headroom."

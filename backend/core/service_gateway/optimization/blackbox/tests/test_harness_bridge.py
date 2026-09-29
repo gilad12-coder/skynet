@@ -184,3 +184,24 @@ def test_shim_resumes_by_restating_the_opening_prompt(tmp_path: Path) -> None:
     )
     assert rejected.returncode == 1
     assert "unsupported --output-format" in rejected.stderr
+
+
+def test_direct_anthropic_points_claude_at_the_edge_with_only_a_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Send a direct run to Anthropic with the placeholder key, and leave other runs on the gateway."""
+    gateway = {"ANTHROPIC_BASE_URL": "http://127.0.0.1:9/mailbox", "ANTHROPIC_AUTH_TOKEN": "gateway-token"}
+    untouched = dict(gateway)
+    harness_bridge.use_direct_anthropic(untouched)
+    assert untouched == gateway
+    ca = tmp_path / "proxy-ca.crt"
+    ca.write_text("certificate")
+    monkeypatch.setattr(harness_bridge, "PROXY_CA_PATH", str(ca))
+    direct = {**gateway, "SKYNET_CLAUDE_DIRECT": "1"}
+    harness_bridge.use_direct_anthropic(direct)
+    assert direct == {
+        "SKYNET_CLAUDE_DIRECT": "1",
+        "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+        "ANTHROPIC_API_KEY": "sk-ant-skynet-edge-injected",
+        "NODE_EXTRA_CA_CERTS": str(ca),
+    }

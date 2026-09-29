@@ -111,6 +111,8 @@
     "rate_limit.exceeded": "Demasiadas solicitudes. Espere {retry_after, plural, one {1 segundo} other {# segundos}} y vuelva a intentarlo.",
     "submission.capacity_reached": "Skynet ha alcanzado su capacidad máxima en este momento. Inténtalo de nuevo en unos instantes.",
     "submission.claude_code_unavailable": "Claude Code no está disponible temporalmente. Elige otro agente, como Codex.",
+    "submission.claude_code_model_unsupported": "Claude Code solo funciona con modelos Claude de Anthropic. Elige un modelo anthropic/claude-*.",
+    "submission.claude_code_needs_anthropic_key": "Claude Code necesita tu propia clave de Anthropic verificada. Añádela en Ajustes y vuelve a intentarlo.",
     "webauthn.challenge_expired": "La solicitud de clave de acceso ha caducado; inténtalo de nuevo.",
     "webauthn.invalid_credential": "No se pudo verificar esta clave de acceso.",
     "webauthn.not_found": "Clave de acceso no encontrada.",

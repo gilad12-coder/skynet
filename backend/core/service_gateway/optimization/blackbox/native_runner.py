@@ -524,10 +524,14 @@ def _engine_knobs(engine_id: str, proposer: dict[str, Any]) -> dict[str, Any]:
 def _install_proposer(proposer: dict[str, Any]) -> None:
     """Put the configured harness behind the ``claude`` command the upstream engines run.
 
+    Claude Code itself stays the ``claude`` command, aimed at Anthropic when the
+    run holds its owner's key.
+
     Args:
         proposer: Proposer block of the parent payload.
     """
     if not proposer or proposer.get("harness") == "claude_code":
+        harness_bridge.use_direct_anthropic(os.environ)
         return
     config_file = Path("proposer.json").resolve()
     config_file.write_text(json.dumps(proposer), encoding="utf-8")

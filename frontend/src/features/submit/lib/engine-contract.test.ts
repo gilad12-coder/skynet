@@ -20,6 +20,7 @@ const catalog: BlackboxEngineCatalogResponse = {
   auto_unavailable_reason: null,
   auto_checkpoint_recovery_supported: false,
   auto_checkpoint_recovery_reason: "Auto recovery requires a new search.",
+  claude_code_proposer_available: false,
   upstream_revision: "pinned",
   run_recovery_eligibility:
     "Recovery also requires a compatible saved checkpoint and enough funded headroom.",

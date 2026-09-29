@@ -264,3 +264,23 @@ def test_git_free_runtime_is_rejected_before_the_proposer_starts(
     with pytest.raises(RuntimeError, match="needs git"):
         native_engines.AutoResearchEngine(config).run(server.task, server)
     assert subprocess.run(["/usr/bin/git", "--version"], capture_output=True, check=False).returncode == 0
+
+
+@pytest.mark.parametrize(("direct", "expected"), [(True, "sk-ant-skynet-edge-injected"), (False, None)])
+def test_only_a_direct_claude_code_run_keeps_its_anthropic_key(
+    fake_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, direct: bool, expected: str | None
+) -> None:
+    """Keep the edge placeholder for a direct run, and drop any raw key otherwise."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-skynet-edge-injected")
+    if direct:
+        monkeypatch.setenv("SKYNET_CLAUDE_DIRECT", "1")
+    else:
+        monkeypatch.delenv("SKYNET_CLAUDE_DIRECT", raising=False)
+    _install_fake(
+        fake_home,
+        "(pathlib.Path.home() / 'key.json').write_text(json.dumps(os.environ.get('ANTHROPIC_API_KEY')))\n",
+    )
+    native_engines.run_proposer(
+        "go", work_dir=tmp_path, log_dir=tmp_path / "logs", name="iter0", model="claude-test", session_id="s1"
+    )
+    assert json.loads((fake_home / "key.json").read_text()) == expected

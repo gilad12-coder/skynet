@@ -17,7 +17,12 @@ from vercel.sandbox import SandboxApiError
 from core.billing.budgets import BudgetInsufficientError, BudgetService
 from core.billing.operation_pricing import UnpricedOperationError
 from core.billing.runtime import BudgetRuntime, UsagePendingError
-from core.billing.vercel_usage import quote_vercel_sandbox, vercel_actual_usd, vercel_sandbox_cost_range
+from core.billing.vercel_usage import (
+    SANDBOX_NETWORK_BYTES_CAP,
+    quote_vercel_sandbox,
+    vercel_actual_usd,
+    vercel_sandbox_cost_range,
+)
 from core.config import settings
 from core.service_gateway.optimization.blackbox import sandbox as sandbox_module
 from core.service_gateway.optimization.blackbox.sandbox import SandboxSpec, VercelCredentials, VercelSandboxRuntime
@@ -31,6 +36,12 @@ CREATE = {
     "network_disabled": True,
     "ports": [],
     "persistent": False,
+}
+NETWORKED = {
+    **CREATE,
+    "network_disabled": False,
+    "allowed_hosts": ["api.anthropic.com"],
+    "network_bytes_cap": SANDBOX_NETWORK_BYTES_CAP,
 }
 RECEIPT = {
     "id": "session-one",
@@ -148,6 +159,45 @@ def test_control_plane_transfer_settles_only_under_an_offline_admission() -> Non
         vercel_actual_usd(receipt, session_id="session-one", vcpus=2, price_snapshot=connected)
 
 
+def test_allowlisted_box_is_funded_for_its_transfer_cap_and_charged_per_byte() -> None:
+    """Fund a networked box for its whole byte cap, then charge every byte it moved."""
+    offline = quote_vercel_sandbox(CREATE)
+    quote = quote_vercel_sandbox(NETWORKED)
+    assert quote.maximum.total - offline.maximum.total == Decimal(SANDBOX_NETWORK_BYTES_CAP) * Decimal("0.15") / 10**7
+    assert quote.price_snapshot["maximum_billable_network_bytes"] == SANDBOX_NETWORK_BYTES_CAP
+    assert offline.price_snapshot["maximum_billable_network_bytes"] == 0
+    assert offline.price_snapshot["network_basis"].startswith("deny-all")
+    receipt = {**RECEIPT, "networkTransfer": {"ingress": 600_000_000, "egress": 400_000_000}}
+    moved = vercel_actual_usd(receipt, session_id="session-one", vcpus=2, price_snapshot=quote.price_snapshot)
+    idle = vercel_actual_usd(RECEIPT, session_id="session-one", vcpus=2, price_snapshot=quote.price_snapshot)
+    assert moved - idle == Decimal("0.15")
+
+
+def test_transfer_beyond_the_admitted_cap_stays_pending() -> None:
+    """Never settle a networked box that moved more than its admission funded."""
+    snapshot = quote_vercel_sandbox(NETWORKED).price_snapshot
+    receipt = {**RECEIPT, "networkTransfer": {"ingress": SANDBOX_NETWORK_BYTES_CAP, "egress": 1}}
+    with pytest.raises(UsagePendingError, match="allowance"):
+        vercel_actual_usd(receipt, session_id="session-one", vcpus=2, price_snapshot=snapshot)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"allowed_hosts": []},
+        {"allowed_hosts": ["*"]},
+        {"allowed_hosts": ["b.example", "a.example"]},
+        {"network_bytes_cap": None},
+        {"network_bytes_cap": SANDBOX_NETWORK_BYTES_CAP + 1},
+        {"network_disabled": True},
+    ],
+)
+def test_unbounded_allowlist_is_not_quoted(change: dict[str, Any]) -> None:
+    """Refuse an open, unsorted, or uncapped allowlist, and an allowlist on a deny-all box."""
+    with pytest.raises(UnpricedOperationError):
+        quote_vercel_sandbox({**NETWORKED, **change})
+
+
 def _mock_provider(
     monkeypatch: pytest.MonkeyPatch,
     runtime: BudgetRuntime,
@@ -155,6 +205,7 @@ def _mock_provider(
     receipt: dict[str, Any] | None = None,
     fail_create: bool = False,
     reject_create: bool = False,
+    network_policy: dict[str, Any] | None = None,
 ) -> list[httpx.Request]:
     """Install a real Python SDK transport with deterministic Vercel API responses.
 
@@ -164,6 +215,7 @@ def _mock_provider(
         receipt: Optional stopped-session metadata override.
         fail_create: Simulate a network failure after creation may have been accepted.
         reject_create: Answer the first create call with the 400 Vercel returns for a lifetime above its ceiling.
+        network_policy: The create body's expected network policy, deny-all when omitted.
 
     Returns:
         Captured provider requests for replay and lifecycle assertions.
@@ -180,7 +232,7 @@ def _mock_provider(
             body = json.loads(request.content)
             assert body["persistent"] is False
             assert body["ports"] == []
-            assert body["networkPolicy"] == {"mode": "deny-all"}
+            assert body["networkPolicy"] == (network_policy or {"mode": "deny-all"})
             assert body["resources"] == {"vcpus": 2, "memory": 4096}
             first_creation = not any(earlier.url.path.endswith("/v3/sandboxes") for earlier in requests[:-1])
             if reject_create and first_creation:
@@ -271,6 +323,35 @@ def test_control_plane_transfer_is_recorded_and_settled(database: Engine, monkey
             select(ExecutionUsageEvidenceModel).where(ExecutionUsageEvidenceModel.final.is_(True))
         )
         assert evidence.evidence["session"]["networkTransfer"] == {"ingress": 42, "egress": 1}
+
+
+def test_allowlisted_box_reaches_only_its_host_with_the_key_added_at_the_edge(
+    database: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Send Vercel an allowlist-only policy and keep the injected key out of the funded request."""
+    runtime = _runtime(database)
+    requests = _mock_provider(
+        monkeypatch,
+        runtime,
+        network_policy={
+            "allow": {
+                "api.anthropic.com": [{"transform": [{"headers": {"x-api-key": "sk-ant-secret"}}]}],
+            }
+        },
+    )
+    spec = SandboxSpec(
+        lifetime_seconds=120,
+        name="sandbox-one",
+        operation_key="evaluation-one",
+        allowed_hosts=("api.anthropic.com",),
+        inject_headers={"api.anthropic.com": {"x-api-key": "sk-ant-secret"}},
+    )
+    _sandbox_runtime(runtime).open(spec).close()
+    assert requests[-1].method == "DELETE"
+    with Session(database) as session:
+        operation = session.scalar(select(ExecutionOperationModel))
+        assert "sk-ant-secret" not in json.dumps(operation.price_snapshot, default=str)
+        assert operation.price_snapshot["request"]["allowed_hosts"] == ["api.anthropic.com"]
 
 
 def test_lost_creation_response_is_pending_and_never_repeated(

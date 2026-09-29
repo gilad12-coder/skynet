@@ -134,6 +134,7 @@ class RemoteSandboxRuntime:
                     "image": spec.image,
                     "vcpus": spec.vcpus,
                     "inject_headers": dict(spec.inject_headers),
+                    "allowed_hosts": list(spec.allowed_hosts),
                 },
             },
             timeout=max(90, spec.lifetime_seconds + 60),

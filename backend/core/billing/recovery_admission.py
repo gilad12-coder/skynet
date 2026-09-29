@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from .operation_pricing import OperationQuote, json_fingerprint
-from .vercel_usage import quote_vercel_sandbox
+from .vercel_usage import SANDBOX_NETWORK_BYTES_CAP, quote_vercel_sandbox
 
 RECOVERY_ADMISSION_VERSION = 1
 _VOLATILE_PRICE_FIELDS = frozenset({"retrieved_at", "version"})
@@ -131,7 +131,12 @@ def runtime_bound(kind: str, descriptor: Mapping[str, Any] | None) -> dict[str, 
         "image": descriptor.get("image"),
         "lifetime_ms": math.ceil(float(descriptor.get("lifetime_seconds", 0)) * 1000),
         "vcpus": 2,
-        "network_disabled": True,
+        "network_disabled": not descriptor.get("allowed_hosts"),
+        **(
+            {"allowed_hosts": list(descriptor["allowed_hosts"]), "network_bytes_cap": SANDBOX_NETWORK_BYTES_CAP}
+            if descriptor.get("allowed_hosts")
+            else {}
+        ),
         "ports": [],
         "persistent": False,
     }

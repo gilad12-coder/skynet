@@ -866,6 +866,34 @@ def test_run_native_engine_serializes_the_proposer_without_the_gateway_key(
     assert "@anthropic-ai/claude-code" not in session.calls[0][0]
 
 
+def test_direct_claude_code_box_reaches_only_anthropic_and_flags_the_guest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ask the parent for Anthropic egress and tell the guest runner to bypass the mailbox."""
+    monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
+    session = FakeSession()
+    runtime = FakeRuntime(session)
+    monkeypatch.setattr(native_runtime, "raise_gateway_stop", lambda route: None)
+    runtime.protected = True
+    runtime.injects_headers = False
+    ctx = _context(tmp_path, runtime)
+    ctx.native_options = replace(
+        ctx.native_options,
+        model="claude-sonnet-4-5",
+        direct_anthropic=True,
+        budget_route={"url": "http://127.0.0.1:9000/v1", "token": "scoped"},
+    )
+    run_native_engine(
+        "meta_harness", Task("seed", train_set=[{"id": "case"}]), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx
+    )
+    assert runtime.spec.allowed_hosts == ("api.anthropic.com",)
+    assert session.calls[1][1]["env"][harness_bridge.DIRECT_ANTHROPIC_ENV] == "1"
+    offline = _context(tmp_path, FakeRuntime(FakeSession()))
+    offline.native_options = replace(offline.native_options, direct_anthropic=True)
+    with pytest.raises(ServiceError, match="protected sandbox"):
+        run_native_engine("meta_harness", Task("seed"), EvalServer(lambda *_: (0.5, {}), max_evals=3), offline)
+
+
 class _RecordingMailbox:
     """Child-side mailbox stand-in that scores by vowel density and records progress lines."""
 

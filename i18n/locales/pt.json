@@ -111,6 +111,8 @@
     "rate_limit.exceeded": "Demasiados pedidos. Aguarde {retry_after, plural, one {1 segundo} other {# segundos}} e tente novamente.",
     "submission.capacity_reached": "A Skynet atingiu a capacidade máxima de momento. Tente novamente em breve.",
     "submission.claude_code_unavailable": "O Claude Code está temporariamente indisponível. Escolha outro agente, como o Codex.",
+    "submission.claude_code_model_unsupported": "O Claude Code só funciona com modelos Claude da Anthropic. Escolha um modelo anthropic/claude-*.",
+    "submission.claude_code_needs_anthropic_key": "O Claude Code precisa da sua própria chave da Anthropic verificada. Adicione-a nas Configurações e tente novamente.",
     "webauthn.challenge_expired": "O pedido de passkey expirou — tente novamente.",
     "webauthn.invalid_credential": "Não foi possível verificar esta passkey.",
     "webauthn.not_found": "Passkey não encontrada.",

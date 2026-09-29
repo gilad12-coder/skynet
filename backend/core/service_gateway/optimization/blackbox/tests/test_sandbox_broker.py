@@ -100,6 +100,28 @@ def test_broker_keeps_profile_and_ownership_in_parent() -> None:
         broker.handle("open", _open_payload(lifetime_seconds=90))
 
 
+def test_broker_opens_anthropic_only_with_the_owner_key_added_at_the_edge() -> None:
+    """Let a box reach Anthropic only when the run holds a key, and keep the key off the child's side."""
+    offline = SandboxBroker(FakeRuntime(), image=IMAGE, max_lifetime_seconds=120)
+    with pytest.raises(ServiceError, match="network access"):
+        offline.handle("open", _open_payload(allowed_hosts=["api.anthropic.com"]))
+    runtime = FakeRuntime()
+    broker = SandboxBroker(runtime, image=IMAGE, max_lifetime_seconds=120, anthropic_api_key="sk-ant-secret")
+    for hosts in (["evil.example"], ["api.anthropic.com", "evil.example"], "api.anthropic.com"):
+        with pytest.raises(ServiceError, match="network access") as refused:
+            broker.handle("open", _open_payload(allowed_hosts=hosts))
+        assert "sk-ant-secret" not in str(refused.value)
+    opened = broker.handle("open", _open_payload(allowed_hosts=["api.anthropic.com"]))
+    assert "sk-ant-secret" not in json.dumps(opened)
+    spec = runtime.specs[0]
+    assert spec.network_disabled is False
+    assert spec.allowed_hosts == ("api.anthropic.com",)
+    assert spec.inject_headers == {"api.anthropic.com": {"x-api-key": "sk-ant-secret"}}
+    broker.handle("open", {**_open_payload(), "request_id": "offline"})
+    assert runtime.specs[1].network_disabled is True
+    assert runtime.specs[1].inject_headers == {}
+
+
 def test_broker_rejects_host_paths_and_closes_every_session_after_failure() -> None:
     """Do not let one uncertain settlement leave other owned compute running."""
     runtime = FakeRuntime()
@@ -170,6 +192,26 @@ def test_remote_round_trip_streams_output_and_supports_callback_file_actions() -
     assert runtime.sessions[0].files["mailbox/response.json"] == "done"
     assert runtime.sessions[0].close_calls == 1
     assert len([request for request in requests if request["action"] == "close"]) == 1
+
+
+def test_remote_child_asks_for_anthropic_without_ever_holding_the_key() -> None:
+    """Carry the child's host request to the parent, which alone adds the key."""
+    runtime = FakeRuntime()
+    broker = SandboxBroker(runtime, image=IMAGE, max_lifetime_seconds=120, anthropic_api_key="sk-ant-secret")
+    bodies: list[bytes] = []
+
+    def parent(request: httpx.Request) -> httpx.Response:
+        """Answer the child's open with the broker's result."""
+        bodies.append(request.content)
+        body = json.loads(request.content)
+        return httpx.Response(200, json=broker.handle(body["action"], body["payload"]))
+
+    with httpx.Client(transport=httpx.MockTransport(parent)) as client:
+        remote = RemoteSandboxRuntime("http://127.0.0.1:9000/v1", "opaque-control", client=client)
+        remote.open(SandboxSpec(lifetime_seconds=60, allowed_hosts=("api.anthropic.com",)))
+    assert json.loads(bodies[0])["payload"]["spec"]["allowed_hosts"] == ["api.anthropic.com"]
+    assert all(b"sk-ant-secret" not in body for body in bodies)
+    assert runtime.specs[0].inject_headers == {"api.anthropic.com": {"x-api-key": "sk-ant-secret"}}
 
 
 @pytest.mark.parametrize("stream", [True, False])

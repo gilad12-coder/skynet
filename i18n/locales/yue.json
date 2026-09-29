@@ -227,6 +227,8 @@
     "serve.no_model_config": "搵唔到本次執行嘅模型設定。請提供 model_config_override。",
     "submission.capacity_reached": "Skynet 目前處理能力已滿載。請稍後再試。",
     "submission.claude_code_unavailable": "Claude Code 暫時無法使用。請揀另一個代理，例如 Codex。",
+    "submission.claude_code_model_unsupported": "Claude Code 只可以用 Anthropic 嘅 Claude 模型。請揀一個 anthropic/claude-* 模型。",
+    "submission.claude_code_needs_anthropic_key": "Claude Code 需要你自己已驗證嘅 Anthropic 金鑰。請喺設定度加入，然後再試。",
     "submission.module_resolve_failed": "載入模組失敗：{error}",
     "submission.staged_dataset_not_found": "搵唔到此用戶嘅 staged_dataset_id '{staged_dataset_id}' — 請重新上傳資料集後再試。",
     "submission.validation_failed": "Payload 驗證失敗。請檢查 optimizer、module 同欄位對應（column mapping）。",

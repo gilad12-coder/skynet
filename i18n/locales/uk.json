@@ -111,6 +111,8 @@
     "rate_limit.exceeded": "Забагато запитів. Зачекайте {retry_after, plural, one {1 секунду} few {# секунди} many {# секунд} other {# секунди}} і спробуйте знову.",
     "submission.capacity_reached": "Skynet наразі перевантажено. Будь ласка, спробуйте знову незабаром.",
     "submission.claude_code_unavailable": "Claude Code тимчасово недоступний. Виберіть інший агент, наприклад Codex.",
+    "submission.claude_code_model_unsupported": "Claude Code працює лише з моделями Claude від Anthropic. Виберіть модель anthropic/claude-*.",
+    "submission.claude_code_needs_anthropic_key": "Для Claude Code потрібен ваш власний перевірений ключ Anthropic. Додайте його в налаштуваннях і спробуйте ще раз.",
     "webauthn.challenge_expired": "Термін дії запиту ключа доступу закінчився — спробуйте знову.",
     "webauthn.invalid_credential": "Не вдалося перевірити цей ключ доступу.",
     "webauthn.not_found": "Ключ доступу не знайдено.",

@@ -36,6 +36,8 @@ from gepa.oa.task import Task, seed_as_text
 META_HARNESS_REVISION = "0cbc31e97c9e6d24232d1dc754827c02e1ec415c"
 AUTORESEARCH_REVISION = "228791fb499afffb54b46200aca536f79142f117"
 PROMPTS_DIR = Path(__file__).with_name("upstream_prompts")
+# harness_bridge.DIRECT_ANTHROPIC_ENV; this module loads in the sandbox without its siblings.
+_DIRECT_ANTHROPIC_ENV = "SKYNET_CLAUDE_DIRECT"
 ASSET_CHECKSUMS = {
     "meta_harness/SKILL.md": "fce9a51d2e95d8a2d59c60b91106adc0309232a8d6b2fe0fa0785395dcb78d1c",
     "autoresearch/program.md": "86cf987a5c381e46eefe0d0a82765223fd766d8d7acdc2afacfbbce15ecacece",
@@ -239,9 +241,11 @@ def run_proposer(
     cmd.append(prompt)
     env = {**os.environ}
     # Upstream: a nested CLI must not believe it is already inside Claude Code,
-    # and the proposer must authenticate through the harness, not a raw key.
+    # and the proposer must authenticate through the harness, not a raw key. A
+    # direct Claude Code run keeps its key: a placeholder the network edge replaces.
     env.pop("CLAUDECODE", None)
-    env.pop("ANTHROPIC_API_KEY", None)
+    if env.get(_DIRECT_ANTHROPIC_ENV) != "1":
+        env.pop("ANTHROPIC_API_KEY", None)
     if max_thinking_tokens is not None:
         env["CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING"] = "1"
         env["MAX_THINKING_TOKENS"] = str(max_thinking_tokens)

@@ -111,6 +111,8 @@
     "rate_limit.exceeded": "Çok fazla istek. Lütfen {retry_after, plural, one {1 saniye} other {# saniye}} bekleyip tekrar deneyin.",
     "submission.capacity_reached": "Skynet şu anda tam kapasiteye ulaştı. Lütfen kısa bir süre sonra tekrar deneyin.",
     "submission.claude_code_unavailable": "Claude Code geçici olarak kullanılamıyor. Codex gibi başka bir ajan seçin.",
+    "submission.claude_code_model_unsupported": "Claude Code yalnızca Anthropic Claude modelleriyle çalışır. Bir anthropic/claude-* modeli seçin.",
+    "submission.claude_code_needs_anthropic_key": "Claude Code için doğrulanmış kendi Anthropic anahtarınız gerekir. Ayarlar'dan ekleyip yeniden deneyin.",
     "webauthn.challenge_expired": "Geçiş anahtarı isteğinin süresi doldu — tekrar deneyin.",
     "webauthn.invalid_credential": "Bu geçiş anahtarı doğrulanamadı.",
     "webauthn.not_found": "Geçiş anahtarı bulunamadı.",
