@@ -785,35 +785,6 @@ export function deleteAccount(password: string) {
   });
 }
 
-export interface MemoryKnob {
-  value: number;
-  override: number | null;
-  default: number;
-  min: number;
-  max: number;
-}
-
-export interface MemorySettings {
-  wake_lines: MemoryKnob;
-  entry_chars: MemoryKnob;
-  recall_chars: MemoryKnob;
-}
-
-export type MemoryKnobName = keyof MemorySettings;
-
-/** Fetch the caller's agent-memory size knobs (OptMem config). */
-export function getMemorySettings() {
-  return request<MemorySettings>("/agent/memory/settings");
-}
-
-/** Patch agent-memory knobs; null resets one to the tool default. */
-export function updateMemorySettings(patch: Partial<Record<MemoryKnobName, number | null>>) {
-  return request<MemorySettings>("/agent/memory/settings", {
-    method: "PUT",
-    body: JSON.stringify(patch),
-  });
-}
-
 interface BillingFreeGrant {
   cents_remaining: number;
   cents_total: number;

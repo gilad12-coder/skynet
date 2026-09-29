@@ -877,75 +877,6 @@
    }
   },
   {
-   "name": "memory_nap",
-   "description": "Save the agent-authored summary of the next pending block.",
-   "parameters": {
-    "type": "object",
-    "properties": {
-     "block": {
-      "type": "string",
-      "description": "The block id from the compression request, like \"16-31\"."
-     },
-     "summary": {
-      "type": "string",
-      "description": "Your one-line compression of the block, at most 280 characters."
-     }
-    },
-    "required": [
-     "block",
-     "summary"
-    ]
-   }
-  },
-  {
-   "name": "memory_note",
-   "description": "Append one line to the caller's permanent memory log.",
-   "parameters": {
-    "type": "object",
-    "properties": {
-     "text": {
-      "type": "string",
-      "description": "The memory: one line, at most 280 characters, in English."
-     }
-    },
-    "required": [
-     "text"
-    ]
-   }
-  },
-  {
-   "name": "memory_recall",
-   "description": "Regex-search the caller's whole memory log, word for word.",
-   "parameters": {
-    "type": "object",
-    "properties": {
-     "pattern": {
-      "type": "string",
-      "description": "Case-insensitive regular expression."
-     }
-    },
-    "required": [
-     "pattern"
-    ]
-   }
-  },
-  {
-   "name": "memory_zoom",
-   "description": "Expand a ``#lo-hi`` summary node into its halves, toward raw memories.",
-   "parameters": {
-    "type": "object",
-    "properties": {
-     "block": {
-      "type": "string",
-      "description": "A block id as the memory context prints them, like \"16-31\"."
-     }
-    },
-    "required": [
-     "block"
-    ]
-   }
-  },
-  {
    "name": "pause_job_optimizations",
    "description": "Suspend a running optimization at its last checkpoint so it can be resumed.",
    "parameters": {
@@ -5067,10 +4998,6 @@
    "list_models_for_agent",
    "list_sample_datasets_datasets_samples_get",
    "list_tagging_sessions_for_agent",
-   "memory_nap",
-   "memory_note",
-   "memory_recall",
-   "memory_zoom",
    "public_search_dashboard_search_post",
    "rename_job_optimizations",
    "request_user_dataset_datasets_request_upload_post",

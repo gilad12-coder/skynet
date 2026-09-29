@@ -5,7 +5,7 @@ harnesses running the same model over the same tools.
 
 ## How it works
 
-* `tools.json` holds the 53 tool schemas the production generalist agent can
+* `tools.json` holds the 49 tool schemas the production generalist agent can
   reach, dumped from the real FastMCP mount. Every harness sees exactly these.
 * `bench/handlers/` implements those tools over an in-memory "world"
   (`bench/fixtures.py` is the starting state). Nothing touches the real backend,
@@ -14,7 +14,7 @@ harnesses running the same model over the same tools.
   the final world state, the tool-call log and the reply. Each task carries an
   `oracle` that solves it through the same tool API; `bench.validate` proves
   every task is solvable and that doing nothing does not pass.
-  The 36 tasks are split over six categories, six tasks each:
+  The 34 tasks are split over six categories, six tasks each except `cross` (four):
 
   | Category | Module | What it covers |
   |---|---|---|
@@ -23,7 +23,7 @@ harnesses running the same model over the same tools.
   | `lifecycle` | `job_lifecycle.py` | rename, cancel, resume, delete, and asking before destructive actions |
   | `bbserve` | `blackbox_serving.py` | black-box engines, code validation, serving a finished program |
   | `robust` | `account_robustness.py` | wallet, preferences, public search, tool faults, prompt injection |
-  | `cross` | `cross_cutting.py` | memory recall and notes, multi-turn follow-ups, black-box launch, code-authoring card, model catalog |
+  | `cross` | `cross_cutting.py` | multi-turn follow-ups, black-box launch, code-authoring card, model catalog |
 
 * `bench.server` serves one task's world over MCP (`/mcp`) and a plain JSON API.
   The runner starts one server per attempt, so attempts never share state.

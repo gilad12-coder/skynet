@@ -3,7 +3,7 @@
 :func:`base_state` returns a fresh, fully deterministic state dict on every call
 (no wall-clock reads, no randomness): "now" is fixed at ``2026-09-20T09:00:00Z``.
 The state mirrors the real Skynet backend the agent tools act on -- jobs, the
-dataset library and sample catalog, the model catalog, wallet, agent memory, the
+dataset library and sample catalog, the model catalog, wallet, the
 public-search corpus, blackbox engines, discovery endpoints, tagging sessions and
 user preferences.
 
@@ -523,91 +523,6 @@ def _wallet() -> dict[str, Any]:
         "paid_balance_cents": 2000,
         "free_grant": {"cents_remaining": 180, "cents_total": 500},
         "ledger": ledger,
-    }
-
-
-# --- Agent memory ----------------------------------------------------------
-
-
-def _memory() -> dict[str, Any]:
-    """Return 12 dense notes plus a summary tree with one pending nap (#0-7)."""
-    notes = [
-        {
-            "seq": 0,
-            "date": "2026-08-09",
-            "text": "dana onboarded to Skynet; got a 500-credit welcome grant and topped up 1500.",
-        },
-        {
-            "seq": 1,
-            "date": "2026-08-10",
-            "text": "support-tickets v2 run with gpt-4o-mini + gepa hit 0.81 accuracy, up from 0.62.",
-        },
-        {
-            "seq": 2,
-            "date": "2026-08-11",
-            "text": "cloned support-tickets v2 into a copy to A/B a prompt tweak.",
-        },
-        {
-            "seq": 3,
-            "date": "2026-08-14",
-            "text": "Hebrew sentiment run on claude-haiku-4.5 reached 0.75; dana prefers Hebrew task names.",
-        },
-        {
-            "seq": 4,
-            "date": "2026-08-18",
-            "text": "email-triage nightly failed: metric raised KeyError on the 'label' column.",
-        },
-        {
-            "seq": 5,
-            "date": "2026-08-20",
-            "text": "qa-bot tuning failed on grok-4 with a provider 429 rate-limit error.",
-        },
-        {
-            "seq": 6,
-            "date": "2026-08-26",
-            "text": "regression-risk run went backwards: optimized 0.66 below baseline 0.70.",
-        },
-        {
-            "seq": 7,
-            "date": "2026-08-28",
-            "text": "grid model bake-off: claude-haiku-4.5 + gpt-4o was the best pair at +0.30.",
-        },
-        {
-            "seq": 8,
-            "date": "2026-08-30",
-            "text": "reasoning-effort grid: gpt-4o + claude-sonnet-4.5 won at 0.70.",
-        },
-        {
-            "seq": 9,
-            "date": "2026-09-02",
-            "text": "first blackbox run optimized a cold-email prompt with the gepa engine.",
-        },
-        {
-            "seq": 10,
-            "date": "2026-09-06",
-            "text": "noa shared her classifier run with dana as viewer.",
-        },
-        {
-            "seq": 11,
-            "date": "2026-09-08",
-            "text": "budget-capped run stopped at its spending limit; it is resumable.",
-        },
-    ]
-    summaries = {
-        "0-1": "dana onboarded with credits and shipped a strong support-tickets v2 run (0.62->0.81).",
-        "2-3": "A/B cloned support-tickets; Hebrew sentiment on claude-haiku hit 0.75.",
-        "4-5": "Two failures: email-triage metric KeyError, qa-bot provider 429 rate-limit.",
-        "6-7": "regression-risk regressed below baseline; grid bake-off best pair +0.30.",
-        "8-9": "reasoning-effort grid winner 0.70; first gepa blackbox on a cold-email prompt.",
-        "10-11": "noa shared a run with dana; a budget-capped run stopped and is resumable.",
-        "0-3": "Onboarding through A/B and Hebrew sentiment: dana ramped up fast with solid gains.",
-        "4-7": "A rough patch: two failures, one regression, offset by a strong grid best pair.",
-        "8-11": "Grid + blackbox wins, a shared run from noa, and a resumable budget-stopped run.",
-    }
-    return {
-        "notes": notes,
-        "summaries": summaries,
-        "settings": {"wake_lines": 64, "entry_chars": 280, "recall_chars": 4000},
     }
 
 
@@ -2241,7 +2156,7 @@ def base_state() -> dict[str, Any]:
     Returns:
         A dict with all top-level sections the tools read and write: ``user``,
         ``users``, ``jobs``, ``datasets``, ``samples``, ``staged``, ``models``,
-        ``endpoints``, ``registry``, ``wallet``, ``memory``, ``search_corpus``,
+        ``endpoints``, ``registry``, ``wallet``, ``search_corpus``,
         ``blackbox``, ``tagging_sessions``, ``preferences``, ``wizard``,
         ``ui_cards`` and ``faults``. No wall-clock or random values are used.
     """
@@ -2265,7 +2180,6 @@ def base_state() -> dict[str, Any]:
             "optimizers": list(REGISTRY_OPTIMIZERS),
         },
         "wallet": _wallet(),
-        "memory": _memory(),
         "search_corpus": _search_corpus(),
         "blackbox": _blackbox(),
         "tagging_sessions": _tagging_sessions(),

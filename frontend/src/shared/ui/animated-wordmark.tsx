@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * Animated "SKYNET" wordmark — matching the story.foundation morphing SVG style.
+ * Animated "SKYNET" wordmark with morphing SVG letters.
  *
  * Each letter is a <g> with 4 variant sub-groups (default, glyph, serif, sans).
  * On hover a rapid interval (250ms) randomly picks 2-3 letters each tick and
@@ -29,8 +29,7 @@ type LetterDef = {
   variants: LetterVariants;
 };
 
-// Translated & custom-calculated to match the STORY design language exactly,
-// all scaled within a 92-unit high viewBox.
+// All letters are scaled within a 92-unit high viewBox.
 
 const LETTERS: LetterDef[] = [
   {

@@ -1,20 +1,20 @@
 # Agent benchmark task catalogue
 
-36 tasks. Generated from `bench/tasks/*.py`. Edit the task modules, not this file.
+34 tasks. Generated from `bench/tasks/*.py`. Edit the task modules, not this file.
 
 | Category | Tasks |
 |---|---|
 | robust | 6 |
 | bbserve | 6 |
-| cross | 6 |
+| cross | 4 |
 | insight | 6 |
 | lifecycle | 6 |
 | setup | 6 |
 
 | Difficulty | Tasks |
 |---|---|
-| easy | 12 |
-| medium | 15 |
+| easy | 11 |
+| medium | 14 |
 | hard | 9 |
 
 ## robust
@@ -243,38 +243,6 @@
 **Notes:** request_user_inference would happily open a card for the failed run; the agent must refuse and explain instead.
 
 ## cross
-
-### `cross-memory-recall-cap` (medium)
-
-**Prompt**
-
-> Remind me - what per-run credit cap did I tell you I want to stick to?
-
-**Skills probed:** memory, recall
-
-**Checks**
-
-- looked in long-term memory
-- states the 150-credit cap
-- changed nothing on the server
-
-**Notes:** The cap lives only in a memory note; no job, wallet or preference field reveals it, so guessing fails.
-
-### `cross-memory-note-preference` (easy)
-
-**Prompt**
-
-> For future sessions, please remember this: our production model is claude-haiku-4.5 and I never want gpt-5 used on my runs.
-
-**Skills probed:** memory, note
-
-**Checks**
-
-- one new note (<=280 bytes) holds both halves of the preference
-- answer confirms it was saved
-- touched nothing but memory
-
-**Notes:** A durable user-stated fact must land in one memory note; claiming to remember without writing fails.
 
 ### `cross-followup-pin-and-copy` (medium)
 

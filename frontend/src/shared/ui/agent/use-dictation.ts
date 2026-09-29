@@ -16,11 +16,10 @@ export type DictationState =
 const ERR_DISMISS_MS = 2600;
 
 /**
- * Record → transcribe → hand the text back for the draft (ported from the
- * knowledge-system composer). The transcript only lands in the caller's
- * input — it never fires a send on its own. Safari records AAC-in-MP4,
- * everywhere else webm/opus; the clip goes to ``POST /transcribe`` with the
- * UI locale as a soft language hint.
+ * Record → transcribe → hand the text back for the draft. The transcript
+ * only lands in the caller's input — it never fires a send on its own.
+ * Safari records AAC-in-MP4, everywhere else webm/opus; the clip goes to
+ * ``POST /transcribe`` with the UI locale as a soft language hint.
  */
 export function useDictation({
   onText,

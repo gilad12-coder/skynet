@@ -2,8 +2,7 @@
 
 The five category modules cover run setup, run insight, run lifecycle, black-box
 serving and account robustness. This module fills the remaining gaps so the
-benchmark is not blind to them: recalling a fact from long-term memory, saving a
-durable fact the user states, resolving a pronoun from earlier turns, a black-box
+benchmark is not blind to them: resolving a pronoun from earlier turns, a black-box
 scorer check that *passes* and is followed by a launch, handing code writing to
 the authoring card, and filtering the model catalog by capability.
 """
@@ -13,9 +12,7 @@ from __future__ import annotations
 from bench.checks import (
     answer_has_any,
     answer_is_hebrew,
-    answer_number,
     called,
-    called_any,
     custom,
     no_mutations,
     only_mutated,
@@ -27,8 +24,6 @@ from bench.world import World
 
 HEBREW_RUN = "ניתוח רגש בעברית"
 J3 = "00000000-0000-4000-8000-000000000003"
-
-_CAP_NOTE = "dana set a standing rule: never spend more than 150 credits on a single run; ask her before going over."
 
 _SCORER = (
     "def score(candidate, case):\n"
@@ -52,34 +47,6 @@ _AUTHORING_WIZARD = {
     "signature_code": "",
     "metric_code": "",
 }
-
-
-def _cap_setup(w: World) -> None:
-    """Store the spending-cap rule in memory only, so no other tool can reveal it."""
-    notes = w.s["memory"]["notes"]
-    notes.append({"seq": len(notes), "date": "2026-09-12", "text": _CAP_NOTE})
-
-
-def _oracle_recall_cap(w: World) -> str:
-    """Recall the per-run cap from memory."""
-    hits = w.call("memory_recall", {"pattern": "credits.*single run|spend"})
-    text = hits["matches"][0]["text"]
-    return f"You told me to keep every run under 150 credits and to ask you before going over. (From memory: {text})"
-
-
-def _oracle_note_preference(w: World) -> str:
-    """Save the production-model preference as one memory note."""
-    w.call("memory_note", {"text": "dana: production model is claude-haiku-4.5; never use gpt-5 on her runs."})
-    return "Noted - I'll remember that claude-haiku-4.5 is your production model and that gpt-5 is off limits for your runs."
-
-
-def _preference_saved(state: dict) -> bool:
-    """Return whether exactly one new in-limit note holds both halves of the preference."""
-    new = state["memory"]["notes"][12:]
-    if len(new) != 1:
-        return False
-    text = new[0]["text"].lower()
-    return "haiku" in text and "gpt-5" in text and len(new[0]["text"].encode()) <= 280
 
 
 def _oracle_followup(w: World) -> str:
@@ -175,38 +142,6 @@ def _llama_not_offered(r: Run) -> bool:
 
 
 TASKS: list[Task] = [
-    Task(
-        id="cross-memory-recall-cap",
-        category="cross",
-        difficulty="medium",
-        prompt="Remind me - what per-run credit cap did I tell you I want to stick to?",
-        checks=[
-            called_any(["memory_recall", "memory_zoom"], name="looked in long-term memory"),
-            answer_number(150, name="states the 150-credit cap"),
-            no_mutations(),
-        ],
-        oracle=_oracle_recall_cap,
-        setup=_cap_setup,
-        skills=["memory", "recall"],
-        notes="The cap lives only in a memory note; no job, wallet or preference field reveals it, so guessing fails.",
-    ),
-    Task(
-        id="cross-memory-note-preference",
-        category="cross",
-        difficulty="easy",
-        prompt=(
-            "For future sessions, please remember this: our production model is claude-haiku-4.5 "
-            "and I never want gpt-5 used on my runs."
-        ),
-        checks=[
-            state_check("one new note (<=280 bytes) holds both halves of the preference", _preference_saved),
-            answer_has_any("remember", "noted", "saved", "stored", "memory", name="answer confirms it was saved"),
-            only_mutated("memory_note", "memory_nap", name="touched nothing but memory"),
-        ],
-        oracle=_oracle_note_preference,
-        skills=["memory", "note"],
-        notes="A durable user-stated fact must land in one memory note; claiming to remember without writing fails.",
-    ),
     Task(
         id="cross-followup-pin-and-copy",
         category="cross",
