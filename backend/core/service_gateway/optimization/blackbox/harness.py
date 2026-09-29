@@ -79,7 +79,7 @@ class HarnessLaunch:
 
 
 PI_PACKAGE = "@earendil-works/pi-coding-agent"
-PI_VERSION = "0.84.1"
+PI_VERSION = "0.87.1"
 CODEX_VERSION = "0.153.0"
 OPENCODE_VERSION = "1.18.27"
 CLAUDE_CODE_VERSION = "2.1.259"

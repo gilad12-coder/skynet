@@ -97,8 +97,8 @@ def test_pi_launch_pins_the_harness_version_ahead_of_the_image_copy() -> None:
     launch = build_launch(_target(BLACKBOX_HARNESS_PI), _GATEWAY)
 
     assert launch.install_command is not None
-    assert "@earendil-works/pi-coding-agent@0.84.1" in launch.install_command
-    assert '[ "$(pi --version 2>/dev/null)" = "0.84.1" ]' in launch.install_command
+    assert "@earendil-works/pi-coding-agent@0.87.1" in launch.install_command
+    assert '[ "$(pi --version 2>/dev/null)" = "0.87.1" ]' in launch.install_command
     assert launch.install_command.endswith("&& pi --version")
     for command in (launch.install_command, launch.run_command):
         assert command.startswith('export PATH="$HOME/.skynet/pi/bin:$PATH";')
