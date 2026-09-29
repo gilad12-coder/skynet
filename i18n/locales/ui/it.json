@@ -487,6 +487,7 @@
   "submit.blackbox.start.background_toggle": "Contesto e vincoli",
   "submit.blackbox.start.desc": "Cosa viene ottimizzato e come si presenta un buon risultato.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.claude_code_unavailable": "Temporaneamente non disponibile",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "Comando personalizzato",
   "submit.blackbox.start.harness.opencode": "OpenCode",

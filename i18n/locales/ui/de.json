@@ -487,6 +487,7 @@
   "submit.blackbox.start.background_toggle": "Hintergrund und Einschränkungen",
   "submit.blackbox.start.desc": "Was optimiert wird und wie Erfolg aussieht.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.claude_code_unavailable": "Vorübergehend nicht verfügbar",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "Eigener Befehl",
   "submit.blackbox.start.harness.opencode": "OpenCode",

@@ -118,6 +118,7 @@
     "quota.concurrent_reached": "У вас уже виконується {limit, plural, one {1 запуск} few {# запуски} many {# запусків} other {# запуску}}. Зачекайте завершення одного з них, перш ніж запускати новий.",
     "rate_limit.exceeded": "Забагато запитів. Зачекайте {retry_after, plural, one {1 секунду} few {# секунди} many {# секунд} other {# секунди}} і спробуйте знову.",
     "submission.capacity_reached": "Skynet наразі перевантажено. Будь ласка, спробуйте знову незабаром.",
+    "submission.claude_code_unavailable": "Claude Code тимчасово недоступний. Виберіть інший агент, наприклад Codex.",
     "webauthn.challenge_expired": "Термін дії запиту ключа доступу закінчився — спробуйте знову.",
     "webauthn.invalid_credential": "Не вдалося перевірити цей ключ доступу.",
     "webauthn.not_found": "Ключ доступу не знайдено.",

@@ -16,7 +16,7 @@ import { NumberInput } from "@/shared/ui/number-input";
 import { HelpTip } from "@/shared/ui/help-tip";
 import { HarnessLogo } from "@/shared/ui/harness-logo";
 import { ModelChip } from "@/shared/ui/model-chip";
-import { BLACKBOX_HARNESSES, harnessLabel } from "@/shared/lib/blackbox-harness";
+import { BLACKBOX_HARNESSES, UNAVAILABLE_HARNESSES, harnessLabel } from "@/shared/lib/blackbox-harness";
 import { cn } from "@/shared/lib/utils";
 import { tip } from "@/shared/lib/tooltips";
 import { msg } from "@/shared/lib/messages";
@@ -173,14 +173,22 @@ export function BlackboxOptimizerStep({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {BLACKBOX_HARNESSES.map((h) => (
-                      <SelectItem key={h} value={h}>
-                        <span className="flex items-center gap-2">
-                          <HarnessLogo harness={h} size={16} />
-                          <span>{harnessLabel(h)}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
+                    {BLACKBOX_HARNESSES.map((h) => {
+                      const unavailable = UNAVAILABLE_HARNESSES.includes(h);
+                      return (
+                        <SelectItem key={h} value={h} disabled={unavailable}>
+                          <span className="flex items-center gap-2">
+                            <HarnessLogo harness={h} size={16} />
+                            <span>{harnessLabel(h)}</span>
+                            {unavailable && (
+                              <span className="text-xs text-muted-foreground">
+                                {msg("submit.blackbox.start.harness.claude_code_unavailable")}
+                              </span>
+                            )}
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </Field>

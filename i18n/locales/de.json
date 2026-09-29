@@ -118,6 +118,7 @@
     "quota.concurrent_reached": "Sie haben bereits {limit, plural, one {1 Ausführung} other {# Ausführungen}} in Bearbeitung. Warten Sie, bis eine abgeschlossen ist, bevor Sie eine neue starten.",
     "rate_limit.exceeded": "Zu viele Anfragen. Bitte warten Sie {retry_after, plural, one {1 Sekunde} other {# Sekunden}} und versuchen Sie es erneut.",
     "submission.capacity_reached": "Skynet ist derzeit ausgelastet. Bitte versuchen Sie es in Kürze erneut.",
+    "submission.claude_code_unavailable": "Claude Code ist vorübergehend nicht verfügbar. Wähle einen anderen Agenten, zum Beispiel Codex.",
     "webauthn.challenge_expired": "Die Passkey-Anforderung ist abgelaufen – bitte versuchen Sie es erneut.",
     "webauthn.invalid_credential": "Dieser Passkey konnte nicht verifiziert werden.",
     "webauthn.not_found": "Passkey nicht gefunden.",

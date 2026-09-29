@@ -487,6 +487,7 @@
   "submit.blackbox.start.background_toggle": "Arka plan ve kısıtlar",
   "submit.blackbox.start.desc": "Neyin optimize edileceği ve başarının neye benzediği.",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.claude_code_unavailable": "Geçici olarak kullanılamıyor",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "Özel komut",
   "submit.blackbox.start.harness.opencode": "OpenCode",

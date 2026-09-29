@@ -118,6 +118,7 @@
     "quota.concurrent_reached": "Vous avez déjà {limit, plural, one {1 exécution} other {# exécutions}} en cours. Attendez que l'une d'elles se termine avant d'en démarrer une autre.",
     "rate_limit.exceeded": "Trop de requêtes. Veuillez patienter {retry_after, plural, one {1 seconde} other {# secondes}} et réessayer.",
     "submission.capacity_reached": "Skynet a atteint sa capacité maximale pour le moment. Veuillez réessayer sous peu.",
+    "submission.claude_code_unavailable": "Claude Code est temporairement indisponible. Choisissez un autre agent, par exemple Codex.",
     "webauthn.challenge_expired": "La demande de clé d'accès a expiré — réessayez.",
     "webauthn.invalid_credential": "Cette clé d'accès n'a pas pu être vérifiée.",
     "webauthn.not_found": "Clé d'accès introuvable.",

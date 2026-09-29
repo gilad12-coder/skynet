@@ -234,6 +234,7 @@
     "serve.no_declared_inputs": "成品（Artifact）未宣告輸入欄位，無法安全驗證輸入內容。",
     "serve.no_model_config": "搵唔到本次執行嘅模型設定。請提供 model_config_override。",
     "submission.capacity_reached": "Skynet 目前處理能力已滿載。請稍後再試。",
+    "submission.claude_code_unavailable": "Claude Code 暫時無法使用。請揀另一個代理，例如 Codex。",
     "submission.module_resolve_failed": "載入模組失敗：{error}",
     "submission.staged_dataset_not_found": "搵唔到此用戶嘅 staged_dataset_id '{staged_dataset_id}' — 請重新上傳資料集後再試。",
     "submission.validation_failed": "Payload 驗證失敗。請檢查 optimizer、module 同欄位對應（column mapping）。",

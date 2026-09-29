@@ -55,6 +55,7 @@ from ....constants import (
 )
 from ....exceptions import ServiceError
 from ....models.blackbox import (
+    BLACKBOX_HARNESS_CLAUDE_CODE,
     BLACKBOX_STRATEGY_AUTO,
     BLACKBOX_TARGET_AGENT,
     BlackboxCandidateNode,
@@ -185,6 +186,26 @@ def engine_catalog(target_kind: str) -> BlackboxEngineCatalogResponse:
     )
 
 
+CLAUDE_CODE_UNAVAILABLE = "Claude Code is temporarily unavailable. Choose another agent harness."
+
+
+def claude_code_in_use(payload: BlackboxRunRequest) -> bool:
+    """Report whether a job would launch Claude Code as its proposer or its agent target.
+
+    Args:
+        payload: The submitted or stored job.
+
+    Returns:
+        True when Claude Code would run for this job.
+    """
+    needs_native = payload.strategy.mode != "single" or payload.strategy.engine in NATIVE_ENGINES
+    proposes_with_claude = needs_native and payload.proposer.harness == BLACKBOX_HARNESS_CLAUDE_CODE
+    targets_claude = (
+        payload.target.kind == BLACKBOX_TARGET_AGENT and payload.target.harness == BLACKBOX_HARNESS_CLAUDE_CODE
+    )
+    return proposes_with_claude or targets_claude
+
+
 def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: bool = True) -> None:
     """Reject a job before it is queued when it can never run.
 
@@ -194,10 +215,15 @@ def validate_blackbox_payload(payload: BlackboxRunRequest, *, verify_scorer: boo
             executable code inside the managed runtime.
 
     Raises:
-        ServiceError: When the job has an agent target but this deployment
-            cannot run agents, the chosen engine is unknown/unavailable, or
+        ServiceError: When the job would launch Claude Code, the job has an
+            agent target but this deployment cannot run agents, the chosen engine is unknown/unavailable, or
             the python scorer code does not load.
     """
+    # Claude Code can only reach Anthropic through the Skynet gateway today,
+    # which bills the run to Skynet; until it runs on the user's own key, every
+    # path that launches it (submit, preflight, resume and recovery) stops here.
+    if claude_code_in_use(payload):
+        raise ServiceError(CLAUDE_CODE_UNAVAILABLE)
     caps = engine_capabilities(payload.target)
     if caps.agent_target and not caps.sandbox:
         raise ServiceError(f"Agent targets cannot run on this deployment: {caps.sandbox_reason}")

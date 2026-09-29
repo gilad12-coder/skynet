@@ -28,7 +28,7 @@ export function usesNativeProposer(
  * is the one reasoning control the form offers.
  */
 export const DEFAULT_PROPOSER: BlackboxProposer = {
-  harness: "claude_code",
+  harness: "codex",
   effort: null,
   max_thinking_tokens: null,
   max_candidates_per_iter: 3,

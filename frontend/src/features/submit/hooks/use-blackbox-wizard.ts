@@ -41,7 +41,7 @@ import { registerTutorialHook } from "@/features/tutorial";
 import { readPref, useUserPrefs } from "@/features/settings";
 import { useCodeAgent } from "@/shared/hooks/use-code-agent";
 import { useCodeInterview } from "@/shared/hooks/use-code-interview";
-import { BLACKBOX_HARNESSES } from "@/shared/lib/blackbox-harness";
+import { BLACKBOX_HARNESSES, UNAVAILABLE_HARNESSES } from "@/shared/lib/blackbox-harness";
 import { parseDatasetFile, type ParsedDataset } from "@/shared/lib/parse-dataset";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveIntlLocale } from "@/shared/lib/runtime-locale";
@@ -613,7 +613,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
     // Drafts saved with the retired plateau relay open as Auto.
     setStrategyMode(d.strategyMode === "single" ? "single" : "auto");
     setEngine(d.engine);
-    setProposer({ ...DEFAULT_PROPOSER, ...d.proposer });
+    // Drafts saved with a now-unavailable harness open on the default one.
+    setProposer(
+      d.proposer && UNAVAILABLE_HARNESSES.includes(d.proposer.harness)
+        ? DEFAULT_PROPOSER
+        : { ...DEFAULT_PROPOSER, ...d.proposer },
+    );
     setMaxScorerRuns(d.maxScorerRuns);
     setMaxIterations(d.maxIterations);
     setStopAtScore(d.stopAtScore);
@@ -746,8 +751,13 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
             setStrategyMode(strategy.mode === "single" ? "single" : "auto");
             setEngine(strategy.engine ?? null);
           }
-          // A custom proposer command has no picker, so such clones keep the default.
-          if (source.proposer && BLACKBOX_HARNESSES.includes(source.proposer.harness))
+          // A custom proposer command has no picker, and an unavailable harness
+          // cannot be submitted, so such clones keep the default.
+          if (
+            source.proposer &&
+            BLACKBOX_HARNESSES.includes(source.proposer.harness) &&
+            !UNAVAILABLE_HARNESSES.includes(source.proposer.harness)
+          )
             setProposer({ ...DEFAULT_PROPOSER, ...source.proposer });
           const budget = source.budget;
           if (budget) {

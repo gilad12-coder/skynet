@@ -487,6 +487,7 @@
   "submit.blackbox.start.background_toggle": "背景と制約",
   "submit.blackbox.start.desc": "何を最適化し、成功とはどのような状態かを設定します。",
   "submit.blackbox.start.harness.claude_code": "Claude Code",
+  "submit.blackbox.start.harness.claude_code_unavailable": "一時的に利用できません",
   "submit.blackbox.start.harness.codex": "Codex",
   "submit.blackbox.start.harness.custom": "カスタムコマンド",
   "submit.blackbox.start.harness.opencode": "OpenCode",
