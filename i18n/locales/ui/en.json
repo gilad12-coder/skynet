@@ -48,6 +48,7 @@
   "app.shell.logout": "Log out",
   "legal.terms_link": "Terms of Service",
   "legal.privacy_link": "Privacy Policy",
+  "legal.source_link": "Source code (AGPL-3.0)",
   "app.shell.menu": "Menu",
   "app.shell.menu_close": "Close menu",
   "app.shell.search.button_aria": "Search everything",

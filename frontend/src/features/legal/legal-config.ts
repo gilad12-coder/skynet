@@ -15,7 +15,7 @@ export const LEGAL_CONFIG = {
 
   // Dates shown on both documents. Update lastUpdated whenever the text changes.
   effectiveDate: "August 11, 2026",
-  lastUpdated: "September 27, 2026",
+  lastUpdated: "September 29, 2026",
 
   // Skynet is operated by an individual (sole proprietor); this legal name is
   // the operating party and, for the Privacy Policy, the data controller.
@@ -31,7 +31,18 @@ export const LEGAL_CONFIG = {
   // Governing-law / venue clause.
   governingLaw: "the State of New York, United States",
   venue: "New York County, New York",
+
+  // Public repository the hosted Service is built from (AGPL-3.0 section 13).
+  sourceRepoUrl: "https://github.com/gilad12-coder/skynet",
 } as const;
+
+// The Docker build bakes in the commit Railway deployed, so the link names the
+// exact source running; local builds without it fall back to the repo root.
+const SOURCE_COMMIT = process.env.NEXT_PUBLIC_SOURCE_COMMIT;
+
+export const SOURCE_CODE_URL = SOURCE_COMMIT
+  ? `${LEGAL_CONFIG.sourceRepoUrl}/tree/${SOURCE_COMMIT}`
+  : LEGAL_CONFIG.sourceRepoUrl;
 
 export const LEGAL_LINKS = {
   terms: "/terms",

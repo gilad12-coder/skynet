@@ -89,5 +89,9 @@ Or simply `just test` for the combined sweep.
 
 ## License of contributions
 
-Skynet is licensed under [AGPL-3.0](LICENSE). By contributing you agree that
-your contributions are licensed under the same terms.
+Skynet is licensed under [AGPL-3.0](LICENSE). Before your first pull request
+can be merged, you sign the [Contributor License Agreement](CLA.md) by posting
+the sentence the CLA bot asks for on the pull request. You keep the copyright
+in your work; the agreement lets the project also be offered under other
+terms, such as a commercial license. One signature covers all your later
+contributions.

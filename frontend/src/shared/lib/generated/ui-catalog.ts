@@ -2150,6 +2150,7 @@ export type MessageKey =
   | "hf_import.toast.imported"
   | "hf_import.view_on_hub"
   | "legal.privacy_link"
+  | "legal.source_link"
   | "legal.terms_link"
   | "meta_harness.a11y.chart_label"
   | "meta_harness.a11y.node_label"
@@ -6079,6 +6080,7 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "hf_import.toast.imported": "מערך הנתונים יובא לספרייה שלכם",
   "hf_import.view_on_hub": "צפייה ב־Hugging Face",
   "legal.privacy_link": "מדיניות פרטיות",
+  "legal.source_link": "קוד מקור (AGPL-3.0)",
   "legal.terms_link": "תנאי שימוש",
   "meta_harness.a11y.chart_label": "מסלול הטיפוס של הריצה: כל גרסה נוקדה על כל המקרים, לפי סדר הניקוד",
   "meta_harness.a11y.node_label": "גרסה {id}, ציון {score}",
@@ -17897,6 +17899,7 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "hf_import.toast.imported": "Dataset imported to your library",
   "hf_import.view_on_hub": "View on Hugging Face",
   "legal.privacy_link": "Privacy Policy",
+  "legal.source_link": "Source code (AGPL-3.0)",
   "legal.terms_link": "Terms of Service",
   "meta_harness.a11y.chart_label": "The run's climb: every version scored on all cases, in scoring order",
   "meta_harness.a11y.node_label": "Version {id}, score {score}",
