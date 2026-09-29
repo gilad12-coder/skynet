@@ -450,6 +450,7 @@ function Invoke-BuildImages {
     $baseImage       = Get-OrDefault 'BASE_IMAGE'       ''
     $npmRegistry     = Get-OrDefault 'NPM_REGISTRY'     ''
     $gepaGitMirror   = Get-OrDefault 'GEPA_GIT_MIRROR'  ''
+    $primeAgentMirror = Get-OrDefault 'PRIME_AGENT_RELEASE_MIRROR' ''
     $backendNpmRegistry = Get-OrDefault 'NPM_CONFIG_REGISTRY' $npmRegistry
 
     $backendArgs = @('build', (Join-Path $RootDir 'backend'),
@@ -460,6 +461,7 @@ function Invoke-BuildImages {
     if ($pipIndexUrl)    { $backendArgs += @('--build-arg', "PIP_INDEX_URL=$pipIndexUrl") }
     if ($pipTrustedHost) { $backendArgs += @('--build-arg', "PIP_TRUSTED_HOST=$pipTrustedHost") }
     if ($gepaGitMirror)  { $backendArgs += @('--build-arg', "GEPA_GIT_MIRROR=$gepaGitMirror") }
+    if ($primeAgentMirror) { $backendArgs += @('--build-arg', "PRIME_AGENT_RELEASE_MIRROR=$primeAgentMirror") }
     if ($backendNpmRegistry) { $backendArgs += @('--build-arg', "NPM_CONFIG_REGISTRY=$backendNpmRegistry") }
 
     $frontendArgs = @('build', (Join-Path $RootDir 'frontend'),

@@ -12,8 +12,16 @@ ARG NPM_CONFIG_REGISTRY
 # Images delivered to a third party (air-gap bundles, customer registries) must
 # build with INCLUDE_CLAUDE_CODE=false; only our own hosted deployment keeps it.
 ARG INCLUDE_CLAUDE_CODE=true
+# Prime Agent's tarballs come from its own release host, which
+# NPM_CONFIG_REGISTRY cannot redirect. Air-gap builds point this at a mirror of
+# <host>/releases; the lockfile integrity hashes still pin the content.
+ARG PRIME_AGENT_RELEASE_MIRROR
 COPY sandbox-runtime/package.json sandbox-runtime/package-lock.json /usr/local/lib/skynet-harnesses/
-RUN npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
+RUN if [ -n "$PRIME_AGENT_RELEASE_MIRROR" ]; then \
+        sed -i "s|https://pub-728493de92a943e2a9b2d17b4719f318.r2.dev/releases|${PRIME_AGENT_RELEASE_MIRROR%/}|g" \
+            /usr/local/lib/skynet-harnesses/package.json /usr/local/lib/skynet-harnesses/package-lock.json; \
+    fi \
+    && npm ci --omit=dev --no-audit --no-fund --prefix /usr/local/lib/skynet-harnesses \
         ${NPM_CONFIG_REGISTRY:+--registry "$NPM_CONFIG_REGISTRY"} \
     && rm -rf \
         /usr/local/lib/skynet-harnesses/node_modules/@anthropic-ai/claude-code-linux-x64-musl \
@@ -146,13 +154,13 @@ RUN if [ "$PKG_MANAGER" = "pip" ]; then \
 # first use by downloading uv, Python and packages. Protected sandboxes have no
 # network, so build that kernel here; the Prime launch uses it read-only when
 # present (harness.PRIME_AGENT_IMAGE_KERNEL).
+COPY sandbox-runtime/prime-agent-kernel.txt /opt/prime-agent/requirements.txt
 RUN python -m venv /opt/prime-agent/kernel-venv \
-    && /opt/prime-agent/kernel-venv/bin/python -m pip install --no-cache-dir \
+    && /opt/prime-agent/kernel-venv/bin/python -m pip install --no-cache-dir --no-deps \
         ${PIP_INDEX_URL:+--index-url $PIP_INDEX_URL} \
         ${PIP_TRUSTED_HOST:+--trusted-host $PIP_TRUSTED_HOST} \
+        -r /opt/prime-agent/requirements.txt \
         /usr/local/lib/skynet-harnesses/node_modules/prime-agent/dist/prime-agent-runtime \
-        dill requests httpx pyyaml tomli python-dotenv pandas numpy scipy \
-        beautifulsoup4 lxml pydantic tyro \
     && /opt/prime-agent/kernel-venv/bin/python -c "import rlm, dill, yaml, dotenv, pandas, scipy, bs4, lxml, pydantic, tyro"
 
 # dspy.Flex serve-time dependency. An optimized Flex program ALWAYS executes
