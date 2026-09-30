@@ -23,7 +23,7 @@ websockets==15.0.1
 boto3==1.43.1
 azure-identity==1.25.2
 azure-storage-blob==12.28.0
-mcp==1.26.0
+mcp==1.28.1
 restrictedpython==8.4
 rich==13.9.4
 polars==1.38.1
