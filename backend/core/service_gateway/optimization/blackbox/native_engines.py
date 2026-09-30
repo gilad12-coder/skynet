@@ -1,18 +1,21 @@
-"""Latest-upstream Meta-Harness and AutoResearch loops behind the gepa.oa ``Engine`` contract.
+"""Meta-Harness and AutoResearch loops behind the gepa.oa ``Engine`` contract.
 
 This standalone module is copied into the selected runtime beside
-``native_runner.py``. The upstream repositories are research scripts locked to
-their own domains (memory systems for text classification; nanochat training
-runs), so they cannot be imported as libraries. This module reimplements their
-loop structure, state files and proposer prompts, swapping the domain-specific
-evaluation for the gepa.oa ``EvalServer`` the run scores with.
-The prompts are derived at run time from the verbatim upstream files under
-``upstream_prompts/`` through exact-snippet substitutions, so a pin bump that
-changes the upstream wording fails loudly instead of drifting silently.
+``native_runner.py``. The upstream Meta-Harness repository is a research script
+locked to its own domain (memory systems for text classification), so it cannot
+be imported as a library. This module reimplements its loop structure, state
+files and proposer prompt, swapping the domain-specific evaluation for the
+gepa.oa ``EvalServer`` the run scores with. That prompt is derived at run time
+from the verbatim upstream file under ``upstream_prompts/`` through
+exact-snippet substitutions, so a pin bump that changes the upstream wording
+fails loudly instead of drifting silently.
+
+AutoResearch is Skynet's own engine: round-based, directive-driven research
+over a per-example Pareto frontier, with the evidence recorded by the engine
+rather than by the agent.
 
 Attribution, all MIT-licensed: Meta-Harness, Copyright (c) 2026 Yoonho Lee
-(stanford-iris-lab/meta-harness); AutoResearch by Andrej Karpathy
-(karpathy/autoresearch); gepa.oa, Copyright (c) 2025 Lakshya A Agrawal
+(stanford-iris-lab/meta-harness); gepa.oa, Copyright (c) 2025 Lakshya A Agrawal
 (gepa-ai/gepa). License texts ship in ``upstream_prompts/``
 and ``backend/THIRD_PARTY_NOTICES.md``.
 """
@@ -26,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -40,13 +44,12 @@ from gepa.oa.eval_server import EvalServer
 from gepa.oa.task import Task, seed_as_text
 
 META_HARNESS_REVISION = "0cbc31e97c9e6d24232d1dc754827c02e1ec415c"
-AUTORESEARCH_REVISION = "228791fb499afffb54b46200aca536f79142f117"
+AUTORESEARCH_VERSION = "1"
 PROMPTS_DIR = Path(__file__).with_name("upstream_prompts")
 # harness_bridge.DIRECT_ANTHROPIC_ENV; this module loads in the sandbox without its siblings.
 _DIRECT_ANTHROPIC_ENV = "SKYNET_CLAUDE_DIRECT"
 ASSET_CHECKSUMS = {
     "meta_harness/SKILL.md": "fce9a51d2e95d8a2d59c60b91106adc0309232a8d6b2fe0fa0785395dcb78d1c",
-    "autoresearch/program.md": "86cf987a5c381e46eefe0d0a82765223fd766d8d7acdc2afacfbbce15ecacece",
 }
 BUDGET_EXHAUSTED_MARKER = "BUDGET_EXHAUSTED"
 # Upstream meta_harness.py: PROPOSER_ALLOWED_TOOLS.
@@ -54,19 +57,37 @@ META_HARNESS_TOOLS = "Read,Glob,Grep,Agent,Write,Edit,Bash"
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,80}$")
 _SESSION_POLL_SECONDS = 0.2
 
-# The evaluator stands in for ``uv run train.py``: one call scores the whole
-# visible pool so every logged aggregate is comparable, and HTTP 429 surfaces
-# the upstream-style BUDGET_EXHAUSTED marker the brief tells the agent to obey.
-# The JSON body is built with the runtime's own interpreter because the
-# sandbox image is not guaranteed to ship jq.
+# AutoResearch tuning: frontier and dossier sizes keep STATE.md readable; the
+# stale-round thresholds decide when to change tack and when to stop paying for
+# rounds that no longer move the leader.
+_FRONTIER_SIZE = 4
+_LEADERBOARD_SIZE = 10
+_DOSSIER_EXAMPLES = 5
+_FEEDBACK_CHARS = 600
+_PIVOT_AFTER = 2
+_STOP_AFTER = 4
+_PLANNED_ROUNDS = 6
+# Once a round spends its allowance the agent still gets time to write up the notebook.
+_WRITE_UP_GRACE_SECONDS = 90
+
+# With no example ids the call is a full evaluation over the whole visible pool,
+# which is what the server logs as progress; with ids it is a probe. HTTP 429
+# surfaces the BUDGET_EXHAUSTED marker the brief tells the agent to obey. The
+# JSON body is built with the runtime's own interpreter because the sandbox
+# image is not guaranteed to ship jq.
 EVAL_SCRIPT = """\
 #!/usr/bin/env bash
-# Usage: ./eval.sh <candidate_file>
+# Usage: ./eval.sh <candidate_file> [example_id ...]
 set -euo pipefail
 CANDIDATE_FILE="$1"
+shift
 SERVER_URL="{server_url}"
 PYTHON="{python}"
-BODY=$(CANDIDATE_FILE="$CANDIDATE_FILE" "$PYTHON" -c 'import json, os; print(json.dumps({{"candidate": open(os.environ["CANDIDATE_FILE"], encoding="utf-8").read()}}))')
+BODY=$(CANDIDATE_FILE="$CANDIDATE_FILE" "$PYTHON" -c 'import json, os, sys
+body = {{"candidate": open(os.environ["CANDIDATE_FILE"], encoding="utf-8").read()}}
+if sys.argv[1:]:
+    body["example_ids"] = sys.argv[1:]
+print(json.dumps(body))' "$@")
 RESPONSE=$(curl -s -w "\\n%{{http_code}}" -X POST "$SERVER_URL/{route}" \\
     -H "Content-Type: application/json" -d "$BODY")
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
@@ -378,13 +399,75 @@ def task_brief(task: Task, example_ids: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-class AutoResearchEngine:
-    """karpathy/autoresearch at the pinned revision, driven against the evaluation server.
+@dataclass
+class Observation:
+    """One evaluator call the research agent made, as the server answered it."""
 
-    The original has no driver: the agent reads ``program.md`` and runs the
-    experiment loop itself on a git branch, editing one file and scoring it with
-    one command. This engine lays out that repository shape, hands the agent the
-    adapted brief, and re-launches the session (Ralph) while budget remains.
+    candidate: str
+    scores: dict[str, float]
+    feedback: dict[str, str]
+    full: bool
+    round: int
+
+
+def _feedback_text(info: Any) -> str:
+    """Condense one example's evaluator info into a short readable note.
+
+    Args:
+        info: The per-example info the scorer returned.
+
+    Returns:
+        The feedback string, or a compact JSON rendering, clipped to a readable size.
+    """
+    if isinstance(info, dict) and isinstance(info.get("feedback"), str):
+        text = info["feedback"]
+    elif info in (None, {}):
+        text = ""
+    else:
+        text = json.dumps(info, default=str, sort_keys=True)
+    return text if len(text) <= _FEEDBACK_CHARS else text[:_FEEDBACK_CHARS] + " …"
+
+
+def pareto_front(table: dict[str, dict[str, float]]) -> list[str]:
+    """Return the candidates no other candidate beats on every example.
+
+    Args:
+        table: Per-example scores of each fully evaluated candidate.
+
+    Returns:
+        The non-dominated candidates, highest mean first.
+    """
+
+    def dominates(a: dict[str, float], b: dict[str, float]) -> bool:
+        """Tell whether ``a`` is at least as good as ``b`` everywhere and better somewhere."""
+        return all(a[k] >= b[k] for k in b) and any(a[k] > b[k] for k in b)
+
+    front = [c for c, row in table.items() if not any(dominates(other, row) for d, other in table.items() if d != c)]
+    return sorted(front, key=lambda c: -_mean(table[c]))
+
+
+def _mean(row: dict[str, float]) -> float:
+    """Average a per-example score row.
+
+    Args:
+        row: Scores keyed by example id.
+
+    Returns:
+        The mean, or 0.0 for an empty row.
+    """
+    return sum(row.values()) / len(row) if row else 0.0
+
+
+class AutoResearchEngine:
+    """Round-based research over a candidate frontier, driven against the evaluation server.
+
+    Each round is a fresh proposer session with an explicit directive the engine
+    picks from the evidence so far: survey the seed, exploit a gain, combine two
+    frontier candidates that win on different examples, explore the hard
+    examples, or pivot after a stall. The engine records every evaluator answer
+    itself, so the leaderboard, the per-example Pareto front and the failure
+    dossier it hands the agent cannot be edited by the agent. What the agent
+    learns carries between rounds in its own ``notebook.md``.
     """
 
     name = "autoresearch"
@@ -397,7 +480,7 @@ class AutoResearchEngine:
         """
         engine_config = dict(config.engine_config)
         self.model = str(engine_config.pop("model"))
-        self.ralph = bool(engine_config.pop("ralph", False))
+        self.multi_round = bool(engine_config.pop("ralph", True))
         no_eval = engine_config.pop("max_no_eval_seconds", None)
         self.max_no_eval_seconds = None if no_eval is None else float(no_eval)
         self.effort = engine_config.pop("effort", None)
@@ -406,14 +489,18 @@ class AutoResearchEngine:
         self.max_token_cost = config.max_token_cost
         self.stop_at_score = config.stop_at_score
         self.run_dir = Path(config.run_dir or "autoresearch-run").resolve()
-        self.work_dir = self.run_dir / "autoresearch"
+        self.work_dir = self.run_dir / "lab"
         self.session_ids: list[str] = []
-        self.sessions = 0
         self.cost_usd = 0.0
-        self.tag = time.strftime("%b%d").lower()
+        self.round = 0
+        self.directives: list[str] = []
+        self.observations: list[Observation] = []
+        self.example_ids: list[str] = []
+        self._ids: dict[str, str] = {}
+        self._lock = threading.Lock()
 
     def run(self, task: Task, server: EvalServer) -> Result:
-        """Lay out the repository, run the agent's experiment loop, and report the server-verified best.
+        """Run research rounds until the budget, the target score or the evidence says stop.
 
         Args:
             task: Task with a text seed candidate.
@@ -425,20 +512,32 @@ class AutoResearchEngine:
         Raises:
             RuntimeError: When the agent finished without scoring any candidate.
         """
+        self.example_ids = visible_example_ids(server)
         self._layout(task, server)
-        session_id = str(uuid.uuid4())
-        while True:
-            remaining = _remaining_cost(self.max_token_cost, self.cost_usd)
-            if remaining is not None and remaining <= 0 and self.sessions:
-                break
-            evals_before = server.budget.used
-            outcome = self._session(server, session_id, resume=self.sessions > 0, max_budget_usd=remaining)
-            self.sessions += 1
-            self.cost_usd += outcome.cost_usd
-            if outcome.session_id not in self.session_ids:
+        restore = self._record(server)
+        try:
+            stale = 0
+            improved = False
+            while True:
+                remaining = _remaining_cost(self.max_token_cost, self.cost_usd)
+                if remaining is not None and remaining <= 0 and self.round:
+                    break
+                self.round += 1
+                directive = self._directive(stale, improved)
+                self.directives.append(directive)
+                before = self._leader_score()
+                evals_before = server.budget.used
+                self._write_state(server, directive)
+                outcome = self._session(server, directive, max_budget_usd=remaining)
+                self.cost_usd += outcome.cost_usd
                 self.session_ids.append(outcome.session_id)
-            if not self.ralph or self._loop_done(server, outcome, evals_before):
-                break
+                after = self._leader_score()
+                improved = after is not None and (before is None or after > before)
+                stale = 0 if improved else stale + 1
+                if not self.multi_round or self._done(server, outcome, evals_before, stale):
+                    break
+        finally:
+            restore()
         return self._result(task, server)
 
     def incumbent(self, server: EvalServer) -> tuple[str, float] | None:
@@ -457,7 +556,7 @@ class AutoResearchEngine:
         return str(server.best_candidate), float(server.best_score)
 
     def process_result(self, result: Result, output_dir: str | Path) -> None:
-        """Write the final candidate and run metadata beside the evaluator artifacts.
+        """Write the final candidate, the notebook and run metadata beside the evaluator artifacts.
 
         Args:
             result: Result returned by ``run``.
@@ -467,26 +566,155 @@ class AutoResearchEngine:
         target.mkdir(parents=True, exist_ok=True)
         (target / "best_candidate.txt").write_text(result.best_candidate, encoding="utf-8")
         (target / "metadata.json").write_text(json.dumps(result.metadata, indent=2, default=str), encoding="utf-8")
+        notebook = self.work_dir / "notebook.md"
+        if notebook.is_file():
+            shutil.copyfile(notebook, target / "notebook.md")
+
+    def _record(self, server: EvalServer) -> Callable[[], None]:
+        """Capture every evaluator answer the agent receives, per example.
+
+        The server's own logs keep only aggregates, and a file the agent writes
+        could be edited, so the engine wraps the scoring entry point the HTTP
+        handler calls.
+
+        Args:
+            server: Evaluation server to observe.
+
+        Returns:
+            A function that removes the wrapper.
+        """
+        visible = set(self.example_ids)
+        if server.task.has_dataset:
+            original = server.evaluate_examples
+
+            def evaluate_examples(candidate: str, example_ids: Any = None, split: Any = None) -> Any:
+                """Score through the server, then log the per-example answer."""
+                score, info = original(candidate, example_ids=example_ids, split=split)
+                scores = {str(k): float(v) for k, v in (info.get("scores") or {}).items()}
+                feedback = {str(k): _feedback_text(v) for k, v in (info.get("infos") or {}).items()}
+                for eid, error in (info.get("errors") or {}).items():
+                    feedback[str(eid)] = _feedback_text(f"error: {error}")
+                self._observe(Observation(candidate, scores, feedback, set(scores) == visible, self.round))
+                return score, info
+
+            server.evaluate_examples = evaluate_examples  # type: ignore[method-assign]
+            return lambda: delattr(server, "evaluate_examples")
+        original_single = server.evaluate
+
+        def evaluate(candidate: str, example: Any = None, **kwargs: Any) -> Any:
+            """Score through the server, then log the whole-candidate answer."""
+            score, info = original_single(candidate, example, **kwargs)
+            self._observe(
+                Observation(candidate, {"_single": float(score)}, {"_single": _feedback_text(info)}, True, self.round)
+            )
+            return score, info
+
+        server.evaluate = evaluate  # type: ignore[method-assign]
+        return lambda: delattr(server, "evaluate")
+
+    def _observe(self, observation: Observation) -> None:
+        """Store one observation and archive a newly fully evaluated candidate.
+
+        Args:
+            observation: The evaluator answer.
+        """
+        with self._lock:
+            self.observations.append(observation)
+            if not observation.full or observation.candidate in self._ids:
+                return
+            cid = f"c{len(self._ids) + 1:03d}"
+            self._ids[observation.candidate] = cid
+            (self.work_dir / "archive" / f"{cid}.txt").write_text(observation.candidate, encoding="utf-8")
+            with (self.work_dir / "archive" / "index.tsv").open("a", encoding="utf-8") as index:
+                index.write(f"{cid}\t{_mean(observation.scores):.6f}\t{observation.round}\n")
+
+    def _table(self) -> dict[str, dict[str, float]]:
+        """Per-example scores of every fully evaluated candidate, latest answer winning.
+
+        Returns:
+            Rows keyed by candidate text.
+        """
+        with self._lock:
+            return {o.candidate: o.scores for o in self.observations if o.full}
+
+    def _leader_score(self) -> float | None:
+        """Return the best mean score among fully evaluated candidates.
+
+        Returns:
+            The score, or ``None`` before any full evaluation.
+        """
+        table = self._table()
+        return max((_mean(row) for row in table.values()), default=None)
+
+    def _directive(self, stale: int, improved: bool) -> str:
+        """Pick this round's research directive from the evidence so far.
+
+        Args:
+            stale: Consecutive rounds that did not raise the leader's score.
+            improved: Whether the previous round raised it.
+
+        Returns:
+            One of ``survey``, ``pivot``, ``combine``, ``exploit`` or ``explore``.
+        """
+        if self.round == 1 or not self._table():
+            return "survey"
+        if stale >= _PIVOT_AFTER:
+            return "pivot"
+        if self._partner() is not None and self.directives[-1] != "combine":
+            return "combine"
+        return "exploit" if improved else "explore"
+
+    def _partner(self) -> tuple[str, list[str]] | None:
+        """Find the frontier candidate that most complements the leader.
+
+        Returns:
+            ``(candidate, examples it beats the leader on)``, or ``None`` when no
+            frontier member wins anywhere the leader loses.
+        """
+        table = self._table()
+        front = pareto_front(table)
+        if len(front) < 2:
+            return None
+        leader = table[front[0]]
+        best: tuple[str, list[str]] | None = None
+        for candidate in front[1:]:
+            wins = [eid for eid, score in table[candidate].items() if score > leader.get(eid, 0.0)]
+            if wins and (best is None or len(wins) > len(best[1])):
+                best = (candidate, wins)
+        return best
+
+    def _round_quota(self, server: EvalServer) -> int | None:
+        """Spread the remaining evaluation budget over the planned rounds.
+
+        Args:
+            server: Evaluation server with the budget state.
+
+        Returns:
+            Evaluation units this round may spend, or ``None`` when uncapped.
+        """
+        remaining = server.budget.remaining
+        if remaining is None:
+            return None
+        if not self.multi_round:
+            return remaining
+        pool = max(1, len(self.example_ids))
+        rounds_left = max(1, _PLANNED_ROUNDS - self.round + 1)
+        return min(remaining, max(pool, -(-remaining // rounds_left)))
 
     def _layout(self, task: Task, server: EvalServer) -> None:
-        """Create the git repository the brief describes.
+        """Create the lab directory the brief describes.
 
         Args:
             task: Task providing the seed and description.
             server: Evaluation server whose URL ``eval.sh`` targets.
-
-        Raises:
-            RuntimeError: When git is unavailable, since the loop is branch-based.
         """
-        if shutil.which("git") is None:
-            raise RuntimeError("AutoResearch needs git in the runtime: its experiment loop advances a branch.")
         if self.work_dir.exists():
             shutil.rmtree(self.work_dir)
-        self.work_dir.mkdir(parents=True)
-        example_ids = visible_example_ids(server)
-        route = "evaluate_examples" if example_ids else "evaluate"
-        (self.work_dir / "README.md").write_text(task_brief(task, example_ids), encoding="utf-8")
-        (self.work_dir / "candidate.txt").write_text(seed_as_text(task.seed_candidate), encoding="utf-8")
+        for sub in ("archive", "frontier", "work"):
+            (self.work_dir / sub).mkdir(parents=True)
+        route = "evaluate_examples" if self.example_ids else "evaluate"
+        (self.work_dir / "TASK.md").write_text(task_brief(task, self.example_ids), encoding="utf-8")
+        (self.work_dir / "work" / "seed.txt").write_text(seed_as_text(task.seed_candidate), encoding="utf-8")
         eval_script = self.work_dir / "eval.sh"
         eval_script.write_text(
             EVAL_SCRIPT.format(
@@ -495,255 +723,262 @@ class AutoResearchEngine:
             encoding="utf-8",
         )
         eval_script.chmod(0o755)
-        (self.work_dir / "program.md").write_text(self._program(server, example_ids), encoding="utf-8")
-        (self.work_dir / ".gitignore").write_text("results.tsv\nrun.log\n", encoding="utf-8")
-        (self.work_dir / "results.tsv").write_text("commit\tscore\tstatus\tdescription\n", encoding="utf-8")
-        git_env = {
-            **os.environ,
-            "GIT_AUTHOR_NAME": "autoresearch",
-            "GIT_AUTHOR_EMAIL": "autoresearch@localhost",
-            "GIT_COMMITTER_NAME": "autoresearch",
-            "GIT_COMMITTER_EMAIL": "autoresearch@localhost",
-        }
-        for args in (
-            ["init", "-q", "-b", "master"],
-            ["add", "-A"],
-            ["commit", "-q", "-m", "initial candidate"],
-            ["checkout", "-q", "-b", f"autoresearch/{self.tag}"],
-        ):
-            subprocess.run(["git", *args], cwd=self.work_dir, env=git_env, check=True, capture_output=True)
+        (self.work_dir / "BRIEF.md").write_text(self._brief(), encoding="utf-8")
+        (self.work_dir / "notebook.md").write_text(
+            "# Research notebook\n\nOne section per round: hypotheses, experiments, outcomes, conclusions.\n",
+            encoding="utf-8",
+        )
+        (self.work_dir / "archive" / "index.tsv").write_text("id\tscore\tround\n", encoding="utf-8")
 
-    def _program(self, server: EvalServer, example_ids: list[str]) -> str:
-        """Derive the sandbox brief from the pinned upstream ``program.md``.
-
-        Args:
-            server: Evaluation server, for the budget figures.
-            example_ids: Visible example ids, empty for single-candidate tasks.
+    def _brief(self) -> str:
+        """Write the standing research method every round follows.
 
         Returns:
-            The adapted brief.
+            The ``BRIEF.md`` text.
         """
-        budget = server.budget.remaining
-        budget_note = (
-            "as many evaluator calls as the run allows" if budget is None else f"{budget} evaluator calls in total"
+        probe = (
+            "- `./eval.sh <file> <example_id> [<example_id> ...]` is a **probe**: it scores the file on just those "
+            "examples and costs one unit per example. Probes are for checking whether a change moves the examples "
+            "it targets; they never enter the leaderboard.\n"
+            if self.example_ids
+            else ""
+        )
+        full = (
+            "one unit per visible example (see `TASK.md`)"
+            if self.example_ids
+            else "one unit, since the evaluator scores the candidate as a whole"
+        )
+        return (
+            "# Research brief\n\n"
+            "You are running one round of a multi-round research effort to improve a text candidate against a "
+            "fixed evaluator. `TASK.md` says what the candidate is for and how it is judged. Higher scores are "
+            "better.\n\n"
+            "## Files\n\n"
+            "- `TASK.md`, `BRIEF.md`, `STATE.md`, `eval.sh`, `frontier/` and `archive/` are maintained by the "
+            "engine. Read them; never edit them.\n"
+            "- `STATE.md` is rewritten before every round: the leaderboard, the Pareto frontier of candidates "
+            "that win on different examples, the failure dossier, this round's **directive** and your "
+            "evaluation allowance.\n"
+            "- `frontier/<id>.txt` holds the current frontier candidates; `archive/<id>.txt` holds every candidate "
+            "that ever received a full evaluation, with scores in `archive/index.tsv`.\n"
+            "- `work/` is yours: write every new candidate there. `work/seed.txt` is the starting candidate.\n"
+            "- `notebook.md` is yours and is the only memory that survives between rounds. Later rounds, "
+            "possibly a different session of you, depend on it.\n\n"
+            "## Evaluating\n\n"
+            f"- `./eval.sh <file>` is a **full evaluation**: it costs {full} and is the only way a candidate "
+            "enters the leaderboard.\n"
+            f"{probe}"
+            f"- If `eval.sh` prints `{BUDGET_EXHAUSTED_MARKER}`, the budget is spent: write up the notebook and end "
+            "the session.\n"
+            "- Never score the same text twice; every call spends budget.\n\n"
+            "## Method for a round\n\n"
+            "1. **Orient.** Read `STATE.md`, then `notebook.md`. Do not rerun a hypothesis the notebook already "
+            "refuted unless you have a new reason, and say what the reason is.\n"
+            "2. **Diagnose.** Study the failure dossier and the evaluator feedback. Name concrete failure modes, "
+            "each tied to the examples that show it.\n"
+            "3. **Hypothesize.** Under a `## Round N` heading in `notebook.md`, write two to four falsifiable "
+            "hypotheses. For each: the change, why it should help, and which examples it should move.\n"
+            "4. **Experiment.** Test one hypothesis per candidate: copy a frontier candidate into `work/`, make "
+            "one focused change, and evaluate it. Write the hypothesis down before you evaluate, and the result "
+            "right after.\n"
+            "5. **Conclude.** Mark each hypothesis confirmed, refuted or inconclusive, with the evidence. Record "
+            "what you learned about the task, not just the number.\n"
+            "6. **Consolidate.** Stack the confirmed changes into one candidate and give it a full evaluation "
+            "before the round's allowance runs out.\n\n"
+            "## Standards\n\n"
+            "- Follow the round's directive in `STATE.md`; it is chosen from the evidence of earlier rounds.\n"
+            "- Keep every candidate valid for `TASK.md`. Held-out test cases exist, so a change that only helps "
+            "because it names or special-cases a visible example is not an improvement.\n"
+            "- Between two candidates with the same score, the shorter and simpler one is better. A change that "
+            "deletes text and keeps the score is a win.\n"
+            "- There is no human to ask. End the session once the allowance is spent or the directive is done; "
+            "the engine starts the next round with fresh evidence.\n"
+        )
+
+    def _write_state(self, server: EvalServer, directive: str) -> None:
+        """Refresh ``STATE.md`` and ``frontier/`` for the coming round.
+
+        Args:
+            server: Evaluation server with the budget state.
+            directive: This round's directive.
+        """
+        table = self._table()
+        front = pareto_front(table)[:_FRONTIER_SIZE]
+        frontier_dir = self.work_dir / "frontier"
+        for stale_file in frontier_dir.iterdir():
+            stale_file.unlink()
+        for candidate in front:
+            (frontier_dir / f"{self._ids[candidate]}.txt").write_text(candidate, encoding="utf-8")
+        quota = self._round_quota(server)
+        remaining = server.budget.remaining
+        lines = [f"# Round {self.round}", "", "## Directive", "", self._directive_text(directive, table, front), ""]
+        lines += ["## Budget", ""]
+        lines.append(
+            "- Evaluations: unlimited by count; stop when the directive is done."
+            if remaining is None
+            else f"- This round may spend {_plural(quota or 0, 'evaluation unit')} of the {remaining} left."
         )
         if self.max_token_cost is not None:
-            budget_note += f" and ${float(self.max_token_cost):.2f} of your own model spend"
-        pool = (
-            f" It scores the candidate on all {_plural(len(example_ids), 'visible example')} and reports the "
-            "average `score` plus per-example scores and feedback."
-            if example_ids
-            else " It reports a single `score` plus any evaluator feedback."
-        )
-        edits: list[tuple[str, ...]] = [
-            ("To set up a new experiment, work with the user to:", "To set up a new experiment:"),
-            (
-                "1. **Agree on a run tag**",
-                "Once you get confirmation, kick off the experimentation.",
-                f"1. **Run tag**: this run's tag is `{self.tag}`; the branch `autoresearch/{self.tag}` has already "
-                "been created and checked out for you — this is a fresh run.\n"
-                "2. **Stay on the branch**: never switch branches or touch `master`.\n"
-                "3. **Read the in-scope files**: The repo is small. Read these files for full context:\n"
-                "   - `README.md` — the task: what the candidate is for and how it is judged.\n"
-                "   - `eval.sh` — the fixed evaluator. Do not modify.\n"
-                "   - `candidate.txt` — the file you modify. It holds the candidate text being optimized.\n"
-                "4. **Verify the evaluator answers**: `./eval.sh candidate.txt` must print a JSON body with a "
-                "`score` field.\n"
-                "5. **results.tsv is initialized**: it already holds just the header row. The baseline will be "
-                "recorded after the first run.\n"
-                "6. **Go**: there is no human in this session to confirm with.\n\n"
-                "Kick off the experimentation immediately.",
-            ),
-            (
-                "Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 5 "
-                "minutes** (wall clock training time, excluding startup/compilation). You launch it simply as: "
-                "`uv run train.py`.",
-                "Each experiment scores the current `candidate.txt` with the fixed evaluator. You launch it simply "
-                f"as: `./eval.sh candidate.txt`.{pool}",
-            ),
-            (
-                "- Modify `train.py` — this is the only file you edit. Everything is fair game: model architecture, "
-                "optimizer, hyperparameters, training loop, batch size, model size, etc.",
-                "- Modify `candidate.txt` — this is the only file you edit. Everything in it is fair game: "
-                "structure, wording, logic, length, etc.",
-            ),
-            (
-                "- Modify `prepare.py`. It is read-only.",
-                "The `evaluate_bpb` function in `prepare.py` is the ground truth metric.",
-                "- Modify `eval.sh` or `README.md`. They are read-only.\n"
-                "- Install packages or reach the network. The only outside call you make is `./eval.sh`.\n"
-                "- Modify the evaluation harness. The `score` that `./eval.sh` returns is the ground truth metric.",
-            ),
-            (
-                "**The goal is simple: get the lowest val_bpb.**",
-                "The only constraint is that the code runs without crashing and finishes within the time budget.",
-                "**The goal is simple: get the highest score.** Everything is fair game as long as the candidate "
-                "stays valid for the task in `README.md`. The only constraint is that the evaluator returns a "
-                "score for it.",
-            ),
-            (
-                "**VRAM** is a soft constraint. Some increase is acceptable for meaningful val_bpb gains, but it "
-                "should not blow up dramatically.",
-                "**Length** is a soft constraint. Some growth is acceptable for meaningful score gains, but the "
-                "candidate should not blow up dramatically.",
-            ),
-            (
-                "A 0.001 val_bpb improvement that adds 20 lines of hacky code? Probably not worth it. A 0.001 "
-                "val_bpb improvement from deleting code? Definitely keep.",
-                "A tiny score improvement that adds 20 lines of convoluted text? Probably not worth it. A tiny "
-                "score improvement from deleting text? Definitely keep.",
-            ),
-            (
-                "so you will run the training script as is.",
-                "so you will run the evaluator on `candidate.txt` as is.",
-            ),
-            (
-                "Once the script finishes it prints a summary like this:",
-                'grep "^val_bpb:" run.log\n```',
-                "Once the evaluator finishes it prints a JSON body like this:\n\n```\n"
-                '{"score": 0.6875, ...}\n```\n\n'
-                "The body also carries the evaluator's `feedback` when it has any — read it, it says why the "
-                "candidate scored the way it did. You can extract the key metric from the log file:\n\n```\n"
-                "grep -o '\"score\": *[-0-9.e]*' run.log\n```",
-            ),
-            (
-                "The TSV has a header row and 5 columns:",
-                "d4e5f6g\t0.000000\t0.0\tcrash\tdouble model width (OOM)\n```",
-                "The TSV has a header row and 4 columns:\n\n```\ncommit\tscore\tstatus\tdescription\n```\n\n"
-                "1. git commit hash (short, 7 chars)\n"
-                "2. score achieved (e.g. 0.687500) — use 0.000000 for crashes\n"
-                "3. status: `keep`, `discard`, or `crash`\n"
-                "4. short text description of what this experiment tried\n\n"
-                "Example:\n\n```\ncommit\tscore\tstatus\tdescription\n"
-                "a1b2c3d\t0.625000\tkeep\tbaseline\n"
-                "b2c3d4e\t0.687500\tkeep\tstate the output format up front\n"
-                "c3d4e5f\t0.610000\tdiscard\tdrop the worked example\n"
-                "d4e5f6g\t0.000000\tcrash\tempty candidate (evaluator rejected it)\n```",
-            ),
-            (
-                "The experiment runs on a dedicated branch (e.g. `autoresearch/mar5` or `autoresearch/mar5-gpu0`).",
-                f"The experiment runs on the dedicated branch `autoresearch/{self.tag}`.",
-            ),
-            (
-                "2. Tune `train.py` with an experimental idea by directly hacking the code.",
-                "2. Tune `candidate.txt` with an experimental idea by directly editing it.",
-            ),
-            (
-                "4. Run the experiment: `uv run train.py > run.log 2>&1`",
-                "4. Run the experiment: `./eval.sh candidate.txt > run.log 2>&1`",
-            ),
-            (
-                '5. Read out the results: `grep "^val_bpb:\\|^peak_vram_mb:" run.log`',
-                "5. Read out the results: `grep -o '\"score\": *[-0-9.e]*' run.log`",
-            ),
-            (
-                "Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix.",
-                "Run `tail -n 50 run.log` to read the evaluator's error and attempt a fix. If the log says "
-                f"`{BUDGET_EXHAUSTED_MARKER}`, the evaluation budget is spent: stop the loop and finish.",
-            ),
-            (
-                '8. If val_bpb improved (lower), you "advance" the branch, keeping the git commit',
-                '8. If the score improved (higher), you "advance" the branch, keeping the git commit',
-            ),
-            (
-                "9. If val_bpb is equal or worse, you git reset back to where you started",
-                "9. If the score is equal or worse, you git reset back to where you started",
-            ),
-            (
-                "**Timeout**: Each experiment should take ~5 minutes total (+ a few seconds for startup and eval "
-                "overhead). If a run exceeds 10 minutes, kill it and treat it as a failure (discard and revert).",
-                "**Timeout**: Each experiment takes as long as the evaluator needs. If a run exceeds 10 minutes, "
-                "kill it and treat it as a failure (discard and revert).",
-            ),
-            (
-                "If a run crashes (OOM, or a bug, or etc.)",
-                "If a run crashes (the evaluator rejects the candidate, etc.)",
-            ),
-            (
-                "The human might be asleep, or gone from a computer and expects you to continue working "
-                "*indefinitely* until you are manually stopped.",
-                "There is no human in this session; you are expected to continue working until the evaluation "
-                "budget runs out.",
-            ),
-            (
-                "The loop runs until the human interrupts you, period.",
-                "The loop runs until the evaluation budget is exhausted or the run is interrupted, period.",
-            ),
-            (
-                "As an example use case, a user might leave you running while they sleep.",
-                "all completed by you while they slept!",
-                f"The budget for this run is {budget_note}. Spend it on new experiments, not on re-scoring the "
-                "same candidate: every `./eval.sh` call counts.",
-            ),
-        ]
-        return adapt(load_asset("autoresearch/program.md"), edits)
+            left = max(0.0, float(self.max_token_cost) - self.cost_usd)
+            lines.append(f"- Your own model spend left for the run: ${left:.2f}.")
+        lines += ["", "## Leaderboard", ""]
+        if table:
+            ranked = sorted(table, key=lambda c: -_mean(table[c]))[:_LEADERBOARD_SIZE]
+            lines += ["| id | score | on frontier |", "| --- | --- | --- |"]
+            lines += [f"| {self._ids[c]} | {_mean(table[c]):.4f} | {'yes' if c in front else ''} |" for c in ranked]
+        else:
+            lines.append("Nothing has been fully evaluated yet.")
+        if table and self.example_ids:
+            lines += ["", "## Per-example scores on the frontier", ""]
+            lines += ["| example | " + " | ".join(self._ids[c] for c in front) + " |"]
+            lines += ["| --- " * (len(front) + 1) + "|"]
+            for eid in self.example_ids:
+                cells = " | ".join(f"{table[c].get(eid, 0.0):.3f}" for c in front)
+                lines.append(f"| `{eid}` | {cells} |")
+        lines += ["", "## Failure dossier", ""]
+        lines += self._dossier(table, front)
+        (self.work_dir / "STATE.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    def _session(
-        self, server: EvalServer, session_id: str, *, resume: bool, max_budget_usd: float | None
-    ) -> ProposerOutcome:
-        """Run one agent session with the no-evaluation watchdog.
+    def _directive_text(self, directive: str, table: dict[str, dict[str, float]], front: list[str]) -> str:
+        """Spell out what this round should do.
+
+        Args:
+            directive: The chosen directive.
+            table: Per-example scores of fully evaluated candidates.
+            front: Current frontier, leader first.
+
+        Returns:
+            Markdown for the directive section.
+        """
+        leader = self._ids[front[0]] if front else "the seed"
+        if directive == "survey":
+            return (
+                "**Survey.** First give `work/seed.txt` a full evaluation as-is to anchor the baseline. Then map the "
+                "failure modes across examples and test your most promising hypotheses."
+            )
+        if directive == "exploit":
+            return (
+                f"**Exploit.** The last round raised the leader to `{leader}`. Push further along the direction that "
+                "worked, and run at least one ablation that removes a recent addition to check it earns its place."
+            )
+        if directive == "combine":
+            partner = self._partner()
+            if partner is not None:
+                wins = ", ".join(f"`{eid}`" for eid in partner[1][:_DOSSIER_EXAMPLES])
+                return (
+                    f"**Combine.** `{self._ids[partner[0]]}` beats the leader `{leader}` on {wins}. Find which parts "
+                    "of it cause those wins and graft them into the leader without losing the leader's own wins."
+                )
+        if directive == "pivot":
+            return (
+                f"**Pivot.** {_PIVOT_AFTER} rounds in a row did not beat `{leader}`: small edits have stalled. Make a "
+                "structural change: rewrite the candidate from a different angle, or start from a frontier member "
+                "other than the leader. Keep what the notebook confirmed and drop what it refuted."
+            )
+        return (
+            f"**Explore.** The last round did not beat `{leader}`. Aim new hypotheses at the hard examples in the "
+            "failure dossier, which no candidate handles well yet."
+        )
+
+    def _dossier(self, table: dict[str, dict[str, float]], front: list[str]) -> list[str]:
+        """Describe where the leader fails, with the evaluator's own words.
+
+        Args:
+            table: Per-example scores of fully evaluated candidates.
+            front: Current frontier, leader first.
+
+        Returns:
+            Markdown lines.
+        """
+        if not front:
+            return ["No evidence yet."]
+        leader = front[0]
+        with self._lock:
+            feedback = next((o.feedback for o in reversed(self.observations) if o.full and o.candidate == leader), {})
+        if not self.example_ids:
+            note = feedback.get("_single") or "(no feedback)"
+            return [f"Leader `{self._ids[leader]}` feedback:", "", "```", note, "```"]
+        best_anywhere = {eid: max(row.get(eid, 0.0) for row in table.values()) for eid in self.example_ids}
+        hard = sorted(self.example_ids, key=lambda eid: best_anywhere[eid])[:_DOSSIER_EXAMPLES]
+        weakest = sorted(self.example_ids, key=lambda eid: table[leader].get(eid, 0.0))[:_DOSSIER_EXAMPLES]
+        lines = [
+            "Hardest examples (best score any candidate reached): "
+            + ", ".join(f"`{eid}` {best_anywhere[eid]:.3f}" for eid in hard),
+            "",
+            f"Leader `{self._ids[leader]}` on its weakest examples:",
+            "",
+        ]
+        for eid in weakest:
+            note = feedback.get(eid) or "(no feedback)"
+            lines += [f"- `{eid}` scored {table[leader].get(eid, 0.0):.3f}: {note}"]
+        return lines
+
+    def _session(self, server: EvalServer, directive: str, *, max_budget_usd: float | None) -> ProposerOutcome:
+        """Run one round's agent session under the stall and allowance watchdogs.
 
         Args:
             server: Evaluation server whose usage counter proves progress.
-            session_id: Session to start or resume.
-            resume: Whether this is a Ralph continuation.
+            directive: This round's directive.
             max_budget_usd: Remaining proposer spend.
 
         Returns:
             The session outcome.
         """
-        last_used = server.budget.used
+        start_used = server.budget.used
+        quota = self._round_quota(server)
+        last_used = start_used
         last_progress = time.monotonic()
+        spent_at: float | None = None
 
-        def stalled() -> bool:
-            """Tell whether the agent has gone ``max_no_eval_seconds`` without evaluating."""
-            nonlocal last_used, last_progress
+        def should_kill() -> bool:
+            """End a session that stalled or overran its allowance by more than the write-up grace."""
+            nonlocal last_used, last_progress, spent_at
+            now = time.monotonic()
             if server.budget.used != last_used:
                 last_used = server.budget.used
-                last_progress = time.monotonic()
-            return self.max_no_eval_seconds is not None and time.monotonic() - last_progress >= self.max_no_eval_seconds
+                last_progress = now
+            if quota is not None and server.budget.used - start_used >= quota:
+                spent_at = spent_at if spent_at is not None else now
+                if now - spent_at >= _WRITE_UP_GRACE_SECONDS:
+                    return True
+            return self.max_no_eval_seconds is not None and now - last_progress >= self.max_no_eval_seconds
 
         prompt = (
-            "Read `program.md` in this directory and follow it exactly: it is your complete brief for this "
-            "autonomous research run. Setup is already done; start the experiment loop now."
+            f"This is round {self.round} ({directive}). Read `BRIEF.md`, then `STATE.md`, then `notebook.md` in this "
+            "directory, and carry out the round as the brief describes. Record everything in `notebook.md`."
         )
-        if resume:
-            prompt = (
-                "Continue the experiment loop from `program.md`. The branch, `results.tsv` and your earlier "
-                "commits are still here; pick up where you left off and keep experimenting."
-            )
         return run_proposer(
             prompt,
             work_dir=self.work_dir,
             log_dir=self.run_dir / "sessions",
-            name=f"session{self.sessions + 1}",
+            name=f"round{self.round}",
             model=self.model,
-            session_id=session_id,
-            resume=resume,
+            session_id=str(uuid.uuid4()),
             effort=self.effort,
             max_thinking_tokens=self.max_thinking_tokens,
             max_budget_usd=max_budget_usd,
-            should_kill=stalled,
+            should_kill=should_kill,
         )
 
-    def _loop_done(self, server: EvalServer, outcome: ProposerOutcome, evals_before: int) -> bool:
-        """Decide whether Ralph should relaunch the session.
+    def _done(self, server: EvalServer, outcome: ProposerOutcome, evals_before: int, stale: int) -> bool:
+        """Decide whether another round is worth starting.
 
         Args:
             server: Evaluation server with the budget state.
-            outcome: The session that just ended.
-            evals_before: Evaluations used before that session started.
+            outcome: The round that just ended.
+            evals_before: Evaluations used before that round started.
+            stale: Consecutive rounds without a better leader.
 
         Returns:
-            ``True`` when budget, threshold or a wedged agent ends the loop.
+            ``True`` when budget, threshold, a wedged agent or a spent pivot ends the run.
         """
-        best = self.incumbent(server)
         remaining = server.budget.remaining
         return (
             outcome.budget_exhausted
             or (remaining is not None and remaining <= 0)
-            or _reached(self.stop_at_score, None if best is None else best[1])
+            or _reached(self.stop_at_score, self._leader_score())
             or server.budget.used == evals_before
+            or stale >= _STOP_AFTER
         )
 
     def _result(self, task: Task, server: EvalServer) -> Result:
@@ -761,8 +996,9 @@ class AutoResearchEngine:
         """
         best = self.incumbent(server)
         if best is None:
-            raise RuntimeError("The AutoResearch agent finished without scoring any candidate through eval.sh.")
+            raise RuntimeError("The research agent finished without scoring any candidate through eval.sh.")
         candidate, score = best
+        table = self._table()
         return Result(
             best_candidate=candidate,
             best_score=score,
@@ -770,11 +1006,13 @@ class AutoResearchEngine:
             eval_log=list(server.eval_log),
             metadata={
                 "engine": self.name,
-                "upstream_revision": AUTORESEARCH_REVISION,
+                "engine_version": AUTORESEARCH_VERSION,
+                "rounds": self.round,
+                "directives": list(self.directives),
                 "session_ids": list(self.session_ids),
-                "sessions": self.sessions,
                 "proposer_cost_usd": round(self.cost_usd, 6),
-                "branch": f"autoresearch/{self.tag}",
+                "candidates_evaluated": len(table),
+                "frontier": [{"id": self._ids[c], "score": round(_mean(table[c]), 6)} for c in pareto_front(table)],
                 "work_dir": str(self.work_dir),
                 "seed_len": len(seed_as_text(task.seed_candidate)),
             },
@@ -1274,12 +1512,11 @@ ENGINES: dict[str, type] = {AutoResearchEngine.name: AutoResearchEngine, MetaHar
 
 
 def check_assets() -> dict[str, str]:
-    """Verify both vendored prompts adapt cleanly at the pinned revisions.
+    """Verify the vendored Meta-Harness prompt adapts cleanly at the pinned revision.
 
     Returns:
-        Engine names mapped to their pinned upstream revisions.
+        The engine name mapped to its pinned upstream revision.
     """
     probe = OptimizeAnythingConfig(engine="meta_harness", engine_config={"model": "probe"})
     MetaHarnessEngine(probe).skill()
-    adapt(load_asset("autoresearch/program.md"), [])
-    return {"meta_harness": META_HARNESS_REVISION, "autoresearch": AUTORESEARCH_REVISION}
+    return {"meta_harness": META_HARNESS_REVISION}

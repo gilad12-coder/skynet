@@ -10,9 +10,8 @@ license files in their `*.dist-info/` directories inside the image.
 | Material | Location | Upstream | License |
 | --- | --- | --- | --- |
 | Meta-Harness proposer skill | `core/service_gateway/optimization/blackbox/upstream_prompts/meta_harness/` | stanford-iris-lab/meta-harness@0cbc31e9, Copyright (c) 2026 Yoonho Lee | MIT, `LICENSE` beside it |
-| AutoResearch program | `core/service_gateway/optimization/blackbox/upstream_prompts/autoresearch/` | karpathy/autoresearch@228791fb, Andrej Karpathy | MIT, `LICENSE` beside it |
 | AutoSaddler plugin and prompt-pack wiring | `core/service_gateway/optimization/blackbox/autosaddler_plugin/`, `autosaddler_runner.py` | microsoft/AutoSaddler@9df6d2e3 | MIT, `LICENSE` beside it |
-| Meta-Harness and AutoResearch loop structure | `core/service_gateway/optimization/blackbox/native_engines.py` | as above | MIT |
+| Meta-Harness loop structure | `core/service_gateway/optimization/blackbox/native_engines.py` | as above | MIT |
 | GEPA sources sent to sandboxes | archived at run time with `gepa/LICENSE` | gepa-ai/gepa@0632cdb5, Copyright (c) 2025 Lakshya A Agrawal | MIT |
 | Scalar API reference bundle | `core/api/static/scalar/` | scalar/scalar, Copyright (c) 2023-present Scalar | MIT, `LICENSE` beside it |
 | Inter and JetBrains Mono web fonts | `core/api/static/scalar/fonts/` | rsms/inter, JetBrains/JetBrainsMono | OFL-1.1, `OFL.txt` beside them |

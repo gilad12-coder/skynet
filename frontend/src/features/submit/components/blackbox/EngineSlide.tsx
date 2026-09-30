@@ -138,20 +138,24 @@ function BestOfNBanner() {
 function AutoResearchBanner() {
   return (
     <BannerFrame>
-      <GBox x={30} y={30} w={56} h={28} accent />
-      <GBar x={40} y={38} w={30} />
-      <GBar x={40} y={44} w={22} />
-      <GBar x={40} y={50} w={26} />
-      <GWire d="M86 38 H150" />
-      <GArrow x={154} y={38} dir="right" />
-      <GBox x={154} y={30} w={56} h={28} />
-      <GBar x={164} y={38} w={36} />
-      <GBar x={164} y={44} w={24} />
-      <GBar x={164} y={50} w={30} />
-      <GWire d="M154 50 H90" />
-      <GArrow x={86} y={50} dir="right" />
-      <GWire d="M182 58 V72 H58 V62" />
-      <GArrow x={58} y={58} dir="up" />
+      <GBox x={30} y={26} w={52} h={32} accent />
+      <GBar x={40} y={34} w={30} />
+      <GBar x={40} y={40} w={22} />
+      <GBar x={40} y={46} w={26} />
+      <GWire d="M82 42 H116 V20 H146" />
+      <GArrow x={150} y={20} dir="right" />
+      <GWire d="M116 42 H146" />
+      <GArrow x={150} y={42} dir="right" />
+      <GWire d="M116 42 V64 H146" />
+      <GArrow x={150} y={64} dir="right" />
+      <GBox x={150} y={13} w={60} h={14} />
+      <GBar x={158} y={19} w={34} />
+      <GBox x={150} y={35} w={60} h={14} accent />
+      <GBar x={158} y={41} w={42} />
+      <GBox x={150} y={57} w={60} h={14} />
+      <GBar x={158} y={63} w={26} />
+      <GWire d="M180 71 V80 H56 V62" />
+      <GArrow x={56} y={58} dir="up" />
     </BannerFrame>
   );
 }

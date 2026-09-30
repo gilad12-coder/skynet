@@ -192,7 +192,7 @@ def test_native_readiness_checks_selected_isolation_without_search(
         "runtime": "vercel",
         "gepa_source": native_runtime.GEPA_SOURCE,
         "meta_harness_source": native_runtime.META_HARNESS_REVISION,
-        "autoresearch_source": native_runtime.AUTORESEARCH_REVISION,
+        "autoresearch_version": native_runtime.AUTORESEARCH_VERSION,
         "autosaddler_source": native_runtime.AUTOSADDLER_REVISION,
         "autosaddler_ready": True,
         "claude_version": native_runtime.CLAUDE_VERSION,
@@ -581,6 +581,9 @@ def test_real_native_runner_drives_upstream_with_fake_cli(tmp_path: Path, engine
     }
     if engine_id == "meta_harness":
         payload["task"]["train_set"] = [{"id": "a"}, {"id": "b"}]
+    else:
+        # One research round keeps the fake's single scripted evaluation the whole run.
+        payload["proposer"] = {"harness": "claude_code", "ralph": False}
     (tmp_path / "input.json").write_text(json.dumps(payload))
     env = {"PATH": f"{binary}{os.pathsep}/usr/bin:/bin", "HOME": str(tmp_path), "PYTHONUNBUFFERED": "1"}
     if variant == "repeated":
@@ -666,9 +669,6 @@ def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
         "upstream_prompts/meta_harness/SKILL.md",
         "upstream_prompts/meta_harness/LICENSE",
         "upstream_prompts/meta_harness/NOTICE.md",
-        "upstream_prompts/autoresearch/program.md",
-        "upstream_prompts/autoresearch/NOTICE.md",
-        "upstream_prompts/autoresearch/LICENSE",
     }
 
 
@@ -783,6 +783,7 @@ def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path
             "model": "claude-test",
             "price": {"input": 0.0, "output": 0.0},
             "effort": "high",
+            "ralph": False,
         },
         "task": {"name": "test", "seed_candidate": "seed"},
     }

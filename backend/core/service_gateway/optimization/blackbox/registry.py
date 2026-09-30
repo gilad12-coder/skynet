@@ -122,7 +122,7 @@ ENGINES: dict[str, EngineSpec] = {
     BLACKBOX_ENGINE_AUTORESEARCH: EngineSpec(
         id=BLACKBOX_ENGINE_AUTORESEARCH,
         label="AutoResearch",
-        description="A coding agent iterates on the version in a sandbox.",
+        description="A coding agent runs research rounds over a Pareto frontier of versions.",
         factory=AutoResearchEngine,
         requires_proposer=True,
     ),

@@ -1,6 +1,6 @@
 """Drive any Skynet agent harness as the proposer of an upstream engine.
 
-The upstream engines expect a ``claude`` command line (Meta-Harness,
+The native engines expect a ``claude`` command line (Meta-Harness,
 AutoResearch) or a provider object (AutoSaddler). This module ships into the
 sandbox next to the runners, imports only the standard library, and turns one
 proposer session into a harness launch: it writes the harness configuration

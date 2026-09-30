@@ -1,4 +1,4 @@
-"""Run the pinned upstream AutoResearch engine in its native environment."""
+"""Run Skynet's AutoResearch engine in the native agent runtime."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ from .protocol import EngineContext, EvalServer, Result, Task
 
 
 class AutoResearchEngine:
-    """Select upstream AutoResearch without replacing its agentic research loop."""
+    """Select the round-based AutoResearch loop, which needs a coding-agent proposer."""
 
     name = "autoresearch"
 
     def run(self, task: Task, server: EvalServer, ctx: EngineContext) -> Result:
-        """Delegate the unchanged engine to the selected execution runtime.
+        """Delegate the research loop to the selected execution runtime.
 
         Args:
             task: Optimization inputs.
@@ -20,6 +20,6 @@ class AutoResearchEngine:
             ctx: Model routing, runtime and workspace.
 
         Returns:
-            The upstream aggregate incumbent and execution evidence.
+            The best server-verified candidate and execution evidence.
         """
         return run_native_engine(self.name, task, server, ctx)

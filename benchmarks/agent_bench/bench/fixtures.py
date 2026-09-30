@@ -823,7 +823,7 @@ def _blackbox() -> dict[str, Any]:
         {
             "id": "autoresearch",
             "label": "AutoResearch",
-            "description": "A coding agent iterates on the version in a sandbox.",
+            "description": "A coding agent runs research rounds over a Pareto frontier of versions.",
             "available": True,
             "unavailable_reason": None,
             "requires_agent_target": False,

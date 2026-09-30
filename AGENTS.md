@@ -7,8 +7,8 @@
 
 - **DSPy** is the structured program/prompt optimization path.
 - **Optimize Anything** is the black-box path. Its native engines come from the
-  pinned upstream GEPA implementation and include GEPA, Best-of-N,
-  Meta-Harness, and AutoResearch. `Auto` composes eligible engines without
+  pinned upstream GEPA implementation and include GEPA, Best-of-N and
+  Meta-Harness, plus Skynet's own AutoResearch. `Auto` composes eligible engines without
   redefining their algorithms.
 - **Vercel Sandbox** is the production execution boundary for user workloads,
   including optimization setup, runs, recovery, and completed-run
