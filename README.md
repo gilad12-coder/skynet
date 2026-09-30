@@ -132,6 +132,13 @@ app = create_app(registry=registry)
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, the test-suite layout, i18n rules, and the migration discipline. PRs welcome. [MAINTENANCE.md](MAINTENANCE.md) covers what support to expect and how quickly issues and PRs get a response; report vulnerabilities through [SECURITY.md](SECURITY.md).
 
+## Citations
+
+Skynet runs these published methods. If you use them through Skynet in research, please cite the original work.
+
+- Lakshya A Agrawal et al. *GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning.* 2025. [arXiv:2507.19457](https://arxiv.org/abs/2507.19457)
+- Yoonho Lee et al. *Meta-Harness: End-to-End Optimization of Model Harnesses.* 2026. [arXiv:2603.28052](https://arxiv.org/abs/2603.28052)
+
 ## License
 
 [AGPL-3.0](LICENSE). Run it, fork it, self-host it — and if you offer a modified Skynet as a service, share your modifications back.

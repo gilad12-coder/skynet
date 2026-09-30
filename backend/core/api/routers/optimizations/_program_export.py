@@ -30,6 +30,20 @@ from ....models import ProgramArtifact
 
 EXPORT_FORMAT_VERSION = 1
 
+# The export is the customer's content under the Terms, and the loader is
+# Skynet's own code, so a blanket grant here keeps the AGPL off their program.
+_LICENSE_TXT = """This export was produced by Skynet from your task, data and settings.
+
+You own the program state, signature, workflow, prompts and optimized modules
+in this archive. Skynet claims no rights in them.
+
+load_program.py and README.md are provided by Skynet, and you may use, copy,
+modify and distribute them for any purpose without restriction. They come
+with no warranty of any kind.
+
+DSPy is not included. It is installed separately under its own MIT license.
+"""
+
 # Standalone loader shipped inside the bundle. Plain string (NOT an f-string):
 # the ``{...}`` below are the loader's own runtime f-strings and must survive
 # verbatim into the generated file. Depends on ``dspy`` only — no platform code.
@@ -642,5 +656,6 @@ def build_program_export_zip(
         requirement = f"dspy=={dspy_version}\n" if dspy_version else "dspy\n"
         archive.writestr("requirements.txt", requirement)
         archive.writestr("README.md", _build_readme(metadata))
+        archive.writestr("LICENSE.txt", _LICENSE_TXT)
 
     return buffer.getvalue()

@@ -125,6 +125,13 @@ export const TERMS_OF_SERVICE: LegalDocument = {
             "and lawful bases to submit it and to have it processed as described. Do not upload " +
             "sensitive personal data unless you have a lawful basis to do so.",
         },
+        {
+          kind: "paragraph",
+          text:
+            "Your Content includes any scorer code and any packages you ask the Service to install " +
+            "to run it. You represent that you may use those packages under their licenses, that " +
+            "they contain no malicious code, and that running them does not infringe anyone's rights.",
+        },
       ],
     },
     {
@@ -220,6 +227,13 @@ export const TERMS_OF_SERVICE: LegalDocument = {
             `the open-source ${C.serviceName} codebase, these Terms grant you no rights in our ` +
             `intellectual property beyond the right to use the Service, and you may not use our marks ` +
             `without our prior written permission.`,
+        },
+        {
+          kind: "paragraph",
+          text:
+            "Names and logos of third-party model providers, agent harnesses, and data sources appear " +
+            "in the Service only to identify the products it works with. They are the trademarks of " +
+            "their owners, and their use does not mean those owners endorse or sponsor the Service.",
         },
       ],
     },
