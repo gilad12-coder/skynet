@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from .. import auth as auth_mod
+from .. import model_catalog
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..routers.analytics import create_analytics_router
 from ..routers.models import create_models_router
@@ -21,6 +22,12 @@ __all__ = ["TEST_USER", "FakeJobStore", "bypass_auth"]
 
 
 TEST_USER = AuthenticatedUser(username="alice", role="admin", groups=("skynet-admins",))
+
+
+@pytest.fixture(autouse=True)
+def _offline_zero_retention(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep ``/models`` from fetching OpenRouter's live ZDR endpoint list during tests."""
+    monkeypatch.setattr(model_catalog, "zero_retention_models", lambda: frozenset({"openai/gpt-4o"}))
 
 
 @pytest.fixture(autouse=True)

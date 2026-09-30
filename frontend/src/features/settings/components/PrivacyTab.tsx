@@ -12,22 +12,26 @@ import {
   DownloadSimple,
   Envelope,
   Eraser,
+  ShieldCheck,
   Trash,
   User,
 } from "@/shared/ui/icons";
 
-import { msg, formatMsg } from "@/shared/lib/messages";
+import { msg, formatMsg, type MessageKey } from "@/shared/lib/messages";
 import { tI18n } from "@/shared/lib/i18n";
 import {
   ApiError,
   deleteAccount,
   exportAccountData,
+  getModelPrivacy,
   getNotificationPreferences,
   getSecurityStatus,
   invalidateCache,
+  updateModelPrivacy,
   updateNotificationPreferences,
   type NotificationPreferences,
 } from "@/shared/lib/api";
+import type { ModelDataPolicy } from "@/shared/types/api";
 import { isTelemetryOptedOut, setTelemetryOptOut } from "@/shared/lib/telemetry/client";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import { CopyButton } from "@/shared/ui/copy-button";
@@ -37,6 +41,7 @@ import { TooltipButton } from "@/shared/ui/tooltip-button";
 import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import { Switch } from "@/shared/ui/primitives/switch";
+import { Segmented, type SegmentedOption } from "@/shared/ui/segmented";
 import { Separator } from "@/shared/ui/primitives/separator";
 import {
   Dialog,
@@ -52,6 +57,21 @@ function describeError(err: unknown, fallback: string): string {
   if (err instanceof ApiError && err.code) return tI18n(err.code);
   return fallback;
 }
+
+const MODEL_POLICY_KEYS = {
+  allow: {
+    label: "settings.model_privacy.allow.label",
+    description: "settings.model_privacy.allow.description",
+  },
+  deny: {
+    label: "settings.model_privacy.deny.label",
+    description: "settings.model_privacy.deny.description",
+  },
+  zdr: {
+    label: "settings.model_privacy.zdr.label",
+    description: "settings.model_privacy.zdr.description",
+  },
+} as const satisfies Record<ModelDataPolicy, { label: MessageKey; description: MessageKey }>;
 
 /** A monospace value with the app-standard animated copy button. */
 function CopyValueRow({
@@ -94,6 +114,10 @@ export function PrivacyTab() {
     keyof NotificationPreferences | null
   >(null);
   const [notificationLoadError, setNotificationLoadError] = React.useState(false);
+  const [modelPolicy, setModelPolicy] = React.useState<ModelDataPolicy | null>(null);
+  const [modelPolicyLoading, setModelPolicyLoading] = React.useState(false);
+  const [modelPolicySaving, setModelPolicySaving] = React.useState(false);
+  const [modelPolicyLoadError, setModelPolicyLoadError] = React.useState(false);
 
   const signedOut = !session?.user;
   const email = session?.user?.email ?? "";
@@ -138,6 +162,47 @@ export function PrivacyTab() {
     },
     [],
   );
+
+  const loadModelPolicy = React.useCallback(async () => {
+    if (signedOut) return;
+    setModelPolicyLoading(true);
+    setModelPolicyLoadError(false);
+    try {
+      setModelPolicy((await getModelPrivacy()).data_policy);
+    } catch {
+      setModelPolicyLoadError(true);
+    } finally {
+      setModelPolicyLoading(false);
+    }
+  }, [signedOut]);
+
+  React.useEffect(() => {
+    void loadModelPolicy();
+  }, [loadModelPolicy]);
+
+  const saveModelPolicy = React.useCallback(async (policy: ModelDataPolicy) => {
+    setModelPolicySaving(true);
+    try {
+      const updated = await updateModelPrivacy({ data_policy: policy });
+      setModelPolicy(updated.data_policy);
+      setModelPolicyLoadError(false);
+      toast.success(msg("settings.model_privacy.saved"));
+    } catch (err) {
+      toast.error(describeError(err, msg("settings.model_privacy.save_error")));
+    } finally {
+      setModelPolicySaving(false);
+    }
+  }, []);
+
+  const modelPolicyDisabled = signedOut || modelPolicy === null || modelPolicySaving;
+  const modelPolicyOptions: Array<SegmentedOption<ModelDataPolicy>> = (
+    Object.keys(MODEL_POLICY_KEYS) as ModelDataPolicy[]
+  ).map((policy) => ({
+    value: policy,
+    label: msg(MODEL_POLICY_KEYS[policy].label),
+    tip: msg(MODEL_POLICY_KEYS[policy].description),
+    disabled: modelPolicyDisabled,
+  }));
 
   const handleClearCache = React.useCallback(() => {
     invalidateCache();
@@ -250,6 +315,54 @@ export function PrivacyTab() {
             aria-label={msg("settings.notifications.sharing.label")}
           />
         </SettingsRow>
+      </div>
+
+      <Separator />
+
+      <div className="space-y-2">
+        {modelPolicyLoadError && (
+          <InlineErrorRow
+            message={msg("settings.model_privacy.load_error")}
+            className="items-center py-2"
+            action={
+              <RetryIconButton
+                label={msg("settings.model_privacy.retry")}
+                loading={modelPolicyLoading}
+                onClick={() => void loadModelPolicy()}
+              />
+            }
+          />
+        )}
+        <div className="flex items-start gap-3 pt-3">
+          <ShieldCheck
+            className="size-4 mt-0.5 text-muted-foreground shrink-0"
+            aria-hidden="true"
+          />
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium text-foreground">
+                {msg("settings.model_privacy.label")}
+              </span>
+              <span className="text-xs text-muted-foreground/80">
+                {msg("settings.model_privacy.description")}
+              </span>
+            </div>
+            <Segmented<ModelDataPolicy>
+              value={modelPolicy}
+              onChange={(policy) => {
+                if (policy !== modelPolicy) void saveModelPolicy(policy);
+              }}
+              options={modelPolicyOptions}
+              label={msg("settings.model_privacy.label")}
+              size="sm"
+              className="w-full sm:w-auto"
+            />
+            <p className="text-xs text-muted-foreground/80" aria-live="polite">
+              {modelPolicy ? msg(MODEL_POLICY_KEYS[modelPolicy].description) : null}{" "}
+              {msg("settings.model_privacy.byok_note")}
+            </p>
+          </div>
+        </div>
       </div>
 
       <Separator />

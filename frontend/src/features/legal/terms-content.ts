@@ -80,9 +80,17 @@ export const TERMS_OF_SERVICE: LegalDocument = {
             "Access another user's account or data, or attempt to bypass access controls, usage limits, quotas, or billing.",
             "Interfere with, disrupt, overload, or probe the Service or its infrastructure, except as expressly permitted by the open-source license for the software itself.",
             "Use the Service to generate or distribute unlawful, harmful, deceptive, or abusive content, or to violate the acceptable-use policies of the LLM providers reached through the Service.",
-            "Resell, sublicense, or provide the hosted Service to third parties except as expressly permitted by us.",
+            "Resell, sublicense, or provide the hosted Service to third parties except as expressly permitted by us. Calling a program you optimized through its serving API from your own product, including one open to the public, is permitted.",
             "Use automated means to extract data from the Service beyond the interfaces we provide.",
           ],
+        },
+        {
+          kind: "paragraph",
+          text:
+            "If you expose a served program to other people, you are responsible for how they use " +
+            "it, and you must make them follow these rules. You must also tell them clearly that " +
+            "they are interacting with an AI system, unless that is already obvious from the " +
+            "context, and you must not present its outputs as written by a person.",
         },
         {
           kind: "paragraph",

@@ -21,6 +21,7 @@ from ..config import VERCEL_SANDBOX_LIFETIME_CEILING_SECONDS
 from ..exceptions import DETERMINISTIC_FAILURE, INFRASTRUCTURE_INTERRUPTION, InfrastructureInterruptionError
 from .budgets import BudgetError, BudgetInsufficientError
 from .credential_safety import scrub_model_config
+from .data_policy import data_policy_for
 from .dependency_lock import verify_dependency_lock
 from .mcp_broker import McpToolsBroker
 from .model_batch import BatchCollector
@@ -531,6 +532,8 @@ class ModelGateway:
         """
         model = resolve_model_slug(model, client=self._client)
         token = secrets.token_urlsafe(32)
+        # BYOK traffic runs on the caller's own OpenRouter account, whose privacy settings apply there.
+        data_policy = data_policy_for(self.runtime.username) if policy.kind == "managed_model" else None
         self._routes[token] = OpenRouterDispatcher(
             self.runtime,
             api_key=api_key,
@@ -539,6 +542,7 @@ class ModelGateway:
             policy=policy,
             client=self._client,
             quote_observer=self._observe_model_quote,
+            data_policy=data_policy,
             batch=(
                 BatchCollector(api_key=api_key, model=model, client=self._client, heartbeat=self._beat)
                 if batch

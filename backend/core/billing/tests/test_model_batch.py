@@ -162,6 +162,78 @@ def test_unfinished_requests_in_an_expired_batch_are_refused() -> None:
     assert json.loads(answer.body)["error"]["type"] == "batch_incomplete"
 
 
+def test_finished_batch_is_deleted_after_its_answers() -> None:
+    """Purge a terminal batch so its prompts do not sit in provider storage for 30 days."""
+    deleted = threading.Event()
+    paths = []
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json={"id": "batch-1"})
+        if request.method == "DELETE":
+            paths.append(request.url.path)
+            deleted.set()
+            return httpx.Response(200, json={"id": "batch-1", "deleted": True})
+        return httpx.Response(200, json={"id": "batch-1", "status": "expired", "results": [], "usage": {"cost": 0}})
+
+    collector, client = _collector(provider)
+    with client:
+        collector.run(_body("a"), RATES)
+        assert deleted.wait(5)
+    assert paths == ["/api/v1/batches/batch-1"]
+
+
+def test_lost_batch_is_not_deleted() -> None:
+    """A batch still running past the deadline is left alone, since deleting needs a terminal state."""
+    methods = []
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.method == "POST":
+            return httpx.Response(200, json={"id": "batch-1"})
+        return httpx.Response(200, json={"id": "batch-1", "status": "in_progress"})
+
+    ticks = iter(range(0, 10**6, 100))
+    collector, client = _collector(provider, deadline_seconds=250, clock=lambda: next(ticks))
+    with client:
+        collector.run(_body("a"), RATES)
+    assert "DELETE" not in methods
+
+
+def test_requests_with_different_data_policies_are_batched_apart() -> None:
+    """Carry each group's data policy as batch-level routing instead of mixing policies."""
+    submitted = []
+
+    def provider(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            submitted.append(json.loads(request.content)["provider"])
+            return httpx.Response(200, json={"id": f"batch-{len(submitted)}"})
+        return httpx.Response(200, json={"id": "batch", "status": "expired", "results": []})
+
+    collector, client = _collector(provider)
+    deny = {**_body("a"), "provider": {"only": ["fixture"], "data_collection": "deny", "zdr": True}}
+    allow = {**_body("b"), "provider": {"only": ["fixture"], "data_collection": "allow"}}
+    gate = threading.Event()
+    collector._sleep = lambda seconds: gate.wait()
+    threads = [threading.Thread(target=collector.run, args=(body, RATES)) for body in (deny, allow)]
+    with client:
+        for thread in threads:
+            thread.start()
+        while len(collector._pending) < 2:
+            pass
+        collector._sleep = lambda _: None
+        gate.set()
+        for thread in threads:
+            thread.join(timeout=5)
+    assert sorted(submitted, key=json.dumps) == sorted(
+        [
+            {"only": ["fixture"], "data_collection": "deny", "zdr": True},
+            {"only": ["fixture"], "data_collection": "allow"},
+        ],
+        key=json.dumps,
+    )
+
+
 def test_economy_dispatch_settles_the_batch_share(tmp_path, monkeypatch) -> None:
     """A managed chat call through the relay waits for its batch and is charged its measured share."""
     monkeypatch.setattr(settings, "usage_markup", 1.0)

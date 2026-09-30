@@ -53,6 +53,7 @@ from ..billing import (
     warn_if_local_key_uncapped,
 )
 from ..billing.budgets import BudgetService
+from ..billing.data_policy import configure_data_policy
 from ..config import settings
 from ..connectors.registry import oauth_config_problems
 from ..error_reporting import capture_exception
@@ -107,6 +108,7 @@ from .routers.execution_budgets import create_execution_budgets_router
 from .routers.execution_runtimes import create_execution_runtimes_router
 from .routers.generalist_agent import create_generalist_agent_router
 from .routers.mcp_probe import create_mcp_probe_router
+from .routers.model_privacy import create_model_privacy_router
 from .routers.models import create_models_router
 from .routers.notification_preferences import create_notification_preferences_router
 from .routers.optimizations import create_optimizations_router
@@ -704,6 +706,7 @@ def create_app(
 
     job_store = get_job_store()
     configure_notification_preferences(job_store.engine)
+    configure_data_policy(job_store.engine)
 
     worker: BackgroundWorker | None = None
     queue_metrics_refresher = None
@@ -1311,6 +1314,7 @@ def create_app(
     app.include_router(create_account_security_router(job_store=job_store), tags=["Auth"])
     app.include_router(create_account_data_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_notification_preferences_router(job_store=job_store), tags=["Settings"])
+    app.include_router(create_model_privacy_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_package_registry_router(job_store=job_store), tags=["Settings"])
     app.include_router(create_scorer_dependencies_router(job_store=job_store), tags=["Wizard"])
     app.include_router(create_datasets_router(job_store=job_store), tags=["Datasets"])

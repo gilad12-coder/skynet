@@ -1,0 +1,31 @@
+# The proxy runtime from litellm 1.84.0's "proxy" extra, minus litellm-enterprise.
+# `litellm[proxy]` pins litellm-enterprise, a separately published package under a
+# proprietary license, so the extra is spelled out here instead of installed.
+# Keep these pins in step with litellm's own when bumping it.
+litellm==1.84.0
+litellm-proxy-extras==0.4.72
+prisma==0.11.0
+gunicorn==23.0.0
+uvicorn==0.33.0
+uvloop==0.21.0
+fastapi==0.124.4
+backoff==2.2.1
+pyyaml==6.0.3
+rq==2.7.0
+orjson==3.11.6
+apscheduler==3.11.2
+fastapi-sso==0.19.0
+pyjwt==2.12.0
+python-multipart==0.0.27
+cryptography==46.0.7
+pynacl==1.6.2
+websockets==15.0.1
+boto3==1.43.1
+azure-identity==1.25.2
+azure-storage-blob==12.28.0
+mcp==1.26.0
+restrictedpython==8.1
+rich==13.9.4
+polars==1.38.1
+soundfile==0.12.1
+pyroscope-io==0.8.16

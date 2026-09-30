@@ -50,6 +50,7 @@ from ..storage.models import (
     JobEmbeddingModel,
     JobModel,
     LogEntryModel,
+    ModelPrivacyPreferenceModel,
     NotificationPreferenceModel,
     OptimizationShareGrantModel,
     OptimizationShareLinkModel,
@@ -152,6 +153,7 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         }
 
     registry_row = session.get(PackageRegistryPreferenceModel, username)
+    privacy_row = session.get(ModelPrivacyPreferenceModel, username)
     notification_row = session.get(NotificationPreferenceModel, username)
     notification_preferences = {
         "job_updates_enabled": (bool(notification_row.job_updates_enabled) if notification_row is not None else True),
@@ -315,6 +317,7 @@ def export_account(session: Session, username: str) -> dict[str, Any]:
         "provider_keys": provider_keys_out,
         "passkeys": passkeys_out,
         "notification_preferences": notification_preferences,
+        "model_privacy": {"data_policy": privacy_row.data_policy if privacy_row is not None else "deny"},
         "package_registry": {"index_url": registry_row.index_url if registry_row else "https://pypi.org/simple"},
     }
 
@@ -420,6 +423,7 @@ def delete_account(session: Session, username: str) -> AccountDeletionSummary:
     _run_delete(delete(UserStorageQuotaOverrideModel).where(UserStorageQuotaOverrideModel.username == username))
     _run_delete(delete(AgentStagedDatasetModel).where(AgentStagedDatasetModel.username == username))
     _run_delete(delete(NotificationPreferenceModel).where(NotificationPreferenceModel.username == username))
+    _run_delete(delete(ModelPrivacyPreferenceModel).where(ModelPrivacyPreferenceModel.username == username))
 
     _run_delete(delete(PackageRegistryPreferenceModel).where(PackageRegistryPreferenceModel.username == username))
 

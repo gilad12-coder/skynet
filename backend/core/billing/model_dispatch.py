@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import httpx
 
+from .data_policy import DataPolicy, apply_data_policy
 from .model_batch import BatchCollector
 from .openrouter_float import notify_managed_refusal
 from .openrouter_quotes import PricedRequest, fetch_endpoint_prices, price_text_request
@@ -235,6 +236,24 @@ def mark_prompt_cache(path: str, body: dict[str, Any]) -> dict[str, Any]:
     return {**body, "messages": marked}
 
 
+def data_policy_refusal(model: str, policy: DataPolicy) -> bytes:
+    """Explain a routing refusal in terms of the user's setting, not the platform's OpenRouter account.
+
+    Args:
+        model: The model no permitted provider serves.
+        policy: The setting that excluded every provider.
+
+    Returns:
+        A relay error body the SDK surfaces like a provider error.
+    """
+    scope = "zero-data-retention" if policy == "zdr" else "no-training, no-retention"
+    message = (
+        f"No provider for {model} meets your model data privacy setting ({scope} providers only). "
+        "Choose another model, or change Model data privacy in Settings."
+    )
+    return json.dumps({"error": {"type": "data_policy_unavailable", "message": message}}).encode()
+
+
 def batch_rates(quote: OperationQuote) -> tuple[Decimal, Decimal]:
     """Read the quoted prompt and completion list prices used to share a batch bill.
 
@@ -265,6 +284,7 @@ class OpenRouterDispatcher:
         client: httpx.Client,
         quote_observer: Callable[[str, str, OperationQuote, str, int], bool] | None = None,
         batch: BatchCollector | None = None,
+        data_policy: DataPolicy | None = None,
     ) -> None:
         """Bind one model role to a trusted transport and pricing policy.
 
@@ -279,6 +299,8 @@ class OpenRouterDispatcher:
                 atomic headroom claimant.
             batch: Economy-mode collector; managed chat calls then wait for an
                 OpenRouter batch at half price instead of answering directly.
+            data_policy: The owner's provider privacy setting, forced onto every
+                request; ``None`` leaves BYOK routing to the caller's own account.
         """
         self.runtime = runtime
         self._api_key = api_key
@@ -290,6 +312,7 @@ class OpenRouterDispatcher:
         self._attempt_quotes: dict[tuple[str, str, int], tuple[str, PricedRequest]] = {}
         self._refusal: tuple[bytes, float] | None = None
         self._batch = batch
+        self._data_policy = data_policy
 
     def dispatch(
         self,
@@ -328,8 +351,9 @@ class OpenRouterDispatcher:
             priced = cached[1]
         else:
             catalog = fetch_endpoint_prices(self.model, client=self._client)
+            routed = dict(request) if self._data_policy is None else apply_data_policy(request, self._data_policy)
             priced = (price_responses_request if path == "/responses" else price_text_request)(
-                mark_prompt_cache(path, dict(request)), catalog, self.policy
+                mark_prompt_cache(path, routed), catalog, self.policy
             )
             priced = replace(
                 priced,
@@ -424,6 +448,8 @@ class OpenRouterDispatcher:
             # malformed bodies); holding its coverage would wait on a receipt never written.
             refused = status >= 400 and identity is None and usage is None and not interrupted
             result = ModelHTTPResult(status, content_type, content)
+            if status == 404 and self._data_policy is not None and b"data policy" in content.lower():
+                result = ModelHTTPResult(404, "application/json", data_policy_refusal(self.model, self._data_policy))
             if status == 402 and not interrupted:
                 managed = self.policy.kind == "managed_model"
                 body, hold = funds_refusal(managed, retry_after)

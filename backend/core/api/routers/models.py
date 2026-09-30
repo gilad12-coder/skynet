@@ -29,6 +29,7 @@ from ..model_catalog import (
     ModelCatalogResponse,
     get_byok_catalog_cached,
     get_catalog_cached,
+    with_zero_retention,
 )
 from ..response_limits import AGENT_MAX_LIST, AGENT_MAX_TEXT, cap_list, truncate_text
 
@@ -305,8 +306,7 @@ def create_models_router() -> APIRouter:
         Returns:
             The cached catalog including each model's availability flag.
         """
-        catalog = get_catalog_cached()
-        return catalog
+        return with_zero_retention(get_catalog_cached())
 
     @router.get(
         "/models/byok",

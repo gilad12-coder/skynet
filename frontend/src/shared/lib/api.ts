@@ -14,6 +14,7 @@ import type {
   GridSearchResult,
   GridSearchRequest,
   ModelCatalogResponse,
+  ModelPrivacySettings,
   OptimizationDatasetResponse,
   OptimizationPayloadResponse,
   OptimizationSubmissionResponse,
@@ -766,6 +767,19 @@ export function updateNotificationPreferences(patch: Partial<NotificationPrefere
   return request<NotificationPreferences>("/account/notification-preferences", {
     method: "PATCH",
     body: JSON.stringify(patch),
+  });
+}
+
+/** Fetch which providers may serve the caller's platform-paid model calls. */
+export function getModelPrivacy() {
+  return request<ModelPrivacySettings>("/account/model-privacy");
+}
+
+/** Persist the caller's model data-privacy policy. */
+export function updateModelPrivacy(settings: ModelPrivacySettings) {
+  return request<ModelPrivacySettings>("/account/model-privacy", {
+    method: "PUT",
+    body: JSON.stringify(settings),
   });
 }
 
