@@ -22,3 +22,4 @@ keywords:
   - pgvector
 annotations:
   category: AI/Platform
+  artifacthub.io/license: AGPL-3.0-only

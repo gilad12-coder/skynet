@@ -946,7 +946,6 @@ function CanvasInner({
             connectionLineStyle={{ stroke: EDGE_COLOR, strokeWidth: 2 }}
             fitView
             fitViewOptions={FIT_VIEW}
-            proOptions={{ hideAttribution: true }}
             deleteKeyCode={["Backspace", "Delete"]}
             className="bg-[#FDFCFA]"
           >

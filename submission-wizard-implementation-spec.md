@@ -26,7 +26,7 @@ Version 1.4, 2026-09-03. Product decisions D01–D08c are approved, with the sub
 
 ## 2. Current implementation and exact change surfaces
 
-Repository: /Users/giladmorad/PycharmProjects/Skynet-gilad12-coder. The implementation branch is `codex/wizard-budget-lifecycle`, stacked on the pinned-runtime work in PR #400. PRs #398–#400 are review dependencies and have not been merged by this specification. Recheck the final commit and PR state before deployment; branch-local test results do not establish production behavior.
+Repository: this repository. The implementation branch is `codex/wizard-budget-lifecycle`, stacked on the pinned-runtime work in PR #400. PRs #398–#400 are review dependencies and have not been merged by this specification. Recheck the final commit and PR state before deployment; branch-local test results do not establish production behavior.
 
 All paths below are relative to that repository root.
 

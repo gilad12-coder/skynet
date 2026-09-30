@@ -2,6 +2,7 @@
   "name": "skynet-ui",
   "version": "0.1.0",
   "private": true,
+  "license": "AGPL-3.0-only",
   "sideEffects": [
     "**/*.css"
   ],
@@ -59,7 +60,7 @@
     "recharts": "^3.8.0",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.5.0",
-    "xlsx": "npm:@e965/xlsx@0.20.3"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "overrides": {
     "brace-expansion@^1.1.0": "1.1.18",

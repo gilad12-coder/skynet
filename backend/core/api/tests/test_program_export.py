@@ -165,6 +165,7 @@ def test_bundle_contains_expected_entries() -> None:
         "prompt.json",
         "requirements.txt",
         "README.md",
+        "LICENSE.txt",
     } <= names
 
 

@@ -908,7 +908,7 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     elapsed: "3:28",
     elapsed_seconds: 208,
     module_name: "Predict",
-    optimizer_name: "MIPROv2",
+    optimizer_name: "GEPA",
     model_name: "claude-sonnet-4",
     dataset_rows: 280,
     baseline_test_metric: 66,
@@ -927,7 +927,7 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     elapsed: "5:50",
     elapsed_seconds: 350,
     module_name: "ChainOfThought",
-    optimizer_name: "BootstrapFewShot",
+    optimizer_name: "GEPA",
     model_name: "claude-haiku-4",
     dataset_rows: 180,
     baseline_test_metric: 51,
@@ -946,7 +946,7 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     elapsed: "4:36",
     elapsed_seconds: 276,
     module_name: "Predict",
-    optimizer_name: "MIPROv2",
+    optimizer_name: "GEPA",
     model_name: "gemini-2.0-pro",
     dataset_rows: 220,
     baseline_test_metric: 58,
@@ -965,7 +965,7 @@ const DEMO_JOBS: OptimizationSummaryResponse[] = perLocale(() => [
     elapsed: "2:08",
     elapsed_seconds: 128,
     module_name: "ChainOfThought",
-    optimizer_name: "BootstrapFewShot",
+    optimizer_name: "GEPA",
     model_name: "claude-sonnet-4",
     dataset_rows: 250,
     baseline_test_metric: 60,
@@ -1002,7 +1002,7 @@ const DEMO_DASHBOARD_JOBS: PaginatedJobsResponse = perLocale(() => ({
 const DEMO_DASHBOARD_ANALYTICS: DashboardAnalytics = perLocale(() => ({
   filtered_total: DEMO_JOBS.length,
   status_counts: { success: 7, failed: 1, running: 1 },
-  optimizer_counts: { GEPA: 5, MIPROv2: 2, BootstrapFewShot: 2 },
+  optimizer_counts: { GEPA: 9 },
   job_type_counts: { run: 8, grid_search: 1 },
   owner_usage: [],
   access_usage: [],
@@ -1044,27 +1044,11 @@ const DEMO_DASHBOARD_ANALYTICS: DashboardAnalytics = perLocale(() => ({
   optimizer_stats: [
     {
       name: "GEPA",
-      count: 5,
-      success_count: 4,
-      success_rate: 0.8,
-      avg_improvement: 26,
-      avg_runtime_minutes: 3.45,
-    },
-    {
-      name: "MIPROv2",
-      count: 2,
-      success_count: 2,
-      success_rate: 1,
-      avg_improvement: 19,
-      avg_runtime_minutes: 4.03,
-    },
-    {
-      name: "BootstrapFewShot",
-      count: 2,
-      success_count: 1,
-      success_rate: 0.5,
-      avg_improvement: 20.5,
-      avg_runtime_minutes: 3.98,
+      count: 9,
+      success_count: 7,
+      success_rate: 0.78,
+      avg_improvement: 23.2,
+      avg_runtime_minutes: 3.7,
     },
   ],
   model_stats: [
@@ -1089,7 +1073,7 @@ const DEMO_DASHBOARD_ANALYTICS: DashboardAnalytics = perLocale(() => ({
     { date: daysAgo(0).slice(0, 10), count: 1, success_count: 0, failed_count: 0 },
   ],
   timeline_granularity: "day",
-  available_optimizers: ["GEPA", "MIPROv2", "BootstrapFewShot"],
+  available_optimizers: ["GEPA"],
   available_models: [
     "gpt-4o-mini",
     "gpt-4o",
@@ -1512,7 +1496,7 @@ const EXPLORE_MODELS = [
   "gemini-2.0-pro",
 ];
 
-const EXPLORE_OPTIMIZERS = ["GEPA", "MIPROv2", "BootstrapFewShot", "GridSearch"];
+const EXPLORE_OPTIMIZERS = ["GEPA", "GridSearch"];
 // Black-box ("optimize anything") runs index the engine that ran them, and
 // carry the placeholder module the backend stamps on every such run.
 const EXPLORE_ENGINES: BlackboxEngineId[] = [

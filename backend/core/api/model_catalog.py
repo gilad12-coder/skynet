@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from ..billing import openrouter_prices
 from ..billing.data_policy import zero_retention_models
+from ..billing.model_terms import excluded_from_managed
 from ..config import DEFAULT_AGENT_MODEL_ID, settings
 from ..provider_registry import BYOK_CATALOG_PREFIXES
 from .errors import DomainError
@@ -730,7 +731,7 @@ def _practical_candidates(deployed: dict[str, dict]) -> dict[str, dict[str, dict
     for model_id, item in deployed.items():
         if "/" not in model_id or ":" in model_id or model_id.startswith("~"):
             continue
-        if _REMOVED_MODEL_RE.search(f"openrouter/{model_id}"):
+        if _REMOVED_MODEL_RE.search(f"openrouter/{model_id}") or excluded_from_managed(model_id):
             continue
         if not isinstance(item.get("created"), int) or item.get("expiration_date"):
             continue
@@ -1349,7 +1350,7 @@ def get_catalog() -> ModelCatalogResponse:
     _hidden_model_values = frozenset(
         m.value for m in models if m.available and not _REMOVED_MODEL_RE.search(m.value) and not _practical(m)
     )
-    models = [m for m in models if _practical(m)]
+    models = [m for m in models if _practical(m) and not excluded_from_managed(m.value)]
     models = [
         m.model_copy(update={"featured": True, "is_default": m.value == default_value})
         if m.value in featured_values

@@ -19,7 +19,7 @@ Preferred: use GitHub's private vulnerability reporting on this repository
 (**Security → Report a vulnerability**). It keeps the report confidential and
 threads the fix through a private advisory.
 
-Alternatively, email **gilad.mo12@gmail.com** with:
+Alternatively, email **security@skynetml.com** with:
 
 - a description of the issue and its impact,
 - steps to reproduce (a minimal proof-of-concept helps),

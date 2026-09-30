@@ -40,10 +40,13 @@ litellm_settings:
   # concrete model OpenRouter's Auto Router served (the backend's per-turn
   # "Auto · <model>" reveal). The callback object itself is a no-op.
   callbacks: custom_callbacks.proxy_handler_instance
-  # Prompt caching is a margin lever; provider/model dependent. Backed by Redis
-  # so cache survives a proxy restart. Remove this block to disable caching.
+  # Response caching is off unless a request opts in. The cache key is the
+  # prompt, not the customer, so a default-on cache would serve one tenant's
+  # completion to another and bill a call OpenRouter never saw. The backend
+  # never opts in; provider-side prompt caching is unaffected.
   cache: true
   cache_params:
+    mode: default_off
     type: redis
     host: os.environ/REDIS_HOST
     port: os.environ/REDIS_PORT

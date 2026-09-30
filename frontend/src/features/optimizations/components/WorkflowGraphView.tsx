@@ -165,7 +165,6 @@ function GraphView({ spec }: { spec: WorkflowSpec }) {
             maxZoom={3}
             fitView
             fitViewOptions={FIT_VIEW}
-            proOptions={{ hideAttribution: true }}
             className="bg-[#FDFCFA]"
           >
             <Background gap={16} size={1.25} color="#E3D9CB" />
