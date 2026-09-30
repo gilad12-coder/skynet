@@ -1067,6 +1067,8 @@ export interface ConnectorStatus {
   auth_method: "oauth" | "token" | "service_account" | "credentials" | null;
   /** Whether the deployment can offer "Continue with <provider>" (OAuth app configured). */
   oauth_available: boolean;
+  /** Whether the Google Picker can choose the files this OAuth link may read. */
+  picker_available: boolean;
   connected_at: string | null;
 }
 
@@ -1225,6 +1227,13 @@ export function browseConnector(provider: ConnectorProvider, location: string, s
   const params = new URLSearchParams({ location, search });
   return request<{ entries: ConnectorEntry[]; location_url?: string | null }>(
     `/connectors/${provider}/browse?${params}`,
+  );
+}
+
+/** A short-lived token, API key and app id for opening the Google Picker as the caller. */
+export function getConnectorPicker(provider: ConnectorProvider) {
+  return request<{ access_token: string; developer_key: string; app_id: string }>(
+    `/connectors/${provider}/picker`,
   );
 }
 

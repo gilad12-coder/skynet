@@ -1510,3 +1510,11 @@ table {
 .wf-node-enter {
   animation: wf-node-enter 0.18s ease-out;
 }
+
+/* The Google Picker mounts on <body>, which an open modal dialog sets to
+   pointer-events: none; without this the Picker opened from the import
+   dialog can't be clicked. */
+.picker-dialog-bg,
+.picker-dialog {
+  pointer-events: auto;
+}

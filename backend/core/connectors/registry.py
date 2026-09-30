@@ -67,6 +67,8 @@ OAUTH_PROVIDERS = frozenset(
         supabase.PROVIDER,
     }
 )
+# OAuth links to these reach only the files picked in the Google Picker (drive.file).
+PICKER_PROVIDERS = frozenset({google_sheets.PROVIDER, google_drive.PROVIDER})
 
 
 def get_provider(name: str) -> ModuleType:
@@ -99,6 +101,19 @@ def oauth_available(name: str) -> bool:
     return name in OAUTH_PROVIDERS and PROVIDERS[name].oauth_available()
 
 
+def picker_available(name: str) -> bool:
+    """Report whether the Google Picker can be offered for a provider.
+
+    Args:
+        name: Provider slug.
+
+    Returns:
+        ``True`` when the provider picks files and both the Google OAuth client
+        and the Picker API key are configured.
+    """
+    return name in PICKER_PROVIDERS and oauth_available(name) and settings.google_picker_api_key is not None
+
+
 def oauth_config_problems() -> list[str]:
     """List OAuth providers whose settings are only half filled in.
 
@@ -118,4 +133,6 @@ def oauth_config_problems() -> list[str]:
             problems.append(f"{name}: client secret is set but the client id is missing")
         elif app.client_id and settings.byok_vault_key is None:
             problems.append(f"{name}: client is set but BYOK_VAULT_KEY is not, so sign-in stays hidden")
+    if settings.google_oauth_client_id and settings.google_picker_api_key is None:
+        problems.append("google_drive, google_sheets: GOOGLE_PICKER_API_KEY is unset, so OAuth users cannot pick files")
     return problems

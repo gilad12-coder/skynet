@@ -176,6 +176,11 @@ class Settings(BaseSettings):
         alias="GOOGLE_OAUTH_REDIRECT_URI",
         description="Absolute URL of this backend's /connectors/google_sheets/oauth/callback as registered on the Google client. The Drive, Cloud Storage and BigQuery callbacks are derived from it by swapping the provider segment (/connectors/google_drive/, /connectors/gcs/, /connectors/bigquery/), so register those on the client too. Unset derives every callback from the incoming request.",
     )
+    google_picker_api_key: SecretStr | None = Field(
+        default=None,
+        alias="GOOGLE_PICKER_API_KEY",
+        description="Browser API key with the Google Picker API enabled, from the same Cloud project as the Google OAuth client. The Drive and Sheets connectors only reach the files a user picks, so unset leaves OAuth-linked users with nothing to import; restrict the key to the frontend's HTTP referrers.",
+    )
     github_oauth_client_id: str | None = Field(
         default=None,
         alias="GITHUB_OAUTH_CLIENT_ID",

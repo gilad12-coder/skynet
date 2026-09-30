@@ -53,6 +53,9 @@ class ConnectorStatus(BaseModel):
     account_label: str | None = None
     auth_method: str | None = None
     oauth_available: bool
+    picker_available: bool = Field(
+        default=False, description="Whether the Google Picker can choose the files this OAuth link may read."
+    )
     connected_at: str | None = None
 
 
@@ -66,6 +69,14 @@ class SaveTokenRequest(BaseModel):
     """Body for the pasted-token fallback."""
 
     token: str = Field(min_length=1, max_length=512)
+
+
+class PickerResponse(BaseModel):
+    """What the browser needs to open the Google Picker as the caller."""
+
+    access_token: str
+    developer_key: str
+    app_id: str
 
 
 class OAuthStartResponse(BaseModel):
@@ -199,6 +210,7 @@ def create_connectors_router(*, job_store) -> APIRouter:
                     account_label=view.account_label if view else None,
                     auth_method=view.auth_method if view else None,
                     oauth_available=available,
+                    picker_available=registry.picker_available(provider),
                     connected_at=view.connected_at.isoformat() if view else None,
                 )
             )
@@ -703,6 +715,48 @@ def create_connectors_router(*, job_store) -> APIRouter:
             except DomainError:
                 location_url = None
         return BrowseResponse(entries=[BrowseEntry(**vars(e)) for e in entries], location_url=location_url)
+
+    @router.get(
+        "/connectors/{provider}/picker",
+        response_model=PickerResponse,
+        summary="Hand the browser a short-lived token for the Google Picker",
+    )
+    def connector_picker(
+        provider: str,
+        user: Annotated[AuthenticatedUser, Depends(get_authenticated_user)],
+    ) -> PickerResponse:
+        """Return the caller's access token with the Picker's key and app id.
+
+        The OAuth link asks only for ``drive.file``, so the token can read
+        nothing but the files the caller picks, which is why handing it to the
+        browser is safe.
+
+        Args:
+            provider: ``google_drive`` or ``google_sheets``.
+            user: Authenticated caller.
+
+        Returns:
+            The token, the Picker API key and the Cloud project number.
+
+        Raises:
+            DomainError: 404 for a provider without a picker; 503 when the
+                Picker is not configured; 409 when the link is not OAuth.
+        """
+        registry.get_provider(provider)
+        if provider not in registry.PICKER_PROVIDERS:
+            raise DomainError("connectors.unknown_provider", status=404, provider=provider)
+        key, client_id = settings.google_picker_api_key, settings.google_oauth_client_id
+        if key is None or not client_id:
+            raise DomainError("connectors.picker_unavailable", status=503)
+        secret = _secret(user.username, provider)
+        if secret.auth_method != "oauth":
+            raise DomainError("connectors.picker_needs_oauth", status=409, provider=label(provider))
+        # A Google client id starts with its Cloud project number, which is the Picker's app id.
+        return PickerResponse(
+            access_token=secret.access_token,
+            developer_key=key.get_secret_value(),
+            app_id=client_id.split("-", 1)[0],
+        )
 
     @router.get(
         "/connectors/{provider}/preview",

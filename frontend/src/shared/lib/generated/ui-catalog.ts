@@ -1749,6 +1749,9 @@ export type MessageKey =
   | "connector_import.more_folders"
   | "connector_import.name_label"
   | "connector_import.open_location"
+  | "connector_import.pick_empty"
+  | "connector_import.pick_error"
+  | "connector_import.pick_files"
   | "connector_import.preview_empty"
   | "connector_import.search_placeholder"
   | "connector_import.size_rows"
@@ -5679,6 +5682,9 @@ export const UI_MESSAGES: Record<MessageKey, string> = {
   "connector_import.more_folders": "תיקיות קודמות",
   "connector_import.name_label": "שמירה בשם",
   "connector_import.open_location": "פתיחה ב-{provider}",
+  "connector_import.pick_empty": "Skynet פותח רק קבצים שבחרתם. בחרו אותם מה-Google Drive שלכם.",
+  "connector_import.pick_error": "לא ניתן היה לפתוח את Google Drive. נסו שוב.",
+  "connector_import.pick_files": "בחירה מ-Google Drive",
   "connector_import.preview_empty": "אין תצוגה מקדימה זמינה לקובץ הזה.",
   "connector_import.search_placeholder": "סינון לפי שם",
   "connector_import.size_rows": "{count} שורות",
@@ -17500,6 +17506,9 @@ const ui_en: Partial<Record<MessageKey, string>> = {
   "connector_import.more_folders": "Earlier folders",
   "connector_import.name_label": "Save as",
   "connector_import.open_location": "Open in {provider}",
+  "connector_import.pick_empty": "Skynet only opens the files you choose. Pick them from your Google Drive.",
+  "connector_import.pick_error": "Google Drive couldn't open. Try again.",
+  "connector_import.pick_files": "Choose from Google Drive",
   "connector_import.preview_empty": "No preview available for this file.",
   "connector_import.search_placeholder": "Filter by name",
   "connector_import.size_rows": "{count} rows",

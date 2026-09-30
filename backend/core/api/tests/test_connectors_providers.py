@@ -32,7 +32,18 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from ...config import settings
-from ...connectors import azure_blob, gcs, github, google_auth, oauth, s3, sql_base, tabular
+from ...connectors import (
+    azure_blob,
+    gcs,
+    github,
+    google_auth,
+    google_drive,
+    google_sheets,
+    oauth,
+    s3,
+    sql_base,
+    tabular,
+)
 from ...connectors.registry import oauth_config_problems
 from ...connectors.vault import ConnectorSecret, ConnectorVault
 from ...storage.dataset_library import DatasetLibraryStore, PostgresDatasetBlobStore
@@ -68,6 +79,7 @@ def generic_oauth_off(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "notion_oauth_client_id", None)
     monkeypatch.setattr(settings, "notion_oauth_client_secret", None)
     monkeypatch.setattr(settings, "google_oauth_redirect_uri", None)
+    monkeypatch.setattr(settings, "google_picker_api_key", None)
     monkeypatch.setattr(settings, "microsoft_oauth_redirect_uri", None)
     monkeypatch.setattr(settings, "github_oauth_redirect_uri", None)
     monkeypatch.setattr(settings, "notion_oauth_redirect_uri", None)
@@ -1034,6 +1046,63 @@ def test_google_drive_browses_and_exports_sheets(vault_key: str, generic_oauth_o
     assert preview["rows"][0] == {"name": "ada", "score": "1"}
     assert stream.call_args.args[1].endswith("/files/s1/export")
     assert stream.call_args.kwargs["params"] == {"mimeType": "text/csv"}
+
+
+@pytest.mark.usefixtures("vault_key", "generic_oauth_off")
+def test_google_oauth_reads_only_picked_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OAuth asks for drive.file alone, lists picked files flat, and hands the Picker a token only for OAuth links."""
+    monkeypatch.setattr(settings, "google_oauth_client_id", "1046741053205-abc.apps.googleusercontent.com")
+    monkeypatch.setattr(settings, "google_oauth_client_secret", SecretStr("secret"))
+    for module in (google_drive, google_sheets):
+        app = module.oauth_app()
+        assert app.scopes == "openid email https://www.googleapis.com/auth/drive.file"
+        assert "include_granted_scopes" not in app.extra_authorize_params
+    client, store = _make_client()
+    ConnectorVault(store.engine).save(
+        "alice",
+        "google_drive",
+        access_token="g-token",
+        auth_method="oauth",
+        account_label="ada@example.com",
+        refresh_token="rt",
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+    unconfigured = client.get("/connectors/google_drive/picker")
+    assert unconfigured.status_code == 503
+    assert unconfigured.json()["code"] == "connectors.picker_unavailable"
+
+    monkeypatch.setattr(settings, "google_picker_api_key", SecretStr("browser-key"))
+    statuses = {c["provider"]: c["picker_available"] for c in client.get("/connectors").json()["connectors"]}
+    assert statuses["google_drive"]
+    assert statuses["google_sheets"]
+    assert not statuses["gcs"]
+    picker = client.get("/connectors/google_drive/picker")
+    assert picker.status_code == 200, picker.text
+    assert picker.json() == {"access_token": "g-token", "developer_key": "browser-key", "app_id": "1046741053205"}
+    assert client.get("/connectors/gcs/picker").status_code == 404
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Serve the picked files, which drive.file shows without their folders."""
+        query = kwargs["params"]["q"]
+        assert "'root' in parents" not in query
+        if kwargs["params"].get("corpora") == "allDrives":
+            return _response(200, {"files": []})
+        assert "mimeType != 'application/vnd.google-apps.folder'" in query
+        return _response(200, {"files": [{"id": "f1", "name": "picked.csv", "mimeType": "text/csv", "size": "30"}]})
+
+    with patch("core.connectors.transport.CLIENT.request", side_effect=fake_request):
+        root = client.get("/connectors/google_drive/browse").json()["entries"]
+    assert [(e["ref"], e["kind"]) for e in root] == [("f1", "file")]
+
+    with patch("core.connectors.google_sheets.service_account_token", return_value="sa-token"):
+        linked = client.put(
+            "/connectors/google_sheets/credentials", json={"fields": {"service_account_json": _service_account_json()}}
+        )
+    assert linked.status_code == 200, linked.text
+    refused = client.get("/connectors/google_sheets/picker")
+    assert refused.status_code == 409
+    assert refused.json()["code"] == "connectors.picker_needs_oauth"
 
 
 def test_onedrive_is_oauth_only_and_browses_graph(
