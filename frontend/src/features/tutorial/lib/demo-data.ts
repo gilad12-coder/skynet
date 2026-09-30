@@ -1518,7 +1518,7 @@ const EXPLORE_OPTIMIZERS = ["GEPA", "MIPROv2", "BootstrapFewShot", "GridSearch"]
 const EXPLORE_ENGINES: BlackboxEngineId[] = [
   "gepa",
   "best_of_n",
-  "autoresearch",
+  "deep_research",
   "meta_harness",
   "autosaddler",
 ];

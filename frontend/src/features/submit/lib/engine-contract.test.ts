@@ -15,7 +15,7 @@ import {
 const catalog: BlackboxEngineCatalogResponse = {
   target_kind: "text",
   sandbox_available: true,
-  auto_engines: ["gepa", "autoresearch", "meta_harness", "autosaddler"],
+  auto_engines: ["gepa", "deep_research", "meta_harness", "autosaddler"],
   auto_available: true,
   auto_unavailable_reason: null,
   auto_checkpoint_recovery_supported: false,
@@ -41,7 +41,7 @@ const catalog: BlackboxEngineCatalogResponse = {
     },
   ],
   engines: (
-    ["gepa", "best_of_n", "autoresearch", "meta_harness", "autosaddler"] as BlackboxEngineId[]
+    ["gepa", "best_of_n", "deep_research", "meta_harness", "autosaddler"] as BlackboxEngineId[]
   ).map((id) => ({
     id,
     label: id,
@@ -65,7 +65,7 @@ const selection = {
 
 test("iteration limits apply only to a single Meta-Harness run", () => {
   assert.equal(supportsIterationLimit("single", "meta_harness"), true);
-  for (const engine of ["gepa", "best_of_n", "autoresearch", null] as const) {
+  for (const engine of ["gepa", "best_of_n", "deep_research", null] as const) {
     assert.equal(supportsIterationLimit("single", engine), false);
   }
   assert.equal(supportsIterationLimit("auto", "meta_harness"), false);
@@ -107,7 +107,7 @@ test("missing or legacy capabilities cannot authorize an Auto run", () => {
 });
 
 test("native engines accept text evaluation in the managed sandbox without an agent target", () => {
-  for (const engine of ["meta_harness", "autoresearch", "autosaddler"] as const) {
+  for (const engine of ["meta_harness", "deep_research", "autosaddler"] as const) {
     assert.equal(engineSelectionIssue({ ...selection, mode: "single", engine }), null);
     assert.equal(usesNativeProposer("single", engine), true);
   }
@@ -165,7 +165,7 @@ test("Meta-Harness recipes require training cases without moving validation data
       null,
     );
   }
-  for (const engine of ["gepa", "autoresearch"] as const) {
+  for (const engine of ["gepa", "deep_research"] as const) {
     assert.equal(
       engineSelectionIssue({ ...selection, mode: "single", engine, trainingCaseCount: 0 }),
       null,
@@ -178,7 +178,7 @@ test("proposer knobs follow the engine that reads them, and Auto exposes them al
     candidates: true,
     ralph: false,
   });
-  assert.deepEqual(proposerKnobs("single", "autoresearch"), {
+  assert.deepEqual(proposerKnobs("single", "deep_research"), {
     candidates: false,
     ralph: true,
   });
@@ -214,12 +214,12 @@ test("submitted proposer resets every knob the form hides for the engine", () =>
     ralph: true,
     max_no_eval_seconds: null,
   });
-  assert.deepEqual(submittedProposer(tuned, "single", "autoresearch"), {
+  assert.deepEqual(submittedProposer(tuned, "single", "deep_research"), {
     ...tuned,
     max_candidates_per_iter: null,
     max_no_eval_seconds: stall,
   });
-  assert.deepEqual(submittedProposer({ ...tuned, harness: "opencode" }, "single", "autoresearch"), {
+  assert.deepEqual(submittedProposer({ ...tuned, harness: "opencode" }, "single", "deep_research"), {
     ...tuned,
     harness: "opencode",
     effort: null,

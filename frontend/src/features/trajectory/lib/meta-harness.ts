@@ -19,7 +19,7 @@ const LANED_EVENTS = new Set([CANDIDATE_EVENT, REJECTED_EVENT, MINIBATCH_EVENT, 
 /** Engines that hill-climb: every version is scored on every case, so the run view draws a climb. */
 const CLIMB_ENGINES: ReadonlySet<string> = new Set([
   "meta_harness",
-  "autoresearch",
+  "deep_research",
   "autosaddler",
 ]);
 

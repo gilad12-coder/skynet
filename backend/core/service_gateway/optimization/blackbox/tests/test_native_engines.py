@@ -1,11 +1,10 @@
-"""Exercise the latest-upstream Meta-Harness and AutoResearch loops against the real evaluation server."""
+"""Exercise the Meta-Harness and Deep Research loops against the real evaluation server."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -95,7 +94,6 @@ def test_pinned_prompts_match_upstream_checksums() -> None:
     """Refuse to run on prompt files that differ from the pinned upstream revisions."""
     assert native_engines.check_assets() == {
         "meta_harness": native_engines.META_HARNESS_REVISION,
-        "autoresearch": native_engines.AUTORESEARCH_REVISION,
     }
     for relative, digest in native_engines.ASSET_CHECKSUMS.items():
         text = (native_engines.PROMPTS_DIR / relative).read_text(encoding="utf-8")
@@ -121,14 +119,11 @@ def test_adapted_prompts_replace_the_upstream_domains() -> None:
     assert "agents/<name>.txt" in skill
     assert "MemorySystem" not in skill
     assert "dataset" not in skill.lower()
-    engine = native_engines.AutoResearchEngine(_config("autoresearch"))
-    stub = type("Server", (), {"url": "http://127.0.0.1:1", "budget": BudgetTracker(max_evals=7)})()
-    program = engine._program(stub, ["a"])
-    assert "./eval.sh candidate.txt" in program
-    assert f"autoresearch/{engine.tag}" in program
-    assert "7 evaluator calls" in program
-    assert "BUDGET_EXHAUSTED" in program
-    assert not any(term in program for term in ("val_bpb", "train.py", "GPU"))
+    brief = native_engines.DeepResearchEngine(_config("deep_research"))
+    brief.example_ids = ["a"]
+    text = brief._brief()
+    assert "./eval.sh <file> <example_id>" in text
+    assert "BUDGET_EXHAUSTED" in text
 
 
 def test_meta_harness_benchmarks_seed_then_proposed_candidates(
@@ -170,100 +165,153 @@ def test_meta_harness_benchmarks_seed_then_proposed_candidates(
     assert (logs / "claude_sessions" / "iter1_stdout.json").read_text().startswith('{"type": "result"')
 
 
-def test_autoresearch_runs_eval_sh_and_ralph_resumes_until_the_budget_ends(
+def test_deep_research_runs_directed_rounds_on_engine_recorded_evidence(
     tmp_path: Path, fake_home: Path, server: EvalServer
 ) -> None:
-    """The agent scores through the generated ``eval.sh``; Ralph resumes the session while evaluations remain."""
+    """Each round is a fresh session steered by STATE.md, which the engine fills from the evaluator's answers."""
     _install_fake(
         fake_home,
-        "assert pathlib.Path('program.md').read_text() and pathlib.Path('README.md').read_text()\n"
-        "branch = subprocess.run(['git', 'branch', '--show-current'], capture_output=True, text=True).stdout\n"
-        "assert branch.startswith('autoresearch/'), branch\n"
-        "pathlib.Path('candidate.txt').write_text(f'better {count}')\n"
-        "run = subprocess.run(['./eval.sh', 'candidate.txt'], capture_output=True, text=True)\n"
-        "assert run.returncode == 0 and json.loads(run.stdout)['score'] == 0.875, run.stdout + run.stderr\n",
+        "state = pathlib.Path('STATE.md').read_text()\n"
+        "notebook = pathlib.Path('notebook.md')\n"
+        "def run(*argv):\n"
+        "    done = subprocess.run(['./eval.sh', *argv], capture_output=True, text=True)\n"
+        "    assert done.returncode == 0, done.stdout + done.stderr\n"
+        "    return json.loads(done.stdout)\n"
+        "if count == 1:\n"
+        "    assert '**Survey.**' in state and 'Nothing has been fully evaluated yet.' in state\n"
+        "    assert run('work/seed.txt')['average_score'] == 0.375\n"
+        "    pathlib.Path('work/better.txt').write_text('better 1')\n"
+        "    assert run('work/better.txt', 'b')['scores'] == {'b': 0.75}\n"
+        "    assert run('work/better.txt')['average_score'] == 0.875\n"
+        "    notebook.write_text(notebook.read_text() + '## Round 1\\nconfirmed: better helps\\n')\n"
+        "elif count == 2:\n"
+        "    assert '**Exploit.**' in state and '| c002 | 0.8750 | yes |' in state and '`b` | 0.750' in state\n"
+        "    assert 'Round 1' in notebook.read_text() and pathlib.Path('frontier/c002.txt').read_text() == 'better 1'\n"
+        "    pathlib.Path('work/better2.txt').write_text('better 2')\n"
+        "    run('work/better2.txt')\n"
+        "else:\n"
+        "    assert '**Explore.**' in state and \"did not beat `c002`\" in state\n",
     )
-    server.budget = BudgetTracker(max_evals=6)
-    config = _config("autoresearch", ralph=True)
+    config = _config("deep_research")
     config.run_dir = str(tmp_path / "run")
-    engine = native_engines.AutoResearchEngine(config)
+    engine = native_engines.DeepResearchEngine(config)
     result = engine.run(server.task, server)
-    assert (result.best_candidate, result.best_score) == ("better 1", 0.875)
-    assert (result.total_evals, result.metadata["sessions"]) == (6, 3)
+    assert result.best_score == 0.875
+    assert result.best_candidate.startswith("better")
+    assert result.total_evals == 7
+    assert result.metadata["directives"] == ["survey", "exploit", "explore"]
+    assert (result.metadata["rounds"], result.metadata["candidates_evaluated"]) == (3, 3)
+    assert [entry["id"] for entry in result.metadata["frontier"]] == ["c002", "c003"]
     invocations = _invocations(fake_home)
     assert len(invocations) == 3
-    assert "--session-id" in invocations[0]
-    assert all("--resume" in call and "--session-id" not in call for call in invocations[1:])
-    assert len(result.metadata["session_ids"]) == 1
-    assert (engine.run_dir / "sessions" / "session3_stdout.json").exists()
+    assert all("--session-id" in call and "--resume" not in call for call in invocations)
+    assert len(set(result.metadata["session_ids"])) == 3
+    index = (engine.work_dir / "archive" / "index.tsv").read_text().splitlines()
+    assert [row.split("\t")[0] for row in index] == ["id", "c001", "c002", "c003"]
+    assert [o.full for o in engine.observations] == [True, False, True, True]
+    assert "evaluate_examples" not in vars(server)
+    assert (engine.run_dir / "sessions" / "round3_stdout.json").exists()
+    output = tmp_path / "out"
+    engine.process_result(result, output)
+    assert "Round 1" in (output / "deep_research" / "notebook.md").read_text()
 
 
-def test_autoresearch_eval_sh_reports_budget_exhaustion_and_stops_ralph(
+def test_deep_research_directives_follow_the_evidence(tmp_path: Path) -> None:
+    """Complementary frontier members trigger a combine round; stalls trigger a pivot."""
+    engine = native_engines.DeepResearchEngine(_config("deep_research"))
+    engine.work_dir = tmp_path
+    (tmp_path / "archive").mkdir()
+    engine.round = 1
+    assert engine._directive(0, False) == "survey"
+    specialist = native_engines.Observation("x", {"a": 1.0, "b": 0.0}, {}, True, 1)
+    generalist = native_engines.Observation("y", {"a": 0.5, "b": 0.75}, {}, True, 1)
+    for observation in (specialist, generalist):
+        engine._observe(observation)
+    assert native_engines.pareto_front(engine._table()) == ["y", "x"]
+    assert engine._partner() == ("x", ["a"])
+    engine.round, engine.directives = 2, ["survey"]
+    assert engine._directive(0, True) == "combine"
+    engine.directives.append("combine")
+    assert engine._directive(0, True) == "exploit"
+    assert engine._directive(1, False) == "explore"
+    assert engine._directive(2, False) == "pivot"
+    table = engine._table()
+    assert "`c001` beats the leader `c002` on `a`" in engine._directive_text("combine", table, ["y", "x"])
+
+
+def test_deep_research_eval_sh_reports_budget_exhaustion_and_ends_the_run(
     tmp_path: Path, fake_home: Path, server: EvalServer
 ) -> None:
-    """HTTP 429 from the evaluator surfaces the upstream marker, and the loop does not relaunch."""
+    """HTTP 429 from the evaluator surfaces the marker, and no further round starts."""
     _install_fake(
         fake_home,
-        "pathlib.Path('candidate.txt').write_text('better')\n"
-        "first = subprocess.run(['./eval.sh', 'candidate.txt'], capture_output=True, text=True)\n"
-        "second = subprocess.run(['./eval.sh', 'candidate.txt'], capture_output=True, text=True)\n"
+        "pathlib.Path('work/c.txt').write_text('better')\n"
+        "first = subprocess.run(['./eval.sh', 'work/c.txt'], capture_output=True, text=True)\n"
+        "second = subprocess.run(['./eval.sh', 'work/c.txt'], capture_output=True, text=True)\n"
         "assert first.returncode == 0 and second.returncode == 1, second.stdout + second.stderr\n"
         "assert 'BUDGET_EXHAUSTED' in second.stderr\n"
         "print(second.stderr, file=sys.stderr)\n",
     )
     server.budget = BudgetTracker(max_evals=2)
-    config = _config("autoresearch", ralph=True)
+    config = _config("deep_research")
     config.run_dir = str(tmp_path / "run")
-    engine = native_engines.AutoResearchEngine(config)
-    result = engine.run(server.task, server)
+    result = native_engines.DeepResearchEngine(config).run(server.task, server)
     assert (result.best_candidate, result.best_score, result.total_evals) == ("better", 0.875, 2)
-    assert (result.metadata["sessions"], len(_invocations(fake_home))) == (1, 1)
+    assert (result.metadata["rounds"], len(_invocations(fake_home))) == (1, 1)
 
 
-def test_autoresearch_without_any_evaluation_fails_instead_of_guessing(
+def test_deep_research_single_round_when_multi_round_is_off(
+    tmp_path: Path, fake_home: Path, server: EvalServer
+) -> None:
+    """With ``ralph`` off the engine runs exactly one research round."""
+    _install_fake(fake_home, "subprocess.run(['./eval.sh', 'work/seed.txt'], check=True, capture_output=True)\n")
+    config = _config("deep_research", ralph=False)
+    config.run_dir = str(tmp_path / "run")
+    result = native_engines.DeepResearchEngine(config).run(server.task, server)
+    assert (result.best_candidate, result.metadata["rounds"], result.total_evals) == ("seed", 1, 2)
+
+
+def test_deep_research_without_any_evaluation_fails_instead_of_guessing(
     tmp_path: Path, fake_home: Path, server: EvalServer
 ) -> None:
     """A session that never called the evaluator leaves nothing verified to return."""
-    _install_fake(fake_home, "pathlib.Path('candidate.txt').write_text('unscored')\n")
-    config = _config("autoresearch")
+    _install_fake(fake_home, "pathlib.Path('work/c.txt').write_text('unscored')\n")
+    config = _config("deep_research")
     config.run_dir = str(tmp_path / "run")
     with pytest.raises(RuntimeError, match="without scoring any candidate"):
-        native_engines.AutoResearchEngine(config).run(server.task, server)
+        native_engines.DeepResearchEngine(config).run(server.task, server)
+    assert "evaluate_examples" not in vars(server)
 
 
 def test_single_candidate_tasks_use_the_whole_candidate_route(tmp_path: Path, fake_home: Path) -> None:
     """Without a dataset the evaluator scores the candidate as a whole and the server's best is the answer."""
     task = Task(name="single", seed_candidate="seed")
-    single = EvalServer(task, lambda candidate, example=None: (len(candidate) / 10, {}), BudgetTracker(max_evals=5))
+    single = EvalServer(
+        task,
+        lambda candidate, example=None: (len(candidate) / 10, {"feedback": "too short"}),
+        BudgetTracker(max_evals=5),
+    )
     single.start()
     try:
         _install_fake(
             fake_home,
-            "pathlib.Path('candidate.txt').write_text('longer text')\n"
-            "run = subprocess.run(['./eval.sh', 'candidate.txt'], capture_output=True, text=True)\n"
+            "state = pathlib.Path('STATE.md').read_text()\n"
+            "assert count == 1 or 'too short' in state, state\n"
+            "pathlib.Path('work/c.txt').write_text('longer text' + 'x' * count)\n"
+            "run = subprocess.run(['./eval.sh', 'work/c.txt'], capture_output=True, text=True)\n"
             "assert run.returncode == 0, run.stderr\n",
         )
-        config = _config("autoresearch")
+        config = _config("deep_research")
         config.run_dir = str(tmp_path / "run")
-        engine = native_engines.AutoResearchEngine(config)
+        engine = native_engines.DeepResearchEngine(config)
         result = engine.run(task, single)
-        assert (result.best_candidate, result.best_score) == ("longer text", 1.1)
+        assert result.best_candidate == "longer text" + "x" * result.metadata["rounds"]
         assert '/evaluate"' in (engine.work_dir / "eval.sh").read_text()
         assert "evaluate_examples" not in (engine.work_dir / "eval.sh").read_text()
+        assert "probe" not in (engine.work_dir / "BRIEF.md").read_text()
+        assert "evaluate" not in vars(single)
     finally:
         single.stop()
-
-
-def test_git_free_runtime_is_rejected_before_the_proposer_starts(
-    tmp_path: Path, fake_home: Path, server: EvalServer, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """AutoResearch's loop is branch-based, so a runtime without git cannot run it."""
-    monkeypatch.setenv("PATH", str(fake_home / "bin"))
-    config = _config("autoresearch")
-    config.run_dir = str(tmp_path / "run")
-    with pytest.raises(RuntimeError, match="needs git"):
-        native_engines.AutoResearchEngine(config).run(server.task, server)
-    assert subprocess.run(["/usr/bin/git", "--version"], capture_output=True, check=False).returncode == 0
 
 
 @pytest.mark.parametrize(("direct", "expected"), [(True, "sk-ant-skynet-edge-injected"), (False, None)])

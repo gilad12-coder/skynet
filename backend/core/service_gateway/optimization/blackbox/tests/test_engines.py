@@ -20,17 +20,17 @@ from gepa.oa.task import Task as UpstreamTask
 from core.constants import PROGRESS_CANDIDATE, PROGRESS_MINIBATCH
 from core.exceptions import ServiceError
 from core.models.blackbox import (
-    BLACKBOX_ENGINE_AUTORESEARCH,
     BLACKBOX_ENGINE_AUTOSADDLER,
     BLACKBOX_ENGINE_BEST_OF_N,
+    BLACKBOX_ENGINE_DEEP_RESEARCH,
     BLACKBOX_ENGINE_GEPA,
     BLACKBOX_ENGINE_META_HARNESS,
 )
 from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededError
 
 from .. import gepa_engine as gepa_mod
-from ..autoresearch import AutoResearchEngine
 from ..best_of_n import BestOfNEngine
+from ..deep_research import DeepResearchEngine
 from ..gepa_engine import GepaEngine
 from ..meta_harness import MetaHarnessEngine
 from ..protocol import BudgetExhaustedError, EngineContext, EvalServer, Task
@@ -72,7 +72,7 @@ def test_registry_requires_native_proposer_availability() -> None:
     assert available_engine_ids() == [BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_BEST_OF_N]
     assert isinstance(get_engine(BLACKBOX_ENGINE_GEPA), GepaEngine)
     assert isinstance(get_engine(BLACKBOX_ENGINE_BEST_OF_N), BestOfNEngine)
-    for engine_id in (BLACKBOX_ENGINE_AUTORESEARCH, BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER):
+    for engine_id in (BLACKBOX_ENGINE_DEEP_RESEARCH, BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER):
         assert ENGINES[engine_id].factory is not None
         with pytest.raises(ServiceError, match="proposer runtime is not configured"):
             get_engine(engine_id)
@@ -87,12 +87,12 @@ def test_registry_native_algorithms_do_not_depend_on_candidate_target(sandbox: b
     assert available_engine_ids(caps) == [
         BLACKBOX_ENGINE_GEPA,
         BLACKBOX_ENGINE_BEST_OF_N,
-        BLACKBOX_ENGINE_AUTORESEARCH,
+        BLACKBOX_ENGINE_DEEP_RESEARCH,
         BLACKBOX_ENGINE_META_HARNESS,
         BLACKBOX_ENGINE_AUTOSADDLER,
     ]
     assert isinstance(get_engine(BLACKBOX_ENGINE_META_HARNESS, caps), MetaHarnessEngine)
-    assert isinstance(get_engine(BLACKBOX_ENGINE_AUTORESEARCH, caps), AutoResearchEngine)
+    assert isinstance(get_engine(BLACKBOX_ENGINE_DEEP_RESEARCH, caps), DeepResearchEngine)
 
 
 def test_registry_filters_multi_part_engines() -> None:
@@ -106,7 +106,7 @@ def test_registry_rejects_unknown_engine() -> None:
     with pytest.raises(ServiceError, match=r"Unknown engine 'nope'\. Available engines: gepa, best_of_n\."):
         get_engine("nope")
     with pytest.raises(
-        ServiceError, match=r"Available engines: gepa, best_of_n, autoresearch, meta_harness, autosaddler\."
+        ServiceError, match=r"Available engines: gepa, best_of_n, deep_research, meta_harness, autosaddler\."
     ):
         get_engine("nope", _NATIVE_CAPS)
 

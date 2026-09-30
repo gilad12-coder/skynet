@@ -23,7 +23,7 @@ import type { BlackboxEngineId } from "@/shared/types/api";
 const ENGINE_LABELS: Record<BlackboxEngineId, string> = {
   gepa: "GEPA",
   best_of_n: "Best-of-N",
-  autoresearch: "AutoResearch",
+  deep_research: "Deep Research",
   meta_harness: "Meta-Harness",
   autosaddler: "AutoSaddler",
 };

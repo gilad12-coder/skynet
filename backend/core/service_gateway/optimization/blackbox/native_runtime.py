@@ -44,10 +44,10 @@ from .sandbox import (
     unique_sandbox_name,
 )
 from .upstream import (
-    AUTORESEARCH_REVISION,
-    AUTORESEARCH_SOURCE,
     AUTOSADDLER_REVISION,
     AUTOSADDLER_SOURCE,
+    DEEP_RESEARCH_SOURCE,
+    DEEP_RESEARCH_VERSION,
     META_HARNESS_REVISION,
     META_HARNESS_SOURCE,
 )
@@ -66,10 +66,10 @@ _INSTALL_ALLOWANCE = 600.0
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _RPC_PREFIX = "SKYNET_NATIVE_RPC "
 _UUID = re.compile(r"^[0-9a-f]{32}$")
-NATIVE_ENGINES = frozenset({"meta_harness", "autoresearch", "autosaddler"})
+NATIVE_ENGINES = frozenset({"meta_harness", "deep_research", "autosaddler"})
 _UPSTREAMS = {
     "meta_harness": (META_HARNESS_SOURCE, META_HARNESS_REVISION),
-    "autoresearch": (AUTORESEARCH_SOURCE, AUTORESEARCH_REVISION),
+    "deep_research": (DEEP_RESEARCH_SOURCE, DEEP_RESEARCH_VERSION),
     "autosaddler": (AUTOSADDLER_SOURCE, AUTOSADDLER_REVISION),
 }
 _AUTOSADDLER_RUNNER_FILE = "autosaddler_runner.py"
@@ -427,7 +427,7 @@ def check_native_runtime(options: NativeOptions) -> dict[str, Any]:
             "runtime": options.runtime,
             "gepa_source": GEPA_SOURCE,
             "meta_harness_source": META_HARNESS_REVISION,
-            "autoresearch_source": AUTORESEARCH_REVISION,
+            "deep_research_version": DEEP_RESEARCH_VERSION,
             "autosaddler_source": AUTOSADDLER_REVISION,
             "autosaddler_ready": bool(ready.get("autosaddler")),
             "claude_version": CLAUDE_VERSION,
@@ -655,7 +655,7 @@ def run_native_engine(engine_id: str, task: Task, server: EvalServer, ctx: Engin
     """Execute an unchanged upstream agent engine inside the managed sandbox.
 
     Args:
-        engine_id: Upstream ``meta_harness``, ``autoresearch`` or ``autosaddler`` identifier.
+        engine_id: ``meta_harness``, ``deep_research`` or ``autosaddler``.
         task: Seed and visible training/validation examples.
         server: Skynet evaluator and shared evaluation budget.
         ctx: Run context containing native execution options.

@@ -34,7 +34,7 @@ dependencies = [
     # gepa is pinned to an immutable upstream commit, not a PyPI release: the
     # black-box engines (core.service_gateway.optimization.blackbox) invoke the
     # upstream optimize_anything engines and recipes through gepa.oa — Best-of-N,
-    # Meta-Harness, AutoResearch and the omni composition Auto is built on — and
+    # Meta-Harness, Deep Research and the omni composition Auto is built on — and
     # gepa.oa has no release yet. The commit still reports itself as 0.1.4, so it
     # also carries PxN batched sampling (gepa.strategies.proposal_sampling) and the
     # enable_tool_optimization adapter the training ground runs GEPA through.

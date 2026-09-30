@@ -14,7 +14,7 @@ export type OptimizationModelFamily =
   | "gepa"
   | "best_of_n"
   | "meta_harness"
-  | "autoresearch"
+  | "deep_research"
   | "autosaddler"
   | "auto";
 
@@ -93,7 +93,7 @@ export function optimizationModelFamily(
   if (strategyMode !== "single") return "auto";
   if (strategyMode === "single") {
     if (engine === "meta_harness") return "meta_harness";
-    if (engine === "autoresearch") return "autoresearch";
+    if (engine === "deep_research") return "deep_research";
     if (engine === "autosaddler") return "autosaddler";
     if (engine === "best_of_n") return "best_of_n";
   }
@@ -106,6 +106,6 @@ export const OPTIMIZATION_MODEL_DESCRIPTION: Readonly<Record<OptimizationModelFa
     gepa: "submit.blackbox.roles.optimization.desc.gepa",
     best_of_n: "submit.blackbox.roles.optimization.desc.best_of_n",
     meta_harness: "submit.blackbox.roles.optimization.desc.meta_harness",
-    autoresearch: "submit.blackbox.roles.optimization.desc.autoresearch",
+    deep_research: "submit.blackbox.roles.optimization.desc.deep_research",
     autosaddler: "submit.blackbox.roles.optimization.desc.autosaddler",
   };

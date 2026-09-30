@@ -192,7 +192,7 @@ def test_native_readiness_checks_selected_isolation_without_search(
         "runtime": "vercel",
         "gepa_source": native_runtime.GEPA_SOURCE,
         "meta_harness_source": native_runtime.META_HARNESS_REVISION,
-        "autoresearch_source": native_runtime.AUTORESEARCH_REVISION,
+        "deep_research_version": native_runtime.DEEP_RESEARCH_VERSION,
         "autosaddler_source": native_runtime.AUTOSADDLER_REVISION,
         "autosaddler_ready": True,
         "claude_version": native_runtime.CLAUDE_VERSION,
@@ -382,7 +382,7 @@ def test_parent_scorer_abort_survives_child_transport(tmp_path: Path, monkeypatc
         raise error
 
     with pytest.raises(ScorerAbortError) as raised:
-        run_native_engine("autoresearch", Task("seed"), EvalServer(score, max_evals=3), ctx)
+        run_native_engine("deep_research", Task("seed"), EvalServer(score, max_evals=3), ctx)
     assert raised.value is error
     assert ctx.native_options.usage_by_model["claude-test"]["total_tokens"] == 13
     assert session.closed
@@ -399,7 +399,7 @@ def test_native_timeout_and_missing_usage_fail_without_fallback(
     session = FakeSession(timeout=timeout, incomplete_usage=incomplete)
     ctx = _context(tmp_path, FakeRuntime(session))
     with pytest.raises(ServiceError, match=match):
-        run_native_engine("autoresearch", Task("seed"), EvalServer(lambda *_: (1.0, {}), max_evals=2), ctx)
+        run_native_engine("deep_research", Task("seed"), EvalServer(lambda *_: (1.0, {}), max_evals=2), ctx)
     assert len(session.calls) == 2
     assert session.closed
 
@@ -427,9 +427,9 @@ def test_native_without_aggregate_preserves_only_an_existing_seed(
     server = EvalServer(lambda *_: (1.0, {}), max_evals=2)
     if seed is None:
         with pytest.raises(ServiceError, match="fully evaluated candidate"):
-            run_native_engine("autoresearch", Task(seed), server, ctx)
+            run_native_engine("deep_research", Task(seed), server, ctx)
     else:
-        result = run_native_engine("autoresearch", Task(seed), server, ctx)
+        result = run_native_engine("deep_research", Task(seed), server, ctx)
         assert result.best_candidate == seed
         assert result.best_score is None
     assert session.closed
@@ -459,7 +459,7 @@ def test_parent_rpc_checks_cumulative_budget_at_both_boundaries(
 
     ctx.check_budget = check
     with pytest.raises(CostCeilingExceededError) as raised:
-        run_native_engine("autoresearch", Task("seed"), EvalServer(score, max_evals=2), ctx)
+        run_native_engine("deep_research", Task("seed"), EvalServer(score, max_evals=2), ctx)
     assert raised.value is failure
     assert events == (["check"] if boundary == "before" else ["check", "score", "check"])
     assert session.closed
@@ -531,10 +531,10 @@ def test_artifact_restore_rejects_parent_traversal(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("engine_id", "variant"),
     [
-        ("autoresearch", "success"),
+        ("deep_research", "success"),
         ("meta_harness", "success"),
         ("meta_harness", "abort"),
-        ("autoresearch", "repeated"),
+        ("deep_research", "repeated"),
     ],
 )
 def test_real_native_runner_drives_upstream_with_fake_cli(tmp_path: Path, engine_id: str, variant: str) -> None:
@@ -581,6 +581,9 @@ def test_real_native_runner_drives_upstream_with_fake_cli(tmp_path: Path, engine
     }
     if engine_id == "meta_harness":
         payload["task"]["train_set"] = [{"id": "a"}, {"id": "b"}]
+    else:
+        # One research round keeps the fake's single scripted evaluation the whole run.
+        payload["proposer"] = {"harness": "claude_code", "ralph": False}
     (tmp_path / "input.json").write_text(json.dumps(payload))
     env = {"PATH": f"{binary}{os.pathsep}/usr/bin:/bin", "HOME": str(tmp_path), "PYTHONUNBUFFERED": "1"}
     if variant == "repeated":
@@ -666,9 +669,6 @@ def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
         "upstream_prompts/meta_harness/SKILL.md",
         "upstream_prompts/meta_harness/LICENSE",
         "upstream_prompts/meta_harness/NOTICE.md",
-        "upstream_prompts/autoresearch/program.md",
-        "upstream_prompts/autoresearch/NOTICE.md",
-        "upstream_prompts/autoresearch/LICENSE",
     }
 
 
@@ -736,7 +736,7 @@ def test_autosaddler_transport_needs_a_seed_and_two_visible_examples(tmp_path: P
     assert runtime.spec is None
 
 
-@pytest.mark.parametrize("engine_id", ["autoresearch", "meta_harness"])
+@pytest.mark.parametrize("engine_id", ["deep_research", "meta_harness"])
 def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path, engine_id: str) -> None:
     """Run the unchanged upstream engines against a non-Claude harness through the ``claude`` shim."""
     binary = tmp_path / "bin"
@@ -783,6 +783,7 @@ def test_real_native_runner_drives_upstream_through_a_pi_proposer(tmp_path: Path
             "model": "claude-test",
             "price": {"input": 0.0, "output": 0.0},
             "effort": "high",
+            "ralph": False,
         },
         "task": {"name": "test", "seed_candidate": "seed"},
     }
@@ -854,7 +855,7 @@ def test_run_native_engine_serializes_the_proposer_without_the_gateway_key(
     ctx = _context(tmp_path, runtime)
     proposer = BlackboxProposer(harness="codex", effort="high", max_candidates_per_iter=3, ralph=False)
     ctx.native_options = replace(ctx.native_options, proposer=proposer)
-    run_native_engine("autoresearch", Task("seed"), EvalServer(lambda c, e: (0.5, {}), max_evals=3), ctx)
+    run_native_engine("deep_research", Task("seed"), EvalServer(lambda c, e: (0.5, {}), max_evals=3), ctx)
     payload = json.loads(session.files["native_input.json"])
     assert payload["proposer"]["harness"] == "codex"
     assert payload["proposer"]["output_format"] == "codex"
