@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 BATCHES_URL = "https://openrouter.ai/api/v1/batches"
 TERMINAL_STATUSES = {"completed", "failed", "expired", "cancelled"}
+# Batch-level routing fields; OpenRouter applies one routing to the whole batch.
+BATCH_ROUTING_FIELDS = ("only", "data_collection", "zdr")
 
 # Optimizers fire a round of evaluations at once and then wait on all of them,
 # so a short window collects the round without delaying a lone call much.
@@ -157,7 +159,7 @@ class BatchCollector:
         self._flush()
 
     def _flush(self) -> None:
-        """Submit everything queued, grouped by provider pin, and wait on each batch."""
+        """Submit everything queued, grouped by provider routing, and wait on each batch."""
         with self._lock:
             entries, self._pending = self._pending, []
             self._flush_scheduled = False
@@ -168,26 +170,30 @@ class BatchCollector:
             return
         groups: dict[str, list[_Entry]] = {}
         for entry in entries:
-            only = (entry.body.get("provider") or {}).get("only")
-            groups.setdefault(json.dumps(only), []).append(entry)
+            provider = entry.body.get("provider") or {}
+            routing = {field: provider[field] for field in BATCH_ROUTING_FIELDS if provider.get(field) is not None}
+            groups.setdefault(json.dumps(routing, sort_keys=True), []).append(entry)
         for key, group in groups.items():
             threading.Thread(target=self._submit_and_wait, args=(json.loads(key), group), daemon=True).start()
 
-    def _submit_and_wait(self, only: list[str] | None, entries: list[_Entry]) -> None:
-        """Run one batch to a terminal state and answer every waiting request.
+    def _submit_and_wait(self, routing: dict[str, Any], entries: list[_Entry]) -> None:
+        """Run one batch to a terminal state, answer every waiting request, then delete it.
 
         Args:
-            only: Endpoint pin shared by the group, from the price quote.
+            routing: Endpoint pin and data policy shared by the group.
             entries: The requests in this batch.
         """
         try:
             try:
-                batch_id = self._submit(only, entries)
+                batch_id = self._submit(routing, entries)
             except httpx.HTTPStatusError as exc:
                 logger.warning("OpenRouter refused a batch for %s: %s", self.model, exc)
                 self._fail(entries, BatchAnswer(502, _error("batch_rejected", "The provider rejected the batch.")))
                 return
-            self._answer(self._wait(batch_id), entries)
+            batch = self._wait(batch_id)
+            self._answer(batch, entries)
+            if batch is not None:
+                self._delete(batch_id)
         except Exception:
             # A submission lost in transit may still have created a billable
             # batch, so its coverage is held for reconciliation, not released.
@@ -202,8 +208,12 @@ class BatchCollector:
             if not entry.future.done():
                 entry.future.set_result(answer)
 
-    def _submit(self, only: list[str] | None, entries: list[_Entry]) -> str:
+    def _submit(self, routing: dict[str, Any], entries: list[_Entry]) -> str:
         """Create the batch and return its id.
+
+        Args:
+            routing: Batch-level provider routing for every request.
+            entries: The requests in this batch.
 
         Raises:
             httpx.HTTPError: When the provider refuses the submission.
@@ -212,8 +222,8 @@ class BatchCollector:
         # OpenRouter reads the batch-level fields before the request list, so
         # they must come first in the serialized body.
         payload: dict[str, Any] = {"endpoint": "/v1/chat/completions", "model": self.model}
-        if only:
-            payload["provider"] = {"only": only}
+        if routing:
+            payload["provider"] = dict(routing)
         payload["completion_window"] = "24h"
         payload["requests"] = [
             {
@@ -228,6 +238,23 @@ class BatchCollector:
         if not isinstance(batch_id, str) or not batch_id:
             raise ValueError("The batch response carried no id.")
         return batch_id
+
+    def _delete(self, batch_id: str) -> None:
+        """Purge a finished batch's stored prompts and results from OpenRouter.
+
+        OpenRouter keeps batch inputs and outputs for 30 days unless deleted;
+        the answers are already handed out, so nothing here needs them. A failed
+        delete is logged, not raised, because every request is already answered.
+
+        Args:
+            batch_id: A batch known to be in a terminal state.
+        """
+        try:
+            response = self._client.delete(f"{BATCHES_URL}/{batch_id}", headers=self._headers())
+            if response.status_code != 404:
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            logger.warning("Deleting OpenRouter batch %s failed; it expires in 30 days: %s", batch_id, exc)
 
     def _wait(self, batch_id: str) -> dict[str, Any] | None:
         """Poll until the batch is terminal or the deadline passes.

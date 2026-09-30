@@ -11,7 +11,8 @@
 
 services:
   litellm-proxy:
-    image: ghcr.io/berriai/litellm:main-stable
+    # Built from the MIT litellm wheel; see Dockerfile.
+    build: .
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     ports:
       - "4000:4000"

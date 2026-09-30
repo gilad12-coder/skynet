@@ -71,6 +71,7 @@ def test_list_models_returns_model_fields(models_client: TestClient) -> None:
     assert model["value"] == "openai/gpt-4o"
     assert "label" in model
     assert "provider" in model
+    assert model["zero_retention"] is True
 
 
 def test_list_models_serializes_per_data_center_entries(models_client: TestClient) -> None:

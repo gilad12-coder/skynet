@@ -3,7 +3,9 @@
  *
  * Written to match Skynet's real data flows: account/auth data, prompts and
  * datasets sent to third-party LLM providers via OpenRouter, Stripe billing,
- * encrypted-at-rest BYOK keys, optional observability providers, and the retention
+ * encrypted-at-rest BYOK keys, the per-account model data privacy setting, Google
+ * connector access under the Limited Use policy, named infrastructure
+ * subprocessors, optional observability providers, and the retention
  * windows enforced in the backend. This is a launch-ready draft, not legal advice — have
  * counsel review it before relying on it. Operator-specific values (controller
  * identity and contact emails) live in legal-config.ts.
@@ -74,6 +76,24 @@ export const PRIVACY_POLICY: LegalDocument = {
             "and privacy policies. If you use BYOK, your jobs run against the provider tied to your " +
             "own key.",
         },
+        {
+          kind: "paragraph",
+          text:
+            "You control which providers may receive your content on jobs we pay for, under Model " +
+            "data privacy in your account settings. By default we route only to providers that " +
+            "neither train on nor retain prompts. You can instead restrict jobs to providers with a " +
+            "zero-data-retention agreement, or allow every provider, including ones that may store " +
+            "or train on prompts. The model picker marks models that have a zero-data-retention " +
+            "provider. With BYOK, your own provider account's settings apply instead.",
+        },
+        {
+          kind: "paragraph",
+          text:
+            "If you choose the economy speed, we submit your job's model requests to OpenRouter as a " +
+            "batch. The batched prompts are stored by OpenRouter until the results are ready; we " +
+            "delete each batch as soon as we have read its results, and a batch we cannot delete is " +
+            "removed by OpenRouter within 30 days.",
+        },
       ],
     },
     {
@@ -117,7 +137,7 @@ export const PRIVACY_POLICY: LegalDocument = {
             "LLM providers (via OpenRouter, and a self-hosted gateway where configured) to run your optimization jobs.",
             "Stripe, to process payments and manage billing.",
             "Speech transcription (Groq) when you use voice input.",
-            "Hosting and infrastructure providers that run our application, database, and email delivery.",
+            "Hosting and infrastructure providers: Railway (application servers, database, and cache), Vercel (website hosting and the isolated sandboxes that run evaluation code), our email delivery provider, and Better Stack (operational logs, when enabled).",
             "Analytics and error-monitoring providers (currently PostHog and Sentry, when enabled) to understand feature usage and diagnose failures. Analytics can be disabled in account settings; we configure these providers to minimize personal data.",
             "Professional advisers, and authorities or other parties, where necessary to comply with law, enforce our Terms, or protect the rights, property, or safety of our users or others.",
             "A successor entity in connection with a merger, acquisition, financing, or sale of assets, subject to this Policy.",
@@ -128,6 +148,38 @@ export const PRIVACY_POLICY: LegalDocument = {
           text:
             "We may also share aggregated or de-identified information that cannot reasonably be used " +
             "to identify you.",
+        },
+      ],
+    },
+    {
+      heading: "Google user data",
+      blocks: [
+        {
+          kind: "paragraph",
+          text:
+            "If you link Google Drive, Google Sheets, Google Cloud Storage, or BigQuery, you grant " +
+            "the Service read-only access through Google OAuth. We use that access only to list the " +
+            "files, spreadsheets, buckets, and tables you browse and to import the data you choose " +
+            "into your workspace. We never modify or delete anything in your Google account.",
+        },
+        {
+          kind: "paragraph",
+          text:
+            "Our use and transfer of information received from Google APIs adheres to the Google API " +
+            "Services User Data Policy, including the Limited Use requirements. We do not use Google " +
+            "user data for advertising, we do not sell it, and we do not use it to train AI or " +
+            "machine-learning models. No person reads it unless you ask us to for support, it is " +
+            "needed for security or to comply with law, or it has been aggregated and anonymized " +
+            "for internal operations. We transfer it to others only as needed to provide the " +
+            "features you use, such as sending an imported dataset to the LLM providers that run " +
+            "your jobs, to comply with law, or as part of a merger or acquisition.",
+        },
+        {
+          kind: "paragraph",
+          text:
+            "OAuth tokens are stored encrypted at rest. You can unlink a Google connection at any " +
+            "time in the Service, and revoke the Service's access from your Google Account " +
+            "permissions page; unlinking deletes the stored tokens.",
         },
       ],
     },
@@ -160,6 +212,7 @@ export const PRIVACY_POLICY: LegalDocument = {
             "Some conversational and job data is automatically purged on a rolling basis, and logs are capped and rotated, so older operational data is removed over time.",
             "Billing and transaction records are retained as required for accounting, tax, and legal purposes, in de-identified form where possible after your account is closed.",
             "Backups are retained for a limited period and then overwritten on a rolling basis.",
+            "Economy-speed batches are deleted from OpenRouter once we have read their results, and within 30 days at the latest.",
           ],
         },
       ],

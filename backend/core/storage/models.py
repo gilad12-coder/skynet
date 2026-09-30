@@ -157,6 +157,25 @@ class NotificationPreferenceModel(Base):
     )
 
 
+class ModelPrivacyPreferenceModel(Base):
+    """Which OpenRouter providers may receive a caller's prompts on platform-paid calls.
+
+    A missing row means ``deny``: only providers that neither train on nor
+    store prompts. BYOK calls follow the caller's own OpenRouter account settings.
+    """
+
+    __tablename__ = "model_privacy_preferences"
+
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    data_policy: Mapped[str] = mapped_column(String(16), nullable=False, default="deny")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 class PackageRegistryPreferenceModel(Base):
     """Store a caller's package index independently of local password accounts."""
 

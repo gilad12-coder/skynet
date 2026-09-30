@@ -26,6 +26,7 @@ import litellm
 from pydantic import BaseModel, Field
 
 from ..billing import openrouter_prices
+from ..billing.data_policy import zero_retention_models
 from ..config import DEFAULT_AGENT_MODEL_ID, settings
 from ..provider_registry import BYOK_CATALOG_PREFIXES
 from .errors import DomainError
@@ -118,6 +119,13 @@ class CatalogModel(BaseModel):
     output_cost_per_token: float | None = Field(
         default=None,
         description="Provider output (completion) cost per token in USD, or None when unpriced.",
+    )
+    zero_retention: bool = Field(
+        default=False,
+        description=(
+            "At least one OpenRouter endpoint serves this model under a zero-data-retention "
+            "agreement, so it stays available under every model data privacy setting."
+        ),
     )
 
 
@@ -1431,6 +1439,26 @@ def _kick_background_refresh() -> None:
     Thread(target=_refresh_catalog_in_background, name="catalog-refresh", daemon=True).start()
 
 
+def with_zero_retention(catalog: ModelCatalogResponse) -> ModelCatalogResponse:
+    """Flag the models OpenRouter can serve with zero data retention.
+
+    Args:
+        catalog: A cached catalog, left unmodified.
+
+    Returns:
+        A copy whose models carry the current ``zero_retention`` flag.
+    """
+    zdr = zero_retention_models()
+    return catalog.model_copy(
+        update={
+            "models": [
+                model.model_copy(update={"zero_retention": model.value.removeprefix("openrouter/") in zdr})
+                for model in catalog.models
+            ]
+        }
+    )
+
+
 def get_catalog_cached() -> ModelCatalogResponse:
     """Return the catalog with stale-while-revalidate semantics.
 
@@ -1487,6 +1515,7 @@ def prewarm_catalog() -> None:
     boot itself is unaffected (we don't await this); workers come online
     in parallel with the catalog probe.
     """
+    Thread(target=zero_retention_models, daemon=True).start()
     if _cached_response is not None:
         return
     _kick_background_refresh()

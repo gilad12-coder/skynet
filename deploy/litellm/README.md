@@ -26,14 +26,20 @@ both work without it, and turning it on is a single backend config change.
 ```bash
 cd deploy/litellm
 cp .env.example .env        # fill in OPENROUTER_API_KEY, LITELLM_MASTER_KEY, …
-docker compose up -d
+docker compose up -d --build
 curl -s http://localhost:4000/health   # should report healthy
 ```
+
+The image is built from the MIT-licensed `litellm` wheel pinned in
+`requirements.txt`, not the upstream `ghcr.io/berriai/litellm` image, which ships
+LiteLLM's proprietary `enterprise/` code. `litellm[proxy]` depends on the
+proprietary `litellm-enterprise` package, so the proxy extra is listed by hand
+without it; keep those pins in step with litellm's own when upgrading.
 
 ## Deploy on Railway (hosted)
 
 The same `config.yaml` runs unchanged on Railway. Railway can't bind-mount a
-file into the stock image, so `Dockerfile` here bakes `config.yaml` in; the proxy
+file, so the `Dockerfile` here also bakes `config.yaml` in; the proxy
 still listens on a fixed `4000`. The proxy keeps its own **dedicated** Postgres
 and Redis, separate from the Skynet app database.
 

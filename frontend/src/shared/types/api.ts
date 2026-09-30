@@ -942,6 +942,15 @@ export interface CatalogModel {
   // the estimate falls back to a default rate rather than treating it as free.
   input_cost_per_token?: number | null;
   output_cost_per_token?: number | null;
+  // At least one OpenRouter endpoint serves this model with zero data retention.
+  zero_retention?: boolean;
+}
+
+/** Which providers may serve the account's platform-paid model calls. */
+export type ModelDataPolicy = "allow" | "deny" | "zdr";
+
+export interface ModelPrivacySettings {
+  data_policy: ModelDataPolicy;
 }
 
 export interface CatalogProvider {

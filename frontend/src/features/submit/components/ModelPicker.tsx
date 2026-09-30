@@ -2,7 +2,7 @@
 
 import { MicroPill } from "@/shared/ui/model-chip";
 import * as React from "react";
-import { Check, CaretDown, Eye, MagnifyingGlass } from "@/shared/ui/icons";
+import { Check, CaretDown, Eye, MagnifyingGlass, Warning } from "@/shared/ui/icons";
 import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
 
 import { cn } from "@/shared/lib/utils";
@@ -18,7 +18,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/
 import { ProviderLogo } from "@/shared/ui/provider-logo";
 import { modelProviderSlug } from "@/shared/lib/model-provider";
 import { litellmProviderForByok } from "@/features/billing";
-import type { CatalogModel, CatalogProvider } from "@/shared/types/api";
+import { getModelPrivacy } from "@/shared/lib/api";
+import type { CatalogModel, CatalogProvider, ModelDataPolicy } from "@/shared/types/api";
 
 interface ModelPickerProps {
   value: string;
@@ -92,6 +93,24 @@ export function ModelPicker({
     models: CatalogModel[];
   } | null>(cachedByokCatalog());
   const inputRef = React.useRef<HTMLInputElement>(null);
+  // The account's data policy only governs platform-paid calls; BYOK runs follow
+  // the user's own OpenRouter settings, so it is read only for the managed list.
+  const [dataPolicy, setDataPolicy] = React.useState<ModelDataPolicy | null>(null);
+
+  // Re-read on every open so a change made in Settings shows without a reload.
+  React.useEffect(() => {
+    if (!open || byokMode) return;
+    let cancelled = false;
+    getModelPrivacy()
+      .then((p) => {
+        if (!cancelled) setDataPolicy(p.data_policy);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open, byokMode]);
+  const showRetention = !byokMode && dataPolicy !== null;
 
   // If cache wasn't ready at mount time, await it once
   React.useEffect(() => {
@@ -324,6 +343,21 @@ export function ModelPicker({
                     {m.supports_vision && (
                       <MicroPill tone="primary" title={msg("shared.model_chip.vision_badge")}>
                         <Eye className="size-2.5" />
+                      </MicroPill>
+                    )}
+                    {showRetention && m.zero_retention && (
+                      <MicroPill title={msg("submit.modelpicker.zdr_badge_title")}>
+                        {msg("submit.modelpicker.zdr_badge")}
+                      </MicroPill>
+                    )}
+                    {showRetention && dataPolicy === "zdr" && m.zero_retention === false && (
+                      <MicroPill
+                        className="bg-[var(--warning-dim)] text-[var(--warning)]"
+                        title={msg("submit.modelpicker.zdr_unavailable")}
+                        aria-label={msg("submit.modelpicker.zdr_unavailable")}
+                        role="img"
+                      >
+                        <Warning className="size-2.5" aria-hidden="true" />
                       </MicroPill>
                     )}
                   </span>
