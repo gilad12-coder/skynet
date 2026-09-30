@@ -184,6 +184,21 @@ export const PRIVACY_POLICY: LegalDocument = {
       ],
     },
     {
+      heading: "GitHub data",
+      blocks: [
+        {
+          kind: "paragraph",
+          text:
+            "If you link GitHub, you grant the Service the repo and read:user OAuth scopes. GitHub " +
+            "offers no read-only scope for private repositories, so the repo scope technically " +
+            "allows writing to every repository your account can reach. We use it only to list your " +
+            "repositories, browse their files, and import the files you choose. We never write to, " +
+            "modify, or delete anything on GitHub. The token is stored encrypted at rest, and " +
+            "unlinking deletes it; you can also revoke access in your GitHub application settings.",
+        },
+      ],
+    },
+    {
       heading: "International transfers",
       blocks: [
         {

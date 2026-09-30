@@ -14,10 +14,11 @@ Schema per row:
 Source: every fact below is drawn from publicly-available USPTO records.
 The bibliographic data of issued US patents (titles, dates, inventor names,
 abstracts) is uncopyrightable factual information published by the United
-States Patent and Trademark Office. Per 17 USC §105, US-Government works
-enter the public domain upon publication; per Feist v. Rural (1991), facts
-themselves are uncopyrightable. Both routes make this data freely usable
-without restriction or attribution.
+States Patent and Trademark Office and distributed under the USPTO bulk-data
+terms of use. Per Feist v. Rural (1991), the facts themselves are not
+copyrightable. 17 USC §105 covers only text written by federal employees, so
+it does not reach inventor-written abstracts; those are kept to short factual
+summaries here, and the USPTO is credited as the source.
 
 Closed taxonomies:
     primary_category ∈ {communication, transportation, computing, medical,

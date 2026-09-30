@@ -15,6 +15,7 @@ import httpx
 
 from .data_policy import DataPolicy, apply_data_policy
 from .model_batch import BatchCollector
+from .model_terms import excluded_from_managed, managed_model_refusal
 from .openrouter_float import notify_managed_refusal
 from .openrouter_quotes import PricedRequest, fetch_endpoint_prices, price_text_request
 from .operation_pricing import ChargePolicy, OperationQuote, UnpricedOperationError, exact_nonnegative, json_fingerprint
@@ -337,6 +338,8 @@ class OpenRouterDispatcher:
         """
         if path not in {"/chat/completions", "/messages", "/responses"} or request.get("model") != self.model:
             raise UnpricedOperationError("This scoped route cannot dispatch a different model or API operation.")
+        if self.policy.kind == "managed_model" and excluded_from_managed(self.model):
+            return ModelHTTPResult(403, "application/json", managed_model_refusal(self.model))
         if self._refusal is not None:
             body, until = self._refusal
             if time.monotonic() < until:

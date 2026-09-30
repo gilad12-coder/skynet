@@ -165,6 +165,12 @@ export const TERMS_OF_SERVICE: LegalDocument = {
             "responsible for your provider account, its usage, its costs, and your compliance with " +
             "that provider's terms.",
         },
+        {
+          kind: "paragraph",
+          text:
+            "Gemma and Llama models are available only with your own key, because their license " +
+            "terms must bind you directly as the licensee.",
+        },
       ],
     },
     {
