@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "رابط تسجيل الدخول غير صالح أو منتهي الصلاحية. ابدأ من جديد.",
     "connectors.provider_error": "أعاد {provider} خطأ غير متوقع (HTTP {status_code}). حاول مرة أخرى بعد لحظات.",
     "connectors.rejected": "رفض {provider} الطلب. قد لا تملك بيانات الاعتماد الخاصة بك إذن الوصول إلى هذا العنصر.",
+    "connectors.picker_unavailable": "اختيار الملفات من Google غير مُعدّ في هذا النشر.",
+    "connectors.picker_needs_oauth": "يتطلب اختيار الملفات حساب {provider} مربوطًا عبر تسجيل الدخول بـ Google.",
     "connectors.unknown_provider": "موصل غير معروف: {provider}.",
     "connectors.unreachable": "تعذّر الوصول إلى {provider}. حاول مرة أخرى بعد لحظات.",
     "connectors.hf_dataset_not_found": "لم يُعثر على مجموعة البيانات {repo_id} في Hugging Face، أو أن حسابك لا يملك صلاحية الوصول إليها.",

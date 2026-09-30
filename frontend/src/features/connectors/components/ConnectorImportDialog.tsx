@@ -33,6 +33,7 @@ import { Input } from "@/shared/ui/primitives/input";
 import { Label } from "@/shared/ui/primitives/label";
 import {
   browseConnector,
+  getConnectorPicker,
   getConnectors,
   importConnectorRef,
   isStorageQuotaError,
@@ -47,6 +48,7 @@ import { cn } from "@/shared/lib/utils";
 import { useSettingsModal } from "@/features/settings";
 import { DatasetPreviewPanel } from "@/features/datasets";
 import { BROWSE_CARET_CLASS, BROWSE_LIST_CLASS, BROWSE_ROW_CLASS } from "./browse-list";
+import { pickGoogleFiles } from "./google-picker";
 import { providerMeta } from "./providers";
 import { SearchInput } from "@/shared/ui/search-input";
 import { TOUCH_FIELD } from "@/shared/ui/touch";
@@ -134,6 +136,9 @@ export function ConnectorImportDialog({
   // Checked fresh on every open (null until then), so a link made in Settings
   // since the last open is seen and a stale "unlinked" never bounces the user.
   const [connected, setConnected] = React.useState<boolean | null>(null);
+  // An OAuth-linked Google account reads only the files picked in the Google Picker.
+  const [pickable, setPickable] = React.useState(false);
+  const [picking, setPicking] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) {
@@ -144,7 +149,9 @@ export function ConnectorImportDialog({
     getConnectors()
       .then((res) => {
         if (cancelled) return;
-        if (res.connectors.find((c) => c.provider === provider)?.connected) {
+        const status = res.connectors.find((c) => c.provider === provider);
+        if (status?.connected) {
+          setPickable(status.picker_available && status.auth_method === "oauth");
           setConnected(true);
         } else {
           // Nothing to browse without a link: go straight to its connect form.
@@ -211,7 +218,8 @@ export function ConnectorImportDialog({
   );
 
   const prefetchFolder = (entry: ConnectorEntry) => {
-    if (entry.kind !== "folder" || listings.current.has(listingKey(provider, entry.ref, ""))) return;
+    if (entry.kind !== "folder" || listings.current.has(listingKey(provider, entry.ref, "")))
+      return;
     window.clearTimeout(prefetchTimer.current);
     prefetchTimer.current = window.setTimeout(() => {
       // A failed prefetch is retried, visibly, when the folder is opened.
@@ -331,6 +339,35 @@ export function ConnectorImportDialog({
     }
   };
 
+  const pickFiles = async () => {
+    setPicking(true);
+    try {
+      const picked = await pickGoogleFiles(provider, await getConnectorPicker(provider));
+      if (picked.length === 0) return;
+      // Newly picked files only show up in a fresh listing.
+      listings.current.clear();
+      inflight.current.clear();
+      setPath([]);
+      setQuery("");
+      setAttempt((n) => n + 1);
+      const [file] = picked;
+      if (picked.length === 1 && file) {
+        // A spreadsheet is a folder of tabs; a Drive file opens straight into its preview.
+        openEntry({
+          ref: file.id,
+          name: file.name,
+          kind: provider === "google_sheets" ? "folder" : "file",
+          size: null,
+          modified: null,
+        });
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : msg("connector_import.pick_error"));
+    } finally {
+      setPicking(false);
+    }
+  };
+
   const jumpTo = (index: number) => {
     setPath((prev) => prev.slice(0, index));
     setQuery("");
@@ -367,7 +404,6 @@ export function ConnectorImportDialog({
     }
   };
 
-
   const rowTotal = preview?.num_rows_total ?? null;
 
   return (
@@ -379,6 +415,14 @@ export function ConnectorImportDialog({
             ? "max-h-[85vh] w-[96vw] max-w-[96vw] sm:max-w-[96vw]"
             : "max-h-[85vh] w-[min(72rem,94vw)] max-w-[min(72rem,94vw)] sm:max-w-[min(72rem,94vw)]",
         )}
+        // The Google Picker draws its own overlay outside this dialog; clicks and
+        // Escape there belong to the Picker, not to closing the import.
+        onInteractOutside={(e) => {
+          if (picking) e.preventDefault();
+        }}
+        onEscapeKeyDown={(e) => {
+          if (picking) e.preventDefault();
+        }}
       >
         <DialogHeader className="px-5 pt-5">
           <div className="flex items-center gap-2.5">
@@ -496,6 +540,23 @@ export function ConnectorImportDialog({
               )}
             </div>
 
+            {pickable && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mb-2 w-full sm:w-auto"
+                onClick={pickFiles}
+                disabled={picking}
+              >
+                {picking ? (
+                  <CircleNotch className="size-4 animate-spin" />
+                ) : (
+                  <Folder className="size-4" />
+                )}
+                {msg("connector_import.pick_files")}
+              </Button>
+            )}
+
             <SearchInput
               dir="ltr"
               autoFocus
@@ -522,7 +583,14 @@ export function ConnectorImportDialog({
                   </Button>
                 </div>
               ) : !browsing && visibleEntries.length === 0 ? (
-                <EmptyState variant="list" title={msg("connector_import.empty")} />
+                <EmptyState
+                  variant="list"
+                  title={msg(
+                    pickable && !location
+                      ? "connector_import.pick_empty"
+                      : "connector_import.empty",
+                  )}
+                />
               ) : visibleEntries.length > 0 ? (
                 <ul className={BROWSE_LIST_CLASS}>
                   {visibleEntries.map((entry) => {

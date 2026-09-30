@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "Le lien de connexion n'est pas valide ou a expiré. Recommencez.",
     "connectors.provider_error": "{provider} a renvoyé une erreur inattendue (HTTP {status_code}). Réessayez dans un instant.",
     "connectors.rejected": "{provider} a refusé la demande. Il se peut que vos identifiants n'aient pas accès à cet élément.",
+    "connectors.picker_unavailable": "Le choix de fichiers Google n'est pas configuré sur ce déploiement.",
+    "connectors.picker_needs_oauth": "Pour choisir des fichiers, il faut un compte {provider} associé via la connexion Google.",
     "connectors.unknown_provider": "Connecteur inconnu : {provider}.",
     "connectors.unreachable": "Impossible de contacter {provider}. Réessayez dans un instant.",
     "connectors.hf_dataset_not_found": "Le jeu de données {repo_id} est introuvable sur Hugging Face, ou votre compte n'y a pas accès.",

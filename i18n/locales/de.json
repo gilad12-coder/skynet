@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "Der Anmeldelink ist ungültig oder abgelaufen. Bitte beginnen Sie erneut.",
     "connectors.provider_error": "{provider} hat einen unerwarteten Fehler zurückgegeben (HTTP {status_code}). Versuchen Sie es in Kürze erneut.",
     "connectors.rejected": "{provider} hat die Anfrage abgelehnt. Ihre Anmeldedaten haben möglicherweise keinen Zugriff auf dieses Element.",
+    "connectors.picker_unavailable": "Die Dateiauswahl aus Google ist in dieser Installation nicht eingerichtet.",
+    "connectors.picker_needs_oauth": "Für die Dateiauswahl muss ein {provider}-Konto über die Google-Anmeldung verknüpft sein.",
     "connectors.unknown_provider": "Unbekannter Connector: {provider}.",
     "connectors.unreachable": "{provider} war nicht erreichbar. Versuchen Sie es in Kürze erneut.",
     "connectors.hf_dataset_not_found": "Der Datensatz {repo_id} wurde auf Hugging Face nicht gefunden, oder Ihr Konto hat keinen Zugriff darauf.",

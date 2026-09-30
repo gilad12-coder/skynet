@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "Посилання для входу недійсне або застаріле. Почніть спочатку.",
     "connectors.provider_error": "{provider} повернув неочікувану помилку (HTTP {status_code}). Спробуйте ще раз за хвилину.",
     "connectors.rejected": "{provider} відхилив запит. Можливо, ваші облікові дані не мають доступу до цього елемента.",
+    "connectors.picker_unavailable": "Вибір файлів із Google не налаштовано в цьому розгортанні.",
+    "connectors.picker_needs_oauth": "Для вибору файлів потрібен обліковий запис {provider}, прив'язаний через вхід Google.",
     "connectors.unknown_provider": "Невідомий конектор: {provider}.",
     "connectors.unreachable": "Не вдалося зв’язатися з {provider}. Спробуйте ще раз за хвилину.",
     "connectors.hf_dataset_not_found": "Датасет {repo_id} не знайдено на Hugging Face, або ваш обліковий запис не має до нього доступу.",

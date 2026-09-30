@@ -1,10 +1,12 @@
 """Google Drive connector: browse folders and import a data file.
 
-Linking works through Google OAuth (Drive read-only) or a pasted
-service-account key that sees whatever was shared with it. Browsing starts
-at "My Drive" plus files shared with the account, descends into folders and
-searches by name across the whole drive; CSV, TSV, JSON, JSONL and Parquet
-files import directly and a Google Sheet is exported as CSV (first tab).
+Linking works through Google OAuth or a pasted service-account key that sees
+whatever was shared with it. OAuth asks only for ``drive.file``, so Skynet
+reads just the files the user picks in the Google Picker; browsing then lists
+those picked files. A service account browses from "My Drive" plus files
+shared with it, descends into folders and searches by name. CSV, TSV, JSON,
+JSONL and Parquet files import directly and a Google Sheet is exported as CSV
+(first tab).
 """
 
 from __future__ import annotations
@@ -27,7 +29,10 @@ from .vault import ConnectorSecret
 PROVIDER = "google_drive"
 DRIVE_URL = "https://www.googleapis.com/drive/v3/files"
 USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
-SCOPES = "openid email https://www.googleapis.com/auth/drive.readonly"
+OAUTH_SCOPES = "openid email https://www.googleapis.com/auth/drive.file"
+# A service account only sees what was shared with it, and its tokens never pass
+# through the consent screen, so read-only access to that share stays safe here.
+SERVICE_ACCOUNT_SCOPES = "https://www.googleapis.com/auth/drive.readonly"
 LIST_LIMIT = 100
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet"
@@ -58,10 +63,12 @@ def oauth_app() -> OAuthApp:
         provider=PROVIDER,
         authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
         token_url="https://oauth2.googleapis.com/token",
-        scopes=SCOPES,
+        scopes=OAUTH_SCOPES,
         client_id=settings.google_oauth_client_id,
         client_secret=secret.get_secret_value() if secret is not None else None,
-        extra_authorize_params={"access_type": "offline", "prompt": "consent", "include_granted_scopes": "true"},
+        # No ``include_granted_scopes``: the token is handed to the browser for the
+        # Picker, so it must not pick up the Cloud Storage or BigQuery grants.
+        extra_authorize_params={"access_type": "offline", "prompt": "consent"},
     )
 
 
@@ -114,7 +121,7 @@ def _bearer(secret: ConnectorSecret) -> str:
     """
     if secret.auth_method == "oauth":
         return secret.access_token
-    return service_account_token(json.loads(secret.access_token), SCOPES, PROVIDER)
+    return service_account_token(json.loads(secret.access_token), SERVICE_ACCOUNT_SCOPES, PROVIDER)
 
 
 def verify_credentials(fields: dict[str, str]) -> Credential:
@@ -127,7 +134,7 @@ def verify_credentials(fields: dict[str, str]) -> Credential:
         The credential to store; the label is the service account's e-mail.
     """
     key = parse_service_account(fields.get("service_account_json", ""))
-    service_account_token(key, SCOPES, PROVIDER)
+    service_account_token(key, SERVICE_ACCOUNT_SCOPES, PROVIDER)
     return Credential(secret=json.dumps(key), auth_method="service_account", account_label=key["client_email"])
 
 
@@ -178,6 +185,10 @@ def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
         query = f"name contains '{_escape(search.strip())}'"
     elif location:
         query = f"'{_escape(location)}' in parents"
+    elif secret.auth_method == "oauth":
+        # Under drive.file the token sees only picked files, which may sit in
+        # folders it cannot open, so the top level lists them all flat.
+        query = f"mimeType != '{FOLDER_MIME}'"
     else:
         query = "'root' in parents or sharedWithMe = true"
     body = get_json(

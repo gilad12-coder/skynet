@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "Il link di accesso non è valido o è scaduto. Ricomincia.",
     "connectors.provider_error": "{provider} ha restituito un errore imprevisto (HTTP {status_code}). Riprova tra poco.",
     "connectors.rejected": "{provider} ha rifiutato la richiesta. Le tue credenziali potrebbero non avere accesso a questo elemento.",
+    "connectors.picker_unavailable": "La scelta dei file da Google non è configurata in questa installazione.",
+    "connectors.picker_needs_oauth": "Per scegliere i file serve un account {provider} collegato con l'accesso Google.",
     "connectors.unknown_provider": "Connettore sconosciuto: {provider}.",
     "connectors.unreachable": "Impossibile raggiungere {provider}. Riprova tra poco.",
     "connectors.hf_dataset_not_found": "Il dataset {repo_id} non è stato trovato su Hugging Face oppure l'account non può accedervi.",

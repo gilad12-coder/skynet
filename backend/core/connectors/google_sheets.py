@@ -1,9 +1,10 @@
 """Google Sheets connector: browse a user's spreadsheets and import a tab.
 
-Linking works through Google OAuth (Drive and Sheets read-only scopes) when
-the deployment registered a Google OAuth client, or with a pasted
-service-account key, which then sees whichever spreadsheets were shared with
-that service account. Browsing lists spreadsheets from Drive, then the tabs
+Linking works through Google OAuth when the deployment registered a Google
+OAuth client, or with a pasted service-account key, which then sees whichever
+spreadsheets were shared with that service account. OAuth asks only for
+``drive.file``, so Skynet reads just the spreadsheets the user picks in the
+Google Picker. Browsing lists spreadsheets from Drive, then the tabs
 of one spreadsheet; importing reads a tab with its first row as the header.
 """
 
@@ -26,8 +27,11 @@ PROVIDER = "google_sheets"
 DRIVE_URL = "https://www.googleapis.com/drive/v3/files"
 SHEETS_URL = "https://sheets.googleapis.com/v4/spreadsheets"
 USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
-SCOPES = (
-    "openid email https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.readonly"
+OAUTH_SCOPES = "openid email https://www.googleapis.com/auth/drive.file"
+# A service account only sees what was shared with it, and its tokens never pass
+# through the consent screen, so read-only access to that share stays safe here.
+SERVICE_ACCOUNT_SCOPES = (
+    "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/drive.readonly"
 )
 LIST_LIMIT = 50
 PREVIEW_ROWS = 20
@@ -45,11 +49,13 @@ def oauth_app() -> OAuthApp:
         provider=PROVIDER,
         authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
         token_url="https://oauth2.googleapis.com/token",
-        scopes=SCOPES,
+        scopes=OAUTH_SCOPES,
         client_id=settings.google_oauth_client_id,
         client_secret=secret.get_secret_value() if secret is not None else None,
-        # ``offline`` + ``consent`` is what makes Google hand out a refresh token.
-        extra_authorize_params={"access_type": "offline", "prompt": "consent", "include_granted_scopes": "true"},
+        # ``offline`` + ``consent`` is what makes Google hand out a refresh token. No
+        # ``include_granted_scopes``: the token is handed to the browser for the
+        # Picker, so it must not pick up the Cloud Storage or BigQuery grants.
+        extra_authorize_params={"access_type": "offline", "prompt": "consent"},
     )
 
 
@@ -102,7 +108,7 @@ def _bearer(secret: ConnectorSecret) -> str:
     """
     if secret.auth_method == "oauth":
         return secret.access_token
-    return service_account_token(json.loads(secret.access_token), SCOPES, PROVIDER)
+    return service_account_token(json.loads(secret.access_token), SERVICE_ACCOUNT_SCOPES, PROVIDER)
 
 
 def verify_credentials(fields: dict[str, str]) -> Credential:
@@ -118,7 +124,7 @@ def verify_credentials(fields: dict[str, str]) -> Credential:
         DomainError: 400 when the key is malformed or Google refuses it.
     """
     key = parse_service_account(fields.get("service_account_json", ""))
-    service_account_token(key, SCOPES, PROVIDER)
+    service_account_token(key, SERVICE_ACCOUNT_SCOPES, PROVIDER)
     return Credential(secret=json.dumps(key), auth_method="service_account", account_label=key["client_email"])
 
 

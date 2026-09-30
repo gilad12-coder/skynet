@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "登录链接无效或已过期，请重新开始。",
     "connectors.provider_error": "{provider} 返回了意外错误（HTTP {status_code}），请稍后重试。",
     "connectors.rejected": "{provider} 拒绝了该请求，您的凭据可能无权访问此项目。",
+    "connectors.picker_unavailable": "此部署尚未设置从 Google 选择文件。",
+    "connectors.picker_needs_oauth": "选择文件需要通过 Google 登录关联的 {provider} 账号。",
     "connectors.unknown_provider": "未知的连接器：{provider}。",
     "connectors.unreachable": "无法连接到 {provider}，请稍后重试。",
     "connectors.hf_dataset_not_found": "在 Hugging Face 上找不到数据集 {repo_id},或您的账号无权访问。",
