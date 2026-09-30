@@ -135,7 +135,7 @@ function BestOfNBanner() {
   );
 }
 
-function DeepResearchBanner() {
+function AutoResearchBanner() {
   return (
     <BannerFrame>
       <GBox x={30} y={26} w={52} h={32} accent />
@@ -237,7 +237,7 @@ const GENERIC_VISUAL: EngineVisual = { Banner: GenericBanner, icon: Cube };
 const ENGINE_VISUALS: Record<BlackboxEngineId, EngineVisual> = {
   gepa: { Banner: GepaBanner, icon: GitBranch },
   best_of_n: { Banner: BestOfNBanner, icon: Shuffle },
-  deep_research: { Banner: DeepResearchBanner, icon: Robot },
+  autoresearch: { Banner: AutoResearchBanner, icon: Robot },
   meta_harness: { Banner: MetaHarnessBanner, icon: Wrench },
   autosaddler: { Banner: AutoSaddlerBanner, icon: ArrowsClockwise },
 };

@@ -23,7 +23,7 @@ from .scorer_dependencies import ScorerDependencyLock
 
 BLACKBOX_ENGINE_GEPA = "gepa"
 BLACKBOX_ENGINE_BEST_OF_N = "best_of_n"
-BLACKBOX_ENGINE_DEEP_RESEARCH = "deep_research"
+BLACKBOX_ENGINE_AUTORESEARCH = "autoresearch"
 BLACKBOX_ENGINE_META_HARNESS = "meta_harness"
 BLACKBOX_ENGINE_AUTOSADDLER = "autosaddler"
 BLACKBOX_STRATEGY_AUTO = "auto"
@@ -152,7 +152,7 @@ BLACKBOX_PROPOSER_EFFORTS = ("low", "medium", "high", "max")
 
 
 # The coding agent that drives a harness-based engine (Meta-Harness,
-# Deep Research, AutoSaddler and the Auto lanes built from them). Any harness
+# AutoResearch, AutoSaddler and the Auto lanes built from them). Any harness
 # Skynet offers for agent targets can be the proposer; the engine knobs mirror
 # the upstream engine configs and are ignored by engines that lack them.
 class BlackboxProposer(BaseModel):

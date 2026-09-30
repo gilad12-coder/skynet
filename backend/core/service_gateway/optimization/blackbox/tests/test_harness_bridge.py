@@ -23,7 +23,7 @@ from ..harness_bridge import (
 _PLAIN = {"run_command": 'cat "$SKYNET_PROMPT_FILE"', "output_format": "plain", "files": {}, "env": {}}
 
 
-def test_cli_parser_accepts_the_meta_harness_and_deep_research_shapes() -> None:
+def test_cli_parser_accepts_the_meta_harness_and_autoresearch_shapes() -> None:
     """Parse both upstream argv layouts without leaving unknown arguments behind."""
     meta, unknown = _cli_parser().parse_known_args(
         [

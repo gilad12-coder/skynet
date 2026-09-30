@@ -565,7 +565,7 @@ export type BlackboxCandidate = string | Record<string, string>;
 export type BlackboxEngineId =
   | "gepa"
   | "best_of_n"
-  | "deep_research"
+  | "autoresearch"
   | "meta_harness"
   | "autosaddler";
 export type BlackboxHarness = "pi" | "codex" | "claude_code" | "opencode" | "prime" | "custom";

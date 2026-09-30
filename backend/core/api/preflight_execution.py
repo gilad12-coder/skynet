@@ -252,7 +252,7 @@ def _verify_anything(gateway: ModelGateway, payload: dict[str, Any], *, scope: s
     if scope == "execution" and optimizer_ready:
         public = {key: value for key, value in payload.items() if not key.startswith("_")}
         typed = BlackboxRunRequest.model_validate(public)
-        native = typed.strategy.mode != "single" or typed.strategy.engine in {"meta_harness", "deep_research"}
+        native = typed.strategy.mode != "single" or typed.strategy.engine in {"meta_harness", "autoresearch"}
         optimizer_index = next(index for index, check in enumerate(result["checks"]) if check.get("key") == "optimizer")
         result["checks"][optimizer_index:optimizer_index] = _verify_model_routes(gateway, native=native)
     return result

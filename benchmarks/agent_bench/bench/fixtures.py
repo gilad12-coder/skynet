@@ -821,8 +821,8 @@ def _blackbox() -> dict[str, Any]:
             "checkpoint_recovery_reason": "This pinned engine does not expose a compatible checkpoint restore contract.",
         },
         {
-            "id": "deep_research",
-            "label": "Deep Research",
+            "id": "autoresearch",
+            "label": "AutoResearch",
             "description": "A coding agent runs research rounds over a Pareto frontier of versions.",
             "available": True,
             "unavailable_reason": None,
@@ -857,7 +857,7 @@ def _blackbox() -> dict[str, Any]:
     return {
         "sandbox_available": True,
         "sandbox_reason": None,
-        "auto_engines": ["gepa", "deep_research", "meta_harness"],
+        "auto_engines": ["gepa", "autoresearch", "meta_harness"],
         "auto_available": True,
         "auto_unavailable_reason": None,
         "auto_checkpoint_recovery_supported": False,

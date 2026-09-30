@@ -34,8 +34,8 @@ from core.models.blackbox import (
 )
 from core.models.results import ModelTokenUsage
 
+from .. import autoresearch as autoresearch_mod
 from .. import autosaddler as autosaddler_mod
-from .. import deep_research as deep_research_mod
 from .. import meta_harness as meta_harness_mod
 from .. import scorer as scorer_mod
 from .. import service as service_mod
@@ -127,7 +127,7 @@ def fake_native_proposers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, En
             Candidate-level aggregate evidence from the fake proposal.
         """
         invocations.append((engine, ctx))
-        candidate = "aeioua" if engine == "deep_research" else "aeiouaa"
+        candidate = "aeioua" if engine == "autoresearch" else "aeiouaa"
         scores = []
         for example in task.train_set or task.val_set or [None]:
             if server.remaining <= 0:
@@ -141,7 +141,7 @@ def fake_native_proposers(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, En
             metadata={"engine": engine},
         )
 
-    monkeypatch.setattr(deep_research_mod, "run_native_engine", run_native)
+    monkeypatch.setattr(autoresearch_mod, "run_native_engine", run_native)
     monkeypatch.setattr(meta_harness_mod, "run_native_engine", run_native)
     monkeypatch.setattr(autosaddler_mod, "run_native_engine", run_native)
     return invocations
@@ -233,13 +233,13 @@ def test_auto_run_hands_off_between_engines(
     assert response.strategy_mode == "auto"
     assert {(lane.engine, lane.phase) for lane in response.lanes[:4]} == {
         ("gepa", "explore"),
-        ("deep_research", "explore"),
+        ("autoresearch", "explore"),
         ("meta_harness", "explore"),
         ("autosaddler", "explore"),
     }
     assert (response.lanes[-1].engine, response.lanes[-1].phase) == ("gepa", "continue")
     assert response.engine_used == "gepa"
-    assert {engine for engine, _ in fake_native_proposers} == {"deep_research", "meta_harness", "autosaddler"}
+    assert {engine for engine, _ in fake_native_proposers} == {"autoresearch", "meta_harness", "autosaddler"}
     assert all(ctx.native_options.model == "fake/model" for _, ctx in fake_native_proposers)
     assert all(ctx.native_options.runtime == "vercel" for _, ctx in fake_native_proposers)
     assert all(ctx.native_options.max_token_cost > 0 for _, ctx in fake_native_proposers)
@@ -306,7 +306,7 @@ def test_validate_payload_checks_engine_and_scorer_code(monkeypatch: pytest.Monk
     assert checked == [VOWEL_SCORER_CODE]
 
     with pytest.raises(ServiceError, match="not available"):
-        validate_blackbox_payload(_payload(strategy={"mode": "single", "engine": "deep_research"}))
+        validate_blackbox_payload(_payload(strategy={"mode": "single", "engine": "autoresearch"}))
 
     remote = _payload(scorer={"kind": "remote", "url": "https://scorer.example"})
     checked.clear()
@@ -546,7 +546,7 @@ _JUDGE_SCORER_CODE = (
     "strategy",
     [
         {"mode": "auto"},
-        {"mode": "single", "engine": "deep_research"},
+        {"mode": "single", "engine": "autoresearch"},
         {"mode": "single", "engine": "meta_harness"},
     ],
 )
@@ -582,7 +582,7 @@ def test_unavailable_native_recipe_fails_before_building_a_scorer(
         ({"mode": "auto"}, True),
         ({"mode": "single", "engine": "meta_harness"}, True),
         ({"mode": "single", "engine": "gepa"}, False),
-        ({"mode": "single", "engine": "deep_research"}, False),
+        ({"mode": "single", "engine": "autoresearch"}, False),
         ({"mode": "single", "engine": "autosaddler"}, False),
     ],
 )
@@ -703,7 +703,7 @@ def test_combined_usage_preserves_distinct_native_model_keys() -> None:
     [
         ({"mode": "auto"}, True),
         ({"mode": "single", "engine": "meta_harness"}, True),
-        ({"mode": "single", "engine": "deep_research"}, True),
+        ({"mode": "single", "engine": "autoresearch"}, True),
         ({"mode": "single", "engine": "gepa"}, False),
         ({"mode": "single", "engine": "best_of_n"}, False),
     ],

@@ -119,7 +119,7 @@ jobs:
           import core.service_gateway.optimization
           from gepa.oa import list_engines
           from gepa.optimize_anything import optimize_best_of
-          assert {'gepa', 'meta_harness', 'deep_research', 'best_of_n'} <= set(list_engines())
+          assert {'gepa', 'meta_harness', 'autoresearch', 'best_of_n'} <= set(list_engines())
           print('pip-path image imports OK')
           "
       - name: Pinned native optimizer runtime is installed

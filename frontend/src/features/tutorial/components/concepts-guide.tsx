@@ -636,7 +636,7 @@ function EngineTable() {
   const engines: Array<[string, string]> = [
     ["GEPA", msg("auto.features.tutorial.components.concepts.guide.literal.373")],
     ["Best-of-N", msg("auto.features.tutorial.components.concepts.guide.literal.374")],
-    ["Deep Research", msg("auto.features.tutorial.components.concepts.guide.literal.375")],
+    ["AutoResearch", msg("auto.features.tutorial.components.concepts.guide.literal.375")],
     ["Meta-Harness", msg("auto.features.tutorial.components.concepts.guide.literal.376")],
     ["AutoSaddler", msg("auto.features.tutorial.components.concepts.guide.literal.377")],
   ];

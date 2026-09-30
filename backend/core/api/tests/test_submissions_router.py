@@ -2025,7 +2025,7 @@ def test_submit_blackbox_run_returns_409_when_preflight_fails(monkeypatch: pytes
 
     def _reject(payload: Any) -> None:
         """Fail like an unavailable engine."""
-        raise ServiceError("Engine 'deep_research' is not available: sandbox missing")
+        raise ServiceError("Engine 'autoresearch' is not available: sandbox missing")
 
     monkeypatch.setattr(_sub_mod, "validate_blackbox_payload", _reject)
 
@@ -2033,7 +2033,7 @@ def test_submit_blackbox_run_returns_409_when_preflight_fails(monkeypatch: pytes
 
     assert resp.status_code == 409
     assert resp.json()["code"] == "submission.validation_failed"
-    assert "deep_research" not in resp.text
+    assert "autoresearch" not in resp.text
     assert store.created_ids() == []
 
 
@@ -2189,19 +2189,19 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     assert text.json()["target_kind"] == "text"
     assert text.json()["sandbox_available"] is True
     by_id = {engine["id"]: engine for engine in text.json()["engines"]}
-    assert list(by_id) == ["gepa", "best_of_n", "deep_research", "meta_harness", "autosaddler"]
+    assert list(by_id) == ["gepa", "best_of_n", "autoresearch", "meta_harness", "autosaddler"]
     assert by_id["gepa"]["available"] is True
     assert by_id["gepa"]["supports_parts"] is True
     assert by_id["gepa"]["checkpoint_recovery_supported"] is True
     assert by_id["gepa"]["checkpoint_recovery_reason"] is None
-    assert by_id["deep_research"]["available"] is True
-    assert by_id["deep_research"]["unavailable_reason"] is None
-    assert by_id["deep_research"]["checkpoint_recovery_supported"] is False
-    assert "does not expose" in by_id["deep_research"]["checkpoint_recovery_reason"]
+    assert by_id["autoresearch"]["available"] is True
+    assert by_id["autoresearch"]["unavailable_reason"] is None
+    assert by_id["autoresearch"]["checkpoint_recovery_supported"] is False
+    assert "does not expose" in by_id["autoresearch"]["checkpoint_recovery_reason"]
     assert by_id["meta_harness"]["available"] is True
     assert by_id["meta_harness"]["requires_agent_target"] is False
     assert {key for key, engine in by_id.items() if engine["supports_parts"]} == {"gepa", "autosaddler"}
-    assert text.json()["auto_engines"] == ["gepa", "deep_research", "meta_harness", "autosaddler"]
+    assert text.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler"]
     assert text.json()["auto_available"] is True
     assert text.json()["auto_unavailable_reason"] is None
     assert text.json()["auto_checkpoint_recovery_supported"] is False
@@ -2217,7 +2217,7 @@ def test_blackbox_engine_catalog_resolves_availability_per_target(monkeypatch: p
     agent_by_id = {engine["id"]: engine for engine in agent.json()["engines"]}
     assert agent_by_id["meta_harness"]["available"] is True
     assert agent_by_id["meta_harness"]["unavailable_reason"] is None
-    assert agent.json()["auto_engines"] == ["gepa", "deep_research", "meta_harness", "autosaddler"]
+    assert agent.json()["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler"]
 
 
 def test_blackbox_engine_catalog_surfaces_the_missing_sandbox_reason(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2258,17 +2258,17 @@ def test_blackbox_engine_catalog_checks_the_managed_sandbox(monkeypatch: pytest.
 
     catalog = client.get("/blackbox/engines").json()
 
-    assert catalog["auto_engines"] == ["gepa", "deep_research", "meta_harness", "autosaddler"]
+    assert catalog["auto_engines"] == ["gepa", "autoresearch", "meta_harness", "autosaddler"]
     assert catalog["auto_available"] is False
     assert "Managed sandbox is missing" in catalog["auto_unavailable_reason"]
     assert catalog["proposer_runtimes"][0]["available"] is False
     by_id = {engine["id"]: engine for engine in catalog["engines"]}
     assert by_id["gepa"]["available"] is True
-    assert by_id["deep_research"]["available"] is False
+    assert by_id["autoresearch"]["available"] is False
     assert by_id["meta_harness"]["available"] is False
 
 
-@pytest.mark.parametrize("engine", ["meta_harness", "deep_research"])
+@pytest.mark.parametrize("engine", ["meta_harness", "autoresearch"])
 @pytest.mark.parametrize("runtime", ["worker", "vercel"])
 def test_submit_blackbox_native_engine_accepts_text_target(
     monkeypatch: pytest.MonkeyPatch, engine: str, runtime: str
@@ -2355,7 +2355,7 @@ def test_submit_blackbox_native_engine_accepts_byok_model_routes(
     monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
     monkeypatch.setattr(_bb_service, "agent_target_unavailable_reason", lambda _settings: None)
     payload = _blackbox_payload()
-    payload.update(strategy={"mode": "single", "engine": "deep_research"}, max_cost_cents=100)
+    payload.update(strategy={"mode": "single", "engine": "autoresearch"}, max_cost_cents=100)
     payload.update(override)
 
     response = client.post("/blackbox/run", json=payload)
@@ -2382,7 +2382,7 @@ def test_submit_blackbox_native_engine_auto_creates_a_bounded_budget(monkeypatch
     monkeypatch.setattr(_bb_service, "native_runtime_unavailable_reason", lambda _runtime, _settings: None)
     monkeypatch.setattr(_bb_service, "validate_scorer_code", lambda _code: None)
     payload = _blackbox_payload()
-    payload.update(strategy={"mode": "single", "engine": "deep_research"}, max_cost_cents=None)
+    payload.update(strategy={"mode": "single", "engine": "autoresearch"}, max_cost_cents=None)
 
     response = client.post("/blackbox/run", json=payload)
 

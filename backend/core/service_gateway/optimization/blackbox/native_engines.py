@@ -1,4 +1,4 @@
-"""Meta-Harness and Deep Research loops behind the gepa.oa ``Engine`` contract.
+"""Meta-Harness and AutoResearch loops behind the gepa.oa ``Engine`` contract.
 
 This standalone module is copied into the selected runtime beside
 ``native_runner.py``. The upstream Meta-Harness repository is a research script
@@ -10,7 +10,7 @@ from the verbatim upstream file under ``upstream_prompts/`` through
 exact-snippet substitutions, so a pin bump that changes the upstream wording
 fails loudly instead of drifting silently.
 
-Deep Research is Skynet's own engine: round-based, directive-driven research
+AutoResearch is Skynet's own engine: round-based, directive-driven research
 over a per-example Pareto frontier, with the evidence recorded by the engine
 rather than by the agent.
 
@@ -44,7 +44,7 @@ from gepa.oa.eval_server import EvalServer
 from gepa.oa.task import Task, seed_as_text
 
 META_HARNESS_REVISION = "0cbc31e97c9e6d24232d1dc754827c02e1ec415c"
-DEEP_RESEARCH_VERSION = "1"
+AUTORESEARCH_VERSION = "1"
 PROMPTS_DIR = Path(__file__).with_name("upstream_prompts")
 # harness_bridge.DIRECT_ANTHROPIC_ENV; this module loads in the sandbox without its siblings.
 _DIRECT_ANTHROPIC_ENV = "SKYNET_CLAUDE_DIRECT"
@@ -57,7 +57,7 @@ META_HARNESS_TOOLS = "Read,Glob,Grep,Agent,Write,Edit,Bash"
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,80}$")
 _SESSION_POLL_SECONDS = 0.2
 
-# Deep Research tuning: frontier and dossier sizes keep STATE.md readable; the
+# AutoResearch tuning: frontier and dossier sizes keep STATE.md readable; the
 # stale-round thresholds decide when to change tack and when to stop paying for
 # rounds that no longer move the leader.
 _FRONTIER_SIZE = 4
@@ -458,7 +458,7 @@ def _mean(row: dict[str, float]) -> float:
     return sum(row.values()) / len(row) if row else 0.0
 
 
-class DeepResearchEngine:
+class AutoResearchEngine:
     """Round-based research over a candidate frontier, driven against the evaluation server.
 
     Each round is a fresh proposer session with an explicit directive the engine
@@ -470,7 +470,7 @@ class DeepResearchEngine:
     learns carries between rounds in its own ``notebook.md``.
     """
 
-    name = "deep_research"
+    name = "autoresearch"
 
     def __init__(self, config: OptimizeAnythingConfig) -> None:
         """Pop the engine knobs from the shared config.
@@ -488,7 +488,7 @@ class DeepResearchEngine:
         self.max_thinking_tokens = None if thinking is None else int(thinking)
         self.max_token_cost = config.max_token_cost
         self.stop_at_score = config.stop_at_score
-        self.run_dir = Path(config.run_dir or "deep-research-run").resolve()
+        self.run_dir = Path(config.run_dir or "autoresearch-run").resolve()
         self.work_dir = self.run_dir / "lab"
         self.session_ids: list[str] = []
         self.cost_usd = 0.0
@@ -1006,7 +1006,7 @@ class DeepResearchEngine:
             eval_log=list(server.eval_log),
             metadata={
                 "engine": self.name,
-                "engine_version": DEEP_RESEARCH_VERSION,
+                "engine_version": AUTORESEARCH_VERSION,
                 "rounds": self.round,
                 "directives": list(self.directives),
                 "session_ids": list(self.session_ids),
@@ -1508,7 +1508,7 @@ class MetaHarnessEngine:
         )
 
 
-ENGINES: dict[str, type] = {DeepResearchEngine.name: DeepResearchEngine, MetaHarnessEngine.name: MetaHarnessEngine}
+ENGINES: dict[str, type] = {AutoResearchEngine.name: AutoResearchEngine, MetaHarnessEngine.name: MetaHarnessEngine}
 
 
 def check_assets() -> dict[str, str]:

@@ -35,7 +35,7 @@ def test_vercel_is_the_only_proposer_runtime() -> None:
     assert request.proposer_runtime == "vercel"
 
 
-@pytest.mark.parametrize("engine", ["meta_harness", "deep_research"])
+@pytest.mark.parametrize("engine", ["meta_harness", "autoresearch"])
 @pytest.mark.parametrize("runtime", ["worker", "vercel"])
 def test_native_engine_normalizes_legacy_runtime_without_requiring_agent_target(engine: str, runtime: str) -> None:
     """Run legacy and current inputs in Vercel while keeping evaluation independent.
@@ -74,7 +74,7 @@ def test_autosaddler_accepts_separate_named_parts() -> None:
     [
         {"mode": "auto"},
         {"mode": "single", "engine": "meta_harness"},
-        {"mode": "single", "engine": "deep_research"},
+        {"mode": "single", "engine": "autoresearch"},
         {"mode": "single", "engine": "best_of_n"},
     ],
 )
@@ -129,7 +129,7 @@ def test_agent_target_rejects_mismatched_task_model_role() -> None:
     [
         ({"mode": "single", "engine": "meta_harness"}, True),
         ({"mode": "single", "engine": "autosaddler"}, True),
-        ({"mode": "single", "engine": "deep_research"}, False),
+        ({"mode": "single", "engine": "autoresearch"}, False),
         ({"mode": "single", "engine": "gepa"}, False),
         ({"mode": "single", "engine": "best_of_n"}, False),
         ({"mode": "auto"}, False),

@@ -227,9 +227,9 @@ public set: maya, noa, ravid.
 
 ### Blackbox engines (`blackbox`)
 
-5 engines: `gepa`, `best_of_n`, `deep_research`, `meta_harness` (all
+5 engines: `gepa`, `best_of_n`, `autoresearch`, `meta_harness` (all
 `available: True`) and `autosaddler` (`available: False`, deployment-disabled).
-`auto_engines = [gepa, deep_research, meta_harness]`, `auto_available: True`, so a
+`auto_engines = [gepa, autoresearch, meta_harness]`, `auto_available: True`, so a
 default/Auto-recipe blackbox submit is runnable. Naming `autosaddler` on a submit
 raises 422.
 

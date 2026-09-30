@@ -112,6 +112,6 @@ test("optimizationModelFamily names the proposer the model drives", () => {
   assert.equal(optimizationModelFamily("single", "best_of_n"), "best_of_n");
   assert.equal(optimizationModelFamily("single", "gepa"), "gepa");
   assert.equal(optimizationModelFamily("single", "meta_harness"), "meta_harness");
-  assert.equal(optimizationModelFamily("single", "deep_research"), "deep_research");
+  assert.equal(optimizationModelFamily("single", "autoresearch"), "autoresearch");
   assert.equal(optimizationModelFamily("single", "autosaddler"), "autosaddler");
 });

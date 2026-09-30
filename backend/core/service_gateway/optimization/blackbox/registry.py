@@ -11,16 +11,16 @@ from dataclasses import dataclass
 
 from ....exceptions import ServiceError
 from ....models.blackbox import (
+    BLACKBOX_ENGINE_AUTORESEARCH,
     BLACKBOX_ENGINE_AUTOSADDLER,
     BLACKBOX_ENGINE_BEST_OF_N,
-    BLACKBOX_ENGINE_DEEP_RESEARCH,
     BLACKBOX_ENGINE_GEPA,
     BLACKBOX_ENGINE_META_HARNESS,
     BLACKBOX_MULTI_PART_ENGINES,
 )
+from .autoresearch import AutoResearchEngine
 from .autosaddler import AutoSaddlerEngine
 from .best_of_n import BestOfNEngine
-from .deep_research import DeepResearchEngine
 from .gepa_engine import GepaEngine
 from .meta_harness import MetaHarnessEngine
 from .protocol import Engine
@@ -119,11 +119,11 @@ ENGINES: dict[str, EngineSpec] = {
         description="Independent proposals from the reflection model; keep the best.",
         factory=BestOfNEngine,
     ),
-    BLACKBOX_ENGINE_DEEP_RESEARCH: EngineSpec(
-        id=BLACKBOX_ENGINE_DEEP_RESEARCH,
-        label="Deep Research",
+    BLACKBOX_ENGINE_AUTORESEARCH: EngineSpec(
+        id=BLACKBOX_ENGINE_AUTORESEARCH,
+        label="AutoResearch",
         description="A coding agent runs research rounds over a Pareto frontier of versions.",
-        factory=DeepResearchEngine,
+        factory=AutoResearchEngine,
         requires_proposer=True,
     ),
     BLACKBOX_ENGINE_META_HARNESS: EngineSpec(

@@ -14,7 +14,7 @@ export function usesNativeProposer(
   return (
     mode !== "single" ||
     engine === "meta_harness" ||
-    engine === "deep_research" ||
+    engine === "autoresearch" ||
     engine === "autosaddler"
   );
 }
@@ -44,7 +44,7 @@ export function proposerKnobs(
   const auto = mode !== "single";
   return {
     candidates: auto || engine === "meta_harness",
-    ralph: auto || engine === "deep_research",
+    ralph: auto || engine === "autoresearch",
   };
 }
 

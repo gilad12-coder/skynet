@@ -1,4 +1,4 @@
-"""Exercise the Meta-Harness and Deep Research loops against the real evaluation server."""
+"""Exercise the Meta-Harness and AutoResearch loops against the real evaluation server."""
 
 from __future__ import annotations
 
@@ -119,7 +119,7 @@ def test_adapted_prompts_replace_the_upstream_domains() -> None:
     assert "agents/<name>.txt" in skill
     assert "MemorySystem" not in skill
     assert "dataset" not in skill.lower()
-    brief = native_engines.DeepResearchEngine(_config("deep_research"))
+    brief = native_engines.AutoResearchEngine(_config("autoresearch"))
     brief.example_ids = ["a"]
     text = brief._brief()
     assert "./eval.sh <file> <example_id>" in text
@@ -165,7 +165,7 @@ def test_meta_harness_benchmarks_seed_then_proposed_candidates(
     assert (logs / "claude_sessions" / "iter1_stdout.json").read_text().startswith('{"type": "result"')
 
 
-def test_deep_research_runs_directed_rounds_on_engine_recorded_evidence(
+def test_autoresearch_runs_directed_rounds_on_engine_recorded_evidence(
     tmp_path: Path, fake_home: Path, server: EvalServer
 ) -> None:
     """Each round is a fresh session steered by STATE.md, which the engine fills from the evaluator's answers."""
@@ -192,9 +192,9 @@ def test_deep_research_runs_directed_rounds_on_engine_recorded_evidence(
         "else:\n"
         "    assert '**Explore.**' in state and \"did not beat `c002`\" in state\n",
     )
-    config = _config("deep_research")
+    config = _config("autoresearch")
     config.run_dir = str(tmp_path / "run")
-    engine = native_engines.DeepResearchEngine(config)
+    engine = native_engines.AutoResearchEngine(config)
     result = engine.run(server.task, server)
     assert result.best_score == 0.875
     assert result.best_candidate.startswith("better")
@@ -213,12 +213,12 @@ def test_deep_research_runs_directed_rounds_on_engine_recorded_evidence(
     assert (engine.run_dir / "sessions" / "round3_stdout.json").exists()
     output = tmp_path / "out"
     engine.process_result(result, output)
-    assert "Round 1" in (output / "deep_research" / "notebook.md").read_text()
+    assert "Round 1" in (output / "autoresearch" / "notebook.md").read_text()
 
 
-def test_deep_research_directives_follow_the_evidence(tmp_path: Path) -> None:
+def test_autoresearch_directives_follow_the_evidence(tmp_path: Path) -> None:
     """Complementary frontier members trigger a combine round; stalls trigger a pivot."""
-    engine = native_engines.DeepResearchEngine(_config("deep_research"))
+    engine = native_engines.AutoResearchEngine(_config("autoresearch"))
     engine.work_dir = tmp_path
     (tmp_path / "archive").mkdir()
     engine.round = 1
@@ -239,7 +239,7 @@ def test_deep_research_directives_follow_the_evidence(tmp_path: Path) -> None:
     assert "`c001` beats the leader `c002` on `a`" in engine._directive_text("combine", table, ["y", "x"])
 
 
-def test_deep_research_eval_sh_reports_budget_exhaustion_and_ends_the_run(
+def test_autoresearch_eval_sh_reports_budget_exhaustion_and_ends_the_run(
     tmp_path: Path, fake_home: Path, server: EvalServer
 ) -> None:
     """HTTP 429 from the evaluator surfaces the marker, and no further round starts."""
@@ -253,33 +253,31 @@ def test_deep_research_eval_sh_reports_budget_exhaustion_and_ends_the_run(
         "print(second.stderr, file=sys.stderr)\n",
     )
     server.budget = BudgetTracker(max_evals=2)
-    config = _config("deep_research")
+    config = _config("autoresearch")
     config.run_dir = str(tmp_path / "run")
-    result = native_engines.DeepResearchEngine(config).run(server.task, server)
+    result = native_engines.AutoResearchEngine(config).run(server.task, server)
     assert (result.best_candidate, result.best_score, result.total_evals) == ("better", 0.875, 2)
     assert (result.metadata["rounds"], len(_invocations(fake_home))) == (1, 1)
 
 
-def test_deep_research_single_round_when_multi_round_is_off(
-    tmp_path: Path, fake_home: Path, server: EvalServer
-) -> None:
+def test_autoresearch_single_round_when_multi_round_is_off(tmp_path: Path, fake_home: Path, server: EvalServer) -> None:
     """With ``ralph`` off the engine runs exactly one research round."""
     _install_fake(fake_home, "subprocess.run(['./eval.sh', 'work/seed.txt'], check=True, capture_output=True)\n")
-    config = _config("deep_research", ralph=False)
+    config = _config("autoresearch", ralph=False)
     config.run_dir = str(tmp_path / "run")
-    result = native_engines.DeepResearchEngine(config).run(server.task, server)
+    result = native_engines.AutoResearchEngine(config).run(server.task, server)
     assert (result.best_candidate, result.metadata["rounds"], result.total_evals) == ("seed", 1, 2)
 
 
-def test_deep_research_without_any_evaluation_fails_instead_of_guessing(
+def test_autoresearch_without_any_evaluation_fails_instead_of_guessing(
     tmp_path: Path, fake_home: Path, server: EvalServer
 ) -> None:
     """A session that never called the evaluator leaves nothing verified to return."""
     _install_fake(fake_home, "pathlib.Path('work/c.txt').write_text('unscored')\n")
-    config = _config("deep_research")
+    config = _config("autoresearch")
     config.run_dir = str(tmp_path / "run")
     with pytest.raises(RuntimeError, match="without scoring any candidate"):
-        native_engines.DeepResearchEngine(config).run(server.task, server)
+        native_engines.AutoResearchEngine(config).run(server.task, server)
     assert "evaluate_examples" not in vars(server)
 
 
@@ -301,9 +299,9 @@ def test_single_candidate_tasks_use_the_whole_candidate_route(tmp_path: Path, fa
             "run = subprocess.run(['./eval.sh', 'work/c.txt'], capture_output=True, text=True)\n"
             "assert run.returncode == 0, run.stderr\n",
         )
-        config = _config("deep_research")
+        config = _config("autoresearch")
         config.run_dir = str(tmp_path / "run")
-        engine = native_engines.DeepResearchEngine(config)
+        engine = native_engines.AutoResearchEngine(config)
         result = engine.run(task, single)
         assert result.best_candidate == "longer text" + "x" * result.metadata["rounds"]
         assert '/evaluate"' in (engine.work_dir / "eval.sh").read_text()

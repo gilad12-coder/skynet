@@ -57,14 +57,14 @@ function isLive(job: OptimizationStatusResponse): boolean {
 
 // Each climbing engine explains its own loop; Meta-Harness keeps the default.
 const ENGINE_EXPLAINERS: Record<string, MessageKey> = {
-  deep_research: "meta_harness.explainer.deep_research",
+  autoresearch: "meta_harness.explainer.autoresearch",
   autosaddler: "meta_harness.explainer.autosaddler",
 };
 
 export interface MetaHarnessPanelProps {
   job: OptimizationStatusResponse;
   // The hill-climbing engine that produced the versions: meta_harness,
-  // deep_research or autosaddler.
+  // autoresearch or autosaddler.
   engine: string;
   // Run configuration of the black-box run, forwarded to the drawer so it
   // names versions by kind and shows per-case scores only when cases exist.
@@ -72,7 +72,7 @@ export interface MetaHarnessPanelProps {
 }
 
 /**
- * Run view of a hill-climbing lane (Meta-Harness, Deep Research, AutoSaddler).
+ * Run view of a hill-climbing lane (Meta-Harness, AutoResearch, AutoSaddler).
  * The engine rewrites the best version so far and scores every candidate on
  * all cases, so the run is a climb rather than a tree: the chart lays versions out in scoring order
  * with the best so far as a staircase, and a version's drawer shows how it did

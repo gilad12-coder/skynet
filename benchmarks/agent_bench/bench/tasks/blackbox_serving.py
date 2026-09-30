@@ -66,7 +66,7 @@ def _oracle_pick_engine(w: World) -> str:
     return (
         "For a run you might need to resume from a checkpoint, pick "
         f"{', '.join(resumable).upper()}: it is the only black-box engine that supports "
-        "checkpoint recovery. Best-of-N, Deep Research and Meta-Harness cannot restore from a "
+        "checkpoint recovery. Best-of-N, AutoResearch and Meta-Harness cannot restore from a "
         "checkpoint, and AutoSaddler is disabled on this deployment."
     )
 

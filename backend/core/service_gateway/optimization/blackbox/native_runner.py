@@ -549,7 +549,7 @@ def execute(payload: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Result envelope, or a failure envelope retaining available usage.
     """
-    if payload.get("engine_id") not in ("meta_harness", "deep_research"):
+    if payload.get("engine_id") not in ("meta_harness", "autoresearch"):
         raise ValueError("Unsupported native optimizer.")
     if payload.get("task", {}).get("test_set") is not None:
         raise ValueError("Held-out examples must not enter the native optimizer.")

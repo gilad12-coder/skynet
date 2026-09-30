@@ -55,7 +55,7 @@ External evaluator and MCP service fees are outside Skynet Total. Their relay st
 | --- | --- |
 | DSPy GEPA, including independent GEPA grid pairs | Exact compatible persisted GEPA state |
 | Anything, single GEPA engine | Exact compatible persisted GEPA state |
-| Meta-Harness, Deep Research, Auto/omni, other optimizers | No automatic checkpoint recovery contract |
+| Meta-Harness, AutoResearch, Auto/omni, other optimizers | No automatic checkpoint recovery contract |
 
 Recovery requires state schema 7 at the pinned GEPA revision, matching checkpoint bytes, task/configuration/data, backend source/version, dependency versions, and Python patch version. It retains the same job and cumulative funded budget, fences the previous execution generation, and waits for unresolved prior usage. Upstream resumed seed reevaluation is a real metered operation. Missing or incompatible evidence never triggers a fresh run automatically.
 
