@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "وارد کردن جدول‌ها و ویوها از مجموعه‌داده‌های BigQuery شما.",
-  "connectors.bigquery.credentials_help": "کلید JSON یک حساب سرویس را که نقش‌های BigQuery Data Viewer و Job User را روی پروژه دارد جای‌گذاری کنید.",
-  "connectors.bigquery.oauth_button": "ادامه با Google",
+  "connectors.bigquery.credentials_help": "کلید JSON یک حساب سرویس را که نقش‌های BigQuery Data Viewer و Job User را روی پروژه دارد جای‌گذاری کنید. کلید را با gcloud iam service-accounts keys create بسازید.",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "وارد کردن آزمایش‌ها، لاگ‌ها و مجموعه‌داده‌ها از پروژه‌های Braintrust شما.",
   "connectors.braintrust.credentials_help": "کلید API را از بخش تنظیمات سازمان خود بسازید، در",
@@ -117,8 +116,7 @@
   "connectors.field.token": "توکن دسترسی شخصی",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "فایل‌ها را از باکت‌های Cloud Storage خود وارد کنید.",
-  "connectors.gcs.credentials_help": "کلید JSON یک حساب سرویس دارای نقش Storage Object Viewer روی باکت‌های موردنیاز را جای‌گذاری کنید.",
-  "connectors.gcs.oauth_button": "ادامه با Google",
+  "connectors.gcs.credentials_help": "کلید JSON یک حساب سرویس دارای نقش Storage Object Viewer روی باکت‌های موردنیاز را جای‌گذاری کنید. کلید را با gcloud iam service-accounts keys create بسازید.",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "فایل‌های CSV، JSON یا Parquet را از هر مخزنی که می‌توانید بخوانید وارد کنید.",
   "connectors.github.credentials_help": "یک توکن با دسترسی محدود و فقط‌خواندنی به مخازن موردنیاز کافی است. یکی از آن‌ها را در",

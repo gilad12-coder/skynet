@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "Tabellen und Ansichten aus Ihren BigQuery-Datensätzen importieren",
-  "connectors.bigquery.credentials_help": "Fügen Sie den JSON-Schlüssel eines Dienstkontos mit den Rollen „BigQuery Data Viewer“ und „Job User“ für das Projekt ein",
-  "connectors.bigquery.oauth_button": "Mit Google fortfahren",
+  "connectors.bigquery.credentials_help": "Fügen Sie den JSON-Schlüssel eines Dienstkontos mit den Rollen „BigQuery Data Viewer“ und „Job User“ für das Projekt ein. Erstellen Sie ihn mit gcloud iam service-accounts keys create.",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "Experimente, Logs und Datensätze aus Ihren Braintrust-Projekten importieren",
   "connectors.braintrust.credentials_help": "Erstellen Sie einen API-Schlüssel in Ihren Organisationseinstellungen unter",
@@ -117,8 +116,7 @@
   "connectors.field.token": "Persönliches Zugriffstoken",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "Importieren Sie Dateien aus Ihren Cloud Storage-Buckets.",
-  "connectors.gcs.credentials_help": "Fügen Sie den JSON-Schlüssel eines Dienstkontos mit Storage Object Viewer für die benötigten Buckets ein.",
-  "connectors.gcs.oauth_button": "Mit Google fortfahren",
+  "connectors.gcs.credentials_help": "Fügen Sie den JSON-Schlüssel eines Dienstkontos mit Storage Object Viewer für die benötigten Buckets ein. Erstellen Sie ihn mit gcloud iam service-accounts keys create.",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "Importieren Sie CSV-, JSON- oder Parquet-Dateien aus jedem Repository, das Sie lesen können.",
   "connectors.github.credentials_help": "Ein fein abgestuftes Token mit Lesezugriff auf die benötigten Repositorys genügt. Erstellen Sie eines unter",

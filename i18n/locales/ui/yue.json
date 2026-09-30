@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "從你嘅 BigQuery 資料集入面匯入表同檢視表",
-  "connectors.bigquery.credentials_help": "貼上有呢個專案 BigQuery Data Viewer 同 Job User 權限嘅服務帳戶 JSON 密鑰",
-  "connectors.bigquery.oauth_button": "用 Google 繼續",
+  "connectors.bigquery.credentials_help": "貼上有呢個專案 BigQuery Data Viewer 同 Job User 權限嘅服務帳戶 JSON 密鑰。可以用 gcloud iam service-accounts keys create 建立。",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "從你嘅 Braintrust 專案入面匯入實驗、日誌同資料集",
   "connectors.braintrust.credentials_help": "喺你機構嘅設定入面整一個 API 金鑰，網址喺：",
@@ -117,8 +116,7 @@
   "connectors.field.token": "個人存取權杖",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "從你嘅 Cloud Storage 儲存桶匯入檔案。",
-  "connectors.gcs.credentials_help": "貼上一個喺你需要嘅儲存桶度有 Storage Object Viewer 權限嘅服務帳戶嘅 JSON 金鑰。",
-  "connectors.gcs.oauth_button": "用 Google 繼續",
+  "connectors.gcs.credentials_help": "貼上一個喺你需要嘅儲存桶度有 Storage Object Viewer 權限嘅服務帳戶嘅 JSON 金鑰。可以用 gcloud iam service-accounts keys create 建立。",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "從任何你有讀取權限嘅倉庫匯入 CSV、JSON 或 Parquet 檔案。",
   "connectors.github.credentials_help": "只需要一個對所需倉庫有讀取權限嘅精細權杖就夠。你可以喺",

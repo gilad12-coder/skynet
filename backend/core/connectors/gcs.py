@@ -1,12 +1,10 @@
 """Google Cloud Storage connector.
 
-Linking works through Google OAuth when the deployment registered a Google
-OAuth client, or with a service-account key, optionally pinned to one bucket.
-Tokens carry the read-only storage scope and the JSON API is used directly, so
-no Google client library is needed for the calls involved: list buckets, list
-objects, download an object. A service account lists its own project's
-buckets; a user account has no single project, so its root lists the projects
-it can see (Cloud Resource Manager) and each project opens onto its buckets.
+Linking works only with a service-account key, optionally pinned to one
+bucket. Tokens carry the read-only storage scope and the JSON API is used
+directly, so no Google client library is needed for the calls involved: list
+buckets, list objects, download an object. The root lists the buckets of the
+key's own project.
 """
 
 from __future__ import annotations
@@ -16,69 +14,16 @@ from typing import Any
 from urllib.parse import quote
 
 from ..api.errors import DomainError
-from ..config import settings
 from .base import Credential, Entry, Fetch, import_file, preview_file, range_header, split_location
 from .google_auth import parse_service_account, service_account_token
-from .oauth import OAuthApp
-from .oauth import oauth_available as _oauth_available
 from .tabular import check_size, is_supported
 from .transport import download, get_json
 from .vault import ConnectorSecret
 
 PROVIDER = "gcs"
 API_URL = "https://storage.googleapis.com/storage/v1"
-PROJECTS_URL = "https://cloudresourcemanager.googleapis.com/v1/projects"
-USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 SCOPE = "https://www.googleapis.com/auth/devstorage.read_only"
-# ``cloud-platform.read-only`` is what lets a user token list its projects; buckets are listed per project.
-OAUTH_SCOPES = f"openid email {SCOPE} https://www.googleapis.com/auth/cloud-platform.read-only"
-PROJECT_PREFIX = "project:"
 LIST_LIMIT = 1000
-PROJECT_PROBE_BUCKETS = 3
-
-
-def oauth_app() -> OAuthApp:
-    """Describe the Google OAuth client from settings.
-
-    Returns:
-        The app; ``client_id`` is ``None`` when unconfigured.
-    """
-    secret = settings.google_oauth_client_secret
-    return OAuthApp(
-        provider=PROVIDER,
-        authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
-        token_url="https://oauth2.googleapis.com/token",
-        scopes=OAUTH_SCOPES,
-        client_id=settings.google_oauth_client_id,
-        client_secret=secret.get_secret_value() if secret is not None else None,
-        extra_authorize_params={"access_type": "offline", "prompt": "consent", "include_granted_scopes": "true"},
-    )
-
-
-def oauth_available() -> bool:
-    """Report whether "Continue with Google" can be offered.
-
-    Returns:
-        ``True`` when the client id and the vault key are configured.
-    """
-    return _oauth_available(oauth_app())
-
-
-def fetch_account_label(token: str) -> str | None:
-    """Look up the e-mail behind an OAuth token for the connector card.
-
-    Args:
-        token: A Google access token.
-
-    Returns:
-        The account e-mail, or ``None`` when Google withholds it.
-    """
-    try:
-        body = get_json(USERINFO_URL, provider=PROVIDER, headers=_bearer_headers(token))
-    except DomainError:
-        return None
-    email = body.get("email") if isinstance(body, dict) else None
-    return email if isinstance(email, str) else None
 
 
 def _config(secret: ConnectorSecret) -> dict[str, Any]:
@@ -118,7 +63,7 @@ def _headers(config: dict[str, Any]) -> dict[str, str]:
 
 
 def _secret_headers(secret: ConnectorSecret) -> dict[str, str]:
-    """Bearer headers for a stored connector, OAuth token or service-account key.
+    """Bearer headers for a stored connector's service-account key.
 
     Args:
         secret: The vault entry.
@@ -126,26 +71,7 @@ def _secret_headers(secret: ConnectorSecret) -> dict[str, str]:
     Returns:
         The request headers.
     """
-    if secret.auth_method == "oauth":
-        return _bearer_headers(secret.access_token)
     return _headers(_config(secret))
-
-
-def _list_projects(headers: dict[str, str]) -> list[Entry]:
-    """List the active projects a user account can see.
-
-    Args:
-        headers: Bearer headers.
-
-    Returns:
-        Folder entries keyed ``project:<id>``.
-    """
-    body = get_json(PROJECTS_URL, provider=PROVIDER, headers=headers, params={"filter": "lifecycleState:ACTIVE"})
-    return [
-        Entry(ref=f"{PROJECT_PREFIX}{p['projectId']}", name=p.get("name") or p["projectId"], kind="folder")
-        for p in (body.get("projects") if isinstance(body, dict) else None) or []
-        if isinstance(p.get("projectId"), str)
-    ]
 
 
 def _list_buckets(headers: dict[str, str], project_id: str) -> list[Entry]:
@@ -251,7 +177,7 @@ def web_url(secret: ConnectorSecret, location: str) -> str | None:
 
     Args:
         secret: The stored connector.
-        location: Empty for the top level, ``project:<id>`` or ``bucket/prefix``.
+        location: Empty for the top level, else ``bucket/prefix``.
 
     Returns:
         The URL.
@@ -259,8 +185,6 @@ def web_url(secret: ConnectorSecret, location: str) -> str | None:
     base = "https://console.cloud.google.com/storage/browser"
     if not location:
         return base
-    if location.startswith(PROJECT_PREFIX):
-        return f"{base}?project={quote(location.removeprefix(PROJECT_PREFIX), safe='')}"
     return f"{base}/{quote(location.lstrip('/'))}"
 
 
@@ -287,48 +211,36 @@ def _bucket_has_importable(headers: dict[str, str], bucket: str, prefix: str) ->
 
 
 def has_importable(secret: ConnectorSecret, ref: str) -> bool | None:
-    """Settle whether a project, bucket or prefix holds an importable object.
+    """Settle whether a bucket or prefix holds an importable object.
 
     Args:
         secret: The stored connector.
-        ref: ``project:<id>``, ``bucket`` or ``bucket/prefix/``.
+        ref: ``bucket`` or ``bucket/prefix/``.
 
     Returns:
         ``True``, ``False``, or ``None`` when it is too big to tell.
     """
-    headers = _secret_headers(secret)
-    if not ref.startswith(PROJECT_PREFIX):
-        return _bucket_has_importable(headers, *split_location(ref))
-    buckets = _list_buckets(headers, ref.removeprefix(PROJECT_PREFIX))
-    verdicts = [_bucket_has_importable(headers, b.ref, "") for b in buckets[:PROJECT_PROBE_BUCKETS]]
-    if any(verdicts):
-        return True
-    return False if len(buckets) <= PROJECT_PROBE_BUCKETS and None not in verdicts else None
+    return _bucket_has_importable(_secret_headers(secret), *split_location(ref))
 
 
 def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
-    """List buckets (or, for a user account, projects) at the root, or one prefix of a bucket.
+    """List buckets at the root, or one prefix of a bucket.
 
     Args:
         secret: The stored connector.
-        location: Empty for the root, ``project:<id>`` for a project's
-            buckets, else ``bucket/prefix/``.
+        location: Empty for the root, else ``bucket/prefix/``.
         search: Substring filter applied to the listing.
 
     Returns:
         The entries.
     """
     headers = _secret_headers(secret)
-    if not location and secret.auth_method == "oauth":
-        entries = _list_projects(headers)
-    elif not location:
+    if not location:
         config = _config(secret)
         if config.get("bucket"):
             entries = [Entry(ref=config["bucket"], name=config["bucket"], kind="folder")]
         else:
             entries = _list_buckets(headers, config["service_account"].get("project_id") or "")
-    elif location.startswith(PROJECT_PREFIX):
-        entries = _list_buckets(headers, location.removeprefix(PROJECT_PREFIX))
     else:
         bucket, prefix = split_location(location)
         entries = _list_objects(headers, bucket, prefix)

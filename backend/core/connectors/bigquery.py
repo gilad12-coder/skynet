@@ -1,10 +1,7 @@
 """BigQuery connector: import a table or view.
 
-Linking works through Google OAuth when the deployment registered a Google
-OAuth client, or with a service-account key pinned to one project. A key
-browses that project's datasets, then the tables and views of one dataset; a
-user account has no single project, so its root lists the projects it can see
-and every location and ref carries the project as a ``<project>/`` prefix.
+Linking works only with a service-account key pinned to one project. A key
+browses that project's datasets, then the tables and views of one dataset.
 Tables are read through ``tabledata.list``, which is free of query charges;
 views have no stored rows, so they go through a ``SELECT`` job.
 """
@@ -17,53 +14,19 @@ from typing import Any
 from urllib.parse import quote
 
 from ..api.errors import DomainError
-from ..config import settings
 from .base import Credential, Entry
 from .google_auth import parse_service_account, service_account_token
-from .oauth import OAuthApp
-from .oauth import oauth_available as _oauth_available
 from .records import PREVIEW_ROWS, cell, import_payload, preview_payload, row_cap
 from .transport import get_json, label, post_json
 from .vault import ConnectorSecret
 
 PROVIDER = "bigquery"
 API_URL = "https://bigquery.googleapis.com/bigquery/v2/projects"
-USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 SCOPES = "https://www.googleapis.com/auth/bigquery.readonly"
-OAUTH_SCOPES = f"openid email {SCOPES}"
 LIST_LIMIT = 200
 PAGE_SIZE = 1000
 QUERY_TIMEOUT_MS = 30000
 IDENTIFIER = re.compile(r"^[\w$-]+$")
-# Domain-scoped projects look like ``example.com:analytics``.
-PROJECT_ID = re.compile(r"^[\w.:-]+$")
-
-
-def oauth_app() -> OAuthApp:
-    """Describe the Google OAuth client from settings.
-
-    Returns:
-        The app; ``client_id`` is ``None`` when unconfigured.
-    """
-    secret = settings.google_oauth_client_secret
-    return OAuthApp(
-        provider=PROVIDER,
-        authorize_url="https://accounts.google.com/o/oauth2/v2/auth",
-        token_url="https://oauth2.googleapis.com/token",
-        scopes=OAUTH_SCOPES,
-        client_id=settings.google_oauth_client_id,
-        client_secret=secret.get_secret_value() if secret is not None else None,
-        extra_authorize_params={"access_type": "offline", "prompt": "consent", "include_granted_scopes": "true"},
-    )
-
-
-def oauth_available() -> bool:
-    """Report whether "Continue with Google" can be offered.
-
-    Returns:
-        ``True`` when the client id and the vault key are configured.
-    """
-    return _oauth_available(oauth_app())
 
 
 def _bearer_headers(token: str) -> dict[str, str]:
@@ -78,77 +41,18 @@ def _bearer_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
 
-def fetch_account_label(token: str) -> str | None:
-    """Look up the e-mail behind an OAuth token for the connector card.
-
-    Args:
-        token: A Google access token.
-
-    Returns:
-        The account e-mail, or ``None`` when Google withholds it.
-    """
-    try:
-        body = get_json(USERINFO_URL, provider=PROVIDER, headers=_bearer_headers(token))
-    except DomainError:
-        return None
-    email = body.get("email") if isinstance(body, dict) else None
-    return email if isinstance(email, str) else None
-
-
-def _project(value: str) -> str:
-    """Validate a project id taken from a location or ref.
-
-    Args:
-        value: The candidate project id.
-
-    Returns:
-        The project id.
-
-    Raises:
-        DomainError: 400 when it is not a project id.
-    """
-    if not PROJECT_ID.match(value):
-        raise DomainError("connectors.invalid_ref", status=400)
-    return value
-
-
-def _config(secret: ConnectorSecret, path: str) -> tuple[str, str, str, dict[str, str]]:
-    """Resolve the project, the project-relative path and auth headers.
+def _config(secret: ConnectorSecret) -> tuple[str, dict[str, str]]:
+    """Resolve the project and auth headers of the stored service account.
 
     Args:
         secret: The vault entry.
-        path: A location or ref; OAuth links prefix it with ``<project>/``.
 
     Returns:
-        ``(project, rest, prefix, headers)``: ``rest`` is ``path`` without the
-        project and ``prefix`` is what new refs must start with.
+        ``(project, headers)``.
     """
-    if secret.auth_method == "oauth":
-        project, _, rest = path.partition("/")
-        return _project(project), rest, f"{project}/", _bearer_headers(secret.access_token)
     config = json.loads(secret.access_token)
     token = service_account_token(config["service_account"], SCOPES, PROVIDER)
-    return config["project"], path, "", _bearer_headers(token)
-
-
-def _list_projects(headers: dict[str, str], needle: str) -> list[Entry]:
-    """List the projects a user account can use BigQuery in.
-
-    Args:
-        headers: Bearer headers.
-        needle: Lower-cased name filter.
-
-    Returns:
-        Folder entries keyed by project id.
-    """
-    body = get_json(API_URL, provider=PROVIDER, headers=headers, params={"maxResults": LIST_LIMIT})
-    entries: list[Entry] = []
-    for p in (body.get("projects") if isinstance(body, dict) else None) or []:
-        project_id = (p.get("projectReference") or {}).get("projectId")
-        name = p.get("friendlyName") or project_id
-        if isinstance(project_id, str) and (needle in project_id.lower() or needle in str(name).lower()):
-            entries.append(Entry(ref=project_id, name=str(name), kind="folder"))
-    return entries
+    return config["project"], _bearer_headers(token)
 
 
 def verify_credentials(fields: dict[str, str]) -> Credential:
@@ -202,16 +106,13 @@ def web_url(secret: ConnectorSecret, location: str) -> str | None:
 
     Args:
         secret: The stored connector.
-        location: Empty for the top level, else ``[project/]dataset``; OAuth links lead with the project.
+        location: Empty for the top level, else a dataset id.
 
     Returns:
         The URL.
     """
     base = "https://console.cloud.google.com/bigquery"
-    if secret.auth_method == "oauth":
-        project, _, dataset = location.partition("/")
-    else:
-        project, dataset = json.loads(secret.access_token)["project"], location
+    project, dataset = json.loads(secret.access_token)["project"], location
     if not project:
         return base
     url = f"{base}?project={quote(project, safe='')}"
@@ -221,22 +122,16 @@ def web_url(secret: ConnectorSecret, location: str) -> str | None:
 def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
     """List datasets at the root, or the tables and views of one dataset.
 
-    OAuth links add a level above: projects at the root, then
-    ``<project>`` for its datasets and ``<project>/<dataset>`` for its tables.
-
     Args:
         secret: The stored connector.
-        location: Empty for the root, else a dataset id (``project/dataset``
-            for OAuth links).
+        location: Empty for the root, else a dataset id.
         search: Name filter.
 
     Returns:
         The entries.
     """
     needle = search.strip().lower()
-    if not location and secret.auth_method == "oauth":
-        return _list_projects(_bearer_headers(secret.access_token), needle)
-    project, location, prefix, headers = _config(secret, location)
+    project, headers = _config(secret)
     if not location:
         body = get_json(
             f"{API_URL}/{quote(project, safe='')}/datasets",
@@ -249,7 +144,7 @@ def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
             for d in (body.get("datasets") if isinstance(body, dict) else None) or []
             if isinstance((d.get("datasetReference") or {}).get("datasetId"), str)
         ]
-        return [Entry(ref=f"{prefix}{i}", name=i, kind="folder") for i in ids if needle in i.lower()]
+        return [Entry(ref=i, name=i, kind="folder") for i in ids if needle in i.lower()]
     if not IDENTIFIER.match(location):
         raise DomainError("connectors.invalid_ref", status=400)
     body = get_json(
@@ -264,7 +159,7 @@ def browse(secret: ConnectorSecret, location: str, search: str) -> list[Entry]:
         if not isinstance(table_id, str) or needle not in table_id.lower():
             continue
         modified = t.get("creationTime")
-        entries.append(Entry(ref=f"{prefix}{location}.{table_id}", name=table_id, kind="file", modified=modified))
+        entries.append(Entry(ref=f"{location}.{table_id}", name=table_id, kind="file", modified=modified))
     return entries
 
 
@@ -429,13 +324,13 @@ def _read(secret: ConnectorSecret, ref: str, limit: int) -> tuple[list[dict[str,
 
     Args:
         secret: The stored connector.
-        ref: ``dataset.table`` (``project/dataset.table`` for OAuth links).
+        ref: ``dataset.table``.
         limit: Row cap.
 
     Returns:
         ``(rows, column_names)``.
     """
-    project, ref, _, headers = _config(secret, ref)
+    project, headers = _config(secret)
     dataset, table = _split_ref(ref)
     fields, kind = _table_meta(project, headers, dataset, table)
     if kind == "TABLE" and fields:

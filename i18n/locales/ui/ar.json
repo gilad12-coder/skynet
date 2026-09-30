@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "استيراد الجداول والعروض من مجموعات بيانات BigQuery الخاصة بك",
-  "connectors.bigquery.credentials_help": "الصق مفتاح JSON الخاص بحساب خدمة يملك صلاحيتي BigQuery Data Viewer وJob User على المشروع",
-  "connectors.bigquery.oauth_button": "المتابعة باستخدام Google",
+  "connectors.bigquery.credentials_help": "الصق مفتاح JSON الخاص بحساب خدمة يملك صلاحيتي BigQuery Data Viewer وJob User على المشروع. أنشئ مفتاحًا باستخدام gcloud iam service-accounts keys create.",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "استيراد التجارب والسجلات ومجموعات البيانات من مشاريع Braintrust الخاصة بك",
   "connectors.braintrust.credentials_help": "أنشئ مفتاح API في إعدادات مؤسستك على",
@@ -117,8 +116,7 @@
   "connectors.field.token": "الرمز المميز للوصول الشخصي",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "استورد الملفات من حزم Cloud Storage الخاصة بك.",
-  "connectors.gcs.credentials_help": "الصق مفتاح JSON لحساب خدمة يملك صلاحية Storage Object Viewer على الحزم التي تحتاجها.",
-  "connectors.gcs.oauth_button": "المتابعة باستخدام Google",
+  "connectors.gcs.credentials_help": "الصق مفتاح JSON لحساب خدمة يملك صلاحية Storage Object Viewer على الحزم التي تحتاجها. أنشئ مفتاحًا باستخدام gcloud iam service-accounts keys create.",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "استورد ملفات CSV أو JSON أو Parquet من أي مستودع يمكنك قراءته.",
   "connectors.github.credentials_help": "يكفي رمز مميز دقيق الصلاحيات بإذن قراءة للمستودعات التي تحتاجها. أنشئ واحدًا على",

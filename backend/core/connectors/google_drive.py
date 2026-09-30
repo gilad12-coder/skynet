@@ -67,7 +67,7 @@ def oauth_app() -> OAuthApp:
         client_id=settings.google_oauth_client_id,
         client_secret=secret.get_secret_value() if secret is not None else None,
         # No ``include_granted_scopes``: the token is handed to the browser for the
-        # Picker, so it must not pick up the Cloud Storage or BigQuery grants.
+        # Picker, so it must not pick up the user's other Google grants.
         extra_authorize_params={"access_type": "offline", "prompt": "consent"},
     )
 

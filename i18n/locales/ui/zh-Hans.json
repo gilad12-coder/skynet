@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "从您的 BigQuery 数据集导入表和视图。",
-  "connectors.bigquery.credentials_help": "粘贴具有该项目 BigQuery Data Viewer 和 Job User 权限的服务账号 JSON 密钥。",
-  "connectors.bigquery.oauth_button": "使用 Google 继续",
+  "connectors.bigquery.credentials_help": "粘贴具有该项目 BigQuery Data Viewer 和 Job User 权限的服务账号 JSON 密钥。可使用 gcloud iam service-accounts keys create 创建。",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "从您的 Braintrust 项目导入实验、日志和数据集。",
   "connectors.braintrust.credentials_help": "在组织设置中创建 API 密钥：",
@@ -117,8 +116,7 @@
   "connectors.field.token": "个人访问令牌",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "从您的 Cloud Storage 存储桶导入文件。",
-  "connectors.gcs.credentials_help": "粘贴在所需存储桶上具有 Storage Object Viewer 权限的服务账户 JSON 密钥。",
-  "connectors.gcs.oauth_button": "使用 Google 继续",
+  "connectors.gcs.credentials_help": "粘贴在所需存储桶上具有 Storage Object Viewer 权限的服务账户 JSON 密钥。可使用 gcloud iam service-accounts keys create 创建。",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "从您有读取权限的任意仓库导入 CSV、JSON 或 Parquet 文件。",
   "connectors.github.credentials_help": "只需一个对所需仓库具有读取权限的细粒度令牌即可。您可以在",

@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "BigQuery データセットからテーブルとビューをインポートします。",
-  "connectors.bigquery.credentials_help": "プロジェクトに対して BigQuery Data Viewer と Job User の権限を持つサービスアカウントの JSON キーを貼り付けてください。",
-  "connectors.bigquery.oauth_button": "Google で続ける",
+  "connectors.bigquery.credentials_help": "プロジェクトに対して BigQuery Data Viewer と Job User の権限を持つサービスアカウントの JSON キーを貼り付けてください。キーは gcloud iam service-accounts keys create で作成できます。",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "Braintrust プロジェクトから実験、ログ、データセットをインポートします。",
   "connectors.braintrust.credentials_help": "組織設定のこちらから API キーを作成できます:",
@@ -117,8 +116,7 @@
   "connectors.field.token": "個人用アクセストークン",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "Cloud Storage バケットからファイルをインポートします。",
-  "connectors.gcs.credentials_help": "必要なバケットに対して Storage Object Viewer 権限を持つサービスアカウントの JSON キーを貼り付けてください。",
-  "connectors.gcs.oauth_button": "Google で続ける",
+  "connectors.gcs.credentials_help": "必要なバケットに対して Storage Object Viewer 権限を持つサービスアカウントの JSON キーを貼り付けてください。キーは gcloud iam service-accounts keys create で作成できます。",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "読み取り権限のある任意のリポジトリから CSV、JSON、Parquet ファイルをインポートします。",
   "connectors.github.credentials_help": "必要なリポジトリへの読み取りアクセス権を持つきめ細かいトークンで十分です。作成はこちらから",

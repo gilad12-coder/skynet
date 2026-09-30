@@ -157,10 +157,10 @@ export const PRIVACY_POLICY: LegalDocument = {
         {
           kind: "paragraph",
           text:
-            "If you link Google Drive, Google Sheets, Google Cloud Storage, or BigQuery, you grant " +
-            "the Service read-only access through Google OAuth. We use that access only to list the " +
-            "files, spreadsheets, buckets, and tables you browse and to import the data you choose " +
-            "into your workspace. We never modify or delete anything in your Google account.",
+            "If you link Google Drive or Google Sheets, you grant the Service read-only access " +
+            "through Google OAuth. We use that access only to list the files and spreadsheets you " +
+            "browse and to import the data you choose into your workspace. We never modify or " +
+            "delete anything in your Google account.",
         },
         {
           kind: "paragraph",

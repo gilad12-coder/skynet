@@ -487,12 +487,10 @@ def create_connectors_router(*, job_store) -> APIRouter:
         """
         google = settings.google_oauth_redirect_uri
         microsoft = settings.microsoft_oauth_redirect_uri
-        # One Google client serves Sheets, Drive, GCS and BigQuery, and one Microsoft app serves
+        # One Google client serves Sheets and Drive, and one Microsoft app serves
         # OneDrive and Azure Blob; each derived callback must be registered on the shared client too.
         derived = {
             "google_drive": (google, "google_sheets"),
-            "gcs": (google, "google_sheets"),
-            "bigquery": (google, "google_sheets"),
             "azure_blob": (microsoft, "onedrive"),
         }
         if provider in derived:
