@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "پیوند ورود نامعتبر یا منقضی شده است. دوباره شروع کنید.",
     "connectors.provider_error": "{provider} خطایی غیرمنتظره برگرداند (HTTP {status_code}). کمی بعد دوباره امتحان کنید.",
     "connectors.rejected": "{provider} درخواست را رد کرد. ممکن است اطلاعات ورود شما به این مورد دسترسی نداشته باشد.",
+    "connectors.picker_unavailable": "انتخاب فایل از Google در این استقرار تنظیم نشده است.",
+    "connectors.picker_needs_oauth": "برای انتخاب فایل، باید حساب {provider} با ورود از طریق Google متصل باشد.",
     "connectors.unknown_provider": "کانکتور ناشناخته: {provider}.",
     "connectors.unreachable": "امکان برقراری ارتباط با {provider} نبود. کمی بعد دوباره امتحان کنید.",
     "connectors.hf_dataset_not_found": "مجموعه‌دادهٔ {repo_id} در Hugging Face پیدا نشد یا حساب شما به آن دسترسی ندارد.",

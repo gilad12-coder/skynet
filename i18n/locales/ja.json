@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "サインインリンクが無効か、有効期限が切れています。最初からやり直してください。",
     "connectors.provider_error": "{provider}から予期しないエラーが返されました(HTTP {status_code})。しばらくしてからもう一度お試しください。",
     "connectors.rejected": "{provider}がリクエストを拒否しました。この項目へのアクセス権がない可能性があります。",
+    "connectors.picker_unavailable": "このデプロイでは Google からのファイル選択が設定されていません。",
+    "connectors.picker_needs_oauth": "ファイルを選択するには、Google ログインで連携した {provider} アカウントが必要です。",
     "connectors.unknown_provider": "不明なコネクタです:{provider}",
     "connectors.unreachable": "{provider}に接続できませんでした。しばらくしてからもう一度お試しください。",
     "connectors.hf_dataset_not_found": "データセット {repo_id} が Hugging Face に見つからないか、お使いのアカウントではアクセスできません。",

@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "A ligação de início de sessão é inválida ou expirou. Comece novamente.",
     "connectors.provider_error": "O {provider} devolveu um erro inesperado (HTTP {status_code}). Tente novamente dentro de momentos.",
     "connectors.rejected": "O {provider} recusou o pedido. As suas credenciais podem não ter acesso a este item.",
+    "connectors.picker_unavailable": "A escolha de arquivos do Google não está configurada nesta implantação.",
+    "connectors.picker_needs_oauth": "Para escolher arquivos, é preciso uma conta {provider} vinculada pelo login do Google.",
     "connectors.unknown_provider": "Conector desconhecido: {provider}.",
     "connectors.unreachable": "Não foi possível contactar o {provider}. Tente novamente dentro de momentos.",
     "connectors.hf_dataset_not_found": "O conjunto de dados {repo_id} não foi encontrado no Hugging Face ou a sua conta não tem acesso ao mesmo.",

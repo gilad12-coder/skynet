@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "Oturum açma bağlantısı geçersiz veya süresi dolmuş. Yeniden başlayın.",
     "connectors.provider_error": "{provider} beklenmeyen bir hata döndürdü (HTTP {status_code}). Biraz sonra tekrar deneyin.",
     "connectors.rejected": "{provider} isteği reddetti. Kimlik bilgilerinizin bu öğeye erişimi olmayabilir.",
+    "connectors.picker_unavailable": "Bu kurulumda Google'dan dosya seçimi ayarlanmamış.",
+    "connectors.picker_needs_oauth": "Dosya seçmek için Google ile oturum açılarak bağlanmış bir {provider} hesabı gerekir.",
     "connectors.unknown_provider": "Bilinmeyen bağlayıcı: {provider}.",
     "connectors.unreachable": "{provider} ile bağlantı kurulamadı. Biraz sonra tekrar deneyin.",
     "connectors.hf_dataset_not_found": "{repo_id} veri kümesi Hugging Face'te bulunamadı veya hesabınızın buna erişimi yok.",

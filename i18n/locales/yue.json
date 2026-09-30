@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "登入連結已經無效或者過期，請重新開始。",
     "connectors.provider_error": "{provider} 出現咗意外錯誤（HTTP {status_code}），請過一陣再試。",
     "connectors.rejected": "{provider} 拒絕咗呢個請求，你嘅登入資料可能冇權限存取呢個項目。",
+    "connectors.picker_unavailable": "呢個部署未設定喺 Google 揀檔案。",
+    "connectors.picker_needs_oauth": "揀檔案需要用 Google 登入連結嘅 {provider} 帳戶。",
     "connectors.unknown_provider": "未知嘅連接器：{provider}。",
     "connectors.unreachable": "連接唔到 {provider}，請過一陣再試。",
     "connectors.hf_dataset_not_found": "喺 Hugging Face 搵唔到數據集 {repo_id},或者你嘅帳戶冇權限存取。",

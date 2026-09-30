@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "로그인 링크가 유효하지 않거나 만료되었습니다. 처음부터 다시 시도해 주세요.",
     "connectors.provider_error": "{provider}에서 예기치 않은 오류가 발생했습니다(HTTP {status_code}). 잠시 후 다시 시도해 주세요.",
     "connectors.rejected": "{provider}가 요청을 거부했습니다. 이 항목에 대한 접근 권한이 없을 수 있습니다.",
+    "connectors.picker_unavailable": "이 배포에는 Google 파일 선택이 설정되어 있지 않습니다.",
+    "connectors.picker_needs_oauth": "파일을 선택하려면 Google 로그인으로 연결된 {provider} 계정이 필요합니다.",
     "connectors.unknown_provider": "알 수 없는 커넥터입니다: {provider}",
     "connectors.unreachable": "{provider}에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
     "connectors.hf_dataset_not_found": "데이터셋 {repo_id}을(를) Hugging Face에서 찾을 수 없거나 계정에 접근 권한이 없습니다.",

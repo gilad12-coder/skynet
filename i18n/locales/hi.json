@@ -78,6 +78,8 @@
     "connectors.oauth_state_invalid": "साइन-इन लिंक अमान्य है या समाप्त हो चुका है। फिर से शुरू करें।",
     "connectors.provider_error": "{provider} ने एक अनपेक्षित एरर दिया (HTTP {status_code})। कुछ देर बाद दोबारा कोशिश करें।",
     "connectors.rejected": "{provider} ने रिक्वेस्ट अस्वीकार कर दी। हो सकता है आपके क्रेडेंशियल के पास इस आइटम की एक्सेस न हो।",
+    "connectors.picker_unavailable": "इस डिप्लॉयमेंट पर Google से फ़ाइलें चुनना सेट अप नहीं है।",
+    "connectors.picker_needs_oauth": "फ़ाइलें चुनने के लिए Google साइन-इन से जुड़ा {provider} खाता ज़रूरी है।",
     "connectors.unknown_provider": "अज्ञात कनेक्टर: {provider}।",
     "connectors.unreachable": "{provider} तक नहीं पहुंचा जा सका। कुछ देर बाद दोबारा कोशिश करें।",
     "connectors.hf_dataset_not_found": "डेटासेट {repo_id} Hugging Face पर नहीं मिला, या आपके अकाउंट को इसकी पहुँच नहीं है।",
