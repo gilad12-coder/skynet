@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "BigQuery veri kümelerinizden tablo ve görünüm içe aktarın.",
-  "connectors.bigquery.credentials_help": "Projede BigQuery Data Viewer ve Job User rollerine sahip bir hizmet hesabının JSON anahtarını yapıştırın.",
-  "connectors.bigquery.oauth_button": "Google ile devam et",
+  "connectors.bigquery.credentials_help": "Projede BigQuery Data Viewer ve Job User rollerine sahip bir hizmet hesabının JSON anahtarını yapıştırın. Anahtarı gcloud iam service-accounts keys create komutuyla oluşturun.",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "Braintrust projelerinizden deney, günlük ve veri kümesi içe aktarın.",
   "connectors.braintrust.credentials_help": "Kuruluş ayarlarınızda bir API anahtarı oluşturun:",
@@ -117,8 +116,7 @@
   "connectors.field.token": "Kişisel erişim jetonu",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "Cloud Storage bucket'larınızdan dosya aktarın.",
-  "connectors.gcs.credentials_help": "İhtiyacınız olan bucket'larda Storage Object Viewer rolüne sahip bir hizmet hesabının JSON anahtarını yapıştırın.",
-  "connectors.gcs.oauth_button": "Google ile devam et",
+  "connectors.gcs.credentials_help": "İhtiyacınız olan bucket'larda Storage Object Viewer rolüne sahip bir hizmet hesabının JSON anahtarını yapıştırın. Anahtarı gcloud iam service-accounts keys create komutuyla oluşturun.",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "Okuma izniniz olan herhangi bir depodan CSV, JSON veya Parquet dosyaları aktarın.",
   "connectors.github.credentials_help": "İhtiyacınız olan depolara okuma erişimine sahip ince ayarlı bir jeton yeterlidir. Bunu şu adresten oluşturabilirsiniz",

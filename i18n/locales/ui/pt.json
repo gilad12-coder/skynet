@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "Importe tabelas e vistas dos seus datasets do BigQuery",
-  "connectors.bigquery.credentials_help": "Cole a chave JSON de uma conta de serviço com as funções BigQuery Data Viewer e Job User no projeto",
-  "connectors.bigquery.oauth_button": "Continuar com o Google",
+  "connectors.bigquery.credentials_help": "Cole a chave JSON de uma conta de serviço com as funções BigQuery Data Viewer e Job User no projeto. Crie-a com gcloud iam service-accounts keys create.",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "Importe experimentos, logs e datasets dos seus projetos do Braintrust",
   "connectors.braintrust.credentials_help": "Crie uma chave de API nas configurações da sua organização em",
@@ -117,8 +116,7 @@
   "connectors.field.token": "Token de acesso pessoal",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "Importe ficheiros dos seus buckets do Cloud Storage.",
-  "connectors.gcs.credentials_help": "Cole a chave JSON de uma conta de serviço com a função Storage Object Viewer nos buckets de que precisa.",
-  "connectors.gcs.oauth_button": "Continuar com o Google",
+  "connectors.gcs.credentials_help": "Cole a chave JSON de uma conta de serviço com a função Storage Object Viewer nos buckets de que precisa. Crie-a com gcloud iam service-accounts keys create.",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "Importe ficheiros CSV, JSON ou Parquet de qualquer repositório que consiga ler.",
   "connectors.github.credentials_help": "Um token de acesso granular com acesso de leitura aos repositórios de que precisa é suficiente. Crie um em",

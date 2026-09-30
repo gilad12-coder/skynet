@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "अपने BigQuery डेटासेट से टेबल और व्यू इंपोर्ट करें.",
-  "connectors.bigquery.credentials_help": "प्रोजेक्ट पर BigQuery Data Viewer और Job User वाले सर्विस अकाउंट की JSON कुंजी पेस्ट करें.",
-  "connectors.bigquery.oauth_button": "Google के साथ जारी रखें",
+  "connectors.bigquery.credentials_help": "प्रोजेक्ट पर BigQuery Data Viewer और Job User वाले सर्विस अकाउंट की JSON कुंजी पेस्ट करें. इसे gcloud iam service-accounts keys create से बनाएं.",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "अपने Braintrust प्रोजेक्ट से प्रयोग, लॉग और डेटासेट इंपोर्ट करें.",
   "connectors.braintrust.credentials_help": "अपने संगठन की सेटिंग्स में API कुंजी बनाएं, यहां",
@@ -117,8 +116,7 @@
   "connectors.field.token": "पर्सनल एक्सेस टोकन",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "अपने Cloud Storage बकेट से फ़ाइलें आयात करें।",
-  "connectors.gcs.credentials_help": "उन बकेट पर Storage Object Viewer वाले सर्विस अकाउंट की JSON की पेस्ट करें जिनकी आपको ज़रूरत है।",
-  "connectors.gcs.oauth_button": "Google के साथ जारी रखें",
+  "connectors.gcs.credentials_help": "उन बकेट पर Storage Object Viewer वाले सर्विस अकाउंट की JSON की पेस्ट करें जिनकी आपको ज़रूरत है। इसे gcloud iam service-accounts keys create से बनाएं।",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "किसी भी रिपॉज़िटरी से जिसे आप पढ़ सकते हैं, CSV, JSON या Parquet फ़ाइलें आयात करें।",
   "connectors.github.credentials_help": "आवश्यक रिपॉज़िटरी पर रीड एक्सेस वाला एक फाइन-ग्रेन्ड टोकन काफी है। इसे बनाएं",

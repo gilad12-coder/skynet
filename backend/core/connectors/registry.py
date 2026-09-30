@@ -2,8 +2,7 @@
 
 Every module here exposes ``PROVIDER``, ``verify_credentials``, ``browse``,
 ``preview`` and ``import_ref``; the OAuth-capable ones (Google Sheets,
-Google Drive, OneDrive, GitHub, GCS, BigQuery, Azure Blob, Notion,
-Supabase)
+Google Drive, OneDrive, GitHub, Azure Blob, Notion, Supabase)
 additionally expose ``oauth_app``, ``oauth_available`` and
 ``fetch_account_label``, and Azure Blob also ``oauth_account`` for the storage
 account named before sign-in. Hugging Face keeps its own module and routes.
@@ -60,8 +59,6 @@ OAUTH_PROVIDERS = frozenset(
         google_drive.PROVIDER,
         onedrive.PROVIDER,
         github.PROVIDER,
-        gcs.PROVIDER,
-        bigquery.PROVIDER,
         azure_blob.PROVIDER,
         notion.PROVIDER,
         supabase.PROVIDER,

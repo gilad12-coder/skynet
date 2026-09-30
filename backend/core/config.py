@@ -164,7 +164,7 @@ class Settings(BaseSettings):
     google_oauth_client_id: str | None = Field(
         default=None,
         alias="GOOGLE_OAUTH_CLIENT_ID",
-        description="Client id of the Google OAuth client shared by the Google Sheets, Google Drive, Cloud Storage and BigQuery connectors. Unset hides 'Continue with Google'; users can still paste a service-account key.",
+        description="Client id of the Google OAuth client shared by the Google Sheets and Google Drive connectors. Unset hides 'Continue with Google'; users can still paste a service-account key.",
     )
     google_oauth_client_secret: SecretStr | None = Field(
         default=None,
@@ -174,7 +174,7 @@ class Settings(BaseSettings):
     google_oauth_redirect_uri: str | None = Field(
         default=None,
         alias="GOOGLE_OAUTH_REDIRECT_URI",
-        description="Absolute URL of this backend's /connectors/google_sheets/oauth/callback as registered on the Google client. The Drive, Cloud Storage and BigQuery callbacks are derived from it by swapping the provider segment (/connectors/google_drive/, /connectors/gcs/, /connectors/bigquery/), so register those on the client too. Unset derives every callback from the incoming request.",
+        description="Absolute URL of this backend's /connectors/google_sheets/oauth/callback as registered on the Google client. The Drive callback is derived from it by swapping the provider segment (/connectors/google_drive/), so register that on the client too. Unset derives every callback from the incoming request.",
     )
     google_picker_api_key: SecretStr | None = Field(
         default=None,

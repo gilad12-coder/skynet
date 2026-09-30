@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "Importa tabelle e viste dai tuoi dataset BigQuery.",
-  "connectors.bigquery.credentials_help": "Incolla la chiave JSON di un account di servizio con i ruoli BigQuery Data Viewer e Job User sul progetto.",
-  "connectors.bigquery.oauth_button": "Continua con Google",
+  "connectors.bigquery.credentials_help": "Incolla la chiave JSON di un account di servizio con i ruoli BigQuery Data Viewer e Job User sul progetto. Creala con gcloud iam service-accounts keys create.",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "Importa esperimenti, log e dataset dai tuoi progetti Braintrust.",
   "connectors.braintrust.credentials_help": "Crea una chiave API nelle impostazioni della tua organizzazione su",
@@ -117,8 +116,7 @@
   "connectors.field.token": "Token di accesso personale",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "Importi file dai Suoi bucket di Cloud Storage.",
-  "connectors.gcs.credentials_help": "Incolli la chiave JSON di un account di servizio con il ruolo Storage Object Viewer sui bucket di cui ha bisogno.",
-  "connectors.gcs.oauth_button": "Continua con Google",
+  "connectors.gcs.credentials_help": "Incolli la chiave JSON di un account di servizio con il ruolo Storage Object Viewer sui bucket di cui ha bisogno. La crei con gcloud iam service-accounts keys create.",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "Importi file CSV, JSON o Parquet da qualsiasi repository che può leggere.",
   "connectors.github.credentials_help": "Un token a grana fine con accesso in lettura ai repository di cui ha bisogno è sufficiente. Ne crei uno su",

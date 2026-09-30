@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "Importez des tables et des vues depuis vos jeux de données BigQuery.",
-  "connectors.bigquery.credentials_help": "Collez la clé JSON d'un compte de service disposant des rôles BigQuery Data Viewer et Job User sur le projet.",
-  "connectors.bigquery.oauth_button": "Continuer avec Google",
+  "connectors.bigquery.credentials_help": "Collez la clé JSON d'un compte de service disposant des rôles BigQuery Data Viewer et Job User sur le projet. Créez-la avec gcloud iam service-accounts keys create.",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "Importez des expériences, des journaux et des jeux de données depuis vos projets Braintrust.",
   "connectors.braintrust.credentials_help": "Créez une clé API dans les paramètres de votre organisation, sur",
@@ -117,8 +116,7 @@
   "connectors.field.token": "Jeton d'accès personnel",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "Importez des fichiers depuis vos buckets Cloud Storage.",
-  "connectors.gcs.credentials_help": "Collez la clé JSON d'un compte de service disposant du rôle Storage Object Viewer sur les buckets nécessaires.",
-  "connectors.gcs.oauth_button": "Continuer avec Google",
+  "connectors.gcs.credentials_help": "Collez la clé JSON d'un compte de service disposant du rôle Storage Object Viewer sur les buckets nécessaires. Créez-la avec gcloud iam service-accounts keys create.",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "Importez des fichiers CSV, JSON ou Parquet depuis tout dépôt que vous pouvez lire.",
   "connectors.github.credentials_help": "Un jeton à portée réduite avec un accès en lecture aux dépôts nécessaires suffit. Créez-en un sur",

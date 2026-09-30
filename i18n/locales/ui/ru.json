@@ -1,7 +1,6 @@
 {
   "connectors.bigquery.blurb": "Импорт таблиц и представлений из наборов данных BigQuery.",
-  "connectors.bigquery.credentials_help": "Вставьте JSON-ключ сервисного аккаунта с ролями BigQuery Data Viewer и Job User в проекте.",
-  "connectors.bigquery.oauth_button": "Продолжить с Google",
+  "connectors.bigquery.credentials_help": "Вставьте JSON-ключ сервисного аккаунта с ролями BigQuery Data Viewer и Job User в проекте. Создайте его командой gcloud iam service-accounts keys create.",
   "connectors.bigquery.name": "BigQuery",
   "connectors.braintrust.blurb": "Импорт экспериментов, логов и наборов данных из проектов Braintrust.",
   "connectors.braintrust.credentials_help": "Создайте API-ключ в настройках организации на",
@@ -117,8 +116,7 @@
   "connectors.field.token": "Персональный токен доступа",
   "connectors.field.token_placeholder": "ghp_…",
   "connectors.gcs.blurb": "Импортируйте файлы из бакетов Cloud Storage.",
-  "connectors.gcs.credentials_help": "Вставьте JSON-ключ сервисного аккаунта с ролью Storage Object Viewer для нужных бакетов.",
-  "connectors.gcs.oauth_button": "Продолжить с Google",
+  "connectors.gcs.credentials_help": "Вставьте JSON-ключ сервисного аккаунта с ролью Storage Object Viewer для нужных бакетов. Создайте его командой gcloud iam service-accounts keys create.",
   "connectors.gcs.name": "Google Cloud Storage",
   "connectors.github.blurb": "Импортируйте файлы CSV, JSON или Parquet из любого доступного вам для чтения репозитория.",
   "connectors.github.credentials_help": "Достаточно детализированного токена с доступом на чтение к нужным репозиториям. Создайте его на",

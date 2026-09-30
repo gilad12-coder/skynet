@@ -254,7 +254,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.gcs.blurb"),
         Avatar: GoogleCloud.Avatar,
         Mark: GoogleCloud.Color,
-        oauthButton: msg("connectors.gcs.oauth_button"),
         credentialsHelp: msg("connectors.gcs.credentials_help"),
         fields: [serviceAccountField(), { key: "bucket", label: msg("connectors.field.bucket") }],
       };
@@ -394,7 +393,6 @@ export function providerMeta(id: ConnectorProvider): ProviderMeta {
         blurb: msg("connectors.bigquery.blurb"),
         Avatar: BigQuery.Avatar,
         Mark: BigQuery.Mark,
-        oauthButton: msg("connectors.bigquery.oauth_button"),
         credentialsHelp: msg("connectors.bigquery.credentials_help"),
         fields: [
           serviceAccountField(),

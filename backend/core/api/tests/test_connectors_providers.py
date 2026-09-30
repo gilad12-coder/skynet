@@ -44,7 +44,7 @@ from ...connectors import (
     sql_base,
     tabular,
 )
-from ...connectors.registry import oauth_config_problems
+from ...connectors.registry import OAUTH_PROVIDERS, oauth_config_problems
 from ...connectors.vault import ConnectorSecret, ConnectorVault
 from ...storage.dataset_library import DatasetLibraryStore, PostgresDatasetBlobStore
 from ...storage.models import UserConnectorModel
@@ -1206,92 +1206,16 @@ def google_oauth_on(monkeypatch: pytest.MonkeyPatch, vault_key: str, generic_oau
     )
 
 
-def test_gcs_oauth_lists_projects_then_buckets(google_oauth_on: None) -> None:
-    """Continue with Google on GCS asks for storage read, then browses projects and buckets with the user token."""
-    client, store = _make_client()
-    statuses = {c["provider"]: c["oauth_available"] for c in client.get("/connectors").json()["connectors"]}
-    assert statuses["gcs"] is True
-    assert statuses["bigquery"] is True
-    assert statuses["s3"] is False
-    query = _start_oauth(client, "gcs")
-    assert query["_host"] == ["accounts.google.com"]
-    assert query["client_id"] == ["g-client"]
-    assert query["redirect_uri"] == ["https://api.example/connectors/gcs/oauth/callback"]
-    scopes = query["scope"][0].split()
-    assert "https://www.googleapis.com/auth/devstorage.read_only" in scopes
-    assert {"openid", "email"} <= set(scopes)
-
-    def api(method: str, url: str, **kwargs: Any) -> httpx.Response:
-        """Serve userinfo, Resource Manager and the bucket listing."""
-        assert kwargs["headers"]["Authorization"] == "Bearer ya29.gcs"
-        parts = urlparse(url)
-        if parts.path == "/oauth2/v3/userinfo":
-            return _response(200, {"email": "ada@example.com"})
-        if parts.netloc == "cloudresourcemanager.googleapis.com":
-            return _response(200, {"projects": [{"projectId": "proj-1", "name": "Proj One"}]})
-        if parts.path == "/storage/v1/b":
-            assert kwargs["params"]["project"] == "proj-1"
-            return _response(200, {"items": [{"name": "warehouse"}]})
-        raise AssertionError(url)
-
-    token = {"access_token": "ya29.gcs", "refresh_token": "r", "expires_in": 3600, "token_type": "Bearer"}
-    post = _finish_oauth(client, "gcs", query["state"][0], token, api)
-    assert post.call_args.kwargs["data"]["client_secret"] == "g-secret"
-    assert post.call_args.kwargs["data"]["code_verifier"]
-    secret = ConnectorVault(store.engine).resolve("alice", "gcs")
-    assert (secret.access_token, secret.auth_method) == ("ya29.gcs", "oauth")
-    with patch("core.connectors.transport.CLIENT.request", side_effect=api):
-        root = client.get("/connectors/gcs/browse").json()["entries"]
-        assert [(e["ref"], e["name"]) for e in root] == [("project:proj-1", "Proj One")]
-        buckets = client.get("/connectors/gcs/browse", params={"location": "project:proj-1"}).json()["entries"]
-    assert [e["ref"] for e in buckets] == ["warehouse"]
-    entry = next(c for c in client.get("/connectors").json()["connectors"] if c["provider"] == "gcs")
-    assert entry["account_label"] == "ada@example.com"
-
-
-def test_bigquery_oauth_browses_projects_and_reads_with_user_token(google_oauth_on: None) -> None:
-    """A user-token BigQuery link picks a project first; refs carry it through preview."""
+def test_gcs_and_bigquery_never_offer_google_oauth(google_oauth_on: None) -> None:
+    """Even with the Google client registered, GCS and BigQuery link only with a service-account key."""
     client, _ = _make_client()
-    query = _start_oauth(client, "bigquery")
-    assert query["redirect_uri"] == ["https://api.example/connectors/bigquery/oauth/callback"]
-    assert "https://www.googleapis.com/auth/bigquery.readonly" in query["scope"][0].split()
-    schema = {"fields": [{"name": "n", "type": "INTEGER"}]}
-
-    def api(method: str, url: str, **kwargs: Any) -> httpx.Response:
-        """Serve userinfo and the BigQuery REST API for a domain-scoped project."""
-        assert kwargs["headers"]["Authorization"] == "Bearer ya29.bq"
-        path = urlparse(url).path
-        base = "/bigquery/v2/projects"
-        if path == "/oauth2/v3/userinfo":
-            return _response(200, {"email": "ada@example.com"})
-        if path == base:
-            return _response(200, {"projects": [{"projectReference": {"projectId": "acme.com:lab"}}]})
-        if path == f"{base}/acme.com%3Alab/datasets" or path == f"{base}/acme.com:lab/datasets":
-            return _response(200, {"datasets": [{"datasetReference": {"datasetId": "analytics"}}]})
-        if path.endswith("/datasets/analytics/tables"):
-            return _response(200, {"tables": [{"tableReference": {"tableId": "events"}}]})
-        if path.endswith("/datasets/analytics/tables/events"):
-            assert "acme.com" in path
-            return _response(200, {"schema": schema, "type": "TABLE"})
-        if path.endswith("/datasets/analytics/tables/events/data"):
-            return _response(200, {"rows": [{"f": [{"v": "7"}]}]})
-        raise AssertionError(f"unexpected call {method} {url}")
-
-    token = {"access_token": "ya29.bq", "refresh_token": "r", "expires_in": 3600, "token_type": "Bearer"}
-    _finish_oauth(client, "bigquery", query["state"][0], token, api)
-    with patch("core.connectors.transport.CLIENT.request", side_effect=api):
-        projects = client.get("/connectors/bigquery/browse").json()["entries"]
-        assert [(e["ref"], e["kind"]) for e in projects] == [("acme.com:lab", "folder")]
-        datasets = client.get("/connectors/bigquery/browse", params={"location": "acme.com:lab"}).json()["entries"]
-        assert [e["ref"] for e in datasets] == ["acme.com:lab/analytics"]
-        tables = client.get("/connectors/bigquery/browse", params={"location": "acme.com:lab/analytics"}).json()[
-            "entries"
-        ]
-        assert [e["ref"] for e in tables] == ["acme.com:lab/analytics.events"]
-        preview = client.get("/connectors/bigquery/preview", params={"ref": "acme.com:lab/analytics.events"}).json()
-        bad = client.get("/connectors/bigquery/browse", params={"location": "a b/analytics"})
-    assert preview["rows"] == [{"n": 7}]
-    assert bad.status_code == 400
+    statuses = {c["provider"]: c["oauth_available"] for c in client.get("/connectors").json()["connectors"]}
+    assert statuses["google_drive"] is True
+    assert statuses["gcs"] is False
+    assert statuses["bigquery"] is False
+    assert {"gcs", "bigquery"}.isdisjoint(OAUTH_PROVIDERS)
+    assert client.post("/connectors/gcs/oauth/start").status_code == 404
+    assert client.post("/connectors/bigquery/oauth/start").status_code == 404
 
 
 def test_azure_blob_oauth_names_account_and_uses_bearer(
@@ -1454,26 +1378,23 @@ def test_s3_subtree_check_is_one_flat_listing(keys: list[str], truncated: bool, 
     assert "prefix=raw%2F" in call.call_args.args[1]
 
 
-def test_gcs_subtree_check_covers_prefixes_and_projects() -> None:
-    """A prefix is one flat listing; a project is settled from its first buckets."""
+def test_gcs_subtree_check_covers_prefixes() -> None:
+    """A prefix is settled from one flat listing."""
     listings = {"empty": {"items": [{"name": "readme.txt"}]}, "full": {"items": [{"name": "x/y/t.parquet"}]}}
 
     def fake_request(method: str, url: str, **kwargs: Any) -> httpx.Response:
-        """Serve the bucket list and each bucket's flat object listing."""
+        """Serve each bucket's flat object listing."""
         path = urlparse(url).path
-        if path == "/storage/v1/b":
-            return _response(200, {"items": [{"name": "empty"}, {"name": "full"}]})
         assert "delimiter" not in kwargs["params"]
         return _response(200, listings[path.split("/")[4]])
 
-    secret = _stored("oauth-token")
+    secret = _stored("service-account")
     with (
         patch("core.connectors.gcs._secret_headers", return_value={"Authorization": "Bearer t"}),
         patch("core.connectors.transport.CLIENT.request", side_effect=fake_request),
     ):
         assert gcs.has_importable(secret, "empty/") is False
         assert gcs.has_importable(secret, "full/x/") is True
-        assert gcs.has_importable(secret, "project:proj-1") is True
 
 
 def test_azure_subtree_check_follows_the_next_marker() -> None:
