@@ -7,8 +7,9 @@
 # Build args:
 #   BASE_IMAGE   — node:20-alpine compatible image; override with internal mirror.
 #   NPM_REGISTRY — npm registry URL; override with Artifactory for air-gap builds.
-#                  Note: lockfile `resolved` URLs must also point at the mirror,
-#                  otherwise `npm ci` still fetches tarballs from the original host.
+#                  registry.npmjs.org tarball URLs in the lockfile are rewritten
+#                  to it. xlsx is the exception: it installs from cdn.sheetjs.com,
+#                  which is not on npm, so that host is left as is.
 ARG BASE_IMAGE=node:20-alpine
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 
@@ -21,7 +22,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json .npmrc* ./
 RUN npm config set registry "$NPM_REGISTRY" \
-    && npm config set replace-registry-host always \
+    && npm config set replace-registry-host npmjs \
     && npm ci
 
 FROM base AS build
