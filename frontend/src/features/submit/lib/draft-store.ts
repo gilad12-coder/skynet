@@ -1,3 +1,10 @@
+import type { ParsedDataset } from "@/shared/lib/parse-dataset";
+import {
+  attachDatasets,
+  planDatasetWrite,
+  readDatasetRefs,
+  type DraftDatasetRefs,
+} from "./draft-datasets";
 import { committedDraftTransaction } from "./draft-transaction";
 import { readBudgetDraft } from "./execution-budget-session";
 import {
@@ -16,8 +23,11 @@ import {
 } from "./wizard-steps";
 
 const DB_NAME = "skynet-wizard-drafts";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = "drafts";
+// Datasets live apart from the draft row so an autosave rewrites only the
+// small part that changed. Rows here are keyed by an id the draft points at.
+const DATASET_STORE = "draft-datasets";
 const CHANNEL_NAME = "skynet-wizard-drafts";
 const RESUME_KEY = "skynet.wizard-draft.resume";
 
@@ -97,6 +107,9 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: "accountId" });
       }
+      if (!db.objectStoreNames.contains(DATASET_STORE)) {
+        db.createObjectStore(DATASET_STORE, { keyPath: "id" });
+      }
     };
     request.onsuccess = () => {
       const db = request.result;
@@ -120,51 +133,114 @@ function openDatabase(): Promise<IDBDatabase> {
 /** Only a completed transaction proves a save or reset is durable. */
 function runTransaction<T>(
   mode: IDBTransactionMode,
-  op: (store: IDBObjectStore, result: (value: T) => void) => void,
+  op: (store: IDBObjectStore, result: (value: T) => void, datasets: IDBObjectStore) => void,
 ): Promise<T> {
-  return openDatabase().then((db) => committedDraftTransaction(db, STORE_NAME, mode, op));
+  return openDatabase().then((db) =>
+    committedDraftTransaction(db, [STORE_NAME, DATASET_STORE], mode, (store, result, tx) =>
+      op(store, result, tx.objectStore(DATASET_STORE)),
+    ),
+  );
 }
 
-function storedSnapshot(raw: unknown): DraftStoreSnapshot {
+interface StoredRow {
+  resetGeneration: number;
+  record: unknown;
+  datasets: DraftDatasetRefs;
+}
+
+function storedRow(raw: unknown): StoredRow {
   if (raw && typeof raw === "object" && "resetGeneration" in raw) {
-    const stored = raw as { resetGeneration: number; record?: unknown };
+    const stored = raw as { resetGeneration: number; record?: unknown; datasets?: unknown };
     return {
-      record: normalizeDraftRecord(stored.record),
+      record: stored.record,
       resetGeneration: stored.resetGeneration,
+      datasets: readDatasetRefs(stored.datasets),
     };
   }
-  return { record: normalizeDraftRecord(raw), resetGeneration: 0 };
+  // Rows from before the generation fence held the record itself.
+  return { record: raw, resetGeneration: 0, datasets: {} };
+}
+
+// The same dataset object keeps one id for the life of the page, which is
+// what lets a save skip rewriting a dataset the stored draft already holds.
+const datasetIds = new WeakMap<ParsedDataset, string>();
+
+function datasetId(dataset: ParsedDataset): string {
+  let id = datasetIds.get(dataset);
+  if (!id) {
+    const c = globalThis.crypto as Crypto | undefined;
+    id =
+      c && typeof c.randomUUID === "function"
+        ? c.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    datasetIds.set(dataset, id);
+  }
+  return id;
 }
 
 /** One account row; reset removes content but retains a cross-tab write fence. */
 export const indexedDbDraftStore: DraftStore = {
   read: (accountId) =>
-    runTransaction("readonly", (store, result) => {
+    runTransaction<DraftStoreSnapshot>("readonly", (store, result, datasetStore) => {
       const request = store.get(accountId);
-      request.onsuccess = () => result(storedSnapshot(request.result));
+      request.onsuccess = () => {
+        const row = storedRow(request.result);
+        const ids = [...new Set(Object.values(row.datasets))];
+        const datasets = new Map<string, ParsedDataset>();
+        const finish = () => {
+          const record = normalizeDraftRecord(row.record);
+          result({
+            record: record ? attachDatasets(record, row.datasets, datasets) : null,
+            resetGeneration: row.resetGeneration,
+          });
+        };
+        if (ids.length === 0) {
+          finish();
+          return;
+        }
+        let pending = ids.length;
+        for (const id of ids) {
+          const get = datasetStore.get(id);
+          get.onsuccess = () => {
+            const dataset = (get.result as { dataset?: ParsedDataset } | undefined)?.dataset;
+            if (dataset) {
+              datasets.set(id, dataset);
+              datasetIds.set(dataset, id);
+            }
+            pending -= 1;
+            if (pending === 0) finish();
+          };
+        }
+      };
     }),
   write: (record, resetGeneration) =>
-    runTransaction("readwrite", (store, result) => {
+    runTransaction("readwrite", (store, result, datasetStore) => {
       const request = store.get(record.accountId);
       request.onsuccess = () => {
-        const current = storedSnapshot(request.result);
+        const current = storedRow(request.result);
         if (current.resetGeneration !== resetGeneration) {
           result(false);
           return;
         }
+        const plan = planDatasetWrite(record, current.datasets, datasetId);
+        for (const { id, dataset } of plan.put) datasetStore.put({ id, dataset });
+        for (const id of plan.remove) datasetStore.delete(id);
         store.put({
           accountId: record.accountId,
           resetGeneration,
-          record: normalizeDraftRecord(record),
+          record: normalizeDraftRecord(plan.record),
+          datasets: plan.refs,
         });
         result(true);
       };
     }),
   remove: (accountId) =>
-    runTransaction("readwrite", (store, result) => {
+    runTransaction("readwrite", (store, result, datasetStore) => {
       const request = store.get(accountId);
       request.onsuccess = () => {
-        const resetGeneration = storedSnapshot(request.result).resetGeneration + 1;
+        const row = storedRow(request.result);
+        for (const id of new Set(Object.values(row.datasets))) datasetStore.delete(id);
+        const resetGeneration = row.resetGeneration + 1;
         store.put({ accountId, resetGeneration, record: null });
         result(resetGeneration);
       };
