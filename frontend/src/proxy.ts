@@ -17,7 +17,8 @@ export const config = {
     // readable before someone creates an account. ``optimizations`` is excluded
     // because a public (Explore-corpus) run must be openable signed-out — the
     // detail gate probes the anonymous public composite itself and bounces to
-    // /login only when the run turns out not to be public.
-    "/((?!login|terms|privacy|optimizations|api/auth|api/register|api/webauthn|api/2fa|api/password-reset|api/email-verify|_next/static|_next/image|favicon\\.svg|notification-icon\\.png|robots\\.txt|sitemap\\.xml).*)",
+    // /login only when the run turns out not to be public. ``api/version`` is
+    // read by the external uptime monitor, which never signs in.
+    "/((?!login|terms|privacy|optimizations|api/auth|api/register|api/webauthn|api/2fa|api/password-reset|api/email-verify|api/version|_next/static|_next/image|favicon\\.svg|notification-icon\\.png|robots\\.txt|sitemap\\.xml).*)",
   ],
 };

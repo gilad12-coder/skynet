@@ -13,6 +13,8 @@ class HealthResponse(BaseModel):
     status: str = Field(default=HEALTH_STATUS_OK)
     registered_assets: dict[str, list[str]]
     vector_search_enabled: bool | None = None
+    # The deployed git commit, so an external monitor can tell when prod lags main.
+    commit: str | None = None
 
 
 class QueueStatusResponse(BaseModel):
