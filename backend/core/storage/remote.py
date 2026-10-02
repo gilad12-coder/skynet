@@ -42,7 +42,7 @@ from ..worker.checkpoint_compat import CheckpointCompatibilityError, checkpoint_
 from .agent_run_store import PostgresAgentRunStore
 from .base import JobRecord, LogEntryRecord, ProgressEventRecord
 from .checkpoint_store import GepaCheckpoint, PostgresCheckpointBlobStore, PostgresGridPairResultStore
-from .migrate import sync_migration_head
+from .migrate import stamp_if_unadopted, upgrade_if_adopted
 from .models import (
     EMBEDDING_DIM,
     AgentStagedDatasetModel,
@@ -439,6 +439,9 @@ class RemoteDBJobStore:
                 f"silently rejected. Set EMBEDDINGS_DIM={EMBEDDING_DIM}, disable "
                 "embeddings, or run a migration to change the column width."
             )
+        # Migrations first, so a migration that creates or renames a table doesn't
+        # collide with the empty table create_all would make from the new models.
+        upgrade_if_adopted(self._engine)
         if settings.embeddings_enabled and self._bootstrap_pgvector():
             with schema_bootstrap_lock(self._engine) as conn:
                 Base.metadata.create_all(conn if conn is not None else self._engine)
@@ -459,11 +462,8 @@ class RemoteDBJobStore:
                     conn if conn is not None else self._engine,
                     tables=non_embedding_tables,
                 )
-        # Now that the tables exist, bring Alembic in step: adopt an unstamped
-        # database at head, or apply migrations pending on an adopted one. This
-        # is how column-adding migrations land — create_all never ALTERs a table
-        # an earlier boot already created.
-        sync_migration_head(self._engine)
+        # A database Alembic never tracked now holds the head schema; adopt it.
+        stamp_if_unadopted(self._engine)
         # Lexical search ranking. Independent of pgvector/embeddings: BM25
         # serves the default (embeddings-off) explore search when pg_search is
         # installed, otherwise the ILIKE fallback handles it.

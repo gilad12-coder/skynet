@@ -4,6 +4,7 @@
 Usage:
     python manage.py setup    — First-time database setup
     python manage.py check    — Verify database connection
+    python manage.py migrate  — Bring the schema to head (deploy pre-step)
     python manage.py shell    — Open a Python shell with app context
     python manage.py reembed  — Recompute every job's explore search embedding
 """
@@ -93,6 +94,19 @@ def cmd_setup() -> None:
     print("\n✓ Setup complete. Start the server with: python main.py")
 
 
+def cmd_migrate() -> None:
+    """Bring the database schema to head, exactly as a booting pod would.
+
+    Railway runs this as each service's pre-deploy command, so a failing
+    migration cancels the deploy while the old pods keep serving, instead of
+    crash-looping the new ones. Pods still run the same idempotent bootstrap
+    at boot, which is a no-op once this has succeeded.
+    """
+    store = RemoteDBJobStore(_get_db_url())
+    store.engine.dispose()
+    print("✓ Schema at head")
+
+
 def cmd_shell() -> None:
     """Open an interactive Python shell with ``settings``, ``store`` and ``registry`` available."""
     url = _get_db_url()
@@ -137,14 +151,21 @@ def main() -> None:
             "Commands:\n"
             "  setup     First-time database setup\n"
             "  check     Verify database connection\n"
+            "  migrate   Bring the schema to head (deploy pre-step)\n"
             "  shell     Interactive Python shell with app context\n"
             "  reembed   Recompute every job's explore search embedding"
         ),
     )
-    parser.add_argument("command", choices=["setup", "check", "shell", "reembed"], help="Command to run")
+    parser.add_argument("command", choices=["setup", "check", "migrate", "shell", "reembed"], help="Command to run")
     args = parser.parse_args()
 
-    {"setup": cmd_setup, "check": cmd_check, "shell": cmd_shell, "reembed": cmd_reembed}[args.command]()
+    {
+        "setup": cmd_setup,
+        "check": cmd_check,
+        "migrate": cmd_migrate,
+        "shell": cmd_shell,
+        "reembed": cmd_reembed,
+    }[args.command]()
 
 
 if __name__ == "__main__":

@@ -29,7 +29,8 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from alembic import command
-from core.storage.migrate import sync_migration_head
+from core.storage import remote
+from core.storage.migrate import stamp_if_unadopted, sync_migration_head, upgrade_if_adopted
 from core.storage.models import (
     Base,
     BillingCustomerModel,
@@ -43,6 +44,8 @@ _BACKEND_DIR = Path(__file__).resolve().parents[3]
 _HEAD = ScriptDirectory.from_config(Config(str(_BACKEND_DIR / "alembic.ini"))).get_current_head()
 # The schema state just before the one-time-500 grant migration.
 _PRE_500 = "f2b3c4d5e6a7"
+# The schema state just before credits were renamed to cents (#502).
+_PRE_CENTS_RENAME = "c3e5a7b9d1f2"
 TEST_DB_URL = os.environ.get("SKYNET_TEST_DB_URL")
 
 _needs_pg = pytest.mark.skipif(
@@ -135,16 +138,33 @@ def test_unadopted_database_is_stamped_not_replayed(fresh_pg: Engine) -> None:
     assert _grant(fresh_pg) == 200
 
 
-@_needs_pg
-def test_adopted_database_applies_pending_migrations(fresh_pg: Engine) -> None:
-    """A DB stamped one revision back is upgraded, actually running the migration."""
-    _build_schema_like_prod(fresh_pg)
-    _seed(fresh_pg, 200)
+def _replay_to(revision: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Build the schema as it stood at ``revision`` by replaying migration history.
+
+    Runs Alembic standalone, as the CLI does: a migration that builds an index
+    concurrently can't run inside a caller-owned transaction.
+
+    Args:
+        revision: The Alembic revision to stop at.
+        monkeypatch: Points env.py's ``REMOTE_DB_URL`` at the throwaway target.
+    """
+    monkeypatch.setenv("REMOTE_DB_URL", TEST_DB_URL or "")
     cfg = Config(str(_BACKEND_DIR / "alembic.ini"))
+    cfg.attributes["configure_logger"] = False
+    command.upgrade(cfg, revision)
+
+
+@_needs_pg
+def test_adopted_database_applies_pending_migrations(fresh_pg: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A DB at an older revision is upgraded, actually running the pending migrations."""
+    _replay_to(_PRE_500, monkeypatch)
     with fresh_pg.begin() as conn:
-        cfg.attributes["connection"] = conn
-        command.stamp(cfg, _PRE_500)
-    assert _version(fresh_pg) == _PRE_500
+        conn.execute(
+            text(
+                "INSERT INTO billing_customers (username, stripe_customer_id, grant_remaining) "
+                "VALUES ('a@x.com', 'local:test', 200)"
+            )
+        )
     sync_migration_head(fresh_pg)
     assert _version(fresh_pg) == _HEAD
     # The one-time-500 migration tops the pre-existing 200 grant up to 500.
@@ -179,3 +199,38 @@ def test_sync_preserves_root_logging_config(fresh_pg: Engine) -> None:
         assert root.level == level_before
     finally:
         root.removeHandler(sentinel)
+
+
+@_needs_pg
+def test_boot_migrates_before_create_all(fresh_pg: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A table-renaming migration lands when boot upgrades before ``create_all``.
+
+    Upgrading after ``create_all`` failed the #502 deploy: ``create_all`` had
+    already made the empty renamed table, so the rename collided with it.
+    """
+    _replay_to(_PRE_CENTS_RENAME, monkeypatch)
+    upgrade_if_adopted(fresh_pg)
+    _build_schema_like_prod(fresh_pg)
+    stamp_if_unadopted(fresh_pg)
+    assert _version(fresh_pg) == _HEAD
+
+
+@_needs_pg
+def test_store_boot_upgrades_before_create_all(fresh_pg: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Boot applies pending migrations before ``create_all`` and stamps after it.
+
+    The migration history guards itself against the reverse order (``IF NOT
+    EXISTS`` and similar), so only the call order itself shows the regression.
+    """
+    calls: list[str] = []
+    create_all = Base.metadata.create_all
+    monkeypatch.setattr(remote, "upgrade_if_adopted", lambda engine: calls.append("upgrade"))
+    monkeypatch.setattr(remote, "stamp_if_unadopted", lambda engine: calls.append("stamp"))
+    monkeypatch.setattr(
+        Base.metadata,
+        "create_all",
+        lambda *args, **kwargs: (calls.append("create_all"), create_all(*args, **kwargs))[1],
+    )
+    store = remote.RemoteDBJobStore(TEST_DB_URL or "")
+    store.engine.dispose()
+    assert calls == ["upgrade", "create_all", "stamp"]
