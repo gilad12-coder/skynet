@@ -80,6 +80,7 @@ from ..converters import (
     status_to_job_status,
 )
 from ..errors import DomainError
+from ..folder_access import folder_ids_for_runs, run_folder_roles
 from ..response_limits import AGENT_MAX_TEXT, truncate_text
 from ..sharing_access import (
     MEMBER_ROLES,
@@ -397,7 +398,8 @@ def _grant_role(job_store, optimization_id: str, username: str) -> ShareRole | N
     """Resolve a member grant's role for ``username`` on an optimization.
 
     Opens a short-lived session on the job store's SQLAlchemy engine to read
-    the ``optimization_share_grants`` row. Job stores without an ``engine``
+    the ``optimization_share_grants`` row and the role the run inherits from
+    its folder (see :mod:`core.api.folder_access`); the better of the two wins. Job stores without an ``engine``
     (the in-memory/local store used in tests and offline mode) carry no grant
     table, so this returns ``None`` and access falls back to owner/admin only.
 
@@ -415,9 +417,9 @@ def _grant_role(job_store, optimization_id: str, username: str) -> ShareRole | N
         return None
     with Session(engine) as session:
         grant = get_grant(session, optimization_id, username)
-    if grant is not None and grant.role in MEMBER_ROLES:
-        return ShareRole(grant.role)
-    return None
+        inherited = run_folder_roles(session, [optimization_id], username).get(optimization_id)
+    candidates = [ShareRole(r) for r in (grant.role if grant else None, inherited) if r in MEMBER_ROLES]
+    return max(candidates, key=role_rank) if candidates else None
 
 
 def load_job_with_role(
@@ -543,7 +545,8 @@ def require_role_at_least(
 def grant_roles_for(job_store, optimization_ids: list[str], username: str) -> dict[str, str]:
     """Batch-resolve the caller's grant roles across many optimizations.
 
-    One query for the whole id set (see :func:`list_grants_for_user`); stores
+    Direct grants and folder-inherited roles are merged, keeping the better
+    role per id (see :func:`list_grants_for_user`, :func:`run_folder_roles`); stores
     without a grant-bearing ``engine`` return ``{}``.
 
     Args:
@@ -558,7 +561,30 @@ def grant_roles_for(job_store, optimization_ids: list[str], username: str) -> di
     if engine is None:
         return {}
     with Session(engine) as session:
-        return list_grants_for_user(session, optimization_ids, username)
+        direct = list_grants_for_user(session, optimization_ids, username)
+        inherited = run_folder_roles(session, optimization_ids, username)
+    merged = dict(direct)
+    for oid, role in inherited.items():
+        if oid not in merged or role_rank(role) > role_rank(merged[oid]):
+            merged[oid] = role
+    return merged
+
+
+def run_folder_ids(job_store, optimization_ids: list[str]) -> dict[str, str]:
+    """Return the folder each run is filed in, for runs that are filed.
+
+    Args:
+        job_store: Job-store whose ``engine`` backs the folder tables.
+        optimization_ids: Runs to look up.
+
+    Returns:
+        ``{optimization_id: folder_id}``; empty for stores without an engine.
+    """
+    engine = getattr(job_store, "engine", None)
+    if engine is None or not optimization_ids:
+        return {}
+    with Session(engine) as session:
+        return folder_ids_for_runs(session, optimization_ids)
 
 
 def get_job_no_payload(job_store, optimization_id: str) -> dict[str, Any]:

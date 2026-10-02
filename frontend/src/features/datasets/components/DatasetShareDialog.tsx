@@ -46,14 +46,14 @@ import { track, TelemetryEvent } from "@/shared/lib/telemetry";
 import { sessionIdentity } from "@/shared/lib/session-identity";
 import { Label } from "@/shared/ui/primitives/label";
 
-const ROLE_OPTIONS: MemberRole[] = ["viewer", "editor"];
+export const ROLE_OPTIONS: MemberRole[] = ["viewer", "editor"];
 
 // Sentinel value for the per-member role dropdown's "transfer ownership" item
 // (not a real role — selecting it opens the transfer confirmation instead).
-const TRANSFER_VALUE = "__transfer__";
+export const TRANSFER_VALUE = "__transfer__";
 
 /** Localised label for a member tier role. */
-function roleLabel(role: ShareRole): string {
+export function roleLabel(role: ShareRole): string {
   if (role === "editor") return msg("share.role.editor");
   if (role === "owner") return msg("share.role.owner");
   return msg("share.role.viewer");
@@ -479,7 +479,7 @@ export function DatasetShareDialog({
 }
 
 /** Username autocomplete + role picker to add a new member grant. */
-function InvitePeople({
+export function InvitePeople({
   ownerName,
   onInvite,
   canTransfer,

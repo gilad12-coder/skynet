@@ -2552,6 +2552,8 @@ export interface SidebarJobItem {
   pausable?: boolean;
   /** Caller's share role on a "shared with me" item; absent on own optimizations. */
   role?: ShareRole | null;
+  /** Folder this run is filed in; absent when unfiled. */
+  folder_id?: string | null;
 }
 
 export function listJobsSidebar(params?: { username?: string; limit?: number; offset?: number }) {
@@ -2576,6 +2578,180 @@ export function listJobsSharedWithMe(params?: { limit?: number; offset?: number 
     `/optimizations/shared-with-me${qs ? `?${qs}` : ""}`,
     SIDEBAR_CACHE_MS,
   );
+}
+
+/** One run folder as the sidebar tree sees it. */
+export interface RunFolder {
+  id: string;
+  name: string;
+  /** Parent folder, or null at the top level (also when the parent is not visible). */
+  parent_id: string | null;
+  owner: string;
+  role: ShareRole;
+  shared: boolean;
+  editors_can_share: boolean;
+  run_count: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+/** Access a member holds through a parent folder, shown read-only. */
+export interface InheritedFolderMember {
+  username: string;
+  role: MemberRole;
+  folder_id: string;
+  folder_name: string;
+}
+
+/** Sharing config for one folder. */
+export interface FolderSharingState extends DatasetSharingState {
+  role: ShareRole;
+  can_manage: boolean;
+  editors_can_share: boolean;
+  inherited: InheritedFolderMember[];
+}
+
+/** Result of filing runs into a folder. */
+export interface MoveRunsResult {
+  updated: string[];
+  skipped: Array<{ optimization_id: string; reason: "not_found" | "forbidden" }>;
+}
+
+function invalidateFolders() {
+  invalidateCache("/folders", "/optimizations/sidebar", "/optimizations/shared-with-me");
+}
+
+/** List every folder the caller can reach (owned, shared, and nested). */
+export function listFolders() {
+  return cachedGet<{ folders: RunFolder[] }>("/folders", SIDEBAR_CACHE_MS);
+}
+
+/** List the runs filed directly in a folder. */
+export function listFolderRuns(folderId: string) {
+  return cachedGet<{ items: SidebarJobItem[] }>(`/folders/${folderId}/runs`, SIDEBAR_CACHE_MS);
+}
+
+/** Create a folder, optionally inside another. */
+export async function createFolder(body: { name: string; parent_id?: string | null }) {
+  const folder = await request<RunFolder>("/folders", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  invalidateFolders();
+  return folder;
+}
+
+/** Rename a folder or change whether editors can share it. */
+export async function updateFolder(
+  folderId: string,
+  body: { name?: string; editors_can_share?: boolean },
+) {
+  const folder = await request<RunFolder>(`/folders/${folderId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  invalidateFolders();
+  return folder;
+}
+
+/** Delete a folder and its subfolders. Runs inside are kept and become unfiled. */
+export async function deleteFolder(folderId: string) {
+  const result = await request<{ deleted: string[] }>(`/folders/${folderId}`, { method: "DELETE" });
+  invalidateFolders();
+  return result;
+}
+
+/** Move a folder under another folder, or to the top level with null. */
+export async function moveFolder(folderId: string, parentId: string | null) {
+  const folder = await request<RunFolder>(`/folders/${folderId}/move`, {
+    method: "POST",
+    body: JSON.stringify({ parent_id: parentId }),
+  });
+  invalidateFolders();
+  return folder;
+}
+
+/** File runs into a folder, or unfile them with null. */
+export async function moveRunsToFolder(optimizationIds: string[], folderId: string | null) {
+  const result = await request<MoveRunsResult>("/folders/items", {
+    method: "POST",
+    body: JSON.stringify({ optimization_ids: optimizationIds, folder_id: folderId }),
+  });
+  invalidateFolders();
+  return result;
+}
+
+/** Fetch a folder's sharing config. */
+export function getFolderSharing(folderId: string) {
+  return request<FolderSharingState>(`/folders/${folderId}/sharing`);
+}
+
+/** Set the folder link policy. */
+export async function putFolderSharing(
+  folderId: string,
+  body: { general_access: GeneralAccess; general_role?: LinkRole },
+) {
+  const state = await request<FolderSharingState>(`/folders/${folderId}/sharing`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+  invalidateFolders();
+  return state;
+}
+
+/** Invite a user to a folder. */
+export async function addFolderShareMember(
+  folderId: string,
+  body: { username: string; role: MemberRole },
+) {
+  const state = await request<FolderSharingState>(`/folders/${folderId}/sharing/members`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  invalidateFolders();
+  return state;
+}
+
+/** Change a folder member's role. */
+export function updateFolderShareMember(
+  folderId: string,
+  username: string,
+  body: { role: MemberRole },
+) {
+  return request<FolderSharingState>(
+    `/folders/${folderId}/sharing/members/${encodeURIComponent(username)}`,
+    { method: "PATCH", body: JSON.stringify(body) },
+  );
+}
+
+/** Remove a member's grant from a folder. */
+export async function removeFolderShareMember(folderId: string, username: string) {
+  const state = await request<FolderSharingState>(
+    `/folders/${folderId}/sharing/members/${encodeURIComponent(username)}`,
+    { method: "DELETE" },
+  );
+  invalidateFolders();
+  return state;
+}
+
+/** Transfer folder ownership to an existing member. */
+export async function transferFolderOwnership(folderId: string, username: string) {
+  const state = await request<FolderSharingState>(`/folders/${folderId}/sharing/transfer`, {
+    method: "POST",
+    body: JSON.stringify({ username }),
+  });
+  invalidateFolders();
+  return state;
+}
+
+/** Redeem a folder share link so it lists in the caller's sidebar. */
+export async function claimSharedFolder(token: string) {
+  const result = await request<{ folder_id: string; role: ShareRole }>(
+    `/folders/share/${encodeURIComponent(token)}/claim`,
+    { method: "POST" },
+  );
+  invalidateFolders();
+  return result;
 }
 
 export function getServeInfo(optimizationId: string) {

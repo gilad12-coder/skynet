@@ -58,6 +58,7 @@ from .models import (
     MonthlyActiveUserModel,
     OptimizationShareGrantModel,
     ProgressEventModel,
+    RunFolderItemModel,
     UserModel,
     UserQuotaAuditModel,
     UserQuotaOverrideModel,
@@ -1046,6 +1047,7 @@ class RemoteDBJobStore:
             session.query(BlackboxAgentRunModel).filter(
                 BlackboxAgentRunModel.optimization_id == optimization_id
             ).delete()
+            session.query(RunFolderItemModel).filter(RunFolderItemModel.optimization_id == optimization_id).delete()
             self._delete_grid_pair_children(session, optimization_id)
             session.query(JobModel).filter(JobModel.optimization_id == optimization_id).delete()
             session.commit()
@@ -1171,6 +1173,9 @@ class RemoteDBJobStore:
             session.query(BlackboxAgentRunModel).filter(
                 BlackboxAgentRunModel.optimization_id.in_(optimization_ids)
             ).delete(synchronize_session=False)
+            session.query(RunFolderItemModel).filter(RunFolderItemModel.optimization_id.in_(optimization_ids)).delete(
+                synchronize_session=False
+            )
             for parent_id in optimization_ids:
                 self._delete_grid_pair_children(session, parent_id)
             deleted = (
@@ -3139,6 +3144,32 @@ class RemoteDBJobStore:
             if not with_counts:
                 return records
             return self._rows_with_counts(session, records)
+        finally:
+            session.close()
+
+    def list_jobs_by_ids(self, optimization_ids: list[str]) -> list[JobRecord]:
+        """List the user-facing jobs among ``optimization_ids``, newest first.
+
+        Backs folder contents, where membership (not ownership) picks the rows;
+        the caller has already resolved access to each id.
+
+        Args:
+            optimization_ids: Ids to load. Unknown ids are skipped.
+
+        Returns:
+            Matching ``JobRecord`` rows shaped like :meth:`list_jobs` rows,
+            without the progress/log count folding.
+        """
+        if not optimization_ids:
+            return []
+        session = self._get_session()
+        try:
+            q = (
+                self._list_query(session)
+                .filter(JobModel.optimization_id.in_(optimization_ids), _user_facing_jobs())
+                .order_by(JobModel.created_at.desc())
+            )
+            return [self._list_row_to_dict(row) for row in q.all()]
         finally:
             session.close()
 
