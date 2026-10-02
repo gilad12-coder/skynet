@@ -31,6 +31,8 @@ import { createHmac, randomUUID } from "crypto";
  *                           internal /auth/register|login calls
  *   API_URL               — backend base URL the credentials provider calls
  *   NODE_EXTRA_CA_CERTS   — path to CA bundle .pem for self-signed certs
+ *   AUTH_COOKIE_PREFIX    — renames every Auth.js cookie (local dev only; see
+ *                           authCookies)
  */
 
 const issuer = process.env.AUTH_SSO_ISSUER;
@@ -382,9 +384,28 @@ if (adfsConfigured) {
   );
 }
 
+// Browsers scope cookies by host, not port, so two checkouts on localhost:3000
+// and :3001 overwrite each other's session cookie. With different AUTH_SECRETs
+// each then fails to decrypt the other's ("no matching decryption secret") and
+// signs the user out. A per-checkout prefix keeps their cookies apart.
+function authCookies(prefix: string | undefined) {
+  if (!prefix) return undefined;
+  const named = (suffix: string) => ({ name: `${prefix}.${suffix}` });
+  return {
+    sessionToken: named("session-token"),
+    callbackUrl: named("callback-url"),
+    csrfToken: named("csrf-token"),
+    pkceCodeVerifier: named("pkce.code_verifier"),
+    state: named("state"),
+    nonce: named("nonce"),
+    webauthnChallenge: named("challenge"),
+  };
+}
+
 export const { handlers, auth } = NextAuth({
   providers,
   session: { strategy: "jwt" },
+  cookies: authCookies(process.env.AUTH_COOKIE_PREFIX),
   pages: { signIn: "/login" },
   callbacks: {
     authorized({ auth: session }) {
