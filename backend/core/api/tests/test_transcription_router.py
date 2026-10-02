@@ -3,8 +3,8 @@
 Mounts the router with the auth dependency overridden and the Groq leg
 monkeypatched — no network. Covers the unconfigured 503, the size-cap 413,
 the happy path, the provider-failure 502, and the hourly clip cap and monthly
-Groq budget against an in-memory Redis double. Eligibility (paid balance, Pro,
-or BYOK) and the caller's own Groq key run against an in-memory SQLite engine.
+Groq budget against an in-memory Redis double. Free platform dictation and the
+caller's own Groq key run against an in-memory SQLite engine.
 """
 
 from __future__ import annotations
@@ -23,12 +23,11 @@ from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from ...billing.byok_vault import ProviderKeyVault
 from ...config import settings
-from ...storage.models import Base, BillingCustomerModel
+from ...storage.models import Base
 from .. import platform_budget
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
@@ -172,21 +171,15 @@ def test_hourly_clip_cap_answers_429(monkeypatch: pytest.MonkeyPatch, redis_doub
 
 
 class _BillingStore:
-    """Job-store stand-in exposing an engine and a switchable Pro flag."""
+    """Job-store stand-in exposing an engine."""
 
-    def __init__(self, engine: Any, *, pro: bool = False) -> None:
-        """Bind the engine and the Pro answer.
+    def __init__(self, engine: Any) -> None:
+        """Bind the engine.
 
         Args:
-            engine: SQLAlchemy engine with the billing tables.
-            pro: What ``has_pro_plan`` returns.
+            engine: SQLAlchemy engine with the BYOK tables.
         """
         self.engine = engine
-        self._pro = pro
-
-    def has_pro_plan(self, username: str) -> bool:
-        """Return the configured Pro flag for any user."""
-        return self._pro
 
 
 @pytest.fixture
@@ -219,35 +212,8 @@ def _seen_keys(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return keys
 
 
-def test_free_grant_only_account_is_not_eligible(monkeypatch: pytest.MonkeyPatch, billing_engine: Any) -> None:
-    """No paid balance, no Pro and no BYOK key answers 402 before Groq is called."""
-    keys = _seen_keys(monkeypatch)
-    resp = _post_audio(_client(_BillingStore(billing_engine)))
-    assert resp.status_code == 402
-    assert resp.json()["code"] == "transcription.not_eligible"
-    assert keys == []
-
-
-def test_paid_balance_makes_account_eligible(monkeypatch: pytest.MonkeyPatch, billing_engine: Any) -> None:
-    """A positive purchased balance unlocks platform-paid dictation."""
-    with Session(billing_engine) as session:
-        session.add(BillingCustomerModel(username=_USER.username, stripe_customer_id="cus_1", balance_cents=5))
-        session.commit()
-    keys = _seen_keys(monkeypatch)
-    assert _post_audio(_client(_BillingStore(billing_engine))).status_code == 200
-    assert keys == ["gsk-platform"]
-
-
-def test_pro_plan_makes_account_eligible(monkeypatch: pytest.MonkeyPatch, billing_engine: Any) -> None:
-    """An active Pro plan unlocks platform-paid dictation with no balance."""
-    keys = _seen_keys(monkeypatch)
-    assert _post_audio(_client(_BillingStore(billing_engine, pro=True))).status_code == 200
-    assert keys == ["gsk-platform"]
-
-
-def test_any_verified_byok_key_makes_account_eligible(monkeypatch: pytest.MonkeyPatch, billing_engine: Any) -> None:
-    """A verified non-Groq BYOK key unlocks dictation on the platform key."""
-    _save_key(billing_engine, "openai", "sk-own-openai")
+def test_account_without_balance_dictates_on_platform_key(monkeypatch: pytest.MonkeyPatch, billing_engine: Any) -> None:
+    """An account with no balance, no Pro and no BYOK key still dictates for free."""
     keys = _seen_keys(monkeypatch)
     assert _post_audio(_client(_BillingStore(billing_engine))).status_code == 200
     assert keys == ["gsk-platform"]
