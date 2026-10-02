@@ -5,13 +5,16 @@ with Alembic, because ``create_all`` never ALTERs an existing table: a migration
 that adds a column to a table an earlier boot already created would otherwise
 never land — exactly the drift that silently stranded ``billing_provider_keys``.
 
-On a database Alembic has never stamped, the ``create_all`` schema already *is*
-head, so we stamp it rather than replay history (the pgvector baseline migration
-would fail where the extension is absent). On an adopted database we upgrade,
-applying whatever was added since. Serialized under the same advisory lock as
-``create_all`` so concurrent replicas don't race, and Postgres-only — SQLite test
-stores get ``None`` from the lock helper and skip Alembic, since their schema
-comes straight from the ORM models.
+On an adopted database the pending migrations run *before* ``create_all``: run
+after it, a migration that creates or renames a table collides with the empty
+table ``create_all`` just made from the new models (the #502 deploy failed on
+``wallet_ledger_id_seq`` this way). On a database Alembic has never stamped, the
+``create_all`` schema already *is* head, so it is stamped afterwards rather than
+replayed (the pgvector baseline migration would fail where the extension is
+absent). Both steps run under the same advisory lock as ``create_all`` so
+concurrent replicas don't race, and are Postgres-only — SQLite test stores get
+``None`` from the lock helper and skip Alembic, since their schema comes
+straight from the ORM models.
 """
 
 from __future__ import annotations
@@ -30,31 +33,64 @@ from .schema_lock import schema_bootstrap_lock
 _ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
 
 
-def sync_migration_head(engine: Any) -> None:
-    """Stamp head on an unadopted database, else upgrade to head.
+def upgrade_if_adopted(engine: Any) -> None:
+    """Apply pending migrations when Alembic already tracks this database.
 
-    Held under the schema-bootstrap advisory lock so exactly one replica migrates
-    while peers wait, then proceeds through a no-op upgrade. Runs migrations on
-    the lock-holding connection so they share its transaction rather than opening
-    a second, unserialized session.
+    Call before ``create_all`` so new tables come from their migrations, not from
+    the models.
 
     Args:
         engine: The store's SQLAlchemy engine. On non-PostgreSQL dialects the lock
             helper yields ``None`` and this returns without touching Alembic.
     """
     with schema_bootstrap_lock(engine) as conn:
-        if conn is None:
-            return
-        config = Config(str(_ALEMBIC_INI))
-        config.attributes["connection"] = conn
-        # Keep env.py from running fileConfig(alembic.ini): that replaces the
-        # root handlers and raises the root level to WARN, silencing every app
-        # INFO log (JSON format included) for the rest of the process lifetime.
-        config.attributes["configure_logger"] = False
-        if _is_adopted(conn):
-            command.upgrade(config, "head")
-        else:
-            command.stamp(config, "head")
+        if conn is not None and _is_adopted(conn):
+            command.upgrade(_alembic_config(conn), "head")
+
+
+def stamp_if_unadopted(engine: Any) -> None:
+    """Stamp head on a database Alembic has never tracked.
+
+    Call after ``create_all``, whose schema on such a database already is head.
+
+    Args:
+        engine: The store's SQLAlchemy engine. On non-PostgreSQL dialects the lock
+            helper yields ``None`` and this returns without touching Alembic.
+    """
+    with schema_bootstrap_lock(engine) as conn:
+        if conn is not None and not _is_adopted(conn):
+            command.stamp(_alembic_config(conn), "head")
+
+
+def sync_migration_head(engine: Any) -> None:
+    """Upgrade an adopted database, else stamp it at head.
+
+    Args:
+        engine: The store's SQLAlchemy engine.
+    """
+    upgrade_if_adopted(engine)
+    stamp_if_unadopted(engine)
+
+
+def _alembic_config(conn: Any) -> Config:
+    """Build an Alembic config that runs on the lock-holding connection.
+
+    Sharing that connection keeps migrations in the locked transaction rather
+    than a second, unserialized session.
+
+    Args:
+        conn: A live connection bound to the bootstrap transaction.
+
+    Returns:
+        The Alembic config bound to ``conn``.
+    """
+    config = Config(str(_ALEMBIC_INI))
+    config.attributes["connection"] = conn
+    # Keep env.py from running fileConfig(alembic.ini): that replaces the
+    # root handlers and raises the root level to WARN, silencing every app
+    # INFO log (JSON format included) for the rest of the process lifetime.
+    config.attributes["configure_logger"] = False
+    return config
 
 
 def _is_adopted(conn: Any) -> bool:
