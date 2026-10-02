@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "جعبه‌سیاه",
   "sidebar.filter.type.grid": "جستجوی شبکه‌ای",
   "sidebar.filter.type.run": "برنامه DSPy",
-  "sidebar.runs_heading": "اجراها"
+  "sidebar.runs_heading": "اجراها",
+  "folders.new_run": "بهینه‌سازی جدید",
+  "folders.new_run.not_filed": "اجرا آغاز شد، اما افزودن آن به پوشه ممکن نشد. می‌توانید آن را از نوار کناری جابه‌جا کنید."
 }

@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "الصندوق الأسود",
   "sidebar.filter.type.grid": "بحث شبكي",
   "sidebar.filter.type.run": "برنامج DSPy",
-  "sidebar.runs_heading": "التشغيلات"
+  "sidebar.runs_heading": "التشغيلات",
+  "folders.new_run": "تحسين جديد",
+  "folders.new_run.not_filed": "بدأ التشغيل، لكن تعذّرت إضافته إلى المجلد. يمكنك نقله من الشريط الجانبي."
 }

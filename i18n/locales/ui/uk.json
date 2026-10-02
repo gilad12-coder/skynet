@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "Чорна скринька",
   "sidebar.filter.type.grid": "Пошук по сітці",
   "sidebar.filter.type.run": "Програма DSPy",
-  "sidebar.runs_heading": "Запуски"
+  "sidebar.runs_heading": "Запуски",
+  "folders.new_run": "Нова оптимізація",
+  "folders.new_run.not_filed": "Запуск почався, але його не вдалося додати до папки. Ви можете перемістити його через бічну панель."
 }

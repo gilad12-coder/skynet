@@ -80,6 +80,7 @@ import {
   stripModelSecrets,
   type WizardDraftData,
 } from "../lib/draft-record";
+import { fileNewRun } from "../lib/file-new-run";
 import { useWizardDrafts } from "./use-wizard-drafts";
 import { useExecutionBudget } from "./use-execution-budget";
 import { useWizardPreflight } from "./use-wizard-preflight";
@@ -154,7 +155,7 @@ function parseTargetScore(value: string): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 && parsed <= 100 ? parsed : undefined;
 }
 
-export function useSubmitWizard() {
+export function useSubmitWizard(folderId: string | null = null) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();
@@ -2386,6 +2387,7 @@ export function useSubmitWizard() {
       // once navigation tears this form down.
       submittedRef.current = true;
       draftsRef.current.consumed();
+      await fileNewRun(result.optimization_id, folderId);
       const jobUrl = `/optimizations/${result.optimization_id}`;
       setSubmitPhase("splash");
       // Collapse sidebar before navigating so the job page opens with full width

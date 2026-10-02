@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "Чёрный ящик",
   "sidebar.filter.type.grid": "Поиск по сетке",
   "sidebar.filter.type.run": "Программа DSPy",
-  "sidebar.runs_heading": "Запуски"
+  "sidebar.runs_heading": "Запуски",
+  "folders.new_run": "Новая оптимизация",
+  "folders.new_run.not_filed": "Запуск начался, но его не удалось добавить в папку. Вы можете переместить его через боковую панель."
 }

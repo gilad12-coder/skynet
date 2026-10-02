@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "Kara kutu",
   "sidebar.filter.type.grid": "Izgara arama",
   "sidebar.filter.type.run": "DSPy programı",
-  "sidebar.runs_heading": "Çalıştırmalar"
+  "sidebar.runs_heading": "Çalıştırmalar",
+  "folders.new_run": "Yeni optimizasyon",
+  "folders.new_run.not_filed": "Çalıştırma başladı ancak klasöre eklenemedi. Kenar çubuğundan taşıyabilirsiniz."
 }

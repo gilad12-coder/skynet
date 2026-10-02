@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { toast } from "react-toastify";
 import {
@@ -15,6 +16,7 @@ import {
   FolderPlus,
   FunnelSimple,
   PencilSimple,
+  Plus,
   ShareNetwork,
   Trash,
   Users,
@@ -314,6 +316,7 @@ function FolderNode({ folder, depth, ...props }: TreeProps & { folder: RunFolder
   const subfolders = childMap.get(folder.id) ?? [];
   const editable = canEditFolder(folder);
   const isOwner = folder.role === "owner";
+  const router = useRouter();
 
   // Runs load lazily the first time a folder opens, and refresh with the rest
   // of the sidebar while it stays open.
@@ -419,6 +422,18 @@ function FolderNode({ folder, depth, ...props }: TreeProps & { folder: RunFolder
               collisionPadding={8}
               className={COMPACT_POPOVER_PANEL_CLASS}
             >
+              {editable && (
+                <PopoverPrimitive.Close asChild>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/submit?folder=${encodeURIComponent(folder.id)}`)}
+                    className={COMPACT_POPOVER_ITEM_CLASS}
+                  >
+                    <Plus className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
+                    <span className="flex-1 text-start">{msg("folders.new_run")}</span>
+                  </button>
+                </PopoverPrimitive.Close>
+              )}
               {editable &&
                 menuItem(FolderPlus, msg("folders.new_subfolder"), {
                   kind: "create",

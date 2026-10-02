@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "Boîte noire",
   "sidebar.filter.type.grid": "Recherche par grille",
   "sidebar.filter.type.run": "Programme DSPy",
-  "sidebar.runs_heading": "Exécutions"
+  "sidebar.runs_heading": "Exécutions",
+  "folders.new_run": "Nouvelle optimisation",
+  "folders.new_run.not_filed": "L'exécution a démarré, mais elle n'a pas pu être ajoutée au dossier. Vous pouvez la déplacer depuis la barre latérale."
 }
