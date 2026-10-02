@@ -4010,5 +4010,19 @@
   "sidebar.filter.type.run": "DSPy 程序",
   "sidebar.runs_heading": "运行",
   "folders.new_run": "新建优化",
-  "folders.new_run.not_filed": "运行已开始，但无法添加到文件夹。你可以在侧边栏中移动它。"
+  "folders.new_run.not_filed": "运行已开始，但无法添加到文件夹。你可以在侧边栏中移动它。",
+  "tutorial.stage.data": "数据",
+  "tutorial.stage.optimize": "优化",
+  "tutorial.stage.results": "结果",
+  "tutorial.stage.aria": "工作流阶段",
+  "tutorial.step.tagger_setup.title": "从你的数据开始",
+  "tutorial.step.tagger_setup.body": "优化从有正确答案的样例中学习。如果你只有没有答案的文本，就在这里标注。在这个示例中，我们拿邮件来按类型逐一标注。上传 CSV、JSON 或 Excel 文件，选择一个已保存的数据集，或者从一次简短访谈生成一个合成数据集，然后勾选要标注的文本列。",
+  "tutorial.step.tagger_setup.body_manual": "优化从有正确答案的样例中学习。如果你只有没有答案的文本，就在这里标注。在这个示例中，我们拿邮件来按类型逐一标注。上传 CSV、JSON 或 Excel 文件，或者选择一个已保存的数据集，然后勾选要标注的文本列。",
+  "tutorial.step.tagger_modes.body": "默认情况下 AI 以自动驾驶模式运行：经过一次简短访谈后，它会为每一行标注，并把不确定的行标记出来供你审查。在副驾模式下，它会先标注一批，由你逐条确认；在手动模式下，每个决定都由你来做。完成后，把标注保存到你的数据集库，之后它们就会进入优化。",
+  "tutorial.step.data_upload.title": "从标注到优化",
+  "tutorial.step.data_upload.body": "现在你标注过的邮件会变成训练材料。在优化表单中，选择你保存在库中的数据集，或者上传一个文件。每一行就是一个样例：邮件是输入，你的标注是正确答案。将每一列标记为输入、输出或忽略，这个映射就会变成提示词的签名。",
+  "tutorial.step.code_setup.body": "这是助手编写的代码。签名描述了任务的输入和输出。指标会把每个模型的回答与你给出的标注进行比较，并返回一个 0 到 1 的分数，优化要提升的正是这个分数。你可以直接编辑任意一行。",
+  "tutorial.step.models.body": "任务模型负责回答样例，优化模型会读取指标发现的错误并提出更好的提示词。这样每一轮都能从上一轮中学习。为每个角色选择模型和设置。",
+  "tutorial.step.review.body": "摘要在一处展示整条链路：已标注的数据集、提示词、指标和模型。点击任意卡片即可返回并编辑。提交后，优化会在你的样例上运行提示词，为它打分，并一次又一次地重写它。",
+  "tutorial.step.scores.body": "在同一批已标注样例上比较前后：基线分数对应你最初的提示词，优化后的分数对应优化找到的提示词，二者之差就是改进幅度。从这里你可以试用新的提示词，查看它是如何构建的，并将它导出。"
 }

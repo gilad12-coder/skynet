@@ -4010,5 +4010,19 @@
   "sidebar.filter.type.run": "Programma DSPy",
   "sidebar.runs_heading": "Esecuzioni",
   "folders.new_run": "Nuova ottimizzazione",
-  "folders.new_run.not_filed": "L'esecuzione è partita, ma non è stato possibile aggiungerla alla cartella. Puoi spostarla dalla barra laterale."
+  "folders.new_run.not_filed": "L'esecuzione è partita, ma non è stato possibile aggiungerla alla cartella. Puoi spostarla dalla barra laterale.",
+  "tutorial.stage.data": "Dati",
+  "tutorial.stage.optimize": "Ottimizza",
+  "tutorial.stage.results": "Risultato",
+  "tutorial.stage.aria": "Fase del workflow",
+  "tutorial.step.tagger_setup.title": "Inizia dai tuoi dati",
+  "tutorial.step.tagger_setup.body": "L'ottimizzazione impara da esempi che hanno una risposta corretta. Se hai solo testo senza risposte, lo etichetti qui. In questo esempio prendiamo email e etichettiamo ciascuna per tipo. Carica un file CSV, JSON o Excel, scegli un dataset salvato, o genera uno sintetico da una breve intervista, poi spunta la colonna di testo da etichettare.",
+  "tutorial.step.tagger_setup.body_manual": "L'ottimizzazione impara da esempi che hanno una risposta corretta. Se hai solo testo senza risposte, lo etichetti qui. In questo esempio prendiamo email e etichettiamo ciascuna per tipo. Carica un file CSV, JSON o Excel o scegli un dataset salvato, poi spunta la colonna di testo da etichettare.",
+  "tutorial.step.tagger_modes.body": "Per impostazione predefinita l'IA funziona in Pilota automatico: dopo una breve intervista etichetta ogni riga e segnala per la revisione quelle su cui non era sicura. In Co-pilota etichetta un primo lotto e tu confermi ogni etichetta, e in Manuale ogni decisione è tua. Quando hai finito, salva le etichette nella tua libreria di dataset, e da lì passano all'ottimizzazione.",
+  "tutorial.step.data_upload.title": "Dalle etichette all'ottimizzazione",
+  "tutorial.step.data_upload.body": "Ora le email che hai etichettato diventano materiale di addestramento. Nel modulo di ottimizzazione, scegli il dataset che hai salvato nella tua libreria, o carica un file. Ogni riga è un esempio: l'email è l'input e la tua etichetta è la risposta corretta. Segna ogni colonna come Input, Output o Ignora, e quella mappatura diventa la Signature del prompt.",
+  "tutorial.step.code_setup.body": "Questo è il codice che scrive l'assistente. La Signature descrive l'input e l'output del task. La metrica confronta ogni risposta del modello con l'etichetta che hai dato e restituisce un punteggio da 0 a 1, ed è quel punteggio che l'ottimizzazione cerca di aumentare. Puoi modificare qualsiasi riga direttamente.",
+  "tutorial.step.models.body": "Il Modello del task risponde agli esempi, e il Modello di ottimizzazione legge gli errori trovati dalla metrica e propone un prompt migliore. Così ogni round impara dal precedente. Scegli un modello e le impostazioni per ogni ruolo.",
+  "tutorial.step.review.body": "Il riepilogo mostra tutta la catena in un unico posto: il dataset etichettato, il prompt, la metrica e i modelli. Clicca su qualsiasi scheda per tornare indietro e modificarla. Dopo l'invio, l'ottimizzazione esegue il prompt sui tuoi esempi, lo valuta e lo riscrive più e più volte.",
+  "tutorial.step.scores.body": "Confronta il prima e il dopo sugli stessi esempi etichettati: il punteggio di riferimento è il tuo prompt originale, il punteggio ottimizzato è il prompt trovato dall'ottimizzazione, e tra i due c'è il miglioramento. Da qui puoi provare il nuovo prompt, vedere come è stato costruito ed esportarlo."
 }
