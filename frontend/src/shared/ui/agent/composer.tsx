@@ -177,7 +177,12 @@ export function Composer({
               </>
             )}
             {dictation.state.kind === "err" && (
-              <span className="truncate text-destructive">{dictation.state.message}</span>
+              <span
+                className="line-clamp-2 text-xs leading-snug text-destructive"
+                title={dictation.state.message}
+              >
+                {dictation.state.message}
+              </span>
             )}
           </div>
         )}
