@@ -20,6 +20,7 @@ from ...storage.remote import RemoteDBJobStore
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..routers._helpers import grant_roles_for
 from ..routers.folders import create_folders_router
+from ..routers.optimizations import create_optimizations_router
 
 
 class _MemStore(RemoteDBJobStore):
@@ -227,6 +228,22 @@ def test_a_run_lives_in_one_folder() -> None:
     alice.post("/folders/items", json={"optimization_ids": ["run-1"], "folder_id": second})
     assert alice.get(f"/folders/{first}/runs").json()["items"] == []
     assert len(alice.get(f"/folders/{second}/runs").json()["items"]) == 1
+
+
+def test_owner_keeps_owner_role_on_their_filed_runs_in_listing() -> None:
+    """Filing your own run doesn't turn it into a run shared with you."""
+    store = _MemStore()
+    _seed_job(store, "run-1")
+    alice = _client(store)
+    folder_id = _create(alice, "A")
+    alice.post("/folders/items", json={"optimization_ids": ["run-1"], "folder_id": folder_id})
+    app = FastAPI()
+    app.include_router(create_optimizations_router(job_store=store, get_worker_ref=lambda: None))
+    identity = AuthenticatedUser(username="alice", role="user", groups=())
+    app.dependency_overrides[get_authenticated_user] = lambda: identity
+    resp = TestClient(app).get("/optimizations", params={"include_shared": True})
+    assert resp.status_code == 200, resp.text
+    assert [item["role"] for item in resp.json()["items"]] == [None]
 
 
 def test_delete_removes_subfolders_but_keeps_runs() -> None:

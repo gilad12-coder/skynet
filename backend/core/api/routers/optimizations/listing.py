@@ -230,7 +230,10 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
             caller_norm = current_user.username.strip().lower()
             roles = grant_roles_for(job_store, [s.optimization_id for s in items], caller_norm)
             for s in items:
-                s.role = roles.get(s.optimization_id)
+                # A folder grants roles to every run inside it, including the
+                # caller's own; owned runs must keep ``role=None`` ("mine").
+                if (s.username or "").strip().lower() != caller_norm:
+                    s.role = roles.get(s.optimization_id)
         return PaginatedJobsResponse(items=items, total=total, limit=resolved_limit, offset=offset)
 
     @router.get(
