@@ -76,18 +76,21 @@ test("each guided workflow stays at eight steps or fewer", () => {
     quick:
       (steps.match(/tracks: QUICK_ONLY/g) ?? []).length +
       (steps.match(/tracks: QUICK_AND_ANYTHING/g) ?? []).length +
-      (steps.match(/tracks: QUICK_AND_RESULTS/g) ?? []).length,
+      (steps.match(/tracks: QUICK_AND_RESULTS/g) ?? []).length +
+      (steps.match(/tracks: QUICK_AND_DATA/g) ?? []).length,
     anything:
       (steps.match(/tracks: ANYTHING_ONLY/g) ?? []).length +
       (steps.match(/tracks: QUICK_AND_ANYTHING/g) ?? []).length,
-    data: (steps.match(/tracks: DATA_ONLY/g) ?? []).length,
+    data:
+      (steps.match(/tracks: DATA_ONLY/g) ?? []).length +
+      (steps.match(/tracks: QUICK_AND_DATA/g) ?? []).length,
     results:
       (steps.match(/tracks: RESULTS_ONLY/g) ?? []).length +
       (steps.match(/tracks: QUICK_AND_RESULTS/g) ?? []).length,
     workspace: (steps.match(/tracks: WORKSPACE_ONLY/g) ?? []).length,
   };
 
-  assert.deepEqual(counts, { quick: 7, anything: 7, data: 4, results: 8, workspace: 7 });
+  assert.deepEqual(counts, { quick: 8, anything: 7, data: 4, results: 8, workspace: 6 });
   for (const [track, count] of Object.entries(counts)) {
     assert.ok(count <= 8, `${track} guide has ${count} steps`);
   }

@@ -4010,5 +4010,19 @@
   "sidebar.filter.type.run": "DSPy programı",
   "sidebar.runs_heading": "Çalıştırmalar",
   "folders.new_run": "Yeni optimizasyon",
-  "folders.new_run.not_filed": "Çalıştırma başladı ancak klasöre eklenemedi. Kenar çubuğundan taşıyabilirsiniz."
+  "folders.new_run.not_filed": "Çalıştırma başladı ancak klasöre eklenemedi. Kenar çubuğundan taşıyabilirsiniz.",
+  "tutorial.stage.data": "Veri",
+  "tutorial.stage.optimize": "Optimizasyon",
+  "tutorial.stage.results": "Sonuç",
+  "tutorial.stage.aria": "İş akışı aşaması",
+  "tutorial.step.tagger_setup.title": "Verilerinizle başlayın",
+  "tutorial.step.tagger_setup.body": "Optimizasyon, doğru yanıtı olan örneklerden öğrenir. Yalnızca yanıtsız metniniz varsa, burada etiketlersiniz. Bu örnekte e-postaları alıp her birini türüne göre etiketliyoruz. Bir CSV, JSON veya Excel dosyası yükleyin, kayıtlı bir veri kümesi seçin veya kısa bir görüşmeden sentetik bir veri kümesi oluşturun, ardından etiketlenecek metin sütununu işaretleyin.",
+  "tutorial.step.tagger_setup.body_manual": "Optimizasyon, doğru yanıtı olan örneklerden öğrenir. Yalnızca yanıtsız metniniz varsa, burada etiketlersiniz. Bu örnekte e-postaları alıp her birini türüne göre etiketliyoruz. Bir CSV, JSON veya Excel dosyası yükleyin veya kayıtlı bir veri kümesi seçin, ardından etiketlenecek metin sütununu işaretleyin.",
+  "tutorial.step.tagger_modes.body": "Varsayılan olarak yapay zeka Otomatik pilotta çalışır: kısa bir görüşmeden sonra her satırı etiketler ve emin olamadığı satırları incelemeye işaretler. Yardımcı pilotta ilk grubu etiketler ve siz her etiketi onaylarsınız, Manuel'de ise her karar size aittir. İşiniz bitince etiketleri veri kümesi kitaplığınıza kaydedin; buradan optimizasyona geçerler.",
+  "tutorial.step.data_upload.title": "Etiketlerden optimizasyona",
+  "tutorial.step.data_upload.body": "Artık etiketlediğiniz e-postalar eğitim materyaline dönüşüyor. Optimizasyon formunda, kitaplığınızda kaydettiğiniz veri kümesini seçin veya bir dosya yükleyin. Her satır bir örnektir: e-posta girdidir ve etiketiniz doğru yanıttır. Her sütunu Girdi, Çıktı veya Yok say olarak işaretleyin; bu eşleme istemin İmzası olur.",
+  "tutorial.step.code_setup.body": "Bu, asistanın yazdığı koddur. İmza, görevin girdisini ve çıktısını tanımlar. Metrik, her model yanıtını verdiğiniz etiketle karşılaştırır ve 0 ile 1 arasında bir puan döndürür; optimizasyonun yükseltmeye çalıştığı puan da budur. Herhangi bir satırı doğrudan düzenleyebilirsiniz.",
+  "tutorial.step.models.body": "Görev modeli örnekleri yanıtlar, Optimizasyon modeli ise metriğin bulduğu hataları okuyup daha iyi bir istem önerir. Böylece her tur öncekinden öğrenir. Her rol için bir model ve ayarlar seçin.",
+  "tutorial.step.review.body": "Özet, tüm zinciri bir arada gösterir: etiketlenmiş veri kümesi, istem, metrik ve modeller. Geri gidip düzenlemek için herhangi bir karta tıklayın. Gönderdikten sonra optimizasyon istemi örnekleriniz üzerinde çalıştırır, puanlar ve tekrar tekrar yeniden yazar.",
+  "tutorial.step.scores.body": "Aynı etiketlenmiş örnekler üzerinde öncesini ve sonrasını karşılaştırın: temel referans puanı özgün isteminizdir, optimize edilmiş puan ise optimizasyonun bulduğu istemdir ve ikisi arasındaki fark iyileştirmedir. Buradan yeni istemi deneyebilir, nasıl oluşturulduğunu görebilir ve dışa aktarabilirsiniz."
 }

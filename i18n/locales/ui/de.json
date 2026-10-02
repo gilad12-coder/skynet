@@ -4010,5 +4010,19 @@
   "sidebar.filter.type.run": "DSPy-Programm",
   "sidebar.runs_heading": "Durchläufe",
   "folders.new_run": "Neue Optimierung",
-  "folders.new_run.not_filed": "Der Lauf wurde gestartet, konnte aber nicht zum Ordner hinzugefügt werden. Du kannst ihn über die Seitenleiste verschieben."
+  "folders.new_run.not_filed": "Der Lauf wurde gestartet, konnte aber nicht zum Ordner hinzugefügt werden. Du kannst ihn über die Seitenleiste verschieben.",
+  "tutorial.stage.data": "Daten",
+  "tutorial.stage.optimize": "Optimieren",
+  "tutorial.stage.results": "Ergebnis",
+  "tutorial.stage.aria": "Workflow-Phase",
+  "tutorial.step.tagger_setup.title": "Starten Sie mit Ihren Daten",
+  "tutorial.step.tagger_setup.body": "Die Optimierung lernt aus Beispielen mit einer richtigen Antwort. Wenn Sie nur Text ohne Antworten haben, labeln Sie ihn hier. In diesem Beispiel nehmen wir E-Mails und labeln jede nach Typ. Laden Sie eine CSV-, JSON- oder Excel-Datei hoch, wählen Sie einen gespeicherten Datensatz, oder erzeugen Sie einen synthetischen aus einem kurzen Interview, und haken Sie dann die Textspalte zum Labeln an.",
+  "tutorial.step.tagger_setup.body_manual": "Die Optimierung lernt aus Beispielen mit einer richtigen Antwort. Wenn Sie nur Text ohne Antworten haben, labeln Sie ihn hier. In diesem Beispiel nehmen wir E-Mails und labeln jede nach Typ. Laden Sie eine CSV-, JSON- oder Excel-Datei hoch, oder wählen Sie einen gespeicherten Datensatz, und haken Sie dann die Textspalte zum Labeln an.",
+  "tutorial.step.tagger_modes.body": "Standardmäßig läuft die KI auf Autopilot: Nach einem kurzen Interview labelt sie jede Zeile und markiert die unsicheren Fälle zur Überprüfung. Im Co-Pilot labelt sie einen ersten Stapel, und Sie bestätigen jedes Label, und bei Manuell liegt jede Entscheidung bei Ihnen. Wenn Sie fertig sind, speichern Sie die Labels in Ihrer Datensatz-Bibliothek, und von dort gehen sie in die Optimierung.",
+  "tutorial.step.data_upload.title": "Von Labels zur Optimierung",
+  "tutorial.step.data_upload.body": "Jetzt werden die gelabelten E-Mails zum Trainingsmaterial. Wählen Sie im Optimierungsformular den Datensatz, den Sie in Ihrer Bibliothek gespeichert haben, oder laden Sie eine Datei hoch. Jede Zeile ist ein Beispiel: Die E-Mail ist die Eingabe, und Ihr Label ist die richtige Antwort. Markieren Sie jede Spalte als Eingabe, Ausgabe oder Ignorieren, und aus dieser Zuordnung wird die Signatur des Prompts.",
+  "tutorial.step.code_setup.body": "Das ist der Code, den der Assistent schreibt. Die Signatur beschreibt die Eingabe und Ausgabe der Aufgabe. Die Metrik vergleicht jede Modellantwort mit dem Label, das Sie vergeben haben, und gibt einen Score von 0 bis 1 zurück, und genau diesen Score versucht die Optimierung zu steigern. Sie können jede Zeile direkt bearbeiten.",
+  "tutorial.step.models.body": "Das Aufgabenmodell beantwortet die Beispiele, und das Optimierungsmodell liest die von der Metrik gefundenen Fehler und schlägt einen besseren Prompt vor. So lernt jede Runde von der vorherigen. Wählen Sie für jede Rolle ein Modell und die Einstellungen.",
+  "tutorial.step.review.body": "Die Übersicht zeigt die ganze Kette an einem Ort: den gelabelten Datensatz, den Prompt, die Metrik und die Modelle. Klicken Sie auf eine Karte, um zurückzugehen und sie zu bearbeiten. Nach dem Absenden führt die Optimierung den Prompt auf Ihren Beispielen aus, bewertet ihn und schreibt ihn immer wieder neu.",
+  "tutorial.step.scores.body": "Vergleichen Sie Vorher und Nachher an denselben gelabelten Beispielen: Der Baseline-Score steht für Ihren ursprünglichen Prompt, der optimierte Score für den von der Optimierung gefundenen Prompt, und dazwischen liegt die Verbesserung. Von hier aus können Sie den neuen Prompt testen, sehen, wie er entstanden ist, und ihn exportieren."
 }

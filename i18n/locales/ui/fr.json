@@ -4010,5 +4010,19 @@
   "sidebar.filter.type.run": "Programme DSPy",
   "sidebar.runs_heading": "Exécutions",
   "folders.new_run": "Nouvelle optimisation",
-  "folders.new_run.not_filed": "L'exécution a démarré, mais elle n'a pas pu être ajoutée au dossier. Vous pouvez la déplacer depuis la barre latérale."
+  "folders.new_run.not_filed": "L'exécution a démarré, mais elle n'a pas pu être ajoutée au dossier. Vous pouvez la déplacer depuis la barre latérale.",
+  "tutorial.stage.data": "Données",
+  "tutorial.stage.optimize": "Optimiser",
+  "tutorial.stage.results": "Résultat",
+  "tutorial.stage.aria": "Étape du workflow",
+  "tutorial.step.tagger_setup.title": "Commencez par vos données",
+  "tutorial.step.tagger_setup.body": "L'optimisation apprend à partir d'exemples qui ont une réponse correcte. Si vous n'avez que du texte sans réponses, vous l'étiquetez ici. Dans cet exemple, nous prenons des e-mails et étiquetons chacun par type. Importez un fichier CSV, JSON ou Excel, choisissez-en un dans votre bibliothèque, ou générez-en un synthétique à partir d'un court entretien, puis cochez la colonne de texte à étiqueter.",
+  "tutorial.step.tagger_setup.body_manual": "L'optimisation apprend à partir d'exemples qui ont une réponse correcte. Si vous n'avez que du texte sans réponses, vous l'étiquetez ici. Dans cet exemple, nous prenons des e-mails et étiquetons chacun par type. Importez un fichier CSV, JSON ou Excel ou choisissez-en un dans votre bibliothèque, puis cochez la colonne de texte à étiqueter.",
+  "tutorial.step.tagger_modes.body": "Par défaut, l'IA fonctionne en Pilote automatique : après un court entretien, elle étiquette chaque ligne et signale pour révision celles dont elle n'était pas sûre. En Copilote, elle étiquette un premier lot et vous confirmez chaque étiquette, et en Manuel, chaque décision vous appartient. Une fois terminé, enregistrez les étiquettes dans votre bibliothèque de jeux de données, d'où elles passent à l'optimisation.",
+  "tutorial.step.data_upload.title": "Des étiquettes à l'optimisation",
+  "tutorial.step.data_upload.body": "Les e-mails que vous avez étiquetés deviennent maintenant du matériel d'entraînement. Dans le formulaire d'optimisation, choisissez le jeu de données enregistré dans votre bibliothèque, ou importez un fichier. Chaque ligne est un exemple : l'e-mail est l'entrée et votre étiquette est la réponse correcte. Marquez chaque colonne comme Entrée, Sortie ou Ignorer, et ce mappage devient la Signature du prompt.",
+  "tutorial.step.code_setup.body": "Voici le code que l'assistant écrit. La Signature décrit l'entrée et la sortie de la tâche. La métrique compare chaque réponse du modèle à l'étiquette que vous avez donnée et renvoie un score de 0 à 1, et c'est ce score que l'optimisation cherche à augmenter. Vous pouvez modifier directement n'importe quelle ligne.",
+  "tutorial.step.models.body": "Le Modèle de tâche répond aux exemples, et le Modèle d'optimisation lit les erreurs trouvées par la métrique et propose un meilleur prompt. Ainsi, chaque tour apprend du précédent. Choisissez un modèle et des paramètres pour chaque rôle.",
+  "tutorial.step.review.body": "Le résumé montre toute la chaîne en un seul endroit : le jeu de données étiqueté, le prompt, la métrique et les modèles. Cliquez sur une carte pour y revenir et la modifier. Après l'envoi, l'optimisation exécute le prompt sur vos exemples, le note et le réécrit encore et encore.",
+  "tutorial.step.scores.body": "Comparez l'avant et l'après sur les mêmes exemples étiquetés : le score de référence correspond à votre prompt d'origine, le score optimisé au prompt trouvé par l'optimisation, et l'écart entre les deux est l'amélioration. À partir d'ici, vous pouvez essayer le nouveau prompt, voir comment il a été construit et l'exporter."
 }

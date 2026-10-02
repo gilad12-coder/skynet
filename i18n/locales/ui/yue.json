@@ -4010,5 +4010,19 @@
   "sidebar.filter.type.run": "DSPy 程式",
   "sidebar.runs_heading": "執行記錄",
   "folders.new_run": "新優化",
-  "folders.new_run.not_filed": "執行已經開始，但未能加入資料夾。你可以喺側邊欄移動佢。"
+  "folders.new_run.not_filed": "執行已經開始，但未能加入資料夾。你可以喺側邊欄移動佢。",
+  "tutorial.stage.data": "資料",
+  "tutorial.stage.optimize": "優化",
+  "tutorial.stage.results": "結果",
+  "tutorial.stage.aria": "工作流程階段",
+  "tutorial.step.tagger_setup.title": "由你嘅資料開始",
+  "tutorial.step.tagger_setup.body": "優化係由有正確答案嘅例子學嘅，如果你淨係有冇答案嘅文字，就喺呢度打標籤。喺呢個例子，我哋攞啲電郵，按類型逐個打標籤。上傳 CSV、JSON 或 Excel 檔案，揀一個已儲存嘅資料集，或者由一次簡短訪談生成一個合成資料集，然之後剔選要打標籤嘅文字欄。",
+  "tutorial.step.tagger_setup.body_manual": "優化係由有正確答案嘅例子學嘅，如果你淨係有冇答案嘅文字，就喺呢度打標籤。喺呢個例子，我哋攞啲電郵，按類型逐個打標籤。上傳 CSV、JSON 或 Excel 檔案，或者揀一個已儲存嘅資料集，然之後剔選要打標籤嘅文字欄。",
+  "tutorial.step.tagger_modes.body": "預設情況下 AI 會用 Autopilot 執行：喺一次簡短訪談之後，佢會為每一行打標籤，並將唔肯定嘅標記畀你覆核。用 Co-pilot 嗰陣，佢會為第一批打標籤，你逐個確認；用手動嗰陣，每個決定都係你話事。做完之後，將標籤儲存去你嘅資料庫，之後佢哋就會進入優化。",
+  "tutorial.step.data_upload.title": "由標籤到優化",
+  "tutorial.step.data_upload.body": "而家你打咗標籤嘅電郵會變成訓練材料。喺優化表單裏面，揀返你喺資料庫儲存嘅資料集，或者上傳一個檔案。每一行就係一個例子：電郵係輸入，你嘅標籤就係正確答案。將每一欄標記為輸入、輸出或者忽略，呢個對應就會變成 Prompt 嘅 Signature。",
+  "tutorial.step.code_setup.body": "呢個就係助手寫嘅程式碼。Signature 描述緊任務嘅輸入同輸出。指標會攞每個模型答案同你畀嘅標籤做比較，再傳回一個 0 到 1 嘅分數，優化就係想將呢個分數提升。你可以直接編輯任何一行。",
+  "tutorial.step.models.body": "任務模型負責回答例子，最佳化模型就會讀指標搵到嘅錯誤，然後提議一個更好嘅 Prompt。咁樣每一輪就可以由上一輪學返嚟。每個角色揀一個模型同設定。",
+  "tutorial.step.review.body": "摘要會喺一個地方展示成條鏈：已打標籤嘅資料集、Prompt、指標同模型。㩒任何一張卡就可以返去編輯。提交之後，優化會攞住 Prompt 喺你嘅例子上面執行，評分，再一次又一次重寫。",
+  "tutorial.step.scores.body": "喺同一批已打標籤嘅例子上面比較前後：基準分數係你原本嘅 Prompt，最佳化得分係優化搵到嘅 Prompt，兩者之間就係進步嘅幅度。喺呢度你可以試吓新嘅 Prompt，睇吓佢點樣整出嚟，同埋匯出佢。"
 }

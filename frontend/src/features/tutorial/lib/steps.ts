@@ -12,6 +12,7 @@ import {
   DEMO_BLACKBOX_SCORER_CODE,
   DEMO_BLACKBOX_SEED_TEXT,
   DEMO_DATASET_ID,
+  DEMO_EMAIL_ROWS,
   DEMO_METRIC_CODE,
   DEMO_OPTIMIZATION_ID,
   DEMO_SIGNATURE_CODE,
@@ -29,13 +30,17 @@ import { TUTORIAL_SUBMIT_SPLASH_MS } from "./tutorial-timing";
 /**
  * The short end-to-end path plus four focused workflow guides.
  *
- * Keeping each guide narrow makes the tutorial useful after onboarding too:
+ * The quick start covers only what a first run cannot skip, in the order the
+ * work happens: tag data, set up and submit the optimization, read the score.
+ * Testers gave up midway when it opened on result screens, so everything
+ * after the score lives in the focused guides. Keeping each guide narrow makes the tutorial useful after onboarding too:
  * users can replay only the part they need instead of stepping through the
  * entire application again.
  */
 export type TutorialTrack = "quick" | "anything" | "data" | "results" | "workspace";
 
 const QUICK_ONLY: readonly TutorialTrack[] = ["quick"];
+const QUICK_AND_DATA: readonly TutorialTrack[] = ["quick", "data"];
 const QUICK_AND_RESULTS: readonly TutorialTrack[] = ["quick", "results"];
 const QUICK_AND_ANYTHING: readonly TutorialTrack[] = ["quick", "anything"];
 const ANYTHING_ONLY: readonly TutorialTrack[] = ["anything"];
@@ -43,8 +48,13 @@ const DATA_ONLY: readonly TutorialTrack[] = ["data"];
 const RESULTS_ONLY: readonly TutorialTrack[] = ["results"];
 const WORKSPACE_ONLY: readonly TutorialTrack[] = ["workspace"];
 
+/** Where a step sits in the product's one workflow: prepare data, optimize, use the result. */
+export type TutorialStage = "data" | "optimize" | "results";
+
 export interface TutorialStep {
   id: string;
+  /** Workflow stage shown as a progress strip, so steps read as one journey. */
+  stage?: TutorialStage;
   title: string;
   description: string;
   target: string;
@@ -168,6 +178,26 @@ function waitForStableRect(selector: string, timeoutMs = 2000): Promise<void> {
 function showSubmitSplash(): Promise<void> {
   callTutorialHook("showTutorialSplash");
   return new Promise((resolve) => setTimeout(resolve, TUTORIAL_SUBMIT_SPLASH_MS));
+}
+
+// The pages each guide visits, in order. Warmed when the guide starts so its
+// route changes land on an already-loaded page instead of waiting on one.
+const TRACK_ROUTES: Record<TutorialTrack, readonly string[]> = {
+  quick: ["/tagger", "/submit", `/optimizations/${DEMO_OPTIMIZATION_ID}`],
+  anything: ["/submit", `/optimizations/${DEMO_BLACKBOX_OPTIMIZATION_ID}`],
+  data: ["/datasets", "/tagger"],
+  results: [`/optimizations/${DEMO_OPTIMIZATION_ID}`],
+  workspace: ["/", "/explore"],
+};
+
+export function warmTrackRoutes(track: TutorialTrack): void {
+  for (const path of TRACK_ROUTES[track]) {
+    if (path === window.location.pathname) continue;
+    callTutorialHook("routerPrefetch", path);
+    // The dev server compiles a route on its first request (seconds each) and
+    // router.prefetch is a no-op in development, so request the page itself.
+    if (process.env.NODE_ENV === "development") void fetch(path).catch(() => {});
+  }
 }
 
 export function resetTutorialOneShotState(): void {
@@ -336,41 +366,28 @@ function setGeneralistPanelOpen(open: boolean) {
 /** Inject demo data into tagger setup when empty and advance to the requested step */
 function injectDemoTaggerData(targetStep: number) {
   if (!queryTutorialHook("hasTaggerData")) {
-    const rows = [
-      { id: 1, text: msg("auto.features.tutorial.lib.steps.literal.1") },
-      { id: 2, text: msg("auto.features.tutorial.lib.steps.literal.2") },
-      { id: 3, text: msg("auto.features.tutorial.lib.steps.literal.3") },
-      { id: 4, text: msg("auto.features.tutorial.lib.steps.literal.4") },
-      { id: 5, text: msg("auto.features.tutorial.lib.steps.literal.5") },
-    ];
     callTutorialHook("setTaggerDemoData", {
-      rows,
-      cols: ["text"],
-      textCol: "text",
+      rows: DEMO_EMAIL_ROWS.map((row, index) => ({ id: index + 1, email_text: row.email_text })),
+      cols: ["email_text"],
+      textCol: "email_text",
     });
   }
   callTutorialHook("setTaggerStep", targetStep);
 }
 
+// One shared object per tour, so re-injecting on every wizard step is a no-op
+// state update rather than a "new upload" that re-stages and re-profiles it.
+const DEMO_PARSED_DATASET = {
+  columns: ["email_text", "category"],
+  rows: DEMO_EMAIL_ROWS.map((row) => ({ ...row })),
+  rowCount: DEMO_EMAIL_ROWS.length,
+};
+const DEMO_COLUMN_ROLES = { email_text: "input", category: "output" } as const;
+
 /** Inject sample dataset + code into the wizard for the tutorial */
 function injectSampleDataset() {
-  const rows = [
-    { email_text: "Click here to win $1000 now!", category: "spam" },
-    { email_text: "Meeting moved to 3pm tomorrow", category: "important" },
-    { email_text: "50% off all items this weekend only", category: "promotional" },
-    { email_text: "Your quarterly report is ready for review", category: "important" },
-    { email_text: "Free gift card waiting for you", category: "spam" },
-    { email_text: "Team standup notes from Monday", category: "important" },
-  ];
-  callTutorialHook("setParsedDataset", {
-    columns: ["email_text", "category"],
-    rows,
-    rowCount: rows.length,
-  });
-  callTutorialHook("setColumnRoles", {
-    email_text: "input",
-    category: "output",
-  });
+  callTutorialHook("setParsedDataset", DEMO_PARSED_DATASET);
+  callTutorialHook("setColumnRoles", DEMO_COLUMN_ROLES);
   callTutorialHook("setDatasetFileName", "emails_sample.csv");
   callTutorialHook("setSignatureCode", DEMO_SIGNATURE_CODE);
   callTutorialHook("setMetricCode", DEMO_METRIC_CODE);
@@ -379,6 +396,7 @@ function injectSampleDataset() {
 const tutorialSteps: TutorialStep[] = perLocale(() => [
   {
     id: "dd-dataset-add",
+    stage: "data",
     title: msg("tutorial.step.dataset_add.title"),
     description: msg("tutorial.step.dataset_add.body"),
     target: "[data-tutorial='datasets-add']",
@@ -389,6 +407,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-dataset-actions",
+    stage: "data",
     title: msg("tutorial.step.dataset_actions.title"),
     description: msg("tutorial.step.dataset_actions.body"),
     target: "[data-tutorial='datasets-selection']",
@@ -408,12 +427,13 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-tagger-setup",
-    title: msg("auto.features.tutorial.lib.steps.literal.29"),
+    stage: "data",
+    title: msg("tutorial.step.tagger_setup.title"),
     // The synthetic-dataset button only renders with AI assist on.
     get description() {
       return queryTutorialHook("taggerAssistAvailable") === false
-        ? msg("tutorial.step.tagger_data.body")
-        : msg("auto.features.tutorial.lib.steps.literal.30");
+        ? msg("tutorial.step.tagger_setup.body_manual")
+        : msg("tutorial.step.tagger_setup.body");
     },
     target: "[data-tutorial='tagger-data']",
     placement: "auto",
@@ -421,11 +441,12 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await ensureTagger();
       injectDemoTaggerData(0);
     },
-    tracks: DATA_ONLY,
-    readingTimeSec: 10,
+    tracks: QUICK_AND_DATA,
+    readingTimeSec: 13,
   },
   {
     id: "dd-tagger-modes",
+    stage: "data",
     // With AI assist off, the same anchor sits on the task card instead of the
     // mode picker, so the copy is chosen once setup has mounted.
     get title() {
@@ -436,7 +457,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     get description() {
       return queryTutorialHook("taggerAssistAvailable") === false
         ? msg("tutorial.step.tagger_task.body")
-        : msg("auto.features.tutorial.lib.steps.literal.32");
+        : msg("tutorial.step.tagger_modes.body");
     },
     target: "[data-tutorial='tagger-modes']",
     placement: "auto",
@@ -445,11 +466,12 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       injectDemoTaggerData(1);
       await waitForElement("[data-tutorial='tagger-modes']");
     },
-    tracks: DATA_ONLY,
-    readingTimeSec: 12,
+    tracks: QUICK_AND_DATA,
+    readingTimeSec: 13,
   },
   {
     id: "dd-recipe-picker",
+    stage: "optimize",
     title: msg("tutorial.step.recipe_picker.title"),
     description: msg("tutorial.step.recipe_picker.body"),
     target: "[data-tutorial='submit-recipe']",
@@ -461,8 +483,9 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-data-upload",
-    title: formatMsg("auto.features.tutorial.lib.steps.template.16", { p1: TERMS.dataset }),
-    description: `${msg("auto.features.tutorial.lib.steps.template.17")} ${msg("auto.features.tutorial.lib.steps.template.18")}`,
+    stage: "optimize",
+    title: msg("tutorial.step.data_upload.title"),
+    description: msg("tutorial.step.data_upload.body"),
     target: "[data-tutorial='wizard-step-2']",
     placement: "left",
     beforeShow: async () => {
@@ -472,12 +495,13 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='dataset-upload']");
     },
     tracks: QUICK_ONLY,
-    readingTimeSec: 14,
+    readingTimeSec: 16,
   },
   {
     id: "dd-code-setup",
+    stage: "optimize",
     title: `${msg("auto.features.tutorial.lib.steps.literal.20")} + ${TERMS.metric}`,
-    description: msg("auto.features.tutorial.lib.steps.template.22"),
+    description: msg("tutorial.step.code_setup.body"),
     target: "[data-tutorial='code-editors']",
     placement: "top",
     beforeShow: async () => {
@@ -491,13 +515,14 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='code-editors']");
     },
     tracks: QUICK_ONLY,
-    readingTimeSec: 13,
+    readingTimeSec: 15,
   },
 
   {
     id: "dd-models",
+    stage: "optimize",
     title: msg("auto.features.tutorial.lib.steps.template.24"),
-    description: msg("auto.features.tutorial.lib.steps.template.25"),
+    description: msg("tutorial.step.models.body"),
     target: "[data-tutorial='model-catalog']",
     placement: "bottom",
     beforeShow: async () => {
@@ -507,12 +532,13 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='model-catalog']");
     },
     tracks: QUICK_ONLY,
-    readingTimeSec: 8,
+    readingTimeSec: 10,
   },
   {
     id: "dd-review",
+    stage: "optimize",
     title: msg("auto.features.tutorial.lib.steps.template.27"),
-    description: msg("auto.features.tutorial.lib.steps.template.26"),
+    description: msg("tutorial.step.review.body"),
     target: "[data-tutorial='wizard-stage-review']",
     placement: "bottom",
     beforeShow: async () => {
@@ -522,7 +548,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       setWizardStep(WIZARD_STAGE.review);
     },
     tracks: QUICK_ONLY,
-    readingTimeSec: 12,
+    readingTimeSec: 13,
   },
   {
     id: "bb-start",
@@ -617,12 +643,9 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-scores",
+    stage: "results",
     title: msg("tutorial.step.scores.title"),
-    description: formatMsg("auto.features.tutorial.lib.steps.template.32", {
-      p1: TERMS.baselineScore,
-      p2: TERMS.optimization,
-      p3: TERMS.optimizedScore,
-    }),
+    description: msg("tutorial.step.scores.body"),
     target: "[data-tutorial='score-cards']",
     placement: "bottom",
     beforeShow: async () => {
@@ -643,10 +666,11 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       await waitForElement("[data-tutorial='score-cards']");
     },
     tracks: QUICK_AND_RESULTS,
-    readingTimeSec: 7,
+    readingTimeSec: 11,
   },
   {
     id: "dd-trajectory",
+    stage: "results",
     title: msg("auto.features.tutorial.lib.steps.literal.46"),
     description: msg("auto.features.tutorial.lib.steps.literal.48"),
     target: "[data-tutorial='trajectory-panel']",
@@ -668,6 +692,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-playground",
+    stage: "results",
     title: msg("auto.features.tutorial.lib.steps.literal.25"),
     description: `${msg("auto.features.tutorial.lib.steps.template.36")} ${msg("auto.features.tutorial.lib.steps.literal.41")}`,
     target: "[data-tutorial='serve-playground']",
@@ -678,11 +703,12 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
       setDetailTab("playground");
       await waitForElement("[data-tutorial='serve-playground']");
     },
-    tracks: QUICK_AND_RESULTS,
+    tracks: RESULTS_ONLY,
     readingTimeSec: 9,
   },
   {
     id: "dd-code",
+    stage: "results",
     title: msg("tutorial.step.code.title"),
     description: msg("tutorial.step.code.body"),
     target: "[data-tutorial='code-sources']",
@@ -697,6 +723,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-artifact",
+    stage: "results",
     title: msg("tutorial.step.artifact.title"),
     description: msg("tutorial.step.artifact.body"),
     target: "[data-tutorial='artifact-output']",
@@ -711,6 +738,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-data-tab",
+    stage: "results",
     title: msg("auto.features.tutorial.lib.steps.literal.24"),
     description: msg("auto.features.tutorial.lib.steps.template.35"),
     target: "[data-tutorial='data-table']",
@@ -726,6 +754,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-logs",
+    stage: "results",
     title: msg("auto.features.tutorial.lib.steps.literal.26"),
     description: msg("auto.features.tutorial.lib.steps.template.37"),
     target: "[data-tutorial='live-logs']",
@@ -740,6 +769,7 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
   },
   {
     id: "dd-result-actions",
+    stage: "results",
     title: msg("tutorial.step.result_actions.title"),
     description: msg("tutorial.step.result_actions.body"),
     target: "[data-tutorial='result-actions']",
@@ -841,17 +871,6 @@ const tutorialSteps: TutorialStep[] = perLocale(() => [
     afterHide: closeSettingsUnlessReopened,
     tracks: WORKSPACE_ONLY,
     readingTimeSec: 8,
-  },
-  {
-    id: "dd-settings-providers",
-    title: msg("tutorial.step.settings_providers.title"),
-    description: msg("tutorial.step.settings_providers.body"),
-    target: "[data-tutorial='settings-providers']",
-    placement: "left",
-    beforeShow: () => openSettingsTab("providers"),
-    afterHide: closeSettings,
-    tracks: WORKSPACE_ONLY,
-    readingTimeSec: 12,
   },
 ]);
 

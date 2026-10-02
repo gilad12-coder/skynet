@@ -4010,5 +4010,19 @@
   "sidebar.filter.type.run": "DSPy program",
   "sidebar.runs_heading": "Runs",
   "folders.new_run": "New optimization",
-  "folders.new_run.not_filed": "The run started, but it couldn't be added to the folder. You can move it from the sidebar."
+  "folders.new_run.not_filed": "The run started, but it couldn't be added to the folder. You can move it from the sidebar.",
+  "tutorial.stage.data": "Data",
+  "tutorial.stage.optimize": "Optimize",
+  "tutorial.stage.results": "Result",
+  "tutorial.stage.aria": "Workflow stage",
+  "tutorial.step.tagger_setup.title": "Start with your data",
+  "tutorial.step.tagger_setup.body": "Optimization learns from examples that have a correct answer. If you only have text without answers, you label it here. In this example we take emails and label each one by type. Upload a CSV, JSON or Excel file, pick a saved dataset, or generate a synthetic one from a short interview, then tick the text column to label.",
+  "tutorial.step.tagger_setup.body_manual": "Optimization learns from examples that have a correct answer. If you only have text without answers, you label it here. In this example we take emails and label each one by type. Upload a CSV, JSON or Excel file or pick a saved dataset, then tick the text column to label.",
+  "tutorial.step.tagger_modes.body": "By default the AI runs on Autopilot: after a short interview it labels every row and flags the ones it wasn't sure about for review. In Co-pilot it labels a first batch and you confirm each label, and in Manual every decision is yours. When you're done, save the labels to your dataset library, and from there they go into optimization.",
+  "tutorial.step.data_upload.title": "From labels to optimization",
+  "tutorial.step.data_upload.body": "Now the emails you labeled become training material. In the optimization form, pick the dataset you saved from your library, or upload a file. Each row is one example: the email is the input and your label is the correct answer. Mark each column as Input, Output or Ignore, and that mapping becomes the prompt's Signature.",
+  "tutorial.step.code_setup.body": "This is the code the assistant writes. The Signature describes the task's input and output. The metric compares each model answer with the label you gave and returns a score from 0 to 1, and that's the score the optimization tries to raise. You can edit any line directly.",
+  "tutorial.step.models.body": "The Task model answers the examples, and the Optimization model reads the mistakes the metric found and proposes a better prompt. That way each round learns from the one before. Pick a model and settings for each role.",
+  "tutorial.step.review.body": "The summary shows the whole chain in one place: the labeled dataset, the prompt, the metric and the models. Click any card to go back and edit it. After you submit, the optimization runs the prompt on your examples, scores it and rewrites it again and again.",
+  "tutorial.step.scores.body": "Compare before and after on the same labeled examples: the baseline score is your original prompt, the optimized score is the prompt the optimization found, and between them is the improvement. From here you can try the new prompt, see how it was built and export it."
 }

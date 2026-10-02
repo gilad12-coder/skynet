@@ -4010,5 +4010,19 @@
   "sidebar.filter.type.run": "Programa DSPy",
   "sidebar.runs_heading": "Ejecuciones",
   "folders.new_run": "Nueva optimización",
-  "folders.new_run.not_filed": "La ejecución se inició, pero no se pudo añadir a la carpeta. Puedes moverla desde la barra lateral."
+  "folders.new_run.not_filed": "La ejecución se inició, pero no se pudo añadir a la carpeta. Puedes moverla desde la barra lateral.",
+  "tutorial.stage.data": "Datos",
+  "tutorial.stage.optimize": "Optimizar",
+  "tutorial.stage.results": "Resultado",
+  "tutorial.stage.aria": "Etapa del flujo de trabajo",
+  "tutorial.step.tagger_setup.title": "Empieza con tus datos",
+  "tutorial.step.tagger_setup.body": "La optimización aprende de ejemplos que tienen una respuesta correcta. Si solo tienes texto sin respuestas, lo etiquetas aquí. En este ejemplo tomamos correos electrónicos y etiquetamos cada uno por tipo. Sube un archivo CSV, JSON o Excel, elige un conjunto de datos guardado, o genera uno sintético a partir de una breve entrevista, y luego marca la columna de texto para etiquetar.",
+  "tutorial.step.tagger_setup.body_manual": "La optimización aprende de ejemplos que tienen una respuesta correcta. Si solo tienes texto sin respuestas, lo etiquetas aquí. En este ejemplo tomamos correos electrónicos y etiquetamos cada uno por tipo. Sube un archivo CSV, JSON o Excel o elige un conjunto de datos guardado, y luego marca la columna de texto para etiquetar.",
+  "tutorial.step.tagger_modes.body": "Por defecto la IA funciona en Piloto automático: tras una breve entrevista etiqueta cada fila y marca para revisión las que no tenía claras. En Copiloto etiqueta un primer lote y tú confirmas cada etiqueta, y en Manual cada decisión es tuya. Cuando termines, guarda las etiquetas en tu biblioteca de conjuntos de datos, y desde ahí pasan a la optimización.",
+  "tutorial.step.data_upload.title": "De las etiquetas a la optimización",
+  "tutorial.step.data_upload.body": "Ahora los correos que etiquetaste se convierten en material de entrenamiento. En el formulario de optimización, elige el conjunto de datos que guardaste en tu biblioteca, o sube un archivo. Cada fila es un ejemplo: el correo es la entrada y tu etiqueta es la respuesta correcta. Marca cada columna como Entrada, Salida o Ignorar, y ese mapeo se convierte en la Firma del prompt.",
+  "tutorial.step.code_setup.body": "Este es el código que escribe el asistente. La Firma describe la entrada y la salida de la tarea. La métrica compara cada respuesta del modelo con la etiqueta que diste y devuelve una puntuación de 0 a 1, y esa es la puntuación que la optimización intenta subir. Puedes editar cualquier línea directamente.",
+  "tutorial.step.models.body": "El Modelo de tarea responde a los ejemplos, y el Modelo de optimización lee los errores que encontró la métrica y propone un prompt mejor. Así cada ronda aprende de la anterior. Elige un modelo y los ajustes para cada rol.",
+  "tutorial.step.review.body": "El resumen muestra toda la cadena en un solo lugar: el conjunto de datos etiquetado, el prompt, la métrica y los modelos. Haz clic en cualquier tarjeta para volver y editarla. Después de enviar, la optimización ejecuta el prompt sobre tus ejemplos, lo puntúa y lo reescribe una y otra vez.",
+  "tutorial.step.scores.body": "Compara el antes y el después sobre los mismos ejemplos etiquetados: la puntuación de línea base es tu prompt original, la puntuación optimizada es el prompt que encontró la optimización, y entre ambas está la mejora. Desde aquí puedes probar el nuevo prompt, ver cómo se construyó y exportarlo."
 }
