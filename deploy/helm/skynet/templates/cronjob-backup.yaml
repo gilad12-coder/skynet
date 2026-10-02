@@ -1,0 +1,177 @@
+{{- if .Values.backup.enabled }}
+{{- if and .Values.backup.s3.enabled (not .Values.backup.s3.bucket) }}
+{{- fail "backup.s3.bucket is required when backup.s3.enabled=true" }}
+{{- end }}
+{{- if and .Values.backup.s3.enabled (not .Values.backup.s3.existingSecret) }}
+{{- fail "backup.s3.existingSecret is required when backup.s3.enabled=true (keys AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY)" }}
+{{- end }}
+{{- if and (not .Values.backup.persistence.enabled) (not .Values.backup.s3.enabled) }}
+{{- fail "backup needs somewhere to keep dumps: enable backup.persistence or backup.s3" }}
+{{- end }}
+{{- if and .Values.backup.persistence.enabled (not .Values.backup.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "skynet.fullname" . }}-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "skynet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+  annotations:
+    # Dumps must outlive `helm uninstall`, same as the Postgres PVC.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ .Values.backup.persistence.accessMode }}
+  {{- with .Values.backup.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backup.persistence.size }}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "skynet.fullname" . }}-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "skynet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  {{- with .Values.backup.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  # Two dumps of the same database at once only slow each other down.
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.backup.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "skynet.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          {{- with .Values.global.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.backup.podSecurityContext | nindent 12 }}
+          {{- if .Values.backup.s3.enabled }}
+          initContainers:
+          {{- else }}
+          containers:
+          {{- end }}
+            - name: dump
+              image: {{ include "skynet.backup.image" . }}
+              imagePullPolicy: {{ .Values.backup.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.backup.securityContext | nindent 16 }}
+              env:
+                - name: PGHOST
+                  {{- /* Direct to Postgres, never PgBouncer: pg_dump needs a session-level snapshot. */}}
+                  value: {{ include "skynet.dbHost" . | quote }}
+                - name: PGPORT
+                  value: {{ include "skynet.dbPort" . | quote }}
+                - name: PGDATABASE
+                  value: {{ include "skynet.dbName" . | quote }}
+                - name: PGUSER
+                  value: {{ include "skynet.dbUser" . | quote }}
+                {{- if .Values.externalDatabase.enabled }}
+                - name: PGSSLMODE
+                  value: {{ .Values.externalDatabase.sslmode | quote }}
+                {{- end }}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      {{- if .Values.externalDatabase.enabled }}
+                      {{- if .Values.externalDatabase.existingSecret }}
+                      name: {{ .Values.externalDatabase.existingSecret }}
+                      key: {{ .Values.externalDatabase.existingSecretKey }}
+                      {{- else }}
+                      name: {{ include "skynet.backend.secretName" . }}
+                      key: SKYNET_DB_PASSWORD
+                      {{- end }}
+                      {{- else }}
+                      name: {{ include "skynet.postgres.secretName" . }}
+                      key: password
+                      {{- end }}
+                - name: RETENTION_DAYS
+                  value: {{ .Values.backup.retentionDays | quote }}
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                  out="/backups/skynet-${stamp}.dump"
+                  # Write under a temp name so a crashed run never leaves a
+                  # truncated file that looks like a good backup.
+                  pg_dump --format=custom --no-owner --no-privileges --file="${out}.partial"
+                  pg_restore --list "${out}.partial" > /dev/null
+                  mv "${out}.partial" "${out}"
+                  echo "${out}" > /backups/LATEST
+                  rm -f /backups/*.partial
+                  find /backups -maxdepth 1 -name 'skynet-*.dump' -mtime "+${RETENTION_DAYS}" -print -delete
+                  echo "backup ok: ${out} ($(du -h "${out}" | cut -f1))"
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          {{- if .Values.backup.s3.enabled }}
+          containers:
+            - name: upload
+              image: {{ include "skynet.backup.s3Image" . }}
+              imagePullPolicy: {{ .Values.backup.s3.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.backup.securityContext | nindent 16 }}
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: AWS_DEFAULT_REGION
+                  value: {{ .Values.backup.s3.region | quote }}
+                - name: S3_DEST
+                  value: {{ printf "s3://%s/%s" .Values.backup.s3.bucket (trimSuffix "/" .Values.backup.s3.prefix) | quote }}
+                {{- with .Values.backup.s3.endpoint }}
+                - name: S3_ENDPOINT
+                  value: {{ . | quote }}
+                {{- end }}
+              envFrom:
+                - secretRef:
+                    name: {{ .Values.backup.s3.existingSecret }}
+              command: ["/bin/sh", "-ec"]
+              args:
+                - |
+                  latest="$(cat /backups/LATEST)"
+                  aws ${S3_ENDPOINT:+--endpoint-url "$S3_ENDPOINT"} s3 cp "${latest}" "${S3_DEST}/$(basename "${latest}")"
+                  echo "uploaded ${latest} to ${S3_DEST}"
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          {{- end }}
+          volumes:
+            - name: backups
+              {{- if .Values.backup.persistence.enabled }}
+              persistentVolumeClaim:
+                claimName: {{ default (printf "%s-backup" (include "skynet.fullname" .)) .Values.backup.persistence.existingClaim }}
+              {{- else }}
+              emptyDir: {}
+              {{- end }}
+            {{- if .Values.backup.s3.enabled }}
+            - name: tmp
+              emptyDir: {}
+            {{- end }}
+{{- end }}
