@@ -386,6 +386,70 @@ postgres:
     minAvailable: 1
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Scheduled database backups. A CronJob runs `pg_dump --format=custom` against
+# the database (bundled or external, never through PgBouncer), checks the dump
+# is readable, keeps `retentionDays` of dumps on a PVC, and can copy each dump
+# to S3-compatible storage (AWS S3, MinIO, Ceph RGW) so a copy lives off the
+# cluster. Restore steps are in the chart README.
+# ─────────────────────────────────────────────────────────────────────────────
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  # IANA zone for `schedule` (Kubernetes 1.27+). Empty means the controller's zone, usually UTC.
+  timeZone: ""
+  retentionDays: 14
+  backoffLimit: 2
+  activeDeadlineSeconds: 7200
+  # Empty repository/tag reuse postgres.image, so pg_dump matches the bundled
+  # server. With an external database, pin a tag whose major version is the
+  # same as or newer than the server's (pg_dump refuses older-major servers).
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    existingClaim: ""
+  s3:
+    enabled: false
+    bucket: ""
+    prefix: skynet/backups
+    region: us-east-1
+    # Set for MinIO / Ceph / any non-AWS endpoint, e.g. https://minio.internal:9000
+    endpoint: ""
+    # Secret with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY. Expire old
+    # objects with a bucket lifecycle rule; the job only uploads.
+    existingSecret: ""
+    image:
+      repository: amazon/aws-cli
+      tag: "2.27.50"
+      pullPolicy: IfNotPresent
+    # Egress allowlist for the S3 endpoint on default-deny clusters. Same
+    # shape as networkPolicy.llmEgress; default port 443.
+    egress: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1000m"
+      memory: 1Gi
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    capabilities:
+      drop: [ALL]
+    seccompProfile:
+      type: RuntimeDefault
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Optional PgBouncer transaction-pooler. Enable in production overrides when
 # backend replica × pool size would otherwise exceed Postgres connections.
 # Enabling this requires backend env DB_PGBOUNCER_TRANSACTION_MODE=true; this

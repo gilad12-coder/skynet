@@ -51,10 +51,15 @@ Skynet has been installed as release "{{ .Release.Name }}" in namespace "{{ .Rel
      Flip postgres.podDisruptionBudget.enabled=true if your operations
      prefer "refuse the drain" over "tolerate a blip".
 
-   - PVC backups are your responsibility. Snapshot the
-     {{ include "skynet.postgres.fullname" . }}-data-* PVC on a schedule
-     (Velero, CSI VolumeSnapshot, or a cluster-wide backup operator).
-     The chart does NOT take backups for you.
+   {{- if .Values.backup.enabled }}
+   - Backups: CronJob {{ include "skynet.fullname" . }}-backup runs pg_dump on
+     "{{ .Values.backup.schedule }}"{{ if .Values.backup.s3.enabled }} and copies each dump to s3://{{ .Values.backup.s3.bucket }}{{ end }}.
+     Restore steps are in the chart README. Run a restore drill before go-live.
+   {{- else }}
+   - Backups are OFF. Set backup.enabled=true for nightly pg_dump backups
+     (optionally copied to S3), or snapshot the
+     {{ include "skynet.postgres.fullname" . }}-data-* PVC yourself.
+   {{- end }}
 
    - Vertical scale only. Bump postgres.resources.{requests,limits} when
      query load grows; horizontal scale is not supported by this chart.

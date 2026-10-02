@@ -142,6 +142,29 @@ default
 {{- end -}}
 {{- end -}}
 
+{{/* Backup dump image: defaults to the bundled Postgres image so pg_dump matches the server major. */}}
+{{- define "skynet.backup.image" -}}
+{{- $reg := .Values.global.imageRegistry -}}
+{{- $repo := default .Values.postgres.image.repository .Values.backup.image.repository -}}
+{{- $tag := default .Values.postgres.image.tag .Values.backup.image.tag -}}
+{{- if $reg -}}
+{{- printf "%s/%s:%s" $reg $repo $tag -}}
+{{- else -}}
+{{- printf "%s:%s" $repo $tag -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "skynet.backup.s3Image" -}}
+{{- $reg := .Values.global.imageRegistry -}}
+{{- $repo := .Values.backup.s3.image.repository -}}
+{{- $tag := .Values.backup.s3.image.tag -}}
+{{- if $reg -}}
+{{- printf "%s/%s:%s" $reg $repo $tag -}}
+{{- else -}}
+{{- printf "%s:%s" $repo $tag -}}
+{{- end -}}
+{{- end -}}
+
 {{/* Image pull secrets block (rendered list) */}}
 {{- define "skynet.imagePullSecrets" -}}
 {{- with .Values.global.imagePullSecrets }}

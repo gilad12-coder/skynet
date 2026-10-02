@@ -73,6 +73,9 @@ helm upgrade skynet deploy/helm/skynet --reuse-values \
       verify with `kubectl get networkpolicy <release>-skynet-backend -o yaml` that the
       egress `ipBlock` is NOT `0.0.0.0/0`.
 - [ ] `backend.env.ALLOWED_ORIGINS` lists every front-door host.
+- [ ] `backup.enabled=true`, with `backup.s3.*` pointing at storage outside the
+      cluster. Mirror `amazon/aws-cli` into your registry too when S3 is on.
+      Run a restore drill (below) before go-live.
 
 ## Key values
 
@@ -89,6 +92,37 @@ helm upgrade skynet deploy/helm/skynet --reuse-values \
 | `backend.autoscaling.queueDepth` | External metric target for pending jobs; requires Prometheus Adapter. CPU remains as fallback. |
 | `pgbouncer.enabled` | Optional transaction-pooler in front of Postgres; backend pods set `DB_PGBOUNCER_TRANSACTION_MODE=true` when enabled. |
 | `migration.command` | Pre-install/upgrade hook command; default `["alembic","upgrade","head"]`. Override to `["alembic","stamp","342f7449be26"]` once when adopting a DB already at the baseline. |
+
+## Backups and restore
+
+`backup.enabled=true` adds a CronJob (`<release>-skynet-backup`, nightly at 02:00 by
+default) that runs `pg_dump --format=custom` straight against Postgres, checks the
+dump with `pg_restore --list`, and keeps `backup.retentionDays` of dumps on its own
+PVC. With `backup.s3.enabled=true` each dump is also copied to S3-compatible storage
+(set `backup.s3.endpoint` for MinIO or Ceph). Expire old objects with a bucket
+lifecycle rule. It works with the bundled and the external database. On an external
+database, set `backup.image.tag` to a Postgres image at least as new as the server.
+
+Take a backup now, before an upgrade for example:
+
+```bash
+kubectl create job -n skynet --from=cronjob/skynet-skynet-backup skynet-backup-manual
+kubectl logs -n skynet job/skynet-backup-manual -c dump -f
+```
+
+Restore. Stop writers first, then restore into the database:
+
+```bash
+kubectl scale deploy -n skynet skynet-skynet-backend --replicas=0
+# Copy a dump into the Postgres pod (from the backup PVC or S3), then:
+kubectl exec -n skynet skynet-skynet-postgres-0 -- \
+  pg_restore --clean --if-exists --no-owner -U skynet -d skynet /tmp/skynet-<stamp>.dump
+kubectl scale deploy -n skynet skynet-skynet-backend --replicas=2
+```
+
+Restore drill: restore the latest dump into a scratch database (`createdb drill`,
+then `pg_restore -d drill ...`) and count a few tables. A backup you have never
+restored is not a backup.
 
 ## Uninstall
 
