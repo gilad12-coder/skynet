@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "Black-box",
   "sidebar.filter.type.grid": "Grid search",
   "sidebar.filter.type.run": "Programma DSPy",
-  "sidebar.runs_heading": "Esecuzioni"
+  "sidebar.runs_heading": "Esecuzioni",
+  "folders.new_run": "Nuova ottimizzazione",
+  "folders.new_run.not_filed": "L'esecuzione è partita, ma non è stato possibile aggiungerla alla cartella. Puoi spostarla dalla barra laterale."
 }

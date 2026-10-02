@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "黑盒",
   "sidebar.filter.type.grid": "網格搜尋",
   "sidebar.filter.type.run": "DSPy 程式",
-  "sidebar.runs_heading": "執行記錄"
+  "sidebar.runs_heading": "執行記錄",
+  "folders.new_run": "新優化",
+  "folders.new_run.not_filed": "執行已經開始，但未能加入資料夾。你可以喺側邊欄移動佢。"
 }

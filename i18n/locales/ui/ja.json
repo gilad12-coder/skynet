@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "ブラックボックス",
   "sidebar.filter.type.grid": "グリッドサーチ",
   "sidebar.filter.type.run": "DSPy プログラム",
-  "sidebar.runs_heading": "実行"
+  "sidebar.runs_heading": "実行",
+  "folders.new_run": "新しい最適化",
+  "folders.new_run.not_filed": "実行は開始されましたが、フォルダに追加できませんでした。サイドバーから移動できます。"
 }

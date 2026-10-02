@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "Black-box",
   "sidebar.filter.type.grid": "Grid search",
   "sidebar.filter.type.run": "DSPy program",
-  "sidebar.runs_heading": "Runs"
+  "sidebar.runs_heading": "Runs",
+  "folders.new_run": "New optimization",
+  "folders.new_run.not_filed": "The run started, but it couldn't be added to the folder. You can move it from the sidebar."
 }

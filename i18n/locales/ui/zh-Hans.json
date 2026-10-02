@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "黑盒",
   "sidebar.filter.type.grid": "网格搜索",
   "sidebar.filter.type.run": "DSPy 程序",
-  "sidebar.runs_heading": "运行"
+  "sidebar.runs_heading": "运行",
+  "folders.new_run": "新建优化",
+  "folders.new_run.not_filed": "运行已开始，但无法添加到文件夹。你可以在侧边栏中移动它。"
 }

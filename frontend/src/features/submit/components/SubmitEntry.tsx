@@ -37,6 +37,9 @@ export function SubmitEntry() {
   // carousel opens preselected on the source job's slide, confirmed rather
   // than skipped, so the recipe can still be switched before the wizard.
   const cloning = searchParams.get("clone") !== null;
+  // Read once: continuing a draft rewrites the URL, but a run started from a
+  // folder's menu should still land in that folder.
+  const [folderId] = useState(() => searchParams.get("folder"));
   const [recipe, setRecipe] = useState<Recipe | null>(initial);
   // The picker is its own screen ahead of the wizard: a `?recipe=` deep link
   // skips it, otherwise no wizard exists until a recipe is committed. Reopening
@@ -206,9 +209,10 @@ export function SubmitEntry() {
                 key={`${accountId}:${wizardKey}`}
                 header={chip}
                 initialRecipe={link?.kind ?? "anything"}
+                folderId={folderId}
               />
             ) : (
-              <SubmitWizard key={`${accountId}:${wizardKey}`} header={chip} />
+              <SubmitWizard key={`${accountId}:${wizardKey}`} header={chip} folderId={folderId} />
             )}
           </motion.div>
         )}

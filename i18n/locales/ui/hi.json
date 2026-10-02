@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "ब्लैक-बॉक्स",
   "sidebar.filter.type.grid": "ग्रिड खोज",
   "sidebar.filter.type.run": "DSPy प्रोग्राम",
-  "sidebar.runs_heading": "रन"
+  "sidebar.runs_heading": "रन",
+  "folders.new_run": "नया ऑप्टिमाइज़ेशन",
+  "folders.new_run.not_filed": "रन शुरू हो गया, लेकिन उसे फ़ोल्डर में नहीं जोड़ा जा सका। आप उसे साइडबार से ले जा सकते हैं।"
 }

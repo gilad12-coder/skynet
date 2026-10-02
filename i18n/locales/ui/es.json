@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "Caja negra",
   "sidebar.filter.type.grid": "Búsqueda en cuadrícula",
   "sidebar.filter.type.run": "Programa DSPy",
-  "sidebar.runs_heading": "Ejecuciones"
+  "sidebar.runs_heading": "Ejecuciones",
+  "folders.new_run": "Nueva optimización",
+  "folders.new_run.not_filed": "La ejecución se inició, pero no se pudo añadir a la carpeta. Puedes moverla desde la barra lateral."
 }

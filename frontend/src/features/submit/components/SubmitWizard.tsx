@@ -42,8 +42,14 @@ function evaluationPartFor(field?: string): number | null {
   return 0;
 }
 
-export function SubmitWizard({ header }: { header?: ReactNode }) {
-  const w = useSubmitWizard();
+export function SubmitWizard({
+  header,
+  folderId = null,
+}: {
+  header?: ReactNode;
+  folderId?: string | null;
+}) {
+  const w = useSubmitWizard(folderId);
   const wallet = useBalance();
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);

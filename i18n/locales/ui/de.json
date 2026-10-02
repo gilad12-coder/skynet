@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "Black-Box",
   "sidebar.filter.type.grid": "Rastersuche",
   "sidebar.filter.type.run": "DSPy-Programm",
-  "sidebar.runs_heading": "Durchläufe"
+  "sidebar.runs_heading": "Durchläufe",
+  "folders.new_run": "Neue Optimierung",
+  "folders.new_run.not_filed": "Der Lauf wurde gestartet, konnte aber nicht zum Ordner hinzugefügt werden. Du kannst ihn über die Seitenleiste verschieben."
 }

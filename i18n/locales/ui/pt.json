@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "Black-box",
   "sidebar.filter.type.grid": "Pesquisa em grelha",
   "sidebar.filter.type.run": "Programa DSPy",
-  "sidebar.runs_heading": "Execuções"
+  "sidebar.runs_heading": "Execuções",
+  "folders.new_run": "Nova otimização",
+  "folders.new_run.not_filed": "A execução foi iniciada, mas não foi possível adicioná-la à pasta. Pode movê-la a partir da barra lateral."
 }

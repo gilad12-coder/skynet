@@ -48,11 +48,13 @@ function evaluationStepFor(field: string | undefined, hasCases: boolean): Evalua
 export function BlackboxWizard({
   header,
   initialRecipe,
+  folderId = null,
 }: {
   header?: ReactNode;
   initialRecipe: BlackboxRecipe;
+  folderId?: string | null;
 }) {
-  const w = useBlackboxWizard(initialRecipe);
+  const w = useBlackboxWizard(initialRecipe, folderId);
   const wallet = useBalance();
   const [dataPreviewOpen, setDataPreviewOpen] = useState(false);
   const [dataPreviewExpanded, setDataPreviewExpanded] = useState(false);

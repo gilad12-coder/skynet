@@ -97,6 +97,7 @@ import {
   stripModelSecrets,
   type AnythingDraftData,
 } from "../lib/draft-record";
+import { fileNewRun } from "../lib/file-new-run";
 import { useWizardDrafts } from "./use-wizard-drafts";
 import { useExecutionBudget } from "./use-execution-budget";
 import { prepareModelConfig } from "./use-submit-wizard";
@@ -197,7 +198,7 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
+export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: string | null = null) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { data: session } = useSession();
@@ -1617,6 +1618,7 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe) {
       // splash plays out.
       submittedRef.current = true;
       draftsRef.current.consumed();
+      await fileNewRun(result.optimization_id, folderId);
       const jobUrl = `/optimizations/${result.optimization_id}`;
       setSubmitPhase("splash");
       window.dispatchEvent(new Event("sidebar:collapse"));

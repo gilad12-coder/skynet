@@ -4008,5 +4008,7 @@
   "sidebar.filter.type.blackbox": "קופסה שחורה",
   "sidebar.filter.type.grid": "{term.optimizationTypeGrid}",
   "sidebar.filter.type.run": "תוכנית DSPy",
-  "sidebar.runs_heading": "ריצות"
+  "sidebar.runs_heading": "ריצות",
+  "folders.new_run": "אופטימיזציה חדשה",
+  "folders.new_run.not_filed": "ההרצה התחילה, אבל לא ניתן היה להוסיף אותה לתיקייה. אפשר להעביר אותה מסרגל הצד."
 }
