@@ -2441,6 +2441,7 @@
   "shared.excel_filter.apply": "החל/י",
   "shared.excel_filter.cancel": "בטל/י",
   "shared.excel_filter.filter_column": "סינון עמודת {label}",
+  "shared.excel_filter.more_options": "מוצגים {shown} מתוך {total}. חפשו כדי למצוא עוד.",
   "shared.excel_filter.no_results": "אין תוצאות",
   "shared.excel_filter.reset_filters_title": "איפוס כל הסינונים",
   "shared.excel_filter.reset_width_title": "איפוס רוחב עמודות",

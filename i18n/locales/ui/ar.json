@@ -3104,6 +3104,7 @@
   "shared.excel_filter.apply": "تطبيق",
   "shared.excel_filter.cancel": "إلغاء",
   "shared.excel_filter.filter_column": "تصفية عمود {label}",
+  "shared.excel_filter.more_options": "يتم عرض {shown} من {total}. ابحث للعثور على المزيد.",
   "shared.excel_filter.no_results": "لا توجد نتائج",
   "shared.excel_filter.reset_width_title": "إعادة تعيين عرض الأعمدة",
   "shared.excel_filter.search_placeholder": "بحث…",

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { preflightIdentity } from "./validation-evidence.ts";
+import { preflightIdentity, stableStringify } from "./validation-evidence.ts";
 
 test("data, model settings and funding edits invalidate setup evidence while naming does not", () => {
   const payload = {
@@ -44,4 +44,27 @@ test("MCP tool permission edits invalidate setup evidence", () => {
     }),
     original,
   );
+});
+
+test("the identity matches the plain stable serialization drafts already hold", () => {
+  const payload = {
+    name: "dropped",
+    zeta: [{ b: 1, a: [2, { d: null, c: "x" }] }],
+    alpha: { y: undefined, x: true },
+    skipped: undefined,
+    dataset: [{ q: "first", a: "one" }],
+    max_cost_cents: 20,
+  };
+  const { name: _name, ...setup } = payload;
+  assert.equal(
+    preflightIdentity("anything", payload),
+    stableStringify({ workflow: "anything", setup }),
+  );
+});
+
+test("a dataset swapped for new rows changes the identity even after it was cached", () => {
+  const dataset = [{ q: "first" }];
+  const original = preflightIdentity("dspy", { dataset });
+  assert.equal(preflightIdentity("dspy", { dataset }), original);
+  assert.notEqual(preflightIdentity("dspy", { dataset: [...dataset, { q: "second" }] }), original);
 });

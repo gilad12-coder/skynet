@@ -1,5 +1,6 @@
 "use client";
 
+import { clipText } from "@/shared/lib/clip-text";
 import { notifyCopied } from "@/shared/lib/notify";
 import { InlineErrorRow } from "@/shared/ui/inline-error-row";
 import { ProgressBar } from "@/shared/ui/progress-bar";
@@ -293,8 +294,9 @@ export function DataTab({
     return result;
   }, [rows, colFilters.filters, sortKey, sortDir]);
 
-  // The export and the row reader show the same flattened record.
-  const buildRecords = () => {
+  // The export and the row reader show the same flattened record. The reader
+  // passes the one row it shows, since flattening every row on each step stalled it.
+  const buildRecords = (only?: number) => {
     const includeEval = split === "test" && evalCount > 0;
     const scoreLabel = msg("auto.features.optimizations.components.datatab.literal.8");
     const columns: string[] = [
@@ -304,7 +306,8 @@ export function DataTab({
       ...(includeEval ? outputFields.map((f) => `pred_${f}`) : []),
       ...(includeEval ? loggedMetricNames : []),
     ];
-    const rows = filtered.map((row) => {
+    const source = only === undefined ? filtered : filtered.slice(only, only + 1);
+    const rows = source.map((row) => {
       const ev = currentResults[row.index];
       const rec: Record<string, unknown> = {};
       if (includeEval) rec[scoreLabel] = ev ? ev.score : null;
@@ -332,7 +335,7 @@ export function DataTab({
   const [expanded, setExpanded] = useState(false);
   const expandButton = useRef<HTMLButtonElement>(null);
   useEffect(() => setReaderIndex(null), [filtered]);
-  const reader = readerIndex === null ? null : buildRecords();
+  const reader = readerIndex === null ? null : buildRecords(readerIndex);
 
   // A single click copies the cell, but a double-click opens the reader, so
   // the copy waits long enough to know no second click is coming.
@@ -347,19 +350,22 @@ export function DataTab({
     setReaderIndex(index);
   };
 
+  // Only the open dropdown reads its options, so build just that column's
+  // list instead of deduping and sorting every column on each load.
+  const openFilterCol = colFilters.openFilter;
   const filterOptions = useMemo(() => {
     const opts: Record<string, Array<{ value: string; label: string }>> = {};
-    for (const col of allColumns) {
-      const vals = [...new Set(rows.map((r) => formatCellValue(r.row[col])))]
+    if (openFilterCol && allColumns.includes(openFilterCol)) {
+      const vals = [...new Set(rows.map((r) => formatCellValue(r.row[openFilterCol])))]
         .filter(Boolean)
         .sort();
-      opts[col] = vals.map((v) => ({
+      opts[openFilterCol] = vals.map((v) => ({
         value: v,
         label: v.length > 40 ? `${v.slice(0, 40)}...` : v,
       }));
     }
     return opts;
-  }, [rows, allColumns]);
+  }, [rows, allColumns, openFilterCol]);
 
   const evalCount = Object.keys(currentResults).length;
 
@@ -490,13 +496,13 @@ export function DataTab({
             }}
           >
             <CardContent className="p-0">
-              {reader && readerIndex !== null && reader.rows[readerIndex] ? (
+              {reader && readerIndex !== null && reader.rows[0] ? (
                 <div className={cn("flex flex-col", expanded ? "h-[80dvh]" : "h-[520px]")}>
                   <DatasetRowReader
                     columns={reader.columns}
-                    row={reader.rows[readerIndex]}
+                    row={reader.rows[0]}
                     index={readerIndex}
-                    total={reader.rows.length}
+                    total={filtered.length}
                     onStep={(delta) =>
                       setReaderIndex((cur) =>
                         cur === null || cur + delta < 0 || cur + delta >= filtered.length
@@ -673,9 +679,9 @@ export function DataTab({
                                     ? { width: colResize.widths[f], maxWidth: colResize.widths[f] }
                                     : undefined
                                 }
-                                title={formatCellValue(row.row[f], true)}
+                                title={clipText(formatCellValue(row.row[f], true))}
                               >
-                                {formatCellValue(row.row[f])}
+                                {clipText(formatCellValue(row.row[f]))}
                               </TableCell>
                             ))}
                             {outputFields.map((f) => (
@@ -687,9 +693,9 @@ export function DataTab({
                                     ? { width: colResize.widths[f], maxWidth: colResize.widths[f] }
                                     : undefined
                                 }
-                                title={formatCellValue(row.row[f], true)}
+                                title={clipText(formatCellValue(row.row[f], true))}
                               >
-                                {formatCellValue(row.row[f])}
+                                {clipText(formatCellValue(row.row[f]))}
                               </TableCell>
                             ))}
                             {split === "test" &&
@@ -713,9 +719,9 @@ export function DataTab({
                                         : {}),
                                       color: ev ? scoreColor(ev.score) : undefined,
                                     }}
-                                    title={formatCellValue(pred, true)}
+                                    title={clipText(formatCellValue(pred, true))}
                                   >
-                                    {formatCellValue(pred)}
+                                    {clipText(formatCellValue(pred))}
                                   </TableCell>
                                 );
                               })}

@@ -16,7 +16,8 @@ import {
 } from "@/shared/ui/excel-filter";
 import { ExportTableMenu } from "@/shared/ui/export-table-menu";
 import { cn } from "@/shared/lib/utils";
-import { msg, type MessageKey } from "@/shared/lib/messages";
+import { formatMsg, msg, type MessageKey } from "@/shared/lib/messages";
+import { clipText } from "@/shared/lib/clip-text";
 import { flaggedRowIds } from "../lib/assist";
 import { formatTaggerLabel } from "../lib/labels";
 import type { Annotation, AssistState, DataRow, TaggerConfig } from "../lib/types";
@@ -41,12 +42,15 @@ const PROVENANCE_KEYS: Record<string, MessageKey> = {
   ai_auto: "tagger.results.who.ai_auto",
 };
 
+const RENDER_ROW_CAP = 200;
+
 /**
  * Review-at-a-glance table for a fully-labeled session — the primary surface
  * once every row carries a label. Built on the same shared table stack as the
  * optimization data views (ColumnHeader sorting, Excel-style column filters,
  * resizable columns); clicking a row opens the single-row focus view for edits.
  */
+
 export function TaggerResultsTable({
   config,
   data,
@@ -137,6 +141,10 @@ export function TaggerResultsTable({
     }
     return out;
   }, [rows, colFilters.filters, sortKey, sortDir]);
+
+  // Mounting thousands of rows made every selection change re-render them all.
+  // The window grows with the selection so arrow keys can still walk every row.
+  const renderCount = Math.max(RENDER_ROW_CAP, selected + 1);
 
   // Selection follows filters and sorting — clamp instead of chasing the old row.
   useEffect(() => {
@@ -270,7 +278,7 @@ export function TaggerResultsTable({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visible.map((row, i) => {
+                {visible.slice(0, renderCount).map((row, i) => {
                   const provKey = row.provenance ? PROVENANCE_KEYS[row.provenance] : undefined;
                   return (
                     <TableRow
@@ -293,7 +301,7 @@ export function TaggerResultsTable({
                             <WarningCircle className="size-3.5 shrink-0 text-[var(--warning)]" />
                           )}
                           <span className="truncate" dir="auto">
-                            {row.text}
+                            {clipText(row.text)}
                           </span>
                         </span>
                       </TableCell>
@@ -322,6 +330,11 @@ export function TaggerResultsTable({
               </TableBody>
             </Table>
           </div>
+        )}
+        {visible.length > renderCount && (
+          <p className="text-center text-[0.625rem] text-muted-foreground">
+            {formatMsg("datasets.detail.rows_more", { shown: renderCount, total: visible.length })}
+          </p>
         )}
       </CardContent>
     </Card>

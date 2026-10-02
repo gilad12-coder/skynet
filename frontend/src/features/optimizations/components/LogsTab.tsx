@@ -1,5 +1,6 @@
 "use client";
 
+import { clipText } from "@/shared/lib/clip-text";
 import { notifyCopied } from "@/shared/lib/notify";
 import { useMemo } from "react";
 import { useTableSort } from "@/shared/hooks/use-table-sort";
@@ -438,7 +439,7 @@ export function LogsTab({
                               }
                             : undefined
                         }
-                        title={log.message}
+                        title={clipText(log.message)}
                       >
                         {log.message}
                       </TableCell>

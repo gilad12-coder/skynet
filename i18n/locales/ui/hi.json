@@ -3104,6 +3104,7 @@
   "shared.excel_filter.apply": "लागू करें",
   "shared.excel_filter.cancel": "रद्द करें",
   "shared.excel_filter.filter_column": "{label} कॉलम फ़िल्टर करें",
+  "shared.excel_filter.more_options": "{total} में से {shown} दिखाए जा रहे हैं। और खोजने के लिए सर्च करें।",
   "shared.excel_filter.no_results": "कोई परिणाम नहीं",
   "shared.excel_filter.reset_width_title": "कॉलम चौड़ाई रीसेट करें",
   "shared.excel_filter.search_placeholder": "खोजें…",

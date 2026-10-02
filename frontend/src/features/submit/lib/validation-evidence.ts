@@ -83,6 +83,21 @@ export function evidenceStatus(
   return evidence.ok ? "passed" : "failed";
 }
 
+// The wizards recompute the identity on every render, and the setup carries the
+// dataset rows. Re-sorting and serializing thousands of rows per keystroke
+// stalled the wizard for hundreds of ms, so arrays are serialized once per
+// reference; the rows are replaced, never mutated, when the data changes.
+const serializedArrays = new WeakMap<unknown[], string>();
+
+function stableStringifyArray(value: unknown[]): string {
+  let serialized = serializedArrays.get(value);
+  if (serialized === undefined) {
+    serialized = stableStringify(value);
+    serializedArrays.set(value, serialized);
+  }
+  return serialized;
+}
+
 /** Cosmetic review edits cannot invalidate execution evidence or repeat paid checks. */
 export function preflightIdentity(workflow: "anything" | "dspy", payload: object): string {
   const {
@@ -93,5 +108,13 @@ export function preflightIdentity(workflow: "anything" | "dspy", payload: object
     estimated_cents_high: _high,
     ...setup
   } = payload as Record<string, unknown>;
-  return stableStringify({ workflow, setup });
+  // Hand-assembled so the string stays byte-identical to
+  // `stableStringify({ workflow, setup })`, which drafts already hold as evidence.
+  const fields: string[] = [];
+  for (const key of Object.keys(setup).sort()) {
+    const value = setup[key];
+    const serialized = Array.isArray(value) ? stableStringifyArray(value) : stableStringify(value);
+    if (serialized !== undefined) fields.push(`${JSON.stringify(key)}:${serialized}`);
+  }
+  return `{"setup":{${fields.join(",")}},"workflow":${JSON.stringify(workflow)}}`;
 }

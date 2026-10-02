@@ -3104,6 +3104,7 @@
   "shared.excel_filter.apply": "اعمال",
   "shared.excel_filter.cancel": "لغو",
   "shared.excel_filter.filter_column": "فیلتر ستون {label}",
+  "shared.excel_filter.more_options": "نمایش {shown} از {total}. برای یافتن موارد بیشتر جستجو کنید.",
   "shared.excel_filter.no_results": "نتیجه‌ای نیست",
   "shared.excel_filter.reset_width_title": "بازنشانی عرض ستون‌ها",
   "shared.excel_filter.search_placeholder": "جستجو…",

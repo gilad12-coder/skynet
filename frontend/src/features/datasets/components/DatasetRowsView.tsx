@@ -1,4 +1,5 @@
 "use client";
+import { clipText } from "@/shared/lib/clip-text";
 import { notifyCopied } from "@/shared/lib/notify";
 import { LoadingState } from "@/shared/ui/loading-state";
 import * as React from "react";
@@ -58,7 +59,6 @@ export function DatasetRowsView({
   const columns = rows?.columns ?? [];
   const allRows = React.useMemo(() => rows?.rows ?? [], [rows]);
 
-
   const filtered = React.useMemo(() => {
     let result = allRows.filter((r) => {
       for (const [col, allowed] of Object.entries(colFilters.filters)) {
@@ -79,14 +79,22 @@ export function DatasetRowsView({
     return result;
   }, [allRows, colFilters.filters, sortKey, sortDir]);
 
+  // Only the open dropdown reads its options, so build just that column's
+  // list instead of deduping and sorting every column on each load.
+  const openFilterCol = colFilters.openFilter;
   const filterOptions = React.useMemo(() => {
     const opts: Record<string, Array<{ value: string; label: string }>> = {};
-    for (const col of columns) {
-      const vals = [...new Set(allRows.map((r) => cellText(r[col])))].filter(Boolean).sort();
-      opts[col] = vals.map((v) => ({ value: v, label: v.length > 40 ? `${v.slice(0, 40)}…` : v }));
+    if (openFilterCol && columns.includes(openFilterCol)) {
+      const vals = [...new Set(allRows.map((r) => cellText(r[openFilterCol])))]
+        .filter(Boolean)
+        .sort();
+      opts[openFilterCol] = vals.map((v) => ({
+        value: v,
+        label: v.length > 40 ? `${v.slice(0, 40)}…` : v,
+      }));
     }
     return opts;
-  }, [allRows, columns]);
+  }, [allRows, columns, openFilterCol]);
 
   const copyValue = React.useCallback((text: string) => {
     if (!text) return;
@@ -246,7 +254,9 @@ export function DatasetRowsView({
                                     }
                                   : undefined
                               }
-                              title={isImageDataUri(row[col]) ? undefined : cellText(row[col])}
+                              title={
+                                isImageDataUri(row[col]) ? undefined : clipText(cellText(row[col]))
+                              }
                               onClick={(e) => {
                                 if (e.detail !== 1 || isImageDataUri(row[col])) return;
                                 scheduleCellCopy(cellText(row[col]));
@@ -264,7 +274,7 @@ export function DatasetRowsView({
                                   dir="auto"
                                   className="line-clamp-2 break-words whitespace-normal hover:underline underline-offset-2 decoration-foreground/40"
                                 >
-                                  {cellText(row[col])}
+                                  {clipText(cellText(row[col]))}
                                 </span>
                               )}
                             </TableCell>

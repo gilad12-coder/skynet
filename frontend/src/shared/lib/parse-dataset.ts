@@ -19,35 +19,51 @@ function parseCSV(text: string): string[][] {
   let row: string[] = [];
   let current = "";
   let inQuotes = false;
+  // Copies whole runs between delimiters as slices: appending one character
+  // at a time took most of a second on a 15MB upload and froze the page.
+  const special = /[",\r\n]/g;
 
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
+  let i = 0;
+  while (i < text.length) {
     if (inQuotes) {
-      if (ch === '"') {
-        if (i + 1 < text.length && text[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
+      const quote = text.indexOf('"', i);
+      if (quote === -1) {
+        current += text.slice(i);
+        i = text.length;
+        break;
+      }
+      current += text.slice(i, quote);
+      if (text[quote + 1] === '"') {
+        current += '"';
+        i = quote + 2;
       } else {
-        current += ch;
+        inQuotes = false;
+        i = quote + 1;
       }
       continue;
     }
+    special.lastIndex = i;
+    const match = special.exec(text);
+    if (match === null) {
+      current += text.slice(i);
+      i = text.length;
+      break;
+    }
+    const at = match.index;
+    current += text.slice(i, at);
+    const ch = text[at];
+    i = at + 1;
     if (ch === '"') {
       inQuotes = true;
     } else if (ch === ",") {
       row.push(current.trim());
       current = "";
-    } else if (ch === "\r" || ch === "\n") {
+    } else {
       row.push(current.trim());
       current = "";
       rows.push(row);
       row = [];
-      if (ch === "\r" && text[i + 1] === "\n") i++;
-    } else {
-      current += ch;
+      if (ch === "\r" && text[i] === "\n") i++;
     }
   }
   if (current.length > 0 || row.length > 0) {
