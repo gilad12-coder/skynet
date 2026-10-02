@@ -7,6 +7,8 @@
 #   vars.MONITOR_APP_URL            default https://skynetml.com
 #   vars.MONITOR_API_URL            default https://api.skynetml.com
 #   vars.OPENROUTER_FLOOR_USD       default 15
+#   vars.DEPLOY_GRACE_MINUTES       default 45; how long a merged change may
+#                                   wait before an undeployed service alerts
 #   secrets.OPENROUTER_MONITOR_KEY  a separate OpenRouter key with a $0.01
 #                                   limit; it can read the account balance but
 #                                   cannot spend. Unset skips the float check.
@@ -33,10 +35,17 @@ jobs:
       APP_URL: ${{ vars.MONITOR_APP_URL || 'https://skynetml.com' }}
       API_URL: ${{ vars.MONITOR_API_URL || 'https://api.skynetml.com' }}
       FLOOR_USD: ${{ vars.OPENROUTER_FLOOR_USD || '15' }}
+      DEPLOY_GRACE_MINUTES: ${{ vars.DEPLOY_GRACE_MINUTES || '45' }}
       OPENROUTER_MONITOR_KEY: ${{ secrets.OPENROUTER_MONITOR_KEY }}
       ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
     steps:
-      - name: Probe app, API and OpenRouter float
+      # Full history so the deployed commits can be compared against main.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          filter: blob:none
+      - name: Probe app, API, deployed commits and OpenRouter float
         run: |
           problems=()
           # Retries ride out a deploy restart so a redeploy does not page anyone.
@@ -51,6 +60,36 @@ jobs:
           if [ "$code" != "200" ]; then
             problems+=("App $APP_URL answered HTTP ${code:-none}")
           fi
+
+          # Railway only rebuilds a service when its own folder changed, so a
+          # service is stale only once a change to that folder has waited on
+          # main longer than the grace period. That caught nothing for 15
+          # merges while the frontend sat on #519.
+          check_deployed() {
+            local name=$1 commit=$2 dir=$3 oldest age
+            if [ -z "$commit" ]; then
+              problems+=("Could not read the deployed $name commit")
+              return
+            fi
+            if ! git cat-file -e "$commit^{commit}" 2>/dev/null; then
+              problems+=("$name runs $commit, which is not on main")
+              return
+            fi
+            oldest=$(git log --reverse --format=%ct "$commit..HEAD" -- "$dir" | head -1)
+            if [ -z "$oldest" ]; then
+              echo "$name is current at ${commit:0:8}"
+              return
+            fi
+            age=$(( ($(date +%s) - oldest) / 60 ))
+            if [ "$age" -gt "$DEPLOY_GRACE_MINUTES" ]; then
+              problems+=("$name runs ${commit:0:8}, but a $dir change merged ${age} min ago is not deployed")
+            else
+              echo "$name deploy pending for a change merged ${age} min ago"
+            fi
+          }
+          check_deployed backend "$(jq -r '.commit // empty' <<<"$health" 2>/dev/null)" backend/
+          version=$(fetch -f "$APP_URL/api/version") || version=""
+          check_deployed frontend "$(jq -r '.commit // empty' <<<"$version" 2>/dev/null)" frontend/
 
           if [ -n "$OPENROUTER_MONITOR_KEY" ]; then
             credits=$(fetch -f -H "Authorization: Bearer $OPENROUTER_MONITOR_KEY" https://openrouter.ai/api/v1/credits) || credits=""

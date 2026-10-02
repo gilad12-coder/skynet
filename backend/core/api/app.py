@@ -1223,6 +1223,7 @@ def create_app(
             status=HEALTH_STATUS_OK,
             registered_assets=snapshot,
             vector_search_enabled=getattr(job_store, "vector_search_enabled", None),
+            commit=os.getenv("RAILWAY_GIT_COMMIT_SHA") or None,
         )
 
     app.add_middleware(CacheControlMiddleware)

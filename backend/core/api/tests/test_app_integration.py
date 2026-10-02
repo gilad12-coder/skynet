@@ -163,6 +163,19 @@ def test_health_live_worker_returns_expected_shape(app_client):
     assert "registered_assets" in body
 
 
+def test_health_reports_deployed_commit(app_client, monkeypatch):
+    """``/health`` names the commit Railway deployed, so the uptime monitor can spot a stale deploy."""
+    client, mock_worker, _ = app_client
+    mock_worker.threads_alive.return_value = True
+    mock_worker.seconds_since_last_activity.return_value = 0.0
+
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "0f5104ee" * 5)
+    assert client.get("/health").json()["commit"] == "0f5104ee" * 5
+
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA")
+    assert client.get("/health").json()["commit"] is None
+
+
 def test_health_stale_worker_returns_503(app_client):
     """An idle worker past the staleness threshold returns 503."""
     client, mock_worker, _ = app_client
