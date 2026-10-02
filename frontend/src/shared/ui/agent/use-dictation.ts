@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { transcribeAudio } from "@/shared/lib/api";
+import { ApiError, transcribeAudio } from "@/shared/lib/api";
 import { msg } from "@/shared/lib/messages";
 
 /** The composer's voice state: recording live, transcribing the take, or
@@ -14,6 +14,15 @@ export type DictationState =
   | { kind: "err"; message: string };
 
 const ERR_DISMISS_MS = 2600;
+// A reason that "try again" won't fix needs long enough to be read.
+const REASON_DISMISS_MS = 6000;
+
+/** The backend's own reason when retrying can't help (no key, not eligible,
+ *  over a cap, too large); null for a transient failure. */
+function blockedReason(err: unknown): string | null {
+  if (!(err instanceof ApiError) || !err.code?.startsWith("transcription.")) return null;
+  return err.code === "transcription.failed" ? null : err.message;
+}
 
 /**
  * Record → transcribe → hand the text back for the draft. The transcript
@@ -56,12 +65,12 @@ export function useDictation({
   }, []);
 
   const fail = React.useCallback(
-    (message: string) => {
+    (message: string, dismissMs = ERR_DISMISS_MS) => {
       teardown();
       setState({ kind: "err", message });
       window.setTimeout(
         () => setState((s) => (s.kind === "err" ? { kind: "idle" } : s)),
-        ERR_DISMISS_MS,
+        dismissMs,
       );
     },
     [teardown],
@@ -135,8 +144,10 @@ export function useDictation({
           if (!clean) throw new Error("empty transcript");
           setState({ kind: "idle" });
           onTextRef.current(clean);
-        } catch {
-          fail(msg("agent.composer.transcribe_failed"));
+        } catch (err) {
+          const reason = blockedReason(err);
+          if (reason) fail(reason, REASON_DISMISS_MS);
+          else fail(msg("agent.composer.transcribe_failed"));
         }
       })();
     };
