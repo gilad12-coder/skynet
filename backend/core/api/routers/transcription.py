@@ -11,13 +11,11 @@ The ``language`` field is accepted for wire compatibility but never
 forwarded: Whisper treats the param as a directive, and the UI locale isn't
 necessarily the spoken language.
 
-Dictation is paid from the platform's Groq key, not from user balances, so it
-is open only to accounts with skin in the game: a positive purchased
-balance, an active Skynet Pro plan, or a verified BYOK key (the one-time free
-grant alone does not qualify, or throwaway sign-ups could farm it). A caller
-with a verified Groq BYOK key is transcribed on that key instead. Two limits
-still bound every caller: a per-account hourly clip cap, and a platform-wide
-monthly dollar budget counted from each platform-paid clip's billed duration.
+Dictation is free for every signed-in account and paid from the platform's
+Groq key, not from user balances. A caller with a verified Groq BYOK key is
+transcribed on that key instead. Two limits bound every caller: a
+per-account hourly clip cap, and a platform-wide monthly dollar budget
+counted from each platform-paid clip's billed duration.
 """
 
 from __future__ import annotations
@@ -28,11 +26,9 @@ from typing import Annotated, Any
 import httpx
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
-from ...billing.byok_vault import STATUS_VERIFIED, ProviderKeyVault
+from ...billing.byok_vault import ProviderKeyVault
 from ...config import settings
-from ...storage.models import BillingCustomerModel
 from ..auth import AuthenticatedUser, get_authenticated_user
 from ..errors import DomainError
 from ..platform_budget import budget_open, record_spend
@@ -124,38 +120,12 @@ def _own_groq_key(engine: Any, username: str) -> str | None:
     return connection.secret if connection is not None else None
 
 
-def _eligible_for_platform_dictation(job_store: Any, username: str) -> bool:
-    """Return whether the caller may dictate on the platform's Groq key.
-
-    Args:
-        job_store: Store exposing ``engine`` and, with a database, ``has_pro_plan``.
-        username: The caller.
-
-    Returns:
-        True for a positive purchased balance, an active Pro plan, or any
-        verified BYOK key.
-    """
-    engine = getattr(job_store, "engine", None)
-    if engine is None:
-        # No billing tables to consult (in-memory dev store): nothing to gate on.
-        return True
-    with Session(engine) as session:
-        customer = session.get(BillingCustomerModel, username)
-        if customer is not None and int(customer.balance_cents) > 0:
-            return True
-    has_pro_plan = getattr(job_store, "has_pro_plan", None)
-    if callable(has_pro_plan) and has_pro_plan(username):
-        return True
-    keys = ProviderKeyVault(engine=engine).list_keys(username).keys
-    return any(key.status == STATUS_VERIFIED for key in keys)
-
-
 def create_transcription_router(job_store: Any) -> APIRouter:
     """Build the dictation transcription router.
 
     Args:
-        job_store: Store whose engine backs the billing and BYOK tables used
-            for the eligibility check.
+        job_store: Store whose engine backs the BYOK table used to find the
+            caller's own Groq key.
 
     Returns:
         A configured :class:`APIRouter` exposing ``POST /transcribe``.
@@ -186,8 +156,7 @@ def create_transcription_router(job_store: Any) -> APIRouter:
             The transcript and which provider produced it.
 
         Raises:
-            DomainError: 413 when the clip exceeds the size cap, 402 when the
-                caller is not eligible for platform-paid dictation, 429 when
+            DomainError: 413 when the clip exceeds the size cap, 429 when
                 the caller is over the hourly clip cap, 503 when no Groq key is
                 configured or the monthly budget is spent, 502 when the
                 provider call failed.
@@ -197,11 +166,8 @@ def create_transcription_router(job_store: Any) -> APIRouter:
         if len(data) > _MAX_AUDIO_BYTES:
             raise DomainError("transcription.too_large", status=413, max_mb=_MAX_AUDIO_MB)
         own_key = _own_groq_key(getattr(job_store, "engine", None), user.username)
-        if own_key is None:
-            if not settings.groq_api_key:
-                raise DomainError("transcription.unconfigured", status=503)
-            if not _eligible_for_platform_dictation(job_store, user.username):
-                raise DomainError("transcription.not_eligible", status=402)
+        if own_key is None and not settings.groq_api_key:
+            raise DomainError("transcription.unconfigured", status=503)
         RateLimiter(shared_redis_client()).enforce(
             f"transcribe:{user.username}",
             limit=settings.rate_limit_transcriptions_per_hour,
