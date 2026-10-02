@@ -3104,6 +3104,7 @@
   "shared.excel_filter.apply": "適用",
   "shared.excel_filter.cancel": "キャンセル",
   "shared.excel_filter.filter_column": "{label} 列をフィルター",
+  "shared.excel_filter.more_options": "{total} 件中 {shown} 件を表示中。検索して絞り込んでください。",
   "shared.excel_filter.no_results": "結果なし",
   "shared.excel_filter.reset_width_title": "列幅をリセット",
   "shared.excel_filter.search_placeholder": "検索…",

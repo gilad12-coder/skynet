@@ -3104,6 +3104,7 @@
   "shared.excel_filter.apply": "Застосувати",
   "shared.excel_filter.cancel": "Скасувати",
   "shared.excel_filter.filter_column": "Фільтрувати стовпець {label}",
+  "shared.excel_filter.more_options": "Показано {shown} з {total}. Скористайтеся пошуком, щоб знайти більше.",
   "shared.excel_filter.no_results": "Немає результатів",
   "shared.excel_filter.reset_width_title": "Скинути ширину стовпців",
   "shared.excel_filter.search_placeholder": "Пошук…",

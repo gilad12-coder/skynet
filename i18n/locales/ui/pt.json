@@ -3104,6 +3104,7 @@
   "shared.excel_filter.apply": "Aplicar",
   "shared.excel_filter.cancel": "Cancelar",
   "shared.excel_filter.filter_column": "Filtrar a coluna {label}",
+  "shared.excel_filter.more_options": "A mostrar {shown} de {total}. Pesquise para encontrar mais.",
   "shared.excel_filter.no_results": "Sem resultados",
   "shared.excel_filter.reset_width_title": "Repor as larguras das colunas",
   "shared.excel_filter.search_placeholder": "Pesquisar…",

@@ -2789,6 +2789,7 @@
   "shared.excel_filter.apply": "套用",
   "shared.excel_filter.cancel": "取消",
   "shared.excel_filter.filter_column": "篩選「{label}」欄",
+  "shared.excel_filter.more_options": "顯示緊 {total} 個入面嘅 {shown} 個。搜尋搵更多。",
   "shared.excel_filter.no_results": "無結果",
   "shared.excel_filter.reset_filters_title": "重設所有篩選條件",
   "shared.excel_filter.reset_width_title": "重設欄寬",

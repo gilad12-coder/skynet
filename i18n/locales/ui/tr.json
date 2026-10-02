@@ -3104,6 +3104,7 @@
   "shared.excel_filter.apply": "Uygula",
   "shared.excel_filter.cancel": "İptal",
   "shared.excel_filter.filter_column": "{label} sütununu filtrele",
+  "shared.excel_filter.more_options": "{total} öğeden {shown} tanesi gösteriliyor. Daha fazlası için arayın.",
   "shared.excel_filter.no_results": "Sonuç yok",
   "shared.excel_filter.reset_width_title": "Sütun genişliklerini sıfırla",
   "shared.excel_filter.search_placeholder": "Ara…",

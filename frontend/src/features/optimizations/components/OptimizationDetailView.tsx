@@ -148,11 +148,20 @@ function mergeJobDelta(
 ): OptimizationStatusResponse {
   const po = next.progress_offset ?? 0;
   const lo = next.logs_offset ?? 0;
+  // An empty tail at the end of the held buffer keeps the old array, so the
+  // logs and grid memos keyed on it don't rerun on every quiet poll.
   const progress_events =
     po > 0 && prev?.progress_events
-      ? [...prev.progress_events.slice(0, po), ...next.progress_events]
+      ? next.progress_events.length === 0 && po === prev.progress_events.length
+        ? prev.progress_events
+        : [...prev.progress_events.slice(0, po), ...next.progress_events]
       : next.progress_events;
-  const logs = lo > 0 && prev?.logs ? [...prev.logs.slice(0, lo), ...next.logs] : next.logs;
+  const logs =
+    lo > 0 && prev?.logs
+      ? next.logs.length === 0 && lo === prev.logs.length
+        ? prev.logs
+        : [...prev.logs.slice(0, lo), ...next.logs]
+      : next.logs;
   return { ...next, progress_events, logs };
 }
 

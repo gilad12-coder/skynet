@@ -3104,6 +3104,7 @@
   "shared.excel_filter.apply": "应用",
   "shared.excel_filter.cancel": "取消",
   "shared.excel_filter.filter_column": "过滤{label}列",
+  "shared.excel_filter.more_options": "显示 {total} 项中的 {shown} 项。搜索以查找更多。",
   "shared.excel_filter.no_results": "没有结果",
   "shared.excel_filter.reset_width_title": "重置列宽",
   "shared.excel_filter.search_placeholder": "搜索…",

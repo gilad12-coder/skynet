@@ -2326,6 +2326,7 @@
   "shared.excel_filter.apply": "Apply",
   "shared.excel_filter.cancel": "Cancel",
   "shared.excel_filter.filter_column": "Filter {label} column",
+  "shared.excel_filter.more_options": "Showing {shown} of {total}. Search to find more.",
   "shared.excel_filter.no_results": "No results",
   "shared.excel_filter.reset_filters_title": "Reset all filters",
   "shared.excel_filter.reset_width_title": "Reset column widths",

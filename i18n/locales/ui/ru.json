@@ -3104,6 +3104,7 @@
   "shared.excel_filter.apply": "Применить",
   "shared.excel_filter.cancel": "Отмена",
   "shared.excel_filter.filter_column": "Фильтровать столбец {label}",
+  "shared.excel_filter.more_options": "Показано {shown} из {total}. Воспользуйтесь поиском, чтобы найти остальное.",
   "shared.excel_filter.no_results": "Нет результатов",
   "shared.excel_filter.reset_width_title": "Сбросить ширину столбцов",
   "shared.excel_filter.search_placeholder": "Поиск…",

@@ -13,10 +13,15 @@ import {
 import { Button } from "@/shared/ui/primitives/button";
 import { CheckboxIndicator } from "@/shared/ui/select-checkbox";
 import { formatMsg, msg } from "@/shared/lib/messages";
+import { clipText } from "@/shared/lib/clip-text";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
 import { SearchInput } from "@/shared/ui/search-input";
 
 import type { SortDir } from "@/shared/lib/table-sort";
+
+// A free-text column can hold thousands of distinct values; mounting one
+// checkbox each froze the dropdown, and search reaches the rest.
+const OPTION_RENDER_CAP = 200;
 
 export type { SortDir };
 export type Filters = Record<string, Set<string>>;
@@ -373,11 +378,11 @@ function FilterDropdown({
             {msg("shared.excel_filter.no_results")}
           </p>
         ) : (
-          visibleOptions.map((opt) => (
+          visibleOptions.slice(0, OPTION_RENDER_CAP).map((opt) => (
             <label
               key={opt.value}
               className="group flex min-h-11 cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[0.75rem] text-muted-foreground hover:bg-muted/70 lg:min-h-9"
-              title={opt.value}
+              title={clipText(opt.value)}
             >
               <input
                 type="checkbox"
@@ -391,6 +396,14 @@ function FilterDropdown({
               </span>
             </label>
           ))
+        )}
+        {visibleOptions.length > OPTION_RENDER_CAP && (
+          <p className="px-2 py-1.5 text-[0.6875rem] text-muted-foreground">
+            {formatMsg("shared.excel_filter.more_options", {
+              shown: OPTION_RENDER_CAP,
+              total: visibleOptions.length,
+            })}
+          </p>
         )}
       </div>
 

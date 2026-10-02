@@ -3104,6 +3104,7 @@
   "shared.excel_filter.apply": "Anwenden",
   "shared.excel_filter.cancel": "Abbrechen",
   "shared.excel_filter.filter_column": "Spalte {label} filtern",
+  "shared.excel_filter.more_options": "{shown} von {total} angezeigt. Suchen Sie, um mehr zu finden.",
   "shared.excel_filter.no_results": "Keine Ergebnisse",
   "shared.excel_filter.reset_width_title": "Spaltenbreiten zurücksetzen",
   "shared.excel_filter.search_placeholder": "Suchen…",
