@@ -142,17 +142,29 @@ export function useDatasetProfiling({
   // dataset (engine or column change) only refreshes the fractions, so the user's
   // shuffle choice survives.
   const profiledDatasetRef = useRef<ParsedDataset | null>(null);
+  // The wizard reads only the input columns' kinds and a plan sized by row
+  // count, so outputs never reach the request. Re-posting every column on each
+  // role click serialized megabytes on the main thread; an output-only change
+  // now sends nothing and an input change sends just the input columns.
+  const inputsKey = JSON.stringify(
+    Object.entries(buildColumnMapping(columnRoles).inputs).sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    ),
+  );
   useEffect(() => {
     if (!parsedDataset || parsedDataset.rowCount === 0) return;
-    const mapping = buildColumnMapping(columnRoles);
-    if (Object.keys(mapping.inputs).length === 0) return;
+    const inputs = Object.fromEntries(JSON.parse(inputsKey) as Array<[string, string]>);
+    const columns = Object.values(inputs);
+    if (columns.length === 0) return;
 
     let cancelled = false;
     const handle = setTimeout(() => {
       setProfileLoading(true);
       profileDataset({
-        dataset: parsedDataset.rows as Array<Record<string, unknown>>,
-        column_mapping: mapping,
+        dataset: parsedDataset.rows.map((row) =>
+          Object.fromEntries(columns.map((column) => [column, row[column]])),
+        ),
+        column_mapping: { inputs, outputs: {} },
         engine,
       })
         .then((response) => {
@@ -182,7 +194,7 @@ export function useDatasetProfiling({
       clearTimeout(handle);
     };
   }, [
-    columnRoles,
+    inputsKey,
     engine,
     parsedDataset,
     setDatasetProfile,

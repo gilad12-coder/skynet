@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { preflightIdentity, stableStringify } from "./validation-evidence.ts";
+import {
+  preflightIdentity,
+  stableStringify,
+  upgradeLegacyIdentity,
+} from "./validation-evidence.ts";
 
 test("data, model settings and funding edits invalidate setup evidence while naming does not", () => {
   const payload = {
@@ -46,7 +50,17 @@ test("MCP tool permission edits invalidate setup evidence", () => {
   );
 });
 
-test("the identity matches the plain stable serialization drafts already hold", () => {
+test("a large dataset enters the identity as a short digest", () => {
+  const dataset = Array.from({ length: 3000 }, (_, i) => ({ q: `question ${i} `.repeat(200) }));
+  const identity = preflightIdentity("dspy", { dataset, max_cost_cents: 20 });
+  assert.ok(identity.length < 200, `identity is ${identity.length} chars`);
+  assert.equal(
+    preflightIdentity("dspy", { dataset: dataset.slice() }),
+    preflightIdentity("dspy", { dataset }),
+  );
+});
+
+test("an identity saved in the old serialized form upgrades to today's", () => {
   const payload = {
     name: "dropped",
     zeta: [{ b: 1, a: [2, { d: null, c: "x" }] }],
@@ -56,10 +70,12 @@ test("the identity matches the plain stable serialization drafts already hold", 
     max_cost_cents: 20,
   };
   const { name: _name, ...setup } = payload;
-  assert.equal(
-    preflightIdentity("anything", payload),
-    stableStringify({ workflow: "anything", setup }),
-  );
+  const legacy = stableStringify({ workflow: "anything", setup });
+  assert.equal(upgradeLegacyIdentity(legacy), preflightIdentity("anything", payload));
+  assert.notEqual(upgradeLegacyIdentity(legacy), preflightIdentity("dspy", payload));
+  const current = preflightIdentity("dspy", payload);
+  assert.equal(upgradeLegacyIdentity(current), current);
+  assert.equal(upgradeLegacyIdentity('{"setup":broken'), '{"setup":broken');
 });
 
 test("a dataset swapped for new rows changes the identity even after it was cached", () => {
