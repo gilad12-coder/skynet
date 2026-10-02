@@ -1458,3 +1458,89 @@ class TaggingSessionShareGrantModel(Base):
     # The composite PK leads with session_id, so "list everything shared with
     # this user" (filtering on grantee_username alone) could not use it.
     __table_args__ = (Index("ix_tagging_session_share_grants_grantee", "grantee_username"),)
+
+
+class RunFolderModel(Base):
+    """A user-owned folder that groups optimizations in the sidebar.
+
+    Folders follow Google Drive's "My Drive" model: one owner, an optional
+    ``parent_id`` for nesting, and access that subfolders and runs filed inside
+    inherit from every ancestor. ``editors_can_share`` mirrors Drive's
+    ``writersCanShare``: when False only the owner may change who has access.
+    Deleting a folder deletes its subfolders but never the runs filed in them.
+    """
+
+    __tablename__ = "run_folders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    owner_username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    editors_can_share: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class RunFolderShareLinkModel(Base):
+    """Per-folder link-sharing config keyed by a public link token.
+
+    Same semantics as :class:`DatasetShareLinkModel`; rows are removed with the
+    folder.
+    """
+
+    __tablename__ = "run_folder_share_links"
+
+    token: Mapped[str] = mapped_column(String(48), primary_key=True)
+    folder_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    general_access: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="restricted", server_default="restricted"
+    )
+    general_role: Mapped[str] = mapped_column(String(16), nullable=False, default="viewer", server_default="viewer")
+
+
+class RunFolderShareGrantModel(Base):
+    """A single per-user access grant on a run folder.
+
+    Mirrors :class:`DatasetShareGrantModel`. A grant reaches every subfolder and
+    run beneath the folder; rows are removed with the folder.
+    """
+
+    __tablename__ = "run_folder_share_grants"
+
+    folder_id: Mapped[str] = mapped_column(String(36), primary_key=True, index=True)
+    grantee_username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    # The composite PK leads with folder_id, so "list everything shared with
+    # this user" (filtering on grantee_username alone) could not use it.
+    __table_args__ = (Index("ix_run_folder_share_grants_grantee", "grantee_username"),)
+
+
+class RunFolderItemModel(Base):
+    """Files one optimization into one folder.
+
+    ``optimization_id`` is the primary key, which enforces Drive's single-parent
+    rule: a run lives in at most one folder.
+    """
+
+    __tablename__ = "run_folder_items"
+
+    optimization_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    folder_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    added_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )

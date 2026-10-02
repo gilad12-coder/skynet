@@ -106,6 +106,7 @@ from .routers.dataset_share import create_dataset_share_router
 from .routers.datasets import create_datasets_router
 from .routers.execution_budgets import create_execution_budgets_router
 from .routers.execution_runtimes import create_execution_runtimes_router
+from .routers.folders import create_folders_router
 from .routers.generalist_agent import create_generalist_agent_router
 from .routers.mcp_probe import create_mcp_probe_router
 from .routers.model_privacy import create_model_privacy_router
@@ -1320,6 +1321,7 @@ def create_app(
     app.include_router(create_datasets_router(job_store=job_store), tags=["Datasets"])
     app.include_router(create_dataset_library_router(job_store=job_store), tags=["Datasets"])
     app.include_router(create_dataset_share_router(job_store=job_store), tags=["Datasets"])
+    app.include_router(create_folders_router(job_store=job_store), tags=["Folders"])
     app.include_router(create_connectors_router(job_store=job_store), tags=["Connectors"])
     app.include_router(create_tagging_session_router(job_store=job_store), tags=["Optimizations"])
     app.include_router(create_tagging_session_share_router(job_store=job_store), tags=["Optimizations"])

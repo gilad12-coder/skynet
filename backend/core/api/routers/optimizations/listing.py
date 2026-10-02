@@ -33,7 +33,7 @@ from ...auth import AuthenticatedUser, get_authenticated_user, is_admin
 from ...converters import parse_overview, parse_timestamp
 from ...errors import DomainError
 from ...response_limits import AGENT_DEFAULT_LIST, AGENT_MAX_LIST, clamp_limit
-from .._helpers import build_summary, grant_roles_for, pausable_id_flags, resumable_id_flags
+from .._helpers import build_summary, grant_roles_for, pausable_id_flags, resumable_id_flags, run_folder_ids
 from ..constants import VALID_OPTIMIZATION_TYPES, VALID_STATUSES
 from .schemas import SidebarJobItem, SidebarJobsResponse
 
@@ -61,6 +61,46 @@ def _scope_username(current_user: AuthenticatedUser, requested: str | None) -> s
             return None
         return requested.strip().lower()
     return current_user.username
+
+
+def build_sidebar_item(
+    row: dict,
+    resumable_ids: set[str],
+    pausable_ids: set[str],
+    *,
+    role: str | None = None,
+    folder_id: str | None = None,
+) -> SidebarJobItem:
+    """Build the compact sidebar entry for one job row.
+
+    Args:
+        row: Raw job row from the store.
+        resumable_ids: Ids that can offer Resume (see ``resumable_id_flags``).
+        pausable_ids: Ids that can offer Pause (see ``pausable_id_flags``).
+        role: Caller's share role when the run is not their own.
+        folder_id: Folder the run is filed in, if any.
+
+    Returns:
+        The populated :class:`SidebarJobItem`.
+    """
+    overview = parse_overview(row)
+    return SidebarJobItem(
+        optimization_id=row["optimization_id"],
+        status=row.get("status", "pending"),
+        name=overview.get(PAYLOAD_OVERVIEW_NAME),
+        module_name=overview.get(PAYLOAD_OVERVIEW_MODULE_NAME),
+        optimizer_name=overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME),
+        model_name=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
+        username=overview.get(PAYLOAD_OVERVIEW_USERNAME),
+        created_at=parse_timestamp(row.get("created_at")),
+        pinned=bool(overview.get("pinned", False)),
+        optimization_type=overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE),
+        total_pairs=overview.get(PAYLOAD_OVERVIEW_TOTAL_PAIRS),
+        resumable=row["optimization_id"] in resumable_ids,
+        pausable=row["optimization_id"] in pausable_ids,
+        role=role,
+        folder_id=folder_id,
+    )
 
 
 def register_listing_routes(router: APIRouter, *, job_store) -> None:
@@ -190,7 +230,10 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
             caller_norm = current_user.username.strip().lower()
             roles = grant_roles_for(job_store, [s.optimization_id for s in items], caller_norm)
             for s in items:
-                s.role = roles.get(s.optimization_id)
+                # A folder grants roles to every run inside it, including the
+                # caller's own; owned runs must keep ``role=None`` ("mine").
+                if (s.username or "").strip().lower() != caller_norm:
+                    s.role = roles.get(s.optimization_id)
         return PaginatedJobsResponse(items=items, total=total, limit=resolved_limit, offset=offset)
 
     @router.get(
@@ -320,26 +363,11 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
         rows = job_store.list_jobs(username=scoped_username, limit=limit, offset=offset)
         resumable_ids = resumable_id_flags(job_store, rows)
         pausable_ids = pausable_id_flags(job_store, rows)
-        items = []
-        for row in rows:
-            overview = parse_overview(row)
-            items.append(
-                SidebarJobItem(
-                    optimization_id=row["optimization_id"],
-                    status=row.get("status", "pending"),
-                    name=overview.get(PAYLOAD_OVERVIEW_NAME),
-                    module_name=overview.get(PAYLOAD_OVERVIEW_MODULE_NAME),
-                    optimizer_name=overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME),
-                    model_name=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
-                    username=overview.get(PAYLOAD_OVERVIEW_USERNAME),
-                    created_at=parse_timestamp(row.get("created_at")),
-                    pinned=bool(overview.get("pinned", False)),
-                    optimization_type=overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE),
-                    total_pairs=overview.get(PAYLOAD_OVERVIEW_TOTAL_PAIRS),
-                    resumable=row["optimization_id"] in resumable_ids,
-                    pausable=row["optimization_id"] in pausable_ids,
-                )
-            )
+        folder_ids = run_folder_ids(job_store, [row["optimization_id"] for row in rows])
+        items = [
+            build_sidebar_item(row, resumable_ids, pausable_ids, folder_id=folder_ids.get(row["optimization_id"]))
+            for row in rows
+        ]
         return SidebarJobsResponse(items=items, total=total)
 
     @router.get(
@@ -380,25 +408,7 @@ def register_listing_routes(router: APIRouter, *, job_store) -> None:
         roles = grant_roles_for(job_store, [row["optimization_id"] for row in rows], username)
         resumable_ids = resumable_id_flags(job_store, rows)
         pausable_ids = pausable_id_flags(job_store, rows)
-        items = []
-        for row in rows:
-            overview = parse_overview(row)
-            items.append(
-                SidebarJobItem(
-                    optimization_id=row["optimization_id"],
-                    status=row.get("status", "pending"),
-                    name=overview.get(PAYLOAD_OVERVIEW_NAME),
-                    module_name=overview.get(PAYLOAD_OVERVIEW_MODULE_NAME),
-                    optimizer_name=overview.get(PAYLOAD_OVERVIEW_OPTIMIZER_NAME),
-                    model_name=overview.get(PAYLOAD_OVERVIEW_MODEL_NAME),
-                    username=overview.get(PAYLOAD_OVERVIEW_USERNAME),
-                    created_at=parse_timestamp(row.get("created_at")),
-                    pinned=bool(overview.get("pinned", False)),
-                    optimization_type=overview.get(PAYLOAD_OVERVIEW_OPTIMIZATION_TYPE),
-                    total_pairs=overview.get(PAYLOAD_OVERVIEW_TOTAL_PAIRS),
-                    resumable=row["optimization_id"] in resumable_ids,
-                    pausable=row["optimization_id"] in pausable_ids,
-                    role=roles.get(row["optimization_id"]),
-                )
-            )
+        items = [
+            build_sidebar_item(row, resumable_ids, pausable_ids, role=roles.get(row["optimization_id"])) for row in rows
+        ]
         return SidebarJobsResponse(items=items, total=total)

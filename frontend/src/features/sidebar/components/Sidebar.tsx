@@ -23,6 +23,7 @@ import {
   XCircle,
   User,
   Users,
+  FolderOpen,
 } from "@/shared/ui/icons";
 import { SidebarMoreSkeleton } from "./SidebarMoreSkeleton";
 import { cn } from "@/shared/lib/utils";
@@ -45,8 +46,9 @@ import {
   pauseJob,
   restartJob,
   resumeJob,
+  listFolders,
 } from "@/shared/lib/api";
-import type { SidebarJobItem } from "@/shared/lib/api";
+import type { RunFolder, SidebarJobItem } from "@/shared/lib/api";
 import {
   STATUS_DOT_COLOR,
   STATUS_DOT_FALLBACK,
@@ -76,6 +78,15 @@ import {
   COMPACT_POPOVER_PANEL_CLASS,
 } from "@/shared/ui/compact-popover-menu";
 import { Input } from "@/shared/ui/primitives/input";
+import {
+  FolderDialogs,
+  FolderTree,
+  NewFolderButton,
+  SidebarFilterMenu,
+  childrenByParent,
+  type FolderDialogState,
+} from "./SidebarFolders";
+import { DEFAULT_RUN_VIEW, applyRunView, parseRunView, type RunView } from "../lib/run-view";
 
 const NAV_ITEMS = perLocale(() =>
   APP_PAGES.filter((page) => page.sidebar).map((page) => ({
@@ -104,6 +115,8 @@ const SIDEBAR_COLLAPSE_AT = 150;
 const SIDEBAR_EXPAND_AT = 196;
 const SIDEBAR_WIDTH_STORAGE_KEY = "skynet.sidebar.width";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "skynet.sidebar.collapsed";
+const SIDEBAR_VIEW_STORAGE_KEY = "skynet.sidebar.view";
+const FOLDERS_EXPANDED_STORAGE_KEY = "skynet.sidebar.folders.expanded";
 const DESKTOP_MQ = "(min-width: 768px)";
 
 /** Clamp a candidate sidebar width to the resizable range, rounded to a whole px. */
@@ -135,6 +148,12 @@ export function Sidebar() {
   const [activeCount, setActiveCount] = React.useState(0);
   const [loadedAll, setLoadedAll] = React.useState(false);
   const [loadingMore, setLoadingMore] = React.useState(false);
+  const [folders, setFolders] = React.useState<RunFolder[]>([]);
+  // Bumped on every refresh so open folders refetch their runs alongside the list.
+  const [folderVersion, setFolderVersion] = React.useState(0);
+  const [expandedFolders, setExpandedFolders] = React.useState<Set<string>>(() => new Set());
+  const [view, setView] = React.useState<RunView>(DEFAULT_RUN_VIEW);
+  const [folderDialog, setFolderDialog] = React.useState<FolderDialogState | null>(null);
   const [width, setWidth] = React.useState(SIDEBAR_DEFAULT_WIDTH);
   const [collapsed, setCollapsed] = React.useState(false);
   // Arms the collapse/expand width glide for the discrete snap only; continuous
@@ -157,6 +176,12 @@ export function Sidebar() {
       const n = raw ? Number(raw) : NaN;
       if (Number.isFinite(n)) setWidth(clampSidebarWidth(n));
       setCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1");
+      setView(parseRunView(window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY)));
+      const expandedRaw = window.localStorage.getItem(FOLDERS_EXPANDED_STORAGE_KEY);
+      const expandedIds: unknown = expandedRaw ? JSON.parse(expandedRaw) : [];
+      if (Array.isArray(expandedIds)) {
+        setExpandedFolders(new Set(expandedIds.filter((id) => typeof id === "string")));
+      }
     } catch {
       /* localStorage unavailable */
     }
@@ -256,7 +281,18 @@ export function Sidebar() {
   const listRef = React.useRef<HTMLDivElement>(null);
   const sentinelRef = React.useRef<HTMLDivElement | null>(null);
 
+  const fetchFolders = React.useCallback(async () => {
+    try {
+      const res = await listFolders();
+      setFolders(res.folders);
+      setFolderVersion((v) => v + 1);
+    } catch (err) {
+      console.warn("sidebar folders fetch failed:", err);
+    }
+  }, []);
+
   const fetchData = React.useCallback(async () => {
+    void fetchFolders();
     try {
       const limit = Math.min(200, Math.max(PAGE_SIZE, loadedItemsRef.current));
       const res =
@@ -279,7 +315,7 @@ export function Sidebar() {
     } catch (err) {
       console.warn("sidebar fetch failed:", err);
     }
-  }, [sessionUser, isAdmin, tab]);
+  }, [sessionUser, isAdmin, tab, fetchFolders]);
 
   React.useEffect(() => {
     // Dep change (login / admin toggle) — reset depth so the next fetch
@@ -392,20 +428,130 @@ export function Sidebar() {
     }
   };
 
-  const handleTabChange = React.useCallback(
-    (next: "mine" | "shared") => {
-      if (next === tab) return;
-      // Keep the current rows on screen; the new tab's list crossfades in once
-      // its fetch resolves (see ``renderedTab``). ``switchingRef`` parks
-      // pagination until then.
-      switchingRef.current = true;
-      tabRef.current = next;
-      setTab(next);
-    },
-    [tab],
+  const handleTabChange = React.useCallback((next: "mine" | "shared") => {
+    if (next === tabRef.current) return;
+    // Keep the current rows on screen; the new tab's list crossfades in once
+    // its fetch resolves (see ``renderedTab``). ``switchingRef`` parks
+    // pagination until then.
+    switchingRef.current = true;
+    tabRef.current = next;
+    setTab(next);
+  }, []);
+
+  const updateView = React.useCallback((next: RunView) => {
+    setView(next);
+    try {
+      window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  const toggleFolder = React.useCallback((folderId: string, force?: boolean) => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      const open = force ?? !next.has(folderId);
+      if (open) next.add(folderId);
+      else next.delete(folderId);
+      try {
+        window.localStorage.setItem(FOLDERS_EXPANDED_STORAGE_KEY, JSON.stringify([...next]));
+      } catch {
+        /* noop */
+      }
+      return next;
+    });
+  }, []);
+
+  // ``?folder=<id>`` (set by the share-link claim page) opens that folder and
+  // every ancestor, on whichever tab the folder lives.
+  const folderParam = searchParams.get("folder");
+  // Applied once per param value, so the 30s refresh doesn't re-open a folder
+  // the user has since collapsed.
+  const handledFolderParamRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!folderParam || handledFolderParamRef.current === folderParam) return;
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    const target = byId.get(folderParam);
+    if (!target) return;
+    let cursor: RunFolder | undefined = target;
+    let root = target;
+    while (cursor) {
+      toggleFolder(cursor.id, true);
+      root = cursor;
+      cursor = cursor.parent_id ? byId.get(cursor.parent_id) : undefined;
+    }
+    handledFolderParamRef.current = folderParam;
+    handleTabChange(root.owner.toLowerCase() === sessionUser ? "mine" : "shared");
+  }, [folderParam, folders, sessionUser, toggleFolder, handleTabChange]);
+
+  const groupByFolder = view.group === "folder";
+  const childMap = React.useMemo(() => childrenByParent(folders), [folders]);
+  // Top-level folders split by tab the way Drive splits My Drive from Shared
+  // with me: folders I own sit under "mine", everything else under "shared".
+  const rootFolders = React.useMemo(
+    () =>
+      (childMap.get(null) ?? []).filter(
+        (f) => (f.owner.toLowerCase() === sessionUser) === (renderedTab === "mine"),
+      ),
+    [childMap, sessionUser, renderedTab],
+  );
+  // Filed runs live inside their folder, so the flat list drops them while
+  // grouping by folder; a run filed in a folder I can't see stays listed.
+  const visibleFolderIds = React.useMemo(() => new Set(folders.map((f) => f.id)), [folders]);
+  const listedJobs = React.useMemo(
+    () =>
+      applyRunView(
+        groupByFolder
+          ? jobs.filter((j) => !j.folder_id || !visibleFolderIds.has(j.folder_id))
+          : jobs,
+        view,
+      ),
+    [jobs, groupByFolder, visibleFolderIds, view],
+  );
+  const groupedJobs = React.useMemo(
+    () =>
+      view.sort === "name"
+        ? listedJobs.length > 0
+          ? [{ label: msg("sidebar.filter.all_runs"), jobs: listedJobs }]
+          : []
+        : groupJobsByRecency(listedJobs),
+    [listedJobs, view.sort],
   );
 
-  const groupedJobs = React.useMemo(() => groupJobsByRecency(jobs), [jobs]);
+  const onFolderDone = React.useCallback(
+    (result?: { createdId?: string; deletedIds?: string[] }) => {
+      if (result?.createdId && folderDialog?.kind === "create") {
+        if (folderDialog.parentId) toggleFolder(folderDialog.parentId, true);
+        else handleTabChange("mine");
+      }
+      if (result?.deletedIds?.length) {
+        const gone = new Set(result.deletedIds);
+        setExpandedFolders((prev) => new Set([...prev].filter((id) => !gone.has(id))));
+      }
+      window.dispatchEvent(new Event("optimizations-changed"));
+    },
+    [folderDialog, toggleFolder, handleTabChange],
+  );
+
+  const renderJob = (job: SidebarJobItem, isShared: boolean) => (
+    <JobRow
+      key={job.optimization_id}
+      job={job}
+      isShared={isShared}
+      isActive={pathname === `/optimizations/${job.optimization_id}`}
+      activePair={pathname === `/optimizations/${job.optimization_id}` ? activePairIndex : null}
+      onDelete={handleDelete}
+      onRefresh={fetchData}
+      onMove={() =>
+        setFolderDialog({
+          kind: "move-runs",
+          optimizationIds: [job.optimization_id],
+          currentFolderId: job.folder_id ?? null,
+        })
+      }
+    />
+  );
+  const showFolders = groupByFolder && rootFolders.length > 0;
 
   const deleteJobInfo = React.useMemo(() => {
     if (!deleteConfirm) return null;
@@ -544,13 +690,23 @@ export function Sidebar() {
           })}
         </div>
 
+        <div
+          className={cn("mx-3 mt-2 flex items-center gap-0.5 ps-2 pe-0.5", isCollapsed && "hidden")}
+        >
+          <p className="flex-1 truncate text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60">
+            {msg("sidebar.runs_heading")}
+          </p>
+          <SidebarFilterMenu view={view} onChange={updateView} />
+          <NewFolderButton onClick={() => setFolderDialog({ kind: "create", parentId: null })} />
+        </div>
+
         {/* Collapsed rail hides the run list (no icon form for a text list), but
             the data layer keeps polling — the Dashboard nav badge count reads
             from the same fetch — so hide rather than unmount. */}
         <div
           className={cn("flex-1 overflow-hidden flex flex-col min-h-0", isCollapsed && "hidden")}
         >
-          <div ref={listRef} className="flex-1 overflow-y-auto px-3 pt-2 pb-2 no-scrollbar">
+          <div ref={listRef} className="flex-1 overflow-y-auto px-3 pt-1 pb-2 no-scrollbar">
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
                 key={renderedTab}
@@ -559,6 +715,20 @@ export function Sidebar() {
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.14, ease: "easeOut" }}
               >
+                {showFolders && (
+                  <div className="mb-2">
+                    <FolderTree
+                      folders={rootFolders}
+                      childMap={childMap}
+                      expanded={expandedFolders}
+                      onToggle={toggleFolder}
+                      view={view}
+                      version={folderVersion}
+                      renderRun={(job) => renderJob(job, job.role != null && job.role !== "owner")}
+                      onAction={setFolderDialog}
+                    />
+                  </div>
+                )}
                 {groupedJobs.map((group) => (
                   <div key={group.label} className="mb-2">
                     <p className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60 px-2 py-1.5">
@@ -567,24 +737,15 @@ export function Sidebar() {
                         {group.jobs.length}
                       </span>
                     </p>
-                    {group.jobs.map((job) => (
-                      <JobRow
-                        key={job.optimization_id}
-                        job={job}
-                        isShared={renderedTab === "shared"}
-                        isActive={pathname === `/optimizations/${job.optimization_id}`}
-                        activePair={
-                          pathname === `/optimizations/${job.optimization_id}`
-                            ? activePairIndex
-                            : null
-                        }
-                        onDelete={handleDelete}
-                        onRefresh={fetchData}
-                      />
-                    ))}
+                    {group.jobs.map((job) => renderJob(job, renderedTab === "shared"))}
                   </div>
                 ))}
-                {loadedAll && groupedJobs.length === 0 && (
+                {loadedAll && groupedJobs.length === 0 && !showFolders && jobs.length > 0 && (
+                  <p className="px-2 py-6 text-center text-[0.6875rem] text-muted-foreground/60">
+                    {msg("sidebar.filter.no_match")}
+                  </p>
+                )}
+                {loadedAll && groupedJobs.length === 0 && !showFolders && jobs.length === 0 && (
                   <EmptyState
                     icon={PaperPlaneTilt}
                     iconWrap="tile"
@@ -662,6 +823,13 @@ export function Sidebar() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <FolderDialogs
+        dialog={folderDialog}
+        folders={folders}
+        onClose={() => setFolderDialog(null)}
+        onDone={onFolderDone}
+      />
     </aside>
   );
 }
@@ -786,6 +954,7 @@ function JobRow({
   activePair,
   onDelete,
   onRefresh,
+  onMove,
 }: {
   job: SidebarJobItem;
   isShared: boolean;
@@ -793,6 +962,7 @@ function JobRow({
   activePair: number | null;
   onDelete: (e: React.MouseEvent, id: string) => void;
   onRefresh: () => void;
+  onMove: () => void;
 }) {
   const router = useRouter();
   const isRtl = getActiveDir() === "rtl";
@@ -1097,6 +1267,15 @@ function JobRow({
                   </span>
                 </button>
               </PopoverPrimitive.Close>
+
+              {canEdit && (
+                <PopoverPrimitive.Close asChild>
+                  <button type="button" onClick={onMove} className={COMPACT_POPOVER_ITEM_CLASS}>
+                    <FolderOpen className={COMPACT_POPOVER_ICON_CLASS} aria-hidden="true" />
+                    <span className="flex-1 text-start">{msg("folders.move_run")}</span>
+                  </button>
+                </PopoverPrimitive.Close>
+              )}
 
               {canEdit &&
                 (job.status === "failed" ||
