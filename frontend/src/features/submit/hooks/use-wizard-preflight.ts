@@ -14,6 +14,7 @@ import type { ExecutionBudgetSession } from "../lib/execution-budget-session";
 import {
   reusableSuccessfulPreflight,
   reusableTerminalPreflight,
+  type StoredPreflightEvidence,
 } from "../lib/preflight-outcome";
 import {
   PreflightStore,
@@ -22,7 +23,7 @@ import {
   type ValidationProgress,
   type ValidationStatus,
 } from "../lib/preflight-store";
-import { preflightIdentity } from "../lib/validation-evidence";
+import { preflightIdentity, upgradeLegacyIdentity } from "../lib/validation-evidence";
 import type { ToastApi } from "../lib/validation-toast";
 import { waitForPreflightUsage } from "../lib/wait-for-preflight-usage";
 
@@ -53,13 +54,27 @@ export function usePreflightNotifications(): void {
         seen.set(workflow, status);
         if (status === previous) continue;
         if (status === "running") requestNotificationPermission();
-        else if (previous === "running" && status === "succeeded") notifyUser(msg("notify.check.passed"));
-        else if (previous === "running" && status === "failed") notifyUser(msg("notify.check.failed"));
+        else if (previous === "running" && status === "succeeded")
+          notifyUser(msg("notify.check.passed"));
+        else if (previous === "running" && status === "failed")
+          notifyUser(msg("notify.check.failed"));
       }
     };
     follow();
     return store.subscribe(follow);
   }, []);
+}
+
+function upgradeStoredEvidence(
+  evidence: Partial<Record<PreflightScope, StoredPreflightEvidence>> | undefined,
+): Partial<Record<PreflightScope, StoredPreflightEvidence>> | undefined {
+  if (!evidence) return evidence;
+  return Object.fromEntries(
+    Object.entries(evidence).map(([scope, stored]) => [
+      scope,
+      stored && { ...stored, identity: upgradeLegacyIdentity(stored.identity) },
+    ]),
+  );
 }
 
 /** Keep checks scoped to the current setup; server evidence and costs remain authoritative. */
@@ -82,7 +97,7 @@ export function useWizardPreflight(
     store.attach(workflow, budget);
     // A restored draft carries the passes it last acknowledged; seed them so a
     // returning setup shows verified at once instead of re-running the check.
-    store.seed(workflow, budget.draft.preflightEvidence);
+    store.seed(workflow, upgradeStoredEvidence(budget.draft.preflightEvidence));
     return () => {
       mounted.current = false;
       store.detach(workflow, budget);
