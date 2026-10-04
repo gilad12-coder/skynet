@@ -3984,7 +3984,7 @@
   "tutorial.step.tagger_task.body": "اختر طريقة الإجابة عن كل صف: سؤال بنعم/لا، أو إحدى فئاتك، أو إجابة مكتوبة.",
   "tutorial.step.sidebar_nav.title": "التنقّل في التطبيق",
   "tutorial.step.sidebar_nav.body": "استخدم الشريط الجانبي للتنقّل بين الصفحات. اضغط ⌘K أو Ctrl+K من أي مكان للانتقال إلى أي صفحة أو إعداد.",
-  "billing.plans.topup.fee_note": "يشمل السعر رسوم منصة قدرها {p1}، وهي نفسها لكل طرق الدفع.",
+  "billing.plans.topup.fee_note": "يشمل السعر رسوم منصة قدرها {p1}.",
   "billing.plans.topup.custom_range": "أدخل مبلغًا من {p1} إلى {p2}.",
   "submit.economy.label": "نصف السعر، أبطأ",
   "submit.economy.hint": "تمر استدعاءات النماذج المُدارة عبر طابور الدفعات لدى المزوّد بنصف السعر. قد تستغرق كل جولة من دقائق إلى ساعات.",

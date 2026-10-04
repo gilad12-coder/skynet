@@ -3984,7 +3984,7 @@
   "tutorial.step.tagger_task.body": "选择每一行的回答方式：是/否问题、你的某个类别，或书面回答。",
   "tutorial.step.sidebar_nav.title": "快速上手导航",
   "tutorial.step.sidebar_nav.body": "使用侧边栏在页面间切换。在任意位置按 ⌘K 或 Ctrl+K，即可跳转到任意页面或设置。",
-  "billing.plans.topup.fee_note": "价格包含 {p1} 平台费，所有付款方式相同。",
+  "billing.plans.topup.fee_note": "价格包含 {p1} 平台费。",
   "billing.plans.topup.custom_range": "请输入 {p1} 至 {p2} 之间的金额。",
   "submit.economy.label": "半价，较慢",
   "submit.economy.hint": "托管模型调用将以半价通过提供商的批处理队列执行。每一轮可能需要几分钟到几小时。",

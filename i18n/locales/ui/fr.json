@@ -3984,7 +3984,7 @@
   "tutorial.step.tagger_task.body": "Choisissez comment répondre pour chaque ligne : une question oui/non, une de vos catégories, ou une réponse écrite.",
   "tutorial.step.sidebar_nav.title": "Se repérer dans l'app",
   "tutorial.step.sidebar_nav.body": "Utilisez la barre latérale pour passer d'une page à l'autre. Appuyez sur ⌘K ou Ctrl+K n'importe où pour accéder à une page ou un réglage.",
-  "billing.plans.topup.fee_note": "Le prix inclut des frais de plateforme de {p1}, identiques pour tous les moyens de paiement.",
+  "billing.plans.topup.fee_note": "Le prix inclut des frais de plateforme de {p1}.",
   "billing.plans.topup.custom_range": "Saisissez un montant de {p1} à {p2}.",
   "submit.economy.label": "Moitié prix, plus lent",
   "submit.economy.hint": "Les appels aux modèles gérés passent par la file de lots du fournisseur à moitié prix. Chaque tour peut prendre de quelques minutes à quelques heures.",
