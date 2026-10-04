@@ -130,7 +130,7 @@ export function LegalDocument({ document, kind }: { document: LegalDoc; kind: Le
   return (
     <div
       dir="ltr"
-      className="h-dvh overflow-x-hidden overflow-y-auto bg-[#F5F1EC] text-foreground print:h-auto print:overflow-visible"
+      className="h-dvh scroll-smooth overflow-x-hidden overflow-y-auto bg-[#F5F1EC] motion-reduce:scroll-auto text-foreground print:h-auto print:overflow-visible"
     >
       <header className="sticky top-0 z-20 border-b border-border/60 bg-[#FAF8F5]/95 backdrop-blur-md print:static print:bg-white">
         <div className="mx-auto flex min-h-16 w-full max-w-[96rem] items-center justify-between gap-4 px-4 sm:px-8 lg:px-12 xl:px-16">
