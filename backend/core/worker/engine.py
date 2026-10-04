@@ -45,7 +45,7 @@ from ..billing.protected_credentials import (
     has_exposed_execution_credentials,
     resolve_execution_credentials,
 )
-from ..billing.protected_execution import bind_protected_sandbox, claude_code_anthropic_key
+from ..billing.protected_execution import bind_protected_sandbox, claude_code_anthropic_key, protected_image
 from ..billing.recovery_admission import validate_recovery_plan
 from ..billing.runtime import BudgetRuntime, UsagePendingError
 from ..billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
@@ -993,11 +993,19 @@ class BackgroundWorker:
                         ),
                         recovery_plan=recovery_plan,
                     )
+                    sandbox_workflow = "anything" if optimization_type == OPTIMIZATION_TYPE_BLACKBOX else "dspy"
+                    current_image = protected_image(settings, sandbox_workflow)
+                    sandbox_image = (
+                        self._job_store.pin_sandbox_image(optimization_id, current_image)
+                        if current_image is not None
+                        else None
+                    )
                     bind_protected_sandbox(
                         budget_gateway,
                         settings,
-                        workflow="anything" if optimization_type == OPTIMIZATION_TYPE_BLACKBOX else "dspy",
+                        workflow=sandbox_workflow,
                         owner_id=optimization_id,
+                        image=sandbox_image,
                         anthropic_api_key=(
                             claude_code_anthropic_key(ProviderKeyVault(engine=byok_engine), execution_payload.username)
                             if optimization_type == OPTIMIZATION_TYPE_BLACKBOX
@@ -1014,6 +1022,7 @@ class BackgroundWorker:
                     checkpoint_tracker.update(
                         recovery_plan_builder=budget_gateway.checkpoint_recovery_plan,
                         execution_runtime=execution_runtime,
+                        sandbox_image=sandbox_image,
                     )
                     parent_payload = resolve_execution_credentials(
                         payload_dict,
@@ -2312,7 +2321,9 @@ class BackgroundWorker:
         if is_grid:
             checkpoints = self._job_store.list_gepa_checkpoints(optimization_id)
             for cp in checkpoints:
-                validate_checkpoint(cp.data, cp.manifest, payload, job.get("code_version"))
+                validate_checkpoint(
+                    cp.data, cp.manifest, payload, job.get("code_version"), sandbox_image=job.get("sandbox_image")
+                )
                 pair_dir = base / f"pair_{cp.pair_index}"
                 pair_dir.mkdir(parents=True, exist_ok=True)
                 (pair_dir / GEPA_STATE_FILENAME).write_bytes(cp.data)
@@ -2329,7 +2340,13 @@ class BackgroundWorker:
             if checkpoint is None and (job.get("recovery") or {}).get("phase") == "resuming":
                 raise ValueError("The checkpoint selected for recovery is no longer available.")
             if checkpoint is not None:
-                validate_checkpoint(checkpoint.data, checkpoint.manifest, payload, job.get("code_version"))
+                validate_checkpoint(
+                    checkpoint.data,
+                    checkpoint.manifest,
+                    payload,
+                    job.get("code_version"),
+                    sandbox_image=job.get("sandbox_image"),
+                )
                 state_base = base / "gepa" if "strategy" in payload else base
                 state_base.mkdir(parents=True, exist_ok=True)
                 (state_base / GEPA_STATE_FILENAME).write_bytes(checkpoint.data)
@@ -2413,7 +2430,12 @@ class BackgroundWorker:
         if not data:
             return
         try:
-            manifest = checkpoint_manifest(data, tracker.get("payload", {}), tracker.get("code_version"))
+            manifest = checkpoint_manifest(
+                data,
+                tracker.get("payload", {}),
+                tracker.get("code_version"),
+                sandbox_image=tracker.get("sandbox_image"),
+            )
             incumbent = tracker.get("_incumbents", {}).get(pair_index)
             if incumbent is not None:
                 manifest["evaluated_incumbent"] = incumbent

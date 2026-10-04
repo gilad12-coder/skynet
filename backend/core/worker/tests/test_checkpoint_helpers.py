@@ -15,12 +15,19 @@ import shutil
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
 from gepa.core.state import GEPAState, ValsetEvaluation
 
 from core.constants import OPTIMIZATION_TYPE_GRID_SEARCH, OPTIMIZATION_TYPE_RUN, PROGRESS_CANDIDATE
 from core.service_gateway.optimization.trajectory import GEPA_STATE_FILENAME, GRID_PAIR_RESULT_FILENAME
 from core.storage import JobStore
-from core.worker.checkpoint_compat import checkpoint_incumbent, checkpoint_manifest
+from core.worker import checkpoint_compat
+from core.worker.checkpoint_compat import (
+    CheckpointCompatibilityError,
+    checkpoint_incumbent,
+    checkpoint_manifest,
+    validate_checkpoint,
+)
 from core.worker.constants import EVENT_PROGRESS
 from core.worker.engine import BackgroundWorker
 
@@ -221,3 +228,26 @@ def test_grid_prepare_restores_in_flight_pair_checkpoints() -> None:
         assert not (base / "pair_1").exists()  # pair 1 had no checkpoint (e.g. already finished)
     finally:
         shutil.rmtree(base, ignore_errors=True)
+
+
+def test_image_checkpoint_resumes_under_any_worker_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Accept state written inside a pinned image whatever the worker now runs.
+
+    Args:
+        monkeypatch: Swaps the worker's own Python and dependency versions.
+    """
+    image = "registry.example/sandbox@sha256:" + "a" * 64
+    data = _state(2)
+    manifest = checkpoint_manifest(data, _PAYLOAD, "old-revision", sandbox_image=image)
+    monkeypatch.setattr(checkpoint_compat.platform, "python_version", lambda: "9.9.9")
+    validate_checkpoint(data, manifest, _PAYLOAD, "new-revision", sandbox_image=image)
+
+
+def test_image_checkpoint_refuses_another_image() -> None:
+    """Refuse to resume state in an image other than the one that wrote it."""
+    data = _state(2)
+    manifest = checkpoint_manifest(data, _PAYLOAD, None, sandbox_image="registry.example/a@sha256:" + "a" * 64)
+    with pytest.raises(CheckpointCompatibilityError, match="sandbox_image"):
+        validate_checkpoint(data, manifest, _PAYLOAD, None, sandbox_image="registry.example/b@sha256:" + "b" * 64)
+    with pytest.raises(CheckpointCompatibilityError, match="sandbox_image"):
+        validate_checkpoint(data, manifest, _PAYLOAD, None)

@@ -1697,3 +1697,17 @@ def test_scan_jobs_for_analytics_null_result_and_filters(store: SQLiteJobStore) 
     assert {r["optimization_id"] for r in running_rows} == {"an-other"}
 
     assert len(store.scan_jobs_for_analytics(limit=1)) == 1
+
+
+def test_pin_sandbox_image_keeps_the_first_image(store: SQLiteJobStore) -> None:
+    """Pin a run to its first image so a redeploy never moves it to another.
+
+    Args:
+        store: Disposable job store.
+    """
+    store.create_job("pin1")
+    assert store.pin_sandbox_image("pin1", "img@sha256:first") == "img@sha256:first"
+    assert store.pin_sandbox_image("pin1", "img@sha256:second") == "img@sha256:first"
+    assert store.get_job("pin1")["sandbox_image"] == "img@sha256:first"
+    assert store.requeue_for_rerun("pin1")
+    assert store.get_job("pin1")["sandbox_image"] is None

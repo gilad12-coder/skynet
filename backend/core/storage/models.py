@@ -918,6 +918,9 @@ class JobModel(Base):
     composition: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     code_version: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    # The image a protected run first executed in. Every later box for the run,
+    # a resume after a redeploy included, boots from it so checkpoints stay loadable.
+    sandbox_image: Mapped[str | None] = mapped_column(String(255), nullable=True)
     execution_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     execution_budget_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     execution_budget_generation: Mapped[int | None] = mapped_column(Integer, nullable=True)

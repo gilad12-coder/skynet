@@ -32,6 +32,7 @@ class JobRecord(TypedDict, total=False):
     optimization_type: str | None
     attempts: int
     code_version: str | None
+    sandbox_image: str | None
     progress_count: int
     log_count: int
     stored_bytes: int

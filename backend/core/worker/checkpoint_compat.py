@@ -235,13 +235,38 @@ def _state_metadata(data: bytes) -> dict[str, Any]:
     raise CheckpointCompatibilityError("The checkpoint is incomplete.")
 
 
-def checkpoint_manifest(data: bytes, payload: dict[str, Any], code_version: str | None) -> dict[str, Any]:
-    """Record compatibility for state just written by the trusted local GEPA process.
+def _worker_runtime(code_version: str | None) -> dict[str, Any]:
+    """Describe the worker process that ran GEPA itself, outside any sandbox image.
 
     Args:
-        data: Complete atomically published GEPA state bytes from the worker directory.
+        code_version: Deployed application version owning the adapter.
+
+    Returns:
+        The GEPA revision, application version, source digest, dependencies, and Python.
+    """
+    return {
+        "upstream_revision": GEPA_REVISION,
+        "code_version": code_version,
+        "source_sha256": runtime_identity()["source_sha256"],
+        "dependencies": _dependencies(),
+        "python": platform.python_version(),
+    }
+
+
+def checkpoint_manifest(
+    data: bytes, payload: dict[str, Any], code_version: str | None, *, sandbox_image: str | None = None
+) -> dict[str, Any]:
+    """Record compatibility for GEPA state just published by its optimizer.
+
+    State written inside a sandbox belongs to that image, which carries the
+    optimizer's code and dependencies; only that image can load it again. State
+    written by the worker's own process belongs to the worker's runtime instead.
+
+    Args:
+        data: Complete atomically published GEPA state bytes.
         payload: Resolved immutable request, including dataset content.
         code_version: Deployed application version owning the adapter.
+        sandbox_image: The image the run is pinned to, or None when GEPA ran in the worker.
 
     Returns:
         Recovery evidence stored atomically alongside the exact bytes.
@@ -251,23 +276,20 @@ def checkpoint_manifest(data: bytes, payload: dict[str, Any], code_version: str 
     """
     if not supports_checkpoint(payload):
         raise CheckpointCompatibilityError("This optimizer has no supported checkpoint recovery contract.")
-    direct_url = importlib.metadata.distribution("gepa").read_text("direct_url.json")
-    source = json.loads(direct_url or "{}")
-    if source.get("vcs_info", {}).get("commit_id") != GEPA_REVISION:
-        raise CheckpointCompatibilityError("The installed GEPA source does not match the approved revision.")
+    if sandbox_image is None:
+        direct_url = importlib.metadata.distribution("gepa").read_text("direct_url.json")
+        source = json.loads(direct_url or "{}")
+        if source.get("vcs_info", {}).get("commit_id") != GEPA_REVISION:
+            raise CheckpointCompatibilityError("The installed GEPA source does not match the approved revision.")
     state = _state_metadata(data)
     if not isinstance(state, dict) or state.get("validation_schema_version") != GEPA_SCHEMA:
         raise CheckpointCompatibilityError("The checkpoint is not a supported GEPA state schema 7 snapshot.")
     return {
-        "manifest_version": 1,
-        "upstream_revision": GEPA_REVISION,
+        "manifest_version": 1 if sandbox_image is None else 2,
         "state_schema": GEPA_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(data).hexdigest(),
         "configuration_sha256": _configuration_hash(payload),
-        "code_version": code_version,
-        "source_sha256": runtime_identity()["source_sha256"],
-        "dependencies": _dependencies(),
-        "python": platform.python_version(),
+        **(_worker_runtime(code_version) if sandbox_image is None else {"sandbox_image": sandbox_image}),
         "iteration": int(state.get("i", 0)),
         "metric_calls": int(state.get("total_num_evals", 0)),
         "seed_reevaluation_required": True,
@@ -376,7 +398,12 @@ def checkpoint_incumbent(manifest: dict[str, Any] | None) -> dict[str, Any] | No
 
 
 def validate_checkpoint(
-    data: bytes, manifest: dict[str, Any] | None, payload: dict[str, Any], code_version: str | None
+    data: bytes,
+    manifest: dict[str, Any] | None,
+    payload: dict[str, Any],
+    code_version: str | None,
+    *,
+    sandbox_image: str | None = None,
 ) -> None:
     """Reject mismatched state before upstream deserializes or spends on resumed seed evaluation.
 
@@ -385,6 +412,7 @@ def validate_checkpoint(
         manifest: Compatibility evidence captured when those bytes were written.
         payload: Request to resume without changing the task or optimizer.
         code_version: Adapter version available on the replacement worker.
+        sandbox_image: The image the run is pinned to, which the resume boots from.
 
     Raises:
         CheckpointCompatibilityError: When integrity, source, task, or runtime does not match.
@@ -393,16 +421,15 @@ def validate_checkpoint(
         raise CheckpointCompatibilityError(
             "No verified compatible checkpoint is available; a fresh restart is required."
         )
+    in_image = manifest.get("manifest_version") == 2
+    if in_image and sandbox_image is None:
+        raise CheckpointCompatibilityError("Checkpoint recovery is incompatible: sandbox_image changed.")
     expected = {
-        "manifest_version": 1,
-        "upstream_revision": GEPA_REVISION,
+        "manifest_version": 2 if in_image else 1,
         "state_schema": GEPA_SCHEMA,
         "checkpoint_sha256": hashlib.sha256(data).hexdigest(),
         "configuration_sha256": _configuration_hash(payload),
-        "code_version": code_version,
-        "source_sha256": runtime_identity()["source_sha256"],
-        "dependencies": _dependencies(),
-        "python": platform.python_version(),
+        **({"sandbox_image": sandbox_image} if in_image else _worker_runtime(code_version)),
     }
     for key, value in expected.items():
         if manifest.get(key) != value:
