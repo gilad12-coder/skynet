@@ -88,6 +88,18 @@ def test_other_upstream_recipes_reject_multipart_seeds(strategy: dict[str, str])
         BlackboxRunRequest.model_validate(_payload(seed_candidate={"prompt": "candidate"}, strategy=strategy))
 
 
+def test_run_needs_neither_an_objective_nor_a_starting_point() -> None:
+    """The scorer alone drives the climb, so a blank run starts from empty text."""
+    request = BlackboxRunRequest.model_validate(_payload(seed_candidate=None, objective=None))
+    assert request.seed_candidate == ""
+
+
+def test_objective_without_a_starting_point_leaves_the_seed_to_be_drafted() -> None:
+    """With an objective the seed stays unset so the engine can draft one from it."""
+    request = BlackboxRunRequest.model_validate(_payload(seed_candidate=None, objective="Be concise"))
+    assert request.seed_candidate is None
+
+
 def test_unknown_proposer_runtime_is_rejected() -> None:
     """Reject an unsupported runtime rather than silently selecting it."""
     with pytest.raises(ValidationError, match="proposer_runtime"):

@@ -1465,17 +1465,12 @@ export function useBlackboxWizard(initialRecipe: BlackboxRecipe, folderId: strin
             return fail("submit.blackbox.repo.validation.secret_duplicate", "bb-repo-secrets");
           if (named.some((row) => !row.savedSecretId && !row.value))
             return fail("submit.blackbox.repo.validation.secret_value", "bb-repo-secrets");
-          if (!objective.trim())
-            return fail("submit.blackbox.validation.objective_required", "bb-objective");
           return null;
         }
         const partsIssue = seedMode === "parts" ? seedPartsIssue(namedSeedParts(seedParts)) : null;
         if (partsIssue) return fail(`submit.parts.${partsIssue}`, "bb-seed");
-        // In auto mode the agent drafts the text seed from the objective, so
-        // the objective is the required input and the seed may stay blank.
-        const agentDrafts = codeAssistMode === "auto" && seedMode === "text";
-        if ((seedCandidate == null || agentDrafts) && !objective.trim())
-          return fail("submit.blackbox.validation.objective_required", "bb-objective");
+        // The scorer alone drives the climb, so neither an objective nor a
+        // starting point is required: a blank run starts from empty text.
         return null;
       }
       case WIZARD_STAGE.evaluation: {
