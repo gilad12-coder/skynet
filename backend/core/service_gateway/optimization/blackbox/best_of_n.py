@@ -11,6 +11,7 @@ from gepa.oa.engines.best_of_n import BestOfNEngine as UpstreamBestOfN
 from ....exceptions import ServiceError
 from ..budget_stop import BudgetReached
 from .feedback import emit_candidate
+from .native_runtime import run_native_engine
 from .protocol import EngineContext, EvalServer, Result, Task
 from .upstream import local_result, reflection_endpoint, upstream_server
 
@@ -91,6 +92,10 @@ class BestOfNEngine:
         """
         if not task.str_mode:
             raise ServiceError("Best-of-N supports text starting points only.")
+        if ctx.native_options is not None and ctx.native_options.repo is not None:
+            # A repository sample is a patch a coding agent writes in the native
+            # runtime's checkout; upstream's text sampler cannot edit a checkout.
+            return run_native_engine("best_of_n_repo", task, server, ctx)
         upstream = upstream_server(task, server, ctx, on_eval=_SampleStream(task, server, ctx))
         result = None
         budget_stop = None

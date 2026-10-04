@@ -128,8 +128,6 @@ export interface RepoSecretRow {
 
 export const REPO_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
 export const REPO_SECRET_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
-// Repository runs are searched by one of these; the rest edit text only.
-const REPO_ENGINES: readonly BlackboxEngineId[] = ["autoresearch", "gepa"];
 
 /** The editable paths as typed, one per line or comma, with "." meaning the whole repository. */
 export function parseEditablePaths(value: string): string[] {
@@ -428,7 +426,7 @@ export function useBlackboxWizard(
   const [maxIterations, setMaxIterations] = useState<number | "">("");
   const [stopAtScore, setStopAtScore] = useState("");
   const [reflectionModel, setReflectionModel] = useState<ModelConfig>(emptyModelConfig());
-  const nativeProposer = usesNativeProposer(strategyMode, engine);
+  const nativeProposer = usesNativeProposer(strategyMode, engine, isRepo);
   const iterationLimitSupported = supportsIterationLimit(strategyMode, engine);
   const effectiveReflectionModel = useMemo(
     () => proposerModelConfig(reflectionModel, nativeProposer),
@@ -650,12 +648,12 @@ export function useBlackboxWizard(
     };
   }, [isRepo]);
 
-  // A repository is searched by one hand-picked engine: Auto mixes text-only
-  // engines, so the strategy settles on AutoResearch unless GEPA was chosen.
+  // A repository is searched by one hand-picked engine, never Auto, so the
+  // strategy settles on AutoResearch unless another engine was chosen.
   useEffect(() => {
     if (!isRepo) return;
     setStrategyMode("single");
-    setEngine((current) => (current && REPO_ENGINES.includes(current) ? current : "autoresearch"));
+    setEngine((current) => current ?? "autoresearch");
     setScorerKind("python");
   }, [isRepo, strategyMode, engine]);
 
@@ -1340,9 +1338,18 @@ export function useBlackboxWizard(
       engine,
       hasParts: seedMode === "parts",
       trainingCaseCount,
+      repo: isRepo,
     });
     return issue ? msg(issue.key, issue.params) : null;
-  }, [engineCatalog, engineCatalogFailed, strategyMode, engine, seedMode, trainingCaseCount]);
+  }, [
+    engineCatalog,
+    engineCatalogFailed,
+    strategyMode,
+    engine,
+    seedMode,
+    trainingCaseCount,
+    isRepo,
+  ]);
   const optimizationFamily = optimizationModelFamily(strategyMode, engine);
 
   /** The first problem holding a stage back, or null when it validates. */

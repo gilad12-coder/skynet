@@ -441,6 +441,118 @@ def test_gepa_drives_an_agent_proposer_over_repository_versions(tmp_path: Path, 
     assert (output / "gepa_repo" / "best_candidate.patch").read_text() == result.best_candidate
 
 
+def _repo_task_server(seen: list[str], max_evals: int) -> EvalServer:
+    """Serve a two-case repository task whose scorer rewards writing ``better`` into the code.
+
+    Args:
+        seen: Collects every patch the parent was asked to score.
+        max_evals: Scoring budget.
+
+    Returns:
+        A started evaluation server; the caller stops it.
+    """
+    task = Task(name="repo", seed_candidate="", objective="make it better", train_set=[{"id": "a"}, {"id": "b"}])
+
+    def evaluate(candidate: str, example: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+        """Score a patch that writes ``better`` into ``src/app.py`` highly."""
+        seen.append(candidate)
+        if "+better" in candidate:
+            return 1.0, {"feedback": f"case {example['id']} passes"}
+        return 0.25, {"feedback": f"case {example['id']} needs better code"}
+
+    instance = EvalServer(task, evaluate, BudgetTracker(max_evals=max_evals))
+    instance.start()
+    return instance
+
+
+def test_best_of_n_samples_independent_repository_versions(tmp_path: Path, fake_home: Path) -> None:
+    """Each sample is a fresh agent session on the starting checkout; every patch is scored and the best wins."""
+    seen: list[str] = []
+    server = _repo_task_server(seen, max_evals=5)
+    try:
+        _install_fake(
+            fake_home,
+            "prompt = args[-1]\n"
+            "assert 'needs better code' not in prompt and '`src`' in prompt and 'vendor/lib' in prompt, prompt\n"
+            "assert pathlib.Path('src/app.py').read_text() == 'x = 1\\n'\n"
+            "pathlib.Path('src/app.py').write_text('better\\n' if count == 2 else 'worse\\n')\n",
+        )
+        checkout = _repo_checkout(tmp_path, {"src/app.py": "x = 1\n", "README.md": "hi\n"})
+        config = _repo_config(tmp_path, checkout)
+        config.engine = "best_of_n_repo"
+        engine = native_engines.BestOfNRepoEngine(config)
+        result = engine.run(server.task, server)
+    finally:
+        server.stop()
+    assert len(_invocations(fake_home)) == 2
+    assert len(seen) == 4
+    assert all(repo_tree.patch_paths(patch) == ["src/app.py"] for patch in seen)
+    assert result.best_score == 1.0
+    assert "+better" in result.best_candidate
+    assert repo_tree.patch_paths(result.best_candidate) == ["src/app.py"]
+    assert [sample["score"] for sample in result.metadata["samples"]] == [0.25, 1.0]
+    assert engine.incumbent(server) == (result.best_candidate, 1.0)
+    assert (checkout / "src" / "app.py").read_text() == "x = 1\n"
+    output = tmp_path / "out"
+    engine.process_result(result, output)
+    assert (output / "best_of_n_repo" / "best_candidate.patch").read_text() == result.best_candidate
+
+
+def test_best_of_n_repo_engine_needs_a_checkout() -> None:
+    """Best-of-N's agent sampler has nothing to edit without a repository."""
+    with pytest.raises(ValueError, match="repository checkout"):
+        native_engines.BestOfNRepoEngine(_config("best_of_n_repo"))
+
+
+def test_meta_harness_proposes_repository_patches(tmp_path: Path, fake_home: Path) -> None:
+    """The proposer edits ``repo/`` and saves patches; only patches inside the editable paths reach the parent."""
+    seen: list[str] = []
+    server = _repo_task_server(seen, max_evals=10)
+    readme_patch = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-hi\n+x\n"
+    try:
+        _install_fake(
+            fake_home,
+            "def run(*argv):\n"
+            "    return subprocess.run(list(argv), capture_output=True, text=True)\n"
+            "assert 'save.sh' in pathlib.Path('.claude/skills/meta-harness/SKILL.md').read_text()\n"
+            "assert '`src`' in pathlib.Path('task.md').read_text()\n"
+            "assert pathlib.Path('repo/src/app.py').read_text() == 'x = 1\\n'\n"
+            "pathlib.Path('repo/src/app.py').write_text('better\\n')\n"
+            "saved = run('./save.sh', 'better')\n"
+            "assert saved.returncode == 0 and 'saved' in saved.stdout, saved.stderr\n"
+            "pathlib.Path('repo/README.md').write_text('changed\\n')\n"
+            "refused = run('./save.sh', 'outside')\n"
+            "assert refused.returncode != 0 and 'README.md' in refused.stderr, refused.stderr\n"
+            "assert not pathlib.Path('agents/outside.patch').exists()\n"
+            "assert run('./checkout.sh', 'base').returncode == 0\n"
+            "assert pathlib.Path('repo/README.md').read_text() == 'hi\\n'\n"
+            "assert run('./checkout.sh', 'better').returncode == 0\n"
+            "assert pathlib.Path('repo/src/app.py').read_text() == 'better\\n'\n"
+            f"pathlib.Path('agents/manual.patch').write_text({readme_patch!r})\n"
+            "pathlib.Path('logs/run/pending_eval.json').write_text(json.dumps({'candidates': ["
+            "{'name': 'better', 'file': 'agents/better.patch'},"
+            "{'name': 'manual', 'file': 'agents/manual.patch'}]}))\n",
+        )
+        checkout = _repo_checkout(tmp_path, {"src/app.py": "x = 1\n", "README.md": "hi\n"})
+        config = _repo_config(tmp_path, checkout, max_iterations=1, max_candidates_per_iter=2)
+        config.engine = "meta_harness"
+        engine = native_engines.MetaHarnessEngine(config)
+        result = engine.run(server.task, server)
+    finally:
+        server.stop()
+    assert seen[:2] == ["", ""]
+    assert all(repo_tree.patch_paths(patch) in ([], ["src/app.py"]) for patch in seen)
+    assert len(seen) == 4
+    assert result.best_score == 1.0
+    assert repo_tree.patch_paths(result.best_candidate) == ["src/app.py"]
+    rows = [json.loads(line) for line in (engine.logs_dir / "evolution_summary.jsonl").read_text().splitlines()]
+    assert rows[1]["system"] == "manual"
+    assert "README.md" in rows[1]["outcome"]
+    output = tmp_path / "out"
+    engine.process_result(result, output)
+    assert (output / "meta_harness" / "best_candidate.patch").read_text() == result.best_candidate
+
+
 def test_agent_proposer_keeps_the_parent_when_its_diff_is_too_large(
     tmp_path: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

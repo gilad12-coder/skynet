@@ -114,6 +114,9 @@ test("native engines accept text evaluation in the managed sandbox without an ag
   assert.equal(usesNativeProposer("auto", null), true);
   assert.equal(usesNativeProposer("single", "gepa"), false);
   assert.equal(usesNativeProposer("single", "best_of_n"), false);
+  for (const engine of ["gepa", "best_of_n"] as const) {
+    assert.equal(usesNativeProposer("single", engine, true), true);
+  }
 });
 
 test("managed sandbox availability gates native engines without disabling GEPA", () => {
@@ -135,6 +138,19 @@ test("managed sandbox availability gates native engines without disabling GEPA",
     engineSelectionIssue({ ...selection, catalog: unavailable, mode: "single", engine: "gepa" }),
     null,
   );
+  // On a repository every engine drives the coding agent in that sandbox.
+  for (const engine of ["gepa", "best_of_n"] as const) {
+    assert.equal(
+      engineSelectionIssue({
+        ...selection,
+        catalog: unavailable,
+        mode: "single",
+        engine,
+        repo: true,
+      })?.key,
+      "submit.blackbox.run_disabled.runtime_reason",
+    );
+  }
 });
 
 test("parts follow each single engine's capabilities", () => {

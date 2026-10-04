@@ -46,9 +46,17 @@ BLACKBOX_HARNESSES = (
 )
 # Engines that accept a multi-part (named files) starting point.
 BLACKBOX_MULTI_PART_ENGINES = frozenset({BLACKBOX_ENGINE_GEPA, BLACKBOX_ENGINE_AUTOSADDLER})
-# Engines that can optimize a repository: both drive a coding agent that edits
-# a real checkout. GEPA only searches there; the agent writes every version.
-BLACKBOX_REPO_ENGINES = frozenset({BLACKBOX_ENGINE_AUTORESEARCH, BLACKBOX_ENGINE_GEPA})
+# Engines that can optimize a repository: each drives a coding agent that edits
+# a real checkout, and the engine only searches over the versions it writes.
+BLACKBOX_REPO_ENGINES = frozenset(
+    {
+        BLACKBOX_ENGINE_AUTORESEARCH,
+        BLACKBOX_ENGINE_GEPA,
+        BLACKBOX_ENGINE_BEST_OF_N,
+        BLACKBOX_ENGINE_META_HARNESS,
+        BLACKBOX_ENGINE_AUTOSADDLER,
+    }
+)
 # Single-mode engines that honor an explicit iteration cap.
 BLACKBOX_ITERATION_LIMIT_ENGINES = frozenset({BLACKBOX_ENGINE_META_HARNESS, BLACKBOX_ENGINE_AUTOSADDLER})
 # Stands in for ``module_name`` in the job overview and notifications, where
@@ -429,7 +437,7 @@ class BlackboxRunRequest(BaseModel):
 
         Raises:
             ValueError: When the seed is multi-part, the scorer is not Python
-                code, or the run is not a single AutoResearch or GEPA run.
+                code, or the run is not a single-engine run.
         """
         multi_part = isinstance(self.seed_candidate, dict)
         if multi_part:
@@ -438,7 +446,7 @@ class BlackboxRunRequest(BaseModel):
             raise ValueError("A repository run is scored by Python code that receives the checkout's path.")
         self.seed_candidate = self.seed_candidate or ""
         if self.strategy.mode != "single" or self.strategy.engine not in BLACKBOX_REPO_ENGINES:
-            raise ValueError(f"A repository target runs a single {' or '.join(sorted(BLACKBOX_REPO_ENGINES))} engine.")
+            raise ValueError("A repository target runs one engine; Auto mode does not optimize a repository.")
 
 
 # ``POST /blackbox/scorer/dry-run``: score one version on one case before

@@ -22,13 +22,14 @@ from gepa.oa.task import Task as UpstreamTask
 
 from core.billing.pricing import model_token_costs
 from core.billing.runtime import UsagePendingError
+from core.billing.vercel_usage import PACKAGE_REGISTRY_HOSTS
 from core.constants import PROGRESS_CANDIDATE, PROGRESS_CASE_SCORED
 from core.exceptions import ServiceError
 from core.models.blackbox import BlackboxProposer, BlackboxTarget
 from core.service_gateway.language_models import total_tokens_from_history, usage_by_model_from_history
 from core.service_gateway.optimization.cost_ceiling import CostCeilingExceededError
 
-from .. import gepa_engine, harness_bridge, native_runner, native_runtime, repo_tree
+from .. import best_of_n, gepa_engine, harness_bridge, native_runner, native_runtime, repo_tree
 from ..harness import GatewayConfig, build_launch, launch_payload
 from ..native_runtime import NativeOptions, _bootstrap_command, check_native_runtime, run_native_engine
 from ..protocol import EvalServer, Result, ScorerAbortError, Task
@@ -370,10 +371,11 @@ def test_protected_managed_runtime_does_not_nest_upstream_jail(tmp_path: Path, m
     assert session.closed
 
 
-def test_repository_tree_and_rules_reach_the_autoresearch_sandbox(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("engine_id", ["autoresearch", "gepa_repo", "best_of_n_repo", "meta_harness", "autosaddler"])
+def test_repository_tree_and_rules_reach_every_repository_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine_id: str
 ) -> None:
-    """Upload the packed tree chunk by chunk, with the rules the agent's eval.sh checks."""
+    """Upload the packed tree chunk by chunk with its rules; the guest never gets registry network."""
     monkeypatch.setattr(native_runtime, "_source_archive", lambda: "source")
     chunks = [tmp_path / "tree.0000.b64", tmp_path / "tree.0001.b64"]
     for index, chunk in enumerate(chunks):
@@ -383,8 +385,11 @@ def test_repository_tree_and_rules_reach_the_autoresearch_sandbox(
     ctx = _context(tmp_path, FakeRuntime(session))
     repo = {"chunks": [str(chunk) for chunk in chunks], "editable_paths": ["src"], "readonly_paths": ["vendor/lib"]}
     ctx.native_options = replace(ctx.native_options, repo=repo)
-    run_native_engine("autoresearch", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+    task = Task("", train_set=[{"id": "a"}, {"id": "b"}])
+    run_native_engine(engine_id, task, EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
 
+    assert ctx.native_options.sandbox_runtime.spec.allowed_hosts == ()
+    assert not set(ctx.native_options.sandbox_runtime.spec.allowed_hosts) & set(PACKAGE_REGISTRY_HOSTS)
     assert (session.files["repo-tree/tree.0000.b64"], session.files["repo-tree/tree.0001.b64"]) == ("chunk0", "chunk1")
     assert json.loads(session.files["native_input.json"])["repo"] == {
         "chunks": ["repo-tree/tree.0000.b64", "repo-tree/tree.0001.b64"],
@@ -394,12 +399,12 @@ def test_repository_tree_and_rules_reach_the_autoresearch_sandbox(
     assert session.files["repo_tree.py"] == Path(repo_tree.__file__).read_text()
 
 
-def test_only_autoresearch_and_gepa_take_a_repository(tmp_path: Path) -> None:
-    """Meta-Harness edits one text file, so a repository run never reaches it."""
+@pytest.mark.parametrize("engine_id", ["gepa_repo", "best_of_n_repo"])
+def test_repository_only_engines_refuse_a_text_run(tmp_path: Path, engine_id: str) -> None:
+    """GEPA's and Best-of-N's agent samplers edit a checkout, so a text run never reaches them."""
     ctx = _context(tmp_path, FakeRuntime(FakeSession()))
-    ctx.native_options = replace(ctx.native_options, repo={"chunks": [], "editable_paths": ["."], "readonly_paths": []})
-    with pytest.raises(ServiceError, match="Only AutoResearch and GEPA"):
-        run_native_engine("meta_harness", Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+    with pytest.raises(ServiceError, match="needs a repository checkout"):
+        run_native_engine(engine_id, Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
 
 
 def test_gepa_hands_a_repository_run_to_the_native_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -416,6 +421,25 @@ def test_gepa_hands_a_repository_run_to_the_native_runtime(tmp_path: Path, monke
     ctx.native_options = replace(ctx.native_options, repo={"chunks": [], "editable_paths": ["."], "readonly_paths": []})
     result = gepa_engine.GepaEngine().run(Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
     assert calls == ["gepa_repo"]
+    assert result.best_score == 1.0
+
+
+def test_best_of_n_hands_a_repository_run_to_the_native_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Best-of-N on a repository samples coding-agent versions in the native sandbox."""
+    calls: list[str] = []
+
+    def fake_native(engine_id: str, *_: object) -> Result:
+        """Record which native engine Best-of-N asked for."""
+        calls.append(engine_id)
+        return Result(best_candidate="", best_score=1.0, total_evals=1)
+
+    monkeypatch.setattr(best_of_n, "run_native_engine", fake_native)
+    ctx = _context(tmp_path, FakeRuntime(FakeSession()))
+    ctx.native_options = replace(ctx.native_options, repo={"chunks": [], "editable_paths": ["."], "readonly_paths": []})
+    result = best_of_n.BestOfNEngine().run(Task(""), EvalServer(lambda *_: (0.5, {}), max_evals=3), ctx)
+    assert calls == ["best_of_n_repo"]
     assert result.best_score == 1.0
 
 
@@ -437,7 +461,11 @@ _GEPA_AGENT = "pathlib.Path('src/a.py').write_text('a = 2\\n')\n"
 
 @pytest.mark.parametrize(
     ("engine_id", "agent", "starts"),
-    [("autoresearch", _AUTORESEARCH_AGENT, []), ("gepa_repo", _GEPA_AGENT, [[]])],
+    [
+        ("autoresearch", _AUTORESEARCH_AGENT, []),
+        ("gepa_repo", _GEPA_AGENT, [[]]),
+        ("best_of_n_repo", _GEPA_AGENT, []),
+    ],
 )
 def test_real_native_runner_unpacks_the_repository_for_its_engine(
     tmp_path: Path, engine_id: str, agent: str, starts: list[list[str]]
@@ -797,14 +825,21 @@ def test_autosaddler_runner_files_bundle_the_scenario_plugin() -> None:
     assert set(files) == {
         "autosaddler_runner.py",
         "harness_bridge.py",
+        "repo_tree.py",
         "autosaddler_plugin/LICENSE",
         "autosaddler_plugin/NOTICE.md",
-        "autosaddler_plugin/SYSTEM.md",
-        "autosaddler_plugin/prompts/diagnose_patch.md",
-        "autosaddler_plugin/prompts/evolve.md",
-        "autosaddler_plugin/prompts/reflect.md",
-        "autosaddler_plugin/skills/candidate-patch/SKILL.md",
-        "autosaddler_plugin/skills/patch-verification/SKILL.md",
+        *(
+            f"autosaddler_plugin/{prefix}{name}"
+            for prefix in ("", "repo/")
+            for name in (
+                "SYSTEM.md",
+                "prompts/diagnose_patch.md",
+                "prompts/evolve.md",
+                "prompts/reflect.md",
+                "skills/candidate-patch/SKILL.md",
+                "skills/patch-verification/SKILL.md",
+            )
+        ),
     }
     assert all(text.strip() for text in files.values())
     assert set(native_runtime._runner_files("meta_harness")) == {

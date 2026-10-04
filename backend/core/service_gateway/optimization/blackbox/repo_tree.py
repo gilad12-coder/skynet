@@ -239,6 +239,32 @@ def unpack_tree(chunks: Iterable[str | Path], destination: Path) -> Path:
     return destination
 
 
+def exclude_paths(checkout: Path, paths: Iterable[str]) -> None:
+    """Keep files a proposer harness writes into a checkout out of every version.
+
+    A harness's files can carry the proposer's credentials, so they must never
+    reach a patch the parent scores or opens as a pull request.
+
+    Args:
+        checkout: Folder made by :func:`unpack_tree`; its worktrees share the exclusions.
+        paths: Checkout-relative files the harness writes.
+
+    Raises:
+        ValueError: When a path is a file the repository tracks, which an exclusion cannot hide.
+    """
+    paths = [path.strip("/") for path in paths if path.strip("/")]
+    if not paths:
+        return
+    tracked = _git(["ls-files", "--", *paths], checkout).splitlines()
+    if tracked:
+        raise ValueError(f"The proposer harness writes files the repository already has: {', '.join(tracked)}")
+    exclude = Path(_git(["rev-parse", "--git-common-dir"], checkout).strip())
+    exclude = (exclude if exclude.is_absolute() else checkout / exclude) / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    with exclude.open("a", encoding="utf-8") as stream:
+        stream.write("".join(f"\n/{path}" for path in paths) + "\n")
+
+
 def version_patch(checkout: Path) -> str:
     """Return everything changed in a checkout since ``unpack_tree`` as one patch.
 

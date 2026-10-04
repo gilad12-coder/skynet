@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from .. import autosaddler_runner, native_runtime
+from .. import autosaddler_runner, native_runtime, repo_tree
 
 # The runner needs the pinned upstream package on Python 3.12, which the
 # backend venv does not carry; point this at an interpreter that has it.
@@ -298,3 +298,119 @@ def test_runner_drives_upstream_through_a_configured_harness(tmp_path: Path) -> 
     sessions = (tmp_path / "sessions.log").read_text().split()
     assert sessions.count("diagnose_patch") == 2
     assert list((tmp_path / ".skynet-bridge").iterdir())
+
+
+def test_runner_evolves_repository_versions_scored_by_the_parent(tmp_path: Path) -> None:
+    """Each version is a real checkout the agent edits; the parent scores its patch and the best comes back."""
+    python = _upstream_python()
+    if python is None:
+        pytest.skip(f"set {_PYTHON_ENV} to a Python 3.12 interpreter with the pinned autosaddler package")
+    (tmp_path / "rpc").mkdir()
+    source = tmp_path / "source"
+    (source / "src").mkdir(parents=True)
+    (source / "src" / "app.py").write_text("x = 1\n")
+    (source / "README.md").write_text("hi\n")
+    archive = tmp_path / "tree.tgz"
+    subprocess.run(["tar", "-czf", str(archive), "-C", str(source), "."], check=True)
+    chunks = []
+    for index, chunk in enumerate(repo_tree.archive_chunks(archive)):
+        chunks.append(str(tmp_path / f"tree.{index}.b64"))
+        Path(chunks[-1]).write_text(chunk)
+    agent = tmp_path / "agent.py"
+    agent.write_text(
+        "import json, pathlib\n"
+        "schema = pathlib.Path('.autosaddler/session_output_schema.json').read_text()\n"
+        "context = json.loads(pathlib.Path('.autosaddler/session_context.json').read_text())\n"
+        "if 'diagnosis' in schema:\n"
+        "    kind = 'diagnose_patch'\n"
+        "    assert context['mutation_scope'] == ['src'] and context['readonly_paths'] == []\n"
+        "    assert pathlib.Path('README.md').read_text() == 'hi\\n'\n"
+        "    app = pathlib.Path('src/app.py')\n"
+        "    app.write_text(app.read_text() + 'better\\n')\n"
+        "    output = {'schema_version': 'skynet-autosaddler-diagnosis/v1', 'intent': 'improve',"
+        " 'diagnosis': 'not better yet', 'expected_effect': 'higher score', 'changed_paths': ['src/app.py']}\n"
+        "elif 'evolution' in schema:\n"
+        "    kind = 'evolve'\n"
+        "    output = {'schema_version': 'skynet-autosaddler-evolution/v1', 'parent_ids': [context['candidate_ids'][-1]],"
+        " 'component_sources': {}, 'rationale': 'continue'}\n"
+        "else:\n"
+        "    kind = 'reflect'\n"
+        "    output = {'schema_version': 'skynet-autosaddler-reflection/v1', 'lessons': []}\n"
+        "pathlib.Path('.autosaddler/session_output.json').write_text(json.dumps(output))\n"
+        "with (pathlib.Path.home() / 'sessions.log').open('a') as log: log.write(kind + '\\n')\n"
+        "print('done')\n"
+    )
+    payload = {
+        "nonce": "testnonce",
+        "engine_id": "autosaddler",
+        "model": "claude-test",
+        "sandbox": False,
+        "max_token_cost": 0.05,
+        "max_evals": 12,
+        "max_concurrency": 1,
+        "max_iterations": 2,
+        "timeout_seconds": 60,
+        "source": native_runtime.AUTOSADDLER_REVISION,
+        "proposer": {
+            "harness": "custom",
+            "run_command": f'"{python}" "{agent}"',
+            "instructions_file": "GUIDE.md",
+            "output_format": "plain",
+            "files": {"harness.json": "__SKYNET_API_KEY__"},
+            "env": {},
+            "model": "claude-test",
+            "price": {"input": 0.0, "output": 0.0},
+        },
+        "repo": {"chunks": chunks, "editable_paths": ["."], "readonly_paths": []},
+        "task": {
+            "name": "test",
+            "seed_candidate": "",
+            "objective": "make it better",
+            "train_set": [{"id": "a"}, {"id": "b"}],
+            "val_set": [{"id": "c"}],
+        },
+    }
+    payload["repo"]["editable_paths"] = ["src"]
+    (tmp_path / "input.json").write_text(json.dumps(payload))
+    for name, text in native_runtime._runner_files("autosaddler").items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "PYTHONUNBUFFERED": "1",
+        "SKYNET_PROPOSER_API_KEY": "sk-secret-test",
+    }
+    process = subprocess.Popen(
+        [python, "autosaddler_runner.py", "input.json"],
+        cwd=tmp_path,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    scored: list[str] = []
+    try:
+        for line in process.stdout:
+            if not line.startswith("SKYNET_NATIVE_RPC testnonce "):
+                continue
+            request = json.loads(line.split(" ", 2)[2])
+            scored.append(request["candidate"])
+            response = {"score": min(1.0, request["candidate"].count("+better") / 2), "info": {"feedback": "ok"}}
+            (tmp_path / "rpc" / f"{request['id']}.json").write_text(json.dumps(response))
+        stderr = process.stderr.read()
+        result_file = tmp_path / "native_result.json"
+        assert process.wait(timeout=60) == 0, (result_file.read_text() if result_file.exists() else "") + stderr
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    result = json.loads((tmp_path / "native_result.json").read_text())
+    assert "error" not in result, result
+    assert scored[0] == ""
+    assert all(repo_tree.patch_paths(patch) in ([], ["src/app.py"]) for patch in scored)
+    assert result["best_candidate"].count("+better") == 2
+    assert repo_tree.patch_paths(result["best_candidate"]) == ["src/app.py"]
+    assert result["best_score"] == 1.0
+    assert result["metadata"]["iterations"] == 2
+    assert (tmp_path / "sessions.log").read_text().split().count("diagnose_patch") == 2

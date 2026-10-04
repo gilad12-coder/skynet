@@ -161,6 +161,58 @@ fi
 echo "repo/ is now $VERSION"
 """
 
+# Meta-Harness repository mode: a candidate is ``agents/<name>.patch``, the diff
+# of ``repo/`` against the starting commit when the proposer saved it. The same
+# rules check as ``eval.sh`` refuses a diff the trusted scorer would refuse, so
+# a bad candidate fails here instead of costing a benchmark.
+MH_SAVE_SCRIPT = """\
+#!/usr/bin/env bash
+# Usage: ./save.sh <name>   (writes repo/'s changes against the starting commit to agents/<name>.patch)
+set -euo pipefail
+cd "$(dirname "$0")"
+NAME="${{1:?usage: ./save.sh <name>}}"
+case "$NAME" in .*|*[!A-Za-z0-9_.-]*) echo "invalid candidate name: $NAME" >&2; exit 2;; esac
+PATCH_FILE="agents/$NAME.patch"
+git -C repo add --all
+git -C repo diff --cached --binary --no-color --no-ext-diff {base} > "$PATCH_FILE"
+PATCH_FILE="$PATCH_FILE" PYTHONPATH="{tools}" "{python}" -c 'import json, os, sys
+import repo_tree
+path = os.environ["PATCH_FILE"]
+try:
+    patch = open(path, encoding="utf-8").read()
+except UnicodeDecodeError:
+    os.remove(path)
+    sys.exit("Not saved: a changed text file is not UTF-8.")
+rules = json.load(open(".repo-rules.json", encoding="utf-8"))
+problems = repo_tree.patch_violations(patch, rules["editable_paths"], rules["readonly_paths"])
+if not patch.strip():
+    problems.append("repo/ has no changes against the starting commit.")
+if len(patch.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:
+    problems.append("The change is larger than a version may be.")
+if problems:
+    os.remove(path)
+    sys.exit("Not saved:\\n" + "\\n".join(problems))'
+echo "saved $PATCH_FILE"
+"""
+
+MH_CHECKOUT_SCRIPT = """\
+#!/usr/bin/env bash
+# Usage: ./checkout.sh <name>   (a saved candidate such as seed, or "base" for the starting commit)
+set -euo pipefail
+cd "$(dirname "$0")"
+NAME="${{1:?usage: ./checkout.sh <name|base>}}"
+case "$NAME" in .*|*[!A-Za-z0-9_.-]*) echo "unknown candidate: $NAME" >&2; exit 2;; esac
+if [ "$NAME" != "base" ] && [ ! -f "agents/$NAME.patch" ]; then
+    echo "unknown candidate: $NAME" >&2; exit 2
+fi
+git -C repo reset --quiet --hard {base}
+git -C repo clean --quiet -fd
+if [ "$NAME" != "base" ] && [ -s "agents/$NAME.patch" ]; then
+    git -C repo apply --binary --whitespace=nowarn "$PWD/agents/$NAME.patch"
+fi
+echo "repo/ is now $NAME"
+"""
+
 
 def load_asset(relative: str) -> str:
     """Read a vendored upstream prompt and verify it is the pinned revision's text.
@@ -522,6 +574,23 @@ def _mean(row: dict[str, float]) -> float:
     return sum(row.values()) / len(row) if row else 0.0
 
 
+def repo_rules(repo: dict[str, Any]) -> str:
+    """Describe which parts of the repository a version may change.
+
+    Args:
+        repo: Repository settings holding ``editable_paths`` and ``readonly_paths``.
+
+    Returns:
+        Markdown appended to the task brief.
+    """
+    editable = ", ".join("the whole repository" if p == "." else f"`{p}`" for p in repo["editable_paths"])
+    lines = ["", "## Repository", "", f"You may change: {editable}. Everything else is read-only context."]
+    if repo["readonly_paths"]:
+        lines += ["", "Submodules and Git LFS files stay as fetched:"]
+        lines += [f"- `{path}`" for path in repo["readonly_paths"]]
+    return "\n".join(lines) + "\n"
+
+
 class AutoResearchEngine:
     """Round-based research over a candidate frontier, driven against the evaluation server.
 
@@ -783,7 +852,7 @@ class AutoResearchEngine:
         route = "evaluate_examples" if self.example_ids else "evaluate"
         brief = task_brief(task, self.example_ids)
         if self.repo:
-            brief += self._repo_rules()
+            brief += repo_rules(self.repo)
             (self.work_dir / "repo").symlink_to(Path(self.repo["checkout"]), target_is_directory=True)
             rules = {"editable_paths": self.repo["editable_paths"], "readonly_paths": self.repo["readonly_paths"]}
             (self.work_dir / ".repo-rules.json").write_text(json.dumps(rules), encoding="utf-8")
@@ -813,20 +882,6 @@ class AutoResearchEngine:
             encoding="utf-8",
         )
         (self.work_dir / "archive" / "index.tsv").write_text("id\tscore\tround\n", encoding="utf-8")
-
-    def _repo_rules(self) -> str:
-        """Describe which parts of the repository a version may change.
-
-        Returns:
-            Markdown appended to ``TASK.md``.
-        """
-        repo = self.repo or {}
-        editable = ", ".join("the whole repository" if p == "." else f"`{p}`" for p in repo["editable_paths"])
-        lines = ["", "## Repository", "", f"You may change: {editable}. Everything else is read-only context."]
-        if repo["readonly_paths"]:
-            lines += ["", "Submodules and Git LFS files stay as fetched:"]
-            lines += [f"- `{path}`" for path in repo["readonly_paths"]]
-        return "\n".join(lines) + "\n"
 
     def _repo_brief(self) -> str:
         """Write the standing research method for a repository run.
@@ -1228,6 +1283,10 @@ class MetaHarnessEngine:
         self.max_thinking_tokens = None if thinking is None else int(thinking)
         self.max_token_cost = config.max_token_cost
         self.stop_at_score = config.stop_at_score
+        # ``checkout``, ``base``, ``editable_paths``, ``readonly_paths`` and
+        # ``tools`` (the folder holding ``repo_tree.py``) for a repository run.
+        self.repo: dict[str, Any] | None = engine_config.pop("repo", None)
+        self.suffix = ".patch" if self.repo else ".txt"
         self.run_dir = Path(config.run_dir or "meta-harness-run").resolve()
         self.work_dir = self.run_dir / "meta_harness"
         self.logs_dir = self.work_dir / "logs" / "run"
@@ -1292,7 +1351,7 @@ class MetaHarnessEngine:
         """
         target = Path(output_dir) / self.name
         target.mkdir(parents=True, exist_ok=True)
-        (target / "best_candidate.txt").write_text(result.best_candidate, encoding="utf-8")
+        (target / f"best_candidate{self.suffix}").write_text(result.best_candidate, encoding="utf-8")
         (target / "metadata.json").write_text(json.dumps(result.metadata, indent=2, default=str), encoding="utf-8")
 
     def _layout(self, task: Task) -> None:
@@ -1305,8 +1364,25 @@ class MetaHarnessEngine:
             shutil.rmtree(self.work_dir)
         for sub in ("agents", "logs/run/reports", "logs/run/claude_sessions", "logs/run/results"):
             (self.work_dir / sub).mkdir(parents=True)
-        (self.work_dir / "agents" / "seed.txt").write_text(seed_as_text(task.seed_candidate), encoding="utf-8")
-        (self.work_dir / "task.md").write_text(task_brief(task, self.example_ids), encoding="utf-8")
+        seed = seed_as_text(task.seed_candidate) if task.seed_candidate is not None else ""
+        (self.work_dir / "agents" / f"seed{self.suffix}").write_text(seed, encoding="utf-8")
+        brief = task_brief(task, self.example_ids)
+        if self.repo:
+            brief += repo_rules(self.repo)
+            (self.work_dir / "repo").symlink_to(Path(self.repo["checkout"]), target_is_directory=True)
+            rules = {"editable_paths": self.repo["editable_paths"], "readonly_paths": self.repo["readonly_paths"]}
+            (self.work_dir / ".repo-rules.json").write_text(json.dumps(rules), encoding="utf-8")
+            scripts = {
+                "save.sh": MH_SAVE_SCRIPT.format(
+                    base=self.repo["base"], tools=self.repo["tools"], python=sys.executable
+                ),
+                "checkout.sh": MH_CHECKOUT_SCRIPT.format(base=self.repo["base"]),
+            }
+            for name, text in scripts.items():
+                (self.work_dir / name).write_text(text, encoding="utf-8")
+                (self.work_dir / name).chmod(0o755)
+            subprocess.run(["./checkout.sh", "seed"], cwd=self.work_dir, check=True, capture_output=True)
+        (self.work_dir / "task.md").write_text(brief, encoding="utf-8")
         skill_dir = self.work_dir / ".claude" / "skills" / "meta-harness"
         skill_dir.mkdir(parents=True)
         skill_dir.joinpath("SKILL.md").write_text(self.skill(), encoding="utf-8")
@@ -1408,7 +1484,10 @@ class MetaHarnessEngine:
             (
                 "1. Copy a top-performing base system to `agents/<name>.py`, then make targeted modifications. This "
                 "copy-then-edit approach ensures correct imports and proven patterns.",
-                "1. Copy a top-performing base candidate to `agents/<name>.txt`, then make targeted modifications. "
+                "1. Run `./checkout.sh <base>` to reset `repo/` to a top-performing candidate, then make targeted "
+                "changes to the code in `repo/`. This checkout-then-edit approach keeps proven patterns."
+                if self.repo
+                else "1. Copy a top-performing base candidate to `agents/<name>.txt`, then make targeted modifications. "
                 "This copy-then-edit approach keeps proven patterns.",
             ),
             (
@@ -1419,25 +1498,48 @@ class MetaHarnessEngine:
                 "4. Validate: `uv run python -c \"from text_classification.agents.<name> import *; print('OK')\"`\n\n"
                 "Do not edit `config.yaml` just to register candidates. The benchmark auto-discovers files in "
                 "`agents/`.",
-                "After writing, re-read the file and check: does this candidate introduce a genuinely NEW "
+                (
+                    "After implementing, re-read your diff and check: does this candidate introduce a genuinely NEW "
+                    "mechanism, or is it just a parameter variant? If the code is identical to the base except for "
+                    "constants, REWRITE with a truly novel mechanism.\n"
+                    "4. Save: `./save.sh <name>` writes `repo/`'s whole change against the starting commit to "
+                    "`agents/<name>.patch` and checks it only touches files you may change; it must print `saved`. "
+                    "Then move on to the next candidate with `./checkout.sh`.\n\n"
+                    "Do not edit `task.md` or write patch files by hand. The benchmark applies exactly the patches "
+                    "listed in `pending_eval.json` to a fresh checkout of the starting commit."
+                )
+                if self.repo
+                else "After writing, re-read the file and check: does this candidate introduce a genuinely NEW "
                 "mechanism, or is it just a cosmetic variant? If it is identical to the base except for a few "
                 "words or numbers, REWRITE with a truly novel mechanism.\n"
                 "4. Validate: `test -s agents/<name>.txt && echo OK` — the file must exist and be non-empty; its "
                 "whole content is what gets evaluated.\n\n"
                 "Do not edit `task.md`. The benchmark reads exactly the files listed in `pending_eval.json`.",
             ),
-            ('"file": "agents/<name>.py",', '"file": "agents/<name>.txt",'),
+            ('"file": "agents/<name>.py",', f'"file": "agents/<name>{self.suffix}",'),
             ("Output: `CANDIDATES: <name1>, <name2>, <name3>`", f"Output: `CANDIDATES: {names}`"),
             (
                 "## MemorySystem Interface",
                 "- Test results: `results/<dataset>/<memory>/<model>/test.json` (separate dir, never exposed during "
                 "evolution)",
-                "## Candidate Format\n\n"
-                "- Each candidate is a plain text file under `agents/`; its whole content is submitted to the "
-                "evaluator.\n"
-                "- `task.md` says what the candidate is for and how it is judged.\n"
-                "- `agents/seed.txt` is the starting candidate the run began from.\n\n"
-                "## Directory Structure\n\n"
+                (
+                    "## Candidate Format\n\n"
+                    "- `repo/` is a git checkout of the repository under optimization; edit its code in place.\n"
+                    "- Each candidate is a patch `agents/<name>.patch` made by `./save.sh <name>`: `repo/`'s change "
+                    "against the starting commit. The evaluator applies it to a fresh checkout, runs the "
+                    "repository's setup and scorer, which you cannot run here.\n"
+                    "- `./checkout.sh <name>` resets `repo/` to a saved candidate, and `./checkout.sh base` to the "
+                    "starting commit. It throws away unsaved work in `repo/`.\n"
+                    "- `task.md` says what the repository is for, how it is judged and which paths you may change.\n"
+                    "- `agents/seed.patch` is the starting candidate the run began from.\n\n"
+                    if self.repo
+                    else "## Candidate Format\n\n"
+                    "- Each candidate is a plain text file under `agents/`; its whole content is submitted to the "
+                    "evaluator.\n"
+                    "- `task.md` says what the candidate is for and how it is judged.\n"
+                    "- `agents/seed.txt` is the starting candidate the run began from.\n\n"
+                )
+                + "## Directory Structure\n\n"
                 "- Val results: `results/<candidate>/val.json` (`avg_val` plus per-example `scores` and evaluator "
                 "`infos`)\n"
                 "- Frontier: `frontier_val.json` (`_pareto` ranks candidates by average score)\n"
@@ -1480,7 +1582,13 @@ class MetaHarnessEngine:
             f"- `{logs / 'reports'}/` — post-eval reports\n"
             f"- `{logs / 'results'}/<candidate>/val.json` — per-example scores and evaluator feedback\n"
             f"- Write pending_eval.json to: `{logs / 'pending_eval.json'}`\n\n"
-            "Follow the meta-harness skill in `.claude/skills/meta-harness/SKILL.md`."
+            + (
+                "Each candidate is a change to the repository checked out in `repo/`: edit it in place and save "
+                "each candidate with `./save.sh <name>`.\n\n"
+                if self.repo
+                else ""
+            )
+            + "Follow the meta-harness skill in `.claude/skills/meta-harness/SKILL.md`."
         )
 
     def _iteration(self, server: EvalServer, iteration: int, remaining_cost: float | None) -> None:
@@ -1601,8 +1709,20 @@ class MetaHarnessEngine:
         agents = (self.work_dir / "agents").resolve()
         if not path.is_relative_to(agents) or not path.is_file():
             return "candidate file must exist under agents/"
-        if not path.read_text(encoding="utf-8").strip():
+        if self.repo and path.suffix != self.suffix:
+            return "candidate file must be a patch saved by save.sh"
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return "candidate file is not UTF-8 text"
+        if not text.strip():
             return "candidate file is empty"
+        if self.repo:
+            if len(text.encode("utf-8")) > repo_tree.MAX_PATCH_BYTES:
+                return "patch is larger than a version may be"
+            problems = repo_tree.patch_violations(text, self.repo["editable_paths"], self.repo["readonly_paths"])
+            if problems:
+                return "; ".join(problems)
         return None
 
     def _benchmark(self, server: EvalServer, name: str, candidate: str) -> float:
@@ -1958,10 +2078,137 @@ class AgentProposer:
         return "\n".join(lines)
 
 
+class BestOfNRepoEngine:
+    """Upstream Best-of-N's sample-and-keep-best loop over repository versions.
+
+    Each sample is one coding-agent session in a fresh checkout of the starting
+    version, briefed the same way every time and never shown earlier samples,
+    exactly as upstream draws independent samples from one fixed prompt. Each
+    sample is scored on the cases upstream scores (training, else validation)
+    through the parent, and the best full score wins.
+    """
+
+    name = "best_of_n_repo"
+
+    def __init__(self, config: OptimizeAnythingConfig) -> None:
+        """Pop the engine knobs from the shared config.
+
+        Args:
+            config: Cross-engine run configuration; ``engine_config`` must hold ``repo``.
+
+        Raises:
+            ValueError: When no repository checkout was configured.
+        """
+        engine_config = dict(config.engine_config)
+        self.repo: dict[str, Any] | None = engine_config.pop("repo", None)
+        if self.repo is None:
+            raise ValueError("Best-of-N's agent sampler needs a repository checkout.")
+        self.run_dir = Path(config.run_dir or "best-of-n-repo-run").resolve()
+        self.proposer = AgentProposer(
+            model=str(engine_config.pop("model")),
+            checkout=Path(self.repo["checkout"]),
+            editable_paths=list(self.repo["editable_paths"]),
+            readonly_paths=list(self.repo["readonly_paths"]),
+            log_dir=self.run_dir / "sessions",
+            effort=engine_config.pop("effort", None),
+            max_thinking_tokens=engine_config.pop("max_thinking_tokens", None),
+            max_token_cost=config.max_token_cost,
+        )
+        self.max_token_cost = config.max_token_cost
+        self.stop_at_score = config.stop_at_score
+        self.samples: list[dict[str, Any]] = []
+        self.best: tuple[str, float] | None = None
+
+    def run(self, task: Task, server: EvalServer) -> Result:
+        """Draw and score samples until a budget or the target score stops the loop.
+
+        Args:
+            task: Task whose seed is the starting patch (empty for the commit as fetched).
+            server: Evaluation server that scores each version through the parent.
+
+        Returns:
+            The best fully scored sample.
+
+        Raises:
+            RuntimeError: When no sample was fully scored.
+        """
+        self.proposer.objective = task.objective
+        self.proposer.background = task.background
+        seed = seed_as_text(task.seed_candidate) if task.seed_candidate is not None else ""
+        split = "train" if task.train_set else ("val" if task.val_set else None)
+        cases = len(task.train_set or task.val_set or []) or 1
+        while True:
+            if self.max_token_cost is not None and self.proposer.total_cost >= self.max_token_cost:
+                break
+            # A sample the budget cannot fully score would waste an agent session.
+            if server.budget.remaining is not None and server.budget.remaining < cases:
+                break
+            patch = self.proposer({"candidate": seed}, {}, ["candidate"])
+            sample = {"sample": len(self.samples) + 1, "proposer_cost_usd": round(self.proposer.total_cost, 6)}
+            self.samples.append(sample)
+            try:
+                if split is None:
+                    score, _ = server.evaluate(patch["candidate"])
+                else:
+                    score, _ = server.evaluate_examples(patch["candidate"], split=split)
+            except BudgetExhausted:
+                # Upstream discards a sample the budget cut short and keeps the best complete one.
+                sample["outcome"] = "budget_exhausted"
+                break
+            score = float(score)
+            server.log_progress(score, candidate=patch["candidate"])
+            sample["score"] = score
+            if self.best is None or score > self.best[1]:
+                self.best = (patch["candidate"], score)
+            if _reached(self.stop_at_score, self.best[1]):
+                break
+        if self.best is None:
+            raise RuntimeError("Best-of-N stopped before any repository version was fully scored.")
+        return Result(
+            best_candidate=self.best[0],
+            best_score=self.best[1],
+            total_evals=server.budget.used,
+            eval_log=list(server.eval_log),
+            metadata={
+                "engine": self.name,
+                "n_samples": len(self.samples),
+                "samples": list(self.samples),
+                "proposer_cost_usd": round(self.proposer.total_cost, 6),
+                "session_ids": list(self.proposer.session_ids),
+                "repository": True,
+            },
+        )
+
+    def incumbent(self, server: EvalServer) -> tuple[str, float] | None:
+        """Return the best fully scored sample so far.
+
+        Args:
+            server: Unused; samples are the engine's own verified record.
+
+        Returns:
+            ``(patch, score)`` or ``None`` before any sample was scored.
+        """
+        del server
+        return self.best
+
+    def process_result(self, result: Result, output_dir: str | Path) -> None:
+        """Write the best patch and run metadata beside the evaluator artifacts.
+
+        Args:
+            result: Result returned by ``run``.
+            output_dir: Evaluator output directory.
+        """
+        target = Path(output_dir) / self.name
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "best_candidate.patch").write_text(result.best_candidate, encoding="utf-8")
+        (target / "metadata.json").write_text(json.dumps(result.metadata, indent=2, default=str), encoding="utf-8")
+
+
 ENGINES: dict[str, type] = {
     AutoResearchEngine.name: AutoResearchEngine,
     MetaHarnessEngine.name: MetaHarnessEngine,
     GepaRepoEngine.name: GepaRepoEngine,
+    BestOfNRepoEngine.name: BestOfNRepoEngine,
 }
 
 
