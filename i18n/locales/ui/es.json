@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "Ejecuciones del evaluador",
   "submit.blackbox.agent.empty_hint": "Describe tu objetivo y el agente redactará un punto de partida y un evaluador en Python. Puedes aceptarlos tal cual o solicitar cambios.",
   "submit.blackbox.agent.fix_scorer": "El evaluador dio un error. Corrígelo.",
-  "submit.blackbox.agent.objective_required": "Añade un objetivo en el paso Punto de partida para activar el agente.",
   "submit.blackbox.interview.reading": "Preparando la primera pregunta…",
   "submit.blackbox.interview.brief.description": "Extraído de tus respuestas. Edita lo que quieras — el punto de partida y el evaluador se redactarán siguiendo estas directivas.",
   "submit.blackbox.interview.brief.confirm": "Redactar el punto de partida y el evaluador",

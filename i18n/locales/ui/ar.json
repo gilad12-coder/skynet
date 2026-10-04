@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "عمليات تشغيل المُقيِّم",
   "submit.blackbox.agent.empty_hint": "صِف هدفك وسيصوغ الوكيل نقطة بداية ومُقيِّمًا بلغة Python. يمكنك قبولهما كما هما أو طلب تعديلات.",
   "submit.blackbox.agent.fix_scorer": "واجه المُقيِّم خطأً. أصلِحه.",
-  "submit.blackbox.agent.objective_required": "أضِف هدفًا في خطوة نقطة البداية لتفعيل الوكيل.",
   "submit.blackbox.interview.reading": "جارٍ تجهيز السؤال الأول…",
   "submit.blackbox.interview.brief.description": "مُستخلَص من إجاباتك. عدّل ما تشاء — ستُصاغ نقطة البداية والمُقيِّم وفق هذه التوجيهات.",
   "submit.blackbox.interview.brief.confirm": "صياغة نقطة البداية والمُقيِّم",

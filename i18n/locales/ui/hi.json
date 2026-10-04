@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "स्कोरर रन",
   "submit.blackbox.agent.empty_hint": "अपना उद्देश्य बताएँ और एजेंट एक प्रारंभिक बिंदु और एक Python स्कोरर तैयार करेगा। आप उन्हें वैसे ही स्वीकार कर सकते हैं, या बदलाव का अनुरोध कर सकते हैं।",
   "submit.blackbox.agent.fix_scorer": "स्कोरर में एक त्रुटि आई। इसे ठीक करें।",
-  "submit.blackbox.agent.objective_required": "एजेंट को चालू करने के लिए प्रारंभिक बिंदु चरण में एक उद्देश्य जोड़ें।",
   "submit.blackbox.interview.reading": "पहला सवाल तैयार किया जा रहा है…",
   "submit.blackbox.interview.brief.description": "आपके उत्तरों से तैयार किया गया। कुछ भी संपादित करें — प्रारंभिक बिंदु और स्कोरर इन निर्देशों का पालन करते हुए तैयार किए जाएँगे।",
   "submit.blackbox.interview.brief.confirm": "प्रारंभिक बिंदु और स्कोरर तैयार करें",

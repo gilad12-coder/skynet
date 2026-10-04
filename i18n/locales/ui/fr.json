@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "Exécutions de l'évaluateur",
   "submit.blackbox.agent.empty_hint": "Décrivez votre objectif et l'agent rédigera un point de départ et un évaluateur Python. Vous pouvez les accepter tels quels ou demander des modifications.",
   "submit.blackbox.agent.fix_scorer": "L'évaluateur a rencontré une erreur. Corrige-le.",
-  "submit.blackbox.agent.objective_required": "Ajoutez un objectif à l'étape Point de départ pour activer l'agent.",
   "submit.blackbox.interview.reading": "Préparation de la première question…",
   "submit.blackbox.interview.brief.description": "Distillé à partir de vos réponses. Modifiez ce que vous voulez — le point de départ et l'évaluateur seront rédigés selon ces directives.",
   "submit.blackbox.interview.brief.confirm": "Rédiger le point de départ et l'évaluateur",

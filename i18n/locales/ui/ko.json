@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "채점기 실행",
   "submit.blackbox.agent.empty_hint": "목표를 설명하면 에이전트가 시작점과 Python 채점기 초안을 작성합니다. 그대로 수락하거나 변경을 요청할 수 있습니다.",
   "submit.blackbox.agent.fix_scorer": "채점기에서 오류가 발생했습니다. 수정해 주세요.",
-  "submit.blackbox.agent.objective_required": "에이전트를 켜려면 시작점 단계에서 목표를 추가하세요.",
   "submit.blackbox.interview.reading": "첫 번째 질문을 준비하는 중…",
   "submit.blackbox.interview.brief.description": "답변에서 추출되었습니다. 무엇이든 편집할 수 있으며, 시작점과 채점기는 이 지시에 따라 작성됩니다.",
   "submit.blackbox.interview.brief.confirm": "시작점 및 채점기 초안 작성",

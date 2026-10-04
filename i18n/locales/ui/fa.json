@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "اجراهای امتیازدهنده",
   "submit.blackbox.agent.empty_hint": "هدف خود را شرح دهید تا عامل یک نقطه‌ی شروع و یک امتیازدهنده‌ی Python پیش‌نویس کند. می‌توانید آن‌ها را همان‌طور که هستند بپذیرید یا تغییراتی بخواهید.",
   "submit.blackbox.agent.fix_scorer": "امتیازدهنده به خطا خورد. آن را برطرف کن.",
-  "submit.blackbox.agent.objective_required": "برای روشن‌کردن عامل، در گام «نقطه‌ی شروع» یک هدف اضافه کنید.",
   "submit.blackbox.interview.reading": "در حال آماده‌سازی پرسش اول…",
   "submit.blackbox.interview.brief.description": "برگرفته از پاسخ‌های شما. هر چیزی را می‌توانید ویرایش کنید — نقطه‌ی شروع و امتیازدهنده بر اساس این دستورالعمل‌ها پیش‌نویس خواهند شد.",
   "submit.blackbox.interview.brief.confirm": "پیش‌نویس نقطه‌ی شروع و امتیازدهنده",

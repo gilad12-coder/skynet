@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "Puanlayıcı çalıştırmaları",
   "submit.blackbox.agent.empty_hint": "Amacınızı açıklayın; aracı bir başlangıç noktası ve bir Python puanlayıcısı taslağı hazırlasın. Bunları olduğu gibi kabul edebilir veya değişiklik isteyebilirsiniz.",
   "submit.blackbox.agent.fix_scorer": "Puanlayıcı bir hatayla karşılaştı. Düzelt.",
-  "submit.blackbox.agent.objective_required": "Aracıyı açmak için Başlangıç noktası adımında bir amaç ekleyin.",
   "submit.blackbox.interview.reading": "İlk soru hazırlanıyor…",
   "submit.blackbox.interview.brief.description": "Yanıtlarınızdan damıtıldı. Her şeyi düzenleyebilirsiniz — başlangıç noktası ve puanlayıcı bu yönergeleri izleyecek şekilde taslak olarak hazırlanacak.",
   "submit.blackbox.interview.brief.confirm": "Başlangıç noktasını ve puanlayıcıyı taslak olarak hazırla",

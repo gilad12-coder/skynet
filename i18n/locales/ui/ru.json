@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "Запуски оценщика",
   "submit.blackbox.agent.empty_hint": "Опишите свою цель, и агент составит отправную точку и оценщик на Python. Вы можете принять их как есть или запросить изменения.",
   "submit.blackbox.agent.fix_scorer": "Оценщик выдал ошибку. Исправь её.",
-  "submit.blackbox.agent.objective_required": "Добавьте цель на шаге «Отправная точка», чтобы включить агента.",
   "submit.blackbox.interview.reading": "Готовим первый вопрос…",
   "submit.blackbox.interview.brief.description": "Составлено на основе ваших ответов. Можно редактировать что угодно — отправная точка и оценщик будут составлены согласно этим указаниям.",
   "submit.blackbox.interview.brief.confirm": "Составить отправную точку и оценщик",

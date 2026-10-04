@@ -486,7 +486,6 @@
   "optimization.progress.blackbox": "Scorer-Durchläufe",
   "submit.blackbox.agent.empty_hint": "Beschreiben Sie Ihr Ziel, und der Agent entwirft einen Startpunkt und einen Python-Scorer. Sie können beides unverändert übernehmen oder Änderungen anfordern.",
   "submit.blackbox.agent.fix_scorer": "Der Scorer ist auf einen Fehler gestoßen. Beheben Sie ihn.",
-  "submit.blackbox.agent.objective_required": "Fügen Sie im Schritt „Startpunkt“ ein Ziel hinzu, um den Agenten zu aktivieren.",
   "submit.blackbox.interview.reading": "Die erste Frage wird vorbereitet…",
   "submit.blackbox.interview.brief.description": "Aus deinen Antworten destilliert. Bearbeite alles — Startpunkt und Scorer werden gemäß diesen Vorgaben entworfen.",
   "submit.blackbox.interview.brief.confirm": "Startpunkt & Scorer entwerfen",
