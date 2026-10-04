@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from core.billing.protected_credentials import has_exposed_execution_credentials
+from core.connectors.github_publish import PublishedChange, RepoPublishError
 from core.connectors.github_repo import RepoSnapshot
 from core.worker import repo_staging
 
@@ -143,3 +144,151 @@ def test_binding_hands_the_guest_a_route_and_closes_the_box(tmp_path: Path) -> N
     assert "secret-value" not in repr(payload)
     staged.close_scorers()
     assert staged.scorers == []
+
+
+_EDIT = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"
+
+
+def _result(baseline: float | None, optimized: float | None, best: str = _EDIT, **extra: Any) -> dict[str, Any]:
+    """Build a finished repository result.
+
+    Args:
+        baseline: Held-out score of the starting code.
+        optimized: Held-out score of the best version.
+        best: The best version's patch.
+        **extra: Fields to add or override.
+
+    Returns:
+        The result.
+    """
+    return {
+        "engine_used": "autoresearch",
+        "seed_candidate": "",
+        "best_candidate": best,
+        "baseline_test_metric": baseline,
+        "optimized_test_metric": optimized,
+        "versions": [],
+        "details": {},
+        **extra,
+    }
+
+
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        (_result(0.5, 0.8), _EDIT),
+        (_result(0.5, 0.5), None),
+        (_result(0.5, 0.8, best=""), None),
+        (_result(0.5, 0.5, regression_guard_applied=True), None),
+        (
+            _result(None, None, versions=[{"candidate": "", "score": 0.2}, {"candidate": _EDIT, "score": 0.4}]),
+            _EDIT,
+        ),
+        (_result(None, None), None),
+    ],
+)
+def test_only_a_version_that_beat_the_start_is_published(result: dict[str, Any], expected: str | None) -> None:
+    """Held-out scores decide, version scores stand in without a hold-out, and ties never publish."""
+    assert repo_staging.improved_patch(result) == expected
+
+
+def _staged(tmp_path: Path, readonly: tuple[str, ...] = ()) -> repo_staging.StagedRepository:
+    """Build a staged repository without fetching anything.
+
+    Args:
+        tmp_path: Pytest temp dir.
+        readonly: Submodule and LFS paths.
+
+    Returns:
+        The staged repository.
+    """
+    snapshot = RepoSnapshot(commit="c" * 40, archive=tmp_path / "tree.tgz", readonly_paths=readonly, size_bytes=1)
+    return repo_staging.StagedRepository(snapshot=snapshot, secrets={}, workdir=tmp_path)
+
+
+def _publish(result: dict[str, Any], staged: repo_staging.StagedRepository) -> dict[str, Any] | None:
+    """Publish a result for the fixture payload.
+
+    Args:
+        result: Finished result.
+        staged: Staged repository.
+
+    Returns:
+        The recorded outcome.
+    """
+    return repo_staging.publish_improvement(
+        result,
+        _payload("c" * 40),
+        staged,
+        username="ada",
+        engine=None,
+        optimization_id="0123456789abcdef",
+        app_url="https://skynetml.com/",
+    )
+
+
+def test_publishing_pushes_the_version_and_records_the_pull_request(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An improved run pushes its patch on the pinned commit and links the draft on the result."""
+    pushed: list[tuple[Any, ...]] = []
+    opened: list[dict[str, Any]] = []
+    monkeypatch.setattr(repo_staging, "github_token", lambda engine, username: "tok")
+    monkeypatch.setattr(repo_staging, "push_version", lambda *args: pushed.append(args))
+
+    def fake_open(token: str, repository: str, **fields: Any) -> PublishedChange:
+        opened.append({"token": token, "repository": repository, **fields})
+        return PublishedChange(branch=fields["head"], url="https://github.com/acme/app/pull/7", number=7, draft=True)
+
+    monkeypatch.setattr(repo_staging, "open_pull_request", fake_open)
+    result = _result(0.5, 0.8)
+
+    outcome = _publish(result, _staged(tmp_path))
+
+    assert pushed == [("acme/app", "c" * 40, _EDIT, "skynet/optimize-0123456789ab", pushed[0][4], "tok")]
+    assert opened[0]["base_branch"] == "main"
+    assert "from 0.5 to 0.8" in opened[0]["body"]
+    assert "- `src/app.py`" in opened[0]["body"]
+    assert "https://skynetml.com/optimizations/0123456789abcdef" in opened[0]["body"]
+    assert outcome == result["details"]["pull_request"]
+    assert outcome == {
+        "url": "https://github.com/acme/app/pull/7",
+        "number": 7,
+        "branch": "skynet/optimize-0123456789ab",
+        "draft": True,
+    }
+
+
+def test_publishing_rechecks_the_editing_rules(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A best version touching a read-only path is never pushed."""
+    monkeypatch.setattr(repo_staging, "push_version", lambda *args: pytest.fail("pushed a forbidden version"))
+    result = _result(0.5, 0.8)
+
+    outcome = _publish(result, _staged(tmp_path, readonly=("src/app.py",)))
+
+    assert outcome is not None
+    assert "read-only" in outcome["error"]
+
+
+def test_publishing_failure_is_recorded_not_raised(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A GitHub failure leaves the run's result intact with a readable reason."""
+    monkeypatch.setattr(repo_staging, "github_token", lambda engine, username: "tok")
+
+    def refuse(*_args: Any) -> None:
+        raise RepoPublishError("Could not push the branch: git push failed: denied")
+
+    monkeypatch.setattr(repo_staging, "push_version", refuse)
+    result = _result(0.5, 0.8)
+
+    _publish(result, _staged(tmp_path))
+
+    assert result["details"]["pull_request"] == {"error": "Could not push the branch: git push failed: denied"}
+    assert result["best_candidate"] == _EDIT
+
+
+def test_no_improvement_publishes_nothing(tmp_path: Path) -> None:
+    """A run that never beat the start leaves its result untouched."""
+    result = _result(0.5, 0.4)
+
+    assert _publish(result, _staged(tmp_path)) is None
+    assert result["details"] == {}
