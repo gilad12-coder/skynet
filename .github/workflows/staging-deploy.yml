@@ -1,0 +1,73 @@
+# Confirms that a push to the staging branch actually reached the staging
+# environment. Railway deploys staging on its own; this run waits until the
+# staging backend and frontend serve a commit that includes every change to
+# their folders, then writes the links into the run summary. A red run means
+# staging did not come up with your change, so look at the Railway logs.
+#
+# Optional configuration (Settings > Secrets and variables > Actions):
+#   vars.STAGING_APP_URL   default https://frontend-staging-102e.up.railway.app
+#   vars.STAGING_API_URL   default https://backend-staging-6295.up.railway.app
+name: staging deploy
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      APP_URL: ${{ vars.STAGING_APP_URL || 'https://frontend-staging-102e.up.railway.app' }}
+      API_URL: ${{ vars.STAGING_API_URL || 'https://backend-staging-6295.up.railway.app' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - name: Wait for staging to serve this push
+        run: |
+          fetch() { curl -sS -L --max-time 20 "$@" 2>/dev/null; }
+
+          # Railway only rebuilds a service when its own folder changed, so a
+          # service is current once no change to its folder sits after the
+          # commit it serves.
+          current() {
+            local commit=$1 dir=$2
+            [ -n "$commit" ] && git cat-file -e "$commit^{commit}" 2>/dev/null \
+              && [ -z "$(git log --format=%H "$commit..HEAD" -- "$dir" | head -1)" ]
+          }
+
+          deadline=$(( $(date +%s) + 35 * 60 ))
+          while :; do
+            health=$(fetch -f "$API_URL/health") || health=""
+            backend=$(jq -r '.commit // empty' <<<"$health" 2>/dev/null)
+            version=$(fetch -f "$APP_URL/api/version") || version=""
+            frontend=$(jq -r '.commit // empty' <<<"$version" 2>/dev/null)
+            if current "$backend" backend/ && current "$frontend" frontend/; then
+              break
+            fi
+            if [ "$(date +%s)" -gt "$deadline" ]; then
+              echo "::error::Staging did not pick up ${GITHUB_SHA:0:8} in 35 minutes. Backend serves ${backend:-nothing}, frontend serves ${frontend:-nothing}. Check the staging deploy logs on Railway."
+              exit 1
+            fi
+            echo "Waiting: backend ${backend:0:8}, frontend ${frontend:0:8}"
+            sleep 30
+          done
+
+          {
+            echo "### Staging is live with ${GITHUB_SHA:0:8}"
+            echo
+            echo "- App: $APP_URL"
+            echo "- API: $API_URL/health"
+            echo "- Backend serves \`${backend:0:8}\`, frontend serves \`${frontend:0:8}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Staging is live: $APP_URL"
