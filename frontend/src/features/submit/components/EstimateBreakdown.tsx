@@ -513,11 +513,11 @@ export function Figure({
         dir={getActiveDir()}
         aria-labelledby={headingId}
         className={cn(
-          "p-0",
+          "flex max-h-(--radix-popover-content-available-height) flex-col p-0",
           numbered ? "w-[min(36rem,calc(100vw-1.5rem))]" : "w-[min(28rem,calc(100vw-1.5rem))]",
         )}
       >
-        <div className="border-b border-border/60 px-4 py-3">
+        <div className="shrink-0 border-b border-border/60 px-4 py-3">
           <div
             id={headingId}
             className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase"
@@ -551,7 +551,7 @@ function Calculation({
   principles?: string[];
 }) {
   return (
-    <div className="max-h-[min(70vh,34rem)] overflow-y-auto overscroll-contain">
+    <div className="max-h-[min(70vh,34rem)] min-h-0 flex-1 overflow-y-auto overscroll-contain">
       <div className="space-y-5 px-4 py-3">
         {sections.map((section, index) => (
           <section key={section.title ?? index} className="space-y-2.5">
@@ -670,7 +670,7 @@ function Equation({ terms }: { terms: Operand[] }) {
         ) : (
           <span
             key={index}
-            className="inline-flex flex-col items-center rounded-md border border-border/50 bg-background px-1.5 py-1 text-center text-[11px] leading-none"
+            className="inline-flex flex-col items-center text-center text-[11px] leading-none"
           >
             <span className="font-medium tabular-nums text-foreground">{term.value}</span>
             {term.caption && (
@@ -688,16 +688,14 @@ function Equation({ terms }: { terms: Operand[] }) {
 /** The choices an input could have taken, with the one in effect filled in. */
 function Scale({ points }: { points: ScalePoint[] }) {
   return (
-    <ol className="flex flex-wrap gap-1">
+    <ol className="flex flex-wrap gap-x-3 gap-y-1">
       {points.map((point) => (
         <li
           key={point.label}
           aria-current={point.active ? "true" : undefined}
           className={cn(
-            "inline-flex items-baseline gap-1 rounded-md border px-1.5 py-0.5 text-[11px] leading-snug",
-            point.active
-              ? "border-[#C8A882]/40 bg-[#C8A882]/15 text-[#3D2E22]"
-              : "border-border/50 text-muted-foreground",
+            "inline-flex items-baseline gap-1 text-[11px] leading-snug",
+            point.active ? "font-semibold text-[#3D2E22]" : "text-muted-foreground",
           )}
           dir="auto"
         >

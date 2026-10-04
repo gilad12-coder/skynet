@@ -116,6 +116,7 @@ export function TotalBudgetCard({
   const runtimeIncluded = bracket.runtimeBillingBasis === "included_in_model_markup";
   const mixedBilling = costBracket.managedModelHighCents > 0 && costBracket.byokModelHighCents > 0;
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [limitEdited, setLimitEdited] = useState(maxCostCents != null);
 
   // The field is typed in dollars; the wizard state stays in cents. The field
   // owns its text so the user can clear it or leave a typo visible with its
@@ -146,11 +147,19 @@ export function TotalBudgetCard({
   const nudge = (direction: 1 | -1) => {
     const base = parsed.kind === "value" ? parsed.value : suggestedCeiling;
     const next = Math.max(1, base + direction * BUDGET_STEP_CENTS);
+    setLimitEdited(true);
     setMaxCostCents(next);
     setText(centsToBudgetText(next, locale));
   };
   const atFloor = parsed.kind === "value" && parsed.value <= 1;
   const minimum = minimumTotalCents == null ? null : Math.ceil(minimumTotalCents);
+  // Until the user edits it, an unset limit follows the estimate's low end,
+  // never below a minimum the server reports; a restored limit is kept as is.
+  const startingLimit = Math.max(1, Math.ceil(bracket.lowCents), minimum ?? 0);
+  useEffect(() => {
+    if (limitEdited || budgetUncapped || maxCostCents === startingLimit) return;
+    setMaxCostCents(startingLimit);
+  }, [limitEdited, startingLimit, maxCostCents, budgetUncapped, setMaxCostCents]);
   const minimumMessage =
     minimum == null
       ? null
@@ -321,6 +330,7 @@ export function TotalBudgetCard({
                 aria-describedby={cn(fieldMessage && "totalBudgetMessage", "totalBudgetUnit")}
                 value={text}
                 onChange={(e) => {
+                  setLimitEdited(true);
                   setText(e.target.value);
                   const next = parseBudgetInput(e.target.value, locale);
                   setMaxCostCents(next.kind === "value" ? next.value : null);

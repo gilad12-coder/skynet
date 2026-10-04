@@ -410,10 +410,10 @@ export function ConnectorImportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn(
-          "gap-0 overflow-y-auto p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
+          "flex flex-col gap-0 overflow-hidden p-0 transition-[max-width,width] duration-200 ease-out motion-reduce:transition-none",
           previewExpanded
-            ? "max-h-[85vh] w-[96vw] max-w-[96vw] sm:max-w-[96vw]"
-            : "max-h-[85vh] w-[min(72rem,94vw)] max-w-[min(72rem,94vw)] sm:max-w-[min(72rem,94vw)]",
+            ? "max-h-[85dvh] w-[96vw] max-w-[96vw] sm:max-w-[96vw]"
+            : "max-h-[85dvh] w-[min(72rem,94vw)] max-w-[min(72rem,94vw)] sm:max-w-[min(72rem,94vw)]",
         )}
         // The Google Picker draws its own overlay outside this dialog; clicks and
         // Escape there belong to the Picker, not to closing the import.
@@ -424,7 +424,7 @@ export function ConnectorImportDialog({
           if (picking) e.preventDefault();
         }}
       >
-        <DialogHeader className="px-5 pt-5">
+        <DialogHeader className="shrink-0 px-5 pt-5">
           <div className="flex items-center gap-2.5">
             <meta.Avatar size={28} />
             <div className="min-w-0">
@@ -441,7 +441,7 @@ export function ConnectorImportDialog({
         {!connected ? (
           <LoadingState className="py-14" />
         ) : selected === null ? (
-          <div className="px-5 pb-5 pt-4">
+          <div className="flex min-h-0 flex-1 flex-col px-5 pb-5 pt-4">
             <div className="mb-3 flex min-w-0 items-center gap-1.5">
               <TooltipButton tooltip={msg("connector_import.up")}>
                 <Button
@@ -574,7 +574,7 @@ export function ConnectorImportDialog({
               busy={browsing}
             />
 
-            <div className="mt-3 max-h-[min(24rem,55vh)] overflow-y-auto">
+            <div className="mt-3 max-h-[min(24rem,55vh)] min-h-0 overflow-y-auto">
               {browseFailed ? (
                 <div className="flex flex-col items-center gap-2 px-1 py-6 text-center text-sm text-muted-foreground">
                   {msg("connector_import.browse_error")}
@@ -637,57 +637,61 @@ export function ConnectorImportDialog({
             </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-4 px-5 pb-5 pt-4">
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setSelected(null)}
-                aria-label={msg("connector_import.back")}
-                className="shrink-0 max-lg:size-[44px]"
-              >
-                <ArrowLeft className="size-4 rtl:rotate-180" />
-              </Button>
-              <span dir="ltr" className="min-w-0 truncate text-sm font-medium text-foreground">
-                {selected.ref}
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="connector-import-name" className="text-xs">
-                {msg("connector_import.name_label")}
-              </Label>
-              <Input
-                id="connector-import-name"
-                dir="ltr"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className={TOUCH_FIELD}
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate text-xs font-medium text-foreground">
-                  {previewRows?.rows.length ? msg("datasets.detail.row_reader.hint") : null}
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-4 pt-4">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setSelected(null)}
+                  aria-label={msg("connector_import.back")}
+                  className="shrink-0 max-lg:size-[44px]"
+                >
+                  <ArrowLeft className="size-4 rtl:rotate-180" />
+                </Button>
+                <span dir="ltr" className="min-w-0 truncate text-sm font-medium text-foreground">
+                  {selected.ref}
                 </span>
-                {rowTotal != null && (
-                  <span className="shrink-0 whitespace-nowrap text-[0.6875rem] text-muted-foreground tabular-nums">
-                    {formatMsg("connector_import.size_rows", { count: rowTotal.toLocaleString() })}
-                  </span>
-                )}
               </div>
-              <DatasetPreviewPanel
-                rows={previewRows}
-                emptyTitle={msg("connector_import.preview_empty")}
-                expanded={previewExpanded}
-                onExpandedChange={setPreviewExpanded}
-                className="h-80"
-                expandedClassName="h-80"
-              />
+
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="connector-import-name" className="text-xs">
+                  {msg("connector_import.name_label")}
+                </Label>
+                <Input
+                  id="connector-import-name"
+                  dir="ltr"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className={TOUCH_FIELD}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                    {previewRows?.rows.length ? msg("datasets.detail.row_reader.hint") : null}
+                  </span>
+                  {rowTotal != null && (
+                    <span className="shrink-0 whitespace-nowrap text-[0.6875rem] text-muted-foreground tabular-nums">
+                      {formatMsg("connector_import.size_rows", {
+                        count: rowTotal.toLocaleString(),
+                      })}
+                    </span>
+                  )}
+                </div>
+                <DatasetPreviewPanel
+                  rows={previewRows}
+                  emptyTitle={msg("connector_import.preview_empty")}
+                  expanded={previewExpanded}
+                  onExpandedChange={setPreviewExpanded}
+                  className="h-80"
+                  expandedClassName="h-80"
+                />
+              </div>
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="shrink-0 px-5 pb-5">
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 {msg("connector_import.cancel")}
               </Button>
