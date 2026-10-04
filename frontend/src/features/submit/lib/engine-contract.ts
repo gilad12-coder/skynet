@@ -64,7 +64,8 @@ export function submittedProposer(
     effort: reasoning ? (proposer.effort ?? null) : null,
     max_thinking_tokens: null,
     max_candidates_per_iter: knobs.candidates ? (proposer.max_candidates_per_iter ?? null) : null,
-    ralph: knobs.ralph ? (proposer.ralph ?? DEFAULT_PROPOSER.ralph) : DEFAULT_PROPOSER.ralph,
+    // Research rounds always run until the budget is spent; stop-at-score ends them early.
+    ralph: true,
     max_no_eval_seconds: knobs.ralph ? DEFAULT_PROPOSER.max_no_eval_seconds : null,
   };
 }

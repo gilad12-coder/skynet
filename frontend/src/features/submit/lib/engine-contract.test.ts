@@ -193,7 +193,7 @@ test("proposer knobs follow the engine that reads them, and Auto exposes them al
   assert.deepEqual(proposerKnobs("auto", null), { candidates: true, ralph: true });
 });
 
-test("submitted proposer resets every knob the form hides for the engine", () => {
+test("submitted proposer resets every knob the form hides, and always runs research rounds", () => {
   const tuned = {
     ...DEFAULT_PROPOSER,
     harness: "claude_code" as const,
@@ -205,6 +205,7 @@ test("submitted proposer resets every knob the form hides for the engine", () =>
   const stall = DEFAULT_PROPOSER.max_no_eval_seconds;
   assert.deepEqual(submittedProposer(tuned, "auto", null), {
     ...tuned,
+    ralph: true,
     max_no_eval_seconds: stall,
   });
   assert.deepEqual(submittedProposer(tuned, "single", "autosaddler"), {
@@ -220,6 +221,7 @@ test("submitted proposer resets every knob the form hides for the engine", () =>
   });
   assert.deepEqual(submittedProposer(tuned, "single", "autoresearch"), {
     ...tuned,
+    ralph: true,
     max_candidates_per_iter: null,
     max_no_eval_seconds: stall,
   });
@@ -227,6 +229,7 @@ test("submitted proposer resets every knob the form hides for the engine", () =>
     ...tuned,
     harness: "opencode",
     effort: null,
+    ralph: true,
     max_candidates_per_iter: null,
     max_no_eval_seconds: stall,
   });

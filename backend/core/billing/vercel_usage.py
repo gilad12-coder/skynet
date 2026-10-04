@@ -43,12 +43,16 @@ SANDBOX_NETWORK_BYTES_CAP = 2_000_000_000
 # checksum database ``go`` verifies modules against, registry.yarnpkg.com is
 # where Yarn 1 lockfiles point, and codeload/objects/release-assets serve the
 # tarballs a ``git+https`` dependency or a GitHub release download redirects to.
+# fonts.googleapis.com and fonts.gstatic.com serve the fonts ``next/font/google``
+# downloads during ``next build``, which fails the build when they're unreachable.
 PACKAGE_REGISTRY_HOSTS = tuple(
     sorted(
         {
             "codeload.github.com",
             "crates.io",
             "files.pythonhosted.org",
+            "fonts.googleapis.com",
+            "fonts.gstatic.com",
             "github.com",
             "index.crates.io",
             "objects.githubusercontent.com",
