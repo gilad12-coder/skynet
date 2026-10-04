@@ -191,7 +191,7 @@ stable and preview Docker build paths.
   path.
 - The frontend and backend share `BACKEND_AUTH_SECRET`; backend identity is the
   user's email across local, OAuth, and SSO providers.
-- See `docs/AUTH_SETUP.md` and both `.env.example` files before changing auth.
+- See both `.env.example` files before changing auth.
 
 ## Internationalization and direction
 

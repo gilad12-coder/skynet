@@ -6,8 +6,6 @@ re-running reuses what already exists instead of duplicating. On success it
 prints the ``STRIPE_PRICE_*`` env lines to paste back into ``backend/.env``.
 
     cd backend && python scripts/provision_stripe.py
-
-See docs/stripe-setup.md for the full walkthrough.
 """
 
 from __future__ import annotations
