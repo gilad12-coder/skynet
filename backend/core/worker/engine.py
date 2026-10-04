@@ -106,6 +106,7 @@ from .constants import (
     EVENT_TERMINAL,
 )
 from .memory_guard import memory_usage_fraction
+from .repo_staging import StagedRepository, is_repo_payload, stage_repository
 from .subprocess_runner import run_service_in_subprocess, set_fork_service
 from .tagging_job import TaggingAutotagPayload, run_autotag_job
 from .vercel_dspy import run_vercel_dspy
@@ -843,6 +844,7 @@ class BackgroundWorker:
 
             budget_gateway: ModelGateway | None = None
             run_process: mp.process.BaseProcess | None = None
+            staged_repository: StagedRepository | None = None
             event_queue: Any | None = None
             result_dict = None
             subprocess_error: dict[str, Any] | None = None
@@ -1020,6 +1022,15 @@ class BackgroundWorker:
                     # against one, so the parent hands it the ledger's allowance.
                     if optimization_type == OPTIMIZATION_TYPE_BLACKBOX and payload_dict.get("max_cost_cents") is None:
                         payload_dict["max_cost_cents"] = budget_gateway.cost_ceiling_cents()
+                    if optimization_type == OPTIMIZATION_TYPE_BLACKBOX and is_repo_payload(payload_dict):
+                        self._touch_activity(worker_id)
+                        payload_dict, staged_repository = stage_repository(
+                            payload_dict,
+                            username=execution_payload.username,
+                            binding_id=job_data["execution_budget_id"],
+                            engine=byok_engine,
+                        )
+                        self._touch_activity(worker_id)
                 if has_exposed_execution_credentials(
                     payload_dict,
                     allow_parent_model_routes=budget_gateway is not None,
@@ -1330,6 +1341,8 @@ class BackgroundWorker:
                         logger.error(
                             "Optimization %s runtime cleanup needs attention: %s", optimization_id, settlement_error
                         )
+                if staged_repository is not None:
+                    staged_repository.cleanup()
                 # The DB holds the checkpoint bytes for a resumable failure; the
                 # local working copy is always removed.
                 if gepa_dir is not None:

@@ -217,3 +217,45 @@ def test_guest_crash_names_its_cause(
     assert event["failure_kind"] == kind
     assert "Traceback (most recent call last):" in caplog.text
     assert events.empty()
+
+
+def test_repository_tree_is_uploaded_as_chunks_and_never_as_a_parent_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ship the fetched tree in upload-sized pieces and hand the guest their paths instead of the parent's file."""
+    session = FakeSession()
+
+    class Runtime:
+        """Return the one fake session."""
+
+        def __init__(self, url: str, token: str) -> None:
+            """Accept the descriptor."""
+
+        def open(self, spec: Any) -> FakeSession:
+            """Return the fake session."""
+            return session
+
+    monkeypatch.setattr(vercel_dspy, "RemoteSandboxRuntime", Runtime)
+    monkeypatch.setattr("core.service_gateway.optimization.blackbox.repo_tree.ARCHIVE_CHUNK_BYTES", 4)
+    archive = tmp_path / "tree.tgz"
+    archive.write_bytes(b"0123456789")
+    payload = {
+        "_gepa_log_dir": str(tmp_path),
+        "_budget_gateway_descriptor": {
+            "url": "http://127.0.0.1:9876",
+            "control_token": "control",
+            "image": "backend@sha256:" + "a" * 64,
+            "lifetime_seconds": 600,
+        },
+        "_repo_snapshot": {"archive": str(archive), "commit": "c" * 40, "readonly_paths": [], "secret_names": ["K"]},
+    }
+
+    vercel_dspy.run_vercel_dspy(payload, "job-repo", queue.Queue(), "spawn")
+
+    [request_path] = [path for path in session.files if path.endswith("/request.json")]
+    snapshot = json.loads(session.files[request_path])["payload"]["_repo_snapshot"]
+    assert snapshot["archive"] is None
+    assert snapshot["secret_names"] == ["K"]
+    assert len(snapshot["chunks"]) == 3
+    assert b"".join(base64.b64decode(session.files[path]) for path in snapshot["chunks"]) == b"0123456789"
+    assert str(archive) not in session.files[request_path]

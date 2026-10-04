@@ -14,6 +14,7 @@ from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import Session
 
 from ...config import settings
+from ...connectors.saved_secrets import SavedSecretStore
 from ...storage.models import (
     Base,
     BillingCustomerModel,
@@ -27,6 +28,8 @@ from ..protected_credentials import (
     MCP_CREDENTIAL_REF_FIELD,
     MCP_URL_REF_FIELD,
     OPENROUTER_API_BASE,
+    REPO_SECRET_REF_FIELD,
+    REPO_SECRET_REVISION_FIELD,
     SCORER_CREDENTIAL_REF_FIELD,
     SCORER_URL_REF_FIELD,
     ProtectedCredentialVault,
@@ -35,6 +38,7 @@ from ..protected_credentials import (
     protect_execution_credentials,
     resolve_current_openrouter_key,
     resolve_execution_credentials,
+    resolve_repo_secrets,
     scrub_execution_credentials,
 )
 from ..protected_execution import claude_code_anthropic_key
@@ -549,3 +553,48 @@ def test_claude_code_key_is_the_owner_verified_anthropic_key_and_never_echoed() 
         with pytest.raises(ValueError) as refused:
             claude_code_anthropic_key(vault, "alice")
         assert "sk-ant-secret" not in str(refused.value)
+
+
+def _repo_payload(secrets: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build a black-box payload whose repository target carries ``secrets``.
+
+    Args:
+        secrets: Secret entries for the target.
+
+    Returns:
+        The payload.
+    """
+    return {"target": {"kind": "repo", "repo": {"repository": "acme/app", "secrets": secrets}}}
+
+
+def test_repo_secrets_are_vaulted_at_submit_and_resolved_only_in_the_parent(harness: _Harness) -> None:
+    """Keep inline values out of the stored payload, resolve them with saved secrets, and scrub every trace."""
+    vault = ProtectedCredentialVault(engine=harness.engine)
+    binding_id = harness.execution_budget(key="repo-secrets")
+    saved = SavedSecretStore(harness.engine).save("alice", "NPM_TOKEN", "npm-saved-value")
+    payload = _repo_payload(
+        [{"name": "API_KEY", "value": "inline-api-value"}, {"name": "NPM_TOKEN", "saved_secret_id": saved.id}]
+    )
+
+    stored = protect_execution_credentials(payload, username="alice", binding_id=binding_id, vault=vault)
+
+    assert "inline-api-value" not in repr(stored)
+    inline = stored["target"]["repo"]["secrets"][0]
+    assert set(inline) == {"name", REPO_SECRET_REF_FIELD, REPO_SECRET_REVISION_FIELD}
+    assert resolve_repo_secrets(
+        stored, username="alice", binding_id=binding_id, vault=vault, saved=SavedSecretStore(harness.engine)
+    ) == {"API_KEY": "inline-api-value", "NPM_TOKEN": "npm-saved-value"}
+    scrubbed = scrub_execution_credentials(stored)
+    assert REPO_SECRET_REF_FIELD not in repr(scrubbed)
+    assert has_exposed_execution_credentials(stored)
+
+
+def test_repo_secret_without_value_or_reference_is_refused(harness: _Harness) -> None:
+    """Ask for the value again rather than running with a secret that silently went missing."""
+    vault = ProtectedCredentialVault(engine=harness.engine)
+    binding_id = harness.execution_budget(key="repo-secret-missing")
+
+    with pytest.raises(ValueError, match="API_KEY"):
+        protect_execution_credentials(
+            _repo_payload([{"name": "API_KEY"}]), username="alice", binding_id=binding_id, vault=vault
+        )
