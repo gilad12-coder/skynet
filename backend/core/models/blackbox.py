@@ -379,8 +379,7 @@ class BlackboxRunRequest(BaseModel):
             The validated request instance.
 
         Raises:
-            ValueError: When the seed is blank, an empty dict, or missing
-                without an objective; when a multi-part seed is paired with
+            ValueError: When the seed is blank or an empty dict; when a multi-part seed is paired with
                 an engine that only takes text; or when an agent target has
                 no cases to run the agent on; or when an iteration cap is
                 supplied outside a single Meta-Harness run.
@@ -389,8 +388,10 @@ class BlackboxRunRequest(BaseModel):
         if self.target.kind == BLACKBOX_TARGET_REPO:
             self._ensure_repo_run()
         elif seed is None:
+            # The scorer alone drives the climb; with nothing to draft a seed
+            # from, the run starts from empty text.
             if not (self.objective or "").strip():
-                raise ValueError("Without a starting point, an objective is required.")
+                self.seed_candidate = ""
         elif isinstance(seed, dict):
             if not seed:
                 raise ValueError("A multi-part starting point needs at least one part.")

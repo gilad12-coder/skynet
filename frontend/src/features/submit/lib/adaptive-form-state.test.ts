@@ -458,7 +458,7 @@ for (const path of ["../components/SubmitWizard.tsx"]) {
 }
 
 for (const codeAssistMode of ["manual", "auto"]) {
-  test(`${codeAssistMode}: an empty starting point uses the goal without a mode switch`, () => {
+  test(`${codeAssistMode}: neither an objective nor a starting point is required`, () => {
     const validate = (objective: string, seedCandidate: string | null) =>
       evaluate(variable(wizard, "stageIssue"), {
         WIZARD_STAGE,
@@ -471,12 +471,12 @@ for (const codeAssistMode of ["manual", "auto"]) {
         msg: (key: string) => key,
       })(WIZARD_STAGE.goal);
     assert.equal(validate("Improve answer accuracy", null), null);
-    assert.equal(validate("", null)?.fieldId, "bb-objective");
-    if (codeAssistMode === "manual") assert.equal(validate("", "Existing prompt"), null);
+    assert.equal(validate("", null), null);
+    assert.equal(validate("", "Existing prompt"), null);
   });
 }
 
-test("a repository goal needs a name, editable paths, sound secrets and an objective", () => {
+test("a repository goal needs a name, editable paths and sound secrets, not an objective", () => {
   const validate = (fields: {
     repoName?: string;
     repoPaths?: string;
@@ -524,7 +524,7 @@ test("a repository goal needs a name, editable paths, sound secrets and an objec
     })?.message,
     "submit.blackbox.repo.validation.secret_duplicate",
   );
-  assert.equal(validate({ objective: "" })?.fieldId, "bb-objective");
+  assert.equal(validate({ objective: "" }), null);
 });
 
 test("typing into a restored no-seed draft makes the starting point active", () => {

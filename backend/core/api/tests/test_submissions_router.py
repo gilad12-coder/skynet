@@ -2094,7 +2094,6 @@ def test_submit_blackbox_run_returns_409_when_preflight_fails(monkeypatch: pytes
     "mutate",
     [
         lambda p: p.pop("scorer"),
-        lambda p: p.update(seed_candidate=None, objective=None),
         lambda p: p.update(strategy={"mode": "single"}),
         lambda p: p.update(scorer={"kind": "python"}),
         lambda p: p.update(scorer={"kind": "remote"}),
