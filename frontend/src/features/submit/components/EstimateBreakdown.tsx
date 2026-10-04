@@ -1,8 +1,12 @@
 "use client";
 
-import { useId } from "react";
-
-import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/primitives/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from "@/shared/ui/primitives/dialog";
 import { centsToUsd, formatBudgetUsd, formatUsd, type TokenSourceMode } from "@/features/billing";
 import { formatMsg, msg } from "@/shared/lib/messages";
 import { getActiveDir } from "@/shared/lib/runtime-locale";
@@ -467,7 +471,7 @@ export function buildEstimateSections(
   };
 }
 
-/** A figure that opens its calculation in a layer over the card. */
+/** A figure that opens its calculation in a dialog centred on the screen. */
 export function Figure({
   label,
   value,
@@ -481,17 +485,20 @@ export function Figure({
   sections: CalcSection[];
   /** What the figure is and is not, shown under it before the steps. */
   intro?: string;
-  /** The billing rules the calculation rests on, closing the layer. */
+  /** The billing rules the calculation rests on, closing the dialog. */
   principles?: string[];
   className?: string;
 }) {
-  const headingId = useId();
-  // A single-section layer (a details row) reads as one list; the full
+  // A single-section calculation (a details row) reads as one list; the full
   // pipeline is numbered so each stage can be referred to.
   const numbered = sections.length > 1;
+  // The dialog's title already names a lone section, so its own heading would
+  // only repeat it.
+  const shown =
+    !numbered && sections[0]?.title === label ? [{ ...sections[0], title: undefined }] : sections;
   return (
-    <Popover>
-      <PopoverTrigger asChild>
+    <Dialog>
+      <DialogTrigger asChild>
         <button
           type="button"
           dir="auto"
@@ -505,38 +512,35 @@ export function Figure({
           {value}
           <span className="sr-only">, {msg("submit.budget.calc.show")}</span>
         </button>
-      </PopoverTrigger>
-      <PopoverContent
-        side="bottom"
-        align="end"
-        collisionPadding={12}
+      </DialogTrigger>
+      <DialogContent
         dir={getActiveDir()}
-        aria-labelledby={headingId}
         className={cn(
-          "flex max-h-(--radix-popover-content-available-height) flex-col p-0",
-          numbered ? "w-[min(36rem,calc(100vw-1.5rem))]" : "w-[min(28rem,calc(100vw-1.5rem))]",
+          "flex max-h-[85dvh] flex-col gap-0 overflow-hidden p-0",
+          numbered ? "sm:max-w-[min(40rem,92vw)]" : "sm:max-w-[min(30rem,92vw)]",
         )}
       >
-        <div className="shrink-0 border-b border-border/60 px-4 py-3">
-          <div
-            id={headingId}
+        <div className="shrink-0 border-b border-border/60 px-5 pt-4 pb-3 pe-12">
+          <DialogTitle
             className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase"
             dir="auto"
           >
             {label}
-          </div>
-          <div className="mt-0.5 text-base font-semibold tabular-nums text-foreground" dir="auto">
+          </DialogTitle>
+          <div className="mt-0.5 text-lg font-semibold tabular-nums text-foreground" dir="auto">
             {value}
           </div>
-          {intro && (
-            <p className="mt-1.5 text-xs leading-snug text-muted-foreground" dir="auto">
+          {intro ? (
+            <DialogDescription className="mt-1.5 text-xs leading-snug" dir="auto">
               {intro}
-            </p>
+            </DialogDescription>
+          ) : (
+            <DialogDescription className="sr-only">{label}</DialogDescription>
           )}
         </div>
-        <Calculation sections={sections} numbered={numbered} principles={principles} />
-      </PopoverContent>
-    </Popover>
+        <Calculation sections={shown} numbered={numbered} principles={principles} />
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -551,8 +555,8 @@ function Calculation({
   principles?: string[];
 }) {
   return (
-    <div className="max-h-[min(70vh,34rem)] min-h-0 flex-1 overflow-y-auto overscroll-contain">
-      <div className="space-y-5 px-4 py-3">
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="space-y-5 px-5 py-4">
         {sections.map((section, index) => (
           <section key={section.title ?? index} className="space-y-2.5">
             {section.title && (
@@ -584,7 +588,7 @@ function Calculation({
         ))}
       </div>
       {principles && principles.length > 0 && (
-        <div className="border-t border-border/60 bg-accent/40 px-4 py-3">
+        <div className="border-t border-border/60 bg-accent/40 px-5 py-3">
           <h4
             className="text-[11px] font-semibold tracking-wide text-muted-foreground/80 uppercase"
             dir="auto"
